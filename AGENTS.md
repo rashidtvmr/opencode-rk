@@ -85,3 +85,14 @@ These apply to the main agent AND every delegated subagent.
   to essential evidence (commands, file:line, output tails) and return.
 - Prefer small batched reads, single greps with tight patterns, and
   rtk-filtered outputs to stay small.
+
+### Subagent lane gating (never trust a completion message)
+- Give each delegated lane exactly ONE owned file. Pre-wire shared files
+  (`lib.rs`) yourself before fan-out so concurrent lanes never race.
+- A lane is only done when its artifact passes `python3 tools/lane_gate.py`.
+  That gate re-checks the file on disk and runs the Rust test target - it does
+  not read the subagent's self-report.
+- Re-delegate any lane whose status is `MISSING`, `STUB`, `INCOMPLETE`, or
+  `FAIL` to an allowed worker from the subagent policy, then re-run the gate.
+- Do not poll or sleep-wait on background subagents; the harness notifies on
+  completion. Track lane status in the gate output, not in chat.
