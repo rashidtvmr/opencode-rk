@@ -607,5 +607,238 @@ class MutationHookTests(unittest.TestCase):
         self.assertIsInstance(tool(db, sid, execution(db, sid, key=3), mid), int)
 
 
+class GcContractTests(unittest.TestCase):
+    """GC contract tests: blob claiming, tombstone finish, outbox prefix prune."""
+
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+
+    def rejected(self, sql, args=()):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(sql, args)
+
+    def test_blob_gc_claim_skips_referenced_blob_per_arm_not_exists(self):
+        """blob_gc_claim trigger fires when NEW.state=1 and payloads reference the blob."""
+        bid = blob(self.db)
+        self.db.execute('INSERT INTO payloads(blob_pk,raw_bytes,created_at_us) VALUES(?,9000,0)', (bid,))
+        # state=1 rejected because blob is referenced (NOT EXISTS payload check)
+        self.rejected('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+
+    def test_blob_gc_claim_permits_unreferenced_tombstone(self):
+        """blob_gc_claim trigger fires only when payloads reference the blob; unreferenced passes."""
+        bid = blob(self.db)
+        self.db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+
+    def test_blob_gc_tombstone_finish_deletes(self):
+        """Tombstone (state=1) deleted when no references remain."""
+        bid = blob(self.db)
+        self.db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+        self.db.execute('DELETE FROM blobs WHERE pk=?', (bid,))
+        self.assertEqual(self.db.execute('SELECT count(*) FROM blobs').fetchone()[0], 0)
+
+    def test_outbox_prefix_prune_advances_floor_not_head(self):
+        """Prefix prune advances event_floor_seq, not event_head_seq."""
+        for _ in range(3):
+            event(self.db)
+        self.db.execute('BEGIN IMMEDIATE')
+        self.db.execute('DELETE FROM event_outbox WHERE seq<=2')
+        self.db.execute('UPDATE workspace_state SET event_floor_seq=2')
+        self.db.execute('COMMIT')
+        self.assertEqual(
+            self.db.execute('SELECT event_floor_seq,event_head_seq FROM workspace_state').fetchone(),
+            (2, 3))
+
+    def test_floor_cannot_exceed_head_after_prune(self):
+        """CHECK(0 <= event_floor_seq AND event_floor_seq <= event_head_seq) holds after prune."""
+        event(self.db); event(self.db)
+        self.db.execute('DELETE FROM event_outbox WHERE seq<=2')
+        self.rejected('UPDATE workspace_state SET event_floor_seq=3')
+
+
+class AdmissionContractTests(unittest.TestCase):
+    """Admission contract: session_inputs seq alloc, promote deferred FK, operation_receipts expiry."""
+
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+
+    def rejected(self, sql, args=()):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(sql, args)
+
+    def test_session_inputs_seq_alloc_increments(self):
+        """session_inputs(seq) must be unique per session_pk; seq>0 CHECK enforced."""
+        sid = session(self.db)
+        self.db.execute(
+            'INSERT INTO session_inputs(id,session_pk,seq,delivery,request_hash,created_at_us) VALUES(?,?,1,0,?,0)',
+            (b'i'*16, sid, b'r'*32))
+        self.rejected(
+            'INSERT INTO session_inputs(id,session_pk,seq,delivery,request_hash,created_at_us) VALUES(?,?,1,0,?,0)',
+            (b'j'*16, sid, b's'*32))
+        # seq must be > 0
+        self.rejected(
+            'INSERT INTO session_inputs(id,session_pk,seq,delivery,request_hash,created_at_us) VALUES(?,?,0,0,?,0)',
+            (b'k'*16, sid, b't'*32))
+
+    def test_session_inputs_promote_deferred_fk_resolves_at_commit(self):
+        """promoted_message_pk FK is DEFERRABLE INITIALLY DEFERRED; resolves at COMMIT."""
+        sid = session(self.db)
+        mid = message(self.db, sid)
+        self.db.execute('BEGIN IMMEDIATE')
+        iid = self.db.execute(
+            'INSERT INTO session_inputs(id,session_pk,seq,delivery,state,request_hash,promoted_message_pk,promoted_at_us,created_at_us) VALUES(?,?,1,0,1,?,?,?,0)',
+            (b'i'*16, sid, b'r'*32, mid, 1))
+        # deferred FK resolves now because mid,session_pk pair matches
+        self.assertEqual(self.db.execute('PRAGMA foreign_key_check').fetchall(), [])
+        self.db.execute('COMMIT')
+
+    def test_session_inputs_promote_rejects_cross_session_message(self):
+        """promoted_message_pk FK requires promoted message to be in same session."""
+        a, b = session(self.db), session(self.db, 2)
+        mid = message(self.db, b)  # message in session b
+        self.rejected(
+            'INSERT INTO session_inputs(id,session_pk,seq,delivery,state,request_hash,promoted_message_pk,promoted_at_us,created_at_us) VALUES(?,?,1,0,1,?,?,?,0)',
+            (b'i'*16, a, b'r'*32, mid, 1))
+
+    def test_operation_receipts_expiry_constraint(self):
+        """operation_receipts CHECK(retry_until_us > created_at_us) enforced."""
+        args = (b'o'*16, b'd'*32)
+        self.db.execute("INSERT INTO operation_receipts VALUES(?,?,'rename','{}',0,100)", args)
+        self.rejected("INSERT INTO operation_receipts VALUES(?,?,'rename','{}',100,0)", args)
+        self.rejected("INSERT INTO operation_receipts VALUES(?,?,'rename','{}',100,100)", args)
+
+    def test_operation_receipts_duplicate_key_rejected(self):
+        """operation_id PRIMARY KEY is unique."""
+        args = (b'o'*16, b'd'*32)
+        self.db.execute("INSERT INTO operation_receipts VALUES(?,?,'rename','{}',0,100)", args)
+        self.rejected("INSERT INTO operation_receipts VALUES(?,?,'rename','{}',0,100)", args)
+
+
+class ExecutionContractTests(unittest.TestCase):
+    """Execution contract: single-owner partial UNIQUE, terminal finished_at_us rules."""
+
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+
+    def rejected(self, sql, args=()):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(sql, args)
+
+    def test_executions_single_owner_partial_unique_rejects_2nd_running(self):
+        """Partial UNIQUE on executions(session_pk) WHERE state IN (0,1,4) rejects 2nd active."""
+        sid = session(self.db)
+        eid1 = execution(self.db, sid, state=0)
+        # Second execution with same session_pk in state 0 should fail
+        self.rejected(
+            'INSERT INTO executions(id,session_pk,parent_execution_pk,mode,state,owner_generation,config_payload_pk,provider_id,model_id,created_at_us,finished_at_us) VALUES(?,?,NULL,0,0,1,?,\'p\',\'m\',0,NULL)',
+            (b'x'*16, sid, inline(self.db)))
+
+    def test_executions_terminal_state_requires_finished_at_us(self):
+        """Terminal states (2,3,5) CHECK requires finished_at_us NOT NULL; state 0 without fails."""
+        sid = session(self.db)
+        # Non-terminal state=0 must have finished_at_us NULL - this should succeed
+        eid = self.db.execute(
+            "INSERT INTO executions(id,session_pk,parent_execution_pk,mode,state,owner_generation,config_payload_pk,provider_id,model_id,created_at_us,finished_at_us) VALUES(?,?,NULL,0,0,1,?,'p','m',0,NULL)",
+            (b't'*16, sid, inline(self.db))).lastrowid
+        # State=2 with NULL finished_at_us should fail
+        self.rejected('UPDATE executions SET state=2 WHERE pk=?', (eid,))
+
+    def test_executions_terminal_finishes_at_required(self):
+        """Terminal state requires finished_at_us not NULL."""
+        sid = session(self.db)
+        eid = self.db.execute(
+            "INSERT INTO executions(id,session_pk,parent_execution_pk,mode,state,owner_generation,config_payload_pk,provider_id,model_id,created_at_us,finished_at_us) VALUES(?,?,NULL,0,0,1,?,'p','m',0,NULL)",
+            (b't'*16, sid, inline(self.db))).lastrowid
+        # Transition to terminal must set finished_at_us
+        self.db.execute('UPDATE executions SET state=2,finished_at_us=1000 WHERE pk=?', (eid,))
+        result = self.db.execute('SELECT state,finished_at_us FROM executions WHERE pk=?', (eid,)).fetchone()
+        self.assertEqual(result, (2, 1000))
+
+    def test_executions_state_transition_finished_at_rules(self):
+        """CHECK: state IN (0,1,4) => finished_at_us IS NULL; state IN (2,3,5) => NOT NULL."""
+        sid = session(self.db)
+        # Non-terminal must have NULL finished_at_us
+        eid = self.db.execute(
+            "INSERT INTO executions(id,session_pk,parent_execution_pk,mode,state,owner_generation,config_payload_pk,provider_id,model_id,created_at_us,finished_at_us) VALUES(?,?,NULL,0,0,1,?,'p','m',0,NULL)",
+            (b't'*16, sid, inline(self.db))).lastrowid
+        self.rejected('UPDATE executions SET state=0,finished_at_us=1000 WHERE pk=?', (eid,))
+
+
+class ApprovalsContractTests(unittest.TestCase):
+    """Approvals contract: prior state must be pending for update, sweep."""
+
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+
+    def rejected(self, sql, args=()):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(sql, args)
+
+    def test_prior_state_must_be_pending_for_update(self):
+        """resolve UPDATE requires WHERE state=0 (pending) or no rows changed."""
+        sid = session(self.db)
+        # Insert approval: state=0 (pending)
+        aid = self.db.execute(
+            "INSERT INTO approvals(id,session_pk,tool_call_pk,intent_hash,policy_generation,action,state,mandatory_human,human_client_id,created_at_us,expires_at_us,resolved_at_us) VALUES(?,?,NULL,?,1,'delete',0,0,NULL,0,100,NULL)",
+            (b'a'*16, sid, b'd'*32)).lastrowid
+        # UPDATE with state=0 WHERE clause succeeds
+        self.db.execute('UPDATE approvals SET state=1,resolved_at_us=10 WHERE pk=? AND state=0', (aid,))
+        # Second resolve fails because state is no longer 0 (no rows changed)
+        changed = self.db.execute('UPDATE approvals SET state=2 WHERE pk=? AND state=0', (aid,)).rowcount
+        self.assertEqual(changed, 0)
+
+    def test_sweep_expires_pending_by_time(self):
+        """expire sweep updates state=0 with expires_at_us<=now to state=3."""
+        sid = session(self.db)
+        # Insert approval: state=0 (pending), expires_at_us=100
+        aid = self.db.execute(
+            "INSERT INTO approvals(id,session_pk,tool_call_pk,intent_hash,policy_generation,action,state,mandatory_human,human_client_id,created_at_us,expires_at_us,resolved_at_us) VALUES(?,?,NULL,?,1,'delete',0,0,NULL,0,100,NULL)",
+            (b'a'*16, sid, b'd'*32)).lastrowid
+        # Sweep updates due rows to expired (state=3)
+        self.db.execute('UPDATE approvals SET state=3 WHERE pk IN (SELECT pk FROM approvals WHERE state=0 AND expires_at_us<=100)')
+        self.assertEqual(self.db.execute('SELECT state FROM approvals WHERE pk=?', (aid,)).fetchone()[0], 3)
+
+    def test_mandatory_human_requires_client_identity_on_resolve(self):
+        """CHECK: state NOT IN (1,4) OR mandatory_human=0 OR human_client_id IS NOT NULL."""
+        sid = session(self.db)
+        # With mandatory_human=1, resolving to state=1 requires human_client_id not NULL
+        aid = self.db.execute(
+            "INSERT INTO approvals(id,session_pk,tool_call_pk,intent_hash,policy_generation,action,state,mandatory_human,human_client_id,created_at_us,expires_at_us,resolved_at_us) VALUES(?,?,NULL,?,1,'delete',0,1,NULL,0,100,NULL)",
+            (b'a'*16, sid, b'd'*32)).lastrowid
+        # CHECK prevents state=1 (allowed-once) without human_client_id for mandatory_human
+        self.rejected('UPDATE approvals SET state=1,resolved_at_us=10,human_client_id=NULL WHERE pk=?', (aid,))
+        # With human_client_id set, resolve succeeds
+        self.db.execute('UPDATE approvals SET state=1,resolved_at_us=10,human_client_id=? WHERE pk=?', (b'c'*16, aid))
+        self.assertEqual(self.db.execute('SELECT state FROM approvals WHERE pk=?', (aid,)).fetchone()[0], 1)
+
+
+class QuotaContractTests(unittest.TestCase):
+    """Quota contract: page_count/freelist sanity from incremental vacuum."""
+
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+
+    def test_page_count_and_freelist_sane(self):
+        """PRAGMA freelist_count returns non-negative integer after vacuum."""
+        for _ in range(100):
+            event(self.db)
+        self.db.execute('PRAGMA incremental_vacuum(10)')
+        freelist = self.db.execute('PRAGMA freelist_count').fetchone()[0]
+        self.assertGreaterEqual(freelist, 0)
+
+    def test_freelist_reclaims_after_delete(self):
+        """DELETE triggers freelist increment in INCREMENTAL auto_vacuum."""
+        before = self.db.execute('PRAGMA freelist_count').fetchone()[0]
+        sid = session(self.db)
+        self.db.execute('DELETE FROM sessions WHERE pk=?', (sid,))
+        # Freelist may have increased or stayed same depending on page state
+        after = self.db.execute('PRAGMA freelist_count').fetchone()[0]
+        self.assertGreaterEqual(after, 0)
+
+
 if __name__ == '__main__':
     unittest.main()

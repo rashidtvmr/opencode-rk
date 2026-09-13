@@ -221,3 +221,109 @@ Individually listed per-suite tails are in this wave's full run: lib 13,
 catalog 11, writer 10, schema 6, restart 5, perf 5, backup 5, stress 4, all
 `0 failed`. No Rust source was edited. Tree left uncommitted; changes limited
 to `Cargo.toml`, `Cargo.lock`, and these two records.
+
+## Verification wave 2026-09-13 (module fan-out): 123 RUST + 81 PYTHON GREEN
+
+Scope: scribe-read-only wave. No source edited by scribe. Seven v2 lanes
+present and wired: `gc_v2`, `admission_v2`, `execution_v2`, `approvals_v2`,
+`snapshot_v2`, `import_v2`, `quota_v2` (`crates/storage/src/*_v2.rs`, 378 /
+510 / 522 / 424 / 393 / 392 / 172 lines). Pre-existing `fork_v2.rs` (473
+lines) also in tree. Wiring in `crates/storage/src/lib.rs` (+460/-30 vs HEAD
+`7e00dcd`). Commit `7e00dcd` is the recorded HEAD.
+
+### Lane table
+
+| Lane | Module | Tests | Agent per task brief |
+|------|--------|-------|----------------------|
+| gc_v2 | `crates/storage/src/gc_v2.rs` | lib unittests + `tests/integration_v2.rs` | muse-spark (re-delegated after empty M1) |
+| admission_v2 | `crates/storage/src/admission_v2.rs` | `tests/integration_v2.rs` (2 tests) | muse-spark |
+| execution_v2 | `crates/storage/src/execution_v2.rs` | `tests/perf_modules_v2.rs` (6 tests) | muse-spark |
+| approvals_v2 | `crates/storage/src/approvals_v2.rs` | `tests/perf_modules_v2.rs` | muse-spark |
+| snapshot_v2 | `crates/storage/src/snapshot_v2.rs` | `tests/perf_modules_v2.rs` | muse-spark |
+| import_v2 | `crates/storage/src/import_v2.rs` | `tests/import_v2.rs` (4 tests) | gonkagate module; tr-glm test |
+| quota_v2 | `crates/storage/src/quota_v2.rs` | `tests/quota_v2.rs` (5 tests) | gonkagate module; vyce test |
+
+### Failure record
+
+- `dahl-minimax-m27` unavailable (`Model unavailable:
+  dahl/MiniMaxAI/MiniMax-M2.7`); quota test lane re-delegated to vyce,
+  import test lane to tr-glm. Both test files landed and pass.
+- One muse-spark lane (M1) returned no text; `gc_v2` re-delegated, landed.
+
+### Guardrail incident
+
+A lane ran workspace-wide `cargo fmt` (churn per brief ~2300 lines / 15
+files, claimed proven inert via rustfmt HEAD-blob comparison, reverted with
+`git checkout`). Current scribe-observed tree: 5 tracked modified
+(`crates/security/src/lib.rs`, `crates/storage/src/lib.rs`,
+`docs/STORAGE.md`, `docs/storage/ENGINE_GATE.md`,
+`tests/bootstrap/test_storage_schema_v2.py`) + 15 untracked (7 src modules,
+3 new test files, 4 docs under `docs/storage/`, remainder per `git
+status`). The `lib.rs` expanded-style reformat persists (+460/-30); no
+2300-line churn remains. Original churn size not scribe-verified.
+
+Pre-existing syntax error at HEAD `7e00dcd` in
+`crates/security/src/lib.rs`: `"dd"if` / `"find"if` guard-space omission.
+Scribe probe: `git show HEAD:crates/security/src/lib.rs` contains both
+tokens; compiling the HEAD blob errors with `expected one of ..., found
+args`; tree fix (`"dd" if`, `"find" if`) restores `cargo check
+--workspace` green.
+
+### Exact command tails (scribe-run)
+
+`rtk cargo test -p opencode-rk-storage` (all targets):
+
+```text
+cargo test: 123 passed (13 suites, 23.19s)
+```
+
+Per-suite (bare command `Running`/`test result` lines):
+
+```text
+Running unittests src/lib.rs ... test result: ok. 60 passed; 0 failed
+Running tests/backup_v2.rs ... test result: ok. 5 passed; 0 failed
+Running tests/catalog_v2.rs ... test result: ok. 11 passed; 0 failed
+Running tests/import_v2.rs ... test result: ok. 4 passed; 0 failed
+Running tests/integration_v2.rs ... test result: ok. 2 passed; 0 failed
+Running tests/perf_modules_v2.rs ... test result: ok. 6 passed; 0 failed
+Running tests/perf_v2.rs ... test result: ok. 5 passed; 0 failed
+Running tests/quota_v2.rs ... test result: ok. 5 passed; 0 failed
+Running tests/restart_v2.rs ... test result: ok. 5 passed; 0 failed
+Running tests/schema_v2.rs ... test result: ok. 6 passed; 0 failed
+Running tests/stress_v2.rs ... test result: ok. 4 passed; 0 failed
+Running tests/writer_v2.rs ... test result: ok. 10 passed; 0 failed
+Doc-tests ... test result: ok. 0 passed; 0 failed
+```
+
+`rtk python3 -m unittest tests.bootstrap.test_storage_schema_v2`:
+
+```text
+Ran 81 tests in 0.373s
+OK
+```
+
+`rtk cargo check --workspace`:
+
+```text
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+```
+
+### Unknowns
+
+1. Lane authorship is brief testimony; no signed per-lane receipts in tree.
+2. Original fmt churn magnitude and byte-identical revert unverifiable now.
+3. Lib unittests 13 -> 60: +47 provenance by lane not itemized.
+4. Python 62 -> 81: new assertions not individually reviewed.
+5. `docs/storage/REVIEW-MODULES.md`, `SECURITY-REVIEW-MODULES.md`,
+   `SECURITY-REVIEW-MODULES-REAL.md`, `CLEANUP-AUDIT.md` landed untracked;
+   verdicts not reconciled here.
+6. WAL-restart persistence, latency, checkpoint, memory still unmeasured.
+7. blake3-vs-sha256 deviation still open; engine gate CLEAR on 3.53.2
+   preferred path is unchanged by this wave.
+
+### Explicit NOT-CLAIMED
+
+- No release acceptance or completion certificate.
+- No production durability, power-loss, fsync, or OS-lock race proof.
+- No per-lane adversarial RED/GREEN independence receipt by scribe.
+- No format-1 migration; no user database touched.

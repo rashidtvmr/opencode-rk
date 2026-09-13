@@ -211,3 +211,61 @@ References checked 2026-09-13:
 [1] https://sqlite.org/wal.html
 [2] https://sqlite.org/foreignkeys.html
 [3] https://sqlite.org/pragma.html
+
+## Implemented modules
+
+The following modules are implemented in `crates/storage/src/` and re-exported from
+`crates/storage/src/lib.rs`. Each owns a subset of the DDL tables and exposes a
+typed Rust API. The `*_v2` suffix indicates format-2 ownership.
+
+| Module | Public API (re-exported from `lib.rs`) | Tables owned (DDL source) |
+|---|---|---|
+| `schema_v2` | `SchemaV2::initialize_workspace`, `SchemaV2::open_existing`, `SchemaV2::workspace_checksum` | `workspace.sql`: `schema_migrations`, `workspace_state` |
+| `catalog_v2` | `CatalogV2::initialize_catalog`, `CatalogV2::open_existing`, `CatalogV2::register_workspace`, `CatalogV2::list_workspaces`, `CatalogV2::put_setting`, `CatalogV2::get_setting`, `CatalogV2::catalog_checksum` | `catalog.sql`: `schema_migrations`, `catalog_state`, `workspaces`, `app_settings`, `provider_accounts`, `provider_account_model_locks` |
+| `writer_v2` | `V2Writer::create_session`, `V2Writer::append_message`, `V2Writer::append_outbox_event`, `V2Writer::list_recent_sessions` | `workspace.sql`: `sessions`, `messages`, `message_parts`, `payloads`, `event_outbox`, `workspace_state` (event_head_seq) |
+| `fork_v2` | `ForkV2::fork_session`, `ForkV2::verify_copy`, `ForkV2::delete_session_tree` | `workspace.sql`: `sessions` (fork cols), `messages`, `message_parts` (copies referencing shared `payloads`) |
+| `gc_v2` | `GcV2::claim_unreferenced_for_deletion`, `GcV2::finish_deletion`, `GcV2::prune_outbox_prefix`, `GcV2::retention_counts` | `workspace.sql`: `blobs` (state machine), `payloads` (reachability), `event_outbox`, `workspace_state` (event_floor_seq) |
+| `admission_v2` | `AdmissionV2::submit_input`, `AdmissionV2::promote_input`, `AdmissionV2::receipt_lookup`, `AdmissionV2::receipt_store` | `workspace.sql`: `session_inputs`, `session_input_parts`, `operation_receipts`, `messages`, `message_parts`, `payloads` (promotion) |
+| `execution_v2` | `ExecV2::start_execution`, `ExecV2::transition_execution`, `ExecV2::record_attempt`, `ExecV2::finish_attempt`, `ExecV2::plan_tool`, `ExecV2::finish_tool` | `workspace.sql`: `executions`, `provider_attempts`, `tool_calls`, `payloads` (config/input/output/error) |
+| `approvals_v2` | `ApprovalsV2::request`, `ApprovalsV2::resolve`, `ApprovalsV2::expire_sweep`, `ApprovalsV2::add_resource` | `workspace.sql`: `approvals`, `approval_resources`, `tool_calls` (FK) |
+| `snapshot_v2` | `SnapshotV2::open_epoch`, `SnapshotV2::close_epoch`, `SnapshotV2::checkpoint`, `SnapshotV2::pin`, `SnapshotV2::unpin`, `SnapshotV2::export_page`, `SnapshotV2::outbox_page` | `workspace.sql`: `context_epochs`, `compaction_checkpoints`, `retained_payloads`, `messages` (read), `event_outbox` (read) |
+| `import_v2` | `ImportV2::import_session`, `ImportV2::verify_counts`, `ImportV2::import_is_resumable` | `workspace.sql`: `messages`, `message_parts`, `payloads`, `sessions` (next_message_seq) — reads format-1 source |
+| `quota_v2` | `QuotaV2::measure`, `QuotaV2::admit`, `QuotaV2::reclaim`, `QuotaSnapshot`, `QuotaV2Error` | `workspace.sql`: `blobs` (indirect via PRAGMA page_count/freelist/WAL file size) |
+
+### Engine gate status: CLEARED
+
+The production engine gate in `docs/STORAGE.md:164-168` is now satisfied. The workspace
+depends on `rusqlite = { version = "0.40", features = ["bundled"] }` (workspace
+`Cargo.toml:27`), which pulls `libsqlite3-sys 0.38.2`. The vendored header defines:
+
+```
+#define SQLITE_VERSION        "3.51.3"
+#define SQLITE_VERSION_NUMBER 3051003
+#define SQLITE_SOURCE_ID      "2026-03-13 10:38:09 737ae4a34738ffa0c3ff7f9bb18df914dd1cad163f28fd6b6e114a344fe6alt1"
+```
+
+This is SQLite 3.51.3, the first release containing the WAL-reset race fix
+(2026-03-13, check-in 7168988acb). The gate floor of >= 3.51.3 or an audited
+backport (3.44.6 / 3.50.7) with recorded `sqlite_source_id` is met. The local
+Python test engine (3.46.1) remains in the affected range and is not production
+qualification, consistent with `docs/STORAGE.md:166-167`.
+
+The init-time engine check proposed in `docs/storage/ENGINE_GATE.md:96-117`
+should be implemented in `SchemaV2::open_existing` and `CatalogV2::open_existing`
+before any write.
+
+### What is still NOT done
+
+| Item | Status | Notes |
+|---|---|---|
+| Format-1 activation | NOT DONE | `Storage::open` in `lib.rs:85` still runs the bootstrap format-1 migration (`migrate` at `lib.rs:240`). The v2 initializer (`SchemaV2::initialize_workspace`) is not wired into the public `Storage` API. |
+| Native app wiring | NOT DONE | The `Storage` struct (`lib.rs:79`) owns a format-1 connection, `BlobStore` (`lib.rs:245`), and uses `synchronous=NORMAL` (`lib.rs:236`). No daemon ownership locks, no retention leases, no hash locks, no OS fsync/directory sync protocol. |
+| GC implementation | STUB | `gc_v2.rs:1-3` is a placeholder. No tombstone sweep, no physical unlink, no orphan cleanup, no staging cleanup. |
+| Blob CAS & staging | NOT DONE | `BlobStore::put` (`lib.rs:254`) writes directly to `blobs/ab/<hash>.zst` with a temp file but does not implement the 7-step publication protocol (staging, retention lease, hash lock, atomic NO-REPLACE install, directory sync, DB commit, release). No 52-byte header, no `opencode-rk/blob/v2` domain prefix, no codec/flags/length validation on read. |
+| Perf in release | NOT DONE | No release benchmarks for CPU, RAM, latency, TOTAL disk, write amplification. `wal_autocheckpoint=1000` and `cache_size=-8192` are unmeasured proposals (`STORAGE.md:153-154`). |
+| OS lock / fsync fault tests | NOT DONE | No failpoint tests at publication/GC/backup boundaries. No real process kill/reopen, power-loss, torn-write, VFS tests. No filesystem no-replace and sync validation on Linux/macOS/Windows. |
+| Durability config | PARTIAL | `SchemaV2` and `CatalogV2` use `synchronous=FULL` (`schema_v2.rs:21`, `catalog_v2.rs:26`), but the legacy `Storage::configure` uses `synchronous=NORMAL` (`lib.rs:236`). |
+| Backup/restore | NOT DONE | `SnapshotV2` has pin/unpin but no SQLite backup API integration, no manifest, no cross-store verification, no restore protocol. |
+| Cursor / outbox resync | PARTIAL | `SnapshotV2::export_page` and `outbox_page` return watermarks, but no advisory wake subscription, no bounded snapshot/export protocol with deletion exclusion (`STORAGE.md:190-195`). |
+| Retention leases | NOT DONE | The retention RW gate, shared/exclusive leases, hash-lock map, and per-hash GC exclusion are designed in `CRASH_CONSISTENCY.md:25-48` but not implemented. |
+| Broker / credentials | NOT DONE | `provider_accounts.secret_ref` points to broker/OS-managed storage (`catalog.sql:34`), but no broker integration exists. No credential refresh orchestration. |

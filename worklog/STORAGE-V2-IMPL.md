@@ -457,3 +457,89 @@ stress_v2:                      4 passed; 0 failed
 - `worklog/STORAGE-V2-IMPL.md` (this section)
 
 No commit made; leave tree staged/not as instructed.
+
+## Module fan-out wave completion (2026-09-13): gc/admission/execution/approvals/snapshot/import/quota IMPLEMENTED
+
+### Claim
+
+Seven v2 lanes now exist as source plus tests and wire into `crates/storage/src/lib.rs`. Prior section "Four-lane integration attempt" (all MISSING) is stale for these seven; `fork_v2.rs` predates this wave (commit `fcc925e`). Scribe touched no source; only this worklog and `validation/storage-v2-verification.md` appended.
+
+### Lane table
+
+| Lane | Module (lines) | Tests | Agent per task brief |
+|------|---------------|-------|----------------------|
+| gc_v2 | `crates/storage/src/gc_v2.rs` (378) | covered in lib unittests + `tests/integration_v2.rs` | muse-spark (re-delegated after empty M1 return) |
+| admission_v2 | `crates/storage/src/admission_v2.rs` (510) | `tests/integration_v2.rs` (193 lines, 2 tests) | muse-spark (earlier lane) |
+| execution_v2 | `crates/storage/src/execution_v2.rs` (522) | `tests/perf_modules_v2.rs` (254 lines, 6 tests) | muse-spark (earlier lane) |
+| approvals_v2 | `crates/storage/src/approvals_v2.rs` (424) | `tests/perf_modules_v2.rs` | muse-spark (earlier lane) |
+| snapshot_v2 | `crates/storage/src/snapshot_v2.rs` (393) | `tests/perf_modules_v2.rs` | muse-spark (earlier lane) |
+| import_v2 | `crates/storage/src/import_v2.rs` (392) | `crates/storage/tests/import_v2.rs` (250 lines, 4 tests) | gonkagate module; tr-glm test per brief |
+| quota_v2 | `crates/storage/src/quota_v2.rs` (172) | `crates/storage/tests/quota_v2.rs` (84 lines, 5 tests) | gonkagate module; vyce test per brief |
+
+Key API surface (grep-verified): `GcV2::claim_unreferenced_for_deletion/finish_deletion/prune_outbox_prefix/retention_counts`; `AdmissionV2::submit_input/promote_input/receipt_lookup/receipt_store`; `ExecV2::start_execution/transition_execution/record_attempt/finish_attempt/plan_tool/finish_tool`; `ApprovalsV2::request/resolve/expire_sweep/add_resource`; `SnapshotV2::open_epoch/close_epoch/checkpoint/pin/unpin/export_page/outbox_page`; `QuotaV2::measure/admit/reclaim` (`crates/storage/src/quota_v2.rs:10-70`); `ImportV2` wired via `pub use import_v2::ImportV2` in lib.rs.
+
+Wiring: `crates/storage/src/lib.rs` adds 7 `pub mod` + 7 `pub use` lines (diff `+460/-30` vs HEAD). Pre-existing `fork_v2` also wired (not this wave).
+
+### Failure record
+
+1. `dahl-minimax-m27` unavailable: `Model unavailable: dahl/MiniMaxAI/MiniMax-M2.7`. Its two lanes re-delegated: quota test to vyce, import test to tr-glm. Both landed (`tests/quota_v2.rs`, `tests/import_v2.rs` green).
+2. One muse-spark lane (M1) returned no text. `gc_v2` re-delegated to muse-spark and landed (`gc_v2.rs:1-378`, per-arm NOT EXISTS, no `NOT IN` on `payload_roots` view).
+
+### Guardrail incident
+
+A lane ran workspace-wide `cargo fmt`, producing large churn across files that do not follow the repo compressed style. Brief states ~2300 lines across 15 files, proven semantically inert (rustfmt of HEAD blob == on-disk) and reverted with `git checkout`. Observed current tree differs in detail: `git status` shows 5 modified tracked files + 15 untracked (7 src modules, 3 test files, plus `docs/storage/CLEANUP-AUDIT.md`, `REVIEW-MODULES.md`, `SECURITY-REVIEW-MODULES.md`, `SECURITY-REVIEW-MODULES-REAL.md`). `crates/storage/src/lib.rs` retains an expanded-style reformat (+460/-30); `crates/security/src/lib.rs` retains a 1-line fix. No 2300-line churn remains in tree. Scribe did not verify the original churn size; the revert claim is owner-brief testimony, not scribe-measured.
+
+Pre-existing syntax error at HEAD `7e00dcd` in `crates/security/src/lib.rs`: `"dd"if` / `"find"if` missing guard space. Proven by scribe: `git show HEAD:crates/security/src/lib.rs | grep -o '"dd"if\|"find"if'` prints both tokens, and checking the HEAD blob fails with `error: expected one of ..., found args`. Fix retained in tree (`"dd" if`, `"find" if`); file restored after probe.
+
+### Command evidence (scribe-run 2026-09-13)
+
+`rtk cargo test -p opencode-rk-storage` (all targets):
+
+```text
+cargo test: 123 passed (13 suites, 23.19s)
+```
+
+Per-suite (bare `cargo test -p opencode-rk-storage`, Running/test-result lines):
+
+```text
+Running unittests src/lib.rs ... test result: ok. 60 passed; 0 failed
+Running tests/backup_v2.rs ... test result: ok. 5 passed; 0 failed
+Running tests/catalog_v2.rs ... test result: ok. 11 passed; 0 failed
+Running tests/import_v2.rs ... test result: ok. 4 passed; 0 failed
+Running tests/integration_v2.rs ... test result: ok. 2 passed; 0 failed
+Running tests/perf_modules_v2.rs ... test result: ok. 6 passed; 0 failed
+Running tests/perf_v2.rs ... test result: ok. 5 passed; 0 failed
+Running tests/quota_v2.rs ... test result: ok. 5 passed; 0 failed
+Running tests/restart_v2.rs ... test result: ok. 5 passed; 0 failed
+Running tests/schema_v2.rs ... test result: ok. 6 passed; 0 failed
+Running tests/stress_v2.rs ... test result: ok. 4 passed; 0 failed
+Running tests/writer_v2.rs ... test result: ok. 10 passed; 0 failed
+Doc-tests ... test result: ok. 0 passed; 0 failed
+```
+
+`rtk python3 -m unittest tests.bootstrap.test_storage_schema_v2`:
+
+```text
+Ran 81 tests in 0.373s
+OK
+```
+
+(up from 62 in prior section; `tests/bootstrap/test_storage_schema_v2.py` gained +233 lines in tree.)
+
+`rtk cargo check --workspace`:
+
+```text
+Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.20s
+```
+
+Zero errors, whole workspace including the `crates/security` fix.
+
+### Remaining unknowns
+
+1. Per-lane agent authorship above is task-brief testimony, not tree-verifiable; no signed lane receipts exist in tree.
+2. Churn size (~2300 lines / 15 files) and full revert unverifiable post-hoc; current `lib.rs` reformat persists, so "reverted" cannot mean byte-identical for that file.
+3. blake3-vs-sha256 checksum deviation (prior decision 1) still unresolved; owner decision pending before long-lived dev DBs.
+4. Lib unittests jumped 13 -> 60; provenance of the +47 (which lanes added lib-internal tests) not itemized by scribe.
+5. Python suite grew 62 -> 81; new contract assertions not individually reviewed here.
+6. New-module adversarial review currency: `docs/storage/REVIEW-MODULES.md` and two SECURITY-REVIEW files landed untracked; their verdicts not reconciled with this worklog.
+7. WAL-restart persistence, writer latency, checkpoint behavior, memory under bounded-reader policy still unmeasured.
