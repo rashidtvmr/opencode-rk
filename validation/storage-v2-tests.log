@@ -1,0 +1,42 @@
+test_account_model_lock_is_unique_and_cascades (test_storage_schema_v2.CatalogSchemaTests.test_account_model_lock_is_unique_and_cascades) ... ok
+test_catalog_has_no_conversation_or_secret_value_columns (test_storage_schema_v2.CatalogSchemaTests.test_catalog_has_no_conversation_or_secret_value_columns) ... ok
+test_secret_reference_and_json_are_bounded (test_storage_schema_v2.CatalogSchemaTests.test_secret_reference_and_json_are_bounded) ... ok
+test_process_exit_preserves_only_committed_state_and_outbox (test_storage_schema_v2.ProcessCrashTests.test_process_exit_preserves_only_committed_state_and_outbox) ... ok
+test_admission_promotion_shares_payload_and_deletes_cleanly (test_storage_schema_v2.WorkspaceSchemaTests.test_admission_promotion_shares_payload_and_deletes_cleanly) ... ok
+test_admission_rejects_cross_session_message (test_storage_schema_v2.WorkspaceSchemaTests.test_admission_rejects_cross_session_message) ... ok
+test_admission_request_identity_is_immutable (test_storage_schema_v2.WorkspaceSchemaTests.test_admission_request_identity_is_immutable) ... ok
+test_all_tables_are_strict (test_storage_schema_v2.WorkspaceSchemaTests.test_all_tables_are_strict) ... ok
+test_backup_pin_prevents_collection (test_storage_schema_v2.WorkspaceSchemaTests.test_backup_pin_prevents_collection) ... ok
+test_blob_gc_cannot_claim_referenced_blob (test_storage_schema_v2.WorkspaceSchemaTests.test_blob_gc_cannot_claim_referenced_blob) ... ok
+test_blob_gc_rejects_reattachment_to_tombstone (test_storage_schema_v2.WorkspaceSchemaTests.test_blob_gc_rejects_reattachment_to_tombstone) ... ok
+test_bounded_parts_and_valid_json (test_storage_schema_v2.WorkspaceSchemaTests.test_bounded_parts_and_valid_json) ... ok
+test_cursor_floor_cannot_exceed_head (test_storage_schema_v2.WorkspaceSchemaTests.test_cursor_floor_cannot_exceed_head) ... ok
+test_delete_event_survives_session_deletion (test_storage_schema_v2.WorkspaceSchemaTests.test_delete_event_survives_session_deletion) ... ok
+test_empty_inline_is_valid (test_storage_schema_v2.WorkspaceSchemaTests.test_empty_inline_is_valid) ... ok
+test_event_watermark_survives_pruning_all_rows (test_storage_schema_v2.WorkspaceSchemaTests.test_event_watermark_survives_pruning_all_rows) ... ok
+test_every_payload_fk_is_in_gc_root_view (test_storage_schema_v2.WorkspaceSchemaTests.test_every_payload_fk_is_in_gc_root_view) ... ok
+test_execution_parent_cannot_be_rewritten_to_cycle (test_storage_schema_v2.WorkspaceSchemaTests.test_execution_parent_cannot_be_rewritten_to_cycle) ... ok
+test_fork_reuses_payload_and_survives_parent_deletion (test_storage_schema_v2.WorkspaceSchemaTests.test_fork_reuses_payload_and_survives_parent_deletion) ... ok
+test_invalid_event_json_and_oversized_payload_rejected (test_storage_schema_v2.WorkspaceSchemaTests.test_invalid_event_json_and_oversized_payload_rejected) ... ok
+test_keyset_query_plans_use_indexes_without_sort (test_storage_schema_v2.WorkspaceSchemaTests.test_keyset_query_plans_use_indexes_without_sort) ... ok
+test_mandatory_human_approval_needs_client_identity (test_storage_schema_v2.WorkspaceSchemaTests.test_mandatory_human_approval_needs_client_identity) ... ok
+test_only_one_open_context_epoch (test_storage_schema_v2.WorkspaceSchemaTests.test_only_one_open_context_epoch) ... ok
+test_payload_cannot_mutate_shared_content (test_storage_schema_v2.WorkspaceSchemaTests.test_payload_cannot_mutate_shared_content) ... ok
+test_payload_has_exactly_one_representation (test_storage_schema_v2.WorkspaceSchemaTests.test_payload_has_exactly_one_representation) ... ok
+test_payload_inline_limit_and_length (test_storage_schema_v2.WorkspaceSchemaTests.test_payload_inline_limit_and_length) ... ok
+test_payload_rejects_unknown_and_mismatched_blob (test_storage_schema_v2.WorkspaceSchemaTests.test_payload_rejects_unknown_and_mismatched_blob) ... ok
+test_public_id_is_binary_uuid (test_storage_schema_v2.WorkspaceSchemaTests.test_public_id_is_binary_uuid) ... ok
+test_receipt_bounds_and_duplicate_key (test_storage_schema_v2.WorkspaceSchemaTests.test_receipt_bounds_and_duplicate_key) ... ok
+test_schema_load_rolls_back_after_interruption (test_storage_schema_v2.WorkspaceSchemaTests.test_schema_load_rolls_back_after_interruption) ... ok
+test_state_and_outbox_rollback_together (test_storage_schema_v2.WorkspaceSchemaTests.test_state_and_outbox_rollback_together) ... ok
+test_tool_approval_digest_binding_is_immutable (test_storage_schema_v2.WorkspaceSchemaTests.test_tool_approval_digest_binding_is_immutable) ... ok
+test_tool_cannot_be_owned_by_user_message (test_storage_schema_v2.WorkspaceSchemaTests.test_tool_cannot_be_owned_by_user_message) ... ok
+test_tool_requires_same_session_execution_and_assistant (test_storage_schema_v2.WorkspaceSchemaTests.test_tool_requires_same_session_execution_and_assistant) ... ok
+test_tool_success_requires_output (test_storage_schema_v2.WorkspaceSchemaTests.test_tool_success_requires_output) ... ok
+test_unavailable_blob_blocks_new_payloads (test_storage_schema_v2.WorkspaceSchemaTests.test_unavailable_blob_blocks_new_payloads) ... ok
+test_uncertain_execution_blocks_new_run (test_storage_schema_v2.WorkspaceSchemaTests.test_uncertain_execution_blocks_new_run) ... ok
+
+----------------------------------------------------------------------
+Ran 37 tests in 1.004s
+
+OK

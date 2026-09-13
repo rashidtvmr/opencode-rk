@@ -1,0 +1,20 @@
+Intentional disposable-DB mutation: remove payload_ready.
+Expected one assertion failure because DELETING blobs can gain references.
+test_blob_gc_rejects_reattachment_to_tombstone (contracts.WorkspaceSchemaTests.test_blob_gc_rejects_reattachment_to_tombstone) ... FAIL
+
+======================================================================
+FAIL: test_blob_gc_rejects_reattachment_to_tombstone (contracts.WorkspaceSchemaTests.test_blob_gc_rejects_reattachment_to_tombstone)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/mnt/data/storage-wave/tests/bootstrap/test_storage_schema_v2.py", line 96, in test_blob_gc_rejects_reattachment_to_tombstone
+    self.rejected('INSERT INTO payloads(blob_pk,raw_bytes,created_at_us) VALUES(?,9000,0)',(bid,))
+    ~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/mnt/data/storage-wave/tests/bootstrap/test_storage_schema_v2.py", line 64, in rejected
+    with self.assertRaises(sqlite3.IntegrityError):
+         ~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: IntegrityError not raised
+
+----------------------------------------------------------------------
+Ran 1 test in 0.004s
+
+FAILED (failures=1)
