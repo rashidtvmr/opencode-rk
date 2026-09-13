@@ -1,0 +1,27 @@
+{
+  "status": "initial-engineering-targets-not-measurements",
+  "baselineProfile": "lean",
+  "fixtureMachine": {"cpuCores":2,"ramMiB":4096,"storage":"local SSD","os":"supported Linux"},
+  "targets": {
+    "idleDaemonRssMiB": 64,
+    "idleDaemonAndNativeTuiRssMiB": 96,
+    "activeGenerationSlots": 4,
+    "activeToolSlots": 4,
+    "cpuWorkers": 1,
+    "maxAgentDepth": 4,
+    "maxQueuedAgents": 256,
+    "maxInputQueueBytesPerSession": 1048576,
+    "maxInMemoryPreviewBytesPerTool": 65536,
+    "maxInMemorySubscriberBytes": 262144,
+    "maxOpenWorkspaceStores": 4,
+    "maxReadersPerOpenWorkspace": 2,
+    "sqliteCacheKiBPerConnection": 2048
+  },
+  "requirements": [
+    "Measure process tree not only main binary",
+    "Measure cold and warm workloads separately",
+    "No silent user-history deletion",
+    "Full tool artifacts also need an explicit disk quota",
+    "Targets change only through independent resource-budget review"
+  ]
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "default": "deny-unless-authorized",
+  "mandatory": {
+    "systemFilesReadOnly": true,
+    "secretsReadDenied": true,
+    "otherWorkspaceNeedsHumanGrant": true,
+    "wildcardDoesNotOverrideMandatory": true,
+    "toolNetworkViaBroker": true,
+    "agentCannotModifyPolicy": true
+  },
+  "trustedHumanSettings": {
+    "destructiveCommandProtection": true,
+    "sensitiveFileReadExceptions": [],
+    "otherWorkspaceGrants": []
+  },
+  "toggleSemantics": "Disabling the destructive-command classifier is a human-only setting; it never grants system-file writes or disables OS isolation. Root/system destruction remains manual-only.",
+  "grantFields": ["actor","session","canonicalResource","operation","expiresAt","nonce","policyGeneration","scope"],
+  "unsupportedSandbox": "deny-risky-operation"
+}
