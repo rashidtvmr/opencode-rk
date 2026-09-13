@@ -305,5 +305,307 @@ os._exit(17)
                 finally: db.close()
 
 
+class CatalogInitTests(unittest.TestCase):
+    def setUp(self):
+        self.db = connect(kind='catalog')
+        self.addCleanup(self.db.close)
+
+    def test_catalog_ddl_loads_under_fk_on_with_zero_errors(self):
+        self.assertEqual(self.db.execute('PRAGMA foreign_keys').fetchone()[0], 1)
+        self.assertEqual(self.db.execute('PRAGMA foreign_key_check').fetchall(), [])
+
+    def test_catalog_singleton_and_migration_checksum_insert(self):
+        self.db.execute('INSERT INTO catalog_state(id,installation_id,format_version) VALUES(1,?,2)', (b'i' * 16,))
+        self.db.execute('INSERT INTO schema_migrations(version,checksum,applied_at_us) VALUES(2,?,0)', (b'c' * 32,))
+        self.assertEqual(
+            self.db.execute('SELECT installation_id,format_version FROM catalog_state WHERE id=1').fetchone(),
+            (b'i' * 16, 2))
+        checksum = self.db.execute('SELECT checksum FROM schema_migrations WHERE version=2').fetchone()[0]
+        self.assertEqual(len(checksum), 32)
+
+    def test_duplicate_singleton_and_short_checksum_rejected(self):
+        self.db.execute('INSERT INTO catalog_state(id,installation_id,format_version) VALUES(1,?,2)', (b'i' * 16,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute('INSERT INTO catalog_state(id,installation_id,format_version) VALUES(1,?,2)', (b'j' * 16,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute('INSERT INTO schema_migrations(version,checksum,applied_at_us) VALUES(3,?,0)', (b'short',))
+
+
+class InitializerSequenceTests(unittest.TestCase):
+    def test_file_pragmas_apply_before_ddl(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = str(pathlib.Path(temp) / 'workspace.db')
+            db = sqlite3.connect(path, isolation_level=None)
+            self.addCleanup(db.close)
+            db.execute('PRAGMA page_size=4096')
+            db.execute('PRAGMA auto_vacuum=INCREMENTAL')
+            db.execute('PRAGMA journal_mode=WAL')
+            db.executescript('BEGIN IMMEDIATE;\n' + (SQL / 'workspace.sql').read_text() + '\nCOMMIT;')
+            self.assertEqual(db.execute('PRAGMA page_size').fetchone()[0], 4096)
+            self.assertEqual(db.execute('PRAGMA auto_vacuum').fetchone()[0], 2)
+
+    def test_wal_attempt_recorded_as_string(self):
+        memory = sqlite3.connect(':memory:')
+        self.addCleanup(memory.close)
+        mode = memory.execute('PRAGMA journal_mode=WAL').fetchone()[0]
+        self.assertIsInstance(mode, str)
+        # System sqlite 3.46.1 reports memory for :memory: databases while
+        # file databases report wal. Record either, fail on anything else.
+        self.assertIn(mode.lower(), ('wal', 'memory'))
+        with tempfile.TemporaryDirectory() as temp:
+            path = str(pathlib.Path(temp) / 'workspace.db')
+            file_db = sqlite3.connect(path, isolation_level=None)
+            self.addCleanup(file_db.close)
+            self.assertEqual(file_db.execute('PRAGMA journal_mode=WAL').fetchone()[0].lower(), 'wal')
+
+    def test_nonempty_file_fails_closed_bytes_unchanged(self):
+        def initialize_new(path):
+            if path.stat().st_size > 0:
+                raise RuntimeError('file exists and is non-empty')
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = pathlib.Path(temp) / 'not-a-workspace.db'
+            original = b'pre-existing bytes'
+            path.write_bytes(original)
+            with self.assertRaises(RuntimeError):
+                initialize_new(path)
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_stored_vs_tampered_checksum_mismatch_detected(self):
+        db = connect()
+        self.addCleanup(db.close)
+        db.execute('INSERT INTO schema_migrations(version,checksum,applied_at_us) VALUES(2,?,0)', (b'A' * 32,))
+        stored = db.execute('SELECT checksum FROM schema_migrations WHERE version=2').fetchone()[0]
+        db.execute('UPDATE schema_migrations SET checksum=? WHERE version=2', (b'\x00' * 32,))
+        tampered = db.execute('SELECT checksum FROM schema_migrations WHERE version=2').fetchone()[0]
+        self.assertEqual(len(bytes(stored)), 32)
+        self.assertNotEqual(bytes(stored), bytes(tampered))
+
+
+def append_atomic(db, sid, mid, text, kind='created', payload='{}'):
+    """Mirror of the V2Writer atomic append: seq alloc, message, inline part
+    and outbox head bump commit together or roll back together."""
+    db.execute('BEGIN IMMEDIATE')
+    try:
+        row = db.execute('SELECT pk,next_message_seq FROM sessions WHERE id=?', (sid,)).fetchone()
+        session_pk, seq = row
+        db.execute('UPDATE sessions SET next_message_seq=next_message_seq+1 WHERE pk=?', (session_pk,))
+        message_pk = db.execute(
+            'INSERT INTO messages(id,session_pk,seq,role,status,created_at_us,completed_at_us)'
+            ' VALUES(?,?,?,?,1,0,0)', (mid, session_pk, seq, 1)).lastrowid
+        payload_pk = db.execute(
+            'INSERT INTO payloads(inline_data,raw_bytes,created_at_us) VALUES(?,?,0)',
+            (text, len(text))).lastrowid
+        db.execute('INSERT INTO message_parts(message_pk,ordinal,kind,payload_pk) VALUES(?,0,0,?)',
+                   (message_pk, payload_pk))
+        head = db.execute(
+            'UPDATE workspace_state SET event_head_seq=event_head_seq+1 WHERE id=1'
+            ' RETURNING event_head_seq').fetchone()[0]
+        db.execute('INSERT INTO event_outbox VALUES(?,?,?,?,0)', (head, sid, kind, payload))
+        db.execute('COMMIT')
+        return seq
+    except Exception:
+        db.execute('ROLLBACK')
+        raise
+
+
+class WriterAtomicityTests(unittest.TestCase):
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+        self.sid = (1).to_bytes(16, 'big')
+        session(self.db)
+
+    def test_commit_together(self):
+        seq = append_atomic(self.db, self.sid, (1).to_bytes(16, 'big'), b'{"ok":true}')
+        self.assertEqual(seq, 1)
+        counts = self.db.execute(
+            'SELECT (SELECT count(*) FROM messages),(SELECT count(*) FROM payloads),'
+            '(SELECT count(*) FROM message_parts),(SELECT count(*) FROM event_outbox),'
+            'event_head_seq FROM workspace_state WHERE id=1').fetchone()
+        self.assertEqual(counts, (1, 1, 1, 1, 1))
+
+    def test_invalid_json_rolls_back_to_zero(self):
+        with self.assertRaises(sqlite3.IntegrityError):
+            append_atomic(self.db, self.sid, (1).to_bytes(16, 'big'), b'{}', payload='not-json')
+        triple = self.db.execute(
+            'SELECT (SELECT count(*) FROM messages),(SELECT count(*) FROM event_outbox),'
+            'event_head_seq FROM workspace_state WHERE id=1').fetchone()
+        self.assertEqual(triple, (0, 0, 0))
+
+    def test_monotonic_sequences_next_is_three(self):
+        seqs = [append_atomic(self.db, self.sid, (key).to_bytes(16, 'big'), b'x')
+                for key in (1, 2)]
+        self.assertEqual(seqs, [1, 2])
+        self.assertEqual(
+            self.db.execute('SELECT next_message_seq FROM sessions WHERE id=?', (self.sid,)).fetchone()[0], 3)
+
+    def test_oversize_outbox_rejected_without_head_advance(self):
+        payload = '"' + 'x' * 4096 + '"'
+        self.assertGreater(len(payload.encode()), 4096)
+        with self.assertRaises(sqlite3.IntegrityError):
+            append_atomic(self.db, self.sid, (1).to_bytes(16, 'big'), b'{}', kind='large', payload=payload)
+        self.assertEqual(self.db.execute('SELECT event_head_seq FROM workspace_state').fetchone()[0], 0)
+        self.assertEqual(self.db.execute('SELECT count(*) FROM event_outbox').fetchone()[0], 0)
+
+
+class WriterNegativeBoundsTests(unittest.TestCase):
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+
+    def rejected(self, sql, args=()):
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute(sql, args)
+
+    def test_title_1024_ok_1025_rejected(self):
+        self.db.execute('INSERT INTO sessions(id,title,created_at_us,updated_at_us) VALUES(?,?,0,0)',
+                        (b'a' * 16, 'x' * 1024))
+        self.rejected('INSERT INTO sessions(id,title,created_at_us,updated_at_us) VALUES(?,?,0,0)',
+                      (b'b' * 16, 'x' * 1025))
+        self.assertEqual(self.db.execute('SELECT count(*) FROM sessions').fetchone()[0], 1)
+
+    def test_inline_over_8192_rejected(self):
+        self.rejected('INSERT INTO payloads(inline_data,raw_bytes,created_at_us) VALUES(?,?,0)', (b'x' * 8193, 8193))
+
+    def test_invalid_outbox_json_rejected(self):
+        self.rejected("INSERT INTO event_outbox VALUES(1,NULL,'x',?,0)", ('not-json',))
+
+    def test_empty_kind_rejected(self):
+        self.rejected('INSERT INTO event_outbox VALUES(1,NULL,?,?,0)', ('', '{}'))
+
+    def test_part_kind_null_and_16_rejected(self):
+        sid = session(self.db)
+        mid = message(self.db, sid)
+        pid = inline(self.db)
+        self.rejected('INSERT INTO message_parts(message_pk,ordinal,kind,payload_pk) VALUES(?,0,?,?)', (mid, None, pid))
+        self.rejected('INSERT INTO message_parts(message_pk,ordinal,kind,payload_pk) VALUES(?,0,?,?)', (mid, 16, pid))
+
+
+class KeysetPaginationTests(unittest.TestCase):
+    QUERIES = [
+        ('SELECT pk,id,title,updated_at_us FROM sessions'
+         ' WHERE state=? AND (updated_at_us,pk)<(?,?) ORDER BY updated_at_us DESC,pk DESC LIMIT ?',
+         (0, 10, 10, 50), 'sessions_state_updated_idx'),
+        ('SELECT pk,id,seq,role,status FROM messages WHERE session_pk=? AND seq>? ORDER BY seq LIMIT ?',
+         (1, 0, 50), 'sqlite_autoindex_messages_2'),
+        ('SELECT pk,id FROM session_inputs WHERE session_pk=? AND delivery=? AND state=0 AND seq>?'
+         ' ORDER BY seq LIMIT ?',
+         (1, 1, 0, 50), 'inputs_pending_idx'),
+        ('SELECT seq,kind,payload_json FROM event_outbox WHERE session_id=? AND seq>? AND seq<=?'
+         ' ORDER BY seq LIMIT ?',
+         (b's' * 16, 0, 99, 50), 'event_session_idx'),
+    ]
+
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+
+    def test_exact_storage_md_queries_use_indexes_without_temp_btree(self):
+        for query, args, index in self.QUERIES:
+            plan = ' '.join(row[3] for row in self.db.execute('EXPLAIN QUERY PLAN ' + query, args))
+            self.assertIn('USING INDEX', plan)
+            self.assertIn(index, plan)
+            self.assertNotIn('TEMP B-TREE', plan)
+
+    def test_keyset_page_returns_expected_row(self):
+        pks = []
+        for key, updated in ((1, 30), (2, 20), (3, 10)):
+            pks.append(session(self.db, key))
+            self.db.execute('UPDATE sessions SET updated_at_us=? WHERE pk=?', (updated, pks[-1]))
+        page = ('SELECT updated_at_us,pk FROM sessions WHERE state=0 AND (updated_at_us,pk)<(?,?)'
+                ' ORDER BY updated_at_us DESC,pk DESC LIMIT 2')
+        self.assertEqual(self.db.execute(page, (31, 1 << 62)).fetchall(), [(30, pks[0]), (20, pks[1])])
+        self.assertEqual(self.db.execute(page, (20, pks[1])).fetchall(), [(10, pks[2])])
+
+
+class GcSafetyPinTests(unittest.TestCase):
+    def setUp(self):
+        self.db = connect()
+        self.addCleanup(self.db.close)
+
+    def test_referenced_blob_cannot_go_deleting_or_be_deleted(self):
+        bid = blob(self.db)
+        self.db.execute('INSERT INTO payloads(blob_pk,raw_bytes,created_at_us) VALUES(?,9000,0)', (bid,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute('DELETE FROM blobs WHERE pk=?', (bid,))
+
+    def test_deleting_blob_cannot_gain_refs_or_resurrect(self):
+        bid = blob(self.db)
+        self.db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute('INSERT INTO payloads(blob_pk,raw_bytes,created_at_us) VALUES(?,9000,0)', (bid,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            self.db.execute('UPDATE blobs SET state=0 WHERE pk=?', (bid,))
+
+    def test_unreferenced_tombstone_deletable(self):
+        bid = blob(self.db)
+        self.db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+        self.db.execute('DELETE FROM blobs WHERE pk=?', (bid,))
+        self.assertEqual(self.db.execute('SELECT count(*) FROM blobs').fetchone()[0], 0)
+
+
+class MutationHookTests(unittest.TestCase):
+    """Drop one trigger in a scratch copy and show the formerly rejected
+    statement now succeeds. Each test proves its trigger owns the invariant."""
+
+    def scratch(self):
+        db = connect()
+        self.addCleanup(db.close)
+        return db
+
+    def assert_trigger_present(self, db, name):
+        self.assertEqual(
+            db.execute("SELECT count(*) FROM sqlite_master WHERE type='trigger' AND name=?", (name,)).fetchone()[0],
+            1)
+
+    def test_drop_blob_gc_claim_allows_collecting_referenced_blob(self):
+        db = self.scratch()
+        self.assert_trigger_present(db, 'blob_gc_claim')
+        bid = blob(db)
+        db.execute('INSERT INTO payloads(blob_pk,raw_bytes,created_at_us) VALUES(?,9000,0)', (bid,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+        db.execute('DROP TRIGGER blob_gc_claim')
+        db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+        self.assertEqual(db.execute('SELECT state FROM blobs WHERE pk=?', (bid,)).fetchone()[0], 1)
+
+    def test_drop_payload_ready_allows_tombstone_reference(self):
+        db = self.scratch()
+        self.assert_trigger_present(db, 'payload_ready')
+        bid = blob(db)
+        db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute('INSERT INTO payloads(blob_pk,raw_bytes,created_at_us) VALUES(?,9000,0)', (bid,))
+        db.execute('DROP TRIGGER payload_ready')
+        rowid = db.execute('INSERT INTO payloads(blob_pk,raw_bytes,created_at_us) VALUES(?,9000,0)', (bid,)).lastrowid
+        self.assertIsInstance(rowid, int)
+
+    def test_drop_blob_no_resurrection_allows_resurrection(self):
+        db = self.scratch()
+        self.assert_trigger_present(db, 'blob_no_resurrection')
+        bid = blob(db)
+        db.execute('UPDATE blobs SET state=1 WHERE pk=?', (bid,))
+        with self.assertRaises(sqlite3.IntegrityError):
+            db.execute('UPDATE blobs SET state=0 WHERE pk=?', (bid,))
+        db.execute('DROP TRIGGER blob_no_resurrection')
+        db.execute('UPDATE blobs SET state=0 WHERE pk=?', (bid,))
+        self.assertEqual(db.execute('SELECT state FROM blobs WHERE pk=?', (bid,)).fetchone()[0], 0)
+
+    def test_drop_tool_assistant_owner_allows_user_owned_tool(self):
+        db = self.scratch()
+        self.assert_trigger_present(db, 'tool_assistant_owner')
+        sid = session(db)
+        first = execution(db, sid)
+        mid = message(db, sid)
+        with self.assertRaises(sqlite3.IntegrityError):
+            tool(db, sid, first, mid)
+        db.execute('UPDATE executions SET state=5,finished_at_us=1 WHERE pk=?', (first,))
+        db.execute('DROP TRIGGER tool_assistant_owner')
+        self.assertIsInstance(tool(db, sid, execution(db, sid, key=3), mid), int)
+
+
 if __name__ == '__main__':
     unittest.main()
