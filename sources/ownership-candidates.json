@@ -1,0 +1,23 @@
+{
+  "warning": "Selectors are search hints, not verified path inventories or accepted ownership. Unmatched files remain unresolved.",
+  "groups": {
+    "discovery": ["**"],
+    "foundation": ["packages/cli/**", "packages/core/src/location*", "packages/server/**", "packages/core/src/config*"],
+    "security": ["packages/core/src/permission*", "packages/core/src/filesystem*", "packages/core/src/tool/**", "packages/codemode/**"],
+    "storage": ["packages/core/src/database/**", "packages/core/src/session/**", "packages/core/src/event*", "specs/storage/**"],
+    "catalog": ["packages/core/src/models-dev.ts", "packages/core/src/catalog.ts", "specs/v2/provider*"],
+    "providers": ["packages/llm/**", "packages/core/src/provider*", "packages/core/src/oauth/**", "packages/core/src/account*"],
+    "routing": ["src/sse/**", "open-sse/**", "src/lib/db/**"],
+    "sessions": ["packages/core/src/session/**", "packages/opencode/src/session/**", "specs/v2/session.md"],
+    "agents": ["packages/core/src/agent*", "packages/core/src/background-job.ts", "packages/opencode/src/agent/**", "packages/core/src/session/**"],
+    "tools": ["packages/core/src/tool/**", "packages/opencode/src/tool/**"],
+    "extensibility": ["packages/plugin/**", "packages/core/src/plugin*", "packages/core/src/skill/**", "packages/core/src/command*", ".opencode/**"],
+    "integrations": ["packages/core/src/integration*", "packages/core/src/workspace*", "packages/core/src/pty*", "packages/core/src/mcp*", "packages/core/src/lsp*", "packages/server/**", "packages/client/**", "sdks/**"],
+    "sharing": ["packages/core/src/share*", "packages/opencode/src/share/**", "packages/enterprise/**"],
+    "tui": ["packages/tui/**", "packages/opencode/src/cli/cmd/tui/**", "specs/tui-package.md"],
+    "optional-clients": ["packages/app/**", "packages/desktop/**", "packages/ui/**"],
+    "operations": ["script/**", "infra/**", ".github/**", "packages/containers/**", "packages/core/src/installation/**"],
+    "release": ["**"],
+    "automation": ["**"]
+  }
+}
