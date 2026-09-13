@@ -1,23 +1,161 @@
 {
   "warning": "Selectors are search hints, not verified path inventories or accepted ownership. Unmatched files remain unresolved.",
   "groups": {
-    "discovery": ["**"],
-    "foundation": ["packages/cli/**", "packages/core/src/location*", "packages/server/**", "packages/core/src/config*"],
-    "security": ["packages/core/src/permission*", "packages/core/src/filesystem*", "packages/core/src/tool/**", "packages/codemode/**"],
-    "storage": ["packages/core/src/database/**", "packages/core/src/session/**", "packages/core/src/event*", "specs/storage/**"],
-    "catalog": ["packages/core/src/models-dev.ts", "packages/core/src/catalog.ts", "specs/v2/provider*"],
-    "providers": ["packages/llm/**", "packages/core/src/provider*", "packages/core/src/oauth/**", "packages/core/src/account*"],
-    "routing": ["src/sse/**", "open-sse/**", "src/lib/db/**"],
-    "sessions": ["packages/core/src/session/**", "packages/opencode/src/session/**", "specs/v2/session.md"],
-    "agents": ["packages/core/src/agent*", "packages/core/src/background-job.ts", "packages/opencode/src/agent/**", "packages/core/src/session/**"],
-    "tools": ["packages/core/src/tool/**", "packages/opencode/src/tool/**"],
-    "extensibility": ["packages/plugin/**", "packages/core/src/plugin*", "packages/core/src/skill/**", "packages/core/src/command*", ".opencode/**"],
-    "integrations": ["packages/core/src/integration*", "packages/core/src/workspace*", "packages/core/src/pty*", "packages/core/src/mcp*", "packages/core/src/lsp*", "packages/server/**", "packages/client/**", "sdks/**"],
-    "sharing": ["packages/core/src/share*", "packages/opencode/src/share/**", "packages/enterprise/**"],
-    "tui": ["packages/tui/**", "packages/opencode/src/cli/cmd/tui/**", "specs/tui-package.md"],
-    "optional-clients": ["packages/app/**", "packages/desktop/**", "packages/ui/**"],
-    "operations": ["script/**", "infra/**", ".github/**", "packages/containers/**", "packages/core/src/installation/**"],
-    "release": ["**"],
-    "automation": ["**"]
+    "discovery": [
+      "**"
+    ],
+    "foundation": [
+      "packages/cli/**",
+      "packages/core/src/location*",
+      "packages/server/**",
+      "packages/core/src/config*",
+      "packages/core/src/project*",
+      "packages/core/src/global.ts",
+      "packages/core/src/effect/**",
+      "packages/core/src/state.ts",
+      "packages/schema/**",
+      "packages/client/**"
+    ],
+    "security": [
+      "packages/core/src/permission*",
+      "packages/core/src/filesystem*",
+      "packages/core/src/tool/**",
+      "packages/codemode/**",
+      "packages/core/src/policy.ts",
+      "packages/core/src/file-mutation.ts",
+      "packages/core/src/process.ts",
+      "packages/core/src/shell.ts",
+      "packages/core/src/credential/**",
+      "packages/core/src/oauth/**"
+    ],
+    "storage": [
+      "packages/core/src/database/**",
+      "packages/core/src/session/**",
+      "packages/core/src/event*",
+      "specs/storage/**",
+      "packages/core/src/data-migration*",
+      "packages/core/src/event/**",
+      "packages/core/src/public-event-manifest.ts",
+      "packages/core/src/snapshot.ts",
+      "packages/core/src/tool-output-store.ts",
+      "packages/effect-drizzle-sqlite/**",
+      "packages/effect-sqlite-node/**",
+      "packages/http-recorder/**"
+    ],
+    "catalog": [
+      "packages/core/src/models-dev.ts",
+      "packages/core/src/catalog.ts",
+      "specs/v2/provider*",
+      "packages/core/src/model.ts",
+      "packages/core/src/v2-schema.ts"
+    ],
+    "providers": [
+      "packages/llm/**",
+      "packages/core/src/provider*",
+      "packages/core/src/oauth/**",
+      "packages/core/src/account*",
+      "packages/core/src/credential*",
+      "packages/core/src/model.ts",
+      "packages/core/src/github-copilot/**",
+      "packages/core/src/aisdk.ts",
+      "packages/http-recorder/**",
+      "packages/enterprise/**",
+      "packages/function/**"
+    ],
+    "routing": [
+      "src/sse/**",
+      "open-sse/**",
+      "src/lib/db/**",
+      "src/store/**",
+      "src/lib/**",
+      "src/mitm/**",
+      "src/models/**",
+      "src/proxy.js",
+      "src/app/api/**",
+      "src/dashboardGuard.js",
+      "src/instrumentation.js"
+    ],
+    "sessions": [
+      "packages/core/src/session/**",
+      "packages/opencode/src/session/**",
+      "specs/v2/session.md",
+      "packages/core/src/question.ts",
+      "packages/core/src/system-context/**",
+      "packages/core/src/instruction-context.ts",
+      "packages/core/src/reference*",
+      "packages/core/src/snapshot.ts"
+    ],
+    "agents": [
+      "packages/core/src/agent*",
+      "packages/core/src/background-job.ts",
+      "packages/opencode/src/agent/**",
+      "packages/core/src/session/**",
+      "packages/core/src/agent/**"
+    ],
+    "tools": [
+      "packages/core/src/tool/**",
+      "packages/opencode/src/tool/**",
+      "packages/core/src/file*",
+      "packages/core/src/ripgrep*",
+      "packages/core/src/patch.ts",
+      "packages/core/src/process.ts",
+      "packages/core/src/shell.ts",
+      "packages/core/src/pty*"
+    ],
+    "extensibility": [
+      "packages/plugin/**",
+      "packages/core/src/plugin*",
+      "packages/core/src/skill/**",
+      "packages/core/src/command*",
+      ".opencode/**"
+    ],
+    "integrations": [
+      "packages/core/src/integration*",
+      "packages/core/src/workspace*",
+      "packages/core/src/pty*",
+      "packages/core/src/mcp*",
+      "packages/core/src/lsp*",
+      "packages/server/**",
+      "packages/client/**",
+      "sdks/**",
+      "packages/core/src/integration.ts",
+      "packages/core/src/project*",
+      "packages/core/src/git.ts",
+      "packages/enterprise/**",
+      "packages/function/**"
+    ],
+    "sharing": [
+      "packages/core/src/share*",
+      "packages/opencode/src/share/**",
+      "packages/enterprise/**"
+    ],
+    "tui": [
+      "packages/tui/**",
+      "packages/opencode/src/cli/cmd/tui/**",
+      "specs/tui-package.md",
+      "packages/cli/**"
+    ],
+    "optional-clients": [
+      "packages/app/**",
+      "packages/desktop/**",
+      "packages/ui/**",
+      "packages/console/**"
+    ],
+    "operations": [
+      "script/**",
+      "infra/**",
+      ".github/**",
+      "packages/containers/**",
+      "packages/core/src/installation/**",
+      "packages/core/src/observability*",
+      "packages/core/src/repository*",
+      "packages/http-recorder/**"
+    ],
+    "release": [
+      "**"
+    ],
+    "automation": [
+      "**"
+    ]
   }
 }

@@ -1,0 +1,759 @@
+{
+  "schemaVersion": 1,
+  "status": "candidate-only-not-reviewed",
+  "warning": "Path rules only nominate public behavior surfaces for DISC-003 review. They never prove behavior, parity, ownership, or implementation status.",
+  "rules": [
+    {
+      "id": "9router.account-storage",
+      "kind": "routing-account-settings-and-persistence",
+      "repositories": [
+        "9router"
+      ],
+      "patterns": [
+        "src/store/**",
+        "src/lib/localDb*",
+        "src/lib/db/**"
+      ],
+      "featureIds": [
+        "ROUTE-001",
+        "ROUTE-003",
+        "ROUTE-004",
+        "ROUTE-008",
+        "ROUTE-009"
+      ]
+    },
+    {
+      "id": "9router.dashboard-api",
+      "kind": "routing-control-surface",
+      "repositories": [
+        "9router"
+      ],
+      "patterns": [
+        "src/app/**",
+        "src/dashboardGuard.js"
+      ],
+      "featureIds": [
+        "ROUTE-001",
+        "ROUTE-008",
+        "ROUTE-009"
+      ]
+    },
+    {
+      "id": "9router.dashboard-settings",
+      "kind": "routing-dashboard-settings-and-api",
+      "repositories": [
+        "9router"
+      ],
+      "patterns": [
+        "src/app/**",
+        "src/dashboardGuard.js"
+      ],
+      "featureIds": [
+        "ROUTE-008",
+        "ROUTE-009",
+        "UI-006",
+        "UI-011"
+      ]
+    },
+    {
+      "id": "9router.model-combos",
+      "kind": "model-alias-combo-and-registry",
+      "repositories": [
+        "9router"
+      ],
+      "patterns": [
+        "src/models/**",
+        "src/sse/services/model.js",
+        "open-sse/providers/**",
+        "open-sse/services/model.js"
+      ],
+      "featureIds": [
+        "CAT-005",
+        "ROUTE-005",
+        "ROUTE-007"
+      ]
+    },
+    {
+      "id": "9router.network-proxy",
+      "kind": "proxy-mitm-and-network-routing",
+      "repositories": [
+        "9router"
+      ],
+      "patterns": [
+        "src/mitm/**",
+        "src/proxy.js",
+        "src/lib/network/**"
+      ],
+      "featureIds": [
+        "ROUTE-006",
+        "ROUTE-007",
+        "SEC-009",
+        "PROV-003",
+        "PROV-004"
+      ]
+    },
+    {
+      "id": "9router.routing",
+      "kind": "multi-account-routing",
+      "repositories": [
+        "9router"
+      ],
+      "patterns": [
+        "src/sse/**",
+        "src/store/**",
+        "src/lib/**",
+        "src/models/**",
+        "src/proxy.js"
+      ],
+      "featureIds": [
+        "ROUTE-001",
+        "ROUTE-002",
+        "ROUTE-003",
+        "ROUTE-004",
+        "ROUTE-005",
+        "ROUTE-006",
+        "ROUTE-007",
+        "ROUTE-008",
+        "ROUTE-009",
+        "ROUTE-010",
+        "ROUTE-011"
+      ]
+    },
+    {
+      "id": "9router.token-refresh",
+      "kind": "credential-refresh-and-lifecycle",
+      "repositories": [
+        "9router"
+      ],
+      "patterns": [
+        "src/sse/services/tokenRefresh.js",
+        "src/sse/services/backgroundTokenRefresh.js",
+        "src/sse/services/antigravityQuota.js"
+      ],
+      "featureIds": [
+        "ROUTE-003",
+        "ROUTE-004",
+        "ROUTE-006",
+        "PROV-008",
+        "SEC-009"
+      ]
+    },
+    {
+      "id": "9router.translation-proxy",
+      "kind": "provider-protocol-translation",
+      "repositories": [
+        "9router"
+      ],
+      "patterns": [
+        "open-sse/**",
+        "src/sse/**",
+        "src/mitm/**"
+      ],
+      "featureIds": [
+        "PROV-001",
+        "PROV-003",
+        "PROV-004",
+        "PROV-005",
+        "ROUTE-006",
+        "ROUTE-007"
+      ]
+    },
+    {
+      "id": "opencode.agent-delegation",
+      "kind": "agent-and-subagent",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/agent.ts",
+        "packages/core/src/agent/**",
+        "packages/core/src/background-job.ts",
+        "packages/core/src/session/runner/**"
+      ],
+      "featureIds": [
+        "AGENT-001",
+        "AGENT-002",
+        "AGENT-003",
+        "AGENT-004",
+        "AGENT-005",
+        "AGENT-006",
+        "AGENT-007",
+        "AGENT-008",
+        "AGENT-009",
+        "AGENT-010",
+        "AGENT-011",
+        "AGENT-012",
+        "AGENT-013",
+        "AGENT-014",
+        "AGENT-015"
+      ]
+    },
+    {
+      "id": "opencode.app-client",
+      "kind": "browser-console-client-surfaces",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/app/**",
+        "packages/console/**"
+      ],
+      "featureIds": [
+        "WEB-001",
+        "WEB-002",
+        "WEB-005",
+        "UI-003",
+        "UI-006",
+        "UI-009",
+        "UI-011"
+      ]
+    },
+    {
+      "id": "opencode.catalog-provider",
+      "kind": "model-catalog-and-provider",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/catalog.ts",
+        "packages/core/src/model.ts",
+        "packages/core/src/models-dev.ts",
+        "packages/core/src/provider.ts",
+        "packages/core/src/provider/**",
+        "packages/core/src/account.ts",
+        "packages/core/src/account/**",
+        "packages/core/src/credential.ts",
+        "packages/core/src/credential/**",
+        "packages/core/src/oauth/**",
+        "packages/core/src/github-copilot/**",
+        "packages/core/src/aisdk.ts",
+        "specs/v2/provider*"
+      ],
+      "featureIds": [
+        "CAT-001",
+        "CAT-002",
+        "CAT-003",
+        "CAT-004",
+        "CAT-005",
+        "CAT-006",
+        "CAT-007",
+        "PROV-001",
+        "PROV-002",
+        "PROV-003",
+        "PROV-004",
+        "PROV-005",
+        "PROV-006",
+        "PROV-007",
+        "PROV-008",
+        "PROV-009",
+        "PROV-010",
+        "PROV-011",
+        "PROV-012"
+      ]
+    },
+    {
+      "id": "opencode.clients-ui",
+      "kind": "terminal-browser-desktop-ui",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/tui/**",
+        "packages/app/**",
+        "packages/desktop/**",
+        "packages/ui/**",
+        "packages/cli/**",
+        "specs/tui-package.md"
+      ],
+      "featureIds": [
+        "UI-001",
+        "UI-002",
+        "UI-003",
+        "UI-004",
+        "UI-005",
+        "UI-006",
+        "UI-007",
+        "UI-008",
+        "UI-009",
+        "UI-010",
+        "UI-011",
+        "UI-012",
+        "UI-013",
+        "WEB-001",
+        "WEB-002",
+        "WEB-003",
+        "WEB-005"
+      ]
+    },
+    {
+      "id": "opencode.code-mode",
+      "kind": "code-mode-grouped-tool-execution",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/codemode/**"
+      ],
+      "featureIds": [
+        "TOOL-011",
+        "SEC-001",
+        "SEC-010"
+      ]
+    },
+    {
+      "id": "opencode.configuration-runtime",
+      "kind": "configuration-and-runtime-lifecycle",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/config.ts",
+        "packages/core/src/config/**",
+        "packages/core/src/flag/**",
+        "packages/core/src/global.ts",
+        "packages/core/src/installation/**",
+        "packages/core/src/npm-config.ts",
+        "packages/core/src/location*",
+        "packages/core/src/state.ts",
+        "packages/core/src/control-plane/**"
+      ],
+      "featureIds": [
+        "BASE-004",
+        "BASE-005",
+        "BASE-006",
+        "BASE-007",
+        "BASE-008",
+        "OPS-001",
+        "OPS-004",
+        "OPS-005",
+        "OPS-008"
+      ]
+    },
+    {
+      "id": "opencode.contracts-schema",
+      "kind": "wire-domain-and-event-contracts",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/schema/**",
+        "packages/core/src/schema.ts",
+        "packages/core/src/v2-schema.ts",
+        "packages/core/src/id/**",
+        "packages/core/src/public-event-manifest.ts"
+      ],
+      "featureIds": [
+        "BASE-002",
+        "DB-003",
+        "INT-008",
+        "SESS-002"
+      ]
+    },
+    {
+      "id": "opencode.desktop-client",
+      "kind": "desktop-packaging-and-client-contract",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/desktop/**"
+      ],
+      "featureIds": [
+        "WEB-003",
+        "WEB-005",
+        "BASE-005"
+      ]
+    },
+    {
+      "id": "opencode.effect-runtime",
+      "kind": "effect-runtime-and-sqlite-adapters",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/effect/**",
+        "packages/effect-drizzle-sqlite/**",
+        "packages/effect-sqlite-node/**"
+      ],
+      "featureIds": [
+        "BASE-003",
+        "BASE-007",
+        "DB-008",
+        "DB-009",
+        "OPS-007"
+      ]
+    },
+    {
+      "id": "opencode.enterprise-remote",
+      "kind": "enterprise-function-and-remote-surfaces",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/enterprise/**",
+        "packages/function/**"
+      ],
+      "featureIds": [
+        "WEB-004",
+        "PROV-006",
+        "INT-010",
+        "SHARE-003"
+      ]
+    },
+    {
+      "id": "opencode.extensibility",
+      "kind": "plugins-skills-commands",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/plugin.ts",
+        "packages/core/src/plugin/**",
+        "packages/core/src/skill.ts",
+        "packages/core/src/skill/**",
+        "packages/core/src/command.ts",
+        "packages/plugin/**",
+        "specs/v2/catalog-config-plugin-lifecycle.md",
+        ".opencode/**"
+      ],
+      "featureIds": [
+        "EXT-001",
+        "EXT-002",
+        "EXT-003",
+        "EXT-004",
+        "EXT-005",
+        "EXT-006",
+        "EXT-007",
+        "EXT-008",
+        "EXT-009",
+        "EXT-010",
+        "EXT-011",
+        "EXT-012"
+      ]
+    },
+    {
+      "id": "opencode.integration-auth",
+      "kind": "integration-credential-oauth-lifecycle",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/integration.ts",
+        "packages/core/src/integration/**",
+        "packages/core/src/credential.ts",
+        "packages/core/src/credential/**",
+        "packages/core/src/oauth/**"
+      ],
+      "featureIds": [
+        "PROV-007",
+        "PROV-008",
+        "PROV-010",
+        "SEC-009",
+        "EXT-007",
+        "INT-004"
+      ]
+    },
+    {
+      "id": "opencode.integrations",
+      "kind": "workspace-and-external-protocols",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/integration.ts",
+        "packages/core/src/integration/**",
+        "packages/core/src/workspace.ts",
+        "packages/core/src/project.ts",
+        "packages/core/src/project/**",
+        "packages/core/src/pty.ts",
+        "packages/core/src/pty/**",
+        "packages/core/src/git.ts",
+        "packages/client/**",
+        "packages/server/**",
+        "sdks/**"
+      ],
+      "featureIds": [
+        "INT-001",
+        "INT-002",
+        "INT-003",
+        "INT-004",
+        "INT-005",
+        "INT-006",
+        "INT-007",
+        "INT-008",
+        "INT-009",
+        "INT-010"
+      ]
+    },
+    {
+      "id": "opencode.legacy-compatibility",
+      "kind": "legacy-and-v2-compatibility-surfaces",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/v1/**",
+        "packages/opencode/**"
+      ],
+      "featureIds": [
+        "EXT-005",
+        "UI-012",
+        "INT-008",
+        "TOOL-014"
+      ]
+    },
+    {
+      "id": "opencode.permission-runtime",
+      "kind": "permission-request-evaluation-and-reply",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/permission.ts",
+        "packages/core/src/permission/**",
+        "packages/core/src/policy.ts"
+      ],
+      "featureIds": [
+        "SEC-001",
+        "SEC-003",
+        "SEC-007",
+        "SEC-010",
+        "SEC-013",
+        "UI-008"
+      ]
+    },
+    {
+      "id": "opencode.process-terminal",
+      "kind": "process-pty-and-spawn-lifecycle",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/process.ts",
+        "packages/core/src/cross-spawn-spawner.ts",
+        "packages/core/src/pty.ts",
+        "packages/core/src/pty/**",
+        "packages/core/src/shell.ts"
+      ],
+      "featureIds": [
+        "SEC-001",
+        "SEC-002",
+        "SEC-008",
+        "TOOL-005",
+        "TOOL-013"
+      ]
+    },
+    {
+      "id": "opencode.prompt-context",
+      "kind": "prompt-context-question-reference",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/question.ts",
+        "packages/core/src/instruction-context.ts",
+        "packages/core/src/system-context/**",
+        "packages/core/src/reference.ts",
+        "packages/core/src/reference/**"
+      ],
+      "featureIds": [
+        "SESS-008",
+        "SESS-013",
+        "SESS-014",
+        "TOOL-008",
+        "EXT-003"
+      ]
+    },
+    {
+      "id": "opencode.provider-recording",
+      "kind": "provider-http-record-replay-fixtures",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/http-recorder/**"
+      ],
+      "featureIds": [
+        "PROV-012",
+        "OPS-009"
+      ]
+    },
+    {
+      "id": "opencode.repository-operations",
+      "kind": "repository-cache-observability-installation",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/repository.ts",
+        "packages/core/src/repository-cache.ts",
+        "packages/core/src/git.ts",
+        "packages/core/src/observability.ts",
+        "packages/core/src/observability/**",
+        "packages/core/src/installation/**",
+        "packages/containers/**"
+      ],
+      "featureIds": [
+        "INT-002",
+        "OPS-002",
+        "OPS-003",
+        "OPS-004",
+        "OPS-006",
+        "OPS-007",
+        "OPS-008",
+        "OPS-009"
+      ]
+    },
+    {
+      "id": "opencode.server-control-plane",
+      "kind": "daemon-server-client-control-plane",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/control-plane/**",
+        "packages/cli/**",
+        "packages/client/**",
+        "packages/opencode/src/server/**",
+        "packages/opencode/src/cli/**"
+      ],
+      "featureIds": [
+        "BASE-001",
+        "BASE-004",
+        "BASE-005",
+        "BASE-007",
+        "INT-008",
+        "WEB-004"
+      ]
+    },
+    {
+      "id": "opencode.session-runtime",
+      "kind": "session-lifecycle",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/session.ts",
+        "packages/core/src/session/**",
+        "specs/v2/session.md"
+      ],
+      "featureIds": [
+        "SESS-001",
+        "SESS-002",
+        "SESS-003",
+        "SESS-004",
+        "SESS-005",
+        "SESS-006",
+        "SESS-007",
+        "SESS-008",
+        "SESS-009",
+        "SESS-010",
+        "SESS-011",
+        "SESS-012",
+        "SESS-013",
+        "SESS-014",
+        "SESS-015",
+        "SESS-016",
+        "SESS-017"
+      ]
+    },
+    {
+      "id": "opencode.sharing",
+      "kind": "session-sharing",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/share/**",
+        "packages/enterprise/**"
+      ],
+      "featureIds": [
+        "SHARE-001",
+        "SHARE-002",
+        "SHARE-003",
+        "SHARE-004",
+        "SHARE-005"
+      ]
+    },
+    {
+      "id": "opencode.storage-events",
+      "kind": "persistence-and-events",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/database/**",
+        "packages/core/src/data-migration*",
+        "packages/core/src/event.ts",
+        "packages/core/src/event/**",
+        "packages/core/src/public-event-manifest.ts",
+        "packages/core/src/snapshot.ts",
+        "packages/core/src/tool-output-store.ts",
+        "packages/effect-drizzle-sqlite/**",
+        "packages/effect-sqlite-node/**",
+        "specs/storage/**"
+      ],
+      "featureIds": [
+        "DB-001",
+        "DB-002",
+        "DB-003",
+        "DB-004",
+        "DB-005",
+        "DB-006",
+        "DB-007",
+        "DB-008",
+        "DB-009",
+        "DB-010",
+        "DB-011",
+        "DB-012",
+        "DB-013",
+        "DB-014",
+        "DB-015",
+        "DB-016"
+      ]
+    },
+    {
+      "id": "opencode.tools-security",
+      "kind": "tool-and-permission-policy",
+      "repositories": [
+        "opencode"
+      ],
+      "patterns": [
+        "packages/core/src/tool/**",
+        "packages/core/src/permission.ts",
+        "packages/core/src/permission/**",
+        "packages/core/src/policy.ts",
+        "packages/core/src/filesystem.ts",
+        "packages/core/src/filesystem/**",
+        "packages/core/src/file-mutation.ts",
+        "packages/core/src/process.ts",
+        "packages/core/src/shell.ts",
+        "packages/core/src/patch.ts",
+        "packages/core/src/ripgrep.ts",
+        "packages/core/src/ripgrep/**",
+        "packages/codemode/**"
+      ],
+      "featureIds": [
+        "SEC-001",
+        "SEC-002",
+        "SEC-003",
+        "SEC-005",
+        "SEC-006",
+        "SEC-007",
+        "SEC-008",
+        "SEC-010",
+        "SEC-011",
+        "SEC-012",
+        "SEC-013",
+        "TOOL-001",
+        "TOOL-002",
+        "TOOL-003",
+        "TOOL-004",
+        "TOOL-005",
+        "TOOL-011",
+        "TOOL-012",
+        "TOOL-014"
+      ]
+    }
+  ]
+}
