@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "preparedOn": "2026-09-13",
+  "repositories": [
+    {
+      "id": "opencode",
+      "url": "https://github.com/anomalyco/opencode.git",
+      "observedBranch": "dev",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "commitObservedDate": "2026-09-11",
+      "scope": "V2 packages and V2 specs plus shared and legacy product surfaces explicitly reconciled by DISC tasks",
+      "vendored": false,
+      "treeSha": "b17683f6fb570317083ee8f62bd136435c023270",
+      "licenseSpdx": "MIT",
+      "licensePath": "LICENSE",
+      "licenseBlobSha": "6439474beed8e0271df9862eff97ffd70ec2464c"
+    },
+    {
+      "id": "9router",
+      "url": "https://github.com/decolua/9router.git",
+      "observedBranch": "master",
+      "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+      "scope": "Routing translation account auth quota and combo behavior; all other source files must still receive a scope disposition",
+      "vendored": false,
+      "treeSha": "4a6b1d14d1d4b4b12aaca1a20cd3c9e1e33bc475",
+      "licenseSpdx": "MIT",
+      "licensePath": "LICENSE",
+      "licenseBlobSha": "92192354269f1f44d50229750674c29e336c27c4"
+    }
+  ],
+  "modelsDev": {
+    "url": "https://models.dev/api.json",
+    "additionalDiscoveredEndpoints": [
+      "https://models.dev/models.json",
+      "https://models.dev/catalog.json"
+    ],
+    "snapshotSha256": null,
+    "status": "capture-during-bootstrap",
+    "note": "Runtime catalog refreshes deliberately; test fixtures are content-hash locked."
+  },
+  "completeness": {
+    "fullCheckoutObtainedHere": false,
+    "everyFileReviewed": false,
+    "featureExhaustivenessCertified": false,
+    "reason": "Repository APIs supplied pins and selected source excerpts. Container network cloning was unavailable. DISC-001 through DISC-010 must reconcile the full checkout before parity claims."
+  }
+}
