@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DISC-001",
+  "status": "in_progress_blocked_on_public_fetch",
+  "targetFiles": [
+    "sources/upstream.lock.json",
+    "tools/source_lock.py",
+    "tools/freeze_sources.py",
+    "tools/inventory.py",
+    "tools/coverage_gate.py"
+  ],
+  "upstreamEvidence": [
+    {
+      "repository": "anomalyco/opencode",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "treeSha": "b17683f6fb570317083ee8f62bd136435c023270",
+      "licensePath": "LICENSE",
+      "licenseBlobSha": "6439474beed8e0271df9862eff97ffd70ec2464c"
+    },
+    {
+      "repository": "decolua/9router",
+      "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+      "treeSha": "4a6b1d14d1d4b4b12aaca1a20cd3c9e1e33bc475",
+      "licensePath": "LICENSE",
+      "licenseBlobSha": "92192354269f1f44d50229750674c29e336c27c4"
+    }
+  ],
+  "entrypoints": [
+    "python3 tools/freeze_sources.py",
+    "python3 tools/freeze_sources.py --fetch",
+    "python3 tools/inventory.py",
+    "python3 tools/coverage_gate.py"
+  ],
+  "securityInvariants": [
+    "no implicit Git credentials or prompts",
+    "no branch fallback",
+    "no upstream hooks or package lifecycle scripts",
+    "no local paths or credentials in frozen evidence",
+    "wrong commit, tree, origin, license, dirty, attached, or incomplete checkout blocks"
+  ],
+  "localVerification": {
+    "bootstrapTestsPassing": 85,
+    "planTasks": 193,
+    "namedTestObligations": 965
+  },
+  "limitations": [
+    "The current shell cannot fetch the two real public repositories.",
+    "A network-enabled trusted verifier must produce the real frozen and inventory manifests before DISC-001 acceptance."
+  ]
+}
