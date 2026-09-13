@@ -1,0 +1,24 @@
+{
+  "evidenceReferences": 43,
+  "implementationStatusCounts": {
+    "partial": 7,
+    "reference-implemented": 4,
+    "unresolved": 21
+  },
+  "inputs": {
+    "evidenceCatalogSha256": "4251be93f2ec0819238ce527ad0d8f53096cc29d4d535c0220c73e08f195c029",
+    "planSha256": "49b1722d5343ac8654caa0b460ad60f1e8da2a73cb954508ded5b172d9f47b1b",
+    "reconciliationSha256": "3d84fad61d30885fe3550f42cb4a3af108866ad91e31f46d7b1dc343777e35a2",
+    "supplementalEvidenceSha256": "96170e344a179eb62200c41e1173f9cd7a02fc7b3d5b56bbb5de35311f581188",
+    "surfaceRulesSha256": "fdfe61860405ef3a50b6da8c45d809710f853b33238c531268e502bf2b455f8b"
+  },
+  "reviewStateCounts": {
+    "partial": 11,
+    "queued": 21
+  },
+  "schemaVersion": 1,
+  "status": "in-progress-not-release-evidence",
+  "surfaceFamilies": 32,
+  "unresolvedFindings": 44,
+  "warning": "DISC-003 reconciliation is review evidence only; it does not replace full pinned-tree inventory, independent review receipts, or acceptance tests."
+}

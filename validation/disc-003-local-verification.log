@@ -1,0 +1,39 @@
+DISC-003 local verification
+Date: 2026-09-13
+Status: VERIFIED FOR THIS DISCOVERY SLICE; NOT RELEASE ACCEPTANCE
+
+Bootstrap tests:
+- command: python3 -m unittest discover -s tests/bootstrap -v
+- result: PASS
+- tests: 108
+- failures: 0
+
+Plan validation:
+- command: python3 tools/validate_plan.py
+- result: PASS
+- tasks: 193
+- named test obligations: 965
+
+DISC-003 reconciliation:
+- command: python3 tools/reconcile_surfaces.py
+- result: PASS
+- candidate surface families: 32
+- partial/evidence-backed: 11
+- queued/unresolved: 21
+- implementation statuses: partial=7, reference-implemented=4, unresolved=21
+- pinned evidence references: 43
+- unresolved findings: 44
+
+Static/bootstrap checks:
+- python3 -m py_compile tools/*.py tests/bootstrap/*.py: PASS
+- JSON parse of repository JSON files: PASS
+- python3 tools/freeze_sources.py (no --fetch): PASS, no network fetch performed
+
+Coverage gate:
+- command: python3 tools/coverage_gate.py
+- result: EXPECTED BLOCK, exit 2
+- reason: Full pinned source inventory has not been generated.
+- this fail-closed result is required until exact locked checkouts are available and reviewed.
+
+Rust:
+- not executed in this shell because rustc/cargo remain unavailable.
