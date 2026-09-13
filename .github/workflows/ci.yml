@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -13,15 +14,27 @@ env:
   RUSTFLAGS: -Dwarnings
 
 jobs:
-  rust:
+  planning:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt,clippy
-      - uses: Swatinem/rust-cache@v2
+      - name: Validate project plan
+        run: python3 tools/validate_plan.py
+      - name: Bootstrap controller tests
+        run: python3 -m unittest discover -s tests/bootstrap -v
+
+  rust:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain info
+        run: |
+          rustc --version
+          cargo --version
+          rustfmt --version
+          cargo clippy --version
       - name: Format
         run: cargo fmt --all -- --check
       - name: Check
@@ -30,16 +43,3 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: Test
         run: cargo test --workspace --all-targets
-
-  planning:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Validate project plan
-        run: python3 tools/validate_plan.py
-      - name: Bootstrap controller tests
-        run: python3 -m unittest discover -s tests/bootstrap -v
