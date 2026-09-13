@@ -1,0 +1,11 @@
+{
+  "candidateSources": 7592,
+  "candidateSurfaces": 32,
+  "inventoryManifestSha256": "a4f095dc2161fe7cc02128cf1bf87ab1c7f36a0a437f54362ca98181931eb4e7",
+  "outputFile": "surface-candidates.jsonl",
+  "outputSha256": "4e6858e60ed682f37850a2ce9557bdcfa26fb668d6352cc5e4e0c5939e8e0e72",
+  "schemaVersion": 1,
+  "status": "candidate-unreviewed",
+  "surfaceRuleSha256": "1d2265a196f63555023ad17f36682969abb0521a7be5bb025de1f860eb202781",
+  "warning": "This queue is discovery input only and cannot satisfy reviewed source/surface coverage gates."
+}

@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    {
+      "id": "OC-SESSION-RUNTIME",
+      "repository": "anomalyco/opencode",
+      "path": "packages/core/src/session.ts",
+      "blobSha": "2dabfb2d6fba2eeff6306abcae0f5fb8c99b6f13",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "core session runtime; durable admission/history and local serialized execution"
+    },
+    {
+      "id": "OC-PERMISSION-RUNTIME",
+      "repository": "anomalyco/opencode",
+      "path": "packages/core/src/permission.ts",
+      "blobSha": "3f28632a034d05b4ab833f22fdeb85d23d1b2888",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "PermissionV2 rule evaluation ask/assert/reply lifecycle"
+    },
+    {
+      "id": "OC-BACKGROUND-JOB",
+      "repository": "anomalyco/opencode",
+      "path": "packages/core/src/background-job.ts",
+      "blobSha": "cdffd212bc4e9b4fe922ccbe4f7c4b9fd6cafe90",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "process-local BackgroundJob"
+    },
+    {
+      "id": "OC-INTEGRATION-AUTH",
+      "repository": "anomalyco/opencode",
+      "path": "packages/core/src/integration.ts",
+      "blobSha": "f61bac393a826bcd7f64914abd6aac45b1b66c99",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "scoped integration registry and key/OAuth connection APIs"
+    },
+    {
+      "id": "OC-PROVIDER",
+      "repository": "anomalyco/opencode",
+      "path": "specs/v2/provider-model.md",
+      "blobSha": "775ef2c30d45382485579e286b7f998ee9da40ff",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "provider/model schemas spec"
+    },
+    {
+      "id": "OC-MODELS",
+      "repository": "anomalyco/opencode",
+      "path": "packages/core/src/catalog.ts",
+      "blobSha": "1945024b54e8c755a4f110d4bf4444ae10a10844",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "ModelsDev schema/cache/fetch behavior"
+    },
+    {
+      "id": "OC-PLUGIN-LIFECYCLE",
+      "repository": "anomalyco/opencode",
+      "path": "specs/v2/catalog-config-plugin-lifecycle.md",
+      "blobSha": "785b6826b904f664fef1126483305076ef97f465",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "scoped plugin add/remove/wait lifecycle design"
+    },
+    {
+      "id": "OC-PLUGIN-RUNTIME",
+      "repository": "anomalyco/opencode",
+      "path": "packages/core/src/plugin/internal.ts",
+      "blobSha": "d4ab71cb6b04d3c696b58bc865245b746cec5741",
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "built-in plugin wiring and lifecycle"
+    },
+    {
+      "id": "NR-AUTH-ROUTING",
+      "repository": "decolua/9router",
+      "path": "src/sse/services/auth.js",
+      "blobSha": "d85c4901159e6dc13a7ac89a1777b63477a55277",
+      "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "auth routing that reads/updates provider connection state"
+    },
+    {
+      "id": "NR-CHAT",
+      "repository": "decolua/9router",
+      "path": "src/sse/handlers/chat.js",
+      "blobSha": "7aa530d381c1cc1da4f6ca667a7abe271a8fbc8e",
+      "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "compatibility chat handler consuming routing/model services"
+    },
+    {
+      "id": "NR-MODEL-ROUTING",
+      "repository": "decolua/9router",
+      "path": "src/sse/services/model.js",
+      "blobSha": "ba4cc6c24a70ea287e0c4b8b9ba09d094d1cd4ed",
+      "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "model service resolving aliases/prefixes/combo names"
+    },
+    {
+      "id": "NR-TOKEN-REFRESH",
+      "repository": "decolua/9router",
+      "path": "src/sse/services/tokenRefresh.js",
+      "blobSha": "58a6f87072f0992a0e93a0e6a4943ebbfcc3ccd3",
+      "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+      "evidenceType": "disc-002-observed-evidence",
+      "limitation": "provider-specific token refresh dispatch"
+    }
+  ]
+}

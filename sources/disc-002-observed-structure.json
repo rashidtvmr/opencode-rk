@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "status": "partial-metadata-observation",
+  "exhaustive": false,
+  "repositories": {
+    "opencode": {
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "behaviorEvidence": true,
+      "observed": {
+        "packages": 10
+      }
+    },
+    "9router": {
+      "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+      "behaviorEvidence": true,
+      "observed": {
+        "sseServices": [
+          "auth.js",
+          "chat.js",
+          "model.js",
+          "tokenRefresh.js"
+        ]
+      }
+    }
+  }
+}

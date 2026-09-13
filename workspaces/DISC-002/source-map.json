@@ -1,0 +1,555 @@
+{
+  "schemaVersion": 1,
+  "taskId": "DISC-002",
+  "status": "partial-candidate-evidence",
+  "completionBlocker": "Observations are candidate-only and not exhaustive. Exact locked local checkouts are required before promotion to reviewed source evidence.",
+  "observations": [
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/session.ts",
+      "blobSha": "2dabfb2d6fba2eeff6306abcae0f5fb8c99b6f13",
+      "candidateFeatureIds": [
+        "SESS-001",
+        "SESS-002",
+        "SESS-003",
+        "SESS-004",
+        "SESS-005",
+        "SESS-006",
+        "SESS-007",
+        "SESS-008",
+        "SESS-009",
+        "SESS-010",
+        "SESS-011",
+        "SESS-012",
+        "SESS-013",
+        "SESS-014",
+        "SESS-015",
+        "SESS-016",
+        "SESS-017"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/config.ts",
+      "blobSha": "c76486968b0784d57dab102e2d51a7e18f57b7f5",
+      "candidateFeatureIds": [
+        "BASE-004",
+        "BASE-005",
+        "BASE-006",
+        "BASE-007",
+        "BASE-008",
+        "OPS-001",
+        "OPS-004",
+        "OPS-005",
+        "OPS-008"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/permission.ts",
+      "blobSha": "3f28632a034d05b4ab833f22fdeb85d23d1b2888",
+      "candidateFeatureIds": [
+        "SEC-001",
+        "SEC-003",
+        "SEC-007",
+        "SEC-010",
+        "SEC-013",
+        "UI-008"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/cross-spawn-spawner.ts",
+      "blobSha": "6ea9022acf1d0c7fd4ffec72e41d66a403c1d998",
+      "candidateFeatureIds": [
+        "SEC-001",
+        "SEC-002",
+        "SEC-008",
+        "TOOL-005",
+        "TOOL-013"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/repository-cache.ts",
+      "blobSha": "cab2f631ffb84c7df07dfe95dd6a25d8396b1d6d",
+      "candidateFeatureIds": [
+        "INT-002",
+        "OPS-002",
+        "OPS-003",
+        "OPS-004",
+        "OPS-006",
+        "OPS-007",
+        "OPS-008",
+        "OPS-009"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/background-job.ts",
+      "blobSha": "cdffd212bc4e9b4fe922ccbe4f7c4b9fd6cafe90",
+      "candidateFeatureIds": [
+        "AGENT-001",
+        "AGENT-002",
+        "AGENT-003",
+        "AGENT-004",
+        "AGENT-005",
+        "AGENT-006",
+        "AGENT-007",
+        "AGENT-008",
+        "AGENT-009",
+        "AGENT-010",
+        "AGENT-011",
+        "AGENT-012",
+        "AGENT-013",
+        "AGENT-014",
+        "AGENT-015"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/catalog.ts",
+      "blobSha": "1945024b54e8c755a4f110d4bf4444ae10a10844",
+      "candidateFeatureIds": [
+        "CAT-001",
+        "CAT-002",
+        "CAT-003",
+        "CAT-004",
+        "CAT-005",
+        "CAT-006",
+        "CAT-007",
+        "PROV-001",
+        "PROV-002",
+        "PROV-003",
+        "PROV-004",
+        "PROV-005",
+        "PROV-006",
+        "PROV-007",
+        "PROV-008",
+        "PROV-009",
+        "PROV-010",
+        "PROV-011",
+        "PROV-012"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/integration.ts",
+      "blobSha": "f61bac393a826bcd7f64914abd6aac45b1b66c99",
+      "candidateFeatureIds": [
+        "INT-001",
+        "INT-002",
+        "INT-003",
+        "INT-004",
+        "INT-005",
+        "INT-006",
+        "INT-007",
+        "INT-008",
+        "INT-009",
+        "INT-010",
+        "PROV-007",
+        "PROV-008",
+        "PROV-010",
+        "SEC-009",
+        "EXT-007"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/tool/bash.ts",
+      "blobSha": "22423764bc672b82934b677f05a3cced4f10bd6f",
+      "candidateFeatureIds": [
+        "SEC-001",
+        "SEC-002",
+        "SEC-003",
+        "SEC-005",
+        "SEC-006",
+        "SEC-007",
+        "SEC-008",
+        "SEC-010",
+        "SEC-011",
+        "SEC-012",
+        "SEC-013",
+        "TOOL-001",
+        "TOOL-002",
+        "TOOL-003",
+        "TOOL-004",
+        "TOOL-005",
+        "TOOL-011",
+        "TOOL-012",
+        "TOOL-014"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/plugin/internal.ts",
+      "blobSha": "d4ab71cb6b04d3c696b58bc865245b746cec5741",
+      "candidateFeatureIds": [
+        "EXT-001",
+        "EXT-002",
+        "EXT-003",
+        "EXT-004",
+        "EXT-005",
+        "EXT-006",
+        "EXT-007",
+        "EXT-008",
+        "EXT-009",
+        "EXT-010",
+        "EXT-011",
+        "EXT-012"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/event.ts",
+      "blobSha": "c92ac0ac2ce30d7cdf0f44075e9a82bb2fc0875e",
+      "candidateFeatureIds": [
+        "DB-001",
+        "DB-002",
+        "DB-003",
+        "DB-004",
+        "DB-005",
+        "DB-006",
+        "DB-007",
+        "DB-008",
+        "DB-009",
+        "DB-010",
+        "DB-011",
+        "DB-012",
+        "DB-013",
+        "DB-014",
+        "DB-015",
+        "DB-016"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/share/sql.ts",
+      "blobSha": "a7a08d0c025436a1266cd642be984742925cd298",
+      "candidateFeatureIds": [
+        "SHARE-001",
+        "SHARE-002",
+        "SHARE-003",
+        "SHARE-004",
+        "SHARE-005"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/app/src/app.tsx",
+      "blobSha": "0c950871a3354032962d6bbd96015d919afc9fd7",
+      "candidateFeatureIds": [
+        "WEB-001",
+        "WEB-002",
+        "WEB-005",
+        "UI-003",
+        "UI-006",
+        "UI-009",
+        "UI-011"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/codemode/src/index.ts",
+      "blobSha": "92019825004b5455fe4ccdd8f168cb2051d70a57",
+      "candidateFeatureIds": [
+        "TOOL-011",
+        "SEC-001",
+        "SEC-010"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/desktop/src/main/index.ts",
+      "blobSha": "183fc634db0160296dd2984e701b8396cfe5f64c",
+      "candidateFeatureIds": [
+        "WEB-003",
+        "WEB-005",
+        "BASE-005"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/http-recorder/src/index.ts",
+      "blobSha": "eac4b75b4bba70f021246c8cc5646683e3a84953",
+      "candidateFeatureIds": [
+        "PROV-012",
+        "OPS-009"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/control-plane/move-session.ts",
+      "blobSha": "e227f88df53924a49ea9d7fdb549c41a1b196c42",
+      "candidateFeatureIds": [
+        "BASE-001",
+        "BASE-004",
+        "BASE-005",
+        "BASE-007",
+        "INT-008",
+        "WEB-004"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/schema.ts",
+      "blobSha": "9c25bee19b1deae56434adc919ebd5fface6a8d3",
+      "candidateFeatureIds": [
+        "BASE-002",
+        "DB-003",
+        "INT-008",
+        "SESS-002"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/effect/runtime.ts",
+      "blobSha": "6ad0f85176caa8862f403054335479697069429c",
+      "candidateFeatureIds": [
+        "BASE-003",
+        "BASE-007",
+        "DB-008",
+        "DB-009",
+        "OPS-007"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/tui/src/app.tsx",
+      "blobSha": "3f1da522bb0678edc66255545c8721a2d73358db",
+      "candidateFeatureIds": [
+        "UI-001",
+        "UI-002",
+        "UI-003",
+        "UI-004",
+        "UI-005",
+        "UI-006",
+        "UI-007",
+        "UI-008",
+        "UI-009",
+        "UI-010",
+        "UI-011",
+        "UI-012",
+        "UI-013",
+        "WEB-001",
+        "WEB-002",
+        "WEB-003",
+        "WEB-005"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/instruction-context.ts",
+      "blobSha": "492fa42094b7ee08355462b9b2dbcf43d3b08f14",
+      "candidateFeatureIds": [
+        "SESS-008",
+        "SESS-013",
+        "SESS-014",
+        "TOOL-008",
+        "EXT-003"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/enterprise/src/app.tsx",
+      "blobSha": "1ee3c674774f9aa31151b6736e1152603e74db58",
+      "candidateFeatureIds": [
+        "WEB-004",
+        "PROV-006",
+        "INT-010",
+        "SHARE-003"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/agent.ts",
+      "blobSha": "da86cf809b90a8117cfa7bb315362d3e61230fa2",
+      "candidateFeatureIds": [
+        "AGENT-001",
+        "AGENT-002",
+        "AGENT-003",
+        "AGENT-004",
+        "AGENT-005",
+        "AGENT-006",
+        "AGENT-007",
+        "AGENT-008",
+        "AGENT-009",
+        "AGENT-010",
+        "AGENT-011",
+        "AGENT-012",
+        "AGENT-013",
+        "AGENT-014",
+        "AGENT-015"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/session/runner/llm.ts",
+      "blobSha": "874086a06bdb2587db6e0754ab73522d6595e59e",
+      "candidateFeatureIds": [
+        "AGENT-001",
+        "AGENT-002",
+        "AGENT-003",
+        "AGENT-004",
+        "AGENT-005",
+        "AGENT-006",
+        "AGENT-007",
+        "AGENT-008",
+        "AGENT-009",
+        "AGENT-010",
+        "AGENT-011",
+        "AGENT-012",
+        "AGENT-013",
+        "AGENT-014",
+        "AGENT-015"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "opencode",
+      "path": "packages/core/src/tool/registry.ts",
+      "blobSha": "1c2dfe7ab459a624044422bfd79d6a130beb4c19",
+      "candidateFeatureIds": [
+        "SEC-001",
+        "SEC-002",
+        "SEC-003",
+        "SEC-005",
+        "SEC-006",
+        "SEC-007",
+        "SEC-008",
+        "SEC-010",
+        "SEC-011",
+        "SEC-012",
+        "SEC-013",
+        "TOOL-001",
+        "TOOL-002",
+        "TOOL-003",
+        "TOOL-004",
+        "TOOL-005",
+        "TOOL-011",
+        "TOOL-012",
+        "TOOL-014"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "9router",
+      "path": "src/lib/db/repos/connectionsRepo.js",
+      "blobSha": "78abfc9052f8d63f70c96a27b58b1a33024ca40e",
+      "candidateFeatureIds": [
+        "ROUTE-001",
+        "ROUTE-003",
+        "ROUTE-004",
+        "ROUTE-008",
+        "ROUTE-009"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "9router",
+      "path": "src/sse/handlers/chat.js",
+      "blobSha": "7aa530d381c1cc1da4f6ca667a7abe271a8fbc8e",
+      "candidateFeatureIds": [
+        "ROUTE-001",
+        "ROUTE-002",
+        "ROUTE-003",
+        "ROUTE-004",
+        "ROUTE-005",
+        "ROUTE-006",
+        "ROUTE-007",
+        "ROUTE-008",
+        "ROUTE-009",
+        "ROUTE-010",
+        "ROUTE-011"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "9router",
+      "path": "src/sse/services/model.js",
+      "blobSha": "ba4cc6c24a70ea287e0c4b8b9ba09d094d1cd4ed",
+      "candidateFeatureIds": [
+        "CAT-005",
+        "ROUTE-005",
+        "ROUTE-007"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "9router",
+      "path": "src/sse/services/tokenRefresh.js",
+      "blobSha": "58a6f87072f0992a0e93a0e6a4943ebbfcc3ccd3",
+      "candidateFeatureIds": [
+        "ROUTE-003",
+        "ROUTE-004",
+        "ROUTE-006",
+        "PROV-008",
+        "SEC-009"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "9router",
+      "path": "src/mitm/server.js",
+      "blobSha": "e9be1a471aec10adec70c86c6e58a2ab766d32ad",
+      "candidateFeatureIds": [
+        "ROUTE-006",
+        "ROUTE-007",
+        "SEC-009",
+        "PROV-003",
+        "PROV-004"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "9router",
+      "path": "open-sse/executors/codex.js",
+      "blobSha": "de2af8229fcf97d04f12f1e1f73a0d92ad396296",
+      "candidateFeatureIds": [
+        "PROV-001",
+        "PROV-003",
+        "PROV-004",
+        "PROV-005",
+        "ROUTE-006",
+        "ROUTE-007"
+      ]
+    },
+    {
+      "reviewState": "candidate-unreviewed",
+      "repository": "9router",
+      "path": "src/app/layout.js",
+      "blobSha": "a6534188174d4eb217769ffe314de0f97178aa56",
+      "candidateFeatureIds": [
+        "ROUTE-001",
+        "ROUTE-008",
+        "ROUTE-009",
+        "UI-006",
+        "UI-011"
+      ]
+    }
+  ]
+}

@@ -1,0 +1,119 @@
+{
+  "repositories": [
+    {
+      "candidateOwnerStatusCounts": {
+        "matched": 4446,
+        "unassigned": 2180
+      },
+      "candidateSurfaceCounts": {
+        "opencode.agent-delegation": 8,
+        "opencode.app-client": 1230,
+        "opencode.catalog-provider": 37,
+        "opencode.clients-ui": 2911,
+        "opencode.code-mode": 41,
+        "opencode.configuration-runtime": 32,
+        "opencode.contracts-schema": 78,
+        "opencode.desktop-client": 306,
+        "opencode.effect-runtime": 39,
+        "opencode.enterprise-remote": 42,
+        "opencode.extensibility": 132,
+        "opencode.integration-auth": 5,
+        "opencode.integrations": 85,
+        "opencode.legacy-compatibility": 853,
+        "opencode.permission-runtime": 4,
+        "opencode.process-terminal": 10,
+        "opencode.prompt-context": 7,
+        "opencode.provider-recording": 24,
+        "opencode.repository-operations": 16,
+        "opencode.server-control-plane": 207,
+        "opencode.session-runtime": 27,
+        "opencode.sharing": 37,
+        "opencode.storage-events": 85,
+        "opencode.tools-security": 78
+      },
+      "cleanWorktree": true,
+      "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+      "connectivityVerified": true,
+      "detachedHead": true,
+      "entries": 6626,
+      "inventoryFile": "opencode.jsonl",
+      "inventorySha256": "6121ed118c7c9891faf639be936797f2fdf65719efd849c1ee07ea89330fdeec",
+      "licenseBlobSha": "6439474beed8e0271df9862eff97ffd70ec2464c",
+      "licensePath": "LICENSE",
+      "objectTypeCounts": {
+        "blob": 6522,
+        "executable": 44,
+        "symlink": 60
+      },
+      "originUrl": "https://github.com/anomalyco/opencode.git",
+      "repository": "opencode",
+      "roleCounts": {
+        "binary": 295,
+        "configuration": 91,
+        "data-or-config": 333,
+        "documentation": 784,
+        "generated": 35,
+        "infrastructure": 142,
+        "license": 4,
+        "lockfile": 6,
+        "manifest": 41,
+        "migration": 193,
+        "other": 1386,
+        "source": 2244,
+        "symlink": 60,
+        "test": 1012
+      },
+      "sourceBytes": 131808668,
+      "tree": "b17683f6fb570317083ee8f62bd136435c023270"
+    },
+    {
+      "candidateOwnerStatusCounts": {
+        "matched": 710,
+        "unassigned": 860
+      },
+      "candidateSurfaceCounts": {
+        "9router.account-storage": 35,
+        "9router.dashboard-api": 270,
+        "9router.dashboard-settings": 270,
+        "9router.model-combos": 138,
+        "9router.network-proxy": 22,
+        "9router.routing": 144,
+        "9router.token-refresh": 3,
+        "9router.translation-proxy": 416
+      },
+      "cleanWorktree": true,
+      "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+      "connectivityVerified": true,
+      "detachedHead": true,
+      "entries": 1570,
+      "inventoryFile": "9router.jsonl",
+      "inventorySha256": "5c21b9d1f0b629e8662341d69c8d1b2d38e5c265c63d8412df2695673ad85b08",
+      "licenseBlobSha": "92192354269f1f44d50229750674c29e336c27c4",
+      "licensePath": "LICENSE",
+      "objectTypeCounts": {
+        "blob": 1567,
+        "executable": 3
+      },
+      "originUrl": "https://github.com/decolua/9router.git",
+      "repository": "9router",
+      "roleCounts": {
+        "binary": 149,
+        "configuration": 26,
+        "data-or-config": 40,
+        "documentation": 134,
+        "infrastructure": 11,
+        "license": 2,
+        "manifest": 4,
+        "migration": 2,
+        "other": 19,
+        "source": 905,
+        "test": 278
+      },
+      "sourceBytes": 11866329,
+      "tree": "4a6b1d14d1d4b4b12aaca1a20cd3c9e1e33bc475"
+    }
+  ],
+  "schemaVersion": 3,
+  "surfaceRuleSchemaVersion": 1,
+  "surfaceRuleSha256": "1d2265a196f63555023ad17f36682969abb0521a7be5bb025de1f860eb202781"
+}

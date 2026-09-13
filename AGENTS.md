@@ -60,3 +60,28 @@ resource measurements and deviations. Do not emit `passes:true` as proof. Do not
 say all features are covered while any upstream surface or mandatory task is
 unresolved. On failure, preserve a minimal reproduction and stop or request the
 next safe task; never disable a safeguard to keep the loop moving.
+
+## Agent operating rules (mandatory)
+
+These apply to the main agent AND every delegated subagent.
+
+### RTK token optimization
+- Prefix EVERY shell command with `rtk`. If rtk has no filter it passes through
+  unchanged, so it is always safe. Cuts context use 60-90%.
+- In command chains prefix each segment: `rtk git add . && rtk git commit -m "x"`.
+- For interactive debugging / raw output use the bare command without rtk.
+
+### Repowise codebase intelligence
+- Use repowise MCP tools for orientation before editing unfamiliar code:
+  `get_overview`, `search_codebase`, `get_context`, `get_risk`, `get_why`,
+  `get_dependency_path`, `get_architecture_diagram`, `get_dead_code`.
+- Repowise is an INDEX, not authority. The index can be stale or, as observed,
+  hallucinate architecture (e.g. a gRPC/Protobuf/codegen description that does
+  not match this lean-harness repo). ALWAYS verify against source files: PLAN.md,
+  docs/, crates/, the specific file:line before relying on repowise claims.
+
+### Context budget
+- Track your context usage. Past ~200K tokens STOP opening new files; compact
+  to essential evidence (commands, file:line, output tails) and return.
+- Prefer small batched reads, single greps with tight patterns, and
+  rtk-filtered outputs to stay small.
