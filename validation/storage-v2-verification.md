@@ -173,3 +173,51 @@ unlogged intermediate contents.
 - No access to or modification of a user's existing OpenCode database. Tests
   used disposable or test fixtures only.
 - No runtime migration was activated.
+
+## Verification wave 2026-09-13 (engine upgrade): ALL SUITES GREEN
+
+Dependency upgrade only; no Rust source changed. Bumped workspace `rusqlite`
+from `0.37` to `0.40` in `Cargo.toml` (bundled feature). Lock resolved to
+`rusqlite 0.40.2` -> `libsqlite3-sys 0.38.2`. The `u64` FromSql removal that
+previously blocked this upgrade was already resolved at commit `fcc925e`
+(`crates/storage/src/lib.rs` now uses `i64` bindings).
+
+### Engine version (measured, not asserted)
+
+Vendored header at
+`~/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/libsqlite3-sys-0.38.2/sqlite3/sqlite3.h`:
+
+```text
+#define SQLITE_VERSION        "3.53.2"
+#define SQLITE_VERSION_NUMBER 3053002
+#define SQLITE_SOURCE_ID      "2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24"
+```
+
+Bundled engine 3.53.2 meets the gate floor: above 3.50.7 (audited backport)
+and above preferred 3.51.3. ENGINE_GATE.md status is now CLEARED on the
+3.51.3+ preferred path.
+
+### Exact command and outcome
+
+```text
+cargo test -p opencode-rk-storage --lib --test writer_v2 --test schema_v2 --test catalog_v2 --test restart_v2 --test perf_v2 --test backup_v2 --test stress_v2
+```
+
+All suites green (lib 13, catalog 11, writer 10, schema 6, restart 5,
+perf 5, backup 5, stress 4):
+
+```text
+test result: ok. 13 passed; ... (lib, src/lib.rs)
+test result: ok. 11 passed; ... (catalog_v2)
+test result: ok. 10 passed; ... (writer_v2)
+test result: ok.  6 passed; ... (schema_v2)
+test result: ok.  5 passed; ... (restart_v2)
+test result: ok.  5 passed; ... (perf_v2)
+test result: ok.  5 passed; ... (backup_v2)
+test result: ok.  4 passed; ... (stress_v2)
+```
+
+Individually listed per-suite tails are in this wave's full run: lib 13,
+catalog 11, writer 10, schema 6, restart 5, perf 5, backup 5, stress 4, all
+`0 failed`. No Rust source was edited. Tree left uncommitted; changes limited
+to `Cargo.toml`, `Cargo.lock`, and these two records.

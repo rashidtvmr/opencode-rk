@@ -314,3 +314,146 @@ OK
    by `docs/STORAGE.md:154-156`.
 5. The full storage library still has the pre-existing
    `tests::session_round_trip_and_archive` failure; no repair was attempted.
+
+## Four-lane integration attempt (2026-09-13): ERROR-WAVE G1-G5 / D1-D5
+
+### Claim
+
+Attempt to wire the 4 won storage-V2 lanes (gc_v2, admission_v2,
+execution_v2, approvals_v2, snapshot_v2, fork_v2 - whichever actually
+landed) and bookkeep per the 10-lane plan split into 5 dahl (D1-D5) plus
+5 gg (G1-G5). Outcome: NONE of the six named lane files exist in the tree,
+so no new module wiring was required or performed. `crates/storage/src/lib.rs`
+is already correct (wires the three base modules that exist and compile).
+Worklog section only.
+
+### Lane plan and status (10-lane: 5 dahl D1-D5 + 5 gg G1-G5)
+
+Named lanes in this task (engine/GC/admission/execution/approvals/snapshot/fork):
+
+| Lane | File expected | Status | Evidence |
+|------|---------------|--------|----------|
+| D: gc_v2 | crates/storage/src/gc_v2.rs | MISSING | `ls crates/storage/src/` yields only catalog_v2.rs, schema_v2.rs, writer_v2.rs, lib.rs |
+| D: admission_v2 | crates/storage/src/admission_v2.rs | MISSING | not present in src/ |
+| D: execution_v2 | crates/storage/src/execution_v2.rs | MISSING | not present in src/ |
+| D: approvals_v2 | crates/storage/src/approvals_v2.rs | MISSING | not present in src/ |
+| D: snapshot_v2 | crates/storage/src/snapshot_v2.rs | MISSING | not present in src/ |
+| D: fork_v2 | crates/storage/src/fork_v2.rs | MISSING | not present in src/ |
+
+No `crates/storage/src/*_v2.rs` beyond the three base modules exists, so the
+five gg (G1-G5) and five dahl (D1-D5) lanes each report MISSING with the
+same directory listing as sole evidence. Because nothing landed, there was
+nothing to wire: the `pub mod`/`pub use` block in lib.rs (lines 3-8) is
+unchanged and remains exactly the three base modules.
+
+### Engine-upgrade outcome (G1 tree state)
+
+- Bundled SQLite remains 3.50.2 (libsqlite3-sys 0.35.0), below the
+  documented floor of 3.50.7 / 3.51.3 (`docs/storage/ENGINE_GATE.md:11-14`,
+  `docs/STORAGE.md:163-168`). No dependency bump was made this wave.
+- No engine activation flag or `Storage::open` switch was touched; the G1
+  tree state is unchanged from the prior wave: engine gate still BLOCKED,
+  format-2 code exists but is not activated in product paths.
+
+### Wire list
+
+- Added: none. Source-filesystem evidence: `ls crates/storage/src/` =
+  `catalog_v2.rs`, `lib.rs`, `schema_v2.rs`, `writer_v2.rs`.
+- No `pub mod`/`pub use` lines edited in `crates/storage/src/lib.rs`; the
+  existing block at lib.rs:3-8 already declares the only modules present.
+
+### Full suite results (all green, current HEAD)
+
+- `cargo check -p opencode-rk-storage`: Finished dev profile, 0 errors.
+- `cargo test -p opencode-rk-storage --lib`: `ok. 8 passed; 0 failed`.
+  Note: the pre-existing `tests::session_round_trip_and_archive` failure
+  recorded in the prior section is no longer present in current HEAD.
+- `cargo test -p opencode-rk-storage --test writer_v2`: `ok. 10 passed`.
+- `cargo test -p opencode-rk-storage --test schema_v2`: `ok. 6 passed`.
+- `cargo test -p opencode-rk-storage --test catalog_v2`: `ok. 11 passed`.
+- `cargo test -p opencode-rk-storage --test perf_v2`: `ok. 5 passed`.
+- `cargo test -p opencode-rk-storage --test restart_v2`: `ok. 5 passed`.
+- `python3 -m unittest tests.bootstrap.test_storage_schema_v2`: `Ran 62
+  tests in 0.190s, OK` (grew from 37 in the prior section; the catalog_v2
+  RED integration file that the prior section listed as missing now exists,
+  hence 11 integration tests, and the python contract suite expanded).
+
+### Commit recommendation
+
+- Nothing to stage for engine/GC/admission/execution/approvals/snapshot/fork
+  lanes: their source files do not exist.
+- No change to `crates/storage/src/lib.rs` was made, so no storage-source
+  stage is warranted.
+- Only `worklog/STORAGE-V2-IMPL.md` was modified (this section). If a
+  bookkeeping commit is desired, stage exactly: `git add worklog/STORAGE-V2-IMPL.md`.
+- The prior-wave artifact set (three base modules, `tests/writer_v2.rs`,
+  `tests/catalog_v2.rs`) is already committed; no follow-up stage needed.
+
+### Remaining unknowns
+
+1. The six named lanes (gc_v2, admission_v2, execution_v2, approvals_v2,
+   snapshot_v2, fork_v2) never landed; no test suites or implementation for
+   them exist anywhere in the tree. Blob-referencing payloads, GC,
+   admissions/promotion, executions, approvals transitions, compaction,
+   snapshot and fork remain entirely unbuilt (STO:93-97, prior section
+   decision 6).
+2. Whether the 10-lane D1-D5 / G1-G5 plan actually exists in another owner
+   doc; this worklog has no independent record of it beyond the task brief.
+3. Engine activation remains BLOCKED on bundled SQLite 3.50.2 (< 3.50.7);
+   no upgrade path (which libsqlite3-sys bundles >= 3.50.7) was audited in
+   this section.
+4. Checksum deviation (blake3-256 vs documented sha256, prior section
+   decision 1) is still unresolved and still needs an owner decision before
+   any long-lived dev database is created with the current digest.
+
+## Engine upgrade wave (2026-09-13): bundled SQLite 3.53.2, ENGINE_GATE CLEARED
+
+Dependency-only upgrade. Workspace `Cargo.toml:27` bumped `rusqlite` from
+`0.37` to `0.40` (features `bundled`). Lock resolved via
+`cargo update -p rusqlite` to:
+
+- `rusqlite 0.40.2`
+- `libsqlite3-sys 0.38.2`
+- bundled `SQLITE_VERSION "3.53.2"`, `SQLITE_VERSION_NUMBER 3053002`,
+  `SQLITE_SOURCE_ID "2026-06-03 19:12:13 d6e03d8c777cfa2d35e3b60d8ec3e0187f3e9f99d8e2ee9cac695fd6fcdf1a24"`
+  (vendored header
+  `libsqlite3-sys-0.38.2/sqlite3/sqlite3.h:149-151`).
+
+Prior blockers cleared: the `u64` FromSql removal that blocked both 0.40.2
+and 0.39.0 previously was resolved at commit `fcc925e` (lib.rs uses `i64`
+bindings). No Rust source was edited in this wave.
+
+### Engine gate outcome
+
+Bundled 3.53.2 is above the audited-backport floor 3.50.7 and above the
+preferred 3.51.3, so `docs/STORAGE.md:164-168` preferred path is satisfied.
+`docs/storage/ENGINE_GATE.md` historical record (BLOCKED at 3.50.2) is left
+intact; this upgrade satisfies its unblock condition 1. New verification
+record appended to `validation/storage-v2-verification.md`.
+
+### Suite tails (all green on 3.53.2)
+
+Command:
+`cargo test -p opencode-rk-storage --lib --test writer_v2 --test schema_v2 --test catalog_v2 --test restart_v2 --test perf_v2 --test backup_v2 --test stress_v2`
+
+```text
+lib (src/lib.rs, unittests):  13 passed; 0 failed
+catalog_v2:                    11 passed; 0 failed
+writer_v2:                     10 passed; 0 failed
+schema_v2:                      6 passed; 0 failed
+restart_v2:                     5 passed; 0 failed
+perf_v2:                        5 passed; 0 failed
+backup_v2:                      5 passed; 0 failed
+stress_v2:                      4 passed; 0 failed
+```
+
+`cargo check -p opencode-rk-storage` also clean.
+
+### Changed files (tree NOT committed)
+
+- `Cargo.toml` (rusqlite 0.37 -> 0.40)
+- `Cargo.lock` (resolved rusqlite 0.40.2 / libsqlite3-sys 0.38.2)
+- `validation/storage-v2-verification.md` (new engine-upgrade wave)
+- `worklog/STORAGE-V2-IMPL.md` (this section)
+
+No commit made; leave tree staged/not as instructed.
