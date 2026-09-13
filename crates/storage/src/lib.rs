@@ -1,5 +1,11 @@
 //! Embedded persistence with bounded relational state and content-addressed blobs.
 #![forbid(unsafe_code)]
+pub mod catalog_v2;
+pub mod schema_v2;
+pub mod writer_v2;
+pub use catalog_v2::CatalogV2;
+pub use schema_v2::SchemaV2;
+pub use writer_v2::{NewMessage, NewSession, V2Writer};
 use std::{fs,io::{Read,Write},path::{PathBuf},str::FromStr,sync::Mutex};
 use chrono::{DateTime,Utc};
 use opencode_rk_contracts::{MessageId,MessageRecord,MessageRole,PayloadRef,SessionId,SessionState,SessionSummary,Timestamp,MAX_INLINE_PAYLOAD_BYTES};
