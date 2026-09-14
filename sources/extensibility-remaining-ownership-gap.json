@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "status": "source-reviewed-no-exact-task-owner",
+  "repositoryId": "opencode",
+  "repository": "anomalyco/opencode",
+  "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+  "treeSha": "b17683f6fb570317083ee8f62bd136435c023270",
+  "storyIds": [
+    "EXT-004",
+    "EXT-006",
+    "EXT-009",
+    "EXT-010",
+    "EXT-011",
+    "EXT-012"
+  ],
+  "storySurfaceSignatures": {
+    "EXT-004": ["opencode.extensibility"],
+    "EXT-006": ["opencode.extensibility"],
+    "EXT-009": ["opencode.extensibility"],
+    "EXT-010": ["opencode.extensibility"],
+    "EXT-011": ["opencode.extensibility"],
+    "EXT-012": ["opencode.extensibility"]
+  },
+  "equivalenceGroups": [
+    {
+      "id": "generic-disc-placeholder",
+      "storyIds": ["EXT-004", "EXT-006", "EXT-010", "EXT-011"],
+      "requirementIds": [],
+      "surfaceSignature": ["opencode.extensibility"]
+    },
+    {
+      "id": "req005-v2-plugin-ui",
+      "storyIds": ["EXT-009", "EXT-012"],
+      "requirementIds": ["REQ-005"],
+      "surfaceSignature": ["opencode.extensibility"]
+    }
+  ],
+  "ownershipDecision": {
+    "EXT-004": null,
+    "EXT-006": null,
+    "EXT-009": null,
+    "EXT-010": null,
+    "EXT-011": null,
+    "EXT-012": null
+  },
+  "taskBindingState": {
+    "EXT-004": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "EXT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "EXT-009": {"controllerStatus":"in-progress","ralphStory":"TBD - see source audit","requirementIds":["REQ-005"],"taskCard":null,"worklog":null},
+    "EXT-010": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "EXT-011": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "EXT-012": {"controllerStatus":"in-progress","ralphStory":"TBD - see source audit","requirementIds":["REQ-005"],"taskCard":null,"worklog":null}
+  },
+  "requirementTopology": {
+    "REQ-005": {
+      "requirement": "OpenCode V2 plugins including UI behavior",
+      "tasks": ["EXT-005", "EXT-009", "EXT-012", "UI-012"],
+      "conclusion": "After excluding the separately guarded EXT-005 compatibility ambiguity and dependency-constrained UI-012, EXT-009 and EXT-012 remain requirement-identical. Requirement subtraction does not define which plugin lifecycle or UI-adjacent behavior belongs to either row."
+    }
+  },
+  "surfaceRulePatterns": [
+    "packages/core/src/plugin.ts",
+    "packages/core/src/plugin/**",
+    "packages/core/src/skill.ts",
+    "packages/core/src/skill/**",
+    "packages/core/src/command.ts",
+    "packages/plugin/**",
+    "specs/v2/catalog-config-plugin-lifecycle.md",
+    ".opencode/**"
+  ],
+  "excludedOwners": [
+    {"id":"EXT-001","disposition":"guarded-by-REQ-017-extensibility-gap"},
+    {"id":"EXT-002","disposition":"guarded-by-REQ-017-extensibility-gap"},
+    {"id":"EXT-003","disposition":"local-implemented-stale","implementationCommit":"31a5adec20d0e70a2e02f4fdc1d626c14c5098b6"},
+    {"id":"EXT-005","disposition":"guarded-adjacent-singleton-compatibility-ambiguity"},
+    {"id":"EXT-007","disposition":"local-implemented-stale","implementationCommit":"b76d6126c97f928b5145dd19b6bdec1c4e70aa83"},
+    {"id":"EXT-008","disposition":"explicit-blocker","reasonKey":"plugin-hook-contract-mismatch"},
+    {"id":"UI-012","disposition":"dependency-constrained","reasonKey":"client-architecture-dependency"}
+  ],
+  "reviewedPartitions": [
+    {
+      "id": "plugin-v2-lifecycle",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/core/src/plugin.ts","blobSha":"a89cdfda5f0a58e674fec3641911abd6fe3d977b","reviewedLines":{"from":19,"to":167}},
+        {"kind":"caller","path":"packages/core/src/plugin/internal.ts","blobSha":"d4ab71cb6b04d3c696b58bc865245b746cec5741","reviewedLines":{"from":54,"to":153}},
+        {"kind":"test","path":"packages/core/test/plugin.test.ts","blobSha":"1e278976539b06711d0b967e403932dad52c09ee","reviewedLines":{"from":11,"to":71}},
+        {"kind":"spec","path":"specs/v2/catalog-config-plugin-lifecycle.md","blobSha":"785b6826b904f664fef1126483305076ef97f465","reviewedLines":{"from":1,"to":189}}
+      ],
+      "inputs": "plugin id and Effect plugin activation callback within a location-scoped host",
+      "outputs": "active plugin scope, replacement/removal effects, wait completion, plugin-added event and replayed transformed state",
+      "failureSemantics": "load cycles and remove-while-loading die; activation defects close the child scope, are retained and are replayed to current/later waiters",
+      "stateLifetime": "location service keeps active child scopes, loading ids, waiters and retained failure exits until replacement/removal/finalization",
+      "resourceLifetime": "one closeable child scope per active plugin plus keyed mutex/waiter maps; location finalizer closes the root plugin scope",
+      "ownershipBlocker": "This exact lifecycle is shared by every residual extensibility row through the same surface. No residual task card, requirement or pinned task-specific spec assigns it to EXT-004/006/009/010/011/012."
+    },
+    {
+      "id": "configured-external-js-ts-plugin-loading",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/core/src/config/plugin/external.ts","blobSha":"d8ace63b3dd8a83419d6d5d1167189edc165c7a9","reviewedLines":{"from":15,"to":91}},
+        {"kind":"caller","path":"packages/core/src/plugin/internal.ts","blobSha":"d4ab71cb6b04d3c696b58bc865245b746cec5741","reviewedLines":{"from":108,"to":123}},
+        {"kind":"spec","path":"specs/v2/catalog-config-plugin-lifecycle.md","blobSha":"785b6826b904f664fef1126483305076ef97f465","reviewedLines":{"from":1,"to":84}}
+      ],
+      "inputs": "configured package/file references, location config entries, plugin options and .opencode plugin files",
+      "outputs": "dynamically imported Effect/Promise plugin modules registered into the scoped plugin host",
+      "failureSemantics": "filesystem glob failures are softened, each package/import/decode/add sequence ignores its cause, and activation runs in a scoped background fiber",
+      "stateLifetime": "configured module discovery follows location/config lifetime; installed modules and dynamic imports belong to the JS/npm runtime",
+      "resourceLifetime": "filesystem traversal, npm package resolution/install, dynamic JS import and background fibers",
+      "ownershipBlocker": "This partition requires the JS/npm runtime and package loading and has no task-specific residual owner. It is outside the authorized native lane unless new pinned ownership and runtime authority appear."
+    },
+    {
+      "id": "built-in-plugin-composition",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/core/src/plugin/internal.ts","blobSha":"d4ab71cb6b04d3c696b58bc865245b746cec5741","reviewedLines":{"from":63,"to":153}},
+        {"kind":"test","path":"packages/core/test/plugin.test.ts","blobSha":"1e278976539b06711d0b967e403932dad52c09ee","reviewedLines":{"from":40,"to":71}},
+        {"kind":"spec","path":"specs/v2/catalog-config-plugin-lifecycle.md","blobSha":"785b6826b904f664fef1126483305076ef97f465","reviewedLines":{"from":53,"to":189}}
+      ],
+      "inputs": "location services spanning catalog, config, commands, skills, integrations, agents, references, models, filesystem and HTTP",
+      "outputs": "ordered built-in plugin registrations and replayable service transforms",
+      "failureSemantics": "registration runs inside a batched forked scope; downstream service/plugin failures retain their service-specific semantics",
+      "stateLifetime": "location-scoped built-in registrations and transforms",
+      "resourceLifetime": "inherits all composed service scopes including HTTP/filesystem/npm/config resources",
+      "ownershipBlocker": "The composition crosses many already-owned domains and cannot be treated as a catch-all EXT implementation. Skills/commands are separately guarded, integration auth has implemented ownership, and hook semantics remain frozen under EXT-008."
+    }
+  ],
+  "designGaps": [
+    "reload-and-config-watch-behavior",
+    "deferred-external-plugin-activation-and-readiness",
+    "package-install-update-network-and-cache-policy",
+    "external-js-ts-plugin-runtime-compatibility",
+    "plugin-ui-and-tui-compatibility",
+    "plugin-hook-pre-post-tool-contract"
+  ],
+  "candidateFragments": [
+    {
+      "id": "plugin-v2-lifecycle",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "Four generic residual rows are source-identical and two REQ-005 rows are requirement/source-identical.",
+        "Existing EXT-003/007 behavior and frozen EXT-008 hooks cannot be re-owned by subtraction.",
+        "The lifecycle spec explicitly leaves reload/watch and deferred external activation as design work, so broader plugin parity is not established."
+      ]
+    }
+  ],
+  "unresolvedPartitions": [
+    "plugin-add-remove-wait-replacement-and-failure-lifecycle",
+    "built-in-plugin-registration-and-cross-service-composition",
+    "configured-external-plugin-discovery-install-import-and-options",
+    "reload-watch-and-deferred-activation-readiness",
+    "plugin-config-transform-replay-and-disablement",
+    "plugin-ui-tui-and-user-visible-compatibility"
+  ],
+  "historyReview": {
+    "state": "locked-checkout-grafted-at-pinned-commit",
+    "limitation": "Current pinned source/caller/test/spec evidence is authoritative for behavior; unavailable historical intent is not used to map generic residual ids."
+  },
+  "closureCriteria": [
+    "Each residual EXT owner requires direct task-specific source, caller, direct test and genuine spec evidence that distinguishes it from its equivalence peers; list order, task number, REQ-005 subtraction and surface membership are insufficient.",
+    "External plugin work must explicitly own JS/npm/package-install/network authority, module validation/failure policy, cache/update lifetime and location-scope cleanup before a native implementation is attempted.",
+    "Existing EXT-001/002 guards, EXT-003/007 implementations, EXT-005 compatibility ambiguity, EXT-008 hook blocker and UI-012 dependency constraint must remain excluded.",
+    "All unresolved partitions and design gaps must receive task-specific dispositions or remain explicitly blocked before the extensibility family can be called decomposed."
+  ]
+}

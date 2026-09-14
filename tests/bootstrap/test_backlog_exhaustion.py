@@ -12,6 +12,8 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     build_expected_ledger,
     disc_status_errors,
     enterprise_remote_gap_errors,
+    extensibility_remaining_gap_errors,
+    integrations_ownership_gap_errors,
     operations_ownership_gap_errors,
     req017_extensibility_gap_errors,
     release_assurance_gap_errors,
@@ -311,6 +313,56 @@ class BacklogExhaustionTests(unittest.TestCase):
             changed = copy.deepcopy(original_gap)
             changed["storySurfaceSignatures"]["SHARE-004"] = []
             self.assertTrue(any("SHARE-004: sharing ownership-gap surface signature drifted" in error for error in errors_for(changed)))
+
+
+    def test_remaining_extensibility_and_integrations_gaps_reject_arithmetic_ownership(self):
+        ledger = load_ledger()
+        self.assertEqual(extensibility_remaining_gap_errors(ledger["stories"], ROOT), [])
+        self.assertEqual(integrations_ownership_gap_errors(ledger["stories"], ROOT), [])
+
+        cases = [
+            (
+                ROOT / "sources/extensibility-remaining-ownership-gap.json",
+                extensibility_remaining_gap_errors,
+                lambda gap: gap["ownershipDecision"].__setitem__("EXT-010", "plugin-v2-lifecycle"),
+                "ownership must stay unresolved",
+            ),
+            (
+                ROOT / "sources/extensibility-remaining-ownership-gap.json",
+                extensibility_remaining_gap_errors,
+                lambda gap: gap["storySurfaceSignatures"].__setitem__("EXT-006", []),
+                "EXT-006: remaining extensibility surface signature drifted",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["candidateFragments"][0].__setitem__("ownershipEstablished", True),
+                "cannot become owned from controller-status/task arithmetic",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["storySurfaceSignatures"].__setitem__("INT-009", []),
+                "INT-009: integrations surface signature drifted",
+            ),
+        ]
+
+        for gap_path, validator, mutate, expected in cases:
+            with self.subTest(path=gap_path.name, expected=expected):
+                original_gap = json.loads(gap_path.read_text(encoding="utf-8"))
+                changed = copy.deepcopy(original_gap)
+                mutate(changed)
+                from tools import validate_backlog_exhaustion as module
+                original_load = module._load
+
+                def fake_load(path):
+                    if pathlib.Path(path) == gap_path:
+                        return changed
+                    return original_load(path)
+
+                with mock.patch("tools.validate_backlog_exhaustion._load", side_effect=fake_load):
+                    errors = validator(ledger["stories"], ROOT)
+                self.assertTrue(any(expected in error for error in errors), errors)
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())

@@ -1,0 +1,156 @@
+{
+  "schemaVersion": 1,
+  "status": "source-reviewed-no-exact-task-owner",
+  "repositoryId": "opencode",
+  "repository": "anomalyco/opencode",
+  "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+  "treeSha": "b17683f6fb570317083ee8f62bd136435c023270",
+  "storyIds": ["INT-001", "INT-003", "INT-005", "INT-006", "INT-007", "INT-009"],
+  "storySurfaceSignatures": {
+    "INT-001": ["opencode.integrations"],
+    "INT-003": ["opencode.integrations"],
+    "INT-005": ["opencode.integrations"],
+    "INT-006": ["opencode.integrations"],
+    "INT-007": ["opencode.integrations"],
+    "INT-009": ["opencode.integrations"]
+  },
+  "equivalenceGroup": {
+    "id": "generic-integration-residual",
+    "storyIds": ["INT-001", "INT-003", "INT-005", "INT-006", "INT-007", "INT-009"],
+    "requirementIds": [],
+    "surfaceSignature": ["opencode.integrations"],
+    "controllerStatuses": {
+      "INT-001": "in-progress",
+      "INT-003": "in-progress",
+      "INT-005": "in-progress",
+      "INT-006": "in-progress",
+      "INT-007": "in-progress",
+      "INT-009": "not-started"
+    },
+    "conclusion": "INT-009's controller status differs, but all six rows have the identical generic DISC-002 story, no requirements, no task/worklog receipts and the same surface. Controller status alone is not semantic ownership."
+  },
+  "ownershipDecision": {
+    "INT-001": null,
+    "INT-003": null,
+    "INT-005": null,
+    "INT-006": null,
+    "INT-007": null,
+    "INT-009": null
+  },
+  "taskBindingState": {
+    "INT-001": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "INT-003": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "INT-005": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "INT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "INT-007": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
+    "INT-009": {"controllerStatus":"not-started","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null}
+  },
+  "surfaceRulePatterns": [
+    "packages/core/src/integration.ts",
+    "packages/core/src/integration/**",
+    "packages/core/src/workspace.ts",
+    "packages/core/src/project.ts",
+    "packages/core/src/project/**",
+    "packages/core/src/pty.ts",
+    "packages/core/src/pty/**",
+    "packages/core/src/git.ts",
+    "packages/client/**",
+    "packages/server/**",
+    "sdks/**"
+  ],
+  "excludedOwners": [
+    {"id":"INT-002","disposition":"explicit-blocker","reasonKey":"repository-contract-mixes-side-effects"},
+    {"id":"INT-004","disposition":"local-implemented-stale","implementationCommit":"d8fa4854fcd680e5fe3dfe2b05c6a2151a340056"},
+    {"id":"INT-008","disposition":"local-implemented-stale-event-wire-compatibility","implementationCommits":["b496878d8192dc3b10d56c00e68597354f99ea32","4e779bedd3018b97ccb981c2edeb6163b0181f83","39887dda97eb7163c8d8725a5a9ecfddc00a9234"]},
+    {"id":"INT-010","disposition":"guarded-enterprise-remote-spec-gap"}
+  ],
+  "reviewedPartitions": [
+    {
+      "id": "authoritative-httpapi-client-server-contract",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/client/src/contract.ts","blobSha":"413fea9dc338b345d40e1dc4b4cf7a962eba1376","reviewedLines":{"from":1,"to":53}},
+        {"kind":"caller","path":"packages/server/src/api.ts","blobSha":"981ad28db93d253ac02e231b6dbc28f034fe5c35","reviewedLines":{"from":1,"to":8}},
+        {"kind":"test","path":"packages/client/test/contract-identity.test.ts","blobSha":"64a2e958ce2d86e6f66e03d5b9353dbd1ffb358a","reviewedLines":{"from":24,"to":58}},
+        {"kind":"spec","path":"packages/client/README.md","blobSha":"8c53e47c7e681a43de56e307b355a8bc65d210a7","reviewedLines":{"from":1,"to":27}}
+      ],
+      "inputs": "authoritative Protocol HttpApi groups/endpoints plus concrete location/session middleware identities",
+      "outputs": "client and server API projections whose generated contract emissions are identical, with explicit group/endpoint naming and omitted custom transports",
+      "failureSemantics": "contract drift fails generation-equivalence tests; middleware declares typed request/session failures; runtime HTTP failures belong to generated clients/handlers",
+      "stateLifetime": "declarative contract/build-time generation; no persistent runtime state in the contract projection itself",
+      "resourceLifetime": "bounded schema/contract compilation; actual HTTP clients own network resources separately",
+      "ownershipBlocker": "All six residual INT rows are source-identical, and INT-008 already owns a narrower event-wire compatibility slice. Generated contract identity cannot be assigned to one residual row by number or status."
+    },
+    {
+      "id": "effect-client-http-and-sse-decoding",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/client/src/contract.ts","blobSha":"413fea9dc338b345d40e1dc4b4cf7a962eba1376","reviewedLines":{"from":14,"to":53}},
+        {"kind":"test","path":"packages/client/test/effect.test.ts","blobSha":"7bf4d26f8fecb2aa054e907e43a4fc6b9a0fff68","reviewedLines":{"from":6,"to":60}},
+        {"kind":"spec","path":"packages/client/README.md","blobSha":"8c53e47c7e681a43de56e307b355a8bc65d210a7","reviewedLines":{"from":3,"to":27}}
+      ],
+      "inputs": "base URL, environment-provided HttpClient, typed endpoint parameters/payloads and SSE byte stream",
+      "outputs": "canonical decoded DTOs and typed event stream including durable metadata",
+      "failureSemantics": "protocol decode failure terminates the Effect event stream with ClientError; transport errors belong to the provided HttpClient",
+      "stateLifetime": "per-client runtime and per-subscription stream lifetime",
+      "resourceLifetime": "network/HTTP/SSE lifetime; custom PTY WebSocket transport is explicitly outside the generic HTTP client",
+      "ownershipBlocker": "Event wire fidelity is already implemented under INT-008 and frozen. Broader network client ownership among the six generic residual rows is not source-grounded."
+    },
+    {
+      "id": "typed-integration-http-handler",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/server/src/handlers/integration.ts","blobSha":"6c29d58776078ad54c436cd91c73daba3feab495","reviewedLines":{"from":1,"to":104}},
+        {"kind":"caller","path":"packages/client/src/contract.ts","blobSha":"413fea9dc338b345d40e1dc4b4cf7a962eba1376","reviewedLines":{"from":19,"to":46}},
+        {"kind":"test","path":"packages/client/test/contract-identity.test.ts","blobSha":"64a2e958ce2d86e6f66e03d5b9353dbd1ffb358a","reviewedLines":{"from":24,"to":45}},
+        {"kind":"spec","path":"packages/client/README.md","blobSha":"8c53e47c7e681a43de56e307b355a8bc65d210a7","reviewedLines":{"from":3,"to":14}}
+      ],
+      "inputs": "typed integration list/get/key/OAuth/attempt requests and credential/auth payloads",
+      "outputs": "Integration service projections, NoContent mutations or normalized InvalidRequestError auth/code failures",
+      "failureSemantics": "authorization failures are intentionally normalized; completion distinguishes code-required from auth failure",
+      "stateLifetime": "delegated to the core Integration service and its connection/attempt state",
+      "resourceLifetime": "HTTP request scope plus provider-specific auth/network/credential lifetimes delegated beneath the handler",
+      "ownershipBlocker": "INT-004 already implements scoped integration metadata/auth-related behavior. Provider-specific credentials/OAuth/external protocols are broader than this handler and cannot be re-owned by a generic residual INT id."
+    }
+  ],
+  "unresolvedRulePartitions": [
+    "packages/core/src/workspace.ts",
+    "packages/core/src/project.ts and packages/core/src/project/**",
+    "packages/core/src/pty.ts and packages/core/src/pty/**",
+    "packages/core/src/git.ts",
+    "packages/client/** beyond reviewed contract/effect tests",
+    "packages/server/** beyond reviewed API/integration handler",
+    "sdks/**",
+    "provider-specific integration methods external protocols auth and credential lifetimes"
+  ],
+  "candidateFragments": [
+    {
+      "id": "client-server-contract-generation-identity",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "All six residual INT rows have the same generic story, no requirements and the same integration surface.",
+        "INT-009's not-started status does not create semantic ownership distinct from the five in-progress peers.",
+        "INT-008 already owns event-wire compatibility and INT-004 owns a scoped integration slice, so broad contract generation cannot re-own those behaviors."
+      ]
+    }
+  ],
+  "unresolvedPartitions": [
+    "workspace-project-and-location-protocol-boundaries",
+    "pty-custom-websocket-transport-and-ticket-auth",
+    "git-and-repository-adjacent-integration-side-effects",
+    "generated-promise-effect-client-and-sdk-ownership",
+    "server-handler-runtime-and-error-normalization-ownership",
+    "provider-specific-integration-auth-network-and-credential-lifecycle",
+    "external-protocol-reconnect-timeout-and-resource-lifetime"
+  ],
+  "historyReview": {
+    "state": "locked-checkout-grafted-at-pinned-commit",
+    "limitation": "Pinned current contract evidence is used directly; unavailable historical intent and differing controller status are not converted into task semantics."
+  },
+  "closureCriteria": [
+    "Each residual INT owner requires task-specific source, caller, direct test and genuine spec evidence that distinguishes it from the six-row equivalence class; task number, controller status and generated endpoint order are insufficient.",
+    "Any network/transport candidate must explicitly own credentials, authentication, reconnect/timeout/failure behavior and resource lifetime and must not re-own INT-004 or frozen INT-008 behavior.",
+    "INT-002 remains frozen for repository side effects and INT-010 remains governed by the enterprise-remote missing-spec record unless materially new pinned evidence resolves those blockers.",
+    "All reviewed and unresolved rule partitions must receive source-grounded task dispositions or remain blocked before the integrations family can be called decomposed."
+  ]
+}
