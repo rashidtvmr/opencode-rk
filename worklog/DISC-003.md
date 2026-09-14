@@ -45,3 +45,19 @@ This moves the bounded ledger from 12 partial / 20 queued to 15 partial / 17 que
 - `/usr/bin/python3 tools/validate_plan.py` => `validate_plan: OK  stories=219 requirements=38 obligations=1095 deps_synthesized=True`.
 - JSON parsing passed for the supplemental evidence catalog, reconciliation ledger, generated manifest, and workspace source map.
 - `git diff --check` passed.
+
+## Prompt-context reconciliation slice
+
+The next bounded source-only slice promotes `opencode.prompt-context` from `queued` to reviewed `partial` without claiming target implementation or DISC-003 completion.
+
+- Source evidence: pinned `packages/core/src/reference.ts` and `packages/core/src/reference/guidance.ts` show a scope-owned transformable reference registry plus model-visible guidance generation. Reference finalization distinguishes inert local metadata from Git sources that delegate clone/refresh to `RepositoryCache`.
+- Caller evidence: pinned `packages/core/src/session/runner/llm.ts` loads `SystemContextRegistry` and `ReferenceGuidance` during provider request assembly.
+- Direct tests: `packages/core/test/reference.test.ts` verifies scoped registration/removal, local source metadata, Git path derivation with cache I/O mocked, and descriptions; `packages/core/test/reference-guidance.test.ts` verifies only described registered references become model-visible guidance.
+- Spec evidence: pinned `specs/v2/session.md` records durable typed prompt attachments complete while native template/@ mention expansion, configured references, and several instruction/materialization paths remain partial or missing.
+- Explicit boundary: Git repository clone/refresh, filesystem materialization, remote instructions, and attachment resolution remain unresolved owners. This slice does not authorize target network/storage behavior.
+
+Validation for this slice:
+
+- `/usr/bin/python3 -m unittest tests.bootstrap.test_disc003_reconciliation -v` => 8/8 passed.
+- `/usr/bin/python3 tools/reconcile_surfaces.py` => 32 families: 16 `partial`, 16 `queued`; implementation statuses 8 `partial`, 8 `reference-implemented`, 16 `unresolved`; 71 evidence references; 49 unresolved findings; zero errors.
+- `git diff --check` passed.
