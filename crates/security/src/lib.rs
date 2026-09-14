@@ -3,6 +3,7 @@
 pub mod cmd_patterns;
 pub mod credentials;
 pub mod env_restrict;
+pub mod exec_policy;
 pub mod hooks;
 pub mod manual_only;
 pub mod project_boundary;

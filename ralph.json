@@ -579,7 +579,7 @@
     {
       "id": "DB-002",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -610,7 +610,7 @@
     {
       "id": "DB-004",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -624,7 +624,7 @@
     {
       "id": "DB-005",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -654,7 +654,7 @@
     {
       "id": "DB-007",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -670,7 +670,7 @@
       "requirementIds": [
         "REQ-033"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -714,7 +714,7 @@
     {
       "id": "DB-011",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -744,7 +744,7 @@
     {
       "id": "DB-013",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -3018,7 +3018,7 @@
         "REQ-025",
         "REQ-030"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Execpolicy prefix rules - declarative path and command allowlist, longest-match evaluated before tools",
       "dependencyIds": [],
       "testObligations": [
@@ -3034,7 +3034,7 @@
       "requirementIds": [
         "REQ-020"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Bounded hook bus - max 100 pending with shift-drop, always-emit allowlist, SSRF guard on HTTP hooks",
       "dependencyIds": [],
       "testObligations": [
@@ -3068,7 +3068,7 @@
         "REQ-006",
         "REQ-033"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Dual rollout record - append-only JSONL is truth, sqlite holds queryable snapshot, recorder owns order",
       "dependencyIds": [],
       "testObligations": [
@@ -3084,7 +3084,7 @@
       "requirementIds": [
         "REQ-033"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Content-addressed transcript dedupe - repeated prompts and tool schemas stored by canonical hash, turns reference ids",
       "dependencyIds": [],
       "testObligations": [

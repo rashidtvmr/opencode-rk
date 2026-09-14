@@ -177,4 +177,72 @@ mod tests {
         let (connection, _temp) = conn_and_paths();
         assert!(QuotaV2::reclaim(&connection, 3).is_ok());
     }
+
+    #[test]
+    fn wal_quota_rejection() {
+        // Create a connection with WAL journaling enforced
+        let temp = tempdir().unwrap();
+        let path = temp.path().join("test.db");
+        let mut connection = Connection::open(&path).unwrap();
+        connection
+            .execute_batch(
+                "PRAGMA journal_mode=WAL; PRAGMA page_size=4096; PRAGMA auto_vacuum=INCREMENTAL;",
+            )
+            .unwrap();
+
+        // Create a table and insert data to grow the WAL
+        connection
+            .execute_batch("CREATE TABLE test_rows(id INTEGER PRIMARY KEY, data TEXT);")
+            .unwrap();
+
+        // Insert many rows to generate WAL growth
+        for i in 0..1000 {
+            connection
+                .execute(
+                    "INSERT INTO test_rows(data) VALUES(?)",
+                    [format!("row_{i}")],
+                )
+                .unwrap();
+        }
+
+        // Measure the snapshot - WAL should now have content
+        let snap = QuotaV2::measure(&connection).unwrap();
+        let wal_bytes = snap.wal_pages.saturating_mul(4096);
+
+        // Verify WAL has grown beyond zero
+        assert!(wal_bytes > 0, "WAL should have grown with inserts");
+
+        // Set a quota that rejects due to WAL size
+        // Use a quota lower than the measured WAL bytes
+        let result = QuotaV2::admit(&connection, &snap, i64::MAX, wal_bytes / 2);
+        assert!(
+            matches!(result, Err(QuotaV2Error::WalBytes(_))),
+            "admit should reject when WAL exceeds quota"
+        );
+    }
+
+    #[test]
+    fn reclaim_frees_space() {
+        let (connection, _temp) = conn_and_paths();
+
+        // Record initial measurements
+        let snap_before = QuotaV2::measure(&connection).unwrap();
+        let freelist_before = snap_before.freelist_count;
+
+        // Do an incremental vacuum which should release free pages
+        let result = QuotaV2::reclaim(&connection, 100);
+        assert!(result.is_ok(), "reclaim should succeed");
+
+        // Measure after - freelist_count should be reduced or equal
+        let snap_after = QuotaV2::measure(&connection).unwrap();
+        let freelist_after = snap_after.freelist_count;
+
+        // freelist_count should not increase after reclaim
+        assert!(
+            freelist_after <= freelist_before,
+            "freelist_count should not increase after reclaim: before={}, after={}",
+            freelist_before,
+            freelist_after
+        );
+    }
 }

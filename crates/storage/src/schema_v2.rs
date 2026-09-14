@@ -212,4 +212,56 @@ mod tests {
             "checksum verification is a readiness gate"
         );
     }
+
+    #[test]
+    fn reopen_validates_markers() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("workspace.db");
+        let conn = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
+        drop(conn);
+        // Reopen should succeed when markers are intact.
+        let _reopened = SchemaV2::open_existing(&path).unwrap();
+
+        // Tamper with application_id: reopen must fail.
+        {
+            let conn = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
+            conn.execute("PRAGMA application_id = -1").unwrap();
+            drop(conn);
+            assert!(
+                SchemaV2::open_existing(&path).is_err(),
+                "application_id mismatch must fail reopen"
+            );
+        }
+
+        // Tamper with user_version: reopen must fail.
+        {
+            let conn = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
+            conn.execute("PRAGMA user_version = 99").unwrap();
+            drop(conn);
+            assert!(
+                SchemaV2::open_existing(&path).is_err(),
+                "user_version mismatch must fail reopen"
+            );
+        }
+    }
+
+    #[test]
+    fn checksum_tamper_detected() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("workspace.db");
+        let conn = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
+        // Flip every byte of the stored checksum to a value that cannot match
+        // the computed workspace digest, then verify reopen rejects the file.
+        let tamper: Vec<u8> = std::iter::repeat(0xAA_u8).take(32).collect();
+        conn.execute(
+            "UPDATE schema_migrations SET checksum=?1 WHERE version=2",
+            params![&tamper[..]],
+        )
+        .unwrap();
+        drop(conn);
+        assert!(
+            SchemaV2::open_existing(&path).is_err(),
+            "checksum mismatch must be detected on reopen"
+        );
+    }
 }

@@ -460,4 +460,58 @@ mod tests {
             .unwrap();
         assert_eq!(sample, "hello 1");
     }
+
+    // DB-016: oversize inline payload > 64KB exceeds event ceiling and is rejected
+    #[test]
+    fn db016_oversize_inline_skipped() {
+        let source = source_db(0);
+        // Create payload at MAX_EVENT_PAYLOAD_BYTES + 1 (65536 + 1 = 65537)
+        let oversize = crate::MAX_EVENT_PAYLOAD_BYTES + 1;
+        let big_payload = "x".repeat(oversize);
+        source
+            .execute(
+                "INSERT INTO messages(id,session_id,role,inline_text,blob_hash,byte_len,created_at) \
+                 VALUES ('big1','src1','user',?1,NULL,?2,?3)",
+                params![big_payload, oversize as i64, now_rfc3339()],
+            )
+            .unwrap();
+        let (mut dest, pk, new_id) = dest_db();
+        // Import fails at first oversized row, no messages imported
+        let err = ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap_err();
+        assert!(matches!(err, StorageError::InlinePayloadTooLarge));
+        ImportV2::verify_counts(&dest, pk, 0).unwrap();
+    }
+
+    // DB-016: import processes rows in bounded pages, not unbounded
+    #[test]
+    fn db016_paged_import_bounded() {
+        // Create more rows than PAGE_BUDGET (500) to verify bounded paging
+        let source = source_db(PAGE_BUDGET as u64 + 100);
+        let (mut dest, pk, _new_id) = dest_db();
+        // First page should be exactly PAGE_BUDGET
+        let (first_page, next_cursor) =
+            ImportV2::import_is_resumable(&mut dest, &source, pk, 0).unwrap();
+        assert_eq!(
+            first_page, PAGE_BUDGET as u64,
+            "first page should be bounded by PAGE_BUDGET"
+        );
+        // Verify page cursor advanced but did not exceed PAGE_BUDGET rows
+        assert!(next_cursor > 0);
+        // Verify destination has exactly PAGE_BUDGET rows so far
+        ImportV2::verify_counts(&dest, pk, PAGE_BUDGET as u64).unwrap();
+        // Drain remaining rows
+        let mut total = first_page;
+        let mut cursor = next_cursor;
+        loop {
+            let (i, n) = ImportV2::import_is_resumable(&mut dest, &source, pk, cursor).unwrap();
+            if i == 0 || n == cursor {
+                break;
+            }
+            total += i;
+            cursor = n;
+        }
+        // Total should be all 600 rows (500 + 100), not unbounded
+        assert_eq!(total, PAGE_BUDGET as u64 + 100);
+        ImportV2::verify_counts(&dest, pk, total).unwrap();
+    }
 }
