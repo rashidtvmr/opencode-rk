@@ -804,7 +804,7 @@
       "requirementIds": [
         "REQ-003"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
