@@ -11,6 +11,7 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     CATEGORY_IDS,
     build_expected_ledger,
     disc_status_errors,
+    residual_evidence_kind_errors,
     validate_ledger,
 )
 
@@ -81,6 +82,18 @@ class BacklogExhaustionTests(unittest.TestCase):
         errors = validate_ledger(bad, ROOT)
         self.assertTrue(any("surfaceIds drifted" in error for error in errors))
         self.assertTrue(any("evidenceIds drifted" in error for error in errors))
+
+    def test_surface_backed_rows_retain_source_caller_test_and_spec_evidence(self):
+        ledger = load_ledger()
+        reconciliation = json.loads((ROOT / "sources/disc-003-reconciliation.json").read_text(encoding="utf-8"))
+        self.assertEqual(residual_evidence_kind_errors(ledger["stories"], reconciliation), [])
+
+        bad = copy.deepcopy(reconciliation)
+        target = next(row for row in bad["reviewedSurfaces"] if row["id"] == "opencode.extensibility")
+        target["evidence"]["caller"] = []
+        story = next(row for row in ledger["stories"] if row["id"] == "EXT-001")
+        errors = residual_evidence_kind_errors([story], bad)
+        self.assertTrue(any("lost classes: caller" in error for error in errors))
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())

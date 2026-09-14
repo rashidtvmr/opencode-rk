@@ -20,6 +20,7 @@ from collections.abc import Mapping
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 LEDGER_PATH = ROOT / "sources/backlog-exhaustion.json"
+DISC_EVIDENCE_KINDS = ("source", "caller", "test", "spec")
 
 CATEGORY_IDS = {
     "local-implemented-stale": {
@@ -264,6 +265,42 @@ def disc_status_errors(
     return errors
 
 
+def residual_evidence_kind_errors(rows, reconciliation: Mapping[str, object]) -> list[str]:
+    """Require every surface-backed residual row to retain all four evidence classes."""
+    reviewed = {
+        str(row.get("id", "")): row
+        for row in reconciliation.get("reviewedSurfaces", [])
+        if isinstance(row, Mapping)
+    }
+    errors: list[str] = []
+    for row in rows:
+        if not isinstance(row, Mapping):
+            continue
+        story_id = str(row.get("id", ""))
+        surface_ids = row.get("surfaceIds", [])
+        if not isinstance(surface_ids, list) or not surface_ids:
+            continue
+        present: set[str] = set()
+        for surface_id in surface_ids:
+            surface = reviewed.get(str(surface_id))
+            if surface is None:
+                errors.append(f"{story_id}: mapped DISC surface is missing from reconciliation: {surface_id}")
+                continue
+            evidence = surface.get("evidence", {})
+            if not isinstance(evidence, Mapping):
+                continue
+            for kind in DISC_EVIDENCE_KINDS:
+                refs = evidence.get(kind)
+                if isinstance(refs, list) and refs:
+                    present.add(kind)
+        missing = [kind for kind in DISC_EVIDENCE_KINDS if kind not in present]
+        if missing:
+            errors.append(
+                f"{story_id}: surface-backed exhaustion evidence lost classes: {', '.join(missing)}"
+            )
+    return errors
+
+
 def sync_features_status(root: pathlib.Path = ROOT) -> None:
     """Synchronize only the generated status mirrors in FEATURES.md from Ralph."""
     plan = _load(root / "ralph.json")
@@ -421,6 +458,7 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
     task_text = (root / "tasks/DISC-003.md").read_text(encoding="utf-8")
     progress_text = (root / "workspaces/DISC-003/progress.md").read_text(encoding="utf-8")
     errors.extend(disc_status_errors(reconciliation, manifest, source_map, task_text, progress_text))
+    errors.extend(residual_evidence_kind_errors(rows, reconciliation))
 
     errors.extend(_features_status_errors(root, plan))
     return errors
