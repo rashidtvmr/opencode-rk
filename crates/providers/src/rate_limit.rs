@@ -6,7 +6,91 @@ pub const MAX_RATE_LIMIT_COOLDOWN_MS: u64 = 30 * 60 * 1_000;
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AccountLockScope {
     Account,
+    AccountWide,
     Model(String),
+}
+
+pub const MAX_ACCOUNT_MODEL_LOCKS: usize = 16;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountLock {
+    pub scope: AccountLockScope,
+    pub expires_at: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AccountRecoveryState {
+    pub test_status_unavailable: bool,
+    pub last_error_present: bool,
+    pub backoff_level: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountRecoveryPatch {
+    pub clear_locks: Vec<AccountLockScope>,
+    pub set_test_status_active: bool,
+    pub clear_last_error: bool,
+    pub reset_backoff_level: bool,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountRecoveryError {
+    TooManyLocks { max: usize, actual: usize },
+}
+
+pub fn plan_account_recovery(
+    connection_id: Option<&str>,
+    successful_model: Option<&str>,
+    state: &AccountRecoveryState,
+    locks: &[AccountLock],
+    now: u64,
+) -> Result<Option<AccountRecoveryPatch>, AccountRecoveryError> {
+    if connection_id.is_none_or(|id| id.is_empty() || id == "noauth") {
+        return Ok(None);
+    }
+
+    if locks.len() > MAX_ACCOUNT_MODEL_LOCKS {
+        return Err(AccountRecoveryError::TooManyLocks {
+            max: MAX_ACCOUNT_MODEL_LOCKS,
+            actual: locks.len(),
+        });
+    }
+
+    if locks.is_empty() && !state.test_status_unavailable && !state.last_error_present {
+        return Ok(None);
+    }
+
+    let mut clear_locks = Vec::with_capacity(locks.len());
+    let mut remaining_active_locks = 0usize;
+
+    for lock in locks {
+        let successful_scope = successful_model.is_some_and(|model| match &lock.scope {
+            AccountLockScope::Model(locked_model) => locked_model == model,
+            AccountLockScope::Account | AccountLockScope::AccountWide => true,
+        });
+        let expired = lock.expires_at <= now;
+
+        if successful_scope || expired {
+            clear_locks.push(lock.scope.clone());
+        } else if lock.expires_at > now {
+            remaining_active_locks += 1;
+        }
+    }
+
+    if clear_locks.is_empty()
+        && !state.test_status_unavailable
+        && !state.last_error_present
+    {
+        return Ok(None);
+    }
+
+    let reset_error_state = remaining_active_locks == 0;
+    Ok(Some(AccountRecoveryPatch {
+        clear_locks,
+        set_test_status_active: reset_error_state,
+        clear_last_error: reset_error_state,
+        reset_backoff_level: reset_error_state,
+    }))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
