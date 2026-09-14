@@ -1212,6 +1212,7 @@
       "evidenceIds": [
         "NR-MODEL-ROUTING",
         "NR-CHAT",
+        "NR-MODEL-ROUTING-TEST",
         "NR-ARCHITECTURE",
         "NR-AUTH-ROUTING",
         "NR-GITHUB-LOCK-TEST"
@@ -1229,14 +1230,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "test"
-          ],
-          "surfaceId": "9router.model-combos"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.model-combos",
         "9router.routing"
@@ -1287,6 +1281,7 @@
       "evidenceIds": [
         "NR-MODEL-ROUTING",
         "NR-CHAT",
+        "NR-MODEL-ROUTING-TEST",
         "NR-ARCHITECTURE",
         "NR-OUTBOUND-PROXY",
         "NR-CONNECTION-PROXY",
@@ -1310,14 +1305,7 @@
       "reasonKey": "local-implemented-controller-stale",
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "test"
-          ],
-          "surfaceId": "9router.model-combos"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.model-combos",
         "9router.network-proxy",
@@ -1680,6 +1668,7 @@
         "OC-APP-SERVER-PROTOCOL-TEST",
         "OC-APP-TERMINAL-WS-TEST",
         "OC-APP-MODEL-SELECTION-E2E",
+        "OC-APP-V1-MIGRATION-SPEC",
         "OC-TUI-RUNTIME",
         "OC-CLI-TUI-BRIDGE",
         "OC-TUI-LIFECYCLE-TEST",
@@ -1693,14 +1682,7 @@
       "requirementIds": [
         "REQ-023"
       ],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.app-client"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui"
@@ -1774,6 +1756,7 @@
         "OC-APP-SERVER-PROTOCOL-TEST",
         "OC-APP-TERMINAL-WS-TEST",
         "OC-APP-MODEL-SELECTION-E2E",
+        "OC-APP-V1-MIGRATION-SPEC",
         "OC-TUI-RUNTIME",
         "OC-CLI-TUI-BRIDGE",
         "OC-TUI-LIFECYCLE-TEST",
@@ -1787,14 +1770,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.app-client"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.dashboard-settings",
         "opencode.app-client",
@@ -1869,6 +1845,7 @@
         "OC-APP-SERVER-PROTOCOL-TEST",
         "OC-APP-TERMINAL-WS-TEST",
         "OC-APP-MODEL-SELECTION-E2E",
+        "OC-APP-V1-MIGRATION-SPEC",
         "OC-TUI-RUNTIME",
         "OC-CLI-TUI-BRIDGE",
         "OC-TUI-LIFECYCLE-TEST",
@@ -1882,14 +1859,7 @@
       "requirementIds": [
         "REQ-019"
       ],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.app-client"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui"
@@ -1938,6 +1908,7 @@
         "OC-APP-SERVER-PROTOCOL-TEST",
         "OC-APP-TERMINAL-WS-TEST",
         "OC-APP-MODEL-SELECTION-E2E",
+        "OC-APP-V1-MIGRATION-SPEC",
         "OC-TUI-RUNTIME",
         "OC-CLI-TUI-BRIDGE",
         "OC-TUI-LIFECYCLE-TEST",
@@ -1952,14 +1923,7 @@
         "REQ-029",
         "REQ-032"
       ],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.app-client"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.dashboard-settings",
         "opencode.app-client",
@@ -2034,6 +1998,7 @@
         "OC-APP-SERVER-PROTOCOL-TEST",
         "OC-APP-TERMINAL-WS-TEST",
         "OC-APP-MODEL-SELECTION-E2E",
+        "OC-APP-V1-MIGRATION-SPEC",
         "OC-TUI-RUNTIME",
         "OC-CLI-TUI-BRIDGE",
         "OC-TUI-LIFECYCLE-TEST",
@@ -2045,14 +2010,7 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.app-client"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui"
@@ -2071,6 +2029,7 @@
         "OC-APP-SERVER-PROTOCOL-TEST",
         "OC-APP-TERMINAL-WS-TEST",
         "OC-APP-MODEL-SELECTION-E2E",
+        "OC-APP-V1-MIGRATION-SPEC",
         "OC-TUI-RUNTIME",
         "OC-CLI-TUI-BRIDGE",
         "OC-TUI-LIFECYCLE-TEST",
@@ -2082,14 +2041,7 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.app-client"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui"
@@ -2111,7 +2063,8 @@
         "OC-DESKTOP-WSL-SERVERS",
         "OC-DESKTOP-PRELOAD",
         "OC-DESKTOP-MAIN-TEST",
-        "OC-DESKTOP-WSL-TEST"
+        "OC-DESKTOP-WSL-TEST",
+        "OC-DESKTOP-PACKAGE-SPEC"
       ],
       "id": "WEB-003",
       "implementationCommits": [],
@@ -2119,14 +2072,7 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.desktop-client"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui",
         "opencode.desktop-client"
@@ -2183,6 +2129,7 @@
         "OC-APP-SERVER-PROTOCOL-TEST",
         "OC-APP-TERMINAL-WS-TEST",
         "OC-APP-MODEL-SELECTION-E2E",
+        "OC-APP-V1-MIGRATION-SPEC",
         "OC-TUI-RUNTIME",
         "OC-CLI-TUI-BRIDGE",
         "OC-TUI-LIFECYCLE-TEST",
@@ -2192,7 +2139,8 @@
         "OC-DESKTOP-WSL-SERVERS",
         "OC-DESKTOP-PRELOAD",
         "OC-DESKTOP-MAIN-TEST",
-        "OC-DESKTOP-WSL-TEST"
+        "OC-DESKTOP-WSL-TEST",
+        "OC-DESKTOP-PACKAGE-SPEC"
       ],
       "id": "WEB-005",
       "implementationCommits": [],
@@ -2200,20 +2148,7 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.app-client"
-        },
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.desktop-client"
-        }
-      ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui",
