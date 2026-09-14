@@ -80,9 +80,17 @@ pub struct OpenCodeEvent<T> {
     #[serde(rename = "type")]
     pub event_type: String,
     pub data: T,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub metadata: Option<BTreeMap<String, Value>>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub durable: Option<DurableEventMeta>,
     #[serde(
         default,
