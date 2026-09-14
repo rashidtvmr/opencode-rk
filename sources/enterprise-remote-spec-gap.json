@@ -1,0 +1,105 @@
+{
+  "schemaVersion": 1,
+  "status": "searched-no-qualifying-in-surface-spec",
+  "surfaceId": "opencode.enterprise-remote",
+  "repositoryId": "opencode",
+  "repository": "anomalyco/opencode",
+  "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+  "rulePatterns": [
+    "packages/enterprise/**",
+    "packages/function/**"
+  ],
+  "residualStoryIds": [
+    "INT-010",
+    "SHARE-003",
+    "WEB-004"
+  ],
+  "missingKinds": [
+    "spec"
+  ],
+  "searchedTrees": [
+    {
+      "path": "packages/enterprise",
+      "treeSha": "de3cbb958ad0ef982f5922c8d9ac7ea7100ff4aa"
+    },
+    {
+      "path": "packages/function",
+      "treeSha": "19db2fcad6271bb67d6331a3c2069b416ea636af"
+    }
+  ],
+  "reviewedRuntimeEvidenceIds": [
+    "OC-ENTERPRISE-SHARE",
+    "OC-FUNCTION-REMOTE",
+    "OC-ENTERPRISE-SHARE-ROUTE",
+    "OC-ENTERPRISE-SHARE-TEST",
+    "OC-FUNCTION-GITHUB-TEST"
+  ],
+  "rejectedCandidates": [
+    {
+      "path": "packages/enterprise/README.md",
+      "blobSha": "9337430cfd31be33675b8e7336b9260906e98440",
+      "reviewedLines": {
+        "from": 1,
+        "to": 32
+      },
+      "reason": "Generic SolidStart scaffold/build instructions; it does not specify enterprise share synchronization, hosted function behavior, authentication, support relay, resource bounds, failure semantics, or deployment lifecycle."
+    },
+    {
+      "path": "packages/enterprise/src/routes/api/[...path].ts",
+      "blobSha": "4677d68d33c48c6a030ae66100d59823fc241aa9",
+      "reviewedLines": {
+        "from": 16,
+        "to": 155
+      },
+      "reason": "Implementation-embedded Hono/OpenAPI metadata describes only legacy enterprise share create/sync/data/remove routes; the support-admin route is outside that described contract, and no committed generated OpenAPI document owns the wider enterprise/function surface."
+    },
+    {
+      "path": "packages/enterprise/package.json",
+      "blobSha": "9d61ae5eacfd8702f446da9fe8b33d384d60e906",
+      "reviewedLines": {
+        "from": 1,
+        "to": 46
+      },
+      "reason": "Package scripts/dependencies and schema metadata are build/package configuration, not a product behavior specification."
+    },
+    {
+      "path": "packages/function/package.json",
+      "blobSha": "7d9bc6548b66027e1c5fc17f0067175d8b208a1c",
+      "reviewedLines": {
+        "from": 1,
+        "to": 23
+      },
+      "reason": "Package scripts/dependencies and schema metadata do not specify SyncServer, WebSocket/R2, support relay, token exchange, installation lookup, or deployment behavior."
+    },
+    {
+      "path": "packages/enterprise/sst-env.d.ts",
+      "blobSha": "64441936d7a02748b870556190c893d73e560948",
+      "reviewedLines": {
+        "from": 1,
+        "to": 10
+      },
+      "reason": "Auto-generated SST environment type reference; it defines no product behavior contract."
+    },
+    {
+      "path": "packages/function/sst-env.d.ts",
+      "blobSha": "64441936d7a02748b870556190c893d73e560948",
+      "reviewedLines": {
+        "from": 1,
+        "to": 10
+      },
+      "reason": "Auto-generated SST environment type reference; it defines no product behavior contract."
+    }
+  ],
+  "requiredDecompositionPartitions": [
+    "enterprise-share-http",
+    "function-syncserver-websocket-r2",
+    "function-support-relay",
+    "function-github-token-exchange-installation",
+    "deployment-resource-lifecycle"
+  ],
+  "historyReview": {
+    "state": "locked-checkout-grafted-at-pinned-commit",
+    "limitation": "The repository's pinned local upstream snapshot exposes the locked commit but not its parent object; no older enterprise/function specification is claimed from unavailable history."
+  },
+  "closure": "Keep the spec gap until a qualifying specification inside the locked enterprise/function surface owns all required partitions, or source-grounded decomposition replaces this heterogeneous surface with narrower task owners."
+}

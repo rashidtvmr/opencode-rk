@@ -21,6 +21,16 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 LEDGER_PATH = ROOT / "sources/backlog-exhaustion.json"
 DISC_EVIDENCE_KINDS = ("source", "caller", "test", "spec")
+ENTERPRISE_REMOTE_GAP_PATH = ROOT / "sources/enterprise-remote-spec-gap.json"
+ENTERPRISE_REMOTE_SURFACE = "opencode.enterprise-remote"
+ENTERPRISE_REMOTE_GAP_STORIES = ("INT-010", "SHARE-003", "WEB-004")
+ENTERPRISE_REMOTE_REQUIRED_PARTITIONS = (
+    "enterprise-share-http",
+    "function-syncserver-websocket-r2",
+    "function-support-relay",
+    "function-github-token-exchange-installation",
+    "deployment-resource-lifecycle",
+)
 
 CATEGORY_IDS = {
     "local-implemented-stale": {
@@ -326,6 +336,181 @@ def residual_evidence_kind_errors(rows, reconciliation: Mapping[str, object]) ->
     return errors
 
 
+def _surface_path_matches(path: str, patterns: list[str]) -> bool:
+    for pattern in patterns:
+        if pattern.endswith("/**"):
+            prefix = pattern[:-3]
+            if path == prefix or path.startswith(prefix + "/"):
+                return True
+        elif path == pattern:
+            return True
+    return False
+
+
+def enterprise_remote_gap_errors(
+    rows: list[object],
+    reconciliation: Mapping[str, object],
+    root: pathlib.Path = ROOT,
+) -> list[str]:
+    """Lock the truthful enterprise-remote negative-spec result fail closed."""
+    errors: list[str] = []
+    path = root / "sources/enterprise-remote-spec-gap.json"
+    if not path.is_file():
+        return ["missing machine-checkable enterprise-remote spec-gap record"]
+    try:
+        gap = _load(path)
+    except (json.JSONDecodeError, OSError) as exc:
+        return [f"invalid enterprise-remote spec-gap record: {exc}"]
+
+    if gap.get("schemaVersion") != 1:
+        errors.append("enterprise-remote spec-gap schemaVersion must be 1")
+    if gap.get("status") != "searched-no-qualifying-in-surface-spec":
+        errors.append("enterprise-remote spec-gap status drifted")
+    if gap.get("surfaceId") != ENTERPRISE_REMOTE_SURFACE:
+        errors.append("enterprise-remote spec-gap surfaceId drifted")
+    if gap.get("repositoryId") != "opencode" or gap.get("repository") != "anomalyco/opencode":
+        errors.append("enterprise-remote spec-gap repository identity drifted")
+    if gap.get("residualStoryIds") != list(ENTERPRISE_REMOTE_GAP_STORIES):
+        errors.append("enterprise-remote residual story set drifted")
+    if gap.get("missingKinds") != ["spec"]:
+        errors.append("enterprise-remote expected missing evidence kind must remain spec")
+    if gap.get("requiredDecompositionPartitions") != list(ENTERPRISE_REMOTE_REQUIRED_PARTITIONS):
+        errors.append("enterprise-remote required decomposition partitions drifted")
+
+    lock = _load(root / "sources/upstream.lock.json")
+    locked = next((item for item in lock.get("repositories", []) if item.get("id") == "opencode"), None)
+    locked_commit = str(locked.get("commit", "")) if isinstance(locked, Mapping) else ""
+    if not locked_commit or gap.get("commit") != locked_commit:
+        errors.append("enterprise-remote negative evidence is not bound to the locked OpenCode commit")
+
+    rules = _load(root / "sources/behavior-surface-rules.json")
+    surface_rule = next((item for item in rules.get("rules", []) if item.get("id") == ENTERPRISE_REMOTE_SURFACE), None)
+    expected_patterns = list(surface_rule.get("patterns", [])) if isinstance(surface_rule, Mapping) else []
+    if not expected_patterns or gap.get("rulePatterns") != expected_patterns:
+        errors.append("enterprise-remote negative evidence rule patterns drifted from behavior-surface rules")
+
+    searched_trees = gap.get("searchedTrees")
+    expected_trees = [
+        {"path": "packages/enterprise", "treeSha": "de3cbb958ad0ef982f5922c8d9ac7ea7100ff4aa"},
+        {"path": "packages/function", "treeSha": "19db2fcad6271bb67d6331a3c2069b416ea636af"},
+    ]
+    if searched_trees != expected_trees:
+        errors.append("enterprise-remote searched subtree pins drifted")
+
+    reviewed = {
+        str(item.get("id", "")): item
+        for item in reconciliation.get("reviewedSurfaces", [])
+        if isinstance(item, Mapping)
+    }
+    surface = reviewed.get(ENTERPRISE_REMOTE_SURFACE)
+    if surface is None:
+        errors.append("enterprise-remote reconciliation row is missing")
+    else:
+        evidence = surface.get("evidence")
+        if not isinstance(evidence, Mapping):
+            errors.append("enterprise-remote reconciliation evidence is missing")
+        else:
+            if evidence.get("spec") != []:
+                errors.append(
+                    "enterprise-remote spec evidence must remain empty until the negative-spec record is intentionally resolved"
+                )
+            live_runtime_ids = [
+                str(ref.get("evidenceId", ""))
+                for kind in ("source", "caller", "test")
+                for ref in evidence.get(kind, []) if isinstance(ref, Mapping)
+            ]
+            if gap.get("reviewedRuntimeEvidenceIds") != live_runtime_ids:
+                errors.append("enterprise-remote reviewed runtime evidence ids drifted")
+
+    expected_gap = [{"surfaceId": ENTERPRISE_REMOTE_SURFACE, "missingKinds": ["spec"]}]
+    actual_gap_rows = {
+        str(row.get("id", "")): row.get("surfaceEvidenceGaps")
+        for row in rows
+        if isinstance(row, Mapping) and row.get("surfaceEvidenceGaps")
+    }
+    wanted_gap_rows = {story_id: expected_gap for story_id in ENTERPRISE_REMOTE_GAP_STORIES}
+    if actual_gap_rows != wanted_gap_rows:
+        errors.append(
+            "residual per-surface evidence gaps must remain exactly INT-010/SHARE-003/WEB-004 -> enterprise-remote spec"
+        )
+
+    candidates = gap.get("rejectedCandidates")
+    expected_candidates = {
+        "packages/enterprise/README.md": (
+            "9337430cfd31be33675b8e7336b9260906e98440", 1, 32,
+        ),
+        "packages/enterprise/src/routes/api/[...path].ts": (
+            "4677d68d33c48c6a030ae66100d59823fc241aa9", 16, 155,
+        ),
+        "packages/enterprise/package.json": (
+            "9d61ae5eacfd8702f446da9fe8b33d384d60e906", 1, 46,
+        ),
+        "packages/function/package.json": (
+            "7d9bc6548b66027e1c5fc17f0067175d8b208a1c", 1, 23,
+        ),
+        "packages/enterprise/sst-env.d.ts": (
+            "64441936d7a02748b870556190c893d73e560948", 1, 10,
+        ),
+        "packages/function/sst-env.d.ts": (
+            "64441936d7a02748b870556190c893d73e560948", 1, 10,
+        ),
+    }
+    if not isinstance(candidates, list) or not candidates:
+        errors.append("enterprise-remote spec-gap record must retain rejected in-surface candidates")
+    else:
+        seen_paths: set[str] = set()
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                errors.append("enterprise-remote rejected candidate must be an object")
+                continue
+            candidate_path = candidate.get("path")
+            if not isinstance(candidate_path, str) or not candidate_path:
+                errors.append("enterprise-remote rejected candidate is missing path")
+                continue
+            if candidate_path in seen_paths:
+                errors.append(f"enterprise-remote rejected candidate is duplicated: {candidate_path}")
+            seen_paths.add(candidate_path)
+            if not _surface_path_matches(candidate_path, expected_patterns):
+                errors.append(f"enterprise-remote rejected candidate escaped surface rule: {candidate_path}")
+            if not re.fullmatch(r"[0-9a-f]{40}", str(candidate.get("blobSha", ""))):
+                errors.append(f"enterprise-remote rejected candidate lacks pinned blob SHA: {candidate_path}")
+            reviewed_lines = candidate.get("reviewedLines")
+            if (
+                not isinstance(reviewed_lines, Mapping)
+                or not isinstance(reviewed_lines.get("from"), int)
+                or not isinstance(reviewed_lines.get("to"), int)
+                or reviewed_lines["from"] < 1
+                or reviewed_lines["to"] < reviewed_lines["from"]
+            ):
+                errors.append(f"enterprise-remote rejected candidate lacks reviewed line range: {candidate_path}")
+            if not str(candidate.get("reason", "")).strip():
+                errors.append(f"enterprise-remote rejected candidate lacks insufficiency reason: {candidate_path}")
+        if seen_paths != set(expected_candidates):
+            errors.append("enterprise-remote rejected candidate inventory drifted")
+        for candidate in candidates:
+            if not isinstance(candidate, Mapping):
+                continue
+            candidate_path = candidate.get("path")
+            expected = expected_candidates.get(str(candidate_path))
+            if expected is None:
+                continue
+            blob_sha, first_line, last_line = expected
+            reviewed_lines = candidate.get("reviewedLines")
+            if candidate.get("blobSha") != blob_sha:
+                errors.append(f"enterprise-remote rejected candidate blob drifted: {candidate_path}")
+            if not isinstance(reviewed_lines, Mapping) or reviewed_lines.get("from") != first_line or reviewed_lines.get("to") != last_line:
+                errors.append(f"enterprise-remote rejected candidate reviewed range drifted: {candidate_path}")
+
+    history = gap.get("historyReview")
+    if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit":
+        errors.append("enterprise-remote history-review limitation drifted")
+    elif not str(history.get("limitation", "")).strip():
+        errors.append("enterprise-remote history-review limitation is missing")
+    if "qualifying specification" not in str(gap.get("closure", "")):
+        errors.append("enterprise-remote spec-gap closure condition drifted")
+    return errors
+
+
 def sync_features_status(root: pathlib.Path = ROOT) -> None:
     """Synchronize only the generated status mirrors in FEATURES.md from Ralph."""
     plan = _load(root / "ralph.json")
@@ -484,6 +669,7 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
     progress_text = (root / "workspaces/DISC-003/progress.md").read_text(encoding="utf-8")
     errors.extend(disc_status_errors(reconciliation, manifest, source_map, task_text, progress_text))
     errors.extend(residual_evidence_kind_errors(rows, reconciliation))
+    errors.extend(enterprise_remote_gap_errors(rows, reconciliation, root))
 
     errors.extend(_features_status_errors(root, plan))
     return errors

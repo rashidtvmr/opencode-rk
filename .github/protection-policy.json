@@ -41,6 +41,7 @@
       "sources/disc-003-evidence.json",
       "sources/disc-003-reconciliation.json",
       "sources/disc-003-reconciliation.manifest.json",
+      "sources/enterprise-remote-spec-gap.json",
       "sources/evidence.json",
       "sources/upstream.lock.json",
       "tasks/DISC-003.md",

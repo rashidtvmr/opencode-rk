@@ -11,6 +11,7 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     CATEGORY_IDS,
     build_expected_ledger,
     disc_status_errors,
+    enterprise_remote_gap_errors,
     residual_evidence_kind_errors,
     surface_evidence_gaps,
     validate_ledger,
@@ -113,6 +114,25 @@ class BacklogExhaustionTests(unittest.TestCase):
             surface_evidence_gaps(["opencode.enterprise-remote"], weakened),
             [{"surfaceId": "opencode.enterprise-remote", "missingKinds": ["caller", "spec"]}],
         )
+
+    def test_enterprise_remote_negative_spec_result_is_exact_and_fail_closed(self):
+        ledger = load_ledger()
+        reconciliation = json.loads((ROOT / "sources/disc-003-reconciliation.json").read_text(encoding="utf-8"))
+        self.assertEqual(enterprise_remote_gap_errors(ledger["stories"], reconciliation, ROOT), [])
+
+        with self.subTest("unrelated spec cannot silently fill the gap"):
+            changed = copy.deepcopy(reconciliation)
+            surface = next(row for row in changed["reviewedSurfaces"] if row["id"] == "opencode.enterprise-remote")
+            surface["evidence"]["spec"] = [{"evidenceId": "OC-CLIENT-SPEC"}]
+            errors = enterprise_remote_gap_errors(ledger["stories"], changed, ROOT)
+            self.assertTrue(any("spec evidence must remain empty" in error for error in errors))
+
+        with self.subTest("residual gap set cannot silently shrink"):
+            changed_rows = copy.deepcopy(ledger["stories"])
+            row = next(item for item in changed_rows if item["id"] == "WEB-004")
+            row["surfaceEvidenceGaps"] = []
+            errors = enterprise_remote_gap_errors(changed_rows, reconciliation, ROOT)
+            self.assertTrue(any("must remain exactly" in error for error in errors))
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())
