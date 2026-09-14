@@ -4,6 +4,7 @@
 pub mod auth;
 pub mod budget;
 pub mod config;
+pub mod cost;
 pub mod debug_export;
 pub mod fallback;
 pub mod health;
