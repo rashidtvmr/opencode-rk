@@ -1,0 +1,523 @@
+{
+  "schemaVersion": 1,
+  "status": "source-reviewed-no-exact-task-owner",
+  "repositoryId": "opencode",
+  "repository": "anomalyco/opencode",
+  "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+  "treeSha": "b17683f6fb570317083ee8f62bd136435c023270",
+  "storyIds": [
+    "OPS-001",
+    "OPS-002",
+    "OPS-003",
+    "OPS-004",
+    "OPS-005",
+    "OPS-006",
+    "OPS-008"
+  ],
+  "storySurfaceSignatures": {
+    "OPS-001": [
+      "opencode.configuration-runtime"
+    ],
+    "OPS-002": [
+      "opencode.repository-operations"
+    ],
+    "OPS-003": [
+      "opencode.repository-operations"
+    ],
+    "OPS-004": [
+      "opencode.configuration-runtime",
+      "opencode.repository-operations"
+    ],
+    "OPS-005": [
+      "opencode.configuration-runtime"
+    ],
+    "OPS-006": [
+      "opencode.repository-operations"
+    ],
+    "OPS-008": [
+      "opencode.configuration-runtime",
+      "opencode.repository-operations"
+    ]
+  },
+  "equivalenceGroups": [
+    {
+      "id": "configuration-only",
+      "storyIds": [
+        "OPS-001",
+        "OPS-005"
+      ],
+      "surfaceSignature": [
+        "opencode.configuration-runtime"
+      ]
+    },
+    {
+      "id": "repository-only",
+      "storyIds": [
+        "OPS-002",
+        "OPS-003",
+        "OPS-006"
+      ],
+      "surfaceSignature": [
+        "opencode.repository-operations"
+      ]
+    },
+    {
+      "id": "configuration-and-repository",
+      "storyIds": [
+        "OPS-004",
+        "OPS-008"
+      ],
+      "surfaceSignature": [
+        "opencode.configuration-runtime",
+        "opencode.repository-operations"
+      ]
+    }
+  ],
+  "ownershipDecision": {
+    "OPS-001": null,
+    "OPS-002": null,
+    "OPS-003": null,
+    "OPS-004": null,
+    "OPS-005": null,
+    "OPS-006": null,
+    "OPS-008": null
+  },
+  "taskBindingState": {
+    "OPS-001": {
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-001",
+        "REQ-024",
+        "REQ-032"
+      ],
+      "taskCard": null,
+      "worklog": null,
+      "conclusion": "The requirements describe broad Rust/Tokio resource savings, lightweight operation and disabled-feature cost. They do not select one configuration-runtime source contract or distinguish OPS-001 from OPS-005."
+    },
+    "OPS-002": {
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "OPS-003": {
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "OPS-004": {
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "OPS-005": {
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "OPS-006": {
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "OPS-008": {
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    }
+  },
+  "surfaceRulePatterns": {
+    "opencode.configuration-runtime": [
+      "packages/core/src/config.ts",
+      "packages/core/src/config/**",
+      "packages/core/src/flag/**",
+      "packages/core/src/global.ts",
+      "packages/core/src/installation/**",
+      "packages/core/src/npm-config.ts",
+      "packages/core/src/location*",
+      "packages/core/src/state.ts",
+      "packages/core/src/control-plane/**"
+    ],
+    "opencode.repository-operations": [
+      "packages/core/src/repository.ts",
+      "packages/core/src/repository-cache.ts",
+      "packages/core/src/git.ts",
+      "packages/core/src/observability.ts",
+      "packages/core/src/observability/**",
+      "packages/core/src/installation/**",
+      "packages/containers/**"
+    ]
+  },
+  "acceptedSurfaceOwners": [
+    {
+      "id": "BASE-004",
+      "controllerStatus": "accepted",
+      "note": "Existing singleton-daemon/PID-lock behavior is closed and cannot be re-owned through configuration-runtime subtraction."
+    },
+    {
+      "id": "BASE-005",
+      "controllerStatus": "accepted",
+      "note": "Existing many-client/server foundation behavior is closed even though no local task card is used here to infer an upstream path partition."
+    },
+    {
+      "id": "BASE-006",
+      "controllerStatus": "accepted",
+      "note": "Typed layered configuration and feature flags are closed; residual OpenCode config discovery is not automatically an OPS owner."
+    },
+    {
+      "id": "BASE-007",
+      "controllerStatus": "accepted",
+      "note": "Runtime lifecycle-manager behavior is closed and must not be reopened through source-family overlap."
+    },
+    {
+      "id": "BASE-008",
+      "controllerStatus": "accepted",
+      "note": "The existing EffectRunner adapter is closed; configuration-runtime membership does not authorize a second generic runtime adapter."
+    }
+  ],
+  "frozenCrossSurfaceOwners": [
+    {
+      "id": "INT-002",
+      "reasonKey": "repository-contract-mixes-side-effects"
+    },
+    {
+      "id": "OPS-007",
+      "reasonKey": "effect-runtime-cross-surface-ownership"
+    },
+    {
+      "id": "OPS-009",
+      "reasonKey": "recorder-cross-surface-side-effects"
+    }
+  ],
+  "reviewedPartitions": [
+    {
+      "id": "configuration-discovery-and-policy",
+      "surfaceIds": [
+        "opencode.configuration-runtime"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/config.ts",
+          "blobSha": "c76486968b0784d57dab102e2d51a7e18f57b7f5",
+          "reviewedLines": {
+            "from": 122,
+            "to": 217
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/config/config.test.ts",
+          "blobSha": "c3c42cab3022844a27a95a8381c16ed4c4b54ba0",
+          "reviewedLines": {
+            "from": 146,
+            "to": 785
+          }
+        }
+      ],
+      "behavior": "Location-scoped config discovery reads global/project/.opencode documents once, applies specificity ordering and loads policy rules.",
+      "sideEffects": [
+        "filesystem-discovery-and-read",
+        "policy-service-mutation",
+        "location-lifetime-cache"
+      ],
+      "ownershipBlocker": "OPS-001 and OPS-005 have the same live surface signature; accepted BASE configuration/lifecycle owners also overlap this surface, and no task-specific source binding chooses this partition."
+    },
+    {
+      "id": "scoped-replayable-state-transforms",
+      "surfaceIds": [
+        "opencode.configuration-runtime"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/state.ts",
+          "blobSha": "ab3457fc18143c10d830979dbde3a9375e194ccf",
+          "reviewedLines": {
+            "from": 29,
+            "to": 127
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/state.test.ts",
+          "blobSha": "505cd724e7e324e665d195d950fc36b517fe53ad",
+          "reviewedLines": {
+            "from": 8,
+            "to": 114
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/core/src/reference.ts",
+          "blobSha": "1e1ab9d20f758ca00996c22a9c2b77eade563998",
+          "reviewedLines": {
+            "from": 27,
+            "to": 115
+          }
+        }
+      ],
+      "behavior": "State.create serializes materialization, composes scoped transforms, removes them on scope finalization and supports batched reload coalescing.",
+      "sideEffects": [
+        "in-memory-mutable-state",
+        "scope-finalizer-lifetime",
+        "serialized-reload"
+      ],
+      "ownershipBlocker": "This reusable runtime primitive is consumed by other domains; no residual OPS task names or owns it."
+    },
+    {
+      "id": "location-service-map-cache",
+      "surfaceIds": [
+        "opencode.configuration-runtime"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/location-services.ts",
+          "blobSha": "7da67673c31982abafc856f34fb52a2c82891525",
+          "reviewedLines": {
+            "from": 42,
+            "to": 115
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/core/src/effect/app-node-builder.ts",
+          "blobSha": "5f01469dab09ed0e690f6931d9127659fa721821",
+          "reviewedLines": {
+            "from": 1,
+            "to": 23
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/location-layer.test.ts",
+          "blobSha": "e28e758c87b8d29d1cb5854e6541ab426aa2e472",
+          "reviewedLines": {
+            "from": 39,
+            "to": 62
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/v2/session.md",
+          "blobSha": "f3c4211c6c6059e158e4209003270b4d125e8c71",
+          "reviewedLines": {
+            "from": 39,
+            "to": 49
+          }
+        }
+      ],
+      "behavior": "A location-keyed service graph is hoisted/compiled with replacements and retained by LayerMap with a 60-minute idle TTL.",
+      "sideEffects": [
+        "service-graph-resource-lifetime",
+        "location-keyed-cache",
+        "time-based-idle-eviction"
+      ],
+      "ownershipBlocker": "The Session spec defines Location service lifetime, not a residual OPS story. Assigning it to OPS-001/005/004/008 from membership would invent task ownership."
+    },
+    {
+      "id": "global-npm-installation-bootstrap",
+      "surfaceIds": [
+        "opencode.configuration-runtime",
+        "opencode.repository-operations"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/global.ts",
+          "blobSha": "a192a4b4684fe2dc308665f3d3fa64c866bf8ccc",
+          "reviewedLines": {
+            "from": 10,
+            "to": 85
+          }
+        },
+        {
+          "kind": "source",
+          "path": "packages/core/src/npm-config.ts",
+          "blobSha": "896bb84872c1ffce95a81d6562214468769dcab3",
+          "reviewedLines": {
+            "from": 12,
+            "to": 40
+          }
+        },
+        {
+          "kind": "source",
+          "path": "packages/core/src/installation/version.ts",
+          "blobSha": "25d9cd99aa6c0e4110a3efba8696c36bfcfaadb1",
+          "reviewedLines": {
+            "from": 1,
+            "to": 8
+          }
+        }
+      ],
+      "behavior": "Global bootstrap derives XDG/process paths and creates runtime directories; npm configuration reads process environment; the reviewed installation slice is only version/channel metadata.",
+      "sideEffects": [
+        "import-time-filesystem-mutation",
+        "process-environment-read",
+        "global-lock-path-configuration"
+      ],
+      "ownershipBlocker": "This evidence crosses process bootstrap/configuration and only a small part of installation. It cannot distinguish either identical residual OPS group or authorize the unreviewed installation remainder."
+    },
+    {
+      "id": "repository-reference-normalization",
+      "surfaceIds": [
+        "opencode.repository-operations"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/repository.ts",
+          "blobSha": "8ee5be600e3a4284092cb525dfa401a31dbb2075",
+          "reviewedLines": {
+            "from": 57,
+            "to": 137
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/repository.test.ts",
+          "blobSha": "1a6af675d12b8066ff71eeb9885f6592c1f51c63",
+          "reviewedLines": {
+            "from": 7,
+            "to": 70
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/core/src/reference.ts",
+          "blobSha": "1e1ab9d20f758ca00996c22a9c2b77eade563998",
+          "reviewedLines": {
+            "from": 75,
+            "to": 103
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/v2/config.md",
+          "blobSha": "96b0f3ac901f6cd67bb9f3250940ab1bff3ce102",
+          "reviewedLines": {
+            "from": 73,
+            "to": 84
+          }
+        }
+      ],
+      "behavior": "Repository references normalize supported forms, reject unsafe branches and derive branch-isolated cache paths/identities before materialization.",
+      "sideEffects": [
+        "github-default-remote-may-read-process-environment"
+      ],
+      "ownershipBlocker": "This is the strongest small strict-TDD-friendly fragment, but repository-operations maps the same source family to OPS-002/003/004/006/008 and no task/path evidence chooses one."
+    },
+    {
+      "id": "repository-cache-materialization",
+      "surfaceIds": [
+        "opencode.repository-operations"
+      ],
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/repository-cache.ts",
+          "blobSha": "cab2f631ffb84c7df07dfe95dd6a25d8396b1d6d",
+          "reviewedLines": {
+            "from": 100,
+            "to": 230
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/repository-cache.test.ts",
+          "blobSha": "4433583bf7874f0d470baaebdf56887717bf49a9",
+          "reviewedLines": {
+            "from": 1,
+            "to": 153
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/core/src/reference.ts",
+          "blobSha": "1e1ab9d20f758ca00996c22a9c2b77eade563998",
+          "reviewedLines": {
+            "from": 75,
+            "to": 103
+          }
+        }
+      ],
+      "behavior": "RepositoryCache serializes checkout materialization behind a file lock and performs stale removal, clone/fetch/checkout/reset plus Git-derived result projection.",
+      "sideEffects": [
+        "filesystem-mutation",
+        "git-network-transport",
+        "cross-process-file-lock",
+        "background-scope-lifetime"
+      ],
+      "ownershipBlocker": "The contract violates the authorized no-network boundary and remains shared across multiple residual OPS ids plus frozen INT-002/OPS-007/OPS-009 overlap."
+    }
+  ],
+  "unresolvedRulePartitions": {
+    "opencode.configuration-runtime": [
+      "packages/core/src/config/**",
+      "packages/core/src/flag/**",
+      "packages/core/src/installation/** beyond reviewed version metadata",
+      "packages/core/src/control-plane/**"
+    ],
+    "opencode.repository-operations": [
+      "packages/core/src/git.ts",
+      "packages/core/src/observability.ts and packages/core/src/observability/**",
+      "packages/core/src/installation/** beyond reviewed version metadata",
+      "packages/containers/**"
+    ]
+  },
+  "candidateFragments": [
+    {
+      "id": "repository-reference-normalization",
+      "inputs": "repository reference string, optional branch and cache root",
+      "outputs": "normalized reference, typed validation failure, branch-isolated cache path and stable cache identity",
+      "failureSemantics": "invalid references and unsafe branches are rejected deterministically; parser returns absence for unsupported malformed forms",
+      "stateLifetime": "none for validation/cache identity; GitHub default remote construction can consult process environment",
+      "resourceLifetime": "bounded input strings and path construction only",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "OPS-002/003/006 have identical repository-only surface signatures.",
+        "OPS-004/008 also include this surface and are mutually indistinguishable.",
+        "No task card, worklog, requirement or pinned task/path specification selects this fragment for one OPS id."
+      ]
+    },
+    {
+      "id": "scoped-replayable-state-transforms",
+      "inputs": "initial state factory, draft adapter, optional finalizer and scoped transform callbacks",
+      "outputs": "materialized current state plus transform registration/disposal and explicit reload",
+      "failureSemantics": "transform failures are converted to fatal Effect failure in the upstream primitive; reloads are serialized",
+      "stateLifetime": "in-memory state and transform list live with the service; each transform lives with its owning Scope",
+      "resourceLifetime": "single in-memory semaphore plus batched reload set",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "The primitive is a reusable caller-neutral runtime mechanism rather than a task-specific OPS contract.",
+        "OPS-001 and OPS-005 are surface-identical and OPS-004/008 also overlap configuration-runtime.",
+        "Accepted BASE runtime/configuration owners remain closed and cannot be reassigned by subtraction."
+      ]
+    }
+  ],
+  "unresolvedPartitions": [
+    "configuration-discovery-policy-and-location-lifetime",
+    "scoped-state-transform-registration-disposal-and-reload",
+    "location-service-map-cache-and-idle-eviction",
+    "global-npm-installation-process-side-effects",
+    "repository-reference-normalization-and-cache-identity",
+    "repository-cache-git-filesystem-lock-lifecycle",
+    "repository-observability-installation-and-container-remainder"
+  ],
+  "historyReview": {
+    "state": "locked-checkout-grafted-at-pinned-commit",
+    "limitation": "The pinned local OpenCode checkout exposes the locked commit but is not used to infer missing task ownership from unavailable historical intent."
+  },
+  "closureCriteria": [
+    "An OPS-001/002/003/004/005/006/008 ownership change requires new pinned task-specific source/path evidence, not surface subtraction, equivalence-group membership, requirement arithmetic or task-number inference.",
+    "The candidate must have direct task-specific source, caller, test and genuine specification evidence with explicit inputs, outputs, failure semantics, state/resource lifetime and bounded authority.",
+    "Accepted BASE owners and frozen INT-002/OPS-007/OPS-009 contracts must remain excluded; no candidate may silently require network, credentials, user-DB mutation, UI/browser state, process mutation or unapproved dependencies.",
+    "Every unresolved partition and unresolved rule remainder must receive a source-grounded task disposition or remain explicitly blocked before an operations family can be called exhausted."
+  ]
+}

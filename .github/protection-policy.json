@@ -43,6 +43,8 @@
       "sources/disc-003-reconciliation.manifest.json",
       "sources/enterprise-remote-spec-gap.json",
       "sources/evidence.json",
+      "sources/operations-ownership-gap.json",
+      "sources/release-assurance-gap.json",
       "sources/routing-ownership-gap.json",
       "sources/upstream.lock.json",
       "tasks/DISC-003.md",

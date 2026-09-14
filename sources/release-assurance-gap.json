@@ -1,0 +1,176 @@
+{
+  "schemaVersion": 1,
+  "status": "declarative-assurance-no-product-owner",
+  "storyIds": [
+    "REL-001",
+    "REL-002",
+    "REL-003"
+  ],
+  "nativeProductOwner": false,
+  "ownershipDecision": {
+    "REL-001": null,
+    "REL-002": null,
+    "REL-003": null
+  },
+  "storySurfaceSignatures": {
+    "REL-001": [],
+    "REL-002": [],
+    "REL-003": []
+  },
+  "taskBindingState": {
+    "REL-001": {
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-003"
+      ],
+      "taskCard": null,
+      "worklog": null
+    },
+    "REL-002": {
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-004",
+        "REQ-035"
+      ],
+      "taskCard": null,
+      "worklog": null
+    },
+    "REL-003": {
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-035"
+      ],
+      "taskCard": null,
+      "worklog": null
+    }
+  },
+  "requirementTopology": {
+    "REQ-003": {
+      "requirement": "Every OpenCode V2 feature accounted for",
+      "tasks": [
+        "DISC-001",
+        "DISC-010",
+        "REL-001"
+      ]
+    },
+    "REQ-004": {
+      "requirement": "Strict TDD and independent verification",
+      "tasks": [
+        "AUTO-002",
+        "AUTO-005",
+        "REL-002"
+      ]
+    },
+    "REQ-035": {
+      "requirement": "Preserve safety and resource correctness rather than blindly translate files",
+      "tasks": [
+        "DISC-008",
+        "SEC-017",
+        "REL-002",
+        "REL-003"
+      ]
+    }
+  },
+  "localPolicyEvidence": [
+    {
+      "path": "PLAN.md",
+      "sha256": "ab825a9335d62da0bec26c71bcf156d3399a609c7f8adb13a7853e646746c85a",
+      "reviewedLines": {
+        "from": 157,
+        "to": 180
+      },
+      "conclusion": "Large unrelated contracts must be split; strict RED/GREEN applies to slices; declarative/discovery work still requires executable validators and a failing fixture rather than invented product tests."
+    },
+    {
+      "path": "docs/TDD.md",
+      "sha256": "8d2baa833e3fe153718cd66abed1ad34957ea9eca7efab80be5778ec036921df",
+      "reviewedLines": {
+        "from": 45,
+        "to": 63
+      },
+      "conclusion": "RED must compile and execute; declarative/discovery tasks use executable validators plus a captured failing fixture, not fabricated Rust product behavior."
+    },
+    {
+      "path": "docs/SECURITY.md",
+      "sha256": "a360f630df59247c7ca917e59f6258b7aa3dea2ad1c9aafc4dbbb5bedcb0e705",
+      "reviewedLines": {
+        "from": 20,
+        "to": 32
+      },
+      "conclusion": "Resource and safety assertions remain deterministic, bounded and fixture-based; no user database mutation or destructive host testing is permitted."
+    }
+  ],
+  "alreadyOwnedRequirementPartitions": [
+    {
+      "requirementId": "REQ-003",
+      "owners": [
+        "DISC-001",
+        "DISC-010"
+      ],
+      "disposition": "Controller-accepted discovery/source-accounting owners exist; REL-001 has no separate behavior surface or source contract that creates a native product module."
+    },
+    {
+      "requirementId": "REQ-004",
+      "owners": [
+        "AUTO-002"
+      ],
+      "blockedOwners": [
+        "AUTO-005"
+      ],
+      "disposition": "Strict-TDD workflow is already defined by repository policy and automation ownership; frozen AUTO-005 is not reopened through REL-002."
+    },
+    {
+      "requirementId": "REQ-035",
+      "owners": [
+        "DISC-008",
+        "SEC-017"
+      ],
+      "residualOwners": [
+        "REL-002",
+        "REL-003"
+      ],
+      "disposition": "Safety/resource-correctness policy is shared; the two residual REL ids are not distinguishable by source, surface, task card or requirement wording."
+    }
+  ],
+  "requiredDeclarativePartitions": [
+    "release-feature-accounting-validator",
+    "strict-tdd-independent-verification-validator",
+    "safety-resource-correctness-release-validator"
+  ],
+  "candidateValidatorContracts": [
+    {
+      "id": "feature-accounting-release-check",
+      "inputs": "canonical plan, requirements, source reconciliation, backlog exhaustion ledger and controller statuses",
+      "outputs": "machine-verifiable proof that every required feature is accounted for without converting local evidence into controller acceptance",
+      "failureSemantics": "nonzero validation with a concrete missing/misclassified feature fixture",
+      "stateLifetime": "read-only repository snapshot",
+      "resourceLifetime": "bounded local files and deterministic validator execution",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "REL-001 has no task card or direct validator contract.",
+        "DISC-001/DISC-010 already own source-accounting requirements and current validators cover substantial portions of the same assurance space.",
+        "A new REL validator must be source-grounded and must not duplicate an existing check solely to make the numeric task appear implemented."
+      ]
+    },
+    {
+      "id": "release-safety-and-tdd-check",
+      "inputs": "frozen test manifests, independent verification results, security/resource gates and release candidate revision",
+      "outputs": "deterministic pass/fail release assurance with attributable failing fixture",
+      "failureSemantics": "nonzero validation on missing RED/GREEN proof, mutable frozen evidence, unsafe resource behavior or unverified release state",
+      "stateLifetime": "one exact candidate revision and its immutable evidence set",
+      "resourceLifetime": "bounded validator/test execution with no host-destructive or user-DB mutation",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "REL-002 and REL-003 share REQ-035 and have no source/surface distinction.",
+        "REQ-004 also overlaps accepted AUTO-002 and frozen AUTO-005, so residual arithmetic cannot identify REL-002 semantics.",
+        "Repository policy requires a failing executable validator fixture before declarative assurance can be claimed."
+      ]
+    }
+  ],
+  "closureCriteria": [
+    "Do not create a Rust product module for REL-001/002/003 unless new source-grounded product semantics and ownership appear; current rows are release/declarative assurance only.",
+    "Each REL ownership change requires an explicit task-specific declarative validator contract, executable failing fixture, expected outputs/failures and exact evidence lifetime rather than requirement subtraction or task-number inference.",
+    "Existing DISC/AUTO/SEC ownership and frozen blockers remain excluded; a new validator must add a distinct release guarantee instead of duplicating an already enforced invariant.",
+    "The three required declarative partitions must be assigned by explicit task evidence or remain unresolved; empty behavior-surface membership is not proof that any particular validator belongs to a REL id."
+  ]
+}

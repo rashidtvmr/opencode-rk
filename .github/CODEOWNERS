@@ -45,6 +45,8 @@
 /sources/disc-003-reconciliation.json @rashidtvmr
 /sources/disc-003-reconciliation.manifest.json @rashidtvmr
 /sources/evidence.json @rashidtvmr
+/sources/operations-ownership-gap.json @rashidtvmr
+/sources/release-assurance-gap.json @rashidtvmr
 /sources/routing-ownership-gap.json @rashidtvmr
 /sources/upstream.lock.json @rashidtvmr
 /tasks/DISC-003.md @rashidtvmr

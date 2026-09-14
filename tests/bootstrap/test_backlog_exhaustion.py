@@ -12,6 +12,8 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     build_expected_ledger,
     disc_status_errors,
     enterprise_remote_gap_errors,
+    operations_ownership_gap_errors,
+    release_assurance_gap_errors,
     residual_evidence_kind_errors,
     routing_ownership_gap_errors,
     surface_evidence_gaps,
@@ -175,6 +177,62 @@ class BacklogExhaustionTests(unittest.TestCase):
             changed = copy.deepcopy(original_gap)
             changed["adjacentSingletonChecks"][0]["ownershipEstablished"] = True
             self.assertTrue(any("EXT-005: adjacent singleton ownership must remain unresolved" in error for error in errors_for(changed)))
+
+    def test_operations_and_release_ownership_gaps_are_exact_and_fail_closed(self):
+        ledger = load_ledger()
+        self.assertEqual(operations_ownership_gap_errors(ledger["stories"], ROOT), [])
+        self.assertEqual(release_assurance_gap_errors(ledger["stories"], ROOT), [])
+
+        operations_path = ROOT / "sources/operations-ownership-gap.json"
+        release_path = ROOT / "sources/release-assurance-gap.json"
+        original_operations = json.loads(operations_path.read_text(encoding="utf-8"))
+        original_release = json.loads(release_path.read_text(encoding="utf-8"))
+
+        def operation_errors_for(changed_gap):
+            from tools import validate_backlog_exhaustion as module
+
+            original_load = module._load
+
+            def fake_load(path):
+                if pathlib.Path(path) == operations_path:
+                    return changed_gap
+                return original_load(path)
+
+            with mock.patch("tools.validate_backlog_exhaustion._load", side_effect=fake_load):
+                return operations_ownership_gap_errors(ledger["stories"], ROOT)
+
+        def release_errors_for(changed_gap):
+            from tools import validate_backlog_exhaustion as module
+
+            original_load = module._load
+
+            def fake_load(path):
+                if pathlib.Path(path) == release_path:
+                    return changed_gap
+                return original_load(path)
+
+            with mock.patch("tools.validate_backlog_exhaustion._load", side_effect=fake_load):
+                return release_assurance_gap_errors(ledger["stories"], ROOT)
+
+        with self.subTest("operations fragment cannot be assigned by residual arithmetic"):
+            changed = copy.deepcopy(original_operations)
+            changed["candidateFragments"][0]["ownershipEstablished"] = True
+            self.assertTrue(any("cannot become owned from residual arithmetic" in error for error in operation_errors_for(changed)))
+
+        with self.subTest("surface-equivalent operations stories cannot silently diverge"):
+            changed = copy.deepcopy(original_operations)
+            changed["storySurfaceSignatures"]["OPS-005"] = []
+            self.assertTrue(any("OPS-005: operations ownership-gap surface signature drifted" in error for error in operation_errors_for(changed)))
+
+        with self.subTest("release assurance cannot become a native product owner"):
+            changed = copy.deepcopy(original_release)
+            changed["nativeProductOwner"] = True
+            self.assertTrue(any("must remain declarative with no native product owner" in error for error in release_errors_for(changed)))
+
+        with self.subTest("release validator cannot be assigned by requirement arithmetic"):
+            changed = copy.deepcopy(original_release)
+            changed["candidateValidatorContracts"][0]["ownershipEstablished"] = True
+            self.assertTrue(any("cannot become owned from requirement arithmetic" in error for error in release_errors_for(changed)))
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())

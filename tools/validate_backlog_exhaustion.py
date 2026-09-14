@@ -9,6 +9,7 @@ explicit source-backed edit.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import pathlib
 import re
@@ -44,6 +45,35 @@ ROUTING_UNRESOLVED_PARTITIONS = (
     "dashboard-settings-security-and-runtime-side-effects",
     "routing-provider-specific-quota-proxy-and-credential-runtime",
     "combo-stream-provider-execution-and-token-refresh",
+)
+OPERATIONS_OWNERSHIP_GAP_PATH = ROOT / "sources/operations-ownership-gap.json"
+OPERATIONS_GAP_STORIES = ("OPS-001", "OPS-002", "OPS-003", "OPS-004", "OPS-005", "OPS-006", "OPS-008")
+OPERATIONS_EQUIVALENCE_GROUPS = (
+    ("configuration-only", ("OPS-001", "OPS-005"), ("opencode.configuration-runtime",)),
+    ("repository-only", ("OPS-002", "OPS-003", "OPS-006"), ("opencode.repository-operations",)),
+    (
+        "configuration-and-repository",
+        ("OPS-004", "OPS-008"),
+        ("opencode.configuration-runtime", "opencode.repository-operations"),
+    ),
+)
+OPERATIONS_ACCEPTED_OWNERS = ("BASE-004", "BASE-005", "BASE-006", "BASE-007", "BASE-008")
+OPERATIONS_FROZEN_OWNERS = ("INT-002", "OPS-007", "OPS-009")
+OPERATIONS_UNRESOLVED_PARTITIONS = (
+    "configuration-discovery-policy-and-location-lifetime",
+    "scoped-state-transform-registration-disposal-and-reload",
+    "location-service-map-cache-and-idle-eviction",
+    "global-npm-installation-process-side-effects",
+    "repository-reference-normalization-and-cache-identity",
+    "repository-cache-git-filesystem-lock-lifecycle",
+    "repository-observability-installation-and-container-remainder",
+)
+RELEASE_ASSURANCE_GAP_PATH = ROOT / "sources/release-assurance-gap.json"
+RELEASE_ASSURANCE_STORIES = ("REL-001", "REL-002", "REL-003")
+RELEASE_ASSURANCE_PARTITIONS = (
+    "release-feature-accounting-validator",
+    "strict-tdd-independent-verification-validator",
+    "safety-resource-correctness-release-validator",
 )
 
 CATEGORY_IDS = {
@@ -834,6 +864,380 @@ def routing_ownership_gap_errors(
     return errors
 
 
+def operations_ownership_gap_errors(rows: list[object], root: pathlib.Path = ROOT) -> list[str]:
+    """Keep broad OpenCode operations surfaces from becoming task ownership by subtraction."""
+    errors: list[str] = []
+    gap_path = root / "sources/operations-ownership-gap.json"
+    if not gap_path.is_file():
+        return ["missing machine-checkable operations ownership-gap record"]
+    try:
+        gap = _load(gap_path)
+    except (json.JSONDecodeError, OSError) as exc:
+        return [f"invalid operations ownership-gap record: {exc}"]
+
+    if gap.get("schemaVersion") != 1:
+        errors.append("operations ownership-gap schemaVersion must be 1")
+    if gap.get("status") != "source-reviewed-no-exact-task-owner":
+        errors.append("operations ownership-gap status drifted")
+    if gap.get("repositoryId") != "opencode" or gap.get("repository") != "anomalyco/opencode":
+        errors.append("operations ownership-gap repository identity drifted")
+    if gap.get("storyIds") != list(OPERATIONS_GAP_STORIES):
+        errors.append("operations ownership-gap story set drifted")
+    if gap.get("ownershipDecision") != {story_id: None for story_id in OPERATIONS_GAP_STORIES}:
+        errors.append("operations ownership must remain unresolved until task-specific source evidence changes")
+    if gap.get("unresolvedPartitions") != list(OPERATIONS_UNRESOLVED_PARTITIONS):
+        errors.append("operations unresolved decomposition partitions drifted")
+
+    lock = _load(root / "sources/upstream.lock.json")
+    locked = next((item for item in lock.get("repositories", []) if item.get("id") == "opencode"), None)
+    locked_commit = str(locked.get("commit", "")) if isinstance(locked, Mapping) else ""
+    locked_tree = str(locked.get("treeSha", "")) if isinstance(locked, Mapping) else ""
+    if not locked_commit or gap.get("commit") != locked_commit:
+        errors.append("operations ownership-gap is not bound to the locked OpenCode commit")
+    if not locked_tree or gap.get("treeSha") != locked_tree:
+        errors.append("operations ownership-gap is not bound to the locked OpenCode tree")
+
+    plan = _load(root / "ralph.json")
+    plan_by_id = {
+        str(item.get("id", "")): item
+        for item in plan.get("userStories", [])
+        if isinstance(item, Mapping)
+    }
+    generic_story = "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json"
+    expected_requirements = {
+        "OPS-001": ["REQ-001", "REQ-024", "REQ-032"],
+        "OPS-002": [],
+        "OPS-003": [],
+        "OPS-004": [],
+        "OPS-005": [],
+        "OPS-006": [],
+        "OPS-008": [],
+    }
+    binding = gap.get("taskBindingState")
+    if not isinstance(binding, Mapping) or list(binding) != list(OPERATIONS_GAP_STORIES):
+        errors.append("operations ownership-gap task binding set drifted")
+        binding = {}
+    for story_id in OPERATIONS_GAP_STORIES:
+        story = plan_by_id.get(story_id)
+        if story is None:
+            errors.append(f"operations ownership-gap story disappeared from Ralph: {story_id}")
+            continue
+        expected_story = "TBD - see source audit" if story_id == "OPS-001" else generic_story
+        if story.get("status") != "not-started" or story.get("userStory") != expected_story:
+            errors.append(f"{story_id}: operations ownership-gap is stale after Ralph task semantics changed")
+        if story.get("requirementIds") != expected_requirements[story_id]:
+            errors.append(f"{story_id}: operations ownership-gap requirement binding drifted")
+        recorded = binding.get(story_id)
+        if not isinstance(recorded, Mapping):
+            errors.append(f"{story_id}: operations ownership-gap task binding is missing")
+        elif (
+            recorded.get("ralphStory") != expected_story
+            or recorded.get("requirementIds") != expected_requirements[story_id]
+            or recorded.get("taskCard") is not None
+            or recorded.get("worklog") is not None
+        ):
+            errors.append(f"{story_id}: operations ownership-gap task binding drifted")
+        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
+            errors.append(f"{story_id}: task/worklog appeared; operations ownership gap needs deliberate review")
+
+    rules = _load(root / "sources/behavior-surface-rules.json")
+    rule_rows = [item for item in rules.get("rules", []) if isinstance(item, Mapping)]
+    rule_by_id = {str(item.get("id", "")): item for item in rule_rows}
+    live_signatures = {
+        story_id: sorted(
+            str(item.get("id"))
+            for item in rule_rows
+            if story_id in item.get("featureIds", [])
+        )
+        for story_id in OPERATIONS_GAP_STORIES
+    }
+    recorded_signatures = gap.get("storySurfaceSignatures")
+    if not isinstance(recorded_signatures, Mapping):
+        errors.append("operations ownership-gap storySurfaceSignatures must be an object")
+    else:
+        for story_id, signature in live_signatures.items():
+            if recorded_signatures.get(story_id) != signature:
+                errors.append(f"{story_id}: operations ownership-gap surface signature drifted from live rules")
+
+    expected_groups = [
+        {"id": group_id, "storyIds": list(story_ids), "surfaceSignature": list(signature)}
+        for group_id, story_ids, signature in OPERATIONS_EQUIVALENCE_GROUPS
+    ]
+    if gap.get("equivalenceGroups") != expected_groups:
+        errors.append("operations ownership-gap equivalence groups drifted")
+    for group_id, story_ids, signature in OPERATIONS_EQUIVALENCE_GROUPS:
+        for story_id in story_ids:
+            if live_signatures.get(story_id) != list(signature):
+                errors.append(f"{group_id}: operations equivalence no longer matches live surface signatures")
+                break
+
+    expected_patterns = {
+        surface_id: list(rule_by_id.get(surface_id, {}).get("patterns", []))
+        for surface_id in ("opencode.configuration-runtime", "opencode.repository-operations")
+    }
+    if gap.get("surfaceRulePatterns") != expected_patterns:
+        errors.append("operations ownership-gap surface rule patterns drifted")
+
+    row_by_id = {
+        str(item.get("id", "")): item
+        for item in rows
+        if isinstance(item, Mapping)
+    }
+    for story_id in OPERATIONS_GAP_STORIES:
+        row = row_by_id.get(story_id)
+        if row is None:
+            errors.append(f"operations ownership-gap story missing from exhaustion ledger: {story_id}")
+            continue
+        if row.get("category") != "unresolved-decomposition" or row.get("reasonKey") != "operations-family-not-decomposed":
+            errors.append(f"{story_id}: operations ownership-gap classification drifted")
+        if row.get("taskCard") is not None or row.get("worklog") is not None or row.get("implementationCommits") != []:
+            errors.append(f"{story_id}: local task ownership appeared; operations ownership gap needs deliberate review")
+        if row.get("requirementIds") != expected_requirements[story_id]:
+            errors.append(f"{story_id}: exhaustion requirement projection drifted from operations ownership gap")
+        if sorted(row.get("surfaceIds", [])) != live_signatures[story_id]:
+            errors.append(f"{story_id}: exhaustion surface projection drifted from operations ownership gap")
+
+    accepted = gap.get("acceptedSurfaceOwners")
+    if not isinstance(accepted, list) or [str(item.get("id", "")) for item in accepted if isinstance(item, Mapping)] != list(OPERATIONS_ACCEPTED_OWNERS):
+        errors.append("operations ownership-gap accepted-owner exclusion set drifted")
+    else:
+        for item in accepted:
+            story_id = str(item.get("id", ""))
+            story = plan_by_id.get(story_id)
+            if not isinstance(story, Mapping) or story.get("status") != "accepted" or item.get("controllerStatus") != "accepted":
+                errors.append(f"{story_id}: operations accepted-owner exclusion is no longer controller accepted")
+            if not str(item.get("note", "")).strip():
+                errors.append(f"{story_id}: operations accepted-owner exclusion lacks disposition")
+
+    frozen = gap.get("frozenCrossSurfaceOwners")
+    expected_frozen = [
+        {"id": story_id, "reasonKey": REASON_BY_ID[story_id]}
+        for story_id in OPERATIONS_FROZEN_OWNERS
+    ]
+    if frozen != expected_frozen:
+        errors.append("operations ownership-gap frozen cross-surface exclusion drifted")
+    for story_id in OPERATIONS_FROZEN_OWNERS:
+        row = row_by_id.get(story_id)
+        if not isinstance(row, Mapping) or row.get("category") != "explicit-blocker" or row.get("reasonKey") != REASON_BY_ID[story_id]:
+            errors.append(f"{story_id}: operations frozen cross-surface blocker drifted")
+
+    inventory, inventory_errors = _inventory_index(root, "opencode")
+    errors.extend(inventory_errors)
+    expected_partition_ids = [
+        "configuration-discovery-and-policy",
+        "scoped-replayable-state-transforms",
+        "location-service-map-cache",
+        "global-npm-installation-bootstrap",
+        "repository-reference-normalization",
+        "repository-cache-materialization",
+    ]
+    partitions = gap.get("reviewedPartitions")
+    if not isinstance(partitions, list) or [str(item.get("id", "")) for item in partitions if isinstance(item, Mapping)] != expected_partition_ids:
+        errors.append("operations ownership-gap reviewed partition inventory drifted")
+    elif inventory:
+        for partition in partitions:
+            evidence = partition.get("evidence") if isinstance(partition, Mapping) else None
+            if not isinstance(evidence, list) or not evidence:
+                errors.append(f"operations ownership-gap partition lacks pinned evidence: {partition.get('id')}")
+                continue
+            if not partition.get("sideEffects") or not str(partition.get("ownershipBlocker", "")).strip():
+                errors.append(f"operations ownership-gap partition lacks side-effect/ownership blocker detail: {partition.get('id')}")
+            for item in evidence:
+                if not isinstance(item, Mapping):
+                    errors.append("operations ownership-gap partition evidence must be an object")
+                    continue
+                source_path = str(item.get("path", ""))
+                inventory_row = inventory.get(source_path)
+                if inventory_row is None:
+                    errors.append(f"operations ownership-gap evidence escaped pinned inventory: {source_path}")
+                    continue
+                if inventory_row.get("commit") != locked_commit or inventory_row.get("blob") != item.get("blobSha"):
+                    errors.append(f"operations ownership-gap evidence pin drifted: {source_path}")
+                if item.get("kind") not in DISC_EVIDENCE_KINDS:
+                    errors.append(f"operations ownership-gap evidence has invalid kind: {source_path}")
+                reviewed_lines = item.get("reviewedLines")
+                if (
+                    not isinstance(reviewed_lines, Mapping)
+                    or not isinstance(reviewed_lines.get("from"), int)
+                    or not isinstance(reviewed_lines.get("to"), int)
+                    or reviewed_lines["from"] < 1
+                    or reviewed_lines["to"] < reviewed_lines["from"]
+                ):
+                    errors.append(f"operations ownership-gap evidence lacks reviewed line range: {source_path}")
+
+    remainder = gap.get("unresolvedRulePartitions")
+    if not isinstance(remainder, Mapping) or set(remainder) != {"opencode.configuration-runtime", "opencode.repository-operations"}:
+        errors.append("operations ownership-gap unresolved rule remainder drifted")
+    elif any(not isinstance(items, list) or not items for items in remainder.values()):
+        errors.append("operations ownership-gap unresolved rule remainder must stay explicit")
+
+    candidates = gap.get("candidateFragments")
+    expected_candidate_ids = ["repository-reference-normalization", "scoped-replayable-state-transforms"]
+    if not isinstance(candidates, list) or [str(item.get("id", "")) for item in candidates if isinstance(item, Mapping)] != expected_candidate_ids:
+        errors.append("operations ownership-gap candidate fragment set drifted")
+    else:
+        for candidate in candidates:
+            if candidate.get("ownershipEstablished") is not False:
+                errors.append(f"operations candidate cannot become owned from residual arithmetic: {candidate.get('id')}")
+            for key in ("inputs", "outputs", "failureSemantics", "stateLifetime", "resourceLifetime"):
+                if not str(candidate.get(key, "")).strip():
+                    errors.append(f"operations candidate {candidate.get('id')} lacks explicit {key}")
+            if not candidate.get("disqualifiers"):
+                errors.append(f"operations candidate {candidate.get('id')} lacks ownership disqualifiers")
+
+    history = gap.get("historyReview")
+    if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit" or not str(history.get("limitation", "")).strip():
+        errors.append("operations ownership-gap history-review limitation drifted")
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 4:
+        errors.append("operations ownership-gap closure criteria drifted")
+    return errors
+
+
+def release_assurance_gap_errors(rows: list[object], root: pathlib.Path = ROOT) -> list[str]:
+    """Keep declarative REL rows from becoming invented Rust product ownership."""
+    errors: list[str] = []
+    gap_path = root / "sources/release-assurance-gap.json"
+    if not gap_path.is_file():
+        return ["missing machine-checkable release assurance-gap record"]
+    try:
+        gap = _load(gap_path)
+    except (json.JSONDecodeError, OSError) as exc:
+        return [f"invalid release assurance-gap record: {exc}"]
+
+    if gap.get("schemaVersion") != 1:
+        errors.append("release assurance-gap schemaVersion must be 1")
+    if gap.get("status") != "declarative-assurance-no-product-owner" or gap.get("nativeProductOwner") is not False:
+        errors.append("release assurance-gap must remain declarative with no native product owner")
+    if gap.get("storyIds") != list(RELEASE_ASSURANCE_STORIES):
+        errors.append("release assurance-gap story set drifted")
+    if gap.get("ownershipDecision") != {story_id: None for story_id in RELEASE_ASSURANCE_STORIES}:
+        errors.append("release assurance ownership must remain unresolved until an executable task-specific validator contract exists")
+    if gap.get("storySurfaceSignatures") != {story_id: [] for story_id in RELEASE_ASSURANCE_STORIES}:
+        errors.append("release assurance-gap must retain empty behavior-surface signatures")
+    if gap.get("requiredDeclarativePartitions") != list(RELEASE_ASSURANCE_PARTITIONS):
+        errors.append("release assurance-gap declarative partition set drifted")
+
+    plan = _load(root / "ralph.json")
+    plan_by_id = {
+        str(item.get("id", "")): item
+        for item in plan.get("userStories", [])
+        if isinstance(item, Mapping)
+    }
+    expected_requirements = {
+        "REL-001": ["REQ-003"],
+        "REL-002": ["REQ-004", "REQ-035"],
+        "REL-003": ["REQ-035"],
+    }
+    binding = gap.get("taskBindingState")
+    if not isinstance(binding, Mapping) or list(binding) != list(RELEASE_ASSURANCE_STORIES):
+        errors.append("release assurance-gap task binding set drifted")
+        binding = {}
+    row_by_id = {
+        str(item.get("id", "")): item
+        for item in rows
+        if isinstance(item, Mapping)
+    }
+    for story_id in RELEASE_ASSURANCE_STORIES:
+        story = plan_by_id.get(story_id)
+        if not isinstance(story, Mapping):
+            errors.append(f"release assurance story disappeared from Ralph: {story_id}")
+            continue
+        if story.get("status") != "not-started" or story.get("userStory") != "TBD - see source audit":
+            errors.append(f"{story_id}: release assurance gap is stale after Ralph semantics changed")
+        if story.get("requirementIds") != expected_requirements[story_id]:
+            errors.append(f"{story_id}: release assurance requirement binding drifted")
+        recorded = binding.get(story_id)
+        if not isinstance(recorded, Mapping) or (
+            recorded.get("ralphStory") != "TBD - see source audit"
+            or recorded.get("requirementIds") != expected_requirements[story_id]
+            or recorded.get("taskCard") is not None
+            or recorded.get("worklog") is not None
+        ):
+            errors.append(f"{story_id}: release assurance task binding drifted")
+        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
+            errors.append(f"{story_id}: task/worklog appeared; release assurance gap needs deliberate review")
+        row = row_by_id.get(story_id)
+        if not isinstance(row, Mapping):
+            errors.append(f"release assurance story missing from exhaustion ledger: {story_id}")
+            continue
+        if row.get("category") != "unresolved-decomposition" or row.get("reasonKey") != "release-assurance-not-product-owner":
+            errors.append(f"{story_id}: release assurance classification drifted")
+        if row.get("surfaceIds") != [] or row.get("evidenceIds") != []:
+            errors.append(f"{story_id}: release assurance unexpectedly gained product-surface evidence")
+        if row.get("requirementIds") != expected_requirements[story_id]:
+            errors.append(f"{story_id}: exhaustion requirement projection drifted from release assurance gap")
+
+    requirements = _load(root / "requirements/user-requirements.json")
+    requirement_by_id = {
+        str(item.get("id", "")): item
+        for item in requirements.get("requirements", [])
+        if isinstance(item, Mapping)
+    }
+    topology = gap.get("requirementTopology")
+    expected_requirement_ids = ("REQ-003", "REQ-004", "REQ-035")
+    if not isinstance(topology, Mapping) or list(topology) != list(expected_requirement_ids):
+        errors.append("release assurance-gap requirement topology set drifted")
+    else:
+        for requirement_id in expected_requirement_ids:
+            live = requirement_by_id.get(requirement_id)
+            recorded = topology.get(requirement_id)
+            if not isinstance(live, Mapping) or not isinstance(recorded, Mapping):
+                errors.append(f"release assurance-gap missing requirement topology: {requirement_id}")
+                continue
+            if recorded.get("requirement") != live.get("requirement") or recorded.get("tasks") != live.get("tasks"):
+                errors.append(f"release assurance-gap requirement topology drifted: {requirement_id}")
+
+    expected_policy_paths = ["PLAN.md", "docs/TDD.md", "docs/SECURITY.md"]
+    policy = gap.get("localPolicyEvidence")
+    if not isinstance(policy, list) or [str(item.get("path", "")) for item in policy if isinstance(item, Mapping)] != expected_policy_paths:
+        errors.append("release assurance-gap local policy evidence set drifted")
+    else:
+        for item in policy:
+            path = root / str(item.get("path", ""))
+            if not path.is_file():
+                errors.append(f"release assurance-gap policy evidence missing: {item.get('path')}")
+                continue
+            actual_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            if item.get("sha256") != actual_hash:
+                errors.append(f"release assurance-gap policy evidence hash drifted: {item.get('path')}")
+            reviewed_lines = item.get("reviewedLines")
+            if (
+                not isinstance(reviewed_lines, Mapping)
+                or not isinstance(reviewed_lines.get("from"), int)
+                or not isinstance(reviewed_lines.get("to"), int)
+                or reviewed_lines["from"] < 1
+                or reviewed_lines["to"] < reviewed_lines["from"]
+                or reviewed_lines["to"] > len(path.read_text(encoding="utf-8").splitlines())
+            ):
+                errors.append(f"release assurance-gap policy evidence line range drifted: {item.get('path')}")
+            if not str(item.get("conclusion", "")).strip():
+                errors.append(f"release assurance-gap policy evidence lacks conclusion: {item.get('path')}")
+
+    owned = gap.get("alreadyOwnedRequirementPartitions")
+    if not isinstance(owned, list) or [item.get("requirementId") for item in owned if isinstance(item, Mapping)] != list(expected_requirement_ids):
+        errors.append("release assurance-gap already-owned requirement partitions drifted")
+    elif any(not str(item.get("disposition", "")).strip() for item in owned if isinstance(item, Mapping)):
+        errors.append("release assurance-gap already-owned requirement partition lacks disposition")
+
+    candidates = gap.get("candidateValidatorContracts")
+    expected_candidate_ids = ["feature-accounting-release-check", "release-safety-and-tdd-check"]
+    if not isinstance(candidates, list) or [str(item.get("id", "")) for item in candidates if isinstance(item, Mapping)] != expected_candidate_ids:
+        errors.append("release assurance-gap candidate validator set drifted")
+    else:
+        for candidate in candidates:
+            if candidate.get("ownershipEstablished") is not False:
+                errors.append(f"release assurance candidate cannot become owned from requirement arithmetic: {candidate.get('id')}")
+            for key in ("inputs", "outputs", "failureSemantics", "stateLifetime", "resourceLifetime"):
+                if not str(candidate.get(key, "")).strip():
+                    errors.append(f"release assurance candidate {candidate.get('id')} lacks explicit {key}")
+            if not candidate.get("disqualifiers"):
+                errors.append(f"release assurance candidate {candidate.get('id')} lacks ownership disqualifiers")
+
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 4:
+        errors.append("release assurance-gap closure criteria drifted")
+    return errors
+
+
 def sync_features_status(root: pathlib.Path = ROOT) -> None:
     """Synchronize only the generated status mirrors in FEATURES.md from Ralph."""
     plan = _load(root / "ralph.json")
@@ -994,6 +1398,8 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
     errors.extend(residual_evidence_kind_errors(rows, reconciliation))
     errors.extend(enterprise_remote_gap_errors(rows, reconciliation, root))
     errors.extend(routing_ownership_gap_errors(rows, reconciliation, root))
+    errors.extend(operations_ownership_gap_errors(rows, root))
+    errors.extend(release_assurance_gap_errors(rows, root))
 
     errors.extend(_features_status_errors(root, plan))
     return errors
