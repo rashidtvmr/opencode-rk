@@ -1,5 +1,9 @@
 //! Provider/model catalog derived from models.dev-compatible JSON.
 #![forbid(unsafe_code)]
+
+pub mod cache;
+pub mod registry;
+
 use opencode_rk_contracts::{ModelId, ProviderId};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;

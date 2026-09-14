@@ -872,7 +872,9 @@ dependencies = [
  "opencode-rk-contracts",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
+ "toml",
 ]
 
 [[package]]
@@ -915,6 +917,19 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
+]
+
+[[package]]
+name = "opencode-rk-providers"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "opencode-rk-contracts",
+ "opencode-rk-security",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]
@@ -968,6 +983,19 @@ dependencies = [
  "tempfile",
  "thiserror",
  "zstd",
+]
+
+[[package]]
+name = "opencode-rk-tools"
+version = "0.1.0-alpha.1"
+dependencies = [
+ "opencode-rk-contracts",
+ "opencode-rk-security",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "tokio",
 ]
 
 [[package]]

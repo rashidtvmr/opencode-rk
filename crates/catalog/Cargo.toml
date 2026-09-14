@@ -11,3 +11,7 @@ opencode-rk-contracts = { path = "../contracts" }
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
+toml = "1.1"
+
+[dev-dependencies]
+tempfile.workspace = true
