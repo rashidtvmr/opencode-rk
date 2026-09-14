@@ -2674,6 +2674,246 @@
         "WEB-005-T04",
         "WEB-005-T05"
       ]
+    },
+    {
+      "id": "AGENT-016",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Spawn subagent with context fork - clone parent session state into child, selective context injection, parent-child relationship tracking",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-016-T01",
+        "AGENT-016-T02",
+        "AGENT-016-T03",
+        "AGENT-016-T04",
+        "AGENT-016-T05"
+      ]
+    },
+    {
+      "id": "AGENT-017",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Spawn subagent with fresh context - zero-context launch with explicit context bundle, no inherited state leakage",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-017-T01",
+        "AGENT-017-T02",
+        "AGENT-017-T03",
+        "AGENT-017-T04",
+        "AGENT-017-T05"
+      ]
+    },
+    {
+      "id": "AGENT-018",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Multi-provider subagent routing - spawn children on different providers/models than parent, per-child model override",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-018-T01",
+        "AGENT-018-T02",
+        "AGENT-018-T03",
+        "AGENT-018-T04",
+        "AGENT-018-T05"
+      ]
+    },
+    {
+      "id": "AGENT-019",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Resume failed subagent - restore session state from last checkpoint, continue from failure point, preserve partial results",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-019-T01",
+        "AGENT-019-T02",
+        "AGENT-019-T03",
+        "AGENT-019-T04",
+        "AGENT-019-T05"
+      ]
+    },
+    {
+      "id": "AGENT-020",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Retry with exponential backoff - classify error (transient/permanent), backoff schedule, jitter, max retries, circuit breaker",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-020-T01",
+        "AGENT-020-T02",
+        "AGENT-020-T03",
+        "AGENT-020-T04",
+        "AGENT-020-T05"
+      ]
+    },
+    {
+      "id": "AGENT-021",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Change model mid-session - hot-swap provider/model for running subagent without losing context, model fallback chain",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-021-T01",
+        "AGENT-021-T02",
+        "AGENT-021-T03",
+        "AGENT-021-T04",
+        "AGENT-021-T05"
+      ]
+    },
+    {
+      "id": "AGENT-022",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Subagent context compression - automatic context compaction when approaching token limit, configurable compression strategy",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-022-T01",
+        "AGENT-022-T02",
+        "AGENT-022-T03",
+        "AGENT-022-T04",
+        "AGENT-022-T05"
+      ]
+    },
+    {
+      "id": "AGENT-023",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Structured handoff protocol - serialize subagent state to handoff document, transfer to new agent with fidelity guarantees",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-023-T01",
+        "AGENT-023-T02",
+        "AGENT-023-T03",
+        "AGENT-023-T04",
+        "AGENT-023-T05"
+      ]
+    },
+    {
+      "id": "AGENT-024",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Auto context compression toggle - settings-driven automatic compression, threshold config, compression quality metrics",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-024-T01",
+        "AGENT-024-T02",
+        "AGENT-024-T03",
+        "AGENT-024-T04",
+        "AGENT-024-T05"
+      ]
+    },
+    {
+      "id": "AGENT-025",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Dedicated subagent settings page - UI/config section for max concurrent, default model, retry policy, compression, timeout, budget per child",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-025-T01",
+        "AGENT-025-T02",
+        "AGENT-025-T03",
+        "AGENT-025-T04",
+        "AGENT-025-T05"
+      ]
+    },
+    {
+      "id": "AGENT-026",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Subagent pool manager - maintain N running agents, auto-replace finished/failed, work queue drain, pool scaling",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-026-T01",
+        "AGENT-026-T02",
+        "AGENT-026-T03",
+        "AGENT-026-T04",
+        "AGENT-026-T05"
+      ]
+    },
+    {
+      "id": "AGENT-027",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Subagent observability - live status dashboard, token usage per child, cost tracking, latency percentiles, error rates",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-027-T01",
+        "AGENT-027-T02",
+        "AGENT-027-T03",
+        "AGENT-027-T04",
+        "AGENT-027-T05"
+      ]
+    },
+    {
+      "id": "AGENT-028",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Subagent permission inheritance - child inherits parent permissions with optional restriction, no privilege escalation",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-028-T01",
+        "AGENT-028-T02",
+        "AGENT-028-T03",
+        "AGENT-028-T04",
+        "AGENT-028-T05"
+      ]
+    },
+    {
+      "id": "AGENT-029",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Subagent output aggregation - collect and merge results from parallel children, conflict resolution, dedup",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-029-T01",
+        "AGENT-029-T02",
+        "AGENT-029-T03",
+        "AGENT-029-T04",
+        "AGENT-029-T05"
+      ]
+    },
+    {
+      "id": "AGENT-030",
+      "requirementIds": [
+        "REQ-036"
+      ],
+      "status": "not-started",
+      "userStory": "Subagent cancellation and cleanup - cancel running children, reclaim resources, cleanup worktrees, release locks",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-030-T01",
+        "AGENT-030-T02",
+        "AGENT-030-T03",
+        "AGENT-030-T04",
+        "AGENT-030-T05"
+      ]
     }
   ]
 }

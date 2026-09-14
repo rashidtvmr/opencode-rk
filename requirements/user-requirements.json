@@ -1,39 +1,369 @@
 {
   "requirements": [
-    {"id":"REQ-001","requirement":"Rust plus Tokio and maximum practical resource savings","tasks":["BASE-003","OPS-001","OPS-007"],"mandatory":true},
-    {"id":"REQ-002","requirement":"Plan file Ralph JSON independent slices and autonomous loop","tasks":["AUTO-001","AUTO-002","AUTO-003","AUTO-004","AUTO-005","AUTO-006"],"mandatory":true},
-    {"id":"REQ-003","requirement":"Every OpenCode V2 feature accounted for","tasks":["DISC-001","DISC-010","REL-001"],"mandatory":true},
-    {"id":"REQ-004","requirement":"Strict TDD and independent verification","tasks":["AUTO-002","AUTO-005","REL-002"],"mandatory":true},
-    {"id":"REQ-005","requirement":"OpenCode V2 plugins including UI behavior","tasks":["EXT-005","EXT-009","EXT-012","UI-012"],"mandatory":true},
-    {"id":"REQ-006","requirement":"Session management and persistent history","tasks":["SESS-001","DB-003","SESS-017"],"mandatory":true},
-    {"id":"REQ-007","requirement":"Session sharing","tasks":["SHARE-001","SHARE-004","SHARE-005"],"mandatory":true},
-    {"id":"REQ-008","requirement":"Session forking","tasks":["SESS-011","UI-004"],"mandatory":true},
-    {"id":"REQ-009","requirement":"Multiple delegation types and custom agents","tasks":["AGENT-002","AGENT-003","AGENT-004","AGENT-010"],"mandatory":true},
-    {"id":"REQ-010","requirement":"Cross-provider subagent delegation","tasks":["AGENT-005","PROV-011"],"mandatory":true},
-    {"id":"REQ-011","requirement":"Own searchable models.dev-backed API","tasks":["CAT-001","CAT-002","CAT-007"],"mandatory":true},
-    {"id":"REQ-012","requirement":"Foreground and background subagents","tasks":["AGENT-003","AGENT-004"],"mandatory":true},
-    {"id":"REQ-013","requirement":"Navigate resume and steer subagents","tasks":["AGENT-007","AGENT-008","UI-005"],"mandatory":true},
-    {"id":"REQ-014","requirement":"Subagent context and messages in DB","tasks":["AGENT-011","DB-003"],"mandatory":true},
-    {"id":"REQ-015","requirement":"Singleton supports many application clients","tasks":["BASE-004","BASE-005"],"mandatory":true},
-    {"id":"REQ-016","requirement":"Status panel","tasks":["UI-006","ROUTE-008"],"mandatory":true},
-    {"id":"REQ-017","requirement":"Skills plugins and custom slash commands","tasks":["EXT-001","EXT-002","UI-010"],"mandatory":true},
-    {"id":"REQ-018","requirement":"Independent main and child effort levels","tasks":["CAT-004","AGENT-006","UI-007"],"mandatory":true},
-    {"id":"REQ-019","requirement":"Themes and common settings","tasks":["UI-009","BASE-006"],"mandatory":true},
-    {"id":"REQ-020","requirement":"Pre-tool and post-tool hooks","tasks":["SEC-010","SEC-011","EXT-008"],"mandatory":true},
-    {"id":"REQ-021","requirement":"Permissions and mandatory human-in-the-loop","tasks":["SEC-001","SEC-003","UI-008"],"mandatory":true},
-    {"id":"REQ-022","requirement":"9router-style built-in multi-account routing","tasks":["ROUTE-001","ROUTE-002","ROUTE-005","ROUTE-011"],"mandatory":true},
-    {"id":"REQ-023","requirement":"Timestamps on each response","tasks":["SESS-002","UI-003"],"mandatory":true},
-    {"id":"REQ-024","requirement":"Lightweight delegation on basic PC or VPS","tasks":["AGENT-015","OPS-001","OPS-007"],"mandatory":true},
-    {"id":"REQ-025","requirement":"Deterministic destructive-command and SQL controls","tasks":["SEC-002","SEC-012","SEC-016"],"mandatory":true},
-    {"id":"REQ-026","requirement":"Manual-only destructive instructions rather than agent execution","tasks":["SEC-013"],"mandatory":true},
-    {"id":"REQ-027","requirement":"OS-enforced .env and sensitive-file restrictions","tasks":["SEC-004","SEC-005","SEC-014"],"mandatory":true},
-    {"id":"REQ-028","requirement":"System files readable where safe but strictly not editable by agent","tasks":["SEC-006"],"mandatory":true},
-    {"id":"REQ-029","requirement":"Trusted user toggle for destructive-command protection","tasks":["SEC-003","SEC-006","UI-011"],"mandatory":true},
-    {"id":"REQ-030","requirement":"Permission star cannot bypass mandatory controls","tasks":["SEC-001","SEC-003","SEC-017"],"mandatory":true},
-    {"id":"REQ-031","requirement":"Other projects and user files require explicit approval","tasks":["SEC-007"],"mandatory":true},
-    {"id":"REQ-032","requirement":"Many features configurable and no hidden cost when off","tasks":["OPS-001","BASE-006","UI-011"],"mandatory":true},
-    {"id":"REQ-033","requirement":"Embedded scalable storage without Postgres or Mongo install","tasks":["DB-001","DB-006","DB-008","DB-009"],"mandatory":true},
-    {"id":"REQ-034","requirement":"Safely import large existing OpenCode data","tasks":["DB-012","DB-016"],"mandatory":true},
-    {"id":"REQ-035","requirement":"Preserve safety and resource correctness rather than blindly translate files","tasks":["DISC-008","SEC-017","REL-002","REL-003"],"mandatory":true}
+    {
+      "id": "REQ-001",
+      "requirement": "Rust plus Tokio and maximum practical resource savings",
+      "tasks": [
+        "BASE-003",
+        "OPS-001",
+        "OPS-007"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-002",
+      "requirement": "Plan file Ralph JSON independent slices and autonomous loop",
+      "tasks": [
+        "AUTO-001",
+        "AUTO-002",
+        "AUTO-003",
+        "AUTO-004",
+        "AUTO-005",
+        "AUTO-006"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-003",
+      "requirement": "Every OpenCode V2 feature accounted for",
+      "tasks": [
+        "DISC-001",
+        "DISC-010",
+        "REL-001"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-004",
+      "requirement": "Strict TDD and independent verification",
+      "tasks": [
+        "AUTO-002",
+        "AUTO-005",
+        "REL-002"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-005",
+      "requirement": "OpenCode V2 plugins including UI behavior",
+      "tasks": [
+        "EXT-005",
+        "EXT-009",
+        "EXT-012",
+        "UI-012"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-006",
+      "requirement": "Session management and persistent history",
+      "tasks": [
+        "SESS-001",
+        "DB-003",
+        "SESS-017"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-007",
+      "requirement": "Session sharing",
+      "tasks": [
+        "SHARE-001",
+        "SHARE-004",
+        "SHARE-005"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-008",
+      "requirement": "Session forking",
+      "tasks": [
+        "SESS-011",
+        "UI-004"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-009",
+      "requirement": "Multiple delegation types and custom agents",
+      "tasks": [
+        "AGENT-002",
+        "AGENT-003",
+        "AGENT-004",
+        "AGENT-010"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-010",
+      "requirement": "Cross-provider subagent delegation",
+      "tasks": [
+        "AGENT-005",
+        "PROV-011"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-011",
+      "requirement": "Own searchable models.dev-backed API",
+      "tasks": [
+        "CAT-001",
+        "CAT-002",
+        "CAT-007"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-012",
+      "requirement": "Foreground and background subagents",
+      "tasks": [
+        "AGENT-003",
+        "AGENT-004"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-013",
+      "requirement": "Navigate resume and steer subagents",
+      "tasks": [
+        "AGENT-007",
+        "AGENT-008",
+        "UI-005"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-014",
+      "requirement": "Subagent context and messages in DB",
+      "tasks": [
+        "AGENT-011",
+        "DB-003"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-015",
+      "requirement": "Singleton supports many application clients",
+      "tasks": [
+        "BASE-004",
+        "BASE-005"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-016",
+      "requirement": "Status panel",
+      "tasks": [
+        "UI-006",
+        "ROUTE-008"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-017",
+      "requirement": "Skills plugins and custom slash commands",
+      "tasks": [
+        "EXT-001",
+        "EXT-002",
+        "UI-010"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-018",
+      "requirement": "Independent main and child effort levels",
+      "tasks": [
+        "CAT-004",
+        "AGENT-006",
+        "UI-007"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-019",
+      "requirement": "Themes and common settings",
+      "tasks": [
+        "UI-009",
+        "BASE-006"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-020",
+      "requirement": "Pre-tool and post-tool hooks",
+      "tasks": [
+        "SEC-010",
+        "SEC-011",
+        "EXT-008"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-021",
+      "requirement": "Permissions and mandatory human-in-the-loop",
+      "tasks": [
+        "SEC-001",
+        "SEC-003",
+        "UI-008"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-022",
+      "requirement": "9router-style built-in multi-account routing",
+      "tasks": [
+        "ROUTE-001",
+        "ROUTE-002",
+        "ROUTE-005",
+        "ROUTE-011"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-023",
+      "requirement": "Timestamps on each response",
+      "tasks": [
+        "SESS-002",
+        "UI-003"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-024",
+      "requirement": "Lightweight delegation on basic PC or VPS",
+      "tasks": [
+        "AGENT-015",
+        "OPS-001",
+        "OPS-007"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-025",
+      "requirement": "Deterministic destructive-command and SQL controls",
+      "tasks": [
+        "SEC-002",
+        "SEC-012",
+        "SEC-016"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-026",
+      "requirement": "Manual-only destructive instructions rather than agent execution",
+      "tasks": [
+        "SEC-013"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-027",
+      "requirement": "OS-enforced .env and sensitive-file restrictions",
+      "tasks": [
+        "SEC-004",
+        "SEC-005",
+        "SEC-014"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-028",
+      "requirement": "System files readable where safe but strictly not editable by agent",
+      "tasks": [
+        "SEC-006"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-029",
+      "requirement": "Trusted user toggle for destructive-command protection",
+      "tasks": [
+        "SEC-003",
+        "SEC-006",
+        "UI-011"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-030",
+      "requirement": "Permission star cannot bypass mandatory controls",
+      "tasks": [
+        "SEC-001",
+        "SEC-003",
+        "SEC-017"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-031",
+      "requirement": "Other projects and user files require explicit approval",
+      "tasks": [
+        "SEC-007"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-032",
+      "requirement": "Many features configurable and no hidden cost when off",
+      "tasks": [
+        "OPS-001",
+        "BASE-006",
+        "UI-011"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-033",
+      "requirement": "Embedded scalable storage without Postgres or Mongo install",
+      "tasks": [
+        "DB-001",
+        "DB-006",
+        "DB-008",
+        "DB-009"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-034",
+      "requirement": "Safely import large existing OpenCode data",
+      "tasks": [
+        "DB-012",
+        "DB-016"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-035",
+      "requirement": "Preserve safety and resource correctness rather than blindly translate files",
+      "tasks": [
+        "DISC-008",
+        "SEC-017",
+        "REL-002",
+        "REL-003"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-036",
+      "requirement": "Full subagent lifecycle control: spawn, fork, resume, retry, model switching, context compression, structured handoff, dedicated settings",
+      "tasks": [
+        "AGENT-016",
+        "AGENT-017",
+        "AGENT-018",
+        "AGENT-019",
+        "AGENT-020",
+        "AGENT-021",
+        "AGENT-022",
+        "AGENT-023",
+        "AGENT-024",
+        "AGENT-025",
+        "AGENT-026",
+        "AGENT-027",
+        "AGENT-028",
+        "AGENT-029",
+        "AGENT-030"
+      ],
+      "mandatory": true
+    }
   ]
 }
