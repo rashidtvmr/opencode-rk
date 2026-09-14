@@ -124,6 +124,17 @@ INTEGRATIONS_UNRESOLVED_PARTITIONS = (
     "external-protocol-reconnect-timeout-and-resource-lifetime",
 )
 
+UNRESOLVED_COVERAGE_GAP_PATHS = (
+    "sources/enterprise-remote-spec-gap.json",
+    "sources/routing-ownership-gap.json",
+    "sources/operations-ownership-gap.json",
+    "sources/release-assurance-gap.json",
+    "sources/req017-extensibility-ownership-gap.json",
+    "sources/sharing-ownership-gap.json",
+    "sources/extensibility-remaining-ownership-gap.json",
+    "sources/integrations-ownership-gap.json",
+)
+
 CATEGORY_IDS = {
     "local-implemented-stale": {
         "AUTO-003", "AUTO-007", "EXT-003", "EXT-007", "EXT-013", "INT-004", "INT-008",
@@ -2091,6 +2102,58 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
     return errors
 
 
+
+def unresolved_gap_coverage_errors(rows: list[object], root: pathlib.Path = ROOT) -> list[str]:
+    """Require every unresolved row to remain covered by at least one machine-checked gap record."""
+    errors: list[str] = []
+    unresolved_ids = {
+        str(item.get("id", ""))
+        for item in rows
+        if isinstance(item, Mapping) and item.get("category") == "unresolved-decomposition"
+    }
+    coverage: dict[str, set[str]] = defaultdict(set)
+
+    for relative in UNRESOLVED_COVERAGE_GAP_PATHS:
+        path = root / relative
+        if not path.is_file():
+            errors.append(f"unresolved coverage record missing: {relative}")
+            continue
+        try:
+            gap = _load(path)
+        except (json.JSONDecodeError, OSError) as exc:
+            errors.append(f"unresolved coverage record invalid: {relative}: {exc}")
+            continue
+
+        story_ids: set[str] = set()
+        for key in ("storyIds", "residualStoryIds"):
+            value = gap.get(key)
+            if isinstance(value, list):
+                story_ids.update(str(item) for item in value)
+        adjacent = gap.get("adjacentSingletonChecks")
+        if isinstance(adjacent, list):
+            for item in adjacent:
+                if isinstance(item, Mapping) and item.get("storyId"):
+                    story_ids.add(str(item.get("storyId")))
+
+        if not story_ids:
+            errors.append(f"unresolved coverage record has no story ids: {relative}")
+            continue
+        for story_id in story_ids:
+            coverage[story_id].add(relative)
+
+    missing = sorted(unresolved_ids - set(coverage))
+    if missing:
+        errors.append(f"unresolved rows lack machine-checkable decomposition coverage: {missing}")
+
+    extraneous = sorted(set(coverage) - unresolved_ids)
+    if extraneous:
+        errors.append(f"gap records cover rows no longer unresolved-decomposition: {extraneous}")
+
+    expected = set(CATEGORY_IDS["unresolved-decomposition"])
+    if unresolved_ids != expected:
+        errors.append("unresolved coverage baseline drifted from canonical category set")
+    return errors
+
 def sync_features_status(root: pathlib.Path = ROOT) -> None:
     """Synchronize only the generated status mirrors in FEATURES.md from Ralph."""
     plan = _load(root / "ralph.json")
@@ -2257,6 +2320,7 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
     errors.extend(sharing_ownership_gap_errors(rows, root))
     errors.extend(extensibility_remaining_gap_errors(rows, root))
     errors.extend(integrations_ownership_gap_errors(rows, root))
+    errors.extend(unresolved_gap_coverage_errors(rows, root))
 
     errors.extend(_features_status_errors(root, plan))
     return errors

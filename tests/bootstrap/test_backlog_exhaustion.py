@@ -21,6 +21,7 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     routing_ownership_gap_errors,
     sharing_ownership_gap_errors,
     surface_evidence_gaps,
+    unresolved_gap_coverage_errors,
     validate_ledger,
 )
 
@@ -363,6 +364,22 @@ class BacklogExhaustionTests(unittest.TestCase):
                 with mock.patch("tools.validate_backlog_exhaustion._load", side_effect=fake_load):
                     errors = validator(ledger["stories"], ROOT)
                 self.assertTrue(any(expected in error for error in errors), errors)
+
+
+    def test_every_unresolved_row_has_machine_checked_gap_coverage(self):
+        ledger = load_ledger()
+        self.assertEqual(unresolved_gap_coverage_errors(ledger["stories"], ROOT), [])
+
+        synthetic = copy.deepcopy(ledger["stories"])
+        synthetic.append({"id": "SYNTH-999", "category": "unresolved-decomposition"})
+        errors = unresolved_gap_coverage_errors(synthetic, ROOT)
+        self.assertTrue(any("lack machine-checkable decomposition coverage" in error for error in errors), errors)
+
+        downgraded = copy.deepcopy(ledger["stories"])
+        row = next(item for item in downgraded if item["id"] == "EXT-004")
+        row["category"] = "explicit-blocker"
+        errors = unresolved_gap_coverage_errors(downgraded, ROOT)
+        self.assertTrue(any("cover rows no longer unresolved-decomposition" in error for error in errors), errors)
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())
