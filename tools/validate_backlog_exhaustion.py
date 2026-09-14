@@ -119,13 +119,14 @@ INTEGRATIONS_REVIEWED_PARTITIONS = (
     "effect-client-http-and-sse-decoding",
     "typed-integration-http-handler",
     "pty-websocket-ticket-auth-boundary",
+    "generated-promise-effect-client-boundary",
 )
 INTEGRATIONS_UNRESOLVED_RULE_PARTITIONS = (
     "packages/core/src/workspace.ts",
     "packages/core/src/project.ts and packages/core/src/project/**",
     "packages/core/src/pty.ts and packages/core/src/pty/** beyond the reviewed ticket/protocol evidence",
     "packages/core/src/git.ts",
-    "packages/client/** beyond reviewed contract/effect tests; generated clients intentionally omit PTY custom transport",
+    "packages/client/** residual runtime/generated outputs beyond reviewed contract/effect/build/promise/import-boundary evidence",
     "packages/server/** beyond reviewed API/integration/PTY websocket handlers",
     "sdks/**",
     "provider-specific integration methods external protocols auth and credential lifetimes",
@@ -2152,11 +2153,37 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
             if not isinstance(story, Mapping) or story.get("status") != "accepted":
                 errors.append(f"{story_id}: integrations PTY accepted process-terminal owner drifted")
 
+    generated_constraints = gap.get("generatedClientConstraints")
+    expected_generated_constraints = {
+        "promiseOutputDirectory": "src/generated",
+        "effectOutputDirectory": "src/generated-effect",
+        "productBuildConcurrency": 2,
+        "promiseAutomaticReconnect": False,
+        "promiseSseBufferStringUnits": 1048576,
+        "promiseRootRuntimeExcludes": ["effect", "schema", "protocol", "core", "server"],
+        "effectRootRuntimeRequires": ["effect", "schema", "protocol"],
+        "effectRootRuntimeExcludes": ["core", "server"],
+        "customTransportEndpointsOmitted": ["pty.connect", "pty.connectToken"],
+        "manifestOwnedStaleRemovalOnly": True,
+        "rejectExistingSymlinkTargets": True,
+    }
+    if generated_constraints != expected_generated_constraints:
+        errors.append("integrations generated client constraints drifted from pinned source")
+    if not isinstance(generated_constraints, Mapping) or generated_constraints.get("promiseAutomaticReconnect") is not False:
+        errors.append("integrations generated Promise client cannot silently gain automatic reconnect semantics")
+    if not isinstance(generated_constraints, Mapping) or generated_constraints.get("manifestOwnedStaleRemovalOnly") is not True:
+        errors.append("integrations generated client stale-file deletion must remain manifest-owned only")
+
     candidates = gap.get("candidateFragments")
-    if not isinstance(candidates, list) or [item.get("id") for item in candidates if isinstance(item, Mapping)] != ["client-server-contract-generation-identity"]:
+    expected_candidate_ids = ["client-server-contract-generation-identity", "generated-promise-effect-client-emission"]
+    if not isinstance(candidates, list) or [item.get("id") for item in candidates if isinstance(item, Mapping)] != expected_candidate_ids:
         errors.append("integrations candidate fragment set drifted")
-    elif candidates[0].get("ownershipEstablished") is not False or not candidates[0].get("disqualifiers"):
-        errors.append("integrations contract candidate cannot become owned from controller-status/task arithmetic")
+    else:
+        for candidate in candidates:
+            if candidate.get("ownershipEstablished") is not False or not candidate.get("disqualifiers"):
+                errors.append(
+                    f"integrations contract candidate cannot become owned from controller-status/task arithmetic: {candidate.get('id')}"
+                )
     history = gap.get("historyReview")
     if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit" or not str(history.get("limitation", "")).strip():
         errors.append("integrations history-review limitation drifted")

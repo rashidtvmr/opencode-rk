@@ -132,6 +132,30 @@
       "stateLifetime": "tickets live in a global cache for at most 60 seconds and are consumed atomically once only when ptyID/directory/workspaceID scope matches; each WebSocket attachment lives until the socket/drain race ends and is detached in finalization",
       "resourceLifetime": "ticket state is capped at 10,000 entries and replay strings are split at 65,536 JavaScript string units per frame, but the server WebSocket outbox is explicitly unbounded and graceful-shutdown socket tracking remains a TODO, so an end-to-end bounded native transport lifetime is not established",
       "ownershipBlocker": "The six residual INT rows remain one generic source-indistinguishable class. Core PTY/ticket paths also overlap the already accepted opencode.process-terminal owners, while the server transport requires HTTP/WebSocket/auth authority and still has an unbounded outbox plus unresolved graceful-shutdown tracking. No residual INT id can own this boundary by subtraction."
+    },
+    {
+      "id": "generated-promise-effect-client-boundary",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"caller","path":"packages/client/script/build.ts","blobSha":"aeec4b3e34512e3a39172abdc79581d3d8095d34","reviewedLines":{"from":1,"to":30}},
+        {"kind":"source","path":"packages/httpapi-codegen/src/index.ts","blobSha":"298a1211dddcaeea66b0c41d6833d90865c828c0","reviewedLines":{"from":76,"to":267}},
+        {"kind":"source","path":"packages/httpapi-codegen/src/index.ts","blobSha":"298a1211dddcaeea66b0c41d6833d90865c828c0","reviewedLines":{"from":492,"to":537}},
+        {"kind":"source","path":"packages/httpapi-codegen/src/index.ts","blobSha":"298a1211dddcaeea66b0c41d6833d90865c828c0","reviewedLines":{"from":710,"to":779}},
+        {"kind":"test","path":"packages/client/test/promise.test.ts","blobSha":"322a39cd6b296dffa0fc0bd0789b8de645ae8376","reviewedLines":{"from":4,"to":84}},
+        {"kind":"test","path":"packages/client/test/import-boundaries.test.ts","blobSha":"4875a3a5dc0d659e0afae2e480cafac3775750c9","reviewedLines":{"from":13,"to":30}},
+        {"kind":"test","path":"packages/httpapi-codegen/test/generate.test.ts","blobSha":"6e076b7ef4e133b001b158ae372c7acd81aa3897","reviewedLines":{"from":27,"to":163}},
+        {"kind":"test","path":"packages/httpapi-codegen/test/generate.test.ts","blobSha":"6e076b7ef4e133b001b158ae372c7acd81aa3897","reviewedLines":{"from":515,"to":555}},
+        {"kind":"test","path":"packages/httpapi-codegen/test/generate.test.ts","blobSha":"6e076b7ef4e133b001b158ae372c7acd81aa3897","reviewedLines":{"from":980,"to":1021}},
+        {"kind":"test","path":"packages/httpapi-codegen/test/write.test.ts","blobSha":"f0704abea2b08d312ea0590c348902bb737703e3","reviewedLines":{"from":6,"to":145}},
+        {"kind":"spec","path":"packages/httpapi-codegen/README.md","blobSha":"0d31b129b72a4ff96af9c09a1646afd638b7d786","reviewedLines":{"from":1,"to":42}},
+        {"kind":"spec","path":"packages/client/README.md","blobSha":"8c53e47c7e681a43de56e307b355a8bc65d210a7","reviewedLines":{"from":3,"to":14}}
+      ],
+      "inputs": "one authoritative HttpApi/ClientApi contract plus explicit product group/endpoint naming and omission policy; runtime Promise clients take base URL, optional fetch/headers and per-request abort/header options",
+      "outputs": "committed Promise and imported-Effect client source generated from the same compiled operation set, with structural wire values for Promise and decoded Effect-native values for Effect",
+      "failureSemantics": "generation fails closed on required client middleware without an adapter, ambiguous/multiple schemas, naming collisions, unsupported or unportable shapes and unsafe output paths; Promise runtime preserves declared tagged errors and normalizes transport, status, content-type and malformed-response failures to stable ClientError reasons",
+      "stateLifetime": "code generation is build-time; a private manifest tracks only files owned by the generator so stale generated files can be removed without deleting unrelated files; runtime client state is per client/stream and generated streams do not reconnect automatically",
+      "resourceLifetime": "the product build emits Promise and Effect outputs with concurrency two; Promise SSE parsing caps its accumulated string buffer at 1,048,576 JavaScript string units and cancels/releases the reader on exit; network lifetime belongs to the supplied fetch/HttpClient transport",
+      "ownershipBlocker": "The generator is generic infrastructure and its own spec says OpenCode owns product endpoint filtering before generation. Product caller/tests still map to the same broad integration/server-control-plane surfaces, including already implemented INT-008 behavior. Generated-client evidence therefore cannot distinguish one of the six residual INT ids or imply ownership of the separate sdks/** remainder."
     }
   ],
   "ptyBoundaryConstraints": {
@@ -155,12 +179,25 @@
     "overlapPatterns": ["packages/core/src/pty.ts", "packages/core/src/pty/**"],
     "conclusion": "The PTY domain/process lifecycle is already mapped entirely to accepted process-terminal owners. Integration decomposition may describe the server/custom-transport seam but cannot re-own accepted PTY lifecycle semantics."
   },
+  "generatedClientConstraints": {
+    "promiseOutputDirectory": "src/generated",
+    "effectOutputDirectory": "src/generated-effect",
+    "productBuildConcurrency": 2,
+    "promiseAutomaticReconnect": false,
+    "promiseSseBufferStringUnits": 1048576,
+    "promiseRootRuntimeExcludes": ["effect", "schema", "protocol", "core", "server"],
+    "effectRootRuntimeRequires": ["effect", "schema", "protocol"],
+    "effectRootRuntimeExcludes": ["core", "server"],
+    "customTransportEndpointsOmitted": ["pty.connect", "pty.connectToken"],
+    "manifestOwnedStaleRemovalOnly": true,
+    "rejectExistingSymlinkTargets": true
+  },
   "unresolvedRulePartitions": [
     "packages/core/src/workspace.ts",
     "packages/core/src/project.ts and packages/core/src/project/**",
     "packages/core/src/pty.ts and packages/core/src/pty/** beyond the reviewed ticket/protocol evidence",
     "packages/core/src/git.ts",
-    "packages/client/** beyond reviewed contract/effect tests; generated clients intentionally omit PTY custom transport",
+    "packages/client/** residual runtime/generated outputs beyond reviewed contract/effect/build/promise/import-boundary evidence",
     "packages/server/** beyond reviewed API/integration/PTY websocket handlers",
     "sdks/**",
     "provider-specific integration methods external protocols auth and credential lifetimes"
@@ -173,6 +210,15 @@
         "All six residual INT rows have the same generic story, no requirements and the same integration surface.",
         "INT-009's not-started status does not create semantic ownership distinct from the five in-progress peers.",
         "INT-008 already owns event-wire compatibility and INT-004 owns a scoped integration slice, so broad contract generation cannot re-own those behaviors."
+      ]
+    },
+    {
+      "id": "generated-promise-effect-client-emission",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "The generic code generator has no product task binding and explicitly delegates endpoint filtering policy to OpenCode before generation.",
+        "The six residual INT rows remain source-identical, while product build/tests also overlap server-control-plane and already implemented INT-008 behavior.",
+        "Generated Promise/Effect client ownership does not establish ownership of the separate sdks/** family or provider-specific external protocols."
       ]
     }
   ],

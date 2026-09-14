@@ -366,6 +366,18 @@ class BacklogExhaustionTests(unittest.TestCase):
                 lambda gap: gap["unresolvedRulePartitions"].__setitem__(2, "packages/core/src/pty/**"),
                 "integrations unresolved rule remainder drifted",
             ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["generatedClientConstraints"].__setitem__("promiseAutomaticReconnect", True),
+                "generated Promise client cannot silently gain automatic reconnect semantics",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["candidateFragments"][1].__setitem__("ownershipEstablished", True),
+                "cannot become owned from controller-status/task arithmetic: generated-promise-effect-client-emission",
+            ),
         ]
 
         for gap_path, validator, mutate, expected in cases:
