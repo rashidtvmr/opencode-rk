@@ -424,6 +424,30 @@ class BacklogExhaustionTests(unittest.TestCase):
                 lambda gap: gap["candidateFragments"][3].__setitem__("ownershipEstablished", True),
                 "cannot become owned from controller-status/task arithmetic: vscode-cli-terminal-bridge",
             ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["integrationAuthConstraints"].__setitem__("attemptCapacityBoundEstablished", True),
+                "upstream OAuth attempt capacity bound must remain explicitly unresolved",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["integrationAuthConstraints"].__setitem__("lifecycleConstantSpecEstablished", True),
+                "auth lifecycle constants must remain explicitly missing a genuine spec",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["integrationAuthSurfaceOverlap"]["featureIds"].pop(),
+                "dedicated auth ownership guard drifted",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["candidateFragments"][4].__setitem__("ownershipEstablished", True),
+                "cannot become owned from controller-status/task arithmetic: credential-oauth-attempt-provider-lifecycle",
+            ),
         ]
 
         for gap_path, validator, mutate, expected in cases:

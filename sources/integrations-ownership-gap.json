@@ -194,6 +194,25 @@
       "stateLifetime": "command registrations live in the VS Code extension subscription scope; the selected random port is stored in terminal environment metadata; deactivate is empty and terminal/process lifetime remains owned by VS Code rather than the extension",
       "resourceLifetime": "the bridge owns IDE UI access, terminal creation, CLI command launch, terminal environment injection, 200 ms readiness delays and localhost HTTP fetches; fetches have no explicit timeout/abort and no direct automated extension behavior test exists at the locked pin",
       "ownershipBlocker": "This is the literal sdks/** integration surface, but it requires VS Code UI state, terminal/process execution, environment injection and localhost network authority that are outside a bounded native residual INT contract. The source/spec/caller chain has no direct automated behavior test, and the six residual INT rows provide no task-specific binding."
+    },
+    {
+      "id": "credential-oauth-attempt-provider-lifecycle",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/core/src/integration.ts","blobSha":"f61bac393a826bcd7f64914abd6aac45b1b66c99","reviewedLines":{"from":63,"to":200}},
+        {"kind":"source","path":"packages/core/src/integration.ts","blobSha":"f61bac393a826bcd7f64914abd6aac45b1b66c99","reviewedLines":{"from":221,"to":364}},
+        {"kind":"source","path":"packages/core/src/integration.ts","blobSha":"f61bac393a826bcd7f64914abd6aac45b1b66c99","reviewedLines":{"from":380,"to":515}},
+        {"kind":"caller","path":"packages/server/src/handlers/integration.ts","blobSha":"6c29d58776078ad54c436cd91c73daba3feab495","reviewedLines":{"from":19,"to":104}},
+        {"kind":"source","path":"packages/protocol/src/groups/integration.ts","blobSha":"304681d3305514b4126aa1f4b3034355b83b1ef3","reviewedLines":{"from":8,"to":130}},
+        {"kind":"test","path":"packages/core/test/integration.test.ts","blobSha":"376d2f9523bd2d2651be64a911a9f834415f0fca","reviewedLines":{"from":101,"to":348}}
+      ],
+      "missingEvidenceClasses": ["lifecycle-spec", "refresh-direct-test"],
+      "inputs": "registered key/OAuth/env authentication methods, raw key material or OAuth inputs/code, stored credential connections, provider authorize/refresh callbacks and process environment values",
+      "outputs": "credential-backed or env-backed active connections; stored key/OAuth credentials; OAuth attempt status transitions; refreshed OAuth credential material; Integration.Updated and ConnectionUpdated events after committed credential changes",
+      "failureSemantics": "provider authorize/refresh/callback failures are wrapped as AuthorizationError; missing key/OAuth methods and missing/already-completing attempts die as defects; code-mode completion without a code returns CodeRequiredError; failed attempts retain a squashed message until terminal retention expires; environment resolution returns undefined when the variable is absent",
+      "stateLifetime": "pending OAuth attempts expire after 10 minutes, completed/failed/expired terminal status is retained for 1 minute, a scrubber runs every 30 seconds, auto callbacks execute in the attempt scope, and cancel/settle/expiry close that scope; stored credentials outlive attempts in Credential.Service",
+      "resourceLifetime": "the attempt map has time-based cleanup but no explicit concurrent-attempt capacity bound; auto provider callbacks run in background fibers; provider authorize/refresh callbacks may own external network/browser resources; env connections read process state; successful key/OAuth flows mutate credential storage and publish events",
+      "ownershipBlocker": "The dedicated opencode.integration-auth surface already maps this source to accepted PROV-007/008/010 and SEC-009 plus locally implemented EXT-007 and INT-004. Those local implementations intentionally exclude raw secrets, env access, provider callback/refresh execution, persistence, events and network. No genuine pinned spec defines the 10-minute/1-minute/30-second/5-minute lifecycle constants, refresh has no direct Integration service test, and the upstream attempt map has no explicit concurrency cap. The six generic residual INT rows therefore cannot re-own this authority by broad-surface overlap."
     }
   ],
   "ptyBoundaryConstraints": {
@@ -263,6 +282,34 @@
     "declaredPackageTestCommand": "vscode-test",
     "manualReloadTestWorkflowDocumented": true
   },
+  "integrationAuthConstraints": {
+    "attemptLifetimeMinutes": 10,
+    "terminalRetentionMinutes": 1,
+    "scrubIntervalSeconds": 30,
+    "refreshWindowMinutes": 5,
+    "attemptCapacityBoundEstablished": false,
+    "providerCallbacksExecute": true,
+    "autoCallbackRunsInBackground": true,
+    "credentialPersistenceMutates": true,
+    "environmentConnectionsReadProcessState": true,
+    "committedCredentialChangesPublishEvents": true,
+    "refreshDirectIntegrationTestEstablished": false,
+    "lifecycleConstantSpecEstablished": false
+  },
+  "integrationAuthSurfaceOverlap": {
+    "surfaceId": "opencode.integration-auth",
+    "featureIds": ["PROV-007", "PROV-008", "PROV-010", "SEC-009", "EXT-007", "INT-004"],
+    "controllerAcceptedFeatureIds": ["PROV-007", "PROV-008", "PROV-010", "SEC-009"],
+    "localImplementedFeatureCommits": {
+      "EXT-007": "b76d6126c97f928b5145dd19b6bdec1c4e70aa83",
+      "INT-004": "d8fa4854fcd680e5fe3dfe2b05c6a2151a340056"
+    },
+    "localImplementedExclusions": {
+      "EXT-007": "metadata-only plugin integration bridge; no env projection, secret material, OAuth callbacks/refresh, network or persistence",
+      "INT-004": "bounded secret-free registry and caller-driven attempt state machine; no credential/env/provider callback/refresh/network/persistence/event authority"
+    },
+    "conclusion": "The narrow integration-auth surface is fully accounted by accepted or locally implemented owners, while the executable secret-bearing remainder is explicitly excluded from the two local implementations. Broad opencode.integrations membership cannot transfer that remainder to a generic residual INT row."
+  },
   "unresolvedRulePartitions": [
     "packages/core/src/workspace.ts",
     "packages/core/src/project/** beyond the reviewed ProjectV2 project.ts resolution/commit boundary",
@@ -271,7 +318,7 @@
     "packages/client/** residual runtime/generated outputs beyond reviewed contract/effect/build/promise/import-boundary evidence",
     "packages/server/** beyond reviewed API/integration/PTY/location/session-location handlers",
     "sdks/vscode packaging/release/tooling and missing direct extension behavior-test coverage beyond the reviewed CLI-terminal bridge",
-    "provider-specific integration methods external protocols auth and credential lifetimes"
+    "provider-specific executable authorization/refresh implementations, external protocol/network behavior and credential/env authority beyond the reviewed generic auth lifecycle"
   ],
   "candidateFragments": [
     {
@@ -309,6 +356,15 @@
         "The bridge requires VS Code UI state, terminal/process execution, environment injection and localhost network authority, including fetches with no explicit timeout.",
         "No task-specific evidence distinguishes one residual INT row from its five source-identical peers."
       ]
+    },
+    {
+      "id": "credential-oauth-attempt-provider-lifecycle",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "The narrow opencode.integration-auth surface is already fully mapped to accepted PROV/SEC owners plus locally implemented EXT-007 and INT-004, whose task receipts explicitly exclude executable secret-bearing behavior.",
+        "The upstream attempt map has no explicit concurrency cap, executable provider authorize/refresh callbacks may own network/browser resources, env connections read process state and successful flows mutate credential storage and publish events.",
+        "No genuine pinned specification defines the core lifecycle constants and no direct Integration test binds the five-minute refresh threshold; the six residual INT rows remain task-indistinguishable."
+      ]
     }
   ],
   "unresolvedPartitions": [
@@ -317,7 +373,7 @@
     "git-and-repository-adjacent-integration-side-effects",
     "generated-promise-effect-client-and-vscode-sdk-bridge-ownership",
     "server-handler-runtime-and-error-normalization-ownership",
-    "provider-specific-integration-auth-network-and-credential-lifecycle",
+    "provider-specific-executable-auth-refresh-network-and-secret-authority",
     "external-protocol-reconnect-timeout-and-resource-lifetime"
   ],
   "historyReview": {
@@ -331,6 +387,7 @@
     "The PTY WebSocket/ticket boundary remains blocked until task-specific evidence distinguishes a residual INT owner and explicitly resolves the unbounded outbox, graceful-shutdown lifetime and server auth/network authority without re-owning accepted process-terminal behavior.",
     "Project/location ownership remains blocked until task-specific evidence separates pure identity/context resolution from legacy migration/persistence, the configuration-runtime Location graph and frozen EventV2 compatibility, with explicit filesystem/git/database authority and lifetime bounds.",
     "The sdks/vscode bridge remains blocked until a direct automated extension behavior test and task-specific owner exist and an approved native boundary explicitly owns IDE/terminal/process-environment/localhost-network authority plus timeout, cancellation and cleanup semantics.",
+    "Executable integration-auth behavior remains closed to residual INT ownership unless new task-specific evidence both distinguishes an owner from the fully accounted integration-auth surface and explicitly grants secret storage, process-environment, provider callback/refresh, event and network/browser authority with bounded concurrent attempt resources and specified lifecycle constants.",
     "All reviewed and unresolved rule partitions must receive source-grounded task dispositions or remain blocked before the integrations family can be called decomposed."
   ]
 }

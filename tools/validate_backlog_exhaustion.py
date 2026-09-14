@@ -122,6 +122,7 @@ INTEGRATIONS_REVIEWED_PARTITIONS = (
     "generated-promise-effect-client-boundary",
     "project-location-context-resolution-boundary",
     "vscode-cli-terminal-bridge",
+    "credential-oauth-attempt-provider-lifecycle",
 )
 INTEGRATIONS_UNRESOLVED_RULE_PARTITIONS = (
     "packages/core/src/workspace.ts",
@@ -131,9 +132,12 @@ INTEGRATIONS_UNRESOLVED_RULE_PARTITIONS = (
     "packages/client/** residual runtime/generated outputs beyond reviewed contract/effect/build/promise/import-boundary evidence",
     "packages/server/** beyond reviewed API/integration/PTY/location/session-location handlers",
     "sdks/vscode packaging/release/tooling and missing direct extension behavior-test coverage beyond the reviewed CLI-terminal bridge",
-    "provider-specific integration methods external protocols auth and credential lifetimes",
+    "provider-specific executable authorization/refresh implementations, external protocol/network behavior and credential/env authority beyond the reviewed generic auth lifecycle",
 )
 INTEGRATIONS_PTY_ACCEPTED_FEATURES = ("SEC-001", "SEC-002", "SEC-008", "TOOL-005", "TOOL-013")
+INTEGRATIONS_AUTH_FEATURES = ("PROV-007", "PROV-008", "PROV-010", "SEC-009", "EXT-007", "INT-004")
+INTEGRATIONS_AUTH_ACCEPTED_FEATURES = ("PROV-007", "PROV-008", "PROV-010", "SEC-009")
+INTEGRATIONS_AUTH_LOCAL_FEATURES = ("EXT-007", "INT-004")
 INTEGRATIONS_LOCATION_RUNTIME_FEATURES = (
     "BASE-004",
     "BASE-005",
@@ -151,7 +155,7 @@ INTEGRATIONS_UNRESOLVED_PARTITIONS = (
     "git-and-repository-adjacent-integration-side-effects",
     "generated-promise-effect-client-and-vscode-sdk-bridge-ownership",
     "server-handler-runtime-and-error-normalization-ownership",
-    "provider-specific-integration-auth-network-and-credential-lifecycle",
+    "provider-specific-executable-auth-refresh-network-and-secret-authority",
     "external-protocol-reconnect-timeout-and-resource-lifetime",
 )
 
@@ -2293,12 +2297,87 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
                 + ", ".join(direct_vscode_tests)
             )
 
+    auth_constraints = gap.get("integrationAuthConstraints")
+    expected_auth_constraints = {
+        "attemptLifetimeMinutes": 10,
+        "terminalRetentionMinutes": 1,
+        "scrubIntervalSeconds": 30,
+        "refreshWindowMinutes": 5,
+        "attemptCapacityBoundEstablished": False,
+        "providerCallbacksExecute": True,
+        "autoCallbackRunsInBackground": True,
+        "credentialPersistenceMutates": True,
+        "environmentConnectionsReadProcessState": True,
+        "committedCredentialChangesPublishEvents": True,
+        "refreshDirectIntegrationTestEstablished": False,
+        "lifecycleConstantSpecEstablished": False,
+    }
+    if auth_constraints != expected_auth_constraints:
+        errors.append("integrations auth lifecycle constraints drifted from pinned source")
+    if not isinstance(auth_constraints, Mapping) or auth_constraints.get("attemptCapacityBoundEstablished") is not False:
+        errors.append("integrations upstream OAuth attempt capacity bound must remain explicitly unresolved")
+    if not isinstance(auth_constraints, Mapping) or auth_constraints.get("lifecycleConstantSpecEstablished") is not False:
+        errors.append("integrations auth lifecycle constants must remain explicitly missing a genuine spec")
+    if not isinstance(auth_constraints, Mapping) or auth_constraints.get("refreshDirectIntegrationTestEstablished") is not False:
+        errors.append("integrations five-minute refresh threshold must remain explicitly missing a direct Integration test")
+
+    auth_overlap = gap.get("integrationAuthSurfaceOverlap")
+    expected_auth_commits = {
+        story_id: STALE_IMPLEMENTATION_COMMITS[story_id][0] for story_id in INTEGRATIONS_AUTH_LOCAL_FEATURES
+    }
+    if not isinstance(auth_overlap, Mapping) or (
+        auth_overlap.get("surfaceId") != "opencode.integration-auth"
+        or auth_overlap.get("featureIds") != list(INTEGRATIONS_AUTH_FEATURES)
+        or auth_overlap.get("controllerAcceptedFeatureIds") != list(INTEGRATIONS_AUTH_ACCEPTED_FEATURES)
+        or auth_overlap.get("localImplementedFeatureCommits") != expected_auth_commits
+        or set(auth_overlap.get("localImplementedExclusions", {})) != set(INTEGRATIONS_AUTH_LOCAL_FEATURES)
+        or any(
+            not str(auth_overlap.get("localImplementedExclusions", {}).get(story_id, "")).strip()
+            for story_id in INTEGRATIONS_AUTH_LOCAL_FEATURES
+        )
+        or not str(auth_overlap.get("conclusion", "")).strip()
+    ):
+        errors.append("integrations dedicated auth ownership guard drifted")
+    auth_surface = next((item for item in rule_rows if item.get("id") == "opencode.integration-auth"), None)
+    if not isinstance(auth_surface, Mapping) or (
+        auth_surface.get("featureIds") != list(INTEGRATIONS_AUTH_FEATURES)
+        or "packages/core/src/integration.ts" not in auth_surface.get("patterns", [])
+        or "packages/core/src/integration/**" not in auth_surface.get("patterns", [])
+    ):
+        errors.append("integrations dedicated auth surface drifted")
+    for story_id in INTEGRATIONS_AUTH_ACCEPTED_FEATURES:
+        story = plan_by_id.get(story_id)
+        if not isinstance(story, Mapping) or story.get("status") != "accepted":
+            errors.append(f"{story_id}: dedicated integration-auth accepted owner drifted")
+    for story_id in INTEGRATIONS_AUTH_LOCAL_FEATURES:
+        row = row_by_id.get(story_id)
+        if not isinstance(row, Mapping) or (
+            row.get("category") != "local-implemented-stale"
+            or row.get("implementationCommits") != list(STALE_IMPLEMENTATION_COMMITS[story_id])
+        ):
+            errors.append(f"{story_id}: dedicated integration-auth local implementation receipt drifted")
+
+    auth_partition = next(
+        (
+            item
+            for item in gap.get("reviewedPartitions", [])
+            if isinstance(item, Mapping) and item.get("id") == "credential-oauth-attempt-provider-lifecycle"
+        ),
+        None,
+    )
+    if not isinstance(auth_partition, Mapping) or auth_partition.get("missingEvidenceClasses") != [
+        "lifecycle-spec",
+        "refresh-direct-test",
+    ]:
+        errors.append("integrations auth lifecycle missing-evidence classes drifted")
+
     candidates = gap.get("candidateFragments")
     expected_candidate_ids = [
         "client-server-contract-generation-identity",
         "generated-promise-effect-client-emission",
         "project-location-context-resolution",
         "vscode-cli-terminal-bridge",
+        "credential-oauth-attempt-provider-lifecycle",
     ]
     if not isinstance(candidates, list) or [item.get("id") for item in candidates if isinstance(item, Mapping)] != expected_candidate_ids:
         errors.append("integrations candidate fragment set drifted")
@@ -2311,7 +2390,7 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
     history = gap.get("historyReview")
     if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit" or not str(history.get("limitation", "")).strip():
         errors.append("integrations history-review limitation drifted")
-    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 7:
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 8:
         errors.append("integrations closure criteria drifted")
     return errors
 
