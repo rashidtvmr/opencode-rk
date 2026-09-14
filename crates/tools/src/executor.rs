@@ -222,29 +222,41 @@ impl ToolExecutor {
     pub async fn execute_batch(&self, calls: Vec<ToolCall>) -> Vec<ToolResult> {
         let config = self.timeout_config.clone();
         let mut set = tokio::task::JoinSet::new();
-        let mut results: Vec<ToolResult> = Vec::with_capacity(calls.len());
+        let mut results: Vec<Option<ToolResult>> = (0..calls.len()).map(|_| None).collect();
 
-        for call in calls {
+        for (idx, call) in calls.into_iter().enumerate() {
             set.spawn(async move {
                 let executor = ToolExecutor::with_timeout_config(config.clone());
-                executor.execute(call).await
+                let result = executor.execute(call).await;
+                (idx, result)
             });
         }
 
-        while let Some(result) = set.join_next().await {
-            match result {
-                Ok(tool_result) => results.push(tool_result),
-                Err(e) => results.push(ToolResult {
-                    tool_id: String::new(),
-                    output: String::new(),
-                    success: false,
-                    duration_ms: 0,
-                    error: Some(format!("Task join error: {}", e)),
-                }),
+        while let Some(join_result) = set.join_next().await {
+            match join_result {
+                Ok((idx, tool_result)) => results[idx] = Some(tool_result),
+                Err(e) => {
+                    // Cannot recover idx on JoinError, find first empty slot
+                    if let Some(pos) = results.iter().position(|r| r.is_none()) {
+                        results[pos] = Some(ToolResult {
+                            tool_id: String::new(),
+                            output: String::new(),
+                            success: false,
+                            duration_ms: 0,
+                            error: Some(format!("Task join error: {}", e)),
+                        });
+                    }
+                }
             }
         }
 
-        results
+        results.into_iter().map(|r| r.unwrap_or_else(|| ToolResult {
+            tool_id: String::new(),
+            output: String::new(),
+            success: false,
+            duration_ms: 0,
+            error: Some("missing result".to_string()),
+        })).collect()
     }
 }
 

@@ -964,6 +964,7 @@ dependencies = [
  "opencode-rk-contracts",
  "opencode-rk-storage",
  "rusqlite",
+ "serde_json",
  "tempfile",
  "thiserror",
  "tokio",

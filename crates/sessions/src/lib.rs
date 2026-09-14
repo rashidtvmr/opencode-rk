@@ -2,6 +2,7 @@
 //! legacy format-1 [`SessionService`] kept for the server/CLI boundary.
 #![forbid(unsafe_code)]
 pub mod index;
+pub mod import;
 pub mod migration;
 pub mod query;
 pub mod store;
