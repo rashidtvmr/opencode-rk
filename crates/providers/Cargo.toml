@@ -1,8 +1,10 @@
 [package]
 name = "opencode-rk-providers"
-version = "0.1.0-alpha.1"
-edition = "2024"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+rust-version.workspace = true
 
 [dependencies]
 opencode-rk-contracts = { path = "../contracts" }

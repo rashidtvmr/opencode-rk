@@ -533,7 +533,7 @@
     {
       "id": "CAT-006",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1331,7 +1331,7 @@
     {
       "id": "PROV-003",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1345,7 +1345,7 @@
     {
       "id": "PROV-004",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1401,7 +1401,7 @@
     {
       "id": "PROV-008",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1975,7 +1975,7 @@
     {
       "id": "SESS-003",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1989,7 +1989,7 @@
     {
       "id": "SESS-004",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [

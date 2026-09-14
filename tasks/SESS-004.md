@@ -1,6 +1,6 @@
 # SESS-004
 
-Status: IN PROGRESS. Kind: product. Runtime optional: False.
+Status: COMPLETED. Kind: product. Runtime optional: False.
 Mandatory for full declared release: yes.
 Requirements: None.
 Dependencies: crates/contracts provides SessionSummary type, crates/storage provides schema.
@@ -50,3 +50,28 @@ Both commands pass with no errors.
 
 SessionRecord = SessionSummary (alias in lib.rs:13)
 SessionSummary has: id (SessionId), title (String), state (SessionState), created_at (Timestamp), updated_at (Timestamp), archived_at (Option<Timestamp>)
+
+## Completion
+
+Implementation complete in `crates/sessions/src/store.rs`.
+
+- `PersistentSessionStore` wraps rusqlite::Connection via `new(conn)`.
+- `create(&session)` inserts using session's `created_at`/`updated_at`.
+- `fetch(id)` returns `Option<SessionRecord>`.
+- `update(&session)` updates record, returns `Err(NotFound)` if missing.
+- `delete(id)` returns `Result<bool>` (true if deleted).
+- `all_sessions()` returns `Vec<SessionRecord>`.
+- `create_session_table(conn)` and `ensure_migrations(conn)` in `crates/sessions/src/migration.rs`.
+
+Tests:
+- SESS-004-T01: create_and_fetch - PASS
+- SESS-004-T02: update_persists - PASS
+- SESS-004-T03: delete_removes - PASS
+- SESS-004-T04: all_sessions_returns_all - PASS
+- SESS-004-T05: fetch_missing_returns_none - PASS
+
+Verification:
+```
+cargo test -p opencode-rk-sessions  -- 25 tests passed
+cargo check --workspace -- no errors
+```

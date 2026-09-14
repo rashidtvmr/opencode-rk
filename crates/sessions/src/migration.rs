@@ -33,9 +33,11 @@ pub fn ensure_migrations(conn: &Connection) -> Result<(), rusqlite::Error> {
 
     // Record migration version if not already present
     let version: Option<i64> = conn
-        .query_row("SELECT version FROM migrations WHERE version = 1", [], |row| {
-            row.get(0)
-        })
+        .query_row(
+            "SELECT version FROM migrations WHERE version = 1",
+            [],
+            |row| row.get(0),
+        )
         .ok();
 
     if version.is_none() {
@@ -89,9 +91,11 @@ mod tests {
         ensure_migrations(&conn).unwrap();
 
         let version: i64 = conn
-            .query_row("SELECT version FROM migrations WHERE version = 1", [], |row| {
-                row.get(0)
-            })
+            .query_row(
+                "SELECT version FROM migrations WHERE version = 1",
+                [],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(version, 1);
     }

@@ -70,7 +70,11 @@ impl SessionManager {
     }
 
     /// List all sessions including archived ones (no state filter).
-    pub fn list_all_sessions(&self, limit: usize, offset: usize) -> Result<Vec<SessionSummary>, SessionError> {
+    pub fn list_all_sessions(
+        &self,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<SessionSummary>, SessionError> {
         let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
         let mut stmt = conn.prepare("SELECT id, title, state, created_at_us, updated_at_us, archived_at_us FROM sessions ORDER BY updated_at_us DESC, pk DESC LIMIT ?1 OFFSET ?2")?;
         let rows = stmt.query_map(

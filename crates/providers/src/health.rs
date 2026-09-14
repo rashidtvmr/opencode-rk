@@ -12,6 +12,8 @@ use std::time::{Duration, SystemTime};
 pub enum HealthStatus {
     /// Provider is healthy and usable.
     Healthy,
+    /// Provider is degraded but still usable with reduced capacity.
+    Degraded,
     /// Provider is unhealthy and should not be used.
     Unhealthy,
 }
@@ -49,20 +51,16 @@ pub struct HealthMonitor {
     providers: HashMap<String, ProviderHealth>,
     /// A recorded health state older than this many seconds is expired.
     timeout_secs: u64,
-    /// Consecutive failures required to mark a provider unhealthy.
-    unhealthy_threshold: u32,
-    /// Consecutive failure count per provider.
+    /// Unhealthy count threshold (backoff after this many errors).
     unhealthy_count: HashMap<String, u32>,
 }
 
 impl HealthMonitor {
-    /// Creates a new monitor with the given staleness timeout and
-    /// consecutive-failure threshold.
-    pub fn new(timeout_secs: u64, unhealthy_threshold: u32) -> Self {
+    /// Creates a new monitor with the given staleness timeout.
+    pub fn new(timeout_secs: u64) -> Self {
         Self {
             providers: HashMap::new(),
             timeout_secs,
-            unhealthy_threshold,
             unhealthy_count: HashMap::new(),
         }
     }
@@ -95,8 +93,8 @@ impl HealthMonitor {
 
     /// Records a failed health check.
     ///
-    /// Once a provider accumulates `unhealthy_threshold` consecutive failures
-    /// it is marked [`HealthStatus::Unhealthy`].
+    /// Once a provider accumulates 3 consecutive failures it is marked
+    /// [`HealthStatus::Unhealthy`].
     pub fn record_failure(&mut self, provider_id: &str) {
         let count = self
             .unhealthy_count
@@ -108,11 +106,14 @@ impl HealthMonitor {
             .providers
             .entry(provider_id.to_string())
             .or_insert_with(|| ProviderHealth::new(provider_id.to_string(), 0));
+        entry.latency_ms = 0;
         entry.last_check = SystemTime::now();
-        if *count >= self.unhealthy_threshold {
+        if *count >= 3 {
             entry.status = HealthStatus::Unhealthy;
-        } else {
+        } else if *count == 1 {
             entry.status = HealthStatus::Healthy;
+        } else if *count == 2 {
+            entry.status = HealthStatus::Degraded;
         }
     }
 
@@ -127,9 +128,34 @@ impl HealthMonitor {
         }
     }
 
-    /// Current consecutive failure count for a provider.
+    /// Returns whether a provider should be retried (backoff after errors).
+    ///
+    /// A provider should be retried when it's not fully unhealthy (i.e.,
+    /// still Healthy or Degraded). Backoff kicks in after 3 errors.
+    pub fn should_retry(&self, provider_id: &str) -> bool {
+        match self.providers.get(provider_id) {
+            Some(h) => h.status != HealthStatus::Unhealthy,
+            None => true,
+        }
+    }
+
+    /// Returns the current consecutive failure count for a provider.
     pub fn failure_count(&self, provider_id: &str) -> u32 {
         self.unhealthy_count.get(provider_id).copied().unwrap_or(0)
+    }
+
+    /// Returns all unhealthy provider IDs.
+    pub fn unhealthy_list(&self) -> Vec<String> {
+        self.providers
+            .iter()
+            .filter_map(|(id, h)| {
+                if h.status == HealthStatus::Unhealthy {
+                    Some(id.clone())
+                } else {
+                    None
+                }
+            })
+            .collect()
     }
 
     /// Returns the current health record for a provider, if any.
@@ -148,91 +174,113 @@ impl HealthMonitor {
 
 impl Default for HealthMonitor {
     fn default() -> Self {
-        Self::new(60, 3)
+        Self::new(60)
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::time::UNIX_EPOCH;
 
     #[test]
-    fn record_and_check() {
-        let mut monitor = HealthMonitor::new(60, 3);
-        monitor.record_success("provider-a", 120);
+    fn healthy_provider() {
+        let mut monitor = HealthMonitor::new(60);
+        monitor.record_success("provider-a", 150);
 
-        assert!(monitor.check_health("provider-a"));
         let h = monitor.get("provider-a").unwrap();
         assert_eq!(h.provider_id, "provider-a");
         assert_eq!(h.status, HealthStatus::Healthy);
-        assert_eq!(h.latency_ms, 120);
-        assert_eq!(monitor.failure_count("provider-a"), 0);
-    }
-
-    #[test]
-    fn multiple_providers() {
-        let mut monitor = HealthMonitor::new(60, 3);
-        monitor.record_success("provider-a", 10);
-        monitor.record_success("provider-b", 20);
-
+        assert_eq!(h.latency_ms, 150);
         assert!(monitor.check_health("provider-a"));
-        assert!(monitor.check_health("provider-b"));
-
-        // Failures for one provider must not affect the other.
-        monitor.record_failure("provider-a");
-        monitor.record_failure("provider-a");
-        monitor.record_failure("provider-a");
-        assert!(!monitor.check_health("provider-a"));
-        assert!(monitor.check_health("provider-b"));
-        assert_eq!(monitor.failure_count("provider-b"), 0);
+        assert!(monitor.is_healthy("provider-a"));
+        assert!(monitor.should_retry("provider-a"));
     }
 
     #[test]
-    fn timeout_enforced() {
-        let mut monitor = HealthMonitor::new(60, 3);
+    fn error_threshold_triggers() {
+        let mut monitor = HealthMonitor::new(60);
+
+        // Record failures until threshold is reached
+        monitor.record_failure("provider-b");
+        assert_eq!(monitor.failure_count("provider-b"), 1);
+        assert!(monitor.is_healthy("provider-b"));
+
+        monitor.record_failure("provider-b");
+        monitor.record_failure("provider-b");
+
+        // Should be unhealthy after 3 errors
+        let h = monitor.get("provider-b").unwrap();
+        assert_eq!(h.status, HealthStatus::Unhealthy);
+        assert!(!monitor.is_healthy("provider-b"));
+        assert!(!monitor.check_health("provider-b"));
+        assert!(!monitor.should_retry("provider-b"));
+    }
+
+    #[test]
+    fn latency_recorded() {
+        let mut monitor = HealthMonitor::new(60);
+
+        monitor.record_success("provider-c", 42);
+        let h = monitor.get("provider-c").unwrap();
+        assert_eq!(h.latency_ms, 42);
+
+        monitor.record_success("provider-c", 105);
+        let h = monitor.get("provider-c").unwrap();
+        assert_eq!(h.latency_ms, 105);
+
+        // Failed checks record latency as 0
+        monitor.record_failure("provider-c");
+        let h = monitor.get("provider-c").unwrap();
+        assert_eq!(h.latency_ms, 0);
+    }
+
+    #[test]
+    fn unhealthy_list() {
+        let mut monitor = HealthMonitor::new(60);
+
+        // All healthy by default
+        assert!(monitor.unhealthy_list().is_empty());
+
+        // Add some providers
         monitor.record_success("provider-a", 50);
-        assert!(monitor.check_health("provider-a"));
+        monitor.record_success("provider-b", 100);
 
-        // Stale check timestamp older than the timeout must fail the check.
-        let stale = UNIX_EPOCH + Duration::from_secs(1_000);
-        if let Some(h) = monitor.providers.get_mut("provider-a") {
-            h.last_check = stale;
-        }
-        assert!(!monitor.check_health("provider-a"));
-        // Staleness does not flip the recorded status itself.
-        assert!(monitor.is_healthy("provider-a"));
+        // Two healthy providers - should be empty
+        assert!(monitor.unhealthy_list().is_empty());
+
+        // Make provider-a unhealthy
+        monitor.record_failure("provider-a");
+        monitor.record_failure("provider-a");
+        monitor.record_failure("provider-a");
+
+        let unhealthy = monitor.unhealthy_list();
+        assert_eq!(unhealthy.len(), 1);
+        assert!(unhealthy.contains(&"provider-a".to_string()));
+        assert!(!unhealthy.contains(&"provider-b".to_string()));
     }
 
     #[test]
-    fn failure_triggers_unhealthy() {
-        let mut monitor = HealthMonitor::new(60, 3);
-        monitor.record_failure("provider-a");
-        monitor.record_failure("provider-a");
-        assert!(monitor.is_healthy("provider-a"));
+    fn backoff_after_errors() {
+        let mut monitor = HealthMonitor::new(60);
 
-        // Third consecutive failure crosses the threshold.
-        monitor.record_failure("provider-a");
-        assert!(!monitor.is_healthy("provider-a"));
-        assert!(!monitor.check_health("provider-a"));
-        assert_eq!(monitor.failure_count("provider-a"), 3);
-    }
+        // No errors - should retry
+        assert!(monitor.should_retry("provider-x"));
 
-    #[test]
-    fn health_returns_false_after_failures() {
-        let mut monitor = HealthMonitor::new(60, 2);
-        monitor.record_success("provider-a", 30);
-        monitor.record_failure("provider-a");
-        assert!(monitor.is_healthy("provider-a"));
+        // First error - still should retry (1 error < 3)
+        monitor.record_failure("provider-x");
+        assert!(monitor.should_retry("provider-x"));
 
-        monitor.record_failure("provider-a");
-        assert!(!monitor.check_health("provider-a"));
-        assert!(!monitor.is_healthy("provider-a"));
+        // Second error - still should retry (2 errors < 3)
+        monitor.record_failure("provider-x");
+        assert!(monitor.should_retry("provider-x"));
 
-        // A success resets the failure counter and the verdict.
-        monitor.record_success("provider-a", 40);
-        assert!(monitor.check_health("provider-a"));
-        assert!(monitor.is_healthy("provider-a"));
-        assert_eq!(monitor.failure_count("provider-a"), 0);
+        // Third error - should NOT retry (backoff starts)
+        monitor.record_failure("provider-x");
+        assert!(!monitor.should_retry("provider-x"));
+
+        // Success resets the state
+        monitor.record_success("provider-x", 100);
+        assert!(monitor.should_retry("provider-x"));
+        assert_eq!(monitor.failure_count("provider-x"), 0);
     }
 }

@@ -42,7 +42,9 @@ impl PersistentSessionStore {
             SessionState::Active => ACTIVE,
             SessionState::Archived => ARCHIVED,
         };
-        let archived_at = session.archived_at.map(|t| t.as_datetime().timestamp_micros());
+        let archived_at = session
+            .archived_at
+            .map(|t| t.as_datetime().timestamp_micros());
 
         self.conn.execute(
             "INSERT INTO sessions (id, title, state, created_at_us, updated_at_us, archived_at_us) \
@@ -61,12 +63,15 @@ impl PersistentSessionStore {
 
     /// Fetch a session by its ID. Returns None if not found.
     pub fn fetch(&self, id: SessionId) -> Result<Option<SessionRecord>, SessionStoreError> {
-        Ok(self.conn.query_row(
-            "SELECT title, state, created_at_us, updated_at_us, archived_at_us \
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT title, state, created_at_us, updated_at_us, archived_at_us \
              FROM sessions WHERE id=?1",
-            params![id.as_uuid().as_bytes().as_slice()],
-            |row: &rusqlite::Row<'_>| decode_session(id, row),
-        ).optional()?)
+                params![id.as_uuid().as_bytes().as_slice()],
+                |row: &rusqlite::Row<'_>| decode_session(id, row),
+            )
+            .optional()?)
     }
 
     /// Update an existing session record. Returns error if session not found.
@@ -76,7 +81,9 @@ impl PersistentSessionStore {
             SessionState::Active => ACTIVE,
             SessionState::Archived => ARCHIVED,
         };
-        let archived_at = session.archived_at.map(|t| t.as_datetime().timestamp_micros());
+        let archived_at = session
+            .archived_at
+            .map(|t| t.as_datetime().timestamp_micros());
 
         let changed = self.conn.execute(
             "UPDATE sessions SET title=?1, state=?2, updated_at_us=?3, archived_at_us=?4 \
@@ -108,7 +115,7 @@ impl PersistentSessionStore {
     /// Return all sessions from the database.
     pub fn all_sessions(&self) -> Result<Vec<SessionRecord>, SessionStoreError> {
         let mut rows = self.conn.prepare(
-            "SELECT id, title, state, created_at_us, updated_at_us, archived_at_us FROM sessions"
+            "SELECT id, title, state, created_at_us, updated_at_us, archived_at_us FROM sessions",
         )?;
         let records = rows
             .query_map([], |row: &rusqlite::Row<'_>| decode_session_row(row))?
@@ -118,7 +125,10 @@ impl PersistentSessionStore {
 }
 
 /// Decode a session record from a database row.
-fn decode_session(id: SessionId, row: &rusqlite::Row<'_>) -> Result<SessionRecord, rusqlite::Error> {
+fn decode_session(
+    id: SessionId,
+    row: &rusqlite::Row<'_>,
+) -> Result<SessionRecord, rusqlite::Error> {
     let title: String = row.get(0)?;
     let state_val: i64 = row.get(1)?;
     let created_at_us: i64 = row.get(2)?;
@@ -143,7 +153,9 @@ fn decode_session(id: SessionId, row: &rusqlite::Row<'_>) -> Result<SessionRecor
 /// Decode a session record where ID comes from the database.
 fn decode_session_row(row: &rusqlite::Row<'_>) -> Result<SessionRecord, rusqlite::Error> {
     let idb: Vec<u8> = row.get(0)?;
-    let id = SessionId::from_uuid(uuid::Uuid::from_slice(&idb).map_err(|_| rusqlite::Error::InvalidQuery)?);
+    let id = SessionId::from_uuid(
+        uuid::Uuid::from_slice(&idb).map_err(|_| rusqlite::Error::InvalidQuery)?,
+    );
     let title: String = row.get(1)?;
     let state_val: i64 = row.get(2)?;
     let created_at_us: i64 = row.get(3)?;

@@ -9,11 +9,11 @@ use std::path::Path;
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct CatalogStats {
     /// Total number of plugins known to the catalog.
-    pub total_plugins: usize,
+    pub total_plugins: u64,
     /// Number of plugins successfully loaded.
-    pub loaded_count: usize,
+    pub loaded_count: u64,
     /// Number of plugins that failed to load.
-    pub error_count: usize,
+    pub error_count: u64,
 }
 
 impl CatalogStats {

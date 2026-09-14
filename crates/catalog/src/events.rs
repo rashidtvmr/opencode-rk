@@ -10,18 +10,11 @@ use std::sync::Mutex;
 #[derive(Debug, Clone)]
 pub enum CatalogEvent {
     /// A plugin was loaded successfully.
-    PluginLoaded {
-        plugin_id: String,
-    },
+    PluginLoaded { plugin_id: String },
     /// A plugin was unloaded successfully.
-    PluginUnloaded {
-        plugin_id: String,
-    },
+    PluginUnloaded { plugin_id: String },
     /// An error occurred with a plugin.
-    PluginError {
-        plugin_id: String,
-        error: String,
-    },
+    PluginError { plugin_id: String, error: String },
     /// The catalog index was updated.
     IndexUpdated {
         provider_count: usize,
