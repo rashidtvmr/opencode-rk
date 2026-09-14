@@ -33,6 +33,59 @@ pub struct RouteDecision {
     pub max_output_tokens: Option<u32>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountCandidate {
+    pub id: String,
+    pub priority: u32,
+    pub active: bool,
+    pub excluded: bool,
+    pub model_lock_until: Option<u64>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountEligibilityError {
+    RateLimited { retry_at: u64 },
+    Unavailable,
+}
+
+pub fn eligible_accounts(
+    candidates: &[AccountCandidate],
+    now: u64,
+) -> Result<Vec<AccountCandidate>, AccountEligibilityError> {
+    let mut eligible = candidates
+        .iter()
+        .filter(|candidate| {
+            candidate.active
+                && !candidate.excluded
+                && candidate
+                    .model_lock_until
+                    .is_none_or(|lock_until| lock_until <= now)
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if !eligible.is_empty() {
+        eligible.sort_by(|left, right| {
+            left.priority
+                .cmp(&right.priority)
+                .then_with(|| left.id.cmp(&right.id))
+        });
+        return Ok(eligible);
+    }
+
+    let retry_at = candidates
+        .iter()
+        .filter(|candidate| candidate.active && !candidate.excluded)
+        .filter_map(|candidate| candidate.model_lock_until)
+        .filter(|lock_until| *lock_until > now)
+        .min();
+
+    retry_at.map_or(
+        Err(AccountEligibilityError::Unavailable),
+        |retry_at| Err(AccountEligibilityError::RateLimited { retry_at }),
+    )
+}
+
 /// Select the cheapest available model that explicitly supports `chore`.
 /// Equal-cost candidates are ordered by stable provider/model identity so the
 /// result does not depend on input ordering. If no candidate qualifies, the
