@@ -33,6 +33,13 @@ class RulesetReadbackVerifierTests(unittest.TestCase):
         self.assertFalse(result["verified"])
         self.assertTrue(any("cannot prove the no-bypass requirement" in error for error in result["errors"]))
 
+    def test_missing_repository_source_is_unverified_not_a_match(self):
+        document = copy.deepcopy(load(MATCH_FIXTURE))
+        document.pop("source")
+        result = verify_document(document, ROOT)
+        self.assertEqual(result["status"], STATUS_UNVERIFIED)
+        self.assertTrue(any("repository source" in error for error in result["errors"]))
+
     def test_semantic_drift_fails_closed(self):
         mutations = {}
 

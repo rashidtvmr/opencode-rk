@@ -123,9 +123,10 @@ recipe; it must not switch a hosting-platform control on by implication.
     the missing list with `[]` by assumption; obtain an administrator-capable
     single-ruleset readback instead.
 11. The verifier tolerates only the documented top-level server metadata `id`,
-    `node_id`, `source`, `_links`, `created_at`, and `updated_at`; when `source` is
-    present it must identify `rashidtvmr/opencode-rk`. Unknown rule fields remain
-    semantic drift. A non-null status-check `integration_id` or an
+    `node_id`, `source`, `_links`, `created_at`, and `updated_at`.
+    `verified-matching` requires `source` to identify `rashidtvmr/opencode-rk`;
+    source-less export/config evidence remains unverified. Unknown rule fields
+    remain semantic drift. A non-null status-check `integration_id` or an
     `allowed_merge_methods` field yields **unverified/policy-underspecified**, not a
     guessed match or guessed mismatch, because this source policy owns neither a
     GitHub App identity nor a merge-method policy. A serialized null

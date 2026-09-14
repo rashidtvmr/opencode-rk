@@ -293,6 +293,15 @@ def verify_document(document: object, root: pathlib.Path = ROOT) -> dict[str, ob
             reason += "; GitHub ruleset-history exports and non-write API reads cannot prove the no-bypass requirement"
         return {"status": STATUS_UNVERIFIED, "verified": False, "errors": [reason]}
 
+    if "source" not in document:
+        return {
+            "status": STATUS_UNVERIFIED,
+            "verified": False,
+            "errors": [
+                "ruleset readback does not identify its repository source; verified-matching requires source=rashidtvmr/opencode-rk"
+            ],
+        }
+
     underspecified = _policy_underspecification_errors(document)
     if underspecified:
         return {
