@@ -1,5 +1,7 @@
 //! Cheap-model routing for small advisory/provider chores.
 
+use crate::rate_limit::MAX_FAILURE_REASON_CHARS;
+
 /// Small background chores that may be routed independently from the caller's
 /// main model choice.
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -81,6 +83,150 @@ pub enum AccountSelectionError {
     EmptyCandidates,
     InvalidStickyLimit,
     TooManyCandidates { max: usize, actual: usize },
+}
+
+pub const MAX_ACCOUNT_ID_BYTES: usize = 128;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountFallbackFailure {
+    pub status: u16,
+    pub error: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountAttemptOutcome {
+    Success,
+    Cancelled,
+    Failure {
+        status: u16,
+        error: String,
+        should_fallback: bool,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountFallbackDecision {
+    Retry,
+    Success,
+    Cancelled,
+    Failure { status: u16, error: String },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountFallbackExhaustion {
+    NoCredentials,
+    Exhausted {
+        last_failure: AccountFallbackFailure,
+    },
+    RateLimited {
+        retry_at: u64,
+        last_failure: Option<AccountFallbackFailure>,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountFallbackError {
+    InvalidAccountId,
+    AccountIdTooLong { max: usize, actual: usize },
+    DuplicateAccount { account_id: String },
+    TooManyAttempts { max: usize, actual: usize },
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct AccountFallbackCoordinator {
+    excluded_account_ids: Vec<String>,
+    last_failure: Option<AccountFallbackFailure>,
+}
+
+impl AccountFallbackCoordinator {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    #[must_use]
+    pub fn excluded_account_ids(&self) -> &[String] {
+        &self.excluded_account_ids
+    }
+
+    #[must_use]
+    pub fn last_failure(&self) -> Option<&AccountFallbackFailure> {
+        self.last_failure.as_ref()
+    }
+
+    pub fn record_attempt(
+        &mut self,
+        account_id: &str,
+        outcome: AccountAttemptOutcome,
+    ) -> Result<AccountFallbackDecision, AccountFallbackError> {
+        if account_id.is_empty() {
+            return Err(AccountFallbackError::InvalidAccountId);
+        }
+        if account_id.len() > MAX_ACCOUNT_ID_BYTES {
+            return Err(AccountFallbackError::AccountIdTooLong {
+                max: MAX_ACCOUNT_ID_BYTES,
+                actual: account_id.len(),
+            });
+        }
+
+        match outcome {
+            AccountAttemptOutcome::Success => Ok(AccountFallbackDecision::Success),
+            AccountAttemptOutcome::Cancelled => Ok(AccountFallbackDecision::Cancelled),
+            AccountAttemptOutcome::Failure {
+                status,
+                error,
+                should_fallback: false,
+            } => Ok(AccountFallbackDecision::Failure { status, error }),
+            AccountAttemptOutcome::Failure {
+                status,
+                error,
+                should_fallback: true,
+            } => {
+                if self
+                    .excluded_account_ids
+                    .iter()
+                    .any(|excluded| excluded == account_id)
+                {
+                    return Err(AccountFallbackError::DuplicateAccount {
+                        account_id: account_id.to_owned(),
+                    });
+                }
+
+                if self.excluded_account_ids.len() >= MAX_ACCOUNT_SELECTION_CANDIDATES {
+                    return Err(AccountFallbackError::TooManyAttempts {
+                        max: MAX_ACCOUNT_SELECTION_CANDIDATES,
+                        actual: self.excluded_account_ids.len().saturating_add(1),
+                    });
+                }
+
+                let failure = AccountFallbackFailure {
+                    status,
+                    error: error.chars().take(MAX_FAILURE_REASON_CHARS).collect(),
+                };
+                self.excluded_account_ids.push(account_id.to_owned());
+                self.last_failure = Some(failure);
+                Ok(AccountFallbackDecision::Retry)
+            }
+        }
+    }
+
+    #[must_use]
+    pub fn finish(&self, eligibility: AccountEligibilityError) -> AccountFallbackExhaustion {
+        match eligibility {
+            AccountEligibilityError::RateLimited { retry_at } => {
+                AccountFallbackExhaustion::RateLimited {
+                    retry_at,
+                    last_failure: self.last_failure.clone(),
+                }
+            }
+            AccountEligibilityError::Unavailable => self
+                .last_failure
+                .clone()
+                .map_or(AccountFallbackExhaustion::NoCredentials, |last_failure| {
+                    AccountFallbackExhaustion::Exhausted { last_failure }
+                }),
+        }
+    }
 }
 
 /// Select one already-eligible account using the pinned 9router strategy rules.
