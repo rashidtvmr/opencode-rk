@@ -4,9 +4,9 @@
 optional compatibility hosts. Prepared 2026-09-13.
 
 This repository is a detailed implementation plan and development-controller
-bootstrap, **not a completed OpenCode replacement**. It contains 193 planned
-slices, 965 named test obligations, and traceability for 35 explicit requirements.
-The 965 obligations are specifications, not 965 implemented or passing tests.
+bootstrap, **not a completed OpenCode replacement**. It contains 219 planned
+slices, 1095 named test obligations, and traceability for 38 explicit requirements.
+The 1095 obligations are specifications, not 1095 implemented or passing tests.
 
 ## Start here
 
@@ -20,8 +20,8 @@ The 965 obligations are specifications, not 965 implemented or passing tests.
    prototype loop. `docs/ADAPTER_PROTOCOL.md` describes the executable contract.
 
 ```sh
-python3 tools/validate_plan.py
-python3 -m unittest discover -s tests/bootstrap -v
+python3 tools/validate_repository.py
+python3 -m unittest discover -s tests/bootstrap -p 'test_*.py' -v
 python3 tools/ralph_loop.py --list-ready
 
 # Explicit network operation; does not install or run upstream dependencies.
@@ -82,7 +82,7 @@ is distinct from the development loop; development uses simulated grants.
 | `PLAN.md` | Architecture, work sequence, definition of completion |
 | `AGENTS.md` | Non-negotiable worker contract |
 | `ralph.json`, `prd.json` | Extended plan and conventional export |
-| `tasks/`, `FEATURES.md` | 193 detailed work items |
+| `tasks/`, `FEATURES.md` | 219 planned work items and the navigable status index |
 | `docs/SECURITY.md` | OS isolation, permission broker, human-only controls |
 | `docs/STORAGE.md` | Embedded storage, bounded events, blobs, safe import |
 | `docs/TDD.md` | RED/GREEN/refactor and differential evidence |
@@ -92,8 +92,10 @@ is distinct from the development loop; development uses simulated grants.
 | `config/` | Lean defaults, resource targets and example controller settings |
 | `validation/` | Actual bootstrap test logs and structural validation |
 
-The Rust crates are intentionally only an unimplemented scaffold. Rust tooling
-was unavailable during preparation; no Rust compilation or product benchmark is
-claimed. Optional JS/TUI compatibility is not falsely presented as zero-overhead
-native functionality. The current user's 90 GB database was neither accessed nor
-modified.
+The Rust workspace is partially implemented, but passing local validation is not
+a release-completion certificate. Product acceptance still requires the trusted
+controller/verifier, full source reconciliation, applicable platform/security
+gates, and resource evidence described in `PLAN.md`. Optional JS/TUI compatibility
+is not falsely presented as zero-overhead native functionality. The current
+user's existing OpenCode database is not an implementation-loop fixture and must
+not be mutated by bootstrap or CI checks.

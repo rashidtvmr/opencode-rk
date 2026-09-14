@@ -18,10 +18,10 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-      - name: Validate project plan
-        run: python3 tools/validate_plan.py
+      - name: Validate repository contracts
+        run: /usr/bin/python3 tools/validate_repository.py
       - name: Bootstrap controller tests
-        run: python3 -m unittest discover -s tests/bootstrap -v
+        run: /usr/bin/python3 -m unittest discover -s tests/bootstrap -p 'test_*.py' -v
 
   rust:
     strategy:

@@ -71,9 +71,14 @@ stderr captured. First nonzero exit stops the sequence with `FAIL`. The last
 Default commands:
 
 ```
-python3 tools/validate_plan.py
+python3 tools/validate_repository.py
 python3 tools/lane_gate.py --run
 ```
+
+These two commands are mandatory and are prepended by the controller even when
+operator settings add extra verification commands. The repository validator
+includes backlog exhaustion, checked-in DISC-003 manifest/reconciliation, and
+plan validation.
 
 Rules:
 

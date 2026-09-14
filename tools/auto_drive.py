@@ -9,7 +9,7 @@ What it does:
 2. Spawns up to --lanes parallel `opencode run` processes, round-robining
    between muse-spark and vyce-dsv4 (the two reliable free workers).
 3. Each worker gets a structured prompt with role/scope/goal/verification.
-4. On completion, runs verification (cargo check + validate_plan).
+4. On completion, runs the canonical repository validation path.
 5. Marks accepted or retries (max 3 attempts, then blocked).
 6. Immediately fills empty slots with next ready tasks.
 7. Stops when no ready work remains or all lanes blocked.
@@ -165,7 +165,7 @@ def run_one_task(task_id: str, worker: str) -> dict:
     verify_log = ""
     try:
         vp = subprocess.run(
-            ["python3", "tools/validate_plan.py"],
+            [sys.executable, "tools/validate_repository.py"],
             cwd=ROOT, capture_output=True, text=True, timeout=60,
         )
         verify_log = vp.stdout + vp.stderr

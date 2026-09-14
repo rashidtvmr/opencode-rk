@@ -25,9 +25,9 @@ implement features itself. It repeatedly:
 5. Records an append-only receipt per attempt in `state/receipts.jsonl` and
    keeps `state/controller.json` as the resumable task ledger.
 
-Default verification commands (operator-editable in settings):
+Mandatory verification commands (operator settings may append, not replace):
 
-- `python3 tools/validate_plan.py`
+- `python3 tools/validate_repository.py`
 - `python3 tools/lane_gate.py --run`
 
 ## 2. Loop contract

@@ -125,6 +125,23 @@ def build_manifest(reconciliation_path, rules_path, evidence_path, supplemental_
         "warning": "DISC-003 reconciliation is review evidence only; it does not replace full pinned-tree inventory, independent review receipts, or acceptance tests."}
 
 
+def manifest_drift_errors(actual, expected):
+    """Return fail-closed errors when the checked-in DISC manifest is stale."""
+    if not isinstance(actual, Mapping):
+        return ["DISC-003 reconciliation manifest must be an object"]
+    if actual == expected:
+        return []
+    errors = []
+    for key in (
+        "schemaVersion", "status", "surfaceFamilies", "reviewStateCounts",
+        "implementationStatusCounts", "evidenceReferences", "unresolvedFindings",
+        "inputs", "warning",
+    ):
+        if actual.get(key) != expected.get(key):
+            errors.append(f"DISC-003 reconciliation manifest drifted at {key}")
+    return errors or ["DISC-003 reconciliation manifest differs from canonical inputs"]
+
+
 def _write(path, value):
     path.parent.mkdir(parents=True, exist_ok=True); tmp = path.with_name(path.name + ".tmp")
     try: tmp.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8"); os.replace(tmp, path)
@@ -132,13 +149,23 @@ def _write(path, value):
 
 
 def main():
-    ap = argparse.ArgumentParser(description=__doc__); ap.add_argument("--reconciliation", type=pathlib.Path, default=ROOT/"sources/disc-003-reconciliation.json"); ap.add_argument("--manifest-output", type=pathlib.Path, default=ROOT/"sources/disc-003-reconciliation.manifest.json"); a = ap.parse_args()
+    ap = argparse.ArgumentParser(description=__doc__); ap.add_argument("--reconciliation", type=pathlib.Path, default=ROOT/"sources/disc-003-reconciliation.json"); ap.add_argument("--manifest-output", type=pathlib.Path, default=ROOT/"sources/disc-003-reconciliation.manifest.json"); ap.add_argument("--check-manifest", action="store_true", help="verify the checked-in manifest is current without rewriting it"); a = ap.parse_args()
     rp, ep, sp, pp, lp = ROOT/"sources/behavior-surface-rules.json", ROOT/"sources/evidence.json", ROOT/"sources/disc-003-evidence.json", ROOT/"ralph.json", ROOT/"sources/upstream.lock.json"
     document, rules, base, extra, plan, lock = [json.loads(p.read_text(encoding="utf-8")) for p in (a.reconciliation, rp, ep, sp, pp, lp)]
     evidence = {"sources": [*base.get("sources", []), *extra.get("sources", [])]}
     names = {str(x["id"]): str(x["url"]).removeprefix("https://github.com/").removesuffix(".git") for x in lock.get("repositories", [])}
-    errors = validate_reconciliation(document, rules, evidence, plan, names); result = {"passed": not errors, **summarize(document, rules), "errors": errors}
+    errors = validate_reconciliation(document, rules, evidence, plan, names)
+    expected_manifest = build_manifest(a.reconciliation, rp, ep, sp, pp, document)
+    if a.check_manifest:
+        if not a.manifest_output.is_file():
+            errors.append(f"Missing DISC-003 reconciliation manifest: {a.manifest_output}")
+        else:
+            actual_manifest = json.loads(a.manifest_output.read_text(encoding="utf-8"))
+            errors.extend(manifest_drift_errors(actual_manifest, expected_manifest))
+    result = {"passed": not errors, **summarize(document, rules), "errors": errors}
     if errors: print(json.dumps(result, indent=2)); return 2
-    _write(a.manifest_output, build_manifest(a.reconciliation, rp, ep, sp, pp, document)); print(json.dumps({**result, "manifest": str(a.manifest_output)}, indent=2)); return 0
+    if not a.check_manifest:
+        _write(a.manifest_output, expected_manifest)
+    print(json.dumps({**result, "manifest": str(a.manifest_output), "manifestMode": "checked" if a.check_manifest else "written"}, indent=2)); return 0
 
 if __name__ == "__main__": raise SystemExit(main())

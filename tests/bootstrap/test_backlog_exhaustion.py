@@ -2,6 +2,8 @@ import copy
 import json
 import pathlib
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 
@@ -44,6 +46,13 @@ class BacklogExhaustionTests(unittest.TestCase):
         bad["stories"].append(copy.deepcopy(bad["stories"][0]))
         self.assertTrue(any("duplicate classifications" in error for error in validate_ledger(bad, ROOT)))
 
+    def test_summary_count_drift_is_rejected(self):
+        bad = copy.deepcopy(load_ledger())
+        bad["summary"]["controllerAccepted"] -= 1
+        bad["summary"]["classificationCounts"]["unresolved-decomposition"] += 1
+        errors = validate_ledger(bad, ROOT)
+        self.assertTrue(any("summary drifted" in error for error in errors))
+
     def test_accepted_story_cannot_enter_residual_ledger(self):
         bad = copy.deepcopy(load_ledger())
         bad["stories"][0]["id"] = "AGENT-001"
@@ -72,6 +81,22 @@ class BacklogExhaustionTests(unittest.TestCase):
         errors = validate_ledger(bad, ROOT)
         self.assertTrue(any("surfaceIds drifted" in error for error in errors))
         self.assertTrue(any("evidenceIds drifted" in error for error in errors))
+
+    def test_stale_local_implementation_receipts_cannot_disappear(self):
+        bad = copy.deepcopy(load_ledger())
+        row = next(item for item in bad["stories"] if item["id"] == "INT-008")
+        row["worklog"] = None
+        row["implementationCommits"] = []
+        errors = validate_ledger(bad, ROOT)
+        self.assertTrue(any("worklog drifted" in error for error in errors))
+        self.assertTrue(any("implementationCommits drifted" in error for error in errors))
+
+        with mock.patch(
+            "tools.validate_backlog_exhaustion.subprocess.run",
+            return_value=SimpleNamespace(returncode=1),
+        ):
+            history_errors = validate_ledger(load_ledger(), ROOT)
+        self.assertTrue(any("implementation commit is missing from history" in error for error in history_errors))
 
     def test_accidental_disc_acceptance_is_rejected_by_expected_projection(self):
         reconciliation = json.loads((ROOT / "sources/disc-003-reconciliation.json").read_text(encoding="utf-8"))

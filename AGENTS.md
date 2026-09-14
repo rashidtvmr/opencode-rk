@@ -87,6 +87,10 @@ These apply to the main agent AND every delegated subagent.
   rtk-filtered outputs to stay small.
 
 ### Subagent lane gating (never trust a completion message)
+- Source/docs/plan/controller changes must pass the canonical repository guard:
+  `python3 tools/validate_repository.py`. It checks backlog exhaustion, the
+  checked-in DISC-003 reconciliation manifest, and plan structure before any
+  lane-specific verification.
 - Give each delegated lane exactly ONE owned file. Pre-wire shared files
   (`lib.rs`) yourself before fan-out so concurrent lanes never race.
 - A lane is only done when its artifact passes `python3 tools/lane_gate.py`.

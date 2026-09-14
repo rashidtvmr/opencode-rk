@@ -55,6 +55,12 @@ RECEIPTS = STATE_DIR / "receipts.jsonl"
 LOCK = STATE_DIR / "loop.lock"
 SETTINGS = ROOT / "config" / "controller.settings.json"
 
+MANDATORY_VERIFICATION_COMMANDS = [
+    [sys.executable, "tools/validate_repository.py"],
+    [sys.executable, "tools/lane_gate.py", "--run"],
+]
+
+
 DEFAULT_SETTINGS = {
     "maxConcurrentLanes": 6,
     "perTaskTimeoutSeconds": 3600,
@@ -65,10 +71,7 @@ DEFAULT_SETTINGS = {
     "verifierWorkerPool": ["9router-tr-glm-5-3-free"],
     "stateDir": "state",
     "worktreeRoot": ".worktrees",
-    "verificationCommands": [
-        ["python3", "tools/validate_plan.py"],
-        ["python3", "tools/lane_gate.py", "--run"],
-    ],
+    "verificationCommands": MANDATORY_VERIFICATION_COMMANDS,
     "stopWhenNoReadyWork": True,
 }
 
@@ -76,7 +79,16 @@ DEFAULT_SETTINGS = {
 def load_settings() -> dict:
     settings = dict(DEFAULT_SETTINGS)
     if SETTINGS.is_file():
-        settings.update(json.loads(SETTINGS.read_text(encoding="utf-8")))
+        configured = json.loads(SETTINGS.read_text(encoding="utf-8"))
+        custom_verification = configured.pop("verificationCommands", None)
+        settings.update(configured)
+        if custom_verification is not None:
+            if not isinstance(custom_verification, list) or not all(isinstance(command, list) for command in custom_verification):
+                raise ValueError("verificationCommands must be a list of argv lists")
+            mandatory = [list(command) for command in MANDATORY_VERIFICATION_COMMANDS]
+            settings["verificationCommands"] = mandatory + [
+                command for command in custom_verification if command not in mandatory
+            ]
     return settings
 
 
@@ -373,7 +385,7 @@ Named test obligations (minimum taxonomy):
 Deliverable: the code/documents for this slice plus captured command evidence (exact commands and tails).
 Constraints: stdlib/native first; no new deps without an integration proposal; no emojis; no em dashes.
 Verification: run the project gates and report exact output:
-  python3 tools/validate_plan.py
+  python3 tools/validate_repository.py
   python3 tools/lane_gate.py --run
 Success criteria: your owned tests pass, and you can state the exact command and result. If the task genuinely
 cannot proceed (missing credentials, missing network, missing source pin), STOP and report `blocked` with the exact
