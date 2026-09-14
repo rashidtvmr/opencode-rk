@@ -2,7 +2,7 @@
 use opencode_rk_storage::quota_v2::QuotaSnapshot;
 use opencode_rk_storage::quota_v2::QuotaV2Error;
 use opencode_rk_storage::schema_v2::SchemaV2;
-use opencode_rk_storage::{QuotaV2, V2Writer, NewSession};
+use opencode_rk_storage::{NewSession, QuotaV2, V2Writer};
 use rusqlite::Connection;
 use tempfile::tempdir;
 
@@ -17,7 +17,10 @@ fn initialized() -> (tempfile::TempDir, Connection) {
 fn measure_returns_non_negative_page_count_gt_zero() {
     let (_dir, connection) = initialized();
     let snap = QuotaV2::measure(&connection).unwrap();
-    assert!(snap.page_count > 0, "page_count must be positive on initialized workspace");
+    assert!(
+        snap.page_count > 0,
+        "page_count must be positive on initialized workspace"
+    );
     assert!(snap.page_count >= 0);
     assert!(snap.freelist_count >= 0);
     assert!(snap.wal_pages >= 0);

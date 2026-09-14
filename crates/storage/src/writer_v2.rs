@@ -114,10 +114,7 @@ impl V2Writer {
     }
 }
 
-fn insert_message(
-    connection: &mut Connection,
-    message: &NewMessage,
-) -> Result<(), StorageError> {
+fn insert_message(connection: &mut Connection, message: &NewMessage) -> Result<(), StorageError> {
     let inline_data = match &message.body {
         PayloadRef::Inline { text } if text.len() <= MAX_INLINE_PAYLOAD_BYTES => text.as_bytes(),
         PayloadRef::Inline { .. } | PayloadRef::Blob { .. } => {
@@ -202,7 +199,12 @@ fn admit_checked(
     snapshot: &QuotaSnapshot,
     budget: &QuotaBudget,
 ) -> Result<(), StorageError> {
-    match QuotaV2::admit(connection, snapshot, budget.max_db_bytes, budget.max_wal_bytes) {
+    match QuotaV2::admit(
+        connection,
+        snapshot,
+        budget.max_db_bytes,
+        budget.max_wal_bytes,
+    ) {
         Ok(()) => Ok(()),
         Err(QuotaV2Error::DbBytes(n)) => Err(StorageError::Io(std::io::Error::new(
             std::io::ErrorKind::Other,
@@ -303,7 +305,9 @@ mod tests {
             id: MessageId::new(),
             session_id: session,
             role: MessageRole::User,
-            body: PayloadRef::Inline { text: body.to_owned() },
+            body: PayloadRef::Inline {
+                text: body.to_owned(),
+            },
             created_at_us: ts,
         }
     }
@@ -322,11 +326,13 @@ mod tests {
     }
 
     fn message_rows(conn: &Connection) -> i64 {
-        conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0)).unwrap()
+        conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
+            .unwrap()
     }
 
     fn payload_rows(conn: &Connection) -> i64 {
-        conn.query_row("SELECT COUNT(*) FROM payloads", [], |r| r.get(0)).unwrap()
+        conn.query_row("SELECT COUNT(*) FROM payloads", [], |r| r.get(0))
+            .unwrap()
     }
 
     #[test]
@@ -339,7 +345,10 @@ mod tests {
         create_session(&mut checked, sid_b);
 
         V2Writer::append_message(&mut plain, &msg(sid_a, "hello", 1000)).unwrap();
-        let budget = QuotaBudget { max_db_bytes: i64::MAX, max_wal_bytes: i64::MAX };
+        let budget = QuotaBudget {
+            max_db_bytes: i64::MAX,
+            max_wal_bytes: i64::MAX,
+        };
         append_message_checked(&mut checked, &msg(sid_b, "hello", 1000), &budget).unwrap();
 
         assert_eq!(message_rows(&plain), message_rows(&checked));
@@ -354,12 +363,12 @@ mod tests {
         create_session(&mut conn, sid);
 
         let before = message_rows(&conn);
-        let budget = QuotaBudget { max_db_bytes: 0, max_wal_bytes: i64::MAX };
+        let budget = QuotaBudget {
+            max_db_bytes: 0,
+            max_wal_bytes: i64::MAX,
+        };
         let err = append_message_checked(&mut conn, &msg(sid, "nope", 1000), &budget).unwrap_err();
-        assert!(matches!(
-            err,
-            StorageError::Io(_)
-        ));
+        assert!(matches!(err, StorageError::Io(_)));
         assert_eq!(message_rows(&conn), before);
     }
 }

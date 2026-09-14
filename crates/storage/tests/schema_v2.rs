@@ -87,7 +87,9 @@ fn referenced_blob_cannot_be_claimed_by_gc() {
     assert!(db
         .execute("UPDATE blobs SET state=1 WHERE pk=?1", [blob_pk])
         .is_err());
-    assert!(db.execute("DELETE FROM blobs WHERE pk=?1", [blob_pk]).is_err());
+    assert!(db
+        .execute("DELETE FROM blobs WHERE pk=?1", [blob_pk])
+        .is_err());
 }
 
 #[test]
@@ -99,7 +101,10 @@ fn immutable_payloads_cannot_change_after_publication() {
     )
     .unwrap();
     assert!(db
-        .execute("UPDATE payloads SET inline_data=?1", params![b"[]".to_vec()])
+        .execute(
+            "UPDATE payloads SET inline_data=?1",
+            params![b"[]".to_vec()]
+        )
         .is_err());
 }
 

@@ -49,8 +49,7 @@ impl AdmissionV2 {
         }
 
         let now_us = chrono::Utc::now().timestamp_micros();
-        let transaction =
-            connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         let (session_pk, sequence): (i64, i64) = transaction
             .query_row(
                 "SELECT pk, next_input_seq FROM sessions WHERE id=?1",
@@ -98,13 +97,9 @@ impl AdmissionV2 {
     /// `seq` from `sessions.next_message_seq`, reuses the input's payload_pk
     /// references (bodies shared, never copied), drops the input parts, and
     /// marks the input promoted, all in ONE tx. Returns the message pk.
-    pub fn promote_input(
-        connection: &mut Connection,
-        input_pk: i64,
-    ) -> Result<i64, StorageError> {
+    pub fn promote_input(connection: &mut Connection, input_pk: i64) -> Result<i64, StorageError> {
         let now_us = chrono::Utc::now().timestamp_micros();
-        let transaction =
-            connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
         let session_pk: i64 = {
             let (pk, state): (i64, i64) = transaction
@@ -266,8 +261,7 @@ mod tests {
     use std::path::Path;
 
     fn workspace(path: &Path) -> Connection {
-        crate::schema_v2::SchemaV2::initialize_workspace(path, [1_u8; 16], [2_u8; 16], 10)
-            .unwrap()
+        crate::schema_v2::SchemaV2::initialize_workspace(path, [1_u8; 16], [2_u8; 16], 10).unwrap()
     }
 
     fn session_bytes(connection: &mut Connection) -> Vec<u8> {
@@ -285,19 +279,9 @@ mod tests {
         id.as_uuid().as_bytes().to_vec()
     }
 
-    fn submit(
-        connection: &mut Connection,
-        session: &[u8],
-        body: &[u8],
-    ) -> (i64, i64) {
-        AdmissionV2::submit_input(
-            connection,
-            session,
-            0,
-            &[7_u8; 32],
-            &[(0, body.to_vec())],
-        )
-        .unwrap()
+    fn submit(connection: &mut Connection, session: &[u8], body: &[u8]) -> (i64, i64) {
+        AdmissionV2::submit_input(connection, session, 0, &[7_u8; 32], &[(0, body.to_vec())])
+            .unwrap()
     }
 
     #[test]
@@ -415,8 +399,7 @@ mod tests {
         let conn = workspace(&dir.path().join("w.db"));
         let op = [4_u8; 16];
         // both stamps long past: valid at write time, expired at lookup time
-        AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "k", "{}", 1000, 2000)
-            .unwrap();
+        AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "k", "{}", 1000, 2000).unwrap();
         assert!(AdmissionV2::receipt_lookup(&conn, &op).unwrap().is_none());
         // unknown operation is also None
         assert!(AdmissionV2::receipt_lookup(&conn, &[5_u8; 16])
@@ -436,8 +419,7 @@ mod tests {
         // boundary size passes
         let ok = vec![b'x'; 8192];
         let (_, seq) =
-            AdmissionV2::submit_input(&mut conn, &session, 0, &[1_u8; 32], &[(0, ok)])
-                .unwrap();
+            AdmissionV2::submit_input(&mut conn, &session, 0, &[1_u8; 32], &[(0, ok)]).unwrap();
         assert_eq!(seq, 1);
     }
 
@@ -465,9 +447,7 @@ mod tests {
         )
         .is_err());
         // empty parts
-        assert!(
-            AdmissionV2::submit_input(&mut conn, &session, 0, &[1_u8; 32], &[]).is_err()
-        );
+        assert!(AdmissionV2::submit_input(&mut conn, &session, 0, &[1_u8; 32], &[]).is_err());
         // unknown session
         assert!(AdmissionV2::submit_input(
             &mut conn,
@@ -487,23 +467,15 @@ mod tests {
         // empty kind
         assert!(AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "", "{}", 1, 2).is_err());
         // invalid JSON
-        assert!(
-            AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "k", "{bad", 1, 2)
-                .is_err()
-        );
+        assert!(AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "k", "{bad", 1, 2).is_err());
         // oversize JSON
         let big = "x".repeat(4097);
-        assert!(
-            AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "k", &big, 1, 2).is_err()
-        );
+        assert!(AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "k", &big, 1, 2).is_err());
         // retry must exceed created
-        assert!(
-            AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "k", "{}", 5, 5).is_err()
-        );
+        assert!(AdmissionV2::receipt_store(&conn, &op, &[1_u8; 32], "k", "{}", 5, 5).is_err());
         // bad operation id length
         assert!(
-            AdmissionV2::receipt_store(&conn, &[1_u8; 8], &[1_u8; 32], "k", "{}", 1, 2)
-                .is_err()
+            AdmissionV2::receipt_store(&conn, &[1_u8; 8], &[1_u8; 32], "k", "{}", 1, 2).is_err()
         );
         assert!(AdmissionV2::receipt_lookup(&conn, &[1_u8; 8]).is_err());
     }

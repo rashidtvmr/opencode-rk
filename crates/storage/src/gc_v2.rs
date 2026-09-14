@@ -123,9 +123,7 @@ impl GcV2 {
     /// and still unreferenced. Any other state, a missing row, or a new
     /// reference surfaces as `changed == 0` and errors.
     pub fn finish_deletion(connection: &Connection, blob_pk: i64) -> Result<(), StorageError> {
-        let sql = format!(
-            "DELETE FROM blobs WHERE pk = ?1 AND state = 1 {UNREFERENCED_ARMS}"
-        );
+        let sql = format!("DELETE FROM blobs WHERE pk = ?1 AND state = 1 {UNREFERENCED_ARMS}");
         let changed = connection.execute(&sql, params![blob_pk])?;
         if changed == 0 {
             return Err(invalid_input(
@@ -400,8 +398,11 @@ mod tests {
     #[test]
     fn prune_advances_floor_not_head() {
         let (_dir, mut conn) = workspace();
-        conn.execute("UPDATE workspace_state SET event_head_seq = 3 WHERE id = 1", [])
-            .unwrap();
+        conn.execute(
+            "UPDATE workspace_state SET event_head_seq = 3 WHERE id = 1",
+            [],
+        )
+        .unwrap();
         insert_outbox_seq(&conn, 1);
         insert_outbox_seq(&conn, 2);
         insert_outbox_seq(&conn, 3);
@@ -523,13 +524,21 @@ mod tests {
 
         // Verify orphan payload is gone
         let orphan_exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM payloads WHERE pk = ?1", [orphan_pk], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM payloads WHERE pk = ?1",
+                [orphan_pk],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(orphan_exists, 0);
 
         // Verify referenced payload remains
         let referenced_exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM payloads WHERE pk = ?1", [referenced_payload_pk], |row| row.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM payloads WHERE pk = ?1",
+                [referenced_payload_pk],
+                |row| row.get(0),
+            )
             .unwrap();
         assert_eq!(referenced_exists, 1);
     }
@@ -554,7 +563,10 @@ mod tests {
              VALUES (?1, 9000, 0)",
             params![blob_pk],
         );
-        assert!(result.is_err(), "tombstoned blob must not accept new payload");
+        assert!(
+            result.is_err(),
+            "tombstoned blob must not accept new payload"
+        );
 
         // Attempt to finish deletion of the tombstoned blob (no payload exists).
         // This should succeed since the blob is now unreferenced.

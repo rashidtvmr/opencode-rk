@@ -136,7 +136,13 @@ impl ImportV2 {
         let Some(next_session) = next_session else {
             return Ok((0, after_message_rowid));
         };
-        page(dest, source, &next_session, dest_session_pk, after_message_rowid)
+        page(
+            dest,
+            source,
+            &next_session,
+            dest_session_pk,
+            after_message_rowid,
+        )
     }
 }
 
@@ -314,13 +320,7 @@ mod tests {
     fn dest_db() -> (Connection, i64, [u8; 16]) {
         let dir = tempdir().unwrap();
         let path = dir.path().join("workspace.db");
-        let mut conn = SchemaV2::initialize_workspace(
-            &path,
-            [1_u8; 16],
-            [2_u8; 16],
-            10,
-        )
-        .unwrap();
+        let mut conn = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
         let sid = SessionId::new();
         let new_id = *sid.as_uuid().as_bytes();
         let ns = NewSession {
@@ -331,9 +331,11 @@ mod tests {
         };
         V2Writer::create_session(&mut conn, &ns).unwrap();
         let pk: i64 = conn
-            .query_row("SELECT pk FROM sessions WHERE id=?1", params![&new_id[..]], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT pk FROM sessions WHERE id=?1",
+                params![&new_id[..]],
+                |r| r.get(0),
+            )
             .unwrap();
         (conn, pk, new_id)
     }
@@ -362,16 +364,14 @@ mod tests {
         let source = source_db(1200);
         let (mut dest, pk, _new_id) = dest_db();
         // first page is bounded by PAGE_BUDGET
-        let (imported, next) =
-            ImportV2::import_is_resumable(&mut dest, &source, pk, 0).unwrap();
+        let (imported, next) = ImportV2::import_is_resumable(&mut dest, &source, pk, 0).unwrap();
         assert_eq!(imported, PAGE_BUDGET as u64);
         assert!(next > 0);
         // drain the rest to completion
         let mut total = imported;
         let mut cursor = next;
         loop {
-            let (i, n) =
-                ImportV2::import_is_resumable(&mut dest, &source, pk, cursor).unwrap();
+            let (i, n) = ImportV2::import_is_resumable(&mut dest, &source, pk, cursor).unwrap();
             total += i;
             if i == 0 || n == cursor {
                 break;
@@ -393,8 +393,7 @@ mod tests {
             )
             .unwrap();
         let (mut dest, pk, new_id) = dest_db();
-        let err =
-            ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap_err();
+        let err = ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap_err();
         assert!(matches!(err, StorageError::InlinePayloadTooLarge));
         let zero_bytes: i64 = dest
             .query_row("SELECT COUNT(*) FROM payloads WHERE raw_bytes=0", [], |r| {
@@ -417,8 +416,7 @@ mod tests {
             )
             .unwrap();
         let (mut dest, pk, new_id) = dest_db();
-        let err =
-            ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap_err();
+        let err = ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap_err();
         assert!(matches!(err, StorageError::InlinePayloadTooLarge));
         ImportV2::verify_counts(&dest, pk, 0).unwrap();
     }

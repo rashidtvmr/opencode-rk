@@ -117,19 +117,22 @@ fn backup_captures_pinned_roots() {
     let backup_conn = SchemaV2::open_existing(&backup).unwrap();
     assert_eq!(
         connection
-            .query_row("SELECT count(*) FROM sessions", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT count(*) FROM sessions", [], |row| row
+                .get::<_, i64>(0))
             .unwrap(),
         1
     );
     assert_eq!(
         backup_conn
-            .query_row("SELECT count(*) FROM sessions", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT count(*) FROM sessions", [], |row| row
+                .get::<_, i64>(0))
             .unwrap(),
         1
     );
     assert_eq!(
         backup_conn
-            .query_row("SELECT count(*) FROM messages", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT count(*) FROM messages", [], |row| row
+                .get::<_, i64>(0))
             .unwrap(),
         2
     );
@@ -184,7 +187,8 @@ fn backup_excludes_gc_midflight() {
     // Live rows are intact in the backup.
     assert_eq!(
         backup_conn
-            .query_row("SELECT count(*) FROM messages", [], |row| row.get::<_, i64>(0))
+            .query_row("SELECT count(*) FROM messages", [], |row| row
+                .get::<_, i64>(0))
             .unwrap(),
         1
     );
@@ -228,7 +232,8 @@ fn restore_reopens_clean() {
 fn outbox_floor_preserved() {
     let (directory, mut connection) = initialized();
     V2Writer::append_outbox_event(&mut connection, SessionId::new(), "changed", "{}").unwrap();
-    V2Writer::append_outbox_event(&mut connection, SessionId::new(), "created", "{\"a\":1}").unwrap();
+    V2Writer::append_outbox_event(&mut connection, SessionId::new(), "created", "{\"a\":1}")
+        .unwrap();
     // Advance the floor to the head by pruning the contiguous prefix.
     connection
         .execute(
@@ -290,10 +295,7 @@ fn pin_blocks_gc_claim() {
     // GC tries to claim the pinned blob by setting DELETING without finishing.
     // The blob_gc_claim trigger rejects the collection because a payload still
     // references this blob.
-    let result = connection.execute(
-        "UPDATE blobs SET state=1 WHERE pk=?1",
-        params![blob_pk],
-    );
+    let result = connection.execute("UPDATE blobs SET state=1 WHERE pk=?1", params![blob_pk]);
     assert!(
         result.is_err(),
         "a pinned/referenced blob must not be collectable by GC"

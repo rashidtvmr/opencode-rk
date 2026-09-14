@@ -94,9 +94,7 @@ fn perf_100_append_message_inline_100b() {
                 id: MessageId::new(),
                 session_id,
                 role: MessageRole::User,
-                body: PayloadRef::Inline {
-                    text: body.clone(),
-                },
+                body: PayloadRef::Inline { text: body.clone() },
                 created_at_us: 10 + i as i64,
             },
         )

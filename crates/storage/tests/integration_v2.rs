@@ -1,6 +1,7 @@
 //! E2E integration tests for the format-2 workspace modules.
 //! Exercises writer + admission + execution + approvals + snapshot + quota.
 
+use opencode_rk_contracts::SessionId;
 use opencode_rk_storage::{
     admission_v2::AdmissionV2,
     approvals_v2::ApprovalsV2,
@@ -10,15 +11,14 @@ use opencode_rk_storage::{
     snapshot_v2::SnapshotV2,
     writer_v2::{NewSession, V2Writer},
 };
-use opencode_rk_contracts::SessionId;
 use rusqlite::Connection;
 use tempfile::{tempdir, TempDir};
 
 fn initialized() -> (TempDir, Connection) {
     let directory = tempdir().unwrap();
     let path = directory.path().join("workspace.db");
-    let connection = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10)
-        .expect("initialization");
+    let connection =
+        SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).expect("initialization");
     (directory, connection)
 }
 
@@ -110,8 +110,8 @@ fn full_session_lifecycle() {
     ApprovalsV2::resolve(&connection, approval_pk, 1, None, 450).expect("resolve approval");
 
     // Step 6: open epoch + export page.
-    let epoch = SnapshotV2::open_epoch(&connection, spk, payload_pk, payload_pk, 600)
-        .expect("open epoch");
+    let epoch =
+        SnapshotV2::open_epoch(&connection, spk, payload_pk, payload_pk, 600).expect("open epoch");
     assert_eq!(epoch, 1);
     let (rows, watermark) = SnapshotV2::export_page(&connection, spk, 0, 100).expect("export");
     assert_eq!(rows.len(), 1);

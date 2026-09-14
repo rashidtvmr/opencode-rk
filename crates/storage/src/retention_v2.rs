@@ -146,9 +146,8 @@ impl RetentionV2 {
             |row| row.get(0),
         )?;
         let orphan_payloads: i64 = {
-            let sql = format!(
-                "SELECT COUNT(*) FROM payloads {ORPHAN_PAYLOAD_MATCH}{REFERENCED_ARMS}"
-            );
+            let sql =
+                format!("SELECT COUNT(*) FROM payloads {ORPHAN_PAYLOAD_MATCH}{REFERENCED_ARMS}");
             connection.query_row(&sql, params![now_us], |row| row.get(0))?
         };
         Ok((expired_receipts, resolved_approvals, orphan_payloads))
@@ -251,7 +250,10 @@ mod tests {
         insert_receipt(&conn, 10); // expired
         insert_receipt(&conn, 20); // expired
         insert_receipt(&conn, 1000); // fresh
-        assert_eq!(RetentionV2::sweep_expired_receipts(&conn, 50, 500).unwrap(), 2);
+        assert_eq!(
+            RetentionV2::sweep_expired_receipts(&conn, 50, 500).unwrap(),
+            2
+        );
         assert_eq!(receipt_count(&conn), 1);
     }
 
@@ -262,10 +264,19 @@ mod tests {
             insert_receipt(&conn, i);
         }
         // Limit 0 clamps to 1: exactly one deleted.
-        assert_eq!(RetentionV2::sweep_expired_receipts(&conn, 99, 0).unwrap(), 1);
+        assert_eq!(
+            RetentionV2::sweep_expired_receipts(&conn, 99, 0).unwrap(),
+            1
+        );
         assert_eq!(receipt_count(&conn), 2);
-        assert_eq!(RetentionV2::sweep_expired_receipts(&conn, 99, 1).unwrap(), 1);
-        assert_eq!(RetentionV2::sweep_expired_receipts(&conn, 99, 500).unwrap(), 1);
+        assert_eq!(
+            RetentionV2::sweep_expired_receipts(&conn, 99, 1).unwrap(),
+            1
+        );
+        assert_eq!(
+            RetentionV2::sweep_expired_receipts(&conn, 99, 500).unwrap(),
+            1
+        );
         assert_eq!(receipt_count(&conn), 0);
     }
 

@@ -88,19 +88,16 @@ fn concurrent_outbox_seq_unique() {
             std::thread::spawn(move || {
                 let mut conn = SchemaV2::open_existing(&path).unwrap();
                 for _ in 0..PER_THREAD {
-                    V2Writer::append_outbox_event(
-                        &mut conn,
-                        SessionId::new(),
-                        "evt",
-                        "{}",
-                    )
-                    .unwrap();
+                    V2Writer::append_outbox_event(&mut conn, SessionId::new(), "evt", "{}")
+                        .unwrap();
                 }
                 // Drain the event head from this connection.
                 let head: i64 = conn
-                    .query_row("SELECT event_head_seq FROM workspace_state WHERE id=1", [], |r| {
-                        r.get(0)
-                    })
+                    .query_row(
+                        "SELECT event_head_seq FROM workspace_state WHERE id=1",
+                        [],
+                        |r| r.get(0),
+                    )
                     .unwrap();
                 seqs.lock().unwrap().push(head);
                 drop(t); // silence unused warning; t is unique per thread
@@ -126,13 +123,19 @@ fn concurrent_outbox_seq_unique() {
     unique.dedup();
     assert_eq!(rows.len(), unique.len(), "seqs must be unique");
     assert_eq!(rows[0], 1, "contiguous from 1");
-    assert_eq!(rows[rows.len() - 1], (THREADS * PER_THREAD) as i64, "contiguous to N");
+    assert_eq!(
+        rows[rows.len() - 1],
+        (THREADS * PER_THREAD) as i64,
+        "contiguous to N"
+    );
 
     // head == 200 (workspace_state event_head_seq mirrors the count).
     let head: i64 = conn
-        .query_row("SELECT event_head_seq FROM workspace_state WHERE id=1", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT event_head_seq FROM workspace_state WHERE id=1",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(head, (THREADS * PER_THREAD) as i64);
 }
@@ -186,17 +189,23 @@ fn concurrent_message_seq_per_session() {
                 "SELECT seq FROM messages WHERE session_pk=(SELECT pk FROM sessions WHERE id=?1) ORDER BY seq",
             )
             .unwrap();
-        stmt.query_map(params![session_id.as_uuid().as_bytes().as_slice()], |r| r.get(0))
-            .unwrap()
-            .collect::<Result<_, _>>()
-            .unwrap()
+        stmt.query_map(params![session_id.as_uuid().as_bytes().as_slice()], |r| {
+            r.get(0)
+        })
+        .unwrap()
+        .collect::<Result<_, _>>()
+        .unwrap()
     };
     assert_eq!(rows.len(), THREADS * PER_THREAD, "message count");
     let mut unique = rows.clone();
     unique.dedup();
     assert_eq!(rows.len(), unique.len(), "per-session seqs must be unique");
     assert_eq!(rows[0], 1, "contiguous from 1");
-    assert_eq!(rows[rows.len() - 1], (THREADS * PER_THREAD) as i64, "contiguous to N");
+    assert_eq!(
+        rows[rows.len() - 1],
+        (THREADS * PER_THREAD) as i64,
+        "contiguous to N"
+    );
 
     // next_message_seq advanced past the last allocated seq.
     let next: i64 = conn

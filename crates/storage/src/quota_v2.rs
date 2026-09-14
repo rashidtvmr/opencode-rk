@@ -159,8 +159,16 @@ mod tests {
         let (connection, _temp) = conn_and_paths();
         // ponytail: fresh DB has an empty WAL, so drive a synthetic snapshot
         // instead of relying on a non-zero measured WAL.
-        let snap = QuotaSnapshot { page_count: 1, freelist_count: 0, wal_pages: 4, db_bytes: 4096 };
-        assert!(matches!(QuotaV2::admit(&connection, &snap, i64::MAX, 0), Err(QuotaV2Error::WalBytes(_))));
+        let snap = QuotaSnapshot {
+            page_count: 1,
+            freelist_count: 0,
+            wal_pages: 4,
+            db_bytes: 4096,
+        };
+        assert!(matches!(
+            QuotaV2::admit(&connection, &snap, i64::MAX, 0),
+            Err(QuotaV2Error::WalBytes(_))
+        ));
         let _ = QuotaV2::measure(&connection).unwrap();
     }
 

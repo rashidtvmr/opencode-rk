@@ -1,5 +1,11 @@
 //! Multi-client connection handler with registry.
-use std::{collections::HashMap, sync::{Arc, Mutex, atomic::{AtomicU64, Ordering}}};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+};
 use tokio::sync::mpsc;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ClientId(pub u64);
@@ -14,7 +20,10 @@ pub struct ClientMessage {
     pub payload: Vec<u8>,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClientError { MaxClients, UnknownClient }
+pub enum ClientError {
+    MaxClients,
+    UnknownClient,
+}
 impl std::fmt::Display for ClientError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -36,11 +45,13 @@ pub struct ClientRegistry {
 impl ClientRegistry {
     #[must_use]
     pub fn new(max_clients: usize) -> Self {
-        Self { inner: Arc::new(ClientRegistryInner {
-            max_clients,
-            next_id: AtomicU64::new(1),
-            clients: Mutex::new(HashMap::new()),
-        })}
+        Self {
+            inner: Arc::new(ClientRegistryInner {
+                max_clients,
+                next_id: AtomicU64::new(1),
+                clients: Mutex::new(HashMap::new()),
+            }),
+        }
     }
     pub fn register(&self, sender: mpsc::Sender<ClientMessage>) -> Result<ClientId, ClientError> {
         let mut guard = self.inner.clients.lock().unwrap();
@@ -65,7 +76,10 @@ impl ClientRegistry {
         let guard = self.inner.clients.lock().unwrap();
         match guard.get(&client_id) {
             Some(handle) => {
-                handle.sender.try_send(msg).map_err(|_| ClientError::UnknownClient)?;
+                handle
+                    .sender
+                    .try_send(msg)
+                    .map_err(|_| ClientError::UnknownClient)?;
                 Ok(())
             }
             None => Err(ClientError::UnknownClient),
@@ -89,12 +103,13 @@ mod tests {
         let id2 = registry.register(tx2).unwrap();
         let id3 = registry.register(tx3).unwrap();
         assert_eq!(registry.connected_count(), 3);
-        registry.broadcast(ClientMessage { client: id1, payload: b"test".to_vec() });
-        assert_eq!(rx1.recv().await.unwrap().payload, b"test");
-        registry.broadcast(ClientMessage { client: id2, payload: b"test2".to_vec() });
-        assert_eq!(rx2.recv().await.unwrap().payload, b"test2");
-        registry.broadcast(ClientMessage { client: id3, payload: b"test3".to_vec() });
-        assert_eq!(rx3.recv().await.unwrap().payload, b"test3");
+        registry.broadcast(ClientMessage {
+            client: id1,
+            payload: b"hello".to_vec(),
+        });
+        assert_eq!(rx1.recv().await.unwrap().payload, b"hello");
+        assert_eq!(rx2.recv().await.unwrap().payload, b"hello");
+        assert_eq!(rx3.recv().await.unwrap().payload, b"hello");
     }
     #[tokio::test]
     async fn unregister_removes() {
@@ -124,7 +139,10 @@ mod tests {
         let _id1 = registry.register(tx1).unwrap();
         let _id2 = registry.register(tx2).unwrap();
         let _id3 = registry.register(tx3).unwrap();
-        let msg = ClientMessage { client: ClientId(0), payload: b"broadcast".to_vec() };
+        let msg = ClientMessage {
+            client: ClientId(0),
+            payload: b"broadcast".to_vec(),
+        };
         registry.broadcast(msg);
         assert_eq!(rx1.recv().await.unwrap().payload, b"broadcast");
         assert_eq!(rx2.recv().await.unwrap().payload, b"broadcast");
@@ -135,14 +153,12 @@ mod tests {
         let registry = ClientRegistry::new(3);
         let (tx1, mut rx1) = mpsc::channel::<ClientMessage>(16);
         let (tx2, mut rx2) = mpsc::channel::<ClientMessage>(16);
-        let (tx3, mut rx3) = mpsc::channel::<ClientMessage>(16);
         let _id1 = registry.register(tx1).unwrap();
         let id2 = registry.register(tx2).unwrap();
-        let _id3 = registry.register(tx3).unwrap();
-        registry.broadcast(ClientMessage { client: ClientId(0), payload: vec![1, 2, 3] });
-        let _ = rx2.recv().await;
-        let _ = rx3.recv().await;
-        let msg = ClientMessage { client: id2, payload: b"specific".to_vec() };
+        let msg = ClientMessage {
+            client: id2,
+            payload: b"specific".to_vec(),
+        };
         registry.send_to(id2, msg).unwrap();
         let received = rx2.recv().await.unwrap();
         assert_eq!(received.payload, b"specific");

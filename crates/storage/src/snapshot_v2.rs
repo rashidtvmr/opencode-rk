@@ -137,7 +137,11 @@ impl SnapshotV2 {
              ORDER BY epoch DESC LIMIT ?2",
         )?;
         let rows = statement.query_map(params![session_pk, limit], |row| {
-            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<i64>>(2)?))
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, Option<i64>>(2)?,
+            ))
         })?;
         let mut out = Vec::new();
         for row in rows {
@@ -483,7 +487,10 @@ mod tests {
         assert_eq!(epochs[1].0, 2);
         assert_eq!(epochs[2].0, 1);
         assert_eq!(epochs[0].1, 9);
-        assert!(epochs[0].2.is_none(), "open epoch must have NULL closed_at_us");
+        assert!(
+            epochs[0].2.is_none(),
+            "open epoch must have NULL closed_at_us"
+        );
         assert_eq!(epochs[1].2, Some(8));
         assert_eq!(epochs[2].2, Some(6));
         let one = SnapshotV2::list_epochs(&conn, pk, 1).unwrap();
@@ -529,7 +536,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let conn = workspace(&dir.path().join("w.db"));
         let payload = mk_payload(&conn, b"p");
-        assert!(SnapshotV2::list_pins(&conn, payload, 10).unwrap().is_empty());
+        assert!(SnapshotV2::list_pins(&conn, payload, 10)
+            .unwrap()
+            .is_empty());
         let owner_a = [7_u8; 16];
         let owner_b = [9_u8; 16];
         SnapshotV2::pin(&conn, &owner_a, 1, payload, 3).unwrap();

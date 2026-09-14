@@ -361,27 +361,34 @@ pub struct ConfigLayer(Value);
 impl ConfigLayer {
     /// Parse a user config file written in TOML.
     pub fn from_toml_str(text: &str) -> Result<Self, ConfigError> {
-        let parsed: toml::Value = toml::from_str(text)
-            .map_err(|error| ConfigError::InvalidToml(error.to_string()))?;
-        Self::from_value(serde_json::to_value(parsed).map_err(|error| ConfigError::InvalidToml(error.to_string()))?)
+        let parsed: toml::Value =
+            toml::from_str(text).map_err(|error| ConfigError::InvalidToml(error.to_string()))?;
+        Self::from_value(
+            serde_json::to_value(parsed)
+                .map_err(|error| ConfigError::InvalidToml(error.to_string()))?,
+        )
     }
 
     /// Parse a user config file written in JSON.
     pub fn from_json_str(text: &str) -> Result<Self, ConfigError> {
-        let parsed: Value =
-            serde_json::from_str(text).map_err(|error| ConfigError::InvalidJson(error.to_string()))?;
+        let parsed: Value = serde_json::from_str(text)
+            .map_err(|error| ConfigError::InvalidJson(error.to_string()))?;
         Self::from_value(parsed)
     }
 
     /// Build a layer from dotted key/value pairs, the CLI override mechanism.
     /// Values are stringly and coerced: "true"/"false" become booleans and
     /// numeric strings become numbers.
-    pub fn from_pairs<'a>(pairs: impl IntoIterator<Item = (&'a str, &'a str)>) -> Result<Self, ConfigError> {
+    pub fn from_pairs<'a>(
+        pairs: impl IntoIterator<Item = (&'a str, &'a str)>,
+    ) -> Result<Self, ConfigError> {
         let mut root = serde_json::Map::new();
         for (key, raw) in pairs {
             let segments: Vec<&str> = key.split('.').collect();
             if segments.is_empty() || segments.iter().any(|s| s.is_empty()) {
-                return Err(ConfigError::InvalidValue(format!("empty path segment in override key {key}")));
+                return Err(ConfigError::InvalidValue(format!(
+                    "empty path segment in override key {key}"
+                )));
             }
             let (leaf, parents) = segments.split_last().expect("non-empty by check above");
             let mut cursor = &mut root;
@@ -401,7 +408,9 @@ impl ConfigLayer {
                 };
             }
             if cursor.insert(leaf.to_string(), coerce(raw)).is_some() {
-                return Err(ConfigError::InvalidValue(format!("duplicate override key {key}")));
+                return Err(ConfigError::InvalidValue(format!(
+                    "duplicate override key {key}"
+                )));
             }
         }
         Self::from_value(Value::Object(root))
@@ -421,7 +430,10 @@ impl ConfigLayer {
             let path = rest.to_ascii_lowercase().replace(ENV_SEPARATOR, ".");
             pairs.push((path, value));
         }
-        let borrowed: Vec<(&str, &str)> = pairs.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        let borrowed: Vec<(&str, &str)> = pairs
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
         Self::from_pairs(borrowed)
     }
 
@@ -508,16 +520,23 @@ shell.timeout_ms = 60000
         assert_eq!(config.compaction.threshold_tokens, 100_000);
         assert_eq!(config.compaction.keep_recent_turns, 20);
         for feature in Feature::ALL {
-            assert!(!config.features.enabled(*feature), "default must disable {}", feature.name());
+            assert!(
+                !config.features.enabled(*feature),
+                "default must disable {}",
+                feature.name()
+            );
         }
-        assert_eq!(Features::default(), Features {
-            plugins: false,
-            js_plugin_host: false,
-            web_client: false,
-            desktop: false,
-            sharing: false,
-            sounds: false,
-        });
+        assert_eq!(
+            Features::default(),
+            Features {
+                plugins: false,
+                js_plugin_host: false,
+                web_client: false,
+                desktop: false,
+                sharing: false,
+                sounds: false,
+            }
+        );
     }
 
     // T02: TOML and JSON user layers override defaults; untouched fields keep
@@ -532,70 +551,100 @@ shell.timeout_ms = 60000
         assert_eq!(config.permission.bash, PermissionMode::Ask);
         assert_eq!(config.shell.max_output_bytes, 65_536);
 
-        let json_layer = ConfigLayer::from_json_str(r##"{"theme":{"mode":"system","custom":{"border":"#00ff88"}}}"##).unwrap();
+        let json_layer = ConfigLayer::from_json_str(
+            r##"{"theme":{"mode":"system","custom":{"border":"#00ff88"}}}"##,
+        )
+        .unwrap();
         let config = Config::resolve(&[json_layer]).unwrap();
         assert_eq!(config.theme.mode, ThemeMode::System);
-        assert_eq!(config.theme.custom.get("border").map(String::as_str), Some("#00ff88"));
+        assert_eq!(
+            config.theme.custom.get("border").map(String::as_str),
+            Some("#00ff88")
+        );
     }
 
     // T03: precedence defaults -> user file -> env -> CLI, with string
     // coercion for booleans and numbers.
     #[test]
     fn t03_env_and_cli_layers_win_in_order() {
-        let user = ConfigLayer::from_json_str(r#"{"theme":{"mode":"light"},"model":{"temperature":0.2}}"#).unwrap();
+        let user =
+            ConfigLayer::from_json_str(r#"{"theme":{"mode":"light"},"model":{"temperature":0.2}}"#)
+                .unwrap();
         let env = ConfigLayer::from_env_vars([
             ("OPENCODE_RK_THEME__MODE".to_string(), "system".to_string()),
-            ("OPENCODE_RK_COMPACTION__ENABLED".to_string(), "false".to_string()),
-            ("OPENCODE_RK_MODEL__MAX_OUTPUT_TOKENS".to_string(), "4096".to_string()),
+            (
+                "OPENCODE_RK_COMPACTION__ENABLED".to_string(),
+                "false".to_string(),
+            ),
+            (
+                "OPENCODE_RK_MODEL__MAX_OUTPUT_TOKENS".to_string(),
+                "4096".to_string(),
+            ),
             ("UNRELATED_ENV".to_string(), "ignored".to_string()),
         ])
         .unwrap();
-        let cli = ConfigLayer::from_pairs([("theme.mode", "dark"), ("model.temperature", "0.5")]).unwrap();
+        let cli = ConfigLayer::from_pairs([("theme.mode", "dark"), ("model.temperature", "0.5")])
+            .unwrap();
 
         let config = Config::resolve(&[user.clone(), env.clone(), cli]).unwrap();
         assert_eq!(config.theme.mode, ThemeMode::Dark, "CLI must win over env");
-        assert!(!config.compaction.enabled, "env must win over user file and default");
+        assert!(
+            !config.compaction.enabled,
+            "env must win over user file and default"
+        );
         assert_eq!(config.model.max_output_tokens, Some(4096));
         assert_eq!(config.model.temperature, Some(0.5));
 
         let config = Config::resolve(&[user, env]).unwrap();
-        assert_eq!(config.theme.mode, ThemeMode::System, "env must win over user file");
+        assert_eq!(
+            config.theme.mode,
+            ThemeMode::System,
+            "env must win over user file"
+        );
     }
 
     // T04: semantic validation rejects parseable but invalid values.
     #[test]
     fn t04_validation_rejects_invalid_values() {
-        let bad_color = ConfigLayer::from_json_str(r##"{"theme":{"custom":{"border":"red"}}}"##).unwrap();
+        let bad_color =
+            ConfigLayer::from_json_str(r##"{"theme":{"custom":{"border":"red"}}}"##).unwrap();
         assert!(Config::resolve(&[bad_color]).is_err());
 
-        let bad_color_len = ConfigLayer::from_json_str(r##"{"theme":{"custom":{"border":"#00ff"}}}"##).unwrap();
+        let bad_color_len =
+            ConfigLayer::from_json_str(r##"{"theme":{"custom":{"border":"#00ff"}}}"##).unwrap();
         assert!(Config::resolve(&[bad_color_len]).is_err());
 
-        let bad_temperature = ConfigLayer::from_json_str(r#"{"model":{"temperature":5.0}}"#).unwrap();
+        let bad_temperature =
+            ConfigLayer::from_json_str(r#"{"model":{"temperature":5.0}}"#).unwrap();
         assert!(Config::resolve(&[bad_temperature]).is_err());
 
-        let zero_tokens = ConfigLayer::from_json_str(r#"{"model":{"max_output_tokens":0}}"#).unwrap();
+        let zero_tokens =
+            ConfigLayer::from_json_str(r#"{"model":{"max_output_tokens":0}}"#).unwrap();
         assert!(Config::resolve(&[zero_tokens]).is_err());
 
         let zero_timeout = ConfigLayer::from_json_str(r#"{"shell":{"timeout_ms":0}}"#).unwrap();
         assert!(Config::resolve(&[zero_timeout]).is_err());
 
-        let zero_output = ConfigLayer::from_json_str(r#"{"shell":{"max_output_bytes":0}}"#).unwrap();
+        let zero_output =
+            ConfigLayer::from_json_str(r#"{"shell":{"max_output_bytes":0}}"#).unwrap();
         assert!(Config::resolve(&[zero_output]).is_err());
 
         let empty_program = ConfigLayer::from_json_str(r#"{"shell":{"program":"  "}}"#).unwrap();
         assert!(Config::resolve(&[empty_program]).is_err());
 
-        let zero_threshold = ConfigLayer::from_json_str(r#"{"compaction":{"threshold_tokens":0}}"#).unwrap();
+        let zero_threshold =
+            ConfigLayer::from_json_str(r#"{"compaction":{"threshold_tokens":0}}"#).unwrap();
         assert!(Config::resolve(&[zero_threshold]).is_err());
 
-        let zero_turns = ConfigLayer::from_json_str(r#"{"compaction":{"keep_recent_turns":0}}"#).unwrap();
+        let zero_turns =
+            ConfigLayer::from_json_str(r#"{"compaction":{"keep_recent_turns":0}}"#).unwrap();
         assert!(Config::resolve(&[zero_turns]).is_err());
 
         let empty_name = ConfigLayer::from_json_str(r#"{"theme":{"name":"  "}}"#).unwrap();
         assert!(Config::resolve(&[empty_name]).is_err());
 
-        let alpha_custom = ConfigLayer::from_json_str(r##"{"theme":{"custom":{"border":"#00ff88AA"}}}"##).unwrap();
+        let alpha_custom =
+            ConfigLayer::from_json_str(r##"{"theme":{"custom":{"border":"#00ff88AA"}}}"##).unwrap();
         assert!(Config::resolve(&[alpha_custom]).is_ok());
     }
 
@@ -603,21 +652,34 @@ shell.timeout_ms = 60000
     #[test]
     fn t05_feature_flags_gate_and_toggle() {
         let mut features = Features::default();
-        assert_eq!(features.require(Feature::Sharing), Err(ConfigError::FeatureDisabled("sharing")));
+        assert_eq!(
+            features.require(Feature::Sharing),
+            Err(ConfigError::FeatureDisabled("sharing"))
+        );
         features.set(Feature::Sharing, true);
         assert!(features.enabled(Feature::Sharing));
         assert_eq!(features.require(Feature::Sharing), Ok(()));
         assert!(!features.enabled(Feature::Plugins), "other flags stay off");
 
         assert_eq!(Feature::parse("web_client"), Some(Feature::WebClient));
-        assert_eq!(Feature::parse("js_plugin_host"), Some(Feature::JsPluginHost));
+        assert_eq!(
+            Feature::parse("js_plugin_host"),
+            Some(Feature::JsPluginHost)
+        );
         assert_eq!(Feature::parse("nonexistent"), None);
 
-        let layer = ConfigLayer::from_env_vars([("OPENCODE_RK_FEATURES__PLUGINS".to_string(), "true".to_string())]).unwrap();
+        let layer = ConfigLayer::from_env_vars([(
+            "OPENCODE_RK_FEATURES__PLUGINS".to_string(),
+            "true".to_string(),
+        )])
+        .unwrap();
         let config = Config::resolve(&[layer]).unwrap();
         assert!(config.features.plugins);
         assert_eq!(config.features.require(Feature::Plugins), Ok(()));
-        assert_eq!(config.features.require(Feature::Desktop), Err(ConfigError::FeatureDisabled("desktop")));
+        assert_eq!(
+            config.features.require(Feature::Desktop),
+            Err(ConfigError::FeatureDisabled("desktop"))
+        );
     }
 
     // Layer construction rejects malformed or non-object input; unknown keys
@@ -630,7 +692,8 @@ shell.timeout_ms = 60000
         assert!(ConfigLayer::from_pairs([("", "x")]).is_err());
         assert!(ConfigLayer::from_pairs([("theme..mode", "x")]).is_err());
 
-        let unknown_keys = ConfigLayer::from_json_str(r#"{"future_key":123,"theme":{"mode":"light"}}"#).unwrap();
+        let unknown_keys =
+            ConfigLayer::from_json_str(r#"{"future_key":123,"theme":{"mode":"light"}}"#).unwrap();
         let config = Config::resolve(&[unknown_keys]).unwrap();
         assert_eq!(config.theme.mode, ThemeMode::Light);
 

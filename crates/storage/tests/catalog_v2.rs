@@ -43,8 +43,7 @@ fn initialize_new_catalog_applies_the_format_2_connection_contract() {
     assert_eq!(pragma_i64(&connection, "user_version"), 2);
     assert_eq!(
         connection
-            .query_row("PRAGMA journal_mode", [], |row| row
-                .get::<_, String>(0))
+            .query_row("PRAGMA journal_mode", [], |row| row.get::<_, String>(0))
             .unwrap()
             .to_ascii_lowercase(),
         "wal"
@@ -130,11 +129,7 @@ fn open_existing_rejects_a_tampered_migration_checksum() {
 #[test]
 fn register_workspace_rejects_an_overlong_label_without_inserting() {
     let (_directory, mut connection) = initialized();
-    let invalid = registration(
-        [1_u8; 16],
-        String::from_utf8(vec![b'x'; 1025]).unwrap(),
-        1,
-    );
+    let invalid = registration([1_u8; 16], String::from_utf8(vec![b'x'; 1025]).unwrap(), 1);
 
     assert!(CatalogV2::register_workspace(&mut connection, &invalid).is_err());
     assert_eq!(
@@ -237,5 +232,8 @@ fn put_setting_rejects_bad_key_invalid_or_oversize_json() {
 #[test]
 fn get_setting_missing_key_returns_none() {
     let (_directory, connection) = initialized();
-    assert_eq!(CatalogV2::get_setting(&connection, "missing").unwrap(), None);
+    assert_eq!(
+        CatalogV2::get_setting(&connection, "missing").unwrap(),
+        None
+    );
 }

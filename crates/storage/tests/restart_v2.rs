@@ -116,13 +116,7 @@ fn committed_messages_and_outbox_survive_reopen() {
     V2Writer::append_message(&mut conn, &message(session_id, MessageId::new(), "one")).unwrap();
     V2Writer::append_message(&mut conn, &message(session_id, MessageId::new(), "two")).unwrap();
     V2Writer::append_outbox_event(&mut conn, session_id, "created", "{}").unwrap();
-    V2Writer::append_outbox_event(
-        &mut conn,
-        session_id,
-        "changed",
-        "{\"ok\":true}",
-    )
-    .unwrap();
+    V2Writer::append_outbox_event(&mut conn, session_id, "changed", "{\"ok\":true}").unwrap();
     drop(conn);
 
     let reopened = SchemaV2::open_existing(&path).unwrap();
@@ -154,9 +148,11 @@ fn committed_messages_and_outbox_survive_reopen() {
     assert_eq!(outbox_seqs, vec![1, 2]);
     assert_eq!(
         reopened
-            .query_row("SELECT event_head_seq FROM workspace_state WHERE id=1", [], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT event_head_seq FROM workspace_state WHERE id=1",
+                [],
+                |row| { row.get::<_, i64>(0) }
+            )
             .unwrap(),
         2
     );
@@ -174,7 +170,10 @@ fn uncommitted_tx_does_not_survive() {
     tx.execute(
         "INSERT INTO sessions (id, title, created_at_us, updated_at_us)
          VALUES (?1, ?2, 10, 10)",
-        params![session_id.as_uuid().as_bytes().as_slice(), &"transient".to_string()],
+        params![
+            session_id.as_uuid().as_bytes().as_slice(),
+            &"transient".to_string()
+        ],
     )
     .unwrap();
     // session visible to the in-flight connection, not yet durable
@@ -202,13 +201,7 @@ fn checkpoint_does_not_lose_rows() {
     V2Writer::append_message(&mut conn, &message(session_id, MessageId::new(), "one")).unwrap();
     V2Writer::append_message(&mut conn, &message(session_id, MessageId::new(), "two")).unwrap();
     V2Writer::append_outbox_event(&mut conn, session_id, "created", "{}").unwrap();
-    V2Writer::append_outbox_event(
-        &mut conn,
-        session_id,
-        "changed",
-        "{\"ok\":true}",
-    )
-    .unwrap();
+    V2Writer::append_outbox_event(&mut conn, session_id, "changed", "{\"ok\":true}").unwrap();
 
     let checkpoint: (i64, i64) = conn
         .query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
@@ -217,9 +210,11 @@ fn checkpoint_does_not_lose_rows() {
         .unwrap();
     assert_eq!(checkpoint.0, 0, "checkpoint must report busy==0");
     let head_before: i64 = conn
-        .query_row("SELECT event_head_seq FROM workspace_state WHERE id=1", [], |row| {
-            row.get::<_, i64>(0)
-        })
+        .query_row(
+            "SELECT event_head_seq FROM workspace_state WHERE id=1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )
         .unwrap();
     assert_eq!(head_before, 2);
     drop(conn);
@@ -239,9 +234,11 @@ fn checkpoint_does_not_lose_rows() {
     assert_eq!(seqs, vec![1, 2]);
     assert_eq!(
         reopened
-            .query_row("SELECT event_head_seq FROM workspace_state WHERE id=1", [], |row| {
-                row.get::<_, i64>(0)
-            })
+            .query_row(
+                "SELECT event_head_seq FROM workspace_state WHERE id=1",
+                [],
+                |row| { row.get::<_, i64>(0) }
+            )
             .unwrap(),
         2
     );

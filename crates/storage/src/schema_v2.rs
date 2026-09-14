@@ -5,9 +5,9 @@
 //! dependency. Using blake3-256 (32-byte digest, already a dep) as the
 //! migration checksum. Upgrade path: add `sha2` to workspace deps when
 //! engine qualification lands, then swap the digest computation.
-use std::path::Path;
 use blake3::hash as blake3_hash;
 use rusqlite::{params, Connection, TransactionBehavior};
+use std::path::Path;
 
 const WORKSPACE_SQL: &str = include_str!("../schema/v2/workspace.sql");
 const APP_ID: i64 = 0x4F525732;
@@ -15,7 +15,8 @@ const USER_VERSION: i64 = 2;
 const FORMAT_VERSION: i64 = 2;
 const MIGRATION_VERSION: i64 = 2;
 
-const PRAGMA_INIT: &str = "PRAGMA page_size=4096; PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_mode=WAL;";
+const PRAGMA_INIT: &str =
+    "PRAGMA page_size=4096; PRAGMA auto_vacuum=INCREMENTAL; PRAGMA journal_mode=WAL;";
 
 const CONNECT_POLICY: &str = "PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA trusted_schema=OFF; PRAGMA cache_size=-8192; PRAGMA temp_store=FILE; PRAGMA mmap_size=0;";
 
@@ -40,12 +41,13 @@ impl SchemaV2 {
         let mut conn = Connection::open(path)?;
         conn.execute_batch(PRAGMA_INIT)?;
         // verify WAL
-        let journal: String =
-            conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
+        let journal: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
         if journal.to_lowercase() != "wal" {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
-                "journal_mode is not wal: {journal}"
-            ))));
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
+                    "journal_mode is not wal: {journal}"
+                )),
+            ));
         }
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute_batch(WORKSPACE_SQL)?;
@@ -63,26 +65,32 @@ impl SchemaV2 {
         tx.execute_batch("PRAGMA user_version = 2; PRAGMA application_id = 0x4F525732;")?;
         tx.commit()?;
         // verify user_version and application_id persisted
-        let actual_user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let actual_user_version: i64 =
+            conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if actual_user_version != USER_VERSION {
             return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
                 "user_version mismatch after commit: expected {USER_VERSION}, got {actual_user_version}"
             ))));
         }
-        let actual_app_id: i64 = conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
+        let actual_app_id: i64 =
+            conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
         if actual_app_id != APP_ID {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
                 "application_id mismatch after commit: expected {APP_ID:#x}, got {actual_app_id:#x}"
-            ))));
+            )),
+            ));
         }
         // apply full connection policy (foreign_keys, synchronous=FULL, etc.)
         conn.execute_batch(CONNECT_POLICY)?;
         // final WAL verification
         let journal: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
         if journal.to_lowercase() != "wal" {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
-                "journal_mode is not wal: {journal}"
-            ))));
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
+                    "journal_mode is not wal: {journal}"
+                )),
+            ));
         }
         Ok(conn)
     }
@@ -92,16 +100,20 @@ impl SchemaV2 {
         // verify application_id
         let app_id: i64 = conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
         if app_id != APP_ID {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
-                "application_id mismatch: expected {APP_ID:#x}, got {app_id:#x}"
-            ))));
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
+                    "application_id mismatch: expected {APP_ID:#x}, got {app_id:#x}"
+                )),
+            ));
         }
         // verify user_version
         let user_version: i64 = conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if user_version != USER_VERSION {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
-                "user_version mismatch: expected {USER_VERSION}, got {user_version}"
-            ))));
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
+                    "user_version mismatch: expected {USER_VERSION}, got {user_version}"
+                )),
+            ));
         }
         // verify schema_migrations version + checksum
         let (stored_version, stored_checksum): (i64, Vec<u8>) = conn.query_row(
@@ -116,20 +128,24 @@ impl SchemaV2 {
         }
         let computed = Self::workspace_checksum();
         if stored_checksum != computed.to_vec() {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
-                "checksum mismatch: stored {}, computed {}",
-                Self::hex_str(&stored_checksum),
-                Self::hex_str(&computed)
-            ))));
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
+                    "checksum mismatch: stored {}, computed {}",
+                    Self::hex_str(&stored_checksum),
+                    Self::hex_str(&computed)
+                )),
+            ));
         }
         // apply connection policy
         conn.execute_batch(CONNECT_POLICY)?;
         // re-verify WAL after configuring
         let journal: String = conn.pragma_query_value(None, "journal_mode", |row| row.get(0))?;
         if journal.to_lowercase() != "wal" {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
-                "journal_mode is not wal: {journal}"
-            ))));
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
+                    "journal_mode is not wal: {journal}"
+                )),
+            ));
         }
         Ok(conn)
     }
@@ -160,7 +176,9 @@ mod tests {
         drop(conn);
         let reopened = SchemaV2::open_existing(&path).unwrap();
         assert_eq!(
-            reopened.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),
+            reopened
+                .pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0))
+                .unwrap(),
             2
         );
     }

@@ -70,8 +70,7 @@ fn open_read_only(path: &Path) -> Connection {
 fn initialized_dest() -> (TempDir, Connection) {
     let directory = tempdir().unwrap();
     let path = directory.path().join("workspace.db");
-    let connection =
-        SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
+    let connection = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
     (directory, connection)
 }
 
@@ -121,8 +120,7 @@ fn import_session_copies_all_messages_preserving_role_and_order() {
     let (_dest_dir, mut dest) = initialized_dest();
     let (pk, new_id) = dest_session(&mut dest);
 
-    let imported =
-        ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap();
+    let imported = ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap();
 
     assert_eq!(imported, 3, "every source message must import");
     let count: i64 = dest
@@ -184,7 +182,10 @@ fn source_file_is_byte_identical_after_import() {
     drop(source);
     let after = fs::read(&source_path).unwrap();
     assert_eq!(before, during, "import must not touch the source mid-run");
-    assert_eq!(before, after, "import must not touch the source after close");
+    assert_eq!(
+        before, after,
+        "import must not touch the source after close"
+    );
 }
 
 #[test]

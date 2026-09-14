@@ -37,9 +37,7 @@ fn init_db(dir: &tempfile::TempDir) -> Connection {
 
 fn report(label: &str, elapsed: Duration, ops: usize) {
     let per_op_us = elapsed.as_micros() as f64 / ops as f64;
-    eprintln!(
-        "[perf_modules_v2] {label}: total={elapsed:?} ops={ops} per_op={per_op_us:.1}us"
-    );
+    eprintln!("[perf_modules_v2] {label}: total={elapsed:?} ops={ops} per_op={per_op_us:.1}us");
 }
 
 fn check(label: &str, elapsed: Duration) {
@@ -82,10 +80,7 @@ fn insert_payload(conn: &Connection, data: &[u8], now_us: i64) -> i64 {
 
 #[test]
 fn sqlite_version_is_printed() {
-    eprintln!(
-        "[perf_modules_v2] sqlite_version={}",
-        rusqlite::version()
-    );
+    eprintln!("[perf_modules_v2] sqlite_version={}", rusqlite::version());
 }
 
 #[test]
@@ -101,14 +96,9 @@ fn perf_100_admission_submit_promote() {
     let mut input_pks = Vec::with_capacity(BATCH);
     for i in 0..BATCH {
         let start = Instant::now();
-        let (input_pk, _seq) = AdmissionV2::submit_input(
-            &mut conn,
-            &session_bytes,
-            0,
-            &[i as u8; 32],
-            &parts,
-        )
-        .unwrap();
+        let (input_pk, _seq) =
+            AdmissionV2::submit_input(&mut conn, &session_bytes, 0, &[i as u8; 32], &parts)
+                .unwrap();
         submit_t += start.elapsed();
         input_pks.push(input_pk);
         let start = Instant::now();
@@ -135,9 +125,17 @@ fn perf_100_execution_start_transition() {
         // start queue(0) -> running(1) -> complete(2, terminal) so the
         // single-owner index is released before the next start.
         let start = Instant::now();
-        let exec_pk =
-            ExecV2::start_execution(&conn, session_pk, 0, i as i64, config_pk, "prov", "model", 1000 + i as i64)
-                .unwrap();
+        let exec_pk = ExecV2::start_execution(
+            &conn,
+            session_pk,
+            0,
+            i as i64,
+            config_pk,
+            "prov",
+            "model",
+            1000 + i as i64,
+        )
+        .unwrap();
         start_t += start.elapsed();
         let start = Instant::now();
         ExecV2::transition_execution(&conn, exec_pk, 0, 1, None).unwrap();
@@ -241,8 +239,7 @@ fn perf_100_snapshot_export_page() {
     let start = Instant::now();
     let mut total_rows = 0_usize;
     for _ in 0..BATCH {
-        let (rows, watermark) =
-            SnapshotV2::export_page(&conn, session_pk, 0, 100).unwrap();
+        let (rows, watermark) = SnapshotV2::export_page(&conn, session_pk, 0, 100).unwrap();
         assert_eq!(rows.len(), 100);
         assert!(watermark > 0);
         total_rows += rows.len();

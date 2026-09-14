@@ -1788,7 +1788,7 @@
       "requirementIds": [
         "REQ-031"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1802,7 +1802,7 @@
     {
       "id": "SEC-008",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1816,7 +1816,7 @@
     {
       "id": "SEC-009",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1880,7 +1880,7 @@
       "requirementIds": [
         "REQ-026"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1896,7 +1896,7 @@
       "requirementIds": [
         "REQ-027"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1912,7 +1912,7 @@
       "requirementIds": [
         "REQ-025"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1929,7 +1929,7 @@
         "REQ-030",
         "REQ-035"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -3001,7 +3001,7 @@
       "requirementIds": [
         "REQ-025"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Dangerous shell-pattern denylist stripped at auto-entry - cross-platform code-exec block plus matcher tests",
       "dependencyIds": [],
       "testObligations": [

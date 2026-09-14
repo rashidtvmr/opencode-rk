@@ -78,7 +78,16 @@ impl ForkV2 {
         let new_pk = transaction.last_insert_rowid();
 
         // fetch source messages: pk, seq, role, status, provider, model, times
-        let rows: Vec<(i64, i64, i64, i64, Option<String>, Option<String>, i64, Option<i64>)> = {
+        let rows: Vec<(
+            i64,
+            i64,
+            i64,
+            i64,
+            Option<String>,
+            Option<String>,
+            i64,
+            Option<i64>,
+        )> = {
             let mut stmt = transaction.prepare(
                 "SELECT pk, seq, role, status, provider_id, model_id, created_at_us, completed_at_us
                  FROM messages WHERE session_pk=?1 AND seq<=?2 ORDER BY seq ASC",
@@ -124,7 +133,14 @@ impl ForkV2 {
             )?;
             let new_message_pk = transaction.last_insert_rowid();
 
-            let parts: Vec<(i64, i64, i64, Option<String>, Option<String>, Option<String>)> = {
+            let parts: Vec<(
+                i64,
+                i64,
+                i64,
+                Option<String>,
+                Option<String>,
+                Option<String>,
+            )> = {
                 let mut pstmt = transaction.prepare(
                     "SELECT ordinal, kind, payload_pk, mime, name, metadata_json
                      FROM message_parts WHERE message_pk=?1 ORDER BY ordinal ASC",
@@ -150,7 +166,15 @@ impl ForkV2 {
                     "INSERT INTO message_parts
                      (message_pk, ordinal, kind, payload_pk, mime, name, metadata_json)
                      VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![new_message_pk, ordinal, kind, payload_pk, mime, name, metadata],
+                    params![
+                        new_message_pk,
+                        ordinal,
+                        kind,
+                        payload_pk,
+                        mime,
+                        name,
+                        metadata
+                    ],
                 )?;
             }
             if seq > max_seq {
@@ -194,9 +218,7 @@ impl ForkV2 {
              WHERE m.session_pk=?1
              ORDER BY m.seq ASC, mp.ordinal ASC",
         )?;
-        let rows = stmt.query_map(params![new_pk], |row| {
-            Ok(row.get::<_, Option<Vec<u8>>>(0)?)
-        })?;
+        let rows = stmt.query_map(params![new_pk], |row| Ok(row.get::<_, Option<Vec<u8>>>(0)?))?;
         for row in rows {
             if let Some(data) = row? {
                 hasher.update(&data);
@@ -248,8 +270,12 @@ mod tests {
             },
         )
         .unwrap();
-        conn.query_row("SELECT pk FROM sessions WHERE id=?1", params![id.as_uuid().as_bytes().as_slice()], |r| r.get(0))
-            .unwrap()
+        conn.query_row(
+            "SELECT pk FROM sessions WHERE id=?1",
+            params![id.as_uuid().as_bytes().as_slice()],
+            |r| r.get(0),
+        )
+        .unwrap()
     }
 
     fn append(conn: &mut Connection, session: SessionId, seq: i64, body: &str) {
@@ -259,7 +285,9 @@ mod tests {
                 id: MessageId::new(),
                 session_id: session,
                 role: MessageRole::User,
-                body: PayloadRef::Inline { text: body.to_owned() },
+                body: PayloadRef::Inline {
+                    text: body.to_owned(),
+                },
                 created_at_us: 1000 + seq,
             },
         )
@@ -315,7 +343,15 @@ mod tests {
         append(&mut conn, parent, 3, "m3");
 
         let fork_id = SessionId::new();
-        let fork_pk = ForkV2::fork_session(&mut conn, parent.as_uuid().as_bytes(), 2, fork_id, "fork", 5000).unwrap();
+        let fork_pk = ForkV2::fork_session(
+            &mut conn,
+            parent.as_uuid().as_bytes(),
+            2,
+            fork_id,
+            "fork",
+            5000,
+        )
+        .unwrap();
 
         let (got_parent, got_seq): (Option<Vec<u8>>, Option<i64>) = conn
             .query_row(
@@ -324,11 +360,18 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(got_parent.as_deref(), Some(parent.as_uuid().as_bytes().as_slice()));
+        assert_eq!(
+            got_parent.as_deref(),
+            Some(parent.as_uuid().as_bytes().as_slice())
+        );
         assert_eq!(got_seq, Some(2));
 
         let msg_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM messages WHERE session_pk=?1", params![fork_pk], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_pk=?1",
+                params![fork_pk],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(msg_count, 2); // bounded: through_seq=2 copied 2
 
@@ -338,7 +381,11 @@ mod tests {
         assert_eq!(fork_pks, parent_pks[..2]);
 
         let next_seq: i64 = conn
-            .query_row("SELECT next_message_seq FROM sessions WHERE pk=?1", params![fork_pk], |r| r.get(0))
+            .query_row(
+                "SELECT next_message_seq FROM sessions WHERE pk=?1",
+                params![fork_pk],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(next_seq, 3); // max_copied_seq + 1
     }
@@ -353,7 +400,14 @@ mod tests {
             append(&mut conn, parent, i, "x");
         }
         let fork_id = SessionId::new();
-        let result = ForkV2::fork_session(&mut conn, parent.as_uuid().as_bytes(), 501, fork_id, "big", 5000);
+        let result = ForkV2::fork_session(
+            &mut conn,
+            parent.as_uuid().as_bytes(),
+            501,
+            fork_id,
+            "big",
+            5000,
+        );
         assert!(result.is_err(), "fork beyond the copy cap must error");
     }
 
@@ -367,7 +421,15 @@ mod tests {
         append(&mut conn, parent, 2, "m2");
 
         let fork_id = SessionId::new();
-        let fork_pk = ForkV2::fork_session(&mut conn, parent.as_uuid().as_bytes(), 2, fork_id, "fork", 5000).unwrap();
+        let fork_pk = ForkV2::fork_session(
+            &mut conn,
+            parent.as_uuid().as_bytes(),
+            2,
+            fork_id,
+            "fork",
+            5000,
+        )
+        .unwrap();
 
         let expected = head_hash(&conn, fork_pk);
         ForkV2::verify_copy(&conn, fork_pk, 2, &expected).unwrap();
@@ -415,30 +477,56 @@ mod tests {
         append(&mut conn, parent, 2, "m2");
 
         let fork_id = SessionId::new();
-        let fork_pk = ForkV2::fork_session(&mut conn, parent.as_uuid().as_bytes(), 2, fork_id, "fork", 5000).unwrap();
+        let fork_pk = ForkV2::fork_session(
+            &mut conn,
+            parent.as_uuid().as_bytes(),
+            2,
+            fork_id,
+            "fork",
+            5000,
+        )
+        .unwrap();
         let fork_pks = payload_pks(&conn, fork_pk);
 
         // delete the whole parent session via its actual pk
         let parent_pk: i64 = conn
-            .query_row("SELECT pk FROM sessions WHERE id=?1", params![parent.as_uuid().as_bytes().as_slice()], |r| r.get(0))
+            .query_row(
+                "SELECT pk FROM sessions WHERE id=?1",
+                params![parent.as_uuid().as_bytes().as_slice()],
+                |r| r.get(0),
+            )
             .unwrap();
         ForkV2::delete_session_tree(&mut conn, parent_pk).unwrap();
 
         // parent gone, fork survives and still references its payloads
         let parent_exists: i64 = conn
-            .query_row("SELECT COUNT(*) FROM sessions WHERE id=?1", params![parent.as_uuid().as_bytes().as_slice()], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE id=?1",
+                params![parent.as_uuid().as_bytes().as_slice()],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(parent_exists, 0);
 
         let msg_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM messages WHERE session_pk=?1", params![fork_pk], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_pk=?1",
+                params![fork_pk],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(msg_count, 2);
 
         let still = payload_pks(&conn, fork_pk);
         assert_eq!(still, fork_pks); // same payload references survive parent delete
         for p in &still {
-            let n: i64 = conn.query_row("SELECT COUNT(*) FROM payloads WHERE pk=?1", params![p], |r| r.get(0)).unwrap();
+            let n: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM payloads WHERE pk=?1",
+                    params![p],
+                    |r| r.get(0),
+                )
+                .unwrap();
             assert_eq!(n, 1);
         }
     }
@@ -454,7 +542,15 @@ mod tests {
         append(&mut conn, parent, 3, "m3");
 
         let fork_id = SessionId::new();
-        let fork_pk = ForkV2::fork_session(&mut conn, parent.as_uuid().as_bytes(), 1, fork_id, "fork", 5000).unwrap();
+        let fork_pk = ForkV2::fork_session(
+            &mut conn,
+            parent.as_uuid().as_bytes(),
+            1,
+            fork_id,
+            "fork",
+            5000,
+        )
+        .unwrap();
 
         let (fork_parent, fork_seq): (Vec<u8>, i64) = conn
             .query_row(
@@ -463,10 +559,17 @@ mod tests {
                 |r| Ok((r.get(0)?, r.get(1)?)),
             )
             .unwrap();
-        assert_eq!(fork_parent.as_slice(), parent.as_uuid().as_bytes().as_slice());
+        assert_eq!(
+            fork_parent.as_slice(),
+            parent.as_uuid().as_bytes().as_slice()
+        );
         assert_eq!(fork_seq, 1);
         let count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM messages WHERE session_pk=?1", params![fork_pk], |r| r.get(0))
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_pk=?1",
+                params![fork_pk],
+                |r| r.get(0),
+            )
             .unwrap();
         assert_eq!(count, 1);
     }
