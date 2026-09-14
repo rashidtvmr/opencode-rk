@@ -48,6 +48,126 @@ pub enum AccountEligibilityError {
     Unavailable,
 }
 
+pub const MAX_ACCOUNT_SELECTION_CANDIDATES: usize = 16;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountSelectionCandidate {
+    pub id: String,
+    pub priority: u32,
+    pub last_used_at: Option<u64>,
+    pub consecutive_use_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountSelectionStrategy {
+    FillFirst,
+    RoundRobin,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AccountSelectionPatch {
+    pub last_used_at: u64,
+    pub consecutive_use_count: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AccountSelectionDecision {
+    pub selected_id: String,
+    pub patch: Option<AccountSelectionPatch>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AccountSelectionError {
+    EmptyCandidates,
+    InvalidStickyLimit,
+    TooManyCandidates { max: usize, actual: usize },
+}
+
+/// Select one already-eligible account using the pinned 9router strategy rules.
+///
+/// The caller owns persistence. Round-robin therefore returns the recency/count
+/// patch that upstream persists; preferred and fill-first selection return no
+/// patch. `now` is caller supplied so this decision has no wall-clock dependency.
+pub fn select_account(
+    candidates: &[AccountSelectionCandidate],
+    preferred_id: Option<&str>,
+    strategy: AccountSelectionStrategy,
+    sticky_limit: u32,
+    now: u64,
+) -> Result<AccountSelectionDecision, AccountSelectionError> {
+    if candidates.len() > MAX_ACCOUNT_SELECTION_CANDIDATES {
+        return Err(AccountSelectionError::TooManyCandidates {
+            max: MAX_ACCOUNT_SELECTION_CANDIDATES,
+            actual: candidates.len(),
+        });
+    }
+    if candidates.is_empty() {
+        return Err(AccountSelectionError::EmptyCandidates);
+    }
+
+    if let Some(preferred_id) = preferred_id {
+        if let Some(candidate) = candidates
+            .iter()
+            .find(|candidate| candidate.id == preferred_id)
+        {
+            return Ok(AccountSelectionDecision {
+                selected_id: candidate.id.clone(),
+                patch: None,
+            });
+        }
+    }
+
+    match strategy {
+        AccountSelectionStrategy::FillFirst => Ok(AccountSelectionDecision {
+            selected_id: candidates[0].id.clone(),
+            patch: None,
+        }),
+        AccountSelectionStrategy::RoundRobin => {
+            if sticky_limit == 0 {
+                return Err(AccountSelectionError::InvalidStickyLimit);
+            }
+
+            let mut by_recency = candidates.iter().collect::<Vec<_>>();
+            by_recency.sort_by(|left, right| match (left.last_used_at, right.last_used_at) {
+                (None, None) => left.priority.cmp(&right.priority),
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (Some(left_used), Some(right_used)) => right_used.cmp(&left_used),
+            });
+
+            let current = by_recency[0];
+            if current.last_used_at.is_some()
+                && current.consecutive_use_count < sticky_limit
+            {
+                return Ok(AccountSelectionDecision {
+                    selected_id: current.id.clone(),
+                    patch: Some(AccountSelectionPatch {
+                        last_used_at: now,
+                        consecutive_use_count: current.consecutive_use_count.saturating_add(1),
+                    }),
+                });
+            }
+
+            let mut by_oldest = candidates.iter().collect::<Vec<_>>();
+            by_oldest.sort_by(|left, right| match (left.last_used_at, right.last_used_at) {
+                (None, None) => left.priority.cmp(&right.priority),
+                (None, Some(_)) => std::cmp::Ordering::Less,
+                (Some(_), None) => std::cmp::Ordering::Greater,
+                (Some(left_used), Some(right_used)) => left_used.cmp(&right_used),
+            });
+            let selected = by_oldest[0];
+
+            Ok(AccountSelectionDecision {
+                selected_id: selected.id.clone(),
+                patch: Some(AccountSelectionPatch {
+                    last_used_at: now,
+                    consecutive_use_count: 1,
+                }),
+            })
+        }
+    }
+}
+
 pub fn eligible_accounts(
     candidates: &[AccountCandidate],
     now: u64,
