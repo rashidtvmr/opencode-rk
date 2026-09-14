@@ -111,15 +111,57 @@
       "stateLifetime": "delegated to the core Integration service and its connection/attempt state",
       "resourceLifetime": "HTTP request scope plus provider-specific auth/network/credential lifetimes delegated beneath the handler",
       "ownershipBlocker": "INT-004 already implements scoped integration metadata/auth-related behavior. Provider-specific credentials/OAuth/external protocols are broader than this handler and cannot be re-owned by a generic residual INT id."
+    },
+    {
+      "id": "pty-websocket-ticket-auth-boundary",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/server/src/handlers/pty.ts","blobSha":"cda2cf43e9ead9363c9a6cdcb08394e81e1ffab7","reviewedLines":{"from":116,"to":219}},
+        {"kind":"source","path":"packages/core/src/pty/ticket.ts","blobSha":"07838b14157f54142a8ea5546c4601e838067388","reviewedLines":{"from":9,"to":56}},
+        {"kind":"source","path":"packages/core/src/pty/protocol.ts","blobSha":"21c6a89f734641a9cea41268cd4d6bddc85b6bb5","reviewedLines":{"from":3,"to":37}},
+        {"kind":"caller","path":"packages/server/src/middleware/authorization.ts","blobSha":"cc785ee2472a401228539b9d7cb3a8733fa1c735","reviewedLines":{"from":38,"to":58}},
+        {"kind":"test","path":"packages/core/test/pty/ticket.test.ts","blobSha":"10849f2f61b7d7f44cbb4da6d58de39516ab442f","reviewedLines":{"from":14,"to":61}},
+        {"kind":"test","path":"packages/core/test/pty/protocol.test.ts","blobSha":"2bf9610595f4c5cb5194129b58e4721c70a9e4ec","reviewedLines":{"from":4,"to":27}},
+        {"kind":"test","path":"packages/opencode/test/server/httpapi-v2-pty.test.ts","blobSha":"ea4b02dc83522d64252e6e428f5d05f6acd3d828","reviewedLines":{"from":103,"to":176}},
+        {"kind":"spec","path":"packages/opencode/src/server/routes/instance/httpapi/AGENTS.md","blobSha":"c44db1edbbfb43fc000b18fe8afbddbe0a2933a6","reviewedLines":{"from":15,"to":39}},
+        {"kind":"spec","path":"packages/client/README.md","blobSha":"8c53e47c7e681a43de56e307b355a8bc65d210a7","reviewedLines":{"from":7,"to":14}}
+      ],
+      "inputs": "PTY id and location scope, the x-opencode-ticket: 1 token-mint header, optional short-lived ticket and replay cursor query values, plus WebSocket text or binary terminal input frames",
+      "outputs": "a scoped one-time connect token or a WebSocket stream that emits bounded replay chunks, an absolute-cursor control frame and live PTY output while forwarding valid UTF-8 client input to the attached PTY",
+      "failureSemantics": "token mint rejects a missing or invalid CSRF header/origin with ForbiddenError and a missing PTY with PtyNotFoundError; connect rejects a missing pre-upgrade PTY with 404 and an invalid/disallowed ticket with 403; post-upgrade missing/exited attach closes with code 4404; invalid UTF-8 binary input is dropped; socket close/errors terminate the transport path while detach is ensured",
+      "stateLifetime": "tickets live in a global cache for at most 60 seconds and are consumed atomically once only when ptyID/directory/workspaceID scope matches; each WebSocket attachment lives until the socket/drain race ends and is detached in finalization",
+      "resourceLifetime": "ticket state is capped at 10,000 entries and replay strings are split at 65,536 JavaScript string units per frame, but the server WebSocket outbox is explicitly unbounded and graceful-shutdown socket tracking remains a TODO, so an end-to-end bounded native transport lifetime is not established",
+      "ownershipBlocker": "The six residual INT rows remain one generic source-indistinguishable class. Core PTY/ticket paths also overlap the already accepted opencode.process-terminal owners, while the server transport requires HTTP/WebSocket/auth authority and still has an unbounded outbox plus unresolved graceful-shutdown tracking. No residual INT id can own this boundary by subtraction."
     }
   ],
+  "ptyBoundaryConstraints": {
+    "ticketTtlSeconds": 60,
+    "ticketCapacity": 10000,
+    "singleUseConsume": true,
+    "scopeKeys": ["ptyID", "directory", "workspaceID"],
+    "connectTokenHeader": {"name":"x-opencode-ticket","value":"1"},
+    "replayChunkStringUnits": 65536,
+    "invalidTicketStatus": 403,
+    "missingPreUpgradeStatus": 404,
+    "postUpgradeMissingOrExitedCloseCode": 4404,
+    "invalidBinaryInputDisposition": "drop",
+    "websocketOutboxBoundEstablished": false,
+    "gracefulShutdownTrackingEstablished": false
+  },
+  "adjacentAcceptedOwnership": {
+    "surfaceId": "opencode.process-terminal",
+    "featureIds": ["SEC-001", "SEC-002", "SEC-008", "TOOL-005", "TOOL-013"],
+    "controllerDisposition": "accepted-closed",
+    "overlapPatterns": ["packages/core/src/pty.ts", "packages/core/src/pty/**"],
+    "conclusion": "The PTY domain/process lifecycle is already mapped entirely to accepted process-terminal owners. Integration decomposition may describe the server/custom-transport seam but cannot re-own accepted PTY lifecycle semantics."
+  },
   "unresolvedRulePartitions": [
     "packages/core/src/workspace.ts",
     "packages/core/src/project.ts and packages/core/src/project/**",
-    "packages/core/src/pty.ts and packages/core/src/pty/**",
+    "packages/core/src/pty.ts and packages/core/src/pty/** beyond the reviewed ticket/protocol evidence",
     "packages/core/src/git.ts",
-    "packages/client/** beyond reviewed contract/effect tests",
-    "packages/server/** beyond reviewed API/integration handler",
+    "packages/client/** beyond reviewed contract/effect tests; generated clients intentionally omit PTY custom transport",
+    "packages/server/** beyond reviewed API/integration/PTY websocket handlers",
     "sdks/**",
     "provider-specific integration methods external protocols auth and credential lifetimes"
   ],
@@ -151,6 +193,7 @@
     "Each residual INT owner requires task-specific source, caller, direct test and genuine spec evidence that distinguishes it from the six-row equivalence class; task number, controller status and generated endpoint order are insufficient.",
     "Any network/transport candidate must explicitly own credentials, authentication, reconnect/timeout/failure behavior and resource lifetime and must not re-own INT-004 or frozen INT-008 behavior.",
     "INT-002 remains frozen for repository side effects and INT-010 remains governed by the enterprise-remote missing-spec record unless materially new pinned evidence resolves those blockers.",
+    "The PTY WebSocket/ticket boundary remains blocked until task-specific evidence distinguishes a residual INT owner and explicitly resolves the unbounded outbox, graceful-shutdown lifetime and server auth/network authority without re-owning accepted process-terminal behavior.",
     "All reviewed and unresolved rule partitions must receive source-grounded task dispositions or remain blocked before the integrations family can be called decomposed."
   ]
 }

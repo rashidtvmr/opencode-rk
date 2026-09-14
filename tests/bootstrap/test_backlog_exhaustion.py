@@ -346,6 +346,26 @@ class BacklogExhaustionTests(unittest.TestCase):
                 lambda gap: gap["storySurfaceSignatures"].__setitem__("INT-009", []),
                 "INT-009: integrations surface signature drifted",
             ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["ptyBoundaryConstraints"].__setitem__("websocketOutboxBoundEstablished", True),
+                "PTY websocket outbox bound must remain explicitly unresolved",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["adjacentAcceptedOwnership"].__setitem__(
+                    "featureIds", ["SEC-001", "SEC-002", "SEC-008", "TOOL-005"]
+                ),
+                "PTY accepted process-terminal ownership guard drifted",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["unresolvedRulePartitions"].__setitem__(2, "packages/core/src/pty/**"),
+                "integrations unresolved rule remainder drifted",
+            ),
         ]
 
         for gap_path, validator, mutate, expected in cases:

@@ -114,6 +114,23 @@ EXTENSIBILITY_REMAINING_UNRESOLVED = (
 )
 INTEGRATIONS_OWNERSHIP_GAP_PATH = ROOT / "sources/integrations-ownership-gap.json"
 INTEGRATIONS_GAP_STORIES = ("INT-001", "INT-003", "INT-005", "INT-006", "INT-007", "INT-009")
+INTEGRATIONS_REVIEWED_PARTITIONS = (
+    "authoritative-httpapi-client-server-contract",
+    "effect-client-http-and-sse-decoding",
+    "typed-integration-http-handler",
+    "pty-websocket-ticket-auth-boundary",
+)
+INTEGRATIONS_UNRESOLVED_RULE_PARTITIONS = (
+    "packages/core/src/workspace.ts",
+    "packages/core/src/project.ts and packages/core/src/project/**",
+    "packages/core/src/pty.ts and packages/core/src/pty/** beyond the reviewed ticket/protocol evidence",
+    "packages/core/src/git.ts",
+    "packages/client/** beyond reviewed contract/effect tests; generated clients intentionally omit PTY custom transport",
+    "packages/server/** beyond reviewed API/integration/PTY websocket handlers",
+    "sdks/**",
+    "provider-specific integration methods external protocols auth and credential lifetimes",
+)
+INTEGRATIONS_PTY_ACCEPTED_FEATURES = ("SEC-001", "SEC-002", "SEC-008", "TOOL-005", "TOOL-013")
 INTEGRATIONS_UNRESOLVED_PARTITIONS = (
     "workspace-project-and-location-protocol-boundaries",
     "pty-custom-websocket-transport-and-ticket-auth",
@@ -2080,15 +2097,61 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
         errors.extend(
             _pinned_partition_errors(
                 gap.get("reviewedPartitions"),
-                ["authoritative-httpapi-client-server-contract", "effect-client-http-and-sse-decoding", "typed-integration-http-handler"],
+                list(INTEGRATIONS_REVIEWED_PARTITIONS),
                 inventory,
                 locked_commit,
                 "integrations",
             )
         )
     remainder = gap.get("unresolvedRulePartitions")
-    if not isinstance(remainder, list) or len(remainder) != 8 or not all(str(item).strip() for item in remainder):
+    if remainder != list(INTEGRATIONS_UNRESOLVED_RULE_PARTITIONS):
         errors.append("integrations unresolved rule remainder drifted")
+
+    pty_constraints = gap.get("ptyBoundaryConstraints")
+    expected_pty_constraints = {
+        "ticketTtlSeconds": 60,
+        "ticketCapacity": 10000,
+        "singleUseConsume": True,
+        "scopeKeys": ["ptyID", "directory", "workspaceID"],
+        "connectTokenHeader": {"name": "x-opencode-ticket", "value": "1"},
+        "replayChunkStringUnits": 65536,
+        "invalidTicketStatus": 403,
+        "missingPreUpgradeStatus": 404,
+        "postUpgradeMissingOrExitedCloseCode": 4404,
+        "invalidBinaryInputDisposition": "drop",
+        "websocketOutboxBoundEstablished": False,
+        "gracefulShutdownTrackingEstablished": False,
+    }
+    if pty_constraints != expected_pty_constraints:
+        errors.append("integrations PTY transport constraints drifted from pinned source")
+    if not isinstance(pty_constraints, Mapping) or pty_constraints.get("websocketOutboxBoundEstablished") is not False:
+        errors.append("integrations PTY websocket outbox bound must remain explicitly unresolved")
+    if not isinstance(pty_constraints, Mapping) or pty_constraints.get("gracefulShutdownTrackingEstablished") is not False:
+        errors.append("integrations PTY graceful-shutdown tracking must remain explicitly unresolved")
+
+    adjacent = gap.get("adjacentAcceptedOwnership")
+    expected_overlap_patterns = ["packages/core/src/pty.ts", "packages/core/src/pty/**"]
+    if not isinstance(adjacent, Mapping) or (
+        adjacent.get("surfaceId") != "opencode.process-terminal"
+        or adjacent.get("featureIds") != list(INTEGRATIONS_PTY_ACCEPTED_FEATURES)
+        or adjacent.get("controllerDisposition") != "accepted-closed"
+        or adjacent.get("overlapPatterns") != expected_overlap_patterns
+        or not str(adjacent.get("conclusion", "")).strip()
+    ):
+        errors.append("integrations PTY accepted process-terminal ownership guard drifted")
+    process_surface = next((item for item in rule_rows if item.get("id") == "opencode.process-terminal"), None)
+    if not isinstance(process_surface, Mapping) or process_surface.get("featureIds") != list(INTEGRATIONS_PTY_ACCEPTED_FEATURES):
+        errors.append("integrations PTY adjacent process-terminal feature set drifted")
+    else:
+        process_patterns = process_surface.get("patterns", [])
+        integration_patterns = surface.get("patterns", []) if isinstance(surface, Mapping) else []
+        if any(pattern not in process_patterns or pattern not in integration_patterns for pattern in expected_overlap_patterns):
+            errors.append("integrations PTY accepted overlap patterns drifted")
+        for story_id in INTEGRATIONS_PTY_ACCEPTED_FEATURES:
+            story = plan_by_id.get(story_id)
+            if not isinstance(story, Mapping) or story.get("status") != "accepted":
+                errors.append(f"{story_id}: integrations PTY accepted process-terminal owner drifted")
+
     candidates = gap.get("candidateFragments")
     if not isinstance(candidates, list) or [item.get("id") for item in candidates if isinstance(item, Mapping)] != ["client-server-contract-generation-identity"]:
         errors.append("integrations candidate fragment set drifted")
@@ -2097,7 +2160,7 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
     history = gap.get("historyReview")
     if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit" or not str(history.get("limitation", "")).strip():
         errors.append("integrations history-review limitation drifted")
-    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 4:
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 5:
         errors.append("integrations closure criteria drifted")
     return errors
 
