@@ -1,6 +1,6 @@
 # AUTO-007
 
-Status: NOT STARTED. Kind: product. Runtime optional: False.
+Status: IMPLEMENTED. Kind: product. Runtime optional: False.
 Mandatory for full declared release: yes.
 Requirements: REQ-002, REQ-012.
 Dependencies: none (milestone gating via tools/plan_model.py).

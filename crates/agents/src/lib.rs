@@ -3,6 +3,7 @@
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
 pub mod executor;
+pub mod turn_state;
 
 use std::collections::HashMap;
 use std::str::FromStr;
