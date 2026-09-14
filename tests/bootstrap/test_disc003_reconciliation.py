@@ -80,7 +80,10 @@ class Disc003ReconciliationTests(unittest.TestCase):
 
     def test_queued_state_cannot_claim_implementation(self):
         bad = copy.deepcopy(self.document)
-        sid = bad["queuedSurfaceIds"].pop()
+        if bad["queuedSurfaceIds"]:
+            sid = bad["queuedSurfaceIds"].pop()
+        else:
+            sid = bad["reviewedSurfaces"].pop()["id"]
         bad["reviewedSurfaces"].append({"id": sid, "reviewState": "queued", "implementationStatus": "implemented-v2", "evidence": {"source": [], "caller": [], "test": [], "spec": []}, "finding": "bad", "unresolved": ["bad"]})
         self.assertTrue(any("queued surface must keep implementation status unresolved" in error for error in self.validate(bad)))
 
