@@ -115,6 +115,12 @@ class Ledger:
             self.tasks.setdefault(task_id, TaskState(id=task_id))
             if story.status != "not-started":
                 self.tasks[task_id].status = story.status
+        # Crash recovery: any task left `running` by a dead controller is
+        # requeued. The singleton lock guarantees no live process owns these.
+        for state in self.tasks.values():
+            if state.status == "running":
+                state.status = "not-started"
+                state.last_error = "requeued after unclean shutdown"
 
     def save(self) -> None:
         STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -155,7 +161,7 @@ class Ledger:
 def ready_queue(ledger: Ledger, limit: int) -> list[str]:
     ready = ledger.plan.ready(ledger.accepted, ledger.blocked)
     ready = [t for t in ready if ledger.tasks[t].status == "not-started"]
-    return ledger.claim(ready)[:limit]
+    return ledger.claim(ready[:limit])
 
 
 def acquire_singleton() -> bool:
