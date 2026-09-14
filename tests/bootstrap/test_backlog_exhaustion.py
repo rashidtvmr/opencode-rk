@@ -406,6 +406,24 @@ class BacklogExhaustionTests(unittest.TestCase):
                 lambda gap: gap["candidateFragments"][2].__setitem__("ownershipEstablished", True),
                 "cannot become owned from controller-status/task arithmetic: project-location-context-resolution",
             ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["vscodeBridgeConstraints"].__setitem__("directAutomatedTestEstablished", True),
+                "VS Code bridge must remain explicitly missing direct automated behavior coverage",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["vscodeBridgeConstraints"].__setitem__("fetchTimeoutEstablished", True),
+                "VS Code localhost fetch timeout must remain explicitly unresolved",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["candidateFragments"][3].__setitem__("ownershipEstablished", True),
+                "cannot become owned from controller-status/task arithmetic: vscode-cli-terminal-bridge",
+            ),
         ]
 
         for gap_path, validator, mutate, expected in cases:

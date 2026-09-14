@@ -121,6 +121,7 @@ INTEGRATIONS_REVIEWED_PARTITIONS = (
     "pty-websocket-ticket-auth-boundary",
     "generated-promise-effect-client-boundary",
     "project-location-context-resolution-boundary",
+    "vscode-cli-terminal-bridge",
 )
 INTEGRATIONS_UNRESOLVED_RULE_PARTITIONS = (
     "packages/core/src/workspace.ts",
@@ -129,7 +130,7 @@ INTEGRATIONS_UNRESOLVED_RULE_PARTITIONS = (
     "packages/core/src/git.ts",
     "packages/client/** residual runtime/generated outputs beyond reviewed contract/effect/build/promise/import-boundary evidence",
     "packages/server/** beyond reviewed API/integration/PTY/location/session-location handlers",
-    "sdks/**",
+    "sdks/vscode packaging/release/tooling and missing direct extension behavior-test coverage beyond the reviewed CLI-terminal bridge",
     "provider-specific integration methods external protocols auth and credential lifetimes",
 )
 INTEGRATIONS_PTY_ACCEPTED_FEATURES = ("SEC-001", "SEC-002", "SEC-008", "TOOL-005", "TOOL-013")
@@ -148,7 +149,7 @@ INTEGRATIONS_UNRESOLVED_PARTITIONS = (
     "workspace-control-plane-project-submodules-and-location-adjacent-runtime-ownership",
     "pty-custom-websocket-transport-and-ticket-auth",
     "git-and-repository-adjacent-integration-side-effects",
-    "generated-promise-effect-client-and-sdk-ownership",
+    "generated-promise-effect-client-and-vscode-sdk-bridge-ownership",
     "server-handler-runtime-and-error-normalization-ownership",
     "provider-specific-integration-auth-network-and-credential-lifecycle",
     "external-protocol-reconnect-timeout-and-resource-lifetime",
@@ -2243,11 +2244,61 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
     ):
         errors.append("integrations adjacent Location configuration-runtime surface drifted")
 
+    vscode_constraints = gap.get("vscodeBridgeConstraints")
+    expected_vscode_constraints = {
+        "portRangeInclusive": [16384, 65535],
+        "startupProbeAttempts": 10,
+        "startupProbeDelayMs": 200,
+        "startupProbePath": "/app",
+        "appendPromptPath": "/tui/append-prompt",
+        "terminalEnvironment": {"_EXTENSION_OPENCODE_PORT": "selected-port", "OPENCODE_CALLER": "vscode"},
+        "fetchTimeoutEstablished": False,
+        "portCollisionRecoveryEstablished": False,
+        "deactivateDisposesTerminal": False,
+        "directAutomatedTestEstablished": False,
+        "declaredPackageTestCommand": "vscode-test",
+        "manualReloadTestWorkflowDocumented": True,
+    }
+    if vscode_constraints != expected_vscode_constraints:
+        errors.append("integrations VS Code bridge constraints drifted from pinned source")
+    if not isinstance(vscode_constraints, Mapping) or vscode_constraints.get("directAutomatedTestEstablished") is not False:
+        errors.append("integrations VS Code bridge must remain explicitly missing direct automated behavior coverage")
+    if not isinstance(vscode_constraints, Mapping) or vscode_constraints.get("fetchTimeoutEstablished") is not False:
+        errors.append("integrations VS Code localhost fetch timeout must remain explicitly unresolved")
+    vscode_partition = next(
+        (
+            item
+            for item in gap.get("reviewedPartitions", [])
+            if isinstance(item, Mapping) and item.get("id") == "vscode-cli-terminal-bridge"
+        ),
+        None,
+    )
+    if not isinstance(vscode_partition, Mapping) or vscode_partition.get("missingEvidenceClasses") != ["test"]:
+        errors.append("integrations VS Code bridge missing-evidence class drifted")
+    if inventory:
+        direct_vscode_tests = sorted(
+            path
+            for path in inventory
+            if path.startswith("sdks/vscode/")
+            and (
+                "/test/" in path
+                or "/tests/" in path
+                or path.endswith(".test.ts")
+                or path.endswith(".spec.ts")
+            )
+        )
+        if direct_vscode_tests:
+            errors.append(
+                "integrations VS Code direct test evidence appeared; decomposition requires deliberate review: "
+                + ", ".join(direct_vscode_tests)
+            )
+
     candidates = gap.get("candidateFragments")
     expected_candidate_ids = [
         "client-server-contract-generation-identity",
         "generated-promise-effect-client-emission",
         "project-location-context-resolution",
+        "vscode-cli-terminal-bridge",
     ]
     if not isinstance(candidates, list) or [item.get("id") for item in candidates if isinstance(item, Mapping)] != expected_candidate_ids:
         errors.append("integrations candidate fragment set drifted")
@@ -2260,7 +2311,7 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
     history = gap.get("historyReview")
     if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit" or not str(history.get("limitation", "")).strip():
         errors.append("integrations history-review limitation drifted")
-    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 6:
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 7:
         errors.append("integrations closure criteria drifted")
     return errors
 

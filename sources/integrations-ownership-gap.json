@@ -178,6 +178,22 @@
       "stateLifetime": "ProjectV2.resolve reads but does not mutate the repo-local project cache; commit is a temporary bridge after old-service migration/persistence; request location context is request-scoped while session context remains pinned in the session row; the underlying core Location runtime has separate configuration-runtime ownership",
       "resourceLifetime": "project resolution performs filesystem and git discovery/remote/history reads; request middleware itself is request-scoped while session middleware also reads database state; location-scoped runtime lifetime is delegated to the separately owned core Location runtime rather than established by this integration boundary",
       "ownershipBlocker": "ProjectV2 explicitly leaves database migration/persistence to the old service, placing commit-side effects next to frozen INT-002 repository ownership, and no genuine spec defines its remote/cache/root/global identity precedence. Core location services are separately mapped to configuration-runtime owners, while cross-location EventV2 compatibility overlaps frozen implemented INT-008. The six residual INT rows remain task-indistinguishable, so this protocol/context boundary cannot select one owner."
+    },
+    {
+      "id": "vscode-cli-terminal-bridge",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"sdks/vscode/src/extension.ts","blobSha":"693e7267e5043e94bb6a055c13b0040f86fb7ce8","reviewedLines":{"from":8,"to":137}},
+        {"kind":"caller","path":"sdks/vscode/package.json","blobSha":"5c43de80758ebe11e931580320f1d627d0eb6a7f","reviewedLines":{"from":23,"to":95}},
+        {"kind":"spec","path":"sdks/vscode/README.md","blobSha":"0114045429c3a0a087946d60f994a19a1690b9fe","reviewedLines":{"from":1,"to":34}}
+      ],
+      "missingEvidenceClasses": ["test"],
+      "inputs": "VS Code command invocations, visible/active terminal state and the active editor file/selection within a workspace folder",
+      "outputs": "focus of an existing opencode terminal or creation of a split VS Code terminal that launches the opencode CLI on a random port, plus optional localhost prompt append and @file#line-range context injection",
+      "failureSemantics": "missing editor/workspace/active terminal context is a no-op; startup probe fetch failures are swallowed and prompt injection is skipped after ten unsuccessful probes; append-prompt fetch failures propagate; no explicit port-collision recovery or HTTP timeout is defined",
+      "stateLifetime": "command registrations live in the VS Code extension subscription scope; the selected random port is stored in terminal environment metadata; deactivate is empty and terminal/process lifetime remains owned by VS Code rather than the extension",
+      "resourceLifetime": "the bridge owns IDE UI access, terminal creation, CLI command launch, terminal environment injection, 200 ms readiness delays and localhost HTTP fetches; fetches have no explicit timeout/abort and no direct automated extension behavior test exists at the locked pin",
+      "ownershipBlocker": "This is the literal sdks/** integration surface, but it requires VS Code UI state, terminal/process execution, environment injection and localhost network authority that are outside a bounded native residual INT contract. The source/spec/caller chain has no direct automated behavior test, and the six residual INT rows provide no task-specific binding."
     }
   ],
   "ptyBoundaryConstraints": {
@@ -233,6 +249,20 @@
     "overlapPattern": "packages/core/src/location*",
     "conclusion": "Location and LocationServiceMap runtime ownership is governed by the separate configuration-runtime surface. Their use by server integration middleware does not transfer those core runtime semantics to a residual INT row."
   },
+  "vscodeBridgeConstraints": {
+    "portRangeInclusive": [16384, 65535],
+    "startupProbeAttempts": 10,
+    "startupProbeDelayMs": 200,
+    "startupProbePath": "/app",
+    "appendPromptPath": "/tui/append-prompt",
+    "terminalEnvironment": {"_EXTENSION_OPENCODE_PORT":"selected-port", "OPENCODE_CALLER":"vscode"},
+    "fetchTimeoutEstablished": false,
+    "portCollisionRecoveryEstablished": false,
+    "deactivateDisposesTerminal": false,
+    "directAutomatedTestEstablished": false,
+    "declaredPackageTestCommand": "vscode-test",
+    "manualReloadTestWorkflowDocumented": true
+  },
   "unresolvedRulePartitions": [
     "packages/core/src/workspace.ts",
     "packages/core/src/project/** beyond the reviewed ProjectV2 project.ts resolution/commit boundary",
@@ -240,7 +270,7 @@
     "packages/core/src/git.ts",
     "packages/client/** residual runtime/generated outputs beyond reviewed contract/effect/build/promise/import-boundary evidence",
     "packages/server/** beyond reviewed API/integration/PTY/location/session-location handlers",
-    "sdks/**",
+    "sdks/vscode packaging/release/tooling and missing direct extension behavior-test coverage beyond the reviewed CLI-terminal bridge",
     "provider-specific integration methods external protocols auth and credential lifetimes"
   ],
   "candidateFragments": [
@@ -270,13 +300,22 @@
         "Core Location runtime belongs to the distinct configuration-runtime surface and cross-location EventV2 tests overlap frozen implemented INT-008 compatibility.",
         "The six residual INT rows still have no task-specific binding that distinguishes project/location protocol ownership."
       ]
+    },
+    {
+      "id": "vscode-cli-terminal-bridge",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "The locked sdks/vscode tree has source, command-manifest caller and README guidance but no direct automated extension behavior test.",
+        "The bridge requires VS Code UI state, terminal/process execution, environment injection and localhost network authority, including fetches with no explicit timeout.",
+        "No task-specific evidence distinguishes one residual INT row from its five source-identical peers."
+      ]
     }
   ],
   "unresolvedPartitions": [
     "workspace-control-plane-project-submodules-and-location-adjacent-runtime-ownership",
     "pty-custom-websocket-transport-and-ticket-auth",
     "git-and-repository-adjacent-integration-side-effects",
-    "generated-promise-effect-client-and-sdk-ownership",
+    "generated-promise-effect-client-and-vscode-sdk-bridge-ownership",
     "server-handler-runtime-and-error-normalization-ownership",
     "provider-specific-integration-auth-network-and-credential-lifecycle",
     "external-protocol-reconnect-timeout-and-resource-lifetime"
@@ -291,6 +330,7 @@
     "INT-002 remains frozen for repository side effects and INT-010 remains governed by the enterprise-remote missing-spec record unless materially new pinned evidence resolves those blockers.",
     "The PTY WebSocket/ticket boundary remains blocked until task-specific evidence distinguishes a residual INT owner and explicitly resolves the unbounded outbox, graceful-shutdown lifetime and server auth/network authority without re-owning accepted process-terminal behavior.",
     "Project/location ownership remains blocked until task-specific evidence separates pure identity/context resolution from legacy migration/persistence, the configuration-runtime Location graph and frozen EventV2 compatibility, with explicit filesystem/git/database authority and lifetime bounds.",
+    "The sdks/vscode bridge remains blocked until a direct automated extension behavior test and task-specific owner exist and an approved native boundary explicitly owns IDE/terminal/process-environment/localhost-network authority plus timeout, cancellation and cleanup semantics.",
     "All reviewed and unresolved rule partitions must receive source-grounded task dispositions or remain blocked before the integrations family can be called decomposed."
   ]
 }
