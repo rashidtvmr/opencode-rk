@@ -1,0 +1,2143 @@
+{
+  "schemaVersion": 1,
+  "sourceOfTruth": "ralph.json",
+  "note": "Conventional Ralph export generated from ralph.json. Not an acceptance authority: it carries no dependency, boundary, evidence, resource, or verification rules. Use ralph.json plus tools/validate_plan.py and the verifier gates for acceptance. See README.md and PLAN.md section 8.",
+  "tasks": [
+    {
+      "id": "AGENT-001",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "AGENT-001-T01",
+        "AGENT-001-T02",
+        "AGENT-001-T03",
+        "AGENT-001-T04",
+        "AGENT-001-T05"
+      ]
+    },
+    {
+      "id": "AGENT-002",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-002-T01",
+        "AGENT-002-T02",
+        "AGENT-002-T03",
+        "AGENT-002-T04",
+        "AGENT-002-T05"
+      ]
+    },
+    {
+      "id": "AGENT-003",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-003-T01",
+        "AGENT-003-T02",
+        "AGENT-003-T03",
+        "AGENT-003-T04",
+        "AGENT-003-T05"
+      ]
+    },
+    {
+      "id": "AGENT-004",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-004-T01",
+        "AGENT-004-T02",
+        "AGENT-004-T03",
+        "AGENT-004-T04",
+        "AGENT-004-T05"
+      ]
+    },
+    {
+      "id": "AGENT-005",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-005-T01",
+        "AGENT-005-T02",
+        "AGENT-005-T03",
+        "AGENT-005-T04",
+        "AGENT-005-T05"
+      ]
+    },
+    {
+      "id": "AGENT-006",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-006-T01",
+        "AGENT-006-T02",
+        "AGENT-006-T03",
+        "AGENT-006-T04",
+        "AGENT-006-T05"
+      ]
+    },
+    {
+      "id": "AGENT-007",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-007-T01",
+        "AGENT-007-T02",
+        "AGENT-007-T03",
+        "AGENT-007-T04",
+        "AGENT-007-T05"
+      ]
+    },
+    {
+      "id": "AGENT-008",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-008-T01",
+        "AGENT-008-T02",
+        "AGENT-008-T03",
+        "AGENT-008-T04",
+        "AGENT-008-T05"
+      ]
+    },
+    {
+      "id": "AGENT-009",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "AGENT-009-T01",
+        "AGENT-009-T02",
+        "AGENT-009-T03",
+        "AGENT-009-T04",
+        "AGENT-009-T05"
+      ]
+    },
+    {
+      "id": "AGENT-010",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-010-T01",
+        "AGENT-010-T02",
+        "AGENT-010-T03",
+        "AGENT-010-T04",
+        "AGENT-010-T05"
+      ]
+    },
+    {
+      "id": "AGENT-011",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-011-T01",
+        "AGENT-011-T02",
+        "AGENT-011-T03",
+        "AGENT-011-T04",
+        "AGENT-011-T05"
+      ]
+    },
+    {
+      "id": "AGENT-012",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "AGENT-012-T01",
+        "AGENT-012-T02",
+        "AGENT-012-T03",
+        "AGENT-012-T04",
+        "AGENT-012-T05"
+      ]
+    },
+    {
+      "id": "AGENT-013",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "AGENT-013-T01",
+        "AGENT-013-T02",
+        "AGENT-013-T03",
+        "AGENT-013-T04",
+        "AGENT-013-T05"
+      ]
+    },
+    {
+      "id": "AGENT-014",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "AGENT-014-T01",
+        "AGENT-014-T02",
+        "AGENT-014-T03",
+        "AGENT-014-T04",
+        "AGENT-014-T05"
+      ]
+    },
+    {
+      "id": "AGENT-015",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AGENT-015-T01",
+        "AGENT-015-T02",
+        "AGENT-015-T03",
+        "AGENT-015-T04",
+        "AGENT-015-T05"
+      ]
+    },
+    {
+      "id": "AUTO-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AUTO-001-T01",
+        "AUTO-001-T02",
+        "AUTO-001-T03",
+        "AUTO-001-T04",
+        "AUTO-001-T05"
+      ]
+    },
+    {
+      "id": "AUTO-002",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AUTO-002-T01",
+        "AUTO-002-T02",
+        "AUTO-002-T03",
+        "AUTO-002-T04",
+        "AUTO-002-T05"
+      ]
+    },
+    {
+      "id": "AUTO-003",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AUTO-003-T01",
+        "AUTO-003-T02",
+        "AUTO-003-T03",
+        "AUTO-003-T04",
+        "AUTO-003-T05"
+      ]
+    },
+    {
+      "id": "AUTO-004",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AUTO-004-T01",
+        "AUTO-004-T02",
+        "AUTO-004-T03",
+        "AUTO-004-T04",
+        "AUTO-004-T05"
+      ]
+    },
+    {
+      "id": "AUTO-005",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AUTO-005-T01",
+        "AUTO-005-T02",
+        "AUTO-005-T03",
+        "AUTO-005-T04",
+        "AUTO-005-T05"
+      ]
+    },
+    {
+      "id": "AUTO-006",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "AUTO-006-T01",
+        "AUTO-006-T02",
+        "AUTO-006-T03",
+        "AUTO-006-T04",
+        "AUTO-006-T05"
+      ]
+    },
+    {
+      "id": "BASE-001",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "BASE-001-T01",
+        "BASE-001-T02",
+        "BASE-001-T03",
+        "BASE-001-T04",
+        "BASE-001-T05"
+      ]
+    },
+    {
+      "id": "BASE-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "BASE-002-T01",
+        "BASE-002-T02",
+        "BASE-002-T03",
+        "BASE-002-T04",
+        "BASE-002-T05"
+      ]
+    },
+    {
+      "id": "BASE-003",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "BASE-003-T01",
+        "BASE-003-T02",
+        "BASE-003-T03",
+        "BASE-003-T04",
+        "BASE-003-T05"
+      ]
+    },
+    {
+      "id": "BASE-004",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "BASE-004-T01",
+        "BASE-004-T02",
+        "BASE-004-T03",
+        "BASE-004-T04",
+        "BASE-004-T05"
+      ]
+    },
+    {
+      "id": "BASE-005",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "BASE-005-T01",
+        "BASE-005-T02",
+        "BASE-005-T03",
+        "BASE-005-T04",
+        "BASE-005-T05"
+      ]
+    },
+    {
+      "id": "BASE-006",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "BASE-006-T01",
+        "BASE-006-T02",
+        "BASE-006-T03",
+        "BASE-006-T04",
+        "BASE-006-T05"
+      ]
+    },
+    {
+      "id": "BASE-007",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "BASE-007-T01",
+        "BASE-007-T02",
+        "BASE-007-T03",
+        "BASE-007-T04",
+        "BASE-007-T05"
+      ]
+    },
+    {
+      "id": "BASE-008",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "BASE-008-T01",
+        "BASE-008-T02",
+        "BASE-008-T03",
+        "BASE-008-T04",
+        "BASE-008-T05"
+      ]
+    },
+    {
+      "id": "CAT-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "CAT-001-T01",
+        "CAT-001-T02",
+        "CAT-001-T03",
+        "CAT-001-T04",
+        "CAT-001-T05"
+      ]
+    },
+    {
+      "id": "CAT-002",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "CAT-002-T01",
+        "CAT-002-T02",
+        "CAT-002-T03",
+        "CAT-002-T04",
+        "CAT-002-T05"
+      ]
+    },
+    {
+      "id": "CAT-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "CAT-003-T01",
+        "CAT-003-T02",
+        "CAT-003-T03",
+        "CAT-003-T04",
+        "CAT-003-T05"
+      ]
+    },
+    {
+      "id": "CAT-004",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "CAT-004-T01",
+        "CAT-004-T02",
+        "CAT-004-T03",
+        "CAT-004-T04",
+        "CAT-004-T05"
+      ]
+    },
+    {
+      "id": "CAT-005",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "CAT-005-T01",
+        "CAT-005-T02",
+        "CAT-005-T03",
+        "CAT-005-T04",
+        "CAT-005-T05"
+      ]
+    },
+    {
+      "id": "CAT-006",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "CAT-006-T01",
+        "CAT-006-T02",
+        "CAT-006-T03",
+        "CAT-006-T04",
+        "CAT-006-T05"
+      ]
+    },
+    {
+      "id": "CAT-007",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "CAT-007-T01",
+        "CAT-007-T02",
+        "CAT-007-T03",
+        "CAT-007-T04",
+        "CAT-007-T05"
+      ]
+    },
+    {
+      "id": "DB-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DB-001-T01",
+        "DB-001-T02",
+        "DB-001-T03",
+        "DB-001-T04",
+        "DB-001-T05"
+      ]
+    },
+    {
+      "id": "DB-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-002-T01",
+        "DB-002-T02",
+        "DB-002-T03",
+        "DB-002-T04",
+        "DB-002-T05"
+      ]
+    },
+    {
+      "id": "DB-003",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DB-003-T01",
+        "DB-003-T02",
+        "DB-003-T03",
+        "DB-003-T04",
+        "DB-003-T05"
+      ]
+    },
+    {
+      "id": "DB-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-004-T01",
+        "DB-004-T02",
+        "DB-004-T03",
+        "DB-004-T04",
+        "DB-004-T05"
+      ]
+    },
+    {
+      "id": "DB-005",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-005-T01",
+        "DB-005-T02",
+        "DB-005-T03",
+        "DB-005-T04",
+        "DB-005-T05"
+      ]
+    },
+    {
+      "id": "DB-006",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DB-006-T01",
+        "DB-006-T02",
+        "DB-006-T03",
+        "DB-006-T04",
+        "DB-006-T05"
+      ]
+    },
+    {
+      "id": "DB-007",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-007-T01",
+        "DB-007-T02",
+        "DB-007-T03",
+        "DB-007-T04",
+        "DB-007-T05"
+      ]
+    },
+    {
+      "id": "DB-008",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DB-008-T01",
+        "DB-008-T02",
+        "DB-008-T03",
+        "DB-008-T04",
+        "DB-008-T05"
+      ]
+    },
+    {
+      "id": "DB-009",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DB-009-T01",
+        "DB-009-T02",
+        "DB-009-T03",
+        "DB-009-T04",
+        "DB-009-T05"
+      ]
+    },
+    {
+      "id": "DB-010",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-010-T01",
+        "DB-010-T02",
+        "DB-010-T03",
+        "DB-010-T04",
+        "DB-010-T05"
+      ]
+    },
+    {
+      "id": "DB-011",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-011-T01",
+        "DB-011-T02",
+        "DB-011-T03",
+        "DB-011-T04",
+        "DB-011-T05"
+      ]
+    },
+    {
+      "id": "DB-012",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DB-012-T01",
+        "DB-012-T02",
+        "DB-012-T03",
+        "DB-012-T04",
+        "DB-012-T05"
+      ]
+    },
+    {
+      "id": "DB-013",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-013-T01",
+        "DB-013-T02",
+        "DB-013-T03",
+        "DB-013-T04",
+        "DB-013-T05"
+      ]
+    },
+    {
+      "id": "DB-014",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-014-T01",
+        "DB-014-T02",
+        "DB-014-T03",
+        "DB-014-T04",
+        "DB-014-T05"
+      ]
+    },
+    {
+      "id": "DB-015",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "DB-015-T01",
+        "DB-015-T02",
+        "DB-015-T03",
+        "DB-015-T04",
+        "DB-015-T05"
+      ]
+    },
+    {
+      "id": "DB-016",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DB-016-T01",
+        "DB-016-T02",
+        "DB-016-T03",
+        "DB-016-T04",
+        "DB-016-T05"
+      ]
+    },
+    {
+      "id": "DISC-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DISC-001-T01",
+        "DISC-001-T02",
+        "DISC-001-T03",
+        "DISC-001-T04",
+        "DISC-001-T05"
+      ]
+    },
+    {
+      "id": "DISC-008",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DISC-008-T01",
+        "DISC-008-T02",
+        "DISC-008-T03",
+        "DISC-008-T04",
+        "DISC-008-T05"
+      ]
+    },
+    {
+      "id": "DISC-010",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "DISC-010-T01",
+        "DISC-010-T02",
+        "DISC-010-T03",
+        "DISC-010-T04",
+        "DISC-010-T05"
+      ]
+    },
+    {
+      "id": "EXT-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "EXT-001-T01",
+        "EXT-001-T02",
+        "EXT-001-T03",
+        "EXT-001-T04",
+        "EXT-001-T05"
+      ]
+    },
+    {
+      "id": "EXT-002",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "EXT-002-T01",
+        "EXT-002-T02",
+        "EXT-002-T03",
+        "EXT-002-T04",
+        "EXT-002-T05"
+      ]
+    },
+    {
+      "id": "EXT-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "EXT-003-T01",
+        "EXT-003-T02",
+        "EXT-003-T03",
+        "EXT-003-T04",
+        "EXT-003-T05"
+      ]
+    },
+    {
+      "id": "EXT-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "EXT-004-T01",
+        "EXT-004-T02",
+        "EXT-004-T03",
+        "EXT-004-T04",
+        "EXT-004-T05"
+      ]
+    },
+    {
+      "id": "EXT-005",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "EXT-005-T01",
+        "EXT-005-T02",
+        "EXT-005-T03",
+        "EXT-005-T04",
+        "EXT-005-T05"
+      ]
+    },
+    {
+      "id": "EXT-006",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "EXT-006-T01",
+        "EXT-006-T02",
+        "EXT-006-T03",
+        "EXT-006-T04",
+        "EXT-006-T05"
+      ]
+    },
+    {
+      "id": "EXT-007",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "EXT-007-T01",
+        "EXT-007-T02",
+        "EXT-007-T03",
+        "EXT-007-T04",
+        "EXT-007-T05"
+      ]
+    },
+    {
+      "id": "EXT-008",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "EXT-008-T01",
+        "EXT-008-T02",
+        "EXT-008-T03",
+        "EXT-008-T04",
+        "EXT-008-T05"
+      ]
+    },
+    {
+      "id": "EXT-009",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "EXT-009-T01",
+        "EXT-009-T02",
+        "EXT-009-T03",
+        "EXT-009-T04",
+        "EXT-009-T05"
+      ]
+    },
+    {
+      "id": "EXT-010",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "EXT-010-T01",
+        "EXT-010-T02",
+        "EXT-010-T03",
+        "EXT-010-T04",
+        "EXT-010-T05"
+      ]
+    },
+    {
+      "id": "EXT-011",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "EXT-011-T01",
+        "EXT-011-T02",
+        "EXT-011-T03",
+        "EXT-011-T04",
+        "EXT-011-T05"
+      ]
+    },
+    {
+      "id": "EXT-012",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "EXT-012-T01",
+        "EXT-012-T02",
+        "EXT-012-T03",
+        "EXT-012-T04",
+        "EXT-012-T05"
+      ]
+    },
+    {
+      "id": "INT-001",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-001-T01",
+        "INT-001-T02",
+        "INT-001-T03",
+        "INT-001-T04",
+        "INT-001-T05"
+      ]
+    },
+    {
+      "id": "INT-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-002-T01",
+        "INT-002-T02",
+        "INT-002-T03",
+        "INT-002-T04",
+        "INT-002-T05"
+      ]
+    },
+    {
+      "id": "INT-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-003-T01",
+        "INT-003-T02",
+        "INT-003-T03",
+        "INT-003-T04",
+        "INT-003-T05"
+      ]
+    },
+    {
+      "id": "INT-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-004-T01",
+        "INT-004-T02",
+        "INT-004-T03",
+        "INT-004-T04",
+        "INT-004-T05"
+      ]
+    },
+    {
+      "id": "INT-005",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-005-T01",
+        "INT-005-T02",
+        "INT-005-T03",
+        "INT-005-T04",
+        "INT-005-T05"
+      ]
+    },
+    {
+      "id": "INT-006",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-006-T01",
+        "INT-006-T02",
+        "INT-006-T03",
+        "INT-006-T04",
+        "INT-006-T05"
+      ]
+    },
+    {
+      "id": "INT-007",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-007-T01",
+        "INT-007-T02",
+        "INT-007-T03",
+        "INT-007-T04",
+        "INT-007-T05"
+      ]
+    },
+    {
+      "id": "INT-008",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-008-T01",
+        "INT-008-T02",
+        "INT-008-T03",
+        "INT-008-T04",
+        "INT-008-T05"
+      ]
+    },
+    {
+      "id": "INT-009",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-009-T01",
+        "INT-009-T02",
+        "INT-009-T03",
+        "INT-009-T04",
+        "INT-009-T05"
+      ]
+    },
+    {
+      "id": "INT-010",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "INT-010-T01",
+        "INT-010-T02",
+        "INT-010-T03",
+        "INT-010-T04",
+        "INT-010-T05"
+      ]
+    },
+    {
+      "id": "OPS-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "OPS-001-T01",
+        "OPS-001-T02",
+        "OPS-001-T03",
+        "OPS-001-T04",
+        "OPS-001-T05"
+      ]
+    },
+    {
+      "id": "OPS-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "OPS-002-T01",
+        "OPS-002-T02",
+        "OPS-002-T03",
+        "OPS-002-T04",
+        "OPS-002-T05"
+      ]
+    },
+    {
+      "id": "OPS-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "OPS-003-T01",
+        "OPS-003-T02",
+        "OPS-003-T03",
+        "OPS-003-T04",
+        "OPS-003-T05"
+      ]
+    },
+    {
+      "id": "OPS-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "OPS-004-T01",
+        "OPS-004-T02",
+        "OPS-004-T03",
+        "OPS-004-T04",
+        "OPS-004-T05"
+      ]
+    },
+    {
+      "id": "OPS-005",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "OPS-005-T01",
+        "OPS-005-T02",
+        "OPS-005-T03",
+        "OPS-005-T04",
+        "OPS-005-T05"
+      ]
+    },
+    {
+      "id": "OPS-006",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "OPS-006-T01",
+        "OPS-006-T02",
+        "OPS-006-T03",
+        "OPS-006-T04",
+        "OPS-006-T05"
+      ]
+    },
+    {
+      "id": "OPS-007",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "OPS-007-T01",
+        "OPS-007-T02",
+        "OPS-007-T03",
+        "OPS-007-T04",
+        "OPS-007-T05"
+      ]
+    },
+    {
+      "id": "OPS-008",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "OPS-008-T01",
+        "OPS-008-T02",
+        "OPS-008-T03",
+        "OPS-008-T04",
+        "OPS-008-T05"
+      ]
+    },
+    {
+      "id": "OPS-009",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "OPS-009-T01",
+        "OPS-009-T02",
+        "OPS-009-T03",
+        "OPS-009-T04",
+        "OPS-009-T05"
+      ]
+    },
+    {
+      "id": "PROV-001",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-001-T01",
+        "PROV-001-T02",
+        "PROV-001-T03",
+        "PROV-001-T04",
+        "PROV-001-T05"
+      ]
+    },
+    {
+      "id": "PROV-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-002-T01",
+        "PROV-002-T02",
+        "PROV-002-T03",
+        "PROV-002-T04",
+        "PROV-002-T05"
+      ]
+    },
+    {
+      "id": "PROV-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-003-T01",
+        "PROV-003-T02",
+        "PROV-003-T03",
+        "PROV-003-T04",
+        "PROV-003-T05"
+      ]
+    },
+    {
+      "id": "PROV-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-004-T01",
+        "PROV-004-T02",
+        "PROV-004-T03",
+        "PROV-004-T04",
+        "PROV-004-T05"
+      ]
+    },
+    {
+      "id": "PROV-005",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-005-T01",
+        "PROV-005-T02",
+        "PROV-005-T03",
+        "PROV-005-T04",
+        "PROV-005-T05"
+      ]
+    },
+    {
+      "id": "PROV-006",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-006-T01",
+        "PROV-006-T02",
+        "PROV-006-T03",
+        "PROV-006-T04",
+        "PROV-006-T05"
+      ]
+    },
+    {
+      "id": "PROV-007",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-007-T01",
+        "PROV-007-T02",
+        "PROV-007-T03",
+        "PROV-007-T04",
+        "PROV-007-T05"
+      ]
+    },
+    {
+      "id": "PROV-008",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-008-T01",
+        "PROV-008-T02",
+        "PROV-008-T03",
+        "PROV-008-T04",
+        "PROV-008-T05"
+      ]
+    },
+    {
+      "id": "PROV-009",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-009-T01",
+        "PROV-009-T02",
+        "PROV-009-T03",
+        "PROV-009-T04",
+        "PROV-009-T05"
+      ]
+    },
+    {
+      "id": "PROV-010",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-010-T01",
+        "PROV-010-T02",
+        "PROV-010-T03",
+        "PROV-010-T04",
+        "PROV-010-T05"
+      ]
+    },
+    {
+      "id": "PROV-011",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "PROV-011-T01",
+        "PROV-011-T02",
+        "PROV-011-T03",
+        "PROV-011-T04",
+        "PROV-011-T05"
+      ]
+    },
+    {
+      "id": "PROV-012",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "PROV-012-T01",
+        "PROV-012-T02",
+        "PROV-012-T03",
+        "PROV-012-T04",
+        "PROV-012-T05"
+      ]
+    },
+    {
+      "id": "REL-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "REL-001-T01",
+        "REL-001-T02",
+        "REL-001-T03",
+        "REL-001-T04",
+        "REL-001-T05"
+      ]
+    },
+    {
+      "id": "REL-002",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "REL-002-T01",
+        "REL-002-T02",
+        "REL-002-T03",
+        "REL-002-T04",
+        "REL-002-T05"
+      ]
+    },
+    {
+      "id": "REL-003",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "REL-003-T01",
+        "REL-003-T02",
+        "REL-003-T03",
+        "REL-003-T04",
+        "REL-003-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "ROUTE-001-T01",
+        "ROUTE-001-T02",
+        "ROUTE-001-T03",
+        "ROUTE-001-T04",
+        "ROUTE-001-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-002",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "ROUTE-002-T01",
+        "ROUTE-002-T02",
+        "ROUTE-002-T03",
+        "ROUTE-002-T04",
+        "ROUTE-002-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "ROUTE-003-T01",
+        "ROUTE-003-T02",
+        "ROUTE-003-T03",
+        "ROUTE-003-T04",
+        "ROUTE-003-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "ROUTE-004-T01",
+        "ROUTE-004-T02",
+        "ROUTE-004-T03",
+        "ROUTE-004-T04",
+        "ROUTE-004-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-005",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "ROUTE-005-T01",
+        "ROUTE-005-T02",
+        "ROUTE-005-T03",
+        "ROUTE-005-T04",
+        "ROUTE-005-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-006",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "ROUTE-006-T01",
+        "ROUTE-006-T02",
+        "ROUTE-006-T03",
+        "ROUTE-006-T04",
+        "ROUTE-006-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-007",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "ROUTE-007-T01",
+        "ROUTE-007-T02",
+        "ROUTE-007-T03",
+        "ROUTE-007-T04",
+        "ROUTE-007-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-008",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "ROUTE-008-T01",
+        "ROUTE-008-T02",
+        "ROUTE-008-T03",
+        "ROUTE-008-T04",
+        "ROUTE-008-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-009",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "ROUTE-009-T01",
+        "ROUTE-009-T02",
+        "ROUTE-009-T03",
+        "ROUTE-009-T04",
+        "ROUTE-009-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-010",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "ROUTE-010-T01",
+        "ROUTE-010-T02",
+        "ROUTE-010-T03",
+        "ROUTE-010-T04",
+        "ROUTE-010-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-011",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "ROUTE-011-T01",
+        "ROUTE-011-T02",
+        "ROUTE-011-T03",
+        "ROUTE-011-T04",
+        "ROUTE-011-T05"
+      ]
+    },
+    {
+      "id": "SEC-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-001-T01",
+        "SEC-001-T02",
+        "SEC-001-T03",
+        "SEC-001-T04",
+        "SEC-001-T05"
+      ]
+    },
+    {
+      "id": "SEC-002",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-002-T01",
+        "SEC-002-T02",
+        "SEC-002-T03",
+        "SEC-002-T04",
+        "SEC-002-T05"
+      ]
+    },
+    {
+      "id": "SEC-003",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-003-T01",
+        "SEC-003-T02",
+        "SEC-003-T03",
+        "SEC-003-T04",
+        "SEC-003-T05"
+      ]
+    },
+    {
+      "id": "SEC-004",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-004-T01",
+        "SEC-004-T02",
+        "SEC-004-T03",
+        "SEC-004-T04",
+        "SEC-004-T05"
+      ]
+    },
+    {
+      "id": "SEC-005",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-005-T01",
+        "SEC-005-T02",
+        "SEC-005-T03",
+        "SEC-005-T04",
+        "SEC-005-T05"
+      ]
+    },
+    {
+      "id": "SEC-006",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-006-T01",
+        "SEC-006-T02",
+        "SEC-006-T03",
+        "SEC-006-T04",
+        "SEC-006-T05"
+      ]
+    },
+    {
+      "id": "SEC-007",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-007-T01",
+        "SEC-007-T02",
+        "SEC-007-T03",
+        "SEC-007-T04",
+        "SEC-007-T05"
+      ]
+    },
+    {
+      "id": "SEC-008",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SEC-008-T01",
+        "SEC-008-T02",
+        "SEC-008-T03",
+        "SEC-008-T04",
+        "SEC-008-T05"
+      ]
+    },
+    {
+      "id": "SEC-009",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SEC-009-T01",
+        "SEC-009-T02",
+        "SEC-009-T03",
+        "SEC-009-T04",
+        "SEC-009-T05"
+      ]
+    },
+    {
+      "id": "SEC-010",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-010-T01",
+        "SEC-010-T02",
+        "SEC-010-T03",
+        "SEC-010-T04",
+        "SEC-010-T05"
+      ]
+    },
+    {
+      "id": "SEC-011",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-011-T01",
+        "SEC-011-T02",
+        "SEC-011-T03",
+        "SEC-011-T04",
+        "SEC-011-T05"
+      ]
+    },
+    {
+      "id": "SEC-012",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-012-T01",
+        "SEC-012-T02",
+        "SEC-012-T03",
+        "SEC-012-T04",
+        "SEC-012-T05"
+      ]
+    },
+    {
+      "id": "SEC-013",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-013-T01",
+        "SEC-013-T02",
+        "SEC-013-T03",
+        "SEC-013-T04",
+        "SEC-013-T05"
+      ]
+    },
+    {
+      "id": "SEC-014",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-014-T01",
+        "SEC-014-T02",
+        "SEC-014-T03",
+        "SEC-014-T04",
+        "SEC-014-T05"
+      ]
+    },
+    {
+      "id": "SEC-016",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-016-T01",
+        "SEC-016-T02",
+        "SEC-016-T03",
+        "SEC-016-T04",
+        "SEC-016-T05"
+      ]
+    },
+    {
+      "id": "SEC-017",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SEC-017-T01",
+        "SEC-017-T02",
+        "SEC-017-T03",
+        "SEC-017-T04",
+        "SEC-017-T05"
+      ]
+    },
+    {
+      "id": "SESS-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SESS-001-T01",
+        "SESS-001-T02",
+        "SESS-001-T03",
+        "SESS-001-T04",
+        "SESS-001-T05"
+      ]
+    },
+    {
+      "id": "SESS-002",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SESS-002-T01",
+        "SESS-002-T02",
+        "SESS-002-T03",
+        "SESS-002-T04",
+        "SESS-002-T05"
+      ]
+    },
+    {
+      "id": "SESS-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-003-T01",
+        "SESS-003-T02",
+        "SESS-003-T03",
+        "SESS-003-T04",
+        "SESS-003-T05"
+      ]
+    },
+    {
+      "id": "SESS-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-004-T01",
+        "SESS-004-T02",
+        "SESS-004-T03",
+        "SESS-004-T04",
+        "SESS-004-T05"
+      ]
+    },
+    {
+      "id": "SESS-005",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-005-T01",
+        "SESS-005-T02",
+        "SESS-005-T03",
+        "SESS-005-T04",
+        "SESS-005-T05"
+      ]
+    },
+    {
+      "id": "SESS-006",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-006-T01",
+        "SESS-006-T02",
+        "SESS-006-T03",
+        "SESS-006-T04",
+        "SESS-006-T05"
+      ]
+    },
+    {
+      "id": "SESS-007",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-007-T01",
+        "SESS-007-T02",
+        "SESS-007-T03",
+        "SESS-007-T04",
+        "SESS-007-T05"
+      ]
+    },
+    {
+      "id": "SESS-008",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-008-T01",
+        "SESS-008-T02",
+        "SESS-008-T03",
+        "SESS-008-T04",
+        "SESS-008-T05"
+      ]
+    },
+    {
+      "id": "SESS-009",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-009-T01",
+        "SESS-009-T02",
+        "SESS-009-T03",
+        "SESS-009-T04",
+        "SESS-009-T05"
+      ]
+    },
+    {
+      "id": "SESS-010",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-010-T01",
+        "SESS-010-T02",
+        "SESS-010-T03",
+        "SESS-010-T04",
+        "SESS-010-T05"
+      ]
+    },
+    {
+      "id": "SESS-011",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SESS-011-T01",
+        "SESS-011-T02",
+        "SESS-011-T03",
+        "SESS-011-T04",
+        "SESS-011-T05"
+      ]
+    },
+    {
+      "id": "SESS-012",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-012-T01",
+        "SESS-012-T02",
+        "SESS-012-T03",
+        "SESS-012-T04",
+        "SESS-012-T05"
+      ]
+    },
+    {
+      "id": "SESS-013",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-013-T01",
+        "SESS-013-T02",
+        "SESS-013-T03",
+        "SESS-013-T04",
+        "SESS-013-T05"
+      ]
+    },
+    {
+      "id": "SESS-014",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-014-T01",
+        "SESS-014-T02",
+        "SESS-014-T03",
+        "SESS-014-T04",
+        "SESS-014-T05"
+      ]
+    },
+    {
+      "id": "SESS-015",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-015-T01",
+        "SESS-015-T02",
+        "SESS-015-T03",
+        "SESS-015-T04",
+        "SESS-015-T05"
+      ]
+    },
+    {
+      "id": "SESS-016",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SESS-016-T01",
+        "SESS-016-T02",
+        "SESS-016-T03",
+        "SESS-016-T04",
+        "SESS-016-T05"
+      ]
+    },
+    {
+      "id": "SESS-017",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SESS-017-T01",
+        "SESS-017-T02",
+        "SESS-017-T03",
+        "SESS-017-T04",
+        "SESS-017-T05"
+      ]
+    },
+    {
+      "id": "SHARE-001",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SHARE-001-T01",
+        "SHARE-001-T02",
+        "SHARE-001-T03",
+        "SHARE-001-T04",
+        "SHARE-001-T05"
+      ]
+    },
+    {
+      "id": "SHARE-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SHARE-002-T01",
+        "SHARE-002-T02",
+        "SHARE-002-T03",
+        "SHARE-002-T04",
+        "SHARE-002-T05"
+      ]
+    },
+    {
+      "id": "SHARE-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "SHARE-003-T01",
+        "SHARE-003-T02",
+        "SHARE-003-T03",
+        "SHARE-003-T04",
+        "SHARE-003-T05"
+      ]
+    },
+    {
+      "id": "SHARE-004",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SHARE-004-T01",
+        "SHARE-004-T02",
+        "SHARE-004-T03",
+        "SHARE-004-T04",
+        "SHARE-004-T05"
+      ]
+    },
+    {
+      "id": "SHARE-005",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "SHARE-005-T01",
+        "SHARE-005-T02",
+        "SHARE-005-T03",
+        "SHARE-005-T04",
+        "SHARE-005-T05"
+      ]
+    },
+    {
+      "id": "TOOL-001",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-001-T01",
+        "TOOL-001-T02",
+        "TOOL-001-T03",
+        "TOOL-001-T04",
+        "TOOL-001-T05"
+      ]
+    },
+    {
+      "id": "TOOL-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-002-T01",
+        "TOOL-002-T02",
+        "TOOL-002-T03",
+        "TOOL-002-T04",
+        "TOOL-002-T05"
+      ]
+    },
+    {
+      "id": "TOOL-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-003-T01",
+        "TOOL-003-T02",
+        "TOOL-003-T03",
+        "TOOL-003-T04",
+        "TOOL-003-T05"
+      ]
+    },
+    {
+      "id": "TOOL-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-004-T01",
+        "TOOL-004-T02",
+        "TOOL-004-T03",
+        "TOOL-004-T04",
+        "TOOL-004-T05"
+      ]
+    },
+    {
+      "id": "TOOL-005",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-005-T01",
+        "TOOL-005-T02",
+        "TOOL-005-T03",
+        "TOOL-005-T04",
+        "TOOL-005-T05"
+      ]
+    },
+    {
+      "id": "TOOL-008",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-008-T01",
+        "TOOL-008-T02",
+        "TOOL-008-T03",
+        "TOOL-008-T04",
+        "TOOL-008-T05"
+      ]
+    },
+    {
+      "id": "TOOL-011",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-011-T01",
+        "TOOL-011-T02",
+        "TOOL-011-T03",
+        "TOOL-011-T04",
+        "TOOL-011-T05"
+      ]
+    },
+    {
+      "id": "TOOL-012",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-012-T01",
+        "TOOL-012-T02",
+        "TOOL-012-T03",
+        "TOOL-012-T04",
+        "TOOL-012-T05"
+      ]
+    },
+    {
+      "id": "TOOL-013",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-013-T01",
+        "TOOL-013-T02",
+        "TOOL-013-T03",
+        "TOOL-013-T04",
+        "TOOL-013-T05"
+      ]
+    },
+    {
+      "id": "TOOL-014",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "TOOL-014-T01",
+        "TOOL-014-T02",
+        "TOOL-014-T03",
+        "TOOL-014-T04",
+        "TOOL-014-T05"
+      ]
+    },
+    {
+      "id": "UI-001",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "UI-001-T01",
+        "UI-001-T02",
+        "UI-001-T03",
+        "UI-001-T04",
+        "UI-001-T05"
+      ]
+    },
+    {
+      "id": "UI-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "UI-002-T01",
+        "UI-002-T02",
+        "UI-002-T03",
+        "UI-002-T04",
+        "UI-002-T05"
+      ]
+    },
+    {
+      "id": "UI-003",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-003-T01",
+        "UI-003-T02",
+        "UI-003-T03",
+        "UI-003-T04",
+        "UI-003-T05"
+      ]
+    },
+    {
+      "id": "UI-004",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-004-T01",
+        "UI-004-T02",
+        "UI-004-T03",
+        "UI-004-T04",
+        "UI-004-T05"
+      ]
+    },
+    {
+      "id": "UI-005",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-005-T01",
+        "UI-005-T02",
+        "UI-005-T03",
+        "UI-005-T04",
+        "UI-005-T05"
+      ]
+    },
+    {
+      "id": "UI-006",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-006-T01",
+        "UI-006-T02",
+        "UI-006-T03",
+        "UI-006-T04",
+        "UI-006-T05"
+      ]
+    },
+    {
+      "id": "UI-007",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-007-T01",
+        "UI-007-T02",
+        "UI-007-T03",
+        "UI-007-T04",
+        "UI-007-T05"
+      ]
+    },
+    {
+      "id": "UI-008",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-008-T01",
+        "UI-008-T02",
+        "UI-008-T03",
+        "UI-008-T04",
+        "UI-008-T05"
+      ]
+    },
+    {
+      "id": "UI-009",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-009-T01",
+        "UI-009-T02",
+        "UI-009-T03",
+        "UI-009-T04",
+        "UI-009-T05"
+      ]
+    },
+    {
+      "id": "UI-010",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-010-T01",
+        "UI-010-T02",
+        "UI-010-T03",
+        "UI-010-T04",
+        "UI-010-T05"
+      ]
+    },
+    {
+      "id": "UI-011",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-011-T01",
+        "UI-011-T02",
+        "UI-011-T03",
+        "UI-011-T04",
+        "UI-011-T05"
+      ]
+    },
+    {
+      "id": "UI-012",
+      "status": "not-started",
+      "userStory": "TBD - see source audit",
+      "testObligations": [
+        "UI-012-T01",
+        "UI-012-T02",
+        "UI-012-T03",
+        "UI-012-T04",
+        "UI-012-T05"
+      ]
+    },
+    {
+      "id": "UI-013",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "UI-013-T01",
+        "UI-013-T02",
+        "UI-013-T03",
+        "UI-013-T04",
+        "UI-013-T05"
+      ]
+    },
+    {
+      "id": "WEB-001",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "WEB-001-T01",
+        "WEB-001-T02",
+        "WEB-001-T03",
+        "WEB-001-T04",
+        "WEB-001-T05"
+      ]
+    },
+    {
+      "id": "WEB-002",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "WEB-002-T01",
+        "WEB-002-T02",
+        "WEB-002-T03",
+        "WEB-002-T04",
+        "WEB-002-T05"
+      ]
+    },
+    {
+      "id": "WEB-003",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "WEB-003-T01",
+        "WEB-003-T02",
+        "WEB-003-T03",
+        "WEB-003-T04",
+        "WEB-003-T05"
+      ]
+    },
+    {
+      "id": "WEB-004",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "WEB-004-T01",
+        "WEB-004-T02",
+        "WEB-004-T03",
+        "WEB-004-T04",
+        "WEB-004-T05"
+      ]
+    },
+    {
+      "id": "WEB-005",
+      "status": "not-started",
+      "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "testObligations": [
+        "WEB-005-T01",
+        "WEB-005-T02",
+        "WEB-005-T03",
+        "WEB-005-T04",
+        "WEB-005-T05"
+      ]
+    }
+  ]
+}
