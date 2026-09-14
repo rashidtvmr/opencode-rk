@@ -13,6 +13,7 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     disc_status_errors,
     enterprise_remote_gap_errors,
     residual_evidence_kind_errors,
+    routing_ownership_gap_errors,
     surface_evidence_gaps,
     validate_ledger,
 )
@@ -133,6 +134,47 @@ class BacklogExhaustionTests(unittest.TestCase):
             row["surfaceEvidenceGaps"] = []
             errors = enterprise_remote_gap_errors(changed_rows, reconciliation, ROOT)
             self.assertTrue(any("must remain exactly" in error for error in errors))
+
+    def test_routing_and_adjacent_singleton_ownership_gap_is_exact_and_fail_closed(self):
+        ledger = load_ledger()
+        reconciliation = json.loads((ROOT / "sources/disc-003-reconciliation.json").read_text(encoding="utf-8"))
+        self.assertEqual(routing_ownership_gap_errors(ledger["stories"], reconciliation, ROOT), [])
+
+        gap_path = ROOT / "sources/routing-ownership-gap.json"
+        original_gap = json.loads(gap_path.read_text(encoding="utf-8"))
+
+        def errors_for(changed_gap):
+            from tools import validate_backlog_exhaustion as module
+
+            original_load = module._load
+
+            def fake_load(path):
+                if pathlib.Path(path) == gap_path:
+                    return changed_gap
+                return original_load(path)
+
+            with mock.patch("tools.validate_backlog_exhaustion._load", side_effect=fake_load):
+                return routing_ownership_gap_errors(ledger["stories"], reconciliation, ROOT)
+
+        with self.subTest("routing singleton cannot become ownership proof"):
+            changed = copy.deepcopy(original_gap)
+            changed["ownershipDecision"]["ROUTE-010"] = "9router.routing"
+            self.assertTrue(any("ownership must remain unresolved" in error for error in errors_for(changed)))
+
+        with self.subTest("identical ROUTE-008/009 surface signatures cannot silently diverge"):
+            changed = copy.deepcopy(original_gap)
+            changed["storySurfaceSignatures"]["ROUTE-009"] = ["9router.account-storage"]
+            self.assertTrue(any("ROUTE-009: routing ownership-gap surface signature drifted" in error for error in errors_for(changed)))
+
+        with self.subTest("safe-looking pure fragment remains unowned without task evidence"):
+            changed = copy.deepcopy(original_gap)
+            changed["candidateFragments"][0]["ownershipEstablished"] = True
+            self.assertTrue(any("cannot become owned from singleton arithmetic" in error for error in errors_for(changed)))
+
+        with self.subTest("EXT-005 adjacent singleton cannot be promoted by subtraction"):
+            changed = copy.deepcopy(original_gap)
+            changed["adjacentSingletonChecks"][0]["ownershipEstablished"] = True
+            self.assertTrue(any("EXT-005: adjacent singleton ownership must remain unresolved" in error for error in errors_for(changed)))
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())

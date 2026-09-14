@@ -31,6 +31,20 @@ ENTERPRISE_REMOTE_REQUIRED_PARTITIONS = (
     "function-github-token-exchange-installation",
     "deployment-resource-lifecycle",
 )
+ROUTING_OWNERSHIP_GAP_PATH = ROOT / "sources/routing-ownership-gap.json"
+ROUTING_GAP_STORIES = ("ROUTE-009", "ROUTE-010")
+ROUTING_SIGNATURE_STORIES = ("ROUTE-008", "ROUTE-009", "ROUTE-010")
+ROUTING_SUBTRACTED_OWNERS = (
+    "ROUTE-001", "ROUTE-002", "ROUTE-003", "ROUTE-004", "ROUTE-005", "ROUTE-007", "ROUTE-011",
+)
+ROUTING_FROZEN_OWNERS = ("ROUTE-006", "ROUTE-008")
+ROUTING_UNRESOLVED_PARTITIONS = (
+    "account-storage-schema-credential-lifecycle",
+    "dashboard-provider-status-and-secret-redaction",
+    "dashboard-settings-security-and-runtime-side-effects",
+    "routing-provider-specific-quota-proxy-and-credential-runtime",
+    "combo-stream-provider-execution-and-token-refresh",
+)
 
 CATEGORY_IDS = {
     "local-implemented-stale": {
@@ -511,6 +525,315 @@ def enterprise_remote_gap_errors(
     return errors
 
 
+def _inventory_index(root: pathlib.Path, repository_id: str) -> tuple[dict[str, Mapping[str, object]], list[str]]:
+    path = root / "sources/inventory" / f"{repository_id}.jsonl"
+    rows: dict[str, Mapping[str, object]] = {}
+    errors: list[str] = []
+    if not path.is_file():
+        return rows, [f"missing pinned inventory for ownership evidence: {path.relative_to(root)}"]
+    try:
+        for line_number, raw in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+            if not raw.strip():
+                continue
+            value = json.loads(raw)
+            if not isinstance(value, Mapping) or not isinstance(value.get("path"), str):
+                errors.append(f"invalid {repository_id} inventory row at line {line_number}")
+                continue
+            rows[str(value["path"])] = value
+    except (json.JSONDecodeError, OSError) as exc:
+        errors.append(f"invalid {repository_id} inventory: {exc}")
+    return rows, errors
+
+
+def routing_ownership_gap_errors(
+    rows: list[object],
+    reconciliation: Mapping[str, object],
+    root: pathlib.Path = ROOT,
+) -> list[str]:
+    """Keep ROUTE-009/010 and adjacent singleton arithmetic from becoming ownership proof."""
+    errors: list[str] = []
+    gap_path = root / "sources/routing-ownership-gap.json"
+    if not gap_path.is_file():
+        return ["missing machine-checkable routing ownership-gap record"]
+    try:
+        gap = _load(gap_path)
+    except (json.JSONDecodeError, OSError) as exc:
+        return [f"invalid routing ownership-gap record: {exc}"]
+
+    if gap.get("schemaVersion") != 1:
+        errors.append("routing ownership-gap schemaVersion must be 1")
+    if gap.get("status") != "source-reviewed-no-exact-task-owner":
+        errors.append("routing ownership-gap status drifted")
+    if gap.get("repositoryId") != "9router" or gap.get("repository") != "decolua/9router":
+        errors.append("routing ownership-gap repository identity drifted")
+    if gap.get("storyIds") != list(ROUTING_GAP_STORIES):
+        errors.append("routing ownership-gap story set drifted")
+    if gap.get("ownershipDecision") != {story_id: None for story_id in ROUTING_GAP_STORIES}:
+        errors.append("routing ownership must remain unresolved until source-grounded task evidence changes")
+    if gap.get("unresolvedPartitions") != list(ROUTING_UNRESOLVED_PARTITIONS):
+        errors.append("routing unresolved decomposition partitions drifted")
+
+    lock = _load(root / "sources/upstream.lock.json")
+    locked = next((item for item in lock.get("repositories", []) if item.get("id") == "9router"), None)
+    locked_commit = str(locked.get("commit", "")) if isinstance(locked, Mapping) else ""
+    locked_tree = str(locked.get("treeSha", "")) if isinstance(locked, Mapping) else ""
+    if not locked_commit or gap.get("commit") != locked_commit:
+        errors.append("routing ownership-gap is not bound to the locked 9router commit")
+    if not locked_tree or gap.get("treeSha") != locked_tree:
+        errors.append("routing ownership-gap is not bound to the locked 9router tree")
+
+    plan = _load(root / "ralph.json")
+    plan_by_id = {
+        str(item.get("id", "")): item
+        for item in plan.get("userStories", [])
+        if isinstance(item, Mapping)
+    }
+    generic_story = "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json"
+    for story_id in ROUTING_GAP_STORIES:
+        story = plan_by_id.get(story_id)
+        if story is None:
+            errors.append(f"routing ownership-gap story disappeared from Ralph: {story_id}")
+            continue
+        if story.get("status") != "not-started" or story.get("userStory") != generic_story:
+            errors.append(f"{story_id}: routing ownership-gap is stale after Ralph task semantics changed")
+        if story.get("requirementIds") != []:
+            errors.append(f"{story_id}: routing ownership-gap expects no task-level requirement binding")
+
+    rules = _load(root / "sources/behavior-surface-rules.json")
+    rule_rows = [item for item in rules.get("rules", []) if isinstance(item, Mapping)]
+    live_signatures = {
+        story_id: sorted(
+            str(item.get("id"))
+            for item in rule_rows
+            if story_id in item.get("featureIds", [])
+        )
+        for story_id in ROUTING_SIGNATURE_STORIES
+    }
+    recorded_signatures = gap.get("storySurfaceSignatures")
+    if not isinstance(recorded_signatures, Mapping):
+        errors.append("routing ownership-gap storySurfaceSignatures must be an object")
+    else:
+        for story_id, signature in live_signatures.items():
+            if recorded_signatures.get(story_id) != signature:
+                errors.append(f"{story_id}: routing ownership-gap surface signature drifted from live rules")
+    if live_signatures["ROUTE-008"] != live_signatures["ROUTE-009"]:
+        errors.append("ROUTE-008/ROUTE-009 are no longer surface-indistinguishable; routing ownership gap needs review")
+    ambiguity = gap.get("surfaceAmbiguity")
+    if not isinstance(ambiguity, Mapping) or ambiguity.get("indistinguishablePair") != ["ROUTE-008", "ROUTE-009"]:
+        errors.append("routing ownership-gap lost the ROUTE-008/ROUTE-009 indistinguishable-pair guard")
+    if not isinstance(ambiguity, Mapping) or "singleton membership" not in str(ambiguity.get("singletonCaveat", "")):
+        errors.append("routing ownership-gap must explicitly reject ROUTE-010 singleton arithmetic")
+
+    row_by_id = {
+        str(item.get("id", "")): item
+        for item in rows
+        if isinstance(item, Mapping)
+    }
+    for story_id in ROUTING_GAP_STORIES:
+        row = row_by_id.get(story_id)
+        if row is None:
+            errors.append(f"routing ownership-gap story missing from exhaustion ledger: {story_id}")
+            continue
+        if row.get("category") != "unresolved-decomposition" or row.get("reasonKey") != "routing-family-not-decomposed":
+            errors.append(f"{story_id}: routing ownership-gap classification drifted")
+        if row.get("taskCard") is not None or row.get("worklog") is not None or row.get("implementationCommits") != []:
+            errors.append(f"{story_id}: task/worklog/implementation appeared; routing ownership gap must be deliberately reconciled")
+        if sorted(row.get("surfaceIds", [])) != live_signatures[story_id]:
+            errors.append(f"{story_id}: ledger surface projection drifted from routing ownership-gap rules")
+
+    subtracted = gap.get("subtractedOwners")
+    expected_subtracted_commits = {
+        story_id: STALE_IMPLEMENTATION_COMMITS[story_id][0]
+        for story_id in ROUTING_SUBTRACTED_OWNERS
+    }
+    if not isinstance(subtracted, list):
+        errors.append("routing ownership-gap subtractedOwners must be a list")
+    else:
+        ids = [str(item.get("id", "")) for item in subtracted if isinstance(item, Mapping)]
+        if ids != list(ROUTING_SUBTRACTED_OWNERS):
+            errors.append("routing ownership-gap implemented-owner subtraction drifted")
+        for item in subtracted:
+            if not isinstance(item, Mapping):
+                errors.append("routing ownership-gap subtracted owner must be an object")
+                continue
+            story_id = str(item.get("id", ""))
+            expected_commit = expected_subtracted_commits.get(story_id)
+            if expected_commit is None:
+                continue
+            if item.get("implementationCommit") != expected_commit:
+                errors.append(f"{story_id}: routing ownership-gap implementation receipt drifted")
+            task = root / str(item.get("task", ""))
+            worklog = root / str(item.get("worklog", ""))
+            if not task.is_file() or not worklog.is_file():
+                errors.append(f"{story_id}: routing ownership-gap implemented task/worklog receipt missing")
+            elif not str(_task_status(task) or "").startswith("IMPLEMENTED"):
+                errors.append(f"{story_id}: routing ownership-gap subtracted task is no longer IMPLEMENTED")
+            if not str(item.get("ownedPartition", "")).strip():
+                errors.append(f"{story_id}: routing ownership-gap lacks the already-owned partition description")
+            result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", expected_commit, "HEAD"], cwd=root,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
+            if result.returncode != 0:
+                errors.append(f"{story_id}: routing ownership-gap implementation receipt is not in live history")
+
+    frozen = gap.get("frozenOwners")
+    expected_frozen = [
+        {"id": story_id, "reasonKey": REASON_BY_ID[story_id]}
+        for story_id in ROUTING_FROZEN_OWNERS
+    ]
+    if frozen != expected_frozen:
+        errors.append("routing ownership-gap frozen-owner subtraction drifted")
+    for story_id in ROUTING_FROZEN_OWNERS:
+        row = row_by_id.get(story_id)
+        if not isinstance(row, Mapping) or row.get("category") != "explicit-blocker":
+            errors.append(f"{story_id}: routing ownership-gap frozen blocker classification drifted")
+
+    inventory, inventory_errors = _inventory_index(root, "9router")
+    errors.extend(inventory_errors)
+    if inventory:
+        path_patterns = []
+        generated = gap.get("generatedContractSearch")
+        if not isinstance(generated, Mapping):
+            errors.append("routing ownership-gap generated-contract search record is missing")
+        else:
+            if generated.get("inventory") != "sources/inventory/9router.jsonl" or generated.get("matches") != []:
+                errors.append("routing ownership-gap generated-contract search result drifted")
+            for pattern in generated.get("pathPatterns", []) if isinstance(generated.get("pathPatterns"), list) else []:
+                try:
+                    path_patterns.append(re.compile(str(pattern), re.IGNORECASE))
+                except re.error as exc:
+                    errors.append(f"routing ownership-gap invalid generated-contract path pattern {pattern!r}: {exc}")
+            found = sorted(path for path in inventory if any(pattern.search(path) for pattern in path_patterns))
+            if found:
+                errors.append(f"routing ownership-gap generated-contract absence is stale; matching paths now exist: {found}")
+
+        expected_partition_ids = [
+            "account-storage-schema-and-credentials",
+            "dashboard-status-and-secret-safe-projection",
+            "dashboard-settings-and-runtime-side-effects",
+            "routing-runtime-remainder",
+        ]
+        partitions = gap.get("reviewedPartitions")
+        if not isinstance(partitions, list) or [str(item.get("id", "")) for item in partitions if isinstance(item, Mapping)] != expected_partition_ids:
+            errors.append("routing ownership-gap reviewed partition inventory drifted")
+        else:
+            for partition in partitions:
+                evidence = partition.get("evidence") if isinstance(partition, Mapping) else None
+                if not isinstance(evidence, list) or not evidence:
+                    errors.append(f"routing ownership-gap partition lacks pinned evidence: {partition.get('id')}")
+                    continue
+                if not partition.get("sideEffects") or not str(partition.get("ownershipBlocker", "")).strip():
+                    errors.append(f"routing ownership-gap partition lacks side-effect/ownership blocker detail: {partition.get('id')}")
+                for item in evidence:
+                    if not isinstance(item, Mapping):
+                        errors.append("routing ownership-gap partition evidence must be an object")
+                        continue
+                    source_path = str(item.get("path", ""))
+                    inventory_row = inventory.get(source_path)
+                    if inventory_row is None:
+                        errors.append(f"routing ownership-gap evidence escaped pinned inventory: {source_path}")
+                        continue
+                    if inventory_row.get("commit") != locked_commit or inventory_row.get("blob") != item.get("blobSha"):
+                        errors.append(f"routing ownership-gap evidence pin drifted: {source_path}")
+                    reviewed_lines = item.get("reviewedLines")
+                    if (
+                        not isinstance(reviewed_lines, Mapping)
+                        or not isinstance(reviewed_lines.get("from"), int)
+                        or not isinstance(reviewed_lines.get("to"), int)
+                        or reviewed_lines["from"] < 1
+                        or reviewed_lines["to"] < reviewed_lines["from"]
+                    ):
+                        errors.append(f"routing ownership-gap evidence lacks reviewed line range: {source_path}")
+
+    candidates = gap.get("candidateFragments")
+    expected_candidate_ids = ["provider-status-classification", "routing-runtime-remainder"]
+    if not isinstance(candidates, list) or [str(item.get("id", "")) for item in candidates if isinstance(item, Mapping)] != expected_candidate_ids:
+        errors.append("routing ownership-gap candidate fragment set drifted")
+    else:
+        for candidate in candidates:
+            if candidate.get("ownershipEstablished") is not False:
+                errors.append(f"routing candidate cannot become owned from singleton arithmetic: {candidate.get('id')}")
+            for key in ("inputs", "outputs", "failureSemantics", "stateLifetime", "resourceLifetime"):
+                if not str(candidate.get(key, "")).strip():
+                    errors.append(f"routing candidate {candidate.get('id')} lacks explicit {key}")
+            if not candidate.get("disqualifiers"):
+                errors.append(f"routing candidate {candidate.get('id')} lacks ownership disqualifiers")
+
+    adjacent = gap.get("adjacentSingletonChecks")
+    if not isinstance(adjacent, list) or [str(item.get("storyId", "")) for item in adjacent if isinstance(item, Mapping)] != ["EXT-005", "WEB-004"]:
+        errors.append("routing ownership-gap adjacent singleton check set drifted")
+    else:
+        opencode_inventory, opencode_inventory_errors = _inventory_index(root, "opencode")
+        errors.extend(opencode_inventory_errors)
+        requirements = _load(root / "requirements/user-requirements.json")
+        requirement_by_id = {
+            str(item.get("id", "")): item
+            for item in requirements.get("requirements", [])
+            if isinstance(item, Mapping)
+        }
+        evidence_rows = []
+        for evidence_path in (root / "sources/evidence.json", root / "sources/disc-003-evidence.json"):
+            evidence_rows.extend(_load(evidence_path).get("sources", []))
+        evidence_index = {str(item.get("id", "")): item for item in evidence_rows if isinstance(item, Mapping)}
+        for item in adjacent:
+            story_id = str(item.get("storyId", ""))
+            if item.get("ownershipEstablished") is not False or not str(item.get("closure", "")).strip():
+                errors.append(f"{story_id}: adjacent singleton ownership must remain unresolved with explicit closure criteria")
+            live_surface_ids = sorted(
+                str(rule.get("id"))
+                for rule in rule_rows
+                if story_id in rule.get("featureIds", [])
+            )
+            if item.get("surfaceIds") != live_surface_ids:
+                errors.append(f"{story_id}: adjacent singleton surface signature drifted")
+            ledger_row = row_by_id.get(story_id)
+            if not isinstance(ledger_row, Mapping) or ledger_row.get("category") != "unresolved-decomposition":
+                errors.append(f"{story_id}: adjacent singleton classification drifted")
+                continue
+            if ledger_row.get("taskCard") is not None or ledger_row.get("worklog") is not None:
+                errors.append(f"{story_id}: adjacent singleton gained task evidence and must be deliberately reconciled")
+
+            if story_id == "EXT-005":
+                requirement_ids = item.get("requirementIds")
+                if requirement_ids != ["REQ-005"] or ledger_row.get("requirementIds") != ["REQ-005"]:
+                    errors.append("EXT-005 adjacent singleton requirement binding drifted")
+                req = requirement_by_id.get("REQ-005")
+                if not isinstance(req, Mapping) or item.get("requirementTaskSplit") != req.get("tasks"):
+                    errors.append("EXT-005 adjacent singleton lost the live REQ-005 multi-task split")
+                refs = item.get("pinnedEvidence")
+                if not isinstance(refs, list) or not refs:
+                    errors.append("EXT-005 adjacent singleton lacks pinned decomposition evidence")
+                else:
+                    for ref in refs:
+                        source_path = str(ref.get("path", "")) if isinstance(ref, Mapping) else ""
+                        inventory_row = opencode_inventory.get(source_path)
+                        if inventory_row is None or inventory_row.get("commit") != "95daf90670b7c039c436c85537da5fbfe2205b41" or inventory_row.get("blob") != ref.get("blobSha"):
+                            errors.append(f"EXT-005 adjacent singleton evidence pin drifted: {source_path}")
+            elif story_id == "WEB-004":
+                expected_ids = [
+                    "OC-SERVER-API", "OC-CONTROL-PLANE-MOVE", "OC-CONTROL-PLANE-HANDLER",
+                    "OC-CONTROL-PLANE-TEST", "OC-CLIENT-CONTRACT-TEST", "OC-HTTPAPI-ROUTE-SPEC",
+                    "OC-ENTERPRISE-SHARE", "OC-FUNCTION-REMOTE",
+                ]
+                if item.get("pinnedEvidenceIds") != expected_ids:
+                    errors.append("WEB-004 adjacent singleton evidence set drifted")
+                for evidence_id in expected_ids:
+                    source = evidence_index.get(evidence_id)
+                    if source is None or source.get("commit") != "95daf90670b7c039c436c85537da5fbfe2205b41":
+                        errors.append(f"WEB-004 adjacent singleton lost pinned evidence: {evidence_id}")
+                enterprise_gap = root / "sources/enterprise-remote-spec-gap.json"
+                if not enterprise_gap.is_file() or _load(enterprise_gap).get("status") != "searched-no-qualifying-in-surface-spec":
+                    errors.append("WEB-004 adjacent singleton must retain the enterprise-remote missing-spec guard")
+
+    history = gap.get("historyReview")
+    if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit":
+        errors.append("routing ownership-gap history-review limitation drifted")
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 4:
+        errors.append("routing ownership-gap closure criteria drifted")
+    return errors
+
+
 def sync_features_status(root: pathlib.Path = ROOT) -> None:
     """Synchronize only the generated status mirrors in FEATURES.md from Ralph."""
     plan = _load(root / "ralph.json")
@@ -670,6 +993,7 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
     errors.extend(disc_status_errors(reconciliation, manifest, source_map, task_text, progress_text))
     errors.extend(residual_evidence_kind_errors(rows, reconciliation))
     errors.extend(enterprise_remote_gap_errors(rows, reconciliation, root))
+    errors.extend(routing_ownership_gap_errors(rows, reconciliation, root))
 
     errors.extend(_features_status_errors(root, plan))
     return errors

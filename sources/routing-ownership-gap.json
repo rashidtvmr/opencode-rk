@@ -1,0 +1,471 @@
+{
+  "schemaVersion": 1,
+  "status": "source-reviewed-no-exact-task-owner",
+  "repositoryId": "9router",
+  "repository": "decolua/9router",
+  "commit": "17c4cc76877bd1755030a8414f8d0083f48dcccf",
+  "treeSha": "4a6b1d14d1d4b4b12aaca1a20cd3c9e1e33bc475",
+  "storyIds": [
+    "ROUTE-009",
+    "ROUTE-010"
+  ],
+  "storySurfaceSignatures": {
+    "ROUTE-008": [
+      "9router.account-storage",
+      "9router.dashboard-api",
+      "9router.dashboard-settings",
+      "9router.routing"
+    ],
+    "ROUTE-009": [
+      "9router.account-storage",
+      "9router.dashboard-api",
+      "9router.dashboard-settings",
+      "9router.routing"
+    ],
+    "ROUTE-010": [
+      "9router.routing"
+    ]
+  },
+  "ownershipDecision": {
+    "ROUTE-009": null,
+    "ROUTE-010": null
+  },
+  "taskBindingState": {
+    "ROUTE-009": "generic-disc-002-placeholder-no-task-card-or-worklog",
+    "ROUTE-010": "generic-disc-002-placeholder-no-task-card-or-worklog"
+  },
+  "surfaceAmbiguity": {
+    "indistinguishablePair": [
+      "ROUTE-008",
+      "ROUTE-009"
+    ],
+    "reason": "ROUTE-008 and ROUTE-009 have identical live behavior-surface signatures. Subtracting the frozen ROUTE-008 blocker does not assign its remaining account/dashboard/routing semantics to ROUTE-009.",
+    "singletonCaveat": "ROUTE-010 is the only unresolved non-frozen row left on 9router.routing after local implementations are subtracted, but singleton membership is not a task contract."
+  },
+  "searchedTrees": [
+    {
+      "path": "src/lib/db/repos",
+      "treeSha": "b4003d54475937a4725f0ded80d15ce141a8968a"
+    },
+    {
+      "path": "src/sse",
+      "treeSha": "9695b177ba9fec8f239c2421dff72451fc8a33bc"
+    },
+    {
+      "path": "src/app/api",
+      "treeSha": "cf3dc542384f2563aad0b2e18027174a254c41ca"
+    },
+    {
+      "path": "tests/unit",
+      "treeSha": "f6d4e36804444bd060e1228c1013b37381a40589"
+    },
+    {
+      "path": "docs",
+      "treeSha": "0191d1148055116c7721d8dcd9ee3adcdbe27d2e"
+    },
+    {
+      "path": "gitbook/content/en/features",
+      "treeSha": "c00ba83da09ebd01a8ac40504dbc862343eff54d"
+    }
+  ],
+  "generatedContractSearch": {
+    "inventory": "sources/inventory/9router.jsonl",
+    "pathPatterns": [
+      "openapi",
+      "swagger",
+      "generated.*contract",
+      "contract.*generated",
+      "api.*schema",
+      "schema.*api"
+    ],
+    "matches": [],
+    "conclusion": "The pinned full-tree inventory contains no generated OpenAPI/Swagger/API-contract artifact that binds dashboard or routing wire shapes to ROUTE-009 or ROUTE-010."
+  },
+  "subtractedOwners": [
+    {
+      "id": "ROUTE-001",
+      "task": "tasks/ROUTE-001.md",
+      "worklog": "worklog/ROUTE-001.md",
+      "implementationCommit": "5e1c98ef6133f414dd9311a831dd20126cdbe3bf",
+      "ownedPartition": "account eligibility, model-lock exclusion and typed retry/unavailable exhaustion"
+    },
+    {
+      "id": "ROUTE-002",
+      "task": "tasks/ROUTE-002.md",
+      "worklog": "worklog/ROUTE-002.md",
+      "implementationCommit": "2d1a47d7caad2b1ef044cb4f963a112c969623ea",
+      "ownedPartition": "preferred/fill-first/sticky round-robin account selection with caller-owned persistence patches"
+    },
+    {
+      "id": "ROUTE-003",
+      "task": "tasks/ROUTE-003.md",
+      "worklog": "worklog/ROUTE-003.md",
+      "implementationCommit": "dabf09d16e3989ac1835b736a8a684d226d4bb84",
+      "ownedPartition": "failure-to-model/account lock planning and bounded failure state"
+    },
+    {
+      "id": "ROUTE-004",
+      "task": "tasks/ROUTE-004.md",
+      "worklog": "worklog/ROUTE-004.md",
+      "implementationCommit": "47d749cfd62c66718d0ad58e8512c871bc91a121",
+      "ownedPartition": "successful request and expired-lock recovery planning"
+    },
+    {
+      "id": "ROUTE-005",
+      "task": "tasks/ROUTE-005.md",
+      "worklog": "worklog/ROUTE-005.md",
+      "implementationCommit": "116ef477b4489a22aa4edd9ec6525bcea2b9c3d5",
+      "ownedPartition": "explicit provider/model, alias and combo-name resolution"
+    },
+    {
+      "id": "ROUTE-007",
+      "task": "tasks/ROUTE-007.md",
+      "worklog": "worklog/ROUTE-007.md",
+      "implementationCommit": "79448b709f32939f76a7f2b8b64d439ff0325625",
+      "ownedPartition": "compatible-provider prefix precedence without combo execution"
+    },
+    {
+      "id": "ROUTE-011",
+      "task": "tasks/ROUTE-011.md",
+      "worklog": "worklog/ROUTE-011.md",
+      "implementationCommit": "20155fed4de0bf97853e7a022a121672f8d8dd2f",
+      "ownedPartition": "bounded account fallback exclusion/retry/terminal exhaustion coordinator"
+    }
+  ],
+  "implementedRoutingOutsideThis9routerSurface": [
+    {
+      "id": "ROUTE-012",
+      "implementationCommit": "caf050398a84a6aced49b72c1c2bba9b5bb5555e",
+      "reason": "Cheap-model chore routing is locally implemented but is not nominated by the 9router.routing surface, so it is retained as routing history rather than used to assign ROUTE-009/010 semantics."
+    }
+  ],
+  "frozenOwners": [
+    {
+      "id": "ROUTE-006",
+      "reasonKey": "proxy-authority-and-platform-boundary"
+    },
+    {
+      "id": "ROUTE-008",
+      "reasonKey": "routing-dashboard-ownership-overlap"
+    }
+  ],
+  "reviewedPartitions": [
+    {
+      "id": "account-storage-schema-and-credentials",
+      "surfaceIds": [
+        "9router.account-storage",
+        "9router.routing"
+      ],
+      "evidence": [
+        {
+          "path": "src/lib/db/repos/connectionsRepo.js",
+          "blobSha": "78abfc9052f8d63f70c96a27b58b1a33024ca40e",
+          "reviewedLines": {
+            "from": 1,
+            "to": 285
+          }
+        },
+        {
+          "path": "src/lib/db/schema.js",
+          "blobSha": "099386c26ef3c0aeffac901965852538eb2bc481",
+          "reviewedLines": {
+            "from": 28,
+            "to": 52
+          }
+        },
+        {
+          "path": "tests/unit/db-sqlite-vs-lowdb.test.js",
+          "blobSha": "4955cd8867885925ad46ae720a5cde90d15f0c2b",
+          "reviewedLines": {
+            "from": 26,
+            "to": 214
+          }
+        }
+      ],
+      "behavior": "Provider-connection schema, credential-bearing CRUD/dedup/reordering, settings persistence and health-state reset are reference persistence contracts.",
+      "sideEffects": [
+        "user-database-mutation",
+        "credential-and-token-state",
+        "transactional-schema-lifecycle"
+      ],
+      "ownershipBlocker": "Pure eligibility/selection/lock planning is already locally owned; no pinned task evidence assigns the remaining persistence or credential lifecycle to ROUTE-009 rather than frozen ROUTE-008 or another storage/security owner."
+    },
+    {
+      "id": "dashboard-status-and-secret-safe-projection",
+      "surfaceIds": [
+        "9router.dashboard-api"
+      ],
+      "evidence": [
+        {
+          "path": "src/app/(dashboard)/dashboard/providers/utils.js",
+          "blobSha": "fa11432555f2e29cc94d75af211b19a50f5c9ba1",
+          "reviewedLines": {
+            "from": 1,
+            "to": 19
+          }
+        },
+        {
+          "path": "tests/unit/providers-status-filter.test.js",
+          "blobSha": "fdcfd8350061dfcec47375bfe985e24148e6c427",
+          "reviewedLines": {
+            "from": 1,
+            "to": 52
+          }
+        },
+        {
+          "path": "src/app/api/providers/route.js",
+          "blobSha": "5885472be76ac4f8c9d0fc469d0024bb3e6064c8",
+          "reviewedLines": {
+            "from": 49,
+            "to": 84
+          }
+        },
+        {
+          "path": "src/app/api/models/availability/route.js",
+          "blobSha": "cceacdaf62c7d73e6bd377710427fc2280e9485d",
+          "reviewedLines": {
+            "from": 9,
+            "to": 103
+          }
+        },
+        {
+          "path": "src/app/(dashboard)/dashboard/providers/page.js",
+          "blobSha": "a0eb586cec58c24b1f794dc4c5314a4e6b2602ba",
+          "reviewedLines": {
+            "from": 173,
+            "to": 218
+          }
+        }
+      ],
+      "behavior": "The dashboard has several different provider/model status projections: noAuth classification, effective cooldown status, connected/error/all-disabled/latest-error summary, and a secret-stripped provider response.",
+      "sideEffects": [
+        "wall-clock-dependent-cooldown-projection",
+        "cooldown-clear-database-mutation",
+        "browser-dashboard-consumption"
+      ],
+      "ownershipBlocker": "A small pure status classifier has a direct test, but ROUTE-009 and frozen ROUTE-008 are surface-indistinguishable and no task-specific source/spec binds that classifier or the larger API projection to ROUTE-009."
+    },
+    {
+      "id": "dashboard-settings-and-runtime-side-effects",
+      "surfaceIds": [
+        "9router.dashboard-settings"
+      ],
+      "evidence": [
+        {
+          "path": "src/app/api/settings/route.js",
+          "blobSha": "6a713433156d02b58203505f63fd06c1e58e9bca",
+          "reviewedLines": {
+            "from": 10,
+            "to": 118
+          }
+        },
+        {
+          "path": "src/lib/db/repos/settingsRepo.js",
+          "blobSha": "b94f770aa828f1ed373c8992ba97dc7b3b2e75f4",
+          "reviewedLines": {
+            "from": 7,
+            "to": 110
+          }
+        },
+        {
+          "path": "tests/unit/db-sqlite-vs-lowdb.test.js",
+          "blobSha": "4955cd8867885925ad46ae720a5cde90d15f0c2b",
+          "reviewedLines": {
+            "from": 26,
+            "to": 48
+          }
+        },
+        {
+          "path": "tests/unit/rtk.multi-provider.e2e.test.js",
+          "blobSha": "69da14b0e1d555543b80fd4a140ba84068904bd1",
+          "reviewedLines": {
+            "from": 108,
+            "to": 114
+          }
+        }
+      ],
+      "behavior": "Settings reads merge broad defaults and redact/derive selected secret state; writes merge persistent state and can immediately mutate proxy environment, combo rotation and auto-ping runtime behavior.",
+      "sideEffects": [
+        "user-database-mutation",
+        "password-and-oidc-secret-handling",
+        "process-environment-mutation",
+        "runtime-combo-reset",
+        "dynamic-background-service-configuration"
+      ],
+      "ownershipBlocker": "The settings surface crosses routing, authentication, UI and runtime configuration authority and has no task-level ROUTE-009 contract or direct route test matrix."
+    },
+    {
+      "id": "routing-runtime-remainder",
+      "surfaceIds": [
+        "9router.routing"
+      ],
+      "evidence": [
+        {
+          "path": "src/sse/services/auth.js",
+          "blobSha": "d85c4901159e6dc13a7ac89a1777b63477a55277",
+          "reviewedLines": {
+            "from": 9,
+            "to": 364
+          }
+        },
+        {
+          "path": "src/sse/handlers/chat.js",
+          "blobSha": "7aa530d381c1cc1da4f6ca667a7abe271a8fbc8e",
+          "reviewedLines": {
+            "from": 200,
+            "to": 339
+          }
+        },
+        {
+          "path": "docs/ARCHITECTURE.md",
+          "blobSha": "548c31908d73003617d630d7a15e45597e7b8183",
+          "reviewedLines": {
+            "from": 180,
+            "to": 270
+          }
+        },
+        {
+          "path": "gitbook/content/en/features/smart-routing.md",
+          "blobSha": "a6aa0c5cdf6bd6e0c2539db5f4bbd6e2417792b9",
+          "reviewedLines": {
+            "from": 1,
+            "to": 407
+          }
+        }
+      ],
+      "behavior": "After the implemented pure routing phases are removed, auth/chat still contain a global selection mutex, no-auth proxy selection, Antigravity quota/time filtering, credential/proxy materialization, token refresh/project-id/provider execution, settings reads and combo/provider fallback orchestration.",
+      "sideEffects": [
+        "global-concurrency-state",
+        "credential-materialization",
+        "wall-clock-and-provider-quota-state",
+        "network-and-token-refresh",
+        "proxy-resolution",
+        "user-database-mutation",
+        "provider-execution-and-streaming"
+      ],
+      "ownershipBlocker": "ROUTE-010 has no task-specific contract selecting one of these remaining behaviors. Treating routing-only membership as ownership would reassign heterogeneous side effects after subtracting already implemented or frozen tasks."
+    }
+  ],
+  "candidateFragments": [
+    {
+      "id": "provider-status-classification",
+      "inputs": "provider connection counts/all-disabled state plus noAuth flag",
+      "outputs": "active/inactive/none classification",
+      "failureSemantics": "pure total classification over caller-supplied summary",
+      "stateLifetime": "none",
+      "resourceLifetime": "bounded caller-supplied values only",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "No ROUTE-009 task/card/spec binds this fragment.",
+        "ROUTE-008 and ROUTE-009 have identical live surface signatures.",
+        "The wider dashboard status surface has additional cooldown/error/secret-redaction semantics."
+      ]
+    },
+    {
+      "id": "routing-runtime-remainder",
+      "inputs": "provider/model request, stored connections/settings, credentials, provider-specific quota and proxy state",
+      "outputs": "credential-bearing provider execution/fallback behavior",
+      "failureSemantics": "provider-specific availability, rate-limit, refresh, proxy and endpoint failures",
+      "stateLifetime": "global mutex plus persistent connection/settings state and provider caches",
+      "resourceLifetime": "network requests, credentials, wall clock, DB writes and stream/request lifetime",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "Hidden network/credential/storage/runtime assumptions violate the authorized pure native boundary.",
+        "Already implemented ROUTE-001/002/003/004/011 own the source-grounded pure account subcontracts.",
+        "Frozen ROUTE-006/008 still overlap proxy/dashboard authority."
+      ]
+    }
+  ],
+  "unresolvedPartitions": [
+    "account-storage-schema-credential-lifecycle",
+    "dashboard-provider-status-and-secret-redaction",
+    "dashboard-settings-security-and-runtime-side-effects",
+    "routing-provider-specific-quota-proxy-and-credential-runtime",
+    "combo-stream-provider-execution-and-token-refresh"
+  ],
+  "adjacentSingletonChecks": [
+    {
+      "storyId": "EXT-005",
+      "surfaceIds": [
+        "opencode.extensibility",
+        "opencode.legacy-compatibility"
+      ],
+      "requirementIds": [
+        "REQ-005"
+      ],
+      "requirementTaskSplit": [
+        "EXT-005",
+        "EXT-009",
+        "EXT-012",
+        "UI-012"
+      ],
+      "ownershipEstablished": false,
+      "reason": "Legacy-compatibility becomes an arithmetic singleton only after other owners are subtracted. EventV2 wire compatibility is already narrowed by locally implemented INT-008, while ConfigV2Compat lowering spans plugins/providers/settings/models/skills/agents/commands/MCP/LSP/permissions and cannot be reassigned to EXT-005 from set subtraction.",
+      "pinnedEvidence": [
+        {
+          "path": "packages/opencode/src/config/v2-compat.ts",
+          "blobSha": "9e4e0bf54089af28bf96db7e8825c12c92bec723",
+          "reviewedLines": {
+            "from": 1,
+            "to": 260
+          }
+        },
+        {
+          "path": "packages/opencode/src/config/config.ts",
+          "blobSha": "9e10b67fe703609a3ccf243ebe1801bf338961d3",
+          "reviewedLines": {
+            "from": 188,
+            "to": 199
+          }
+        },
+        {
+          "path": "packages/opencode/test/config/v2-compat.test.ts",
+          "blobSha": "51873f0c4e826ec1244c9a1d18177cb89664012f",
+          "reviewedLines": {
+            "from": 42,
+            "to": 284
+          }
+        },
+        {
+          "path": "packages/opencode/test/config/fixtures/v2-compat/README.md",
+          "blobSha": "7875647633707fbe792c9ec41bfb536419395b78",
+          "reviewedLines": {
+            "from": 1,
+            "to": 40
+          }
+        }
+      ],
+      "closure": "Require a pinned task-specific source/caller/test/spec contract that identifies the EXT-005 entrypoint and excludes already-owned event compatibility plus unrelated EXT/UI/tool/plugin-runtime behavior."
+    },
+    {
+      "storyId": "WEB-004",
+      "surfaceIds": [
+        "opencode.enterprise-remote",
+        "opencode.server-control-plane"
+      ],
+      "ownershipEstablished": false,
+      "reason": "Server-control-plane becomes an arithmetic singleton only after accepted/local owners are subtracted, but its reviewed contract is typed MoveSession/HttpApi composition with Git/session/project mutations. WEB-004 also remains on heterogeneous enterprise-remote, whose missing in-surface specification is separately machine-locked.",
+      "pinnedEvidenceIds": [
+        "OC-SERVER-API",
+        "OC-CONTROL-PLANE-MOVE",
+        "OC-CONTROL-PLANE-HANDLER",
+        "OC-CONTROL-PLANE-TEST",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-HTTPAPI-ROUTE-SPEC",
+        "OC-ENTERPRISE-SHARE",
+        "OC-FUNCTION-REMOTE"
+      ],
+      "closure": "Require source-grounded decomposition of hosted web exposure from control-plane domain side effects and the enterprise-remote partitions; the existing enterprise spec gap must also be intentionally resolved where relevant."
+    }
+  ],
+  "historyReview": {
+    "state": "locked-checkout-grafted-at-pinned-commit",
+    "limitation": "The local pinned 9router checkout exposes the locked commit but does not provide a usable earlier history chain for these paths; no historical task binding is inferred from unavailable commits."
+  },
+  "closureCriteria": [
+    "A ROUTE-009 or ROUTE-010 ownership change must be backed by new pinned task/path evidence rather than residual set arithmetic.",
+    "The candidate must have task-specific source, direct caller, direct test and genuine specification evidence with explicit inputs, outputs, failure semantics, state/resource lifetime and bounded authority.",
+    "The candidate must exclude all locally implemented and frozen routing ownership above and must not require hidden JS runtime, credentials, user-DB mutation, network, UI/browser state, process environment mutation or an unapproved dependency.",
+    "Every unresolved partition must be assigned by source-grounded decomposition or remain explicitly blocked; no singleton surface is sufficient by itself."
+  ]
+}
