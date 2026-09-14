@@ -16,6 +16,7 @@ class CiEnforcementTests(unittest.TestCase):
             validate_repository.REQUIRED_CHECKS,
             (
                 ("ruleset import", ("tools/render_ruleset_import.py", "--check")),
+                ("ruleset readback verifier fixtures", ("tools/verify_ruleset_readback.py", "--self-test")),
                 ("repository protection", ("tools/validate_protection_policy.py",)),
                 ("backlog exhaustion", ("tools/validate_backlog_exhaustion.py",)),
                 ("DISC-003 reconciliation", ("tools/reconcile_surfaces.py", "--check-manifest")),

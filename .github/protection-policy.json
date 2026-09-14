@@ -10,6 +10,12 @@
     "codeowners": ".github/CODEOWNERS",
     "rulesetImportArtifact": ".github/rulesets/main.disabled.json",
     "rulesetRenderer": "tools/render_ruleset_import.py",
+    "rulesetReadbackVerifier": "tools/verify_ruleset_readback.py",
+    "rulesetReadbackFixtures": [
+      "tests/fixtures/rulesets/github-active-matching.json",
+      "tests/fixtures/rulesets/github-active-mismatching.json",
+      "tests/fixtures/rulesets/github-active-incomplete-export.json"
+    ],
     "defaultOwnerPattern": "*",
     "protectedPaths": [
       ".github/CODEOWNERS",
@@ -42,7 +48,11 @@
       "tests/bootstrap/test_ci_enforcement.py",
       "tests/bootstrap/test_disc003_reconciliation.py",
       "tests/bootstrap/test_protection_policy.py",
+      "tests/bootstrap/test_ruleset_readback_verifier.py",
       "tests/bootstrap/test_validate_plan.py",
+      "tests/fixtures/rulesets/github-active-incomplete-export.json",
+      "tests/fixtures/rulesets/github-active-matching.json",
+      "tests/fixtures/rulesets/github-active-mismatching.json",
       "tools/auto_drive.py",
       "tools/lane_gate.py",
       "tools/plan_model.py",
@@ -53,6 +63,7 @@
       "tools/validate_plan.py",
       "tools/validate_protection_policy.py",
       "tools/validate_repository.py",
+      "tools/verify_ruleset_readback.py",
       "workspaces/DISC-003/progress.md",
       "workspaces/DISC-003/source-map.json"
     ]
@@ -64,6 +75,7 @@
       "planning"
     ],
     "requireBranchUpToDate": true,
+    "doNotEnforceStatusChecksOnCreate": false,
     "requirePullRequest": true,
     "requiredApprovingReviewCount": 1,
     "requireCodeOwnerReview": true,

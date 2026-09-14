@@ -26,6 +26,9 @@ EXPECTED_CODEOWNER_PATTERNS = (
     "*",
     "/.github/",
     "/.github/rulesets/main.disabled.json",
+    "/tests/fixtures/rulesets/github-active-incomplete-export.json",
+    "/tests/fixtures/rulesets/github-active-matching.json",
+    "/tests/fixtures/rulesets/github-active-mismatching.json",
     "/AGENTS.md",
     "/PLAN.md",
     "/README.md",
@@ -47,12 +50,14 @@ EXPECTED_CODEOWNER_PATTERNS = (
     "/tools/validate_backlog_exhaustion.py",
     "/tools/reconcile_surfaces.py",
     "/tools/render_ruleset_import.py",
+    "/tools/verify_ruleset_readback.py",
     "/tools/validate_plan.py",
     "/tests/bootstrap/test_ci_enforcement.py",
     "/tests/bootstrap/test_protection_policy.py",
     "/tests/bootstrap/test_backlog_exhaustion.py",
     "/tests/bootstrap/test_disc003_reconciliation.py",
     "/tests/bootstrap/test_validate_plan.py",
+    "/tests/bootstrap/test_ruleset_readback_verifier.py",
     "/ralph.json",
     "/FEATURES.md",
     "/sources/backlog-exhaustion.json",
@@ -98,13 +103,18 @@ PROTECTED_PATHS = tuple(sorted({
     "tests/bootstrap/test_ci_enforcement.py",
     "tests/bootstrap/test_disc003_reconciliation.py",
     "tests/bootstrap/test_protection_policy.py",
+    "tests/bootstrap/test_ruleset_readback_verifier.py",
     "tests/bootstrap/test_validate_plan.py",
+    "tests/fixtures/rulesets/github-active-incomplete-export.json",
+    "tests/fixtures/rulesets/github-active-matching.json",
+    "tests/fixtures/rulesets/github-active-mismatching.json",
     "tools/auto_drive.py",
     "tools/lane_gate.py",
     "tools/plan_model.py",
     "tools/ralph_loop.py",
     "tools/reconcile_surfaces.py",
     "tools/render_ruleset_import.py",
+    "tools/verify_ruleset_readback.py",
     "tools/validate_backlog_exhaustion.py",
     "tools/validate_plan.py",
     "tools/validate_protection_policy.py",
@@ -118,6 +128,7 @@ EXPECTED_RULESET = {
     "targetBranch": "main",
     "requiredStatusChecks": ["planning"],
     "requireBranchUpToDate": True,
+    "doNotEnforceStatusChecksOnCreate": False,
     "requirePullRequest": True,
     "requiredApprovingReviewCount": 1,
     "requireCodeOwnerReview": True,
@@ -182,6 +193,7 @@ def protection_policy_errors(root: pathlib.Path = ROOT) -> list[str]:
             "codeowners": ".github/CODEOWNERS",
             "rulesetImportArtifact": ".github/rulesets/main.disabled.json",
             "rulesetRenderer": "tools/render_ruleset_import.py",
+            "rulesetReadbackVerifier": "tools/verify_ruleset_readback.py",
             "defaultOwnerPattern": "*",
         }
         for key, expected in expected_scalar.items():
@@ -189,6 +201,13 @@ def protection_policy_errors(root: pathlib.Path = ROOT) -> list[str]:
                 errors.append(f"repository protection sourceControlled.{key} drifted")
         if source.get("protectedPaths") != list(PROTECTED_PATHS):
             errors.append("repository protection protectedPaths drifted")
+        expected_fixtures = [
+            "tests/fixtures/rulesets/github-active-matching.json",
+            "tests/fixtures/rulesets/github-active-mismatching.json",
+            "tests/fixtures/rulesets/github-active-incomplete-export.json",
+        ]
+        if source.get("rulesetReadbackFixtures") != expected_fixtures:
+            errors.append("repository protection sourceControlled.rulesetReadbackFixtures drifted")
 
     if policy.get("desiredExternalRuleset") != EXPECTED_RULESET:
         errors.append("repository protection desired external ruleset drifted")

@@ -54,7 +54,10 @@ class RepositoryProtectionPolicyTests(unittest.TestCase):
         for rel in (
             "tools/validate_repository.py",
             "tools/render_ruleset_import.py",
+            "tools/verify_ruleset_readback.py",
             ".github/rulesets/main.disabled.json",
+            "tests/bootstrap/test_ruleset_readback_verifier.py",
+            "tests/fixtures/rulesets/github-active-matching.json",
         ):
             with self.subTest(rel=rel), tempfile.TemporaryDirectory() as tmp:
                 tmp = pathlib.Path(tmp)

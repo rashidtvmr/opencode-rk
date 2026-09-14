@@ -47,7 +47,7 @@ def build_import_artifact(policy: dict) -> dict:
         "parameters": {
             "required_status_checks": [{"context": str(context)} for context in checks],
             "strict_required_status_checks_policy": bool(desired.get("requireBranchUpToDate")),
-            "do_not_enforce_on_create": False,
+            "do_not_enforce_on_create": bool(desired.get("doNotEnforceStatusChecksOnCreate")),
         },
     })
 

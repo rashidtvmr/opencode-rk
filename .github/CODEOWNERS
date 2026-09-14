@@ -4,6 +4,9 @@
 * @rashidtvmr
 /.github/ @rashidtvmr
 /.github/rulesets/main.disabled.json @rashidtvmr
+/tests/fixtures/rulesets/github-active-incomplete-export.json @rashidtvmr
+/tests/fixtures/rulesets/github-active-matching.json @rashidtvmr
+/tests/fixtures/rulesets/github-active-mismatching.json @rashidtvmr
 /AGENTS.md @rashidtvmr
 /PLAN.md @rashidtvmr
 /README.md @rashidtvmr
@@ -25,12 +28,14 @@
 /tools/validate_backlog_exhaustion.py @rashidtvmr
 /tools/reconcile_surfaces.py @rashidtvmr
 /tools/render_ruleset_import.py @rashidtvmr
+/tools/verify_ruleset_readback.py @rashidtvmr
 /tools/validate_plan.py @rashidtvmr
 /tests/bootstrap/test_ci_enforcement.py @rashidtvmr
 /tests/bootstrap/test_protection_policy.py @rashidtvmr
 /tests/bootstrap/test_backlog_exhaustion.py @rashidtvmr
 /tests/bootstrap/test_disc003_reconciliation.py @rashidtvmr
 /tests/bootstrap/test_validate_plan.py @rashidtvmr
+/tests/bootstrap/test_ruleset_readback_verifier.py @rashidtvmr
 /ralph.json @rashidtvmr
 /FEATURES.md @rashidtvmr
 /sources/backlog-exhaustion.json @rashidtvmr

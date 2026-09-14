@@ -20,6 +20,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 # removing a check from one entrypoint.
 REQUIRED_CHECKS = (
     ("ruleset import", ("tools/render_ruleset_import.py", "--check")),
+    ("ruleset readback verifier fixtures", ("tools/verify_ruleset_readback.py", "--self-test")),
     ("repository protection", ("tools/validate_protection_policy.py",)),
     ("backlog exhaustion", ("tools/validate_backlog_exhaustion.py",)),
     ("DISC-003 reconciliation", ("tools/reconcile_surfaces.py", "--check-manifest")),
@@ -108,7 +109,7 @@ def main() -> int:
         if result.returncode != 0:
             print(f"validate_repository: FAIL {label} exit={result.returncode}")
             return result.returncode
-    print("validate_repository: OK  ruleset-import + protection + exhaustion + DISC-003 + plan")
+    print("validate_repository: OK  ruleset-import + ruleset-readback + protection + exhaustion + DISC-003 + plan")
     return 0
 
 
