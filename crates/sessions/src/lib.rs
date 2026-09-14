@@ -1,6 +1,7 @@
 //! Session lifecycle over the format-2 workspace schema (primary) plus the
 //! legacy format-1 [`SessionService`] kept for the server/CLI boundary.
 #![forbid(unsafe_code)]
+pub mod index;
 pub mod migration;
 pub mod query;
 pub mod store;

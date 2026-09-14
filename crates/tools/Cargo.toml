@@ -14,3 +14,4 @@ tokio = { workspace = true, features = ["rt", "process"] }
 
 [dev-dependencies]
 tempfile = { workspace = true }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
