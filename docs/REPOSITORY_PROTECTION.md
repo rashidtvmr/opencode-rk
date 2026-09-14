@@ -15,6 +15,10 @@ requires:
 - `.github/protection-policy.json` to retain the exact repository, `main` target,
   `planning` required-check intent, review/bypass desired state, and protected
   path inventory;
+- `.github/rulesets/main.disabled.json` to remain the exact GitHub-importable,
+  **disabled** projection of that desired state; `tools/render_ruleset_import.py
+  --check` fails if the recipe or its `planning` context drifts, while `--write`
+  is the explicit regeneration path after an intentional policy edit;
 - every protected path to exist;
 - `.github/workflows/ci.yml` to retain the `planning` job and canonical repository
   validation/bootstrap commands through `tools/validate_repository.py`; the
@@ -25,7 +29,8 @@ requires:
 
 Bootstrap mutation tests exercise missing/renamed protected paths, CODEOWNERS owner
 or pattern drift, required-status drift, weakened review/bypass settings, and
-removal of protection validation from the canonical repository gate.
+removal of protection/import validation from the canonical repository gate. They
+also reject an import artifact that changes `enforcement` to `active` in source.
 
 These checks make accidental weakening fail locally and in the existing
 `planning` CI job. They cannot make a deleted or bypassed GitHub workflow execute
@@ -44,6 +49,65 @@ itself.
 6. linear history;
 7. no force pushes, branch deletion, or bypass actor.
 
+The import handoff is `.github/rulesets/main.disabled.json`. Its JSON shape follows
+GitHub's repository ruleset import/export format, but its checked-in
+`"enforcement": "disabled"` is intentional. Source control can prepare an exact
+recipe; it must not switch a hosting-platform control on by implication.
+
+### Administrator import, activation, and verification
+
+1. On the exact commit intended for import, run
+   `/usr/bin/python3 tools/render_ruleset_import.py --check` and
+   `/usr/bin/python3 tools/validate_repository.py`. Do not import a recipe that
+   fails either command.
+2. In GitHub, open `rashidtvmr/opencode-rk` -> **Settings** -> **Rules** ->
+   **Rulesets** -> **New ruleset** -> **Import a ruleset**, and select
+   `.github/rulesets/main.disabled.json`.
+3. Before creating it, confirm the preview remains **Disabled**, targets only
+   `refs/heads/main`, has no bypass actors, requires pull requests, one approval,
+   CODEOWNERS review, stale-review dismissal, last-push approval and resolved
+   conversations, requires strict `planning`, requires linear history, and blocks
+   deletion/non-fast-forward updates. If GitHub changes or rejects the imported
+   shape, stop and update the source recipe/validator first rather than hand-editing
+   an untracked platform variant.
+4. Create/save the imported ruleset while it is still **Disabled**. This records
+   the candidate policy without enforcing it. Read the saved disabled ruleset back
+   in the UI or with `GET /repos/rashidtvmr/opencode-rk/rulesets/RULESET_ID` and
+   compare its normalized target, bypass list, and rules to the checked-in recipe
+   before changing enforcement.
+5. If this repository/plan exposes **Evaluate** mode, it may be used temporarily
+   to inspect Rule Insights before activation. Evaluate availability is a GitHub
+   platform capability, not something this repository can assert or require.
+6. Resolve reviewer feasibility before activation. Because the only currently
+   source-grounded CODEOWNER is `@rashidtvmr`, a self-authored protected-path PR
+   may require a second real write-capable owner/reviewer. Add that real identity
+   to source and validators first; never invent one to make activation possible.
+7. Confirm the `planning` job has run successfully on a pull request. GitHub uses
+   a workflow **job name** as the required status-check context, so the expected
+   context is exactly `planning`.
+8. Only an administrator should then edit the imported ruleset in GitHub and set
+   enforcement to **Active**. This is the external activation step; no repository
+   commit may flip `platformState.verified` or the import recipe to `active` as a
+   substitute.
+9. Verify the platform state independently. In the GitHub UI, confirm the ruleset
+   is Active and targets `main`. With an authenticated admin `gh`, inspect both the
+   configured ruleset and the effective branch rules, for example:
+
+   ```sh
+   gh api -H 'X-GitHub-Api-Version: 2026-03-10' repos/rashidtvmr/opencode-rk/rulesets
+   gh api -H 'X-GitHub-Api-Version: 2026-03-10' repos/rashidtvmr/opencode-rk/rulesets/RULESET_ID
+   gh api -H 'X-GitHub-Api-Version: 2026-03-10' repos/rashidtvmr/opencode-rk/rules/branches/main
+   ```
+
+   The configured ruleset must report active enforcement, an empty bypass list,
+   the `refs/heads/main` condition and the same rule parameters as the checked-in
+   desired policy. The effective branch-rules response must include the applicable
+   pull-request, required-status-check, linear-history, deletion and
+   non-fast-forward rules. Then use an ordinary PR to confirm `planning` appears as
+   a required check and protected-path review follows CODEOWNERS. Platform/API
+   observations belong in an external administrator/verifier record; they are not
+   inferred from this document or written into DISC acceptance state.
+
 The CODEOWNERS file names only the source-grounded repository owner currently
 visible from the canonical Git remote: `@rashidtvmr`. If that owner authors a
 protected-path pull request, a required independent approval/code-owner policy may
@@ -54,11 +118,17 @@ add the real user/team and update the policy validator in the same reviewed chan
 ## What source cannot attest
 
 The checked-in policy intentionally keeps `platformState.verified` false. Local
-validation cannot prove that GitHub currently requires `planning`, requires code
-owner review, blocks administrators/bypass actors, or blocks force pushes/deletion.
-Those are repository-host settings controlled outside the Git tree. A platform
-administrator must configure them and separately verify them in GitHub. Do not
-change the checked-in field to `true` based only on local tests.
+validation cannot prove that this repository/plan currently supports ruleset import
+or Evaluate mode; that a ruleset was imported; that it is Active; what organization
+or enterprise rules are layered onto `main`; which GitHub App/integration produced
+the observed `planning` check; that `@rashidtvmr` is currently an eligible
+write-capable reviewer; or that an administrator has not changed platform settings
+after a prior verification. It likewise cannot prove that GitHub currently requires
+`planning` or code-owner review, blocks bypass actors, or blocks force
+pushes/deletion. Those are repository-host settings controlled outside the Git tree.
+A platform administrator must configure and separately verify them in GitHub. Do
+not invent an `integration_id`, and do not change the checked-in field to `true`
+based only on local tests or a point-in-time platform observation.
 
 DISC-003 and backlog exhaustion semantics are unchanged by this policy. They
 remain review/blocker evidence, not release evidence or controller acceptance.

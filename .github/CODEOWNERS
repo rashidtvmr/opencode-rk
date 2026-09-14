@@ -3,6 +3,7 @@
 # code-owner review; see docs/REPOSITORY_PROTECTION.md.
 * @rashidtvmr
 /.github/ @rashidtvmr
+/.github/rulesets/main.disabled.json @rashidtvmr
 /AGENTS.md @rashidtvmr
 /PLAN.md @rashidtvmr
 /README.md @rashidtvmr
@@ -23,6 +24,7 @@
 /tools/validate_protection_policy.py @rashidtvmr
 /tools/validate_backlog_exhaustion.py @rashidtvmr
 /tools/reconcile_surfaces.py @rashidtvmr
+/tools/render_ruleset_import.py @rashidtvmr
 /tools/validate_plan.py @rashidtvmr
 /tests/bootstrap/test_ci_enforcement.py @rashidtvmr
 /tests/bootstrap/test_protection_policy.py @rashidtvmr

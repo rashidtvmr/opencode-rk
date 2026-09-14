@@ -8,10 +8,13 @@
     "requiredJob": "planning",
     "canonicalValidator": "tools/validate_repository.py",
     "codeowners": ".github/CODEOWNERS",
+    "rulesetImportArtifact": ".github/rulesets/main.disabled.json",
+    "rulesetRenderer": "tools/render_ruleset_import.py",
     "defaultOwnerPattern": "*",
     "protectedPaths": [
       ".github/CODEOWNERS",
       ".github/protection-policy.json",
+      ".github/rulesets/main.disabled.json",
       ".github/workflows/ci.yml",
       "AGENTS.md",
       "FEATURES.md",
@@ -45,6 +48,7 @@
       "tools/plan_model.py",
       "tools/ralph_loop.py",
       "tools/reconcile_surfaces.py",
+      "tools/render_ruleset_import.py",
       "tools/validate_backlog_exhaustion.py",
       "tools/validate_plan.py",
       "tools/validate_protection_policy.py",
@@ -54,6 +58,7 @@
     ]
   },
   "desiredExternalRuleset": {
+    "desiredEnforcement": "active",
     "targetBranch": "main",
     "requiredStatusChecks": [
       "planning"

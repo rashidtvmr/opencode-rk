@@ -8,8 +8,14 @@ from __future__ import annotations
 
 import json
 import pathlib
+import sys
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from tools.render_ruleset_import import import_artifact_errors  # noqa: E402
+
 POLICY_PATH = ROOT / ".github/protection-policy.json"
 CODEOWNERS_PATH = ROOT / ".github/CODEOWNERS"
 
@@ -19,6 +25,7 @@ REPOSITORY = "rashidtvmr/opencode-rk"
 EXPECTED_CODEOWNER_PATTERNS = (
     "*",
     "/.github/",
+    "/.github/rulesets/main.disabled.json",
     "/AGENTS.md",
     "/PLAN.md",
     "/README.md",
@@ -39,6 +46,7 @@ EXPECTED_CODEOWNER_PATTERNS = (
     "/tools/validate_protection_policy.py",
     "/tools/validate_backlog_exhaustion.py",
     "/tools/reconcile_surfaces.py",
+    "/tools/render_ruleset_import.py",
     "/tools/validate_plan.py",
     "/tests/bootstrap/test_ci_enforcement.py",
     "/tests/bootstrap/test_protection_policy.py",
@@ -62,6 +70,7 @@ EXPECTED_CODEOWNER_PATTERNS = (
 PROTECTED_PATHS = tuple(sorted({
     ".github/CODEOWNERS",
     ".github/protection-policy.json",
+    ".github/rulesets/main.disabled.json",
     ".github/workflows/ci.yml",
     "AGENTS.md",
     "PLAN.md",
@@ -95,6 +104,7 @@ PROTECTED_PATHS = tuple(sorted({
     "tools/plan_model.py",
     "tools/ralph_loop.py",
     "tools/reconcile_surfaces.py",
+    "tools/render_ruleset_import.py",
     "tools/validate_backlog_exhaustion.py",
     "tools/validate_plan.py",
     "tools/validate_protection_policy.py",
@@ -104,6 +114,7 @@ PROTECTED_PATHS = tuple(sorted({
 }))
 
 EXPECTED_RULESET = {
+    "desiredEnforcement": "active",
     "targetBranch": "main",
     "requiredStatusChecks": ["planning"],
     "requireBranchUpToDate": True,
@@ -169,6 +180,8 @@ def protection_policy_errors(root: pathlib.Path = ROOT) -> list[str]:
             "requiredJob": "planning",
             "canonicalValidator": "tools/validate_repository.py",
             "codeowners": ".github/CODEOWNERS",
+            "rulesetImportArtifact": ".github/rulesets/main.disabled.json",
+            "rulesetRenderer": "tools/render_ruleset_import.py",
             "defaultOwnerPattern": "*",
         }
         for key, expected in expected_scalar.items():
@@ -199,6 +212,7 @@ def protection_policy_errors(root: pathlib.Path = ROOT) -> list[str]:
     for rel in PROTECTED_PATHS:
         if not (root / rel).is_file():
             errors.append(f"protected repository path is missing or renamed: {rel}")
+    errors.extend(import_artifact_errors(root))
     return errors
 
 
