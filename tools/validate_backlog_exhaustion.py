@@ -120,20 +120,32 @@ INTEGRATIONS_REVIEWED_PARTITIONS = (
     "typed-integration-http-handler",
     "pty-websocket-ticket-auth-boundary",
     "generated-promise-effect-client-boundary",
+    "project-location-context-resolution-boundary",
 )
 INTEGRATIONS_UNRESOLVED_RULE_PARTITIONS = (
     "packages/core/src/workspace.ts",
-    "packages/core/src/project.ts and packages/core/src/project/**",
+    "packages/core/src/project/** beyond the reviewed ProjectV2 project.ts resolution/commit boundary",
     "packages/core/src/pty.ts and packages/core/src/pty/** beyond the reviewed ticket/protocol evidence",
     "packages/core/src/git.ts",
     "packages/client/** residual runtime/generated outputs beyond reviewed contract/effect/build/promise/import-boundary evidence",
-    "packages/server/** beyond reviewed API/integration/PTY websocket handlers",
+    "packages/server/** beyond reviewed API/integration/PTY/location/session-location handlers",
     "sdks/**",
     "provider-specific integration methods external protocols auth and credential lifetimes",
 )
 INTEGRATIONS_PTY_ACCEPTED_FEATURES = ("SEC-001", "SEC-002", "SEC-008", "TOOL-005", "TOOL-013")
+INTEGRATIONS_LOCATION_RUNTIME_FEATURES = (
+    "BASE-004",
+    "BASE-005",
+    "BASE-006",
+    "BASE-007",
+    "BASE-008",
+    "OPS-001",
+    "OPS-004",
+    "OPS-005",
+    "OPS-008",
+)
 INTEGRATIONS_UNRESOLVED_PARTITIONS = (
-    "workspace-project-and-location-protocol-boundaries",
+    "workspace-control-plane-project-submodules-and-location-adjacent-runtime-ownership",
     "pty-custom-websocket-transport-and-ticket-auth",
     "git-and-repository-adjacent-integration-side-effects",
     "generated-promise-effect-client-and-sdk-ownership",
@@ -2174,8 +2186,69 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
     if not isinstance(generated_constraints, Mapping) or generated_constraints.get("manifestOwnedStaleRemovalOnly") is not True:
         errors.append("integrations generated client stale-file deletion must remain manifest-owned only")
 
+    project_location_constraints = gap.get("projectLocationConstraints")
+    expected_project_location_constraints = {
+        "projectIdentityPrecedence": [
+            "normalized-non-file-git-remote",
+            "cached-common-directory-id",
+            "root-commit",
+            "global",
+        ],
+        "fileRemoteContributesIdentity": False,
+        "resolveWritesProjectCache": False,
+        "commitWriteFailurePropagates": False,
+        "migrationAndPersistenceOwnedByLegacyService": True,
+        "requestDirectoryInputs": ["location[directory]", "x-opencode-directory", "process.cwd() fallback"],
+        "requestWorkspaceInputs": ["location[workspace]", "x-opencode-workspace"],
+        "sessionAcceptsRequestContext": False,
+        "sessionContextFields": ["directory", "workspace_id"],
+        "workspaceIdentityBranded": True,
+        "projectIdentityAlgorithmSpecEstablished": False,
+    }
+    if project_location_constraints != expected_project_location_constraints:
+        errors.append("integrations project/location constraints drifted from pinned source")
+    if (
+        not isinstance(project_location_constraints, Mapping)
+        or project_location_constraints.get("resolveWritesProjectCache") is not False
+    ):
+        errors.append("integrations ProjectV2 resolve must remain read-only with respect to the project cache")
+    if (
+        not isinstance(project_location_constraints, Mapping)
+        or project_location_constraints.get("migrationAndPersistenceOwnedByLegacyService") is not True
+    ):
+        errors.append("integrations ProjectV2 cannot silently absorb legacy migration/persistence ownership")
+    if (
+        not isinstance(project_location_constraints, Mapping)
+        or project_location_constraints.get("projectIdentityAlgorithmSpecEstablished") is not False
+    ):
+        errors.append("integrations ProjectV2 identity algorithm must remain explicitly missing a genuine spec")
+    if (
+        not isinstance(project_location_constraints, Mapping)
+        or project_location_constraints.get("sessionAcceptsRequestContext") is not False
+    ):
+        errors.append("integrations session location must remain pinned to stored session context")
+
+    location_overlap = gap.get("locationSurfaceOverlap")
+    if not isinstance(location_overlap, Mapping) or (
+        location_overlap.get("surfaceId") != "opencode.configuration-runtime"
+        or location_overlap.get("featureIds") != list(INTEGRATIONS_LOCATION_RUNTIME_FEATURES)
+        or location_overlap.get("overlapPattern") != "packages/core/src/location*"
+        or not str(location_overlap.get("conclusion", "")).strip()
+    ):
+        errors.append("integrations Location configuration-runtime overlap guard drifted")
+    configuration_surface = next((item for item in rule_rows if item.get("id") == "opencode.configuration-runtime"), None)
+    if not isinstance(configuration_surface, Mapping) or (
+        configuration_surface.get("featureIds") != list(INTEGRATIONS_LOCATION_RUNTIME_FEATURES)
+        or "packages/core/src/location*" not in configuration_surface.get("patterns", [])
+    ):
+        errors.append("integrations adjacent Location configuration-runtime surface drifted")
+
     candidates = gap.get("candidateFragments")
-    expected_candidate_ids = ["client-server-contract-generation-identity", "generated-promise-effect-client-emission"]
+    expected_candidate_ids = [
+        "client-server-contract-generation-identity",
+        "generated-promise-effect-client-emission",
+        "project-location-context-resolution",
+    ]
     if not isinstance(candidates, list) or [item.get("id") for item in candidates if isinstance(item, Mapping)] != expected_candidate_ids:
         errors.append("integrations candidate fragment set drifted")
     else:
@@ -2187,7 +2260,7 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
     history = gap.get("historyReview")
     if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit" or not str(history.get("limitation", "")).strip():
         errors.append("integrations history-review limitation drifted")
-    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 5:
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 6:
         errors.append("integrations closure criteria drifted")
     return errors
 

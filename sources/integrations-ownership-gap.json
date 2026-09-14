@@ -156,6 +156,28 @@
       "stateLifetime": "code generation is build-time; a private manifest tracks only files owned by the generator so stale generated files can be removed without deleting unrelated files; runtime client state is per client/stream and generated streams do not reconnect automatically",
       "resourceLifetime": "the product build emits Promise and Effect outputs with concurrency two; Promise SSE parsing caps its accumulated string buffer at 1,048,576 JavaScript string units and cancels/releases the reader on exit; network lifetime belongs to the supplied fetch/HttpClient transport",
       "ownershipBlocker": "The generator is generic infrastructure and its own spec says OpenCode owns product endpoint filtering before generation. Product caller/tests still map to the same broad integration/server-control-plane surfaces, including already implemented INT-008 behavior. Generated-client evidence therefore cannot distinguish one of the six residual INT ids or imply ownership of the separate sdks/** remainder."
+    },
+    {
+      "id": "project-location-context-resolution-boundary",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {"kind":"source","path":"packages/core/src/project.ts","blobSha":"49e054d7cc9ae2c3229669e949089f3174242ecd","reviewedLines":{"from":1,"to":136}},
+        {"kind":"caller","path":"packages/server/src/location.ts","blobSha":"8ae5aa6e6d08b26ed063ad7841b7195b3096ff7a","reviewedLines":{"from":11,"to":60}},
+        {"kind":"caller","path":"packages/server/src/middleware/session-location.ts","blobSha":"86fa80f75c1ed4b6113a568718b4221c25717041","reviewedLines":{"from":15,"to":67}},
+        {"kind":"source","path":"packages/protocol/src/groups/location.ts","blobSha":"1752bae9bebefd0577eb075b9443d3aadabf0855","reviewedLines":{"from":5,"to":41}},
+        {"kind":"source","path":"packages/core/src/location.ts","blobSha":"8228b8599ea3b26a7212ab576dab0f43d3b80a78","reviewedLines":{"from":11,"to":39}},
+        {"kind":"test","path":"packages/core/test/project.test.ts","blobSha":"fa709a8b2bf52d55404a8438da1635a40a78e78d","reviewedLines":{"from":41,"to":220}},
+        {"kind":"test","path":"packages/opencode/test/server/httpapi-v2-location.test.ts","blobSha":"cf009812b869ff4b093932349d9cd62f0e1a1224","reviewedLines":{"from":80,"to":125}},
+        {"kind":"test","path":"packages/opencode/test/server/httpapi-sdk.test.ts","blobSha":"c81b3b771b2400ffa7191b67330f1e03a4fea01d","reviewedLines":{"from":381,"to":407}},
+        {"kind":"spec","path":"specs/v2/api.html","blobSha":"147d24f58bb30c479acca1e4a16f393eea4fead2","reviewedLines":{"from":424,"to":516}},
+        {"kind":"spec","path":"specs/v2/schema-changelog.md","blobSha":"379c675d3dbb1d4642ef4016fabc1fecdbc61526","reviewedLines":{"from":232,"to":251}}
+      ],
+      "inputs": "an absolute directory or an HTTP request/session identity; request-scoped routes accept nested location directory/workspace query values or compatibility headers, while session-scoped routes resolve the stored session directory/workspace instead of request context",
+      "outputs": "a deterministic project identity/location context containing canonical project directory, optional branded workspace identity and optional git VCS metadata, then a location-scoped service layer for the resolved Location.Ref",
+      "failureSemantics": "project cache reads are best-effort and resolution falls back deterministically; project cache commit ignores write failure by design; invalid session IDs become InvalidRequestError, missing sessions become SessionNotFoundError and session database read defects die; malformed percent-encoded directory headers fall back to the raw header text",
+      "stateLifetime": "ProjectV2.resolve reads but does not mutate the repo-local project cache; commit is a temporary bridge after old-service migration/persistence; request location context is request-scoped while session context remains pinned in the session row; the underlying core Location runtime has separate configuration-runtime ownership",
+      "resourceLifetime": "project resolution performs filesystem and git discovery/remote/history reads; request middleware itself is request-scoped while session middleware also reads database state; location-scoped runtime lifetime is delegated to the separately owned core Location runtime rather than established by this integration boundary",
+      "ownershipBlocker": "ProjectV2 explicitly leaves database migration/persistence to the old service, placing commit-side effects next to frozen INT-002 repository ownership, and no genuine spec defines its remote/cache/root/global identity precedence. Core location services are separately mapped to configuration-runtime owners, while cross-location EventV2 compatibility overlaps frozen implemented INT-008. The six residual INT rows remain task-indistinguishable, so this protocol/context boundary cannot select one owner."
     }
   ],
   "ptyBoundaryConstraints": {
@@ -192,13 +214,32 @@
     "manifestOwnedStaleRemovalOnly": true,
     "rejectExistingSymlinkTargets": true
   },
+  "projectLocationConstraints": {
+    "projectIdentityPrecedence": ["normalized-non-file-git-remote", "cached-common-directory-id", "root-commit", "global"],
+    "fileRemoteContributesIdentity": false,
+    "resolveWritesProjectCache": false,
+    "commitWriteFailurePropagates": false,
+    "migrationAndPersistenceOwnedByLegacyService": true,
+    "requestDirectoryInputs": ["location[directory]", "x-opencode-directory", "process.cwd() fallback"],
+    "requestWorkspaceInputs": ["location[workspace]", "x-opencode-workspace"],
+    "sessionAcceptsRequestContext": false,
+    "sessionContextFields": ["directory", "workspace_id"],
+    "workspaceIdentityBranded": true,
+    "projectIdentityAlgorithmSpecEstablished": false
+  },
+  "locationSurfaceOverlap": {
+    "surfaceId": "opencode.configuration-runtime",
+    "featureIds": ["BASE-004", "BASE-005", "BASE-006", "BASE-007", "BASE-008", "OPS-001", "OPS-004", "OPS-005", "OPS-008"],
+    "overlapPattern": "packages/core/src/location*",
+    "conclusion": "Location and LocationServiceMap runtime ownership is governed by the separate configuration-runtime surface. Their use by server integration middleware does not transfer those core runtime semantics to a residual INT row."
+  },
   "unresolvedRulePartitions": [
     "packages/core/src/workspace.ts",
-    "packages/core/src/project.ts and packages/core/src/project/**",
+    "packages/core/src/project/** beyond the reviewed ProjectV2 project.ts resolution/commit boundary",
     "packages/core/src/pty.ts and packages/core/src/pty/** beyond the reviewed ticket/protocol evidence",
     "packages/core/src/git.ts",
     "packages/client/** residual runtime/generated outputs beyond reviewed contract/effect/build/promise/import-boundary evidence",
-    "packages/server/** beyond reviewed API/integration/PTY websocket handlers",
+    "packages/server/** beyond reviewed API/integration/PTY/location/session-location handlers",
     "sdks/**",
     "provider-specific integration methods external protocols auth and credential lifetimes"
   ],
@@ -220,10 +261,19 @@
         "The six residual INT rows remain source-identical, while product build/tests also overlap server-control-plane and already implemented INT-008 behavior.",
         "Generated Promise/Effect client ownership does not establish ownership of the separate sdks/** family or provider-specific external protocols."
       ]
+    },
+    {
+      "id": "project-location-context-resolution",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "ProjectV2 source explicitly reserves database migration/persistence for the old service, so its temporary commit bridge cannot be separated from frozen repository-side-effect ownership by task arithmetic.",
+        "Core Location runtime belongs to the distinct configuration-runtime surface and cross-location EventV2 tests overlap frozen implemented INT-008 compatibility.",
+        "The six residual INT rows still have no task-specific binding that distinguishes project/location protocol ownership."
+      ]
     }
   ],
   "unresolvedPartitions": [
-    "workspace-project-and-location-protocol-boundaries",
+    "workspace-control-plane-project-submodules-and-location-adjacent-runtime-ownership",
     "pty-custom-websocket-transport-and-ticket-auth",
     "git-and-repository-adjacent-integration-side-effects",
     "generated-promise-effect-client-and-sdk-ownership",
@@ -240,6 +290,7 @@
     "Any network/transport candidate must explicitly own credentials, authentication, reconnect/timeout/failure behavior and resource lifetime and must not re-own INT-004 or frozen INT-008 behavior.",
     "INT-002 remains frozen for repository side effects and INT-010 remains governed by the enterprise-remote missing-spec record unless materially new pinned evidence resolves those blockers.",
     "The PTY WebSocket/ticket boundary remains blocked until task-specific evidence distinguishes a residual INT owner and explicitly resolves the unbounded outbox, graceful-shutdown lifetime and server auth/network authority without re-owning accepted process-terminal behavior.",
+    "Project/location ownership remains blocked until task-specific evidence separates pure identity/context resolution from legacy migration/persistence, the configuration-runtime Location graph and frozen EventV2 compatibility, with explicit filesystem/git/database authority and lifetime bounds.",
     "All reviewed and unresolved rule partitions must receive source-grounded task dispositions or remain blocked before the integrations family can be called decomposed."
   ]
 }

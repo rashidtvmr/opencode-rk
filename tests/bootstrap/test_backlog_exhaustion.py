@@ -378,6 +378,34 @@ class BacklogExhaustionTests(unittest.TestCase):
                 lambda gap: gap["candidateFragments"][1].__setitem__("ownershipEstablished", True),
                 "cannot become owned from controller-status/task arithmetic: generated-promise-effect-client-emission",
             ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["projectLocationConstraints"].__setitem__("resolveWritesProjectCache", True),
+                "ProjectV2 resolve must remain read-only with respect to the project cache",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["projectLocationConstraints"].__setitem__(
+                    "migrationAndPersistenceOwnedByLegacyService", False
+                ),
+                "ProjectV2 cannot silently absorb legacy migration/persistence ownership",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["projectLocationConstraints"].__setitem__(
+                    "projectIdentityAlgorithmSpecEstablished", True
+                ),
+                "ProjectV2 identity algorithm must remain explicitly missing a genuine spec",
+            ),
+            (
+                ROOT / "sources/integrations-ownership-gap.json",
+                integrations_ownership_gap_errors,
+                lambda gap: gap["candidateFragments"][2].__setitem__("ownershipEstablished", True),
+                "cannot become owned from controller-status/task arithmetic: project-location-context-resolution",
+            ),
         ]
 
         for gap_path, validator, mutate, expected in cases:
