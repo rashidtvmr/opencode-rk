@@ -944,11 +944,14 @@ dependencies = [
 name = "opencode-rk-sessions"
 version = "0.1.0-alpha.1"
 dependencies = [
+ "chrono",
  "opencode-rk-contracts",
  "opencode-rk-storage",
+ "rusqlite",
  "tempfile",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

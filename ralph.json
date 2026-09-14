@@ -336,7 +336,7 @@
     {
       "id": "BASE-001",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -350,7 +350,7 @@
     {
       "id": "BASE-002",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -382,7 +382,7 @@
       "requirementIds": [
         "REQ-015"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -398,7 +398,7 @@
       "requirementIds": [
         "REQ-015"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -429,7 +429,7 @@
     {
       "id": "BASE-007",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -443,7 +443,7 @@
     {
       "id": "BASE-008",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -565,7 +565,7 @@
       "requirementIds": [
         "REQ-033"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
