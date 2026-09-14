@@ -61,3 +61,22 @@ Validation for this slice:
 - `/usr/bin/python3 -m unittest tests.bootstrap.test_disc003_reconciliation -v` => 8/8 passed.
 - `/usr/bin/python3 tools/reconcile_surfaces.py` => 32 families: 16 `partial`, 16 `queued`; implementation statuses 8 `partial`, 8 `reference-implemented`, 16 `unresolved`; 71 evidence references; 49 unresolved findings; zero errors.
 - `git diff --check` passed.
+
+## Recorder / Effect runtime / repository operations reconciliation slice
+
+The next source-only slice keeps DISC-003 **IN PROGRESS / NOT ACCEPTED** and promotes three OpenCode families from `queued` to reviewed `partial` without claiming target implementation:
+
+- `opencode.provider-recording`: pinned `@opencode-ai/http-recorder` source, V2 SessionRunner integration caller, direct record/replay test suite, and package README contract. The record captures deterministic ordered HTTP/WebSocket replay, redaction/secret rejection, local recording, and the documented buffered-stream/WebSocket limits. It explicitly does **not** assign live network recording, filesystem cassette persistence, `CI`/environment policy, or environment-secret scanning to a target task by inference. Locally implemented `PROV-012` remains untouched; `OPS-009` also appears in repository-operations and still needs task-level decomposition.
+- `opencode.effect-runtime`: pinned LayerNode graph compiler, managed runtime, generic Effect/Drizzle SQLite adapter, AppNode caller, direct LayerNode/SQLite tests, and storage adapter spec. The record keeps accepted BASE lifecycle and DB transaction/adapter semantics separate. It also records a newly found reconciliation defect: accepted `BASE-008` explicitly describes an effect-runtime retry/timeout/batch adapter but DISC-002 omitted BASE-008 from this surface's feature IDs, so this family cannot be used to invent OPS-007 ownership.
+- `opencode.repository-operations`: pinned repository parser/cache source, reference-runtime caller, pure/live repository tests, and V2 Git-reference spec. The record captures branch validation, branch-isolated cache identity, serialized clone/refresh/checkout/reset, stale-origin replacement, and typed failures, while leaving container installation and observability portions of the candidate family unexhausted. Parser-only behavior must not be mislabeled full INT-002, and the record does not authorize filesystem/network/Git/environment side effects for OPS tasks merely from a path-derived nomination.
+
+This moves the bounded ledger from 16 partial / 16 queued to 19 partial / 13 queued while preserving all 32 DISC-002 candidate families. It improves the evidence needed to reason about `OPS-007` and `OPS-009`, but deliberately stops short of a product contract where cross-surface or accepted-owner overlap remains unresolved.
+
+Validation for this slice:
+
+- `/usr/bin/python3 tools/reconcile_surfaces.py` => passed with exactly 32 families: 19 `partial`, 13 `queued`; implementation statuses 11 `partial`, 8 `reference-implemented`, 13 `unresolved`; 90 evidence references; 54 unresolved findings; zero validation errors.
+- `/usr/bin/python3 -m unittest tests.bootstrap.test_disc003_reconciliation -v` => 8/8 passed, including manifest hash binding, feature-scope preservation, pinned-repository evidence, partial-state evidence, and queued-state negative checks.
+- `/usr/bin/python3 tools/validate_plan.py` => `validate_plan: OK  stories=219 requirements=38 obligations=1095 deps_synthesized=True`.
+- `jq empty` passed for the supplemental evidence catalog, reconciliation ledger, generated manifest, and workspace source map.
+- `git diff --check` passed.
+- Dirty-tree inspection showed exactly the seven intended DISC-003 evidence/reconciliation/manifest/task/worklog/workspace files; no runtime source, `ralph.json`, verifier/controller status, or accepted task card was changed.
