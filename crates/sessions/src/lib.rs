@@ -1,6 +1,11 @@
 //! Session lifecycle over the format-2 workspace schema (primary) plus the
 //! legacy format-1 [`SessionService`] kept for the server/CLI boundary.
 #![forbid(unsafe_code)]
+pub mod migration;
+pub mod query;
+pub mod store;
+mod types;
+
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
     MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary,
@@ -58,6 +63,18 @@ impl SessionManager {
         let mut stmt = conn.prepare("SELECT id, title, state, created_at_us, updated_at_us, archived_at_us FROM sessions WHERE state=?1 ORDER BY updated_at_us DESC, pk DESC LIMIT ?2 OFFSET ?3")?;
         let rows = stmt.query_map(
             params![ACTIVE, clamp_page(limit) as i64, offset.max(0) as i64],
+            decode_summary_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(SessionError::from)
+    }
+
+    /// List all sessions including archived ones (no state filter).
+    pub fn list_all_sessions(&self, limit: usize, offset: usize) -> Result<Vec<SessionSummary>, SessionError> {
+        let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
+        let mut stmt = conn.prepare("SELECT id, title, state, created_at_us, updated_at_us, archived_at_us FROM sessions ORDER BY updated_at_us DESC, pk DESC LIMIT ?1 OFFSET ?2")?;
+        let rows = stmt.query_map(
+            params![clamp_page(limit) as i64, offset.max(0) as i64],
             decode_summary_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()

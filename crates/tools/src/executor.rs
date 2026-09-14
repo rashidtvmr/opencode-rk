@@ -4,13 +4,12 @@
 //! and `ToolCall`/`ToolResult` types for structured tool invocation.
 
 use serde_json::Value;
-use std::collections::HashMap;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::time::timeout;
 
 /// Configuration for tool execution timeouts.
-#[derive(Clone, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct TimeoutConfig {
     /// Default timeout in milliseconds for tool calls without explicit timeout.
     pub default_timeout_ms: u64,
@@ -132,7 +131,6 @@ impl ToolExecutor {
                             let duration_ms = start.elapsed().as_millis() as u64;
                             let success = output.status.success();
                             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
                             let error = if success {
                                 None
@@ -145,11 +143,7 @@ impl ToolExecutor {
                                 output: stdout,
                                 success,
                                 duration_ms,
-                                error: if error.is_some() {
-                                    Some(error.unwrap())
-                                } else {
-                                    None
-                                },
+                                error,
                             }
                         }
                         Err(e) => ToolResult {
@@ -191,15 +185,10 @@ impl ToolExecutor {
             .and_then(|v| v.as_str())
             .unwrap_or("");
 
-        let result = timeout(timeout_duration, async {
-            let output = Command::new("echo").arg(message).output().await;
+        let cmd = Command::new("echo").arg(message).output();
 
-            output
-        })
-        .await;
-
-        match result {
-            Ok(Some(output_result)) => match output_result {
+        match timeout(timeout_duration, cmd).await {
+            Ok(output_result) => match output_result {
                 Ok(output) => {
                     let duration_ms = start.elapsed().as_millis() as u64;
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
@@ -219,13 +208,6 @@ impl ToolExecutor {
                     error: Some(format!("Echo failed: {}", e)),
                 },
             },
-            Ok(None) => ToolResult {
-                tool_id: call.tool_id.clone(),
-                output: String::new(),
-                success: false,
-                duration_ms: start.elapsed().as_millis() as u64,
-                error: Some("Echo timed out".to_string()),
-            },
             Err(_) => ToolResult {
                 tool_id: call.tool_id.clone(),
                 output: String::new(),
@@ -238,11 +220,15 @@ impl ToolExecutor {
 
     /// Execute multiple tool calls concurrently.
     pub async fn execute_batch(&self, calls: Vec<ToolCall>) -> Vec<ToolResult> {
+        let config = self.timeout_config.clone();
         let mut set = tokio::task::JoinSet::new();
         let mut results: Vec<ToolResult> = Vec::with_capacity(calls.len());
 
         for call in calls {
-            set.spawn(self.execute(call));
+            set.spawn(async move {
+                let executor = ToolExecutor::with_timeout_config(config.clone());
+                executor.execute(call).await
+            });
         }
 
         while let Some(result) = set.join_next().await {
@@ -271,6 +257,7 @@ impl Default for ToolExecutor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     fn make_shell_call(id: &str, cmd: &str) -> ToolCall {
         ToolCall::new(id, "bash", json!({ "command": cmd }))
@@ -308,7 +295,7 @@ mod tests {
 
         assert!(!result.success);
         assert!(result.error.is_some());
-        assert!(result.error.unwrap().contains("timeout"));
+        assert!(result.error.unwrap().contains("timed out"));
         assert!(elapsed < 2000, "Should timeout quickly");
     }
 
@@ -342,7 +329,7 @@ mod tests {
     }
 
     #[tokio::test]
-    fn result_has_duration() {
+    async fn result_has_duration() {
         let result = ToolResult {
             tool_id: "duration-test".to_string(),
             output: "test output".to_string(),

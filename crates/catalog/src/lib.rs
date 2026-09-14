@@ -2,7 +2,10 @@
 #![forbid(unsafe_code)]
 
 pub mod cache;
+pub mod events;
 pub mod registry;
+pub mod search;
+pub mod stats;
 
 use opencode_rk_contracts::{ModelId, ProviderId};
 use serde::{Deserialize, Serialize};

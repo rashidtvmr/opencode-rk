@@ -1,6 +1,6 @@
 //! Plugin cache with LRU eviction.
 
-use serde_json::{json, Value};
+use serde_json::Value;
 use std::collections::HashMap;
 use std::time::SystemTime;
 
@@ -64,13 +64,15 @@ impl CatalogCache {
     #[must_use]
     pub fn get(&mut self, key: &str) -> Option<Value> {
         if let Some(entry) = self.entries.get(key).cloned() {
+            let value = entry.value.clone();
+
             // Update hit stats
             self.hits += 1;
 
             // Update the entry with new hit count and timestamp
             let updated_entry = CacheEntry {
                 key: entry.key.clone(),
-                value: entry.value,
+                value: entry.value.clone(),
                 hits: entry.hits + 1,
                 created_at: entry.created_at,
                 last_accessed: SystemTime::now(),
@@ -80,7 +82,7 @@ impl CatalogCache {
             // Update LRU order
             self._update_lru(key);
 
-            Some(entry.value)
+            Some(value)
         } else {
             self.misses += 1;
             None
@@ -143,6 +145,7 @@ impl CatalogCache {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn get_miss_returns_none() {
@@ -194,17 +197,20 @@ mod tests {
     #[test]
     fn clear_removes_all() {
         let mut cache = CatalogCache::new(10);
+
+        // Set and access to generate stats
         cache.set("key1".to_string(), json!({"id": 1}));
-        cache.set("key2".to_string(), json!({"id": 2}));
+        let _ = cache.get("key1");
 
         cache.clear();
 
-        assert!(cache.get("key1").is_none());
-        assert!(cache.get("key2").is_none());
-
+        // Stats should be reset
         let (hits, misses) = cache.stats();
         assert_eq!(hits, 0);
         assert_eq!(misses, 0);
+
+        // Verify entries are cleared
+        assert!(cache.get("key1").is_none());
     }
 
     #[test]
