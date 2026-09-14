@@ -32,6 +32,12 @@ python3 tools/inventory.py
 python3 tools/coverage_gate.py
 ```
 
+Repository enforcement policy is source-controlled in `.github/CODEOWNERS` and
+`.github/protection-policy.json`; `docs/REPOSITORY_PROTECTION.md` explains what
+local CI can guarantee and which `main` branch/ruleset settings must still be
+configured and verified on the hosting platform. Local validation intentionally
+does not claim that external branch protection is active.
+
 ## What to hand to an agent
 
 `ralph.json` is the canonical extended plan. It retains familiar Ralph story
@@ -42,9 +48,9 @@ security, dependency, or verification rules. Do not use that export as an
 independent acceptance authority.
 
 `tasks/ID.md` is each worker's task card. `FEATURES.md` is the navigable index.
-`feature-ledger.json` links source families to slices. `requirements/` maps every
-explicit requested capability to its task IDs. `sources/` records pins and the
-limits of the current inspection.
+`sources/behavior-surface-rules.json` links discovered source families to candidate
+feature scopes. `requirements/` maps every explicit requested capability to its
+task IDs. `sources/` records pins and the limits of the current inspection.
 
 ## Reference pins
 
@@ -88,6 +94,7 @@ is distinct from the development loop; development uses simulated grants.
 | `docs/TDD.md` | RED/GREEN/refactor and differential evidence |
 | `docs/ADAPTER_PROTOCOL.md` | Required trusted integration adapters |
 | `docs/AUTONOMOUS_EXECUTION.md` | Loop, recovery, budgets and trust boundaries |
+| `docs/REPOSITORY_PROTECTION.md` | CODEOWNERS, required `planning` check desired state, and external enforcement boundary |
 | `docs/SOURCE_AUDIT.md` | Exhaustiveness gates and evidence limitations |
 | `config/` | Lean defaults, resource targets and example controller settings |
 | `validation/` | Actual bootstrap test logs and structural validation |

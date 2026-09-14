@@ -14,6 +14,12 @@ release criteria. Request an integration proposal for shared contracts instead o
 editing another slice's files. Never claim that a feature exists because its
 module compiles or its test was mocked away.
 
+Repository-enforcement paths listed in `.github/CODEOWNERS` and
+`.github/protection-policy.json` are integration-authority files. Changes to those
+paths require the canonical repository guard and the ownership/review process in
+`docs/REPOSITORY_PROTECTION.md`; source-controlled policy is not proof that the
+hosting platform has enabled the desired branch/ruleset settings.
+
 ## Required workflow
 
 1. Cite exact repository commit, path and line/symbol for each discovered

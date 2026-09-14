@@ -1,0 +1,43 @@
+# Source-controlled ownership for repository enforcement and discovery authority.
+# GitHub only makes these reviews mandatory when branch/ruleset settings require
+# code-owner review; see docs/REPOSITORY_PROTECTION.md.
+* @rashidtvmr
+/.github/ @rashidtvmr
+/AGENTS.md @rashidtvmr
+/PLAN.md @rashidtvmr
+/README.md @rashidtvmr
+/docs/ADAPTER_PROTOCOL.md @rashidtvmr
+/docs/AUTONOMOUS_EXECUTION.md @rashidtvmr
+/docs/REPOSITORY_PROTECTION.md @rashidtvmr
+/docs/SECURITY.md @rashidtvmr
+/docs/TDD.md @rashidtvmr
+/config/controller.settings.json @rashidtvmr
+/config/resource-targets.json @rashidtvmr
+/config/security-policy.json @rashidtvmr
+/requirements/user-requirements.json @rashidtvmr
+/tools/auto_drive.py @rashidtvmr
+/tools/lane_gate.py @rashidtvmr
+/tools/plan_model.py @rashidtvmr
+/tools/ralph_loop.py @rashidtvmr
+/tools/validate_repository.py @rashidtvmr
+/tools/validate_protection_policy.py @rashidtvmr
+/tools/validate_backlog_exhaustion.py @rashidtvmr
+/tools/reconcile_surfaces.py @rashidtvmr
+/tools/validate_plan.py @rashidtvmr
+/tests/bootstrap/test_ci_enforcement.py @rashidtvmr
+/tests/bootstrap/test_protection_policy.py @rashidtvmr
+/tests/bootstrap/test_backlog_exhaustion.py @rashidtvmr
+/tests/bootstrap/test_disc003_reconciliation.py @rashidtvmr
+/tests/bootstrap/test_validate_plan.py @rashidtvmr
+/ralph.json @rashidtvmr
+/FEATURES.md @rashidtvmr
+/sources/backlog-exhaustion.json @rashidtvmr
+/sources/behavior-surface-rules.json @rashidtvmr
+/sources/disc-003-evidence.json @rashidtvmr
+/sources/disc-003-reconciliation.json @rashidtvmr
+/sources/disc-003-reconciliation.manifest.json @rashidtvmr
+/sources/evidence.json @rashidtvmr
+/sources/upstream.lock.json @rashidtvmr
+/tasks/DISC-003.md @rashidtvmr
+/workspaces/DISC-003/source-map.json @rashidtvmr
+/workspaces/DISC-003/progress.md @rashidtvmr

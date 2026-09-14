@@ -15,6 +15,7 @@ class CiEnforcementTests(unittest.TestCase):
         self.assertEqual(
             validate_repository.REQUIRED_CHECKS,
             (
+                ("repository protection", ("tools/validate_protection_policy.py",)),
                 ("backlog exhaustion", ("tools/validate_backlog_exhaustion.py",)),
                 ("DISC-003 reconciliation", ("tools/reconcile_surfaces.py", "--check-manifest")),
                 ("plan", ("tools/validate_plan.py",)),
@@ -24,6 +25,9 @@ class CiEnforcementTests(unittest.TestCase):
     def test_pull_request_ci_runs_canonical_validator_and_bootstrap_suite(self):
         workflow = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
         self.assertIn("pull_request:", workflow)
+        self.assertIn("    name: planning", workflow)
+        self.assertIn("actions/checkout@11d5960a326750d5838078e36cf38b85af677262", workflow)
+        self.assertIn("persist-credentials: false", workflow)
         self.assertIn("/usr/bin/python3 tools/validate_repository.py", workflow)
         self.assertIn(
             "/usr/bin/python3 -m unittest discover -s tests/bootstrap -p 'test_*.py' -v",
@@ -48,6 +52,22 @@ class CiEnforcementTests(unittest.TestCase):
             )
             (workflow_path / "ci.yml").write_text(bypassed, encoding="utf-8")
             self.assertTrue(any("continue-on-error" in error for error in validate_repository.workflow_contract_errors(tmp)))
+
+            renamed = workflow.replace("  planning:\n    name: planning", "  planning-renamed:\n    name: planning")
+            (workflow_path / "ci.yml").write_text(renamed, encoding="utf-8")
+            self.assertTrue(any("missing the planning job" in error for error in validate_repository.workflow_contract_errors(tmp)))
+
+            dependent = workflow.replace("    runs-on: ubuntu-latest", "    needs: rust\n    runs-on: ubuntu-latest", 1)
+            (workflow_path / "ci.yml").write_text(dependent, encoding="utf-8")
+            self.assertTrue(any("must not use needs" in error for error in validate_repository.workflow_contract_errors(tmp)))
+
+            filtered = workflow.replace("  pull_request:\n", "  pull_request:\n    paths: ['tools/**']\n", 1)
+            (workflow_path / "ci.yml").write_text(filtered, encoding="utf-8")
+            self.assertTrue(any("trigger/permission prefix drifted" in error for error in validate_repository.workflow_contract_errors(tmp)))
+
+            writable = workflow.replace("  contents: read", "  contents: write", 1)
+            (workflow_path / "ci.yml").write_text(writable, encoding="utf-8")
+            self.assertTrue(any("trigger/permission prefix drifted" in error for error in validate_repository.workflow_contract_errors(tmp)))
 
     def test_controller_verification_uses_canonical_repository_validator(self):
         commands = ralph_loop.DEFAULT_SETTINGS["verificationCommands"]
