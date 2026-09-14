@@ -12,6 +12,7 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     build_expected_ledger,
     disc_status_errors,
     residual_evidence_kind_errors,
+    surface_evidence_gaps,
     validate_ledger,
 )
 
@@ -94,6 +95,24 @@ class BacklogExhaustionTests(unittest.TestCase):
         story = next(row for row in ledger["stories"] if row["id"] == "EXT-001")
         errors = residual_evidence_kind_errors([story], bad)
         self.assertTrue(any("lost classes: caller" in error for error in errors))
+
+    def test_per_surface_evidence_gaps_are_explicit_and_cannot_be_masked(self):
+        ledger = load_ledger()
+        for story_id in ("INT-010", "SHARE-003", "WEB-004"):
+            row = next(item for item in ledger["stories"] if item["id"] == story_id)
+            self.assertEqual(
+                row["surfaceEvidenceGaps"],
+                [{"surfaceId": "opencode.enterprise-remote", "missingKinds": ["spec"]}],
+            )
+
+        reconciliation = json.loads((ROOT / "sources/disc-003-reconciliation.json").read_text(encoding="utf-8"))
+        reviewed = {row["id"]: row for row in reconciliation["reviewedSurfaces"]}
+        weakened = copy.deepcopy(reviewed)
+        weakened["opencode.enterprise-remote"]["evidence"]["caller"] = []
+        self.assertEqual(
+            surface_evidence_gaps(["opencode.enterprise-remote"], weakened),
+            [{"surfaceId": "opencode.enterprise-remote", "missingKinds": ["caller", "spec"]}],
+        )
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())

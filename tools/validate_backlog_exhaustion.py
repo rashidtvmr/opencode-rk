@@ -147,6 +147,30 @@ def _local_evidence_paths(root: pathlib.Path, story_id: str, category: str, surf
     return list(dict.fromkeys(paths))
 
 
+def surface_evidence_gaps(
+    surface_ids: list[str],
+    reviewed: Mapping[str, object],
+) -> list[dict[str, object]]:
+    """Project each mapped surface's still-missing evidence classes explicitly."""
+    gaps: list[dict[str, object]] = []
+    for surface_id in surface_ids:
+        surface = reviewed.get(surface_id)
+        if not isinstance(surface, Mapping):
+            gaps.append({"surfaceId": surface_id, "missingKinds": list(DISC_EVIDENCE_KINDS)})
+            continue
+        evidence = surface.get("evidence", {})
+        missing = [
+            kind
+            for kind in DISC_EVIDENCE_KINDS
+            if not isinstance(evidence, Mapping)
+            or not isinstance(evidence.get(kind), list)
+            or not evidence.get(kind)
+        ]
+        if missing:
+            gaps.append({"surfaceId": surface_id, "missingKinds": missing})
+    return gaps
+
+
 def build_expected_ledger(root: pathlib.Path = ROOT) -> dict[str, object]:
     plan = _load(root / "ralph.json")
     rules = _load(root / "sources/behavior-surface-rules.json")
@@ -201,6 +225,7 @@ def build_expected_ledger(root: pathlib.Path = ROOT) -> dict[str, object]:
             "reopenPolicy": _reason_policy(category),
             "surfaceIds": surface_ids,
             "evidenceIds": evidence_ids,
+            "surfaceEvidenceGaps": surface_evidence_gaps(surface_ids, reviewed),
             "localEvidencePaths": _local_evidence_paths(root, story_id, category, surface_ids),
             "taskCard": f"tasks/{story_id}.md" if task_path.is_file() else None,
             "taskStatus": task_status,
@@ -381,7 +406,7 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
                 continue
             for field in (
                 "category", "controllerStatus", "requirementIds", "reasonKey", "reopenPolicy",
-                "surfaceIds", "evidenceIds", "localEvidencePaths", "taskCard", "worklog",
+                "surfaceIds", "evidenceIds", "surfaceEvidenceGaps", "localEvidencePaths", "taskCard", "worklog",
                 "taskStatus", "implementationCommits",
             ):
                 if row.get(field) != wanted.get(field):

@@ -20,6 +20,7 @@
       "requirementIds": [
         "REQ-002"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/AUTO-003.md",
       "taskStatus": "IMPLEMENTED",
@@ -41,6 +42,7 @@
       "requirementIds": [
         "REQ-002"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": null,
       "taskStatus": null,
@@ -63,6 +65,7 @@
         "REQ-002",
         "REQ-004"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": null,
       "taskStatus": null,
@@ -84,6 +87,7 @@
       "requirementIds": [
         "REQ-002"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": null,
       "taskStatus": null,
@@ -106,6 +110,7 @@
       "requirementIds": [
         "REQ-017"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -130,6 +135,7 @@
       "requirementIds": [
         "REQ-017"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -163,6 +169,7 @@
       "reasonKey": "local-implemented-controller-stale",
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility",
         "opencode.prompt-context"
@@ -186,6 +193,7 @@
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -216,6 +224,7 @@
       "requirementIds": [
         "REQ-005"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility",
         "opencode.legacy-compatibility"
@@ -239,6 +248,7 @@
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -270,6 +280,7 @@
       "reasonKey": "local-implemented-controller-stale",
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility",
         "opencode.integration-auth"
@@ -295,6 +306,7 @@
       "requirementIds": [
         "REQ-020"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -319,6 +331,7 @@
       "requirementIds": [
         "REQ-005"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -341,6 +354,7 @@
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -363,6 +377,7 @@
       "reasonKey": "extensibility-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -387,6 +402,7 @@
       "requirementIds": [
         "REQ-005"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.extensibility"
       ],
@@ -411,6 +427,7 @@
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.integrations"
       ],
@@ -441,6 +458,7 @@
       "reasonKey": "repository-contract-mixes-side-effects",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.integrations",
         "opencode.repository-operations"
@@ -466,6 +484,7 @@
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.integrations"
       ],
@@ -499,6 +518,7 @@
       "reasonKey": "local-implemented-controller-stale",
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.integration-auth",
         "opencode.integrations"
@@ -524,6 +544,7 @@
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.integrations"
       ],
@@ -548,6 +569,7 @@
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.integrations"
       ],
@@ -572,6 +594,7 @@
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.integrations"
       ],
@@ -619,6 +642,7 @@
       "reasonKey": "local-implemented-controller-stale",
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.contracts-schema",
         "opencode.integrations",
@@ -646,6 +670,7 @@
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.integrations"
       ],
@@ -675,6 +700,14 @@
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.enterprise-remote"
+        }
+      ],
       "surfaceIds": [
         "opencode.enterprise-remote",
         "opencode.integrations"
@@ -709,6 +742,7 @@
         "REQ-024",
         "REQ-032"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.configuration-runtime"
       ],
@@ -733,6 +767,7 @@
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.repository-operations"
       ],
@@ -757,6 +792,7 @@
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.repository-operations"
       ],
@@ -792,6 +828,7 @@
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.configuration-runtime",
         "opencode.repository-operations"
@@ -822,6 +859,7 @@
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.configuration-runtime"
       ],
@@ -846,6 +884,7 @@
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.repository-operations"
       ],
@@ -880,6 +919,7 @@
         "REQ-001",
         "REQ-024"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.effect-runtime",
         "opencode.repository-operations"
@@ -916,6 +956,7 @@
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.configuration-runtime",
         "opencode.repository-operations"
@@ -947,6 +988,7 @@
       "reasonKey": "recorder-cross-surface-side-effects",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.provider-recording",
         "opencode.repository-operations"
@@ -973,6 +1015,7 @@
       "requirementIds": [
         "REQ-003"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": null,
       "taskStatus": null,
@@ -997,6 +1040,7 @@
         "REQ-004",
         "REQ-035"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": null,
       "taskStatus": null,
@@ -1020,6 +1064,7 @@
       "requirementIds": [
         "REQ-035"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": null,
       "taskStatus": null,
@@ -1053,6 +1098,7 @@
       "requirementIds": [
         "REQ-022"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.account-storage",
         "9router.dashboard-api",
@@ -1084,6 +1130,7 @@
       "requirementIds": [
         "REQ-022"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.routing"
       ],
@@ -1115,6 +1162,7 @@
       "reasonKey": "local-implemented-controller-stale",
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.account-storage",
         "9router.routing",
@@ -1148,6 +1196,7 @@
       "reasonKey": "local-implemented-controller-stale",
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.account-storage",
         "9router.routing",
@@ -1179,6 +1228,14 @@
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [
         "REQ-022"
+      ],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "test"
+          ],
+          "surfaceId": "9router.model-combos"
+        }
       ],
       "surfaceIds": [
         "9router.model-combos",
@@ -1213,6 +1270,7 @@
       "reasonKey": "proxy-authority-and-platform-boundary",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.network-proxy",
         "9router.routing",
@@ -1252,6 +1310,14 @@
       "reasonKey": "local-implemented-controller-stale",
       "reopenPolicy": "controller-verifier-acceptance-external",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "test"
+          ],
+          "surfaceId": "9router.model-combos"
+        }
+      ],
       "surfaceIds": [
         "9router.model-combos",
         "9router.network-proxy",
@@ -1289,6 +1355,7 @@
       "requirementIds": [
         "REQ-016"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.account-storage",
         "9router.dashboard-api",
@@ -1324,6 +1391,7 @@
       "reasonKey": "routing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.account-storage",
         "9router.dashboard-api",
@@ -1349,6 +1417,7 @@
       "reasonKey": "routing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.routing"
       ],
@@ -1378,6 +1447,7 @@
       "requirementIds": [
         "REQ-022"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "9router.routing"
       ],
@@ -1405,6 +1475,7 @@
       "requirementIds": [
         "REQ-007"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.sharing"
       ],
@@ -1430,6 +1501,7 @@
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.sharing"
       ],
@@ -1457,6 +1529,14 @@
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.enterprise-remote"
+        }
+      ],
       "surfaceIds": [
         "opencode.enterprise-remote",
         "opencode.sharing"
@@ -1485,6 +1565,7 @@
       "requirementIds": [
         "REQ-007"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.sharing"
       ],
@@ -1512,6 +1593,7 @@
       "requirementIds": [
         "REQ-007"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.sharing"
       ],
@@ -1536,6 +1618,7 @@
       "requirementIds": [
         "REQ-037"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/TOOL-015.md",
       "taskStatus": "IMPLEMENTED",
@@ -1556,6 +1639,7 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui"
       ],
@@ -1578,6 +1662,7 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui"
       ],
@@ -1608,6 +1693,14 @@
       "requirementIds": [
         "REQ-023"
       ],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.app-client"
+        }
+      ],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui"
@@ -1633,6 +1726,7 @@
       "requirementIds": [
         "REQ-008"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui"
       ],
@@ -1657,6 +1751,7 @@
       "requirementIds": [
         "REQ-013"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui"
       ],
@@ -1692,6 +1787,14 @@
       "requirementIds": [
         "REQ-016"
       ],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.app-client"
+        }
+      ],
       "surfaceIds": [
         "9router.dashboard-settings",
         "opencode.app-client",
@@ -1718,6 +1821,7 @@
       "requirementIds": [
         "REQ-018"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui"
       ],
@@ -1746,6 +1850,7 @@
       "requirementIds": [
         "REQ-021"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui",
         "opencode.permission-runtime"
@@ -1777,6 +1882,14 @@
       "requirementIds": [
         "REQ-019"
       ],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.app-client"
+        }
+      ],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui"
@@ -1802,6 +1915,7 @@
       "requirementIds": [
         "REQ-017"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui"
       ],
@@ -1838,6 +1952,14 @@
         "REQ-029",
         "REQ-032"
       ],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.app-client"
+        }
+      ],
       "surfaceIds": [
         "9router.dashboard-settings",
         "opencode.app-client",
@@ -1870,6 +1992,7 @@
       "requirementIds": [
         "REQ-005"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui",
         "opencode.legacy-compatibility"
@@ -1893,6 +2016,7 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [
         "opencode.clients-ui"
       ],
@@ -1921,6 +2045,14 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.app-client"
+        }
+      ],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui"
@@ -1950,6 +2082,14 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.app-client"
+        }
+      ],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui"
@@ -1979,6 +2119,14 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.desktop-client"
+        }
+      ],
       "surfaceIds": [
         "opencode.clients-ui",
         "opencode.desktop-client"
@@ -2009,6 +2157,14 @@
       "reasonKey": "hosted-remote-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.enterprise-remote"
+        }
+      ],
       "surfaceIds": [
         "opencode.enterprise-remote",
         "opencode.server-control-plane"
@@ -2044,6 +2200,20 @@
       "reasonKey": "client-architecture-dependency",
       "reopenPolicy": "approved-client-architecture-and-dependencies-required",
       "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.app-client"
+        },
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.desktop-client"
+        }
+      ],
       "surfaceIds": [
         "opencode.app-client",
         "opencode.clients-ui",
@@ -2071,6 +2241,7 @@
         "REQ-002",
         "REQ-012"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/AUTO-007.md",
       "taskStatus": "IMPLEMENTED",
@@ -2093,6 +2264,7 @@
       "requirementIds": [
         "REQ-038"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/PROV-014.md",
       "taskStatus": "IMPLEMENTED",
@@ -2115,6 +2287,7 @@
       "requirementIds": [
         "REQ-037"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/OPS-010.md",
       "taskStatus": "IMPLEMENTED",
@@ -2138,6 +2311,7 @@
         "REQ-017",
         "REQ-027"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/EXT-013.md",
       "taskStatus": "IMPLEMENTED",
@@ -2160,6 +2334,7 @@
       "requirementIds": [
         "REQ-008"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/SESS-019.md",
       "taskStatus": "IMPLEMENTED",
@@ -2182,6 +2357,7 @@
       "requirementIds": [
         "REQ-006"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/SESS-020.md",
       "taskStatus": "IMPLEMENTED",
@@ -2204,6 +2380,7 @@
       "requirementIds": [
         "REQ-018"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/ROUTE-012.md",
       "taskStatus": "IMPLEMENTED",
@@ -2231,6 +2408,7 @@
       "requirementIds": [
         "REQ-016"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/REL-004.md",
       "taskStatus": "IMPLEMENTED",
@@ -2254,6 +2432,7 @@
         "REQ-016",
         "REQ-018"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/UI-014.md",
       "taskStatus": "NOT STARTED",
@@ -2276,6 +2455,7 @@
       "requirementIds": [
         "REQ-016"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/UI-015.md",
       "taskStatus": "NOT STARTED",
@@ -2298,6 +2478,7 @@
       "requirementIds": [
         "REQ-016"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/UI-016.md",
       "taskStatus": "NOT STARTED",
@@ -2321,6 +2502,7 @@
         "REQ-006",
         "REQ-016"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/UI-017.md",
       "taskStatus": "NOT STARTED",
@@ -2343,6 +2525,7 @@
       "requirementIds": [
         "REQ-019"
       ],
+      "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/UI-018.md",
       "taskStatus": "NOT STARTED",
