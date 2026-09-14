@@ -4,48 +4,50 @@ Generated from `ralph.json` (canonical extended plan) and `requirements/user-req
 Every story is mandatory to the declared full release even when its feature is off by default at runtime (PLAN.md section 1).
 `prd.json` is the flat conventional Ralph export of the same data. Dependency eligibility is decided by `ralph.json` plus the milestone ranks in PLAN.md section 4; see `tools/plan_model.py`.
 
-Stories: 178. Requirements: 35. Test obligations: 890.
+Stories: 219. Requirements: 38. Test obligations: 1095.
 
 ## Requirements to stories
 
 | Requirement | Capability | Stories |
 |---|---|---|
 | `REQ-001` | Rust plus Tokio and maximum practical resource savings | `BASE-003`, `OPS-001`, `OPS-007` |
-| `REQ-002` | Plan file Ralph JSON independent slices and autonomous loop | `AUTO-001`, `AUTO-002`, `AUTO-003`, `AUTO-004`, `AUTO-005`, `AUTO-006` |
+| `REQ-002` | Plan file Ralph JSON independent slices and autonomous loop | `AUTO-001`, `AUTO-002`, `AUTO-003`, `AUTO-004`, `AUTO-005`, `AUTO-006`, `AUTO-007` |
 | `REQ-003` | Every OpenCode V2 feature accounted for | `DISC-001`, `DISC-010`, `REL-001` |
 | `REQ-004` | Strict TDD and independent verification | `AUTO-002`, `AUTO-005`, `REL-002` |
 | `REQ-005` | OpenCode V2 plugins including UI behavior | `EXT-005`, `EXT-009`, `EXT-012`, `UI-012` |
-| `REQ-006` | Session management and persistent history | `SESS-001`, `DB-003`, `SESS-017` |
+| `REQ-006` | Session management and persistent history | `SESS-001`, `DB-003`, `SESS-017`, `DB-017`, `SESS-020`, `UI-017` |
 | `REQ-007` | Session sharing | `SHARE-001`, `SHARE-004`, `SHARE-005` |
-| `REQ-008` | Session forking | `SESS-011`, `UI-004` |
+| `REQ-008` | Session forking | `SESS-011`, `UI-004`, `SESS-018`, `SESS-019` |
 | `REQ-009` | Multiple delegation types and custom agents | `AGENT-002`, `AGENT-003`, `AGENT-004`, `AGENT-010` |
 | `REQ-010` | Cross-provider subagent delegation | `AGENT-005`, `PROV-011` |
 | `REQ-011` | Own searchable models.dev-backed API | `CAT-001`, `CAT-002`, `CAT-007` |
-| `REQ-012` | Foreground and background subagents | `AGENT-003`, `AGENT-004` |
-| `REQ-013` | Navigate resume and steer subagents | `AGENT-007`, `AGENT-008`, `UI-005` |
+| `REQ-012` | Foreground and background subagents | `AGENT-003`, `AGENT-004`, `AUTO-007` |
+| `REQ-013` | Navigate resume and steer subagents | `AGENT-007`, `AGENT-008`, `UI-005`, `AGENT-031` |
 | `REQ-014` | Subagent context and messages in DB | `AGENT-011`, `DB-003` |
 | `REQ-015` | Singleton supports many application clients | `BASE-004`, `BASE-005` |
-| `REQ-016` | Status panel | `UI-006`, `ROUTE-008` |
-| `REQ-017` | Skills plugins and custom slash commands | `EXT-001`, `EXT-002`, `UI-010` |
-| `REQ-018` | Independent main and child effort levels | `CAT-004`, `AGENT-006`, `UI-007` |
-| `REQ-019` | Themes and common settings | `UI-009`, `BASE-006` |
-| `REQ-020` | Pre-tool and post-tool hooks | `SEC-010`, `SEC-011`, `EXT-008` |
-| `REQ-021` | Permissions and mandatory human-in-the-loop | `SEC-001`, `SEC-003`, `UI-008` |
+| `REQ-016` | Status panel | `UI-006`, `ROUTE-008`, `REL-004`, `UI-014`, `UI-015`, `UI-016`, `UI-017` |
+| `REQ-017` | Skills plugins and custom slash commands | `EXT-001`, `EXT-002`, `UI-010`, `EXT-013`, `TOOL-007` |
+| `REQ-018` | Independent main and child effort levels | `CAT-004`, `AGENT-006`, `UI-007`, `ROUTE-012`, `UI-014` |
+| `REQ-019` | Themes and common settings | `UI-009`, `BASE-006`, `UI-018` |
+| `REQ-020` | Pre-tool and post-tool hooks | `SEC-010`, `SEC-011`, `EXT-008`, `SEC-020` |
+| `REQ-021` | Permissions and mandatory human-in-the-loop | `SEC-001`, `SEC-003`, `UI-008`, `TOOL-010` |
 | `REQ-022` | 9router-style built-in multi-account routing | `ROUTE-001`, `ROUTE-002`, `ROUTE-005`, `ROUTE-011` |
 | `REQ-023` | Timestamps on each response | `SESS-002`, `UI-003` |
 | `REQ-024` | Lightweight delegation on basic PC or VPS | `AGENT-015`, `OPS-001`, `OPS-007` |
-| `REQ-025` | Deterministic destructive-command and SQL controls | `SEC-002`, `SEC-012`, `SEC-016` |
-| `REQ-026` | Manual-only destructive instructions rather than agent execution | `SEC-013` |
-| `REQ-027` | OS-enforced .env and sensitive-file restrictions | `SEC-004`, `SEC-005`, `SEC-014` |
+| `REQ-025` | Deterministic destructive-command and SQL controls | `SEC-002`, `SEC-012`, `SEC-016`, `SEC-018`, `SEC-019` |
+| `REQ-026` | Manual-only destructive instructions rather than agent execution | `SEC-013`, `TOOL-010` |
+| `REQ-027` | OS-enforced .env and sensitive-file restrictions | `SEC-004`, `SEC-005`, `SEC-014`, `EXT-013` |
 | `REQ-028` | System files readable where safe but strictly not editable by agent | `SEC-006` |
 | `REQ-029` | Trusted user toggle for destructive-command protection | `SEC-003`, `SEC-006`, `UI-011` |
-| `REQ-030` | Permission star cannot bypass mandatory controls | `SEC-001`, `SEC-003`, `SEC-017` |
+| `REQ-030` | Permission star cannot bypass mandatory controls | `SEC-001`, `SEC-003`, `SEC-017`, `SEC-019` |
 | `REQ-031` | Other projects and user files require explicit approval | `SEC-007` |
 | `REQ-032` | Many features configurable and no hidden cost when off | `OPS-001`, `BASE-006`, `UI-011` |
-| `REQ-033` | Embedded scalable storage without Postgres or Mongo install | `DB-001`, `DB-006`, `DB-008`, `DB-009` |
+| `REQ-033` | Embedded scalable storage without Postgres or Mongo install | `DB-001`, `DB-006`, `DB-008`, `DB-009`, `DB-017`, `DB-018` |
 | `REQ-034` | Safely import large existing OpenCode data | `DB-012`, `DB-016` |
 | `REQ-035` | Preserve safety and resource correctness rather than blindly translate files | `DISC-008`, `SEC-017`, `REL-002`, `REL-003` |
 | `REQ-036` | Full subagent lifecycle control: spawn, fork, resume, retry, model switching, context compression, structured handoff, dedicated settings | `AGENT-016`..`AGENT-030` |
+| `REQ-037` | Lean harness mining adoption: typed tool contract, diagnostics, and review discipline | `TOOL-006`, `TOOL-009`, `TOOL-015`, `OPS-010` |
+| `REQ-038` | Provider-boundary observability: tap with redaction plus debug export | `PROV-013`, `PROV-014` |
 
 ## Requirement detail
 
@@ -63,6 +65,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 - `AUTO-004` (not-started): TBD - see source audit Obligations: `AUTO-004-T01`, `AUTO-004-T02`, `AUTO-004-T03`, `AUTO-004-T04`, `AUTO-004-T05`
 - `AUTO-005` (not-started): TBD - see source audit Obligations: `AUTO-005-T01`, `AUTO-005-T02`, `AUTO-005-T03`, `AUTO-005-T04`, `AUTO-005-T05`
 - `AUTO-006` (not-started): TBD - see source audit Obligations: `AUTO-006-T01`, `AUTO-006-T02`, `AUTO-006-T03`, `AUTO-006-T04`, `AUTO-006-T05`
+- `AUTO-007` (not-started): Turn submission state machine Obligations: `AUTO-007-T01`..`T05`
 
 ### REQ-003 - Every OpenCode V2 feature accounted for
 
@@ -88,6 +91,9 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 - `SESS-001` (not-started): TBD - see source audit Obligations: `SESS-001-T01`, `SESS-001-T02`, `SESS-001-T03`, `SESS-001-T04`, `SESS-001-T05`
 - `DB-003` (not-started): TBD - see source audit Obligations: `DB-003-T01`, `DB-003-T02`, `DB-003-T03`, `DB-003-T04`, `DB-003-T05`
 - `SESS-017` (not-started): TBD - see source audit Obligations: `SESS-017-T01`, `SESS-017-T02`, `SESS-017-T03`, `SESS-017-T04`, `SESS-017-T05`
+- `DB-017` (not-started): Dual rollout record JSONL plus sqlite Obligations: `DB-017-T01`..`T05`
+- `SESS-020` (not-started): Auto-compact thresholds plus breaker Obligations: `SESS-020-T01`..`T05`
+- `UI-017` (not-started): TUI /memory viewer Obligations: `UI-017-T01`..`T05`
 
 ### REQ-007 - Session sharing
 
@@ -99,6 +105,8 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 
 - `SESS-011` (not-started): TBD - see source audit Obligations: `SESS-011-T01`, `SESS-011-T02`, `SESS-011-T03`, `SESS-011-T04`, `SESS-011-T05`
 - `UI-004` (not-started): TBD - see source audit Obligations: `UI-004-T01`, `UI-004-T02`, `UI-004-T03`, `UI-004-T04`, `UI-004-T05`
+- `SESS-018` (not-started): Typed fork boundary Obligations: `SESS-018-T01`..`T05`
+- `SESS-019` (not-started): Revert vs rollback split Obligations: `SESS-019-T01`..`T05`
 
 ### REQ-009 - Multiple delegation types and custom agents
 
@@ -128,6 +136,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 - `AGENT-007` (not-started): TBD - see source audit Obligations: `AGENT-007-T01`, `AGENT-007-T02`, `AGENT-007-T03`, `AGENT-007-T04`, `AGENT-007-T05`
 - `AGENT-008` (not-started): TBD - see source audit Obligations: `AGENT-008-T01`, `AGENT-008-T02`, `AGENT-008-T03`, `AGENT-008-T04`, `AGENT-008-T05`
 - `UI-005` (not-started): TBD - see source audit Obligations: `UI-005-T01`, `UI-005-T02`, `UI-005-T03`, `UI-005-T04`, `UI-005-T05`
+- `AGENT-031` (not-started): Plan mode plus structured review child Obligations: `AGENT-031-T01`..`T05`
 
 ### REQ-014 - Subagent context and messages in DB
 
@@ -143,28 +152,38 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 
 - `UI-006` (not-started): TBD - see source audit Obligations: `UI-006-T01`, `UI-006-T02`, `UI-006-T03`, `UI-006-T04`, `UI-006-T05`
 - `ROUTE-008` (not-started): TBD - see source audit Obligations: `ROUTE-008-T01`, `ROUTE-008-T02`, `ROUTE-008-T03`, `ROUTE-008-T04`, `ROUTE-008-T05`
+- `REL-004` (not-started): Per-turn cost counters Obligations: `REL-004-T01`..`T05`
+- `UI-014` (not-started): TUI composer Obligations: `UI-014-T01`..`T05`
+- `UI-015` (not-started): TUI status bar Obligations: `UI-015-T01`..`T05`
+- `UI-016` (not-started): TUI context detail view Obligations: `UI-016-T01`..`T05`
+- `UI-017` (not-started): TUI /memory viewer Obligations: `UI-017-T01`..`T05`
 
 ### REQ-017 - Skills plugins and custom slash commands
 
 - `EXT-001` (not-started): TBD - see source audit Obligations: `EXT-001-T01`, `EXT-001-T02`, `EXT-001-T03`, `EXT-001-T04`, `EXT-001-T05`
 - `EXT-002` (not-started): TBD - see source audit Obligations: `EXT-002-T01`, `EXT-002-T02`, `EXT-002-T03`, `EXT-002-T04`, `EXT-002-T05`
 - `UI-010` (not-started): TBD - see source audit Obligations: `UI-010-T01`, `UI-010-T02`, `UI-010-T03`, `UI-010-T04`, `UI-010-T05`
+- `EXT-013` (not-started): Skill safe extraction Obligations: `EXT-013-T01`..`T05`
+- `TOOL-007` (not-started): Skill-gated approvals Obligations: `TOOL-007-T01`..`T05`
 
 ### REQ-018 - Independent main and child effort levels
 
 - `CAT-004` (not-started): TBD - see source audit Obligations: `CAT-004-T01`, `CAT-004-T02`, `CAT-004-T03`, `CAT-004-T04`, `CAT-004-T05`
 - `AGENT-006` (not-started): TBD - see source audit Obligations: `AGENT-006-T01`, `AGENT-006-T02`, `AGENT-006-T03`, `AGENT-006-T04`, `AGENT-006-T05`
 - `UI-007` (not-started): TBD - see source audit Obligations: `UI-007-T01`, `UI-007-T02`, `UI-007-T03`, `UI-007-T04`, `UI-007-T05`
+- `ROUTE-012` (not-started): Cheap-model chores routing Obligations: `ROUTE-012-T01`..`T05`
 
 ### REQ-019 - Themes and common settings
 
 - `UI-009` (not-started): TBD - see source audit Obligations: `UI-009-T01`, `UI-009-T02`, `UI-009-T03`, `UI-009-T04`, `UI-009-T05`
 - `BASE-006` (not-started): TBD - see source audit Obligations: `BASE-006-T01`, `BASE-006-T02`, `BASE-006-T03`, `BASE-006-T04`, `BASE-006-T05`
+- `UI-018` (not-started): TUI keybindings help Obligations: `UI-018-T01`..`T05`
 
 ### REQ-020 - Pre-tool and post-tool hooks
 
 - `SEC-010` (not-started): TBD - see source audit Obligations: `SEC-010-T01`, `SEC-010-T02`, `SEC-010-T03`, `SEC-010-T04`, `SEC-010-T05`
 - `SEC-011` (not-started): TBD - see source audit Obligations: `SEC-011-T01`, `SEC-011-T02`, `SEC-011-T03`, `SEC-011-T04`, `SEC-011-T05`
+- `SEC-020` (not-started): Bounded hook bus Obligations: `SEC-020-T01`..`T05`
 - `EXT-008` (not-started): TBD - see source audit Obligations: `EXT-008-T01`, `EXT-008-T02`, `EXT-008-T03`, `EXT-008-T04`, `EXT-008-T05`
 
 ### REQ-021 - Permissions and mandatory human-in-the-loop
@@ -172,6 +191,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 - `SEC-001` (not-started): TBD - see source audit Obligations: `SEC-001-T01`, `SEC-001-T02`, `SEC-001-T03`, `SEC-001-T04`, `SEC-001-T05`
 - `SEC-003` (not-started): TBD - see source audit Obligations: `SEC-003-T01`, `SEC-003-T02`, `SEC-003-T03`, `SEC-003-T04`, `SEC-003-T05`
 - `UI-008` (not-started): TBD - see source audit Obligations: `UI-008-T01`, `UI-008-T02`, `UI-008-T03`, `UI-008-T04`, `UI-008-T05`
+- `TOOL-010` (not-started): request_permissions mid-turn tool Obligations: `TOOL-010-T01`..`T05`
 
 ### REQ-022 - 9router-style built-in multi-account routing
 
@@ -196,16 +216,20 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 - `SEC-002` (not-started): TBD - see source audit Obligations: `SEC-002-T01`, `SEC-002-T02`, `SEC-002-T03`, `SEC-002-T04`, `SEC-002-T05`
 - `SEC-012` (not-started): TBD - see source audit Obligations: `SEC-012-T01`, `SEC-012-T02`, `SEC-012-T03`, `SEC-012-T04`, `SEC-012-T05`
 - `SEC-016` (not-started): TBD - see source audit Obligations: `SEC-016-T01`, `SEC-016-T02`, `SEC-016-T03`, `SEC-016-T04`, `SEC-016-T05`
+- `SEC-018` (not-started): Dangerous shell-pattern denylist Obligations: `SEC-018-T01`..`T05`
+- `SEC-019` (not-started): Execpolicy prefix rules Obligations: `SEC-019-T01`..`T05`
 
 ### REQ-026 - Manual-only destructive instructions rather than agent execution
 
 - `SEC-013` (not-started): TBD - see source audit Obligations: `SEC-013-T01`, `SEC-013-T02`, `SEC-013-T03`, `SEC-013-T04`, `SEC-013-T05`
+- `TOOL-010` (not-started): request_permissions mid-turn tool Obligations: `TOOL-010-T01`..`T05`
 
 ### REQ-027 - OS-enforced .env and sensitive-file restrictions
 
 - `SEC-004` (not-started): TBD - see source audit Obligations: `SEC-004-T01`, `SEC-004-T02`, `SEC-004-T03`, `SEC-004-T04`, `SEC-004-T05`
 - `SEC-005` (not-started): TBD - see source audit Obligations: `SEC-005-T01`, `SEC-005-T02`, `SEC-005-T03`, `SEC-005-T04`, `SEC-005-T05`
 - `SEC-014` (not-started): TBD - see source audit Obligations: `SEC-014-T01`, `SEC-014-T02`, `SEC-014-T03`, `SEC-014-T04`, `SEC-014-T05`
+- `EXT-013` (not-started): Skill safe extraction Obligations: `EXT-013-T01`..`T05`
 
 ### REQ-028 - System files readable where safe but strictly not editable by agent
 
@@ -231,6 +255,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 
 - `OPS-001` (not-started): TBD - see source audit Obligations: `OPS-001-T01`, `OPS-001-T02`, `OPS-001-T03`, `OPS-001-T04`, `OPS-001-T05`
 - `BASE-006` (not-started): TBD - see source audit Obligations: `BASE-006-T01`, `BASE-006-T02`, `BASE-006-T03`, `BASE-006-T04`, `BASE-006-T05`
+- `UI-018` (not-started): TUI keybindings help Obligations: `UI-018-T01`..`T05`
 - `UI-011` (not-started): TBD - see source audit Obligations: `UI-011-T01`, `UI-011-T02`, `UI-011-T03`, `UI-011-T04`, `UI-011-T05`
 
 ### REQ-033 - Embedded scalable storage without Postgres or Mongo install
@@ -239,6 +264,8 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 - `DB-006` (not-started): TBD - see source audit Obligations: `DB-006-T01`, `DB-006-T02`, `DB-006-T03`, `DB-006-T04`, `DB-006-T05`
 - `DB-008` (not-started): TBD - see source audit Obligations: `DB-008-T01`, `DB-008-T02`, `DB-008-T03`, `DB-008-T04`, `DB-008-T05`
 - `DB-009` (not-started): TBD - see source audit Obligations: `DB-009-T01`, `DB-009-T02`, `DB-009-T03`, `DB-009-T04`, `DB-009-T05`
+- `DB-017` (not-started): Dual rollout record JSONL plus sqlite Obligations: `DB-017-T01`..`T05`
+- `DB-018` (not-started): Content-addressed transcript dedupe Obligations: `DB-018-T01`..`T05`
 
 ### REQ-034 - Safely import large existing OpenCode data
 
@@ -249,10 +276,23 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 
 - `DISC-008` (not-started): TBD - see source audit Obligations: `DISC-008-T01`, `DISC-008-T02`, `DISC-008-T03`, `DISC-008-T04`, `DISC-008-T05`
 - `SEC-017` (not-started): TBD - see source audit Obligations: `SEC-017-T01`, `SEC-017-T02`, `SEC-017-T03`, `SEC-017-T04`, `SEC-017-T05`
+- `SEC-019` (not-started): Execpolicy prefix rules Obligations: `SEC-019-T01`..`T05`
 - `REL-002` (not-started): TBD - see source audit Obligations: `REL-002-T01`, `REL-002-T02`, `REL-002-T03`, `REL-002-T04`, `REL-002-T05`
 - `REL-003` (not-started): TBD - see source audit Obligations: `REL-003-T01`, `REL-003-T02`, `REL-003-T03`, `REL-003-T04`, `REL-003-T05`
 
 ### REQ-036 - Full subagent lifecycle control
+
+### REQ-037 - Lean harness mining adoption
+
+- `TOOL-006` (not-started): Typed tool contract via buildTool factory Obligations: `TOOL-006-T01`..`T05`
+- `TOOL-009` (not-started): ToolSearch discovery for lean context Obligations: `TOOL-009-T01`..`T05`
+- `TOOL-015` (not-started): MCP tool policy gate plus elicitation Obligations: `TOOL-015-T01`..`T05`
+- `OPS-010` (not-started): Doctor diagnostics command Obligations: `OPS-010-T01`..`T05`
+
+### REQ-038 - Provider-boundary observability
+
+- `PROV-013` (not-started): Provider-boundary tap with redaction Obligations: `PROV-013-T01`..`T05`
+- `PROV-014` (not-started): Debug export bundle plus offline renderer Obligations: `PROV-014-T01`..`T05`
 
 - `AGENT-016` (not-started): Context fork - clone parent session into child with selective context injection Obligations: `AGENT-016-T01`..`T05`
 - `AGENT-017` (not-started): Fresh context spawn - zero-context with explicit bundle Obligations: `AGENT-017-T01`..`T05`
@@ -272,7 +312,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 
 ## Story families (prefix index)
 
-### AGENT (30 stories)
+### AGENT (31 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -307,7 +347,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `AGENT-029` | `REQ-036` | not-started | Output aggregation - merge parallel results, conflict resolution, dedup |
 | `AGENT-030` | `REQ-036` | not-started | Cancellation and cleanup - cancel children, reclaim resources, release locks |
 
-### AUTO (6 stories)
+### AUTO (7 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -343,7 +383,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `CAT-006` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `CAT-007` | `REQ-011` | not-started | TBD - see source audit |
 
-### DB (16 stories)
+### DB (18 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -372,7 +412,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `DISC-008` | `REQ-035` | not-started | TBD - see source audit |
 | `DISC-010` | `REQ-003` | not-started | TBD - see source audit |
 
-### EXT (12 stories)
+### EXT (13 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -404,7 +444,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `INT-009` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `INT-010` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 
-### OPS (9 stories)
+### OPS (10 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -418,7 +458,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `OPS-008` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `OPS-009` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 
-### PROV (12 stories)
+### PROV (14 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -435,7 +475,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `PROV-011` | `REQ-010` | not-started | TBD - see source audit |
 | `PROV-012` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 
-### REL (3 stories)
+### REL (4 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -443,7 +483,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `REL-002` | `REQ-004`, `REQ-035` | not-started | TBD - see source audit |
 | `REL-003` | `REQ-035` | not-started | TBD - see source audit |
 
-### ROUTE (11 stories)
+### ROUTE (12 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -459,7 +499,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `ROUTE-010` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `ROUTE-011` | `REQ-022` | not-started | TBD - see source audit |
 
-### SEC (16 stories)
+### SEC (19 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -480,7 +520,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `SEC-016` | `REQ-025` | not-started | TBD - see source audit |
 | `SEC-017` | `REQ-030`, `REQ-035` | not-started | TBD - see source audit |
 
-### SESS (17 stories)
+### SESS (20 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -512,7 +552,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `SHARE-004` | `REQ-007` | not-started | TBD - see source audit |
 | `SHARE-005` | `REQ-007` | not-started | TBD - see source audit |
 
-### TOOL (10 stories)
+### TOOL (15 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -527,7 +567,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `TOOL-013` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `TOOL-014` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 
-### UI (13 stories)
+### UI (18 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -557,6 +597,32 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 
 ## Stories without a direct requirement link (96)
 
+| `TOOL-006` | `REQ-037` | not-started | Typed tool contract via buildTool factory - schema plus permission plus exec plus render in one definition |
+| `TOOL-007` | `REQ-017` | not-started | Skill-gated approvals - skill invocation passes the same policy gate as tools |
+| `TOOL-009` | `REQ-037` | not-started | ToolSearch discovery - just-in-time tool listing to keep lean context |
+| `TOOL-010` | `REQ-021`, `REQ-026` | not-started | request_permissions mid-turn tool - agent asks for a named capability with scope, rate-limited |
+| `TOOL-015` | `REQ-037` | not-started | MCP tool own policy gate plus elicitation path with timeout and cancel |
+| `SEC-018` | `REQ-025` | not-started | Dangerous shell-pattern denylist stripped at auto-entry - cross-platform code-exec block plus matcher tests |
+| `SEC-019` | `REQ-025`, `REQ-030` | not-started | Execpolicy prefix rules - declarative path and command allowlist, longest-match evaluated before tools |
+| `SEC-020` | `REQ-020` | not-started | Bounded hook bus - max 100 pending with shift-drop, always-emit allowlist, SSRF guard on HTTP hooks |
+| `AUTO-007` | `REQ-002`, `REQ-012` | not-started | Turn submission state machine - submit to running to interrupted or complete as typed transitions with cancel cleanup |
+| `DB-017` | `REQ-006`, `REQ-033` | not-started | Dual rollout record - append-only JSONL is truth, sqlite holds queryable snapshot, recorder owns order |
+| `DB-018` | `REQ-033` | not-started | Content-addressed transcript dedupe - repeated prompts and tool schemas stored by canonical hash, turns reference ids |
+| `PROV-013` | `REQ-038` | not-started | Provider-boundary tap with redaction - uid-keyed structured records at request, response, stream-final, error seam |
+| `PROV-014` | `REQ-038` | not-started | Debug export bundle - one redacted JSONL with session meta, deduped defs, turns, timings, errors; offline renderer |
+| `OPS-010` | `REQ-037` | not-started | Doctor diagnostics command - checks auth, connectivity, tools, MCP; reports failures without log spelunking |
+| `EXT-013` | `REQ-017`, `REQ-027` | not-started | Skill safe extraction - bundled files materialize once, owner-only 0600 O_EXCL O_NOFOLLOW, traversal rejected |
+| `SESS-018` | `REQ-008` | not-started | Fork boundary is typed - branch copy only on fork, cache cleared at boundary |
+| `SESS-019` | `REQ-008` | not-started | Revert is free pointer move distinct from truncating rollback with separate API names |
+| `SESS-020` | `REQ-006` | not-started | Auto-compact thresholds plus warning states plus 3-strike circuit breaker with env kill-switches |
+| `ROUTE-012` | `REQ-018` | not-started | Cheap-model chores routing - quota, topic, title, summarize go to cheapest capable model, fail-open |
+| `AGENT-031` | `REQ-013` | not-started | Plan mode plus structured review child - plan permission mode with Enter and Exit tools, review returns machine-checkable findings |
+| `REL-004` | `REQ-016` | not-started | Per-turn cost counters - input, output, cache-read, cache-create, durations, lines changed, web-search count, unknown-cost flag |
+| `UI-014` | `REQ-016`, `REQ-018` | not-started | TUI composer - multiline editor, Enter sends, Shift+Enter newline, Ctrl+J fallback, send button, draft survives interrupt, queue-while-busy |
+| `UI-015` | `REQ-016` | not-started | TUI status bar - clickable model item opens provider-aware switcher, clickable context item opens context detail view; keyboard fallback |
+| `UI-016` | `REQ-016` | not-started | TUI context detail view - per-source token breakdown with cache-read vs fresh flags, largest blocks first, truncation markers |
+| `UI-017` | `REQ-006`, `REQ-016` | not-started | TUI /memory viewer - list loaded memory files with path bytes tokens cached flag, unload with prefix-cache cost warning, reload path |
+| `UI-018` | `REQ-019` | not-started | TUI keybindings help - footer hints plus /keybindings parity, configurable composer submit keymap |
 These stories carry `requirementIds: []` in `ralph.json`. They are still mandatory backlog (typically DISC-002 surface-extraction discoveries or not-yet-reconciled scope). Do not treat absence of a requirement link as optional. Task cards in `tasks/` and `feature-ledger.json` may add ownership detail.
 
 - `AGENT-001` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
@@ -647,6 +713,11 @@ These stories carry `requirementIds: []` in `ralph.json`. They are still mandato
 - `TOOL-012` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `TOOL-013` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `TOOL-014` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `TOOL-006` (not-started): Typed tool contract via buildTool factory Obligations: `TOOL-006-T01`..`T05`
+- `TOOL-007` (not-started): Skill-gated approvals Obligations: `TOOL-007-T01`..`T05`
+- `TOOL-009` (not-started): ToolSearch discovery for lean context Obligations: `TOOL-009-T01`..`T05`
+- `TOOL-010` (not-started): request_permissions mid-turn tool Obligations: `TOOL-010-T01`..`T05`
+- `TOOL-015` (not-started): MCP tool policy gate plus elicitation Obligations: `TOOL-015-T01`..`T05`
 - `UI-001` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `UI-002` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `UI-013` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json

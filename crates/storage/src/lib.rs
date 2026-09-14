@@ -12,6 +12,8 @@ pub mod retention_v2;
 pub mod schema_v2;
 pub mod snapshot_v2;
 pub mod writer_v2;
+pub mod facade;
+pub mod migrations;
 pub use admission_v2::AdmissionV2;
 pub use approvals_v2::ApprovalsV2;
 pub use catalog_v2::CatalogV2;

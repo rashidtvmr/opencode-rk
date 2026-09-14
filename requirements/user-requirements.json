@@ -19,7 +19,8 @@
         "AUTO-003",
         "AUTO-004",
         "AUTO-005",
-        "AUTO-006"
+        "AUTO-006",
+        "AUTO-007"
       ],
       "mandatory": true
     },
@@ -60,7 +61,10 @@
       "tasks": [
         "SESS-001",
         "DB-003",
-        "SESS-017"
+        "SESS-017",
+        "DB-017",
+        "SESS-020",
+        "UI-017"
       ],
       "mandatory": true
     },
@@ -79,7 +83,9 @@
       "requirement": "Session forking",
       "tasks": [
         "SESS-011",
-        "UI-004"
+        "UI-004",
+        "SESS-018",
+        "SESS-019"
       ],
       "mandatory": true
     },
@@ -118,7 +124,8 @@
       "requirement": "Foreground and background subagents",
       "tasks": [
         "AGENT-003",
-        "AGENT-004"
+        "AGENT-004",
+        "AUTO-007"
       ],
       "mandatory": true
     },
@@ -128,7 +135,8 @@
       "tasks": [
         "AGENT-007",
         "AGENT-008",
-        "UI-005"
+        "UI-005",
+        "AGENT-031"
       ],
       "mandatory": true
     },
@@ -155,7 +163,12 @@
       "requirement": "Status panel",
       "tasks": [
         "UI-006",
-        "ROUTE-008"
+        "ROUTE-008",
+        "REL-004",
+        "UI-014",
+        "UI-015",
+        "UI-016",
+        "UI-017"
       ],
       "mandatory": true
     },
@@ -165,7 +178,9 @@
       "tasks": [
         "EXT-001",
         "EXT-002",
-        "UI-010"
+        "UI-010",
+        "EXT-013",
+        "TOOL-007"
       ],
       "mandatory": true
     },
@@ -175,7 +190,9 @@
       "tasks": [
         "CAT-004",
         "AGENT-006",
-        "UI-007"
+        "UI-007",
+        "ROUTE-012",
+        "UI-014"
       ],
       "mandatory": true
     },
@@ -184,7 +201,8 @@
       "requirement": "Themes and common settings",
       "tasks": [
         "UI-009",
-        "BASE-006"
+        "BASE-006",
+        "UI-018"
       ],
       "mandatory": true
     },
@@ -194,7 +212,8 @@
       "tasks": [
         "SEC-010",
         "SEC-011",
-        "EXT-008"
+        "EXT-008",
+        "SEC-020"
       ],
       "mandatory": true
     },
@@ -204,7 +223,8 @@
       "tasks": [
         "SEC-001",
         "SEC-003",
-        "UI-008"
+        "UI-008",
+        "TOOL-010"
       ],
       "mandatory": true
     },
@@ -244,7 +264,9 @@
       "tasks": [
         "SEC-002",
         "SEC-012",
-        "SEC-016"
+        "SEC-016",
+        "SEC-018",
+        "SEC-019"
       ],
       "mandatory": true
     },
@@ -252,7 +274,8 @@
       "id": "REQ-026",
       "requirement": "Manual-only destructive instructions rather than agent execution",
       "tasks": [
-        "SEC-013"
+        "SEC-013",
+        "TOOL-010"
       ],
       "mandatory": true
     },
@@ -262,7 +285,8 @@
       "tasks": [
         "SEC-004",
         "SEC-005",
-        "SEC-014"
+        "SEC-014",
+        "EXT-013"
       ],
       "mandatory": true
     },
@@ -290,7 +314,8 @@
       "tasks": [
         "SEC-001",
         "SEC-003",
-        "SEC-017"
+        "SEC-017",
+        "SEC-019"
       ],
       "mandatory": true
     },
@@ -319,7 +344,9 @@
         "DB-001",
         "DB-006",
         "DB-008",
-        "DB-009"
+        "DB-009",
+        "DB-017",
+        "DB-018"
       ],
       "mandatory": true
     },
@@ -362,6 +389,26 @@
         "AGENT-028",
         "AGENT-029",
         "AGENT-030"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-037",
+      "requirement": "Lean harness mining adoption: typed tool contract, diagnostics, and review discipline",
+      "tasks": [
+        "TOOL-006",
+        "TOOL-009",
+        "TOOL-015",
+        "OPS-010"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-038",
+      "requirement": "Provider-boundary observability: tap with redaction plus debug export",
+      "tasks": [
+        "PROV-013",
+        "PROV-014"
       ],
       "mandatory": true
     }

@@ -1,5 +1,8 @@
 //! Small HTTP boundary over the native catalog and session services.
 #![forbid(unsafe_code)]
+pub mod event_bus;
+pub mod daemon;
+pub mod clients;
 use std::{str::FromStr,sync::Arc};use axum::{extract::{Path,Query,State},http::StatusCode,response::{IntoResponse,Response},routing::{get,post},Json,Router};use opencode_rk_catalog::{Catalog,CatalogQuery};use opencode_rk_contracts::{SessionId,WIRE_SCHEMA_VERSION};use opencode_rk_sessions::SessionService;use serde::{Deserialize,Serialize};use serde_json::{json,Value};
 #[derive(Clone)]pub struct AppState{pub sessions:SessionService,pub catalog:Arc<Catalog>}pub fn router(state:AppState)->Router{Router::new().route("/health",get(health)).route("/api/models",get(search_models)).route("/api/models/{provider}/{model}",get(get_model)).route("/api/sessions",get(list_sessions).post(create_session)).route("/api/sessions/{id}",get(get_session).patch(rename_session)).route("/api/sessions/{id}/archive",post(archive_session)).with_state(state)}
 async fn health()->Json<Value>{Json(json!({"schema_version":WIRE_SCHEMA_VERSION,"status":"ok","runtime":"native-rust"}))}

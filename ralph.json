@@ -2333,6 +2333,38 @@
       ]
     },
     {
+      "id": "TOOL-006",
+      "requirementIds": [
+        "REQ-037"
+      ],
+      "status": "not-started",
+      "userStory": "Typed tool contract via buildTool factory - schema plus permission plus exec plus render in one definition",
+      "dependencyIds": [],
+      "testObligations": [
+        "TOOL-006-T01",
+        "TOOL-006-T02",
+        "TOOL-006-T03",
+        "TOOL-006-T04",
+        "TOOL-006-T05"
+      ]
+    },
+    {
+      "id": "TOOL-007",
+      "requirementIds": [
+        "REQ-017"
+      ],
+      "status": "not-started",
+      "userStory": "Skill-gated approvals - skill invocation passes the same policy gate as tools",
+      "dependencyIds": [],
+      "testObligations": [
+        "TOOL-007-T01",
+        "TOOL-007-T02",
+        "TOOL-007-T03",
+        "TOOL-007-T04",
+        "TOOL-007-T05"
+      ]
+    },
+    {
       "id": "TOOL-008",
       "requirementIds": [],
       "status": "not-started",
@@ -2344,6 +2376,39 @@
         "TOOL-008-T03",
         "TOOL-008-T04",
         "TOOL-008-T05"
+      ]
+    },
+    {
+      "id": "TOOL-009",
+      "requirementIds": [
+        "REQ-037"
+      ],
+      "status": "not-started",
+      "userStory": "ToolSearch discovery - just-in-time tool listing to keep lean context",
+      "dependencyIds": [],
+      "testObligations": [
+        "TOOL-009-T01",
+        "TOOL-009-T02",
+        "TOOL-009-T03",
+        "TOOL-009-T04",
+        "TOOL-009-T05"
+      ]
+    },
+    {
+      "id": "TOOL-010",
+      "requirementIds": [
+        "REQ-021",
+        "REQ-026"
+      ],
+      "status": "not-started",
+      "userStory": "request_permissions mid-turn tool - agent asks for a named capability with scope, rate-limited",
+      "dependencyIds": [],
+      "testObligations": [
+        "TOOL-010-T01",
+        "TOOL-010-T02",
+        "TOOL-010-T03",
+        "TOOL-010-T04",
+        "TOOL-010-T05"
       ]
     },
     {
@@ -2400,6 +2465,22 @@
         "TOOL-014-T03",
         "TOOL-014-T04",
         "TOOL-014-T05"
+      ]
+    },
+    {
+      "id": "TOOL-015",
+      "requirementIds": [
+        "REQ-037"
+      ],
+      "status": "not-started",
+      "userStory": "MCP tool own policy gate plus elicitation path with timeout and cancel",
+      "dependencyIds": [],
+      "testObligations": [
+        "TOOL-015-T01",
+        "TOOL-015-T02",
+        "TOOL-015-T03",
+        "TOOL-015-T04",
+        "TOOL-015-T05"
       ]
     },
     {
@@ -2913,6 +2994,348 @@
         "AGENT-030-T03",
         "AGENT-030-T04",
         "AGENT-030-T05"
+      ]
+    },
+    {
+      "id": "SEC-018",
+      "requirementIds": [
+        "REQ-025"
+      ],
+      "status": "not-started",
+      "userStory": "Dangerous shell-pattern denylist stripped at auto-entry - cross-platform code-exec block plus matcher tests",
+      "dependencyIds": [],
+      "testObligations": [
+        "SEC-018-T01",
+        "SEC-018-T02",
+        "SEC-018-T03",
+        "SEC-018-T04",
+        "SEC-018-T05"
+      ]
+    },
+    {
+      "id": "SEC-019",
+      "requirementIds": [
+        "REQ-025",
+        "REQ-030"
+      ],
+      "status": "not-started",
+      "userStory": "Execpolicy prefix rules - declarative path and command allowlist, longest-match evaluated before tools",
+      "dependencyIds": [],
+      "testObligations": [
+        "SEC-019-T01",
+        "SEC-019-T02",
+        "SEC-019-T03",
+        "SEC-019-T04",
+        "SEC-019-T05"
+      ]
+    },
+    {
+      "id": "SEC-020",
+      "requirementIds": [
+        "REQ-020"
+      ],
+      "status": "not-started",
+      "userStory": "Bounded hook bus - max 100 pending with shift-drop, always-emit allowlist, SSRF guard on HTTP hooks",
+      "dependencyIds": [],
+      "testObligations": [
+        "SEC-020-T01",
+        "SEC-020-T02",
+        "SEC-020-T03",
+        "SEC-020-T04",
+        "SEC-020-T05"
+      ]
+    },
+    {
+      "id": "AUTO-007",
+      "requirementIds": [
+        "REQ-002",
+        "REQ-012"
+      ],
+      "status": "not-started",
+      "userStory": "Turn submission state machine - submit to running to interrupted or complete as typed transitions with cancel cleanup",
+      "dependencyIds": [],
+      "testObligations": [
+        "AUTO-007-T01",
+        "AUTO-007-T02",
+        "AUTO-007-T03",
+        "AUTO-007-T04",
+        "AUTO-007-T05"
+      ]
+    },
+    {
+      "id": "DB-017",
+      "requirementIds": [
+        "REQ-006",
+        "REQ-033"
+      ],
+      "status": "not-started",
+      "userStory": "Dual rollout record - append-only JSONL is truth, sqlite holds queryable snapshot, recorder owns order",
+      "dependencyIds": [],
+      "testObligations": [
+        "DB-017-T01",
+        "DB-017-T02",
+        "DB-017-T03",
+        "DB-017-T04",
+        "DB-017-T05"
+      ]
+    },
+    {
+      "id": "DB-018",
+      "requirementIds": [
+        "REQ-033"
+      ],
+      "status": "not-started",
+      "userStory": "Content-addressed transcript dedupe - repeated prompts and tool schemas stored by canonical hash, turns reference ids",
+      "dependencyIds": [],
+      "testObligations": [
+        "DB-018-T01",
+        "DB-018-T02",
+        "DB-018-T03",
+        "DB-018-T04",
+        "DB-018-T05"
+      ]
+    },
+    {
+      "id": "PROV-013",
+      "requirementIds": [
+        "REQ-038"
+      ],
+      "status": "not-started",
+      "userStory": "Provider-boundary tap with redaction - uid-keyed structured records at request, response, stream-final, error seam",
+      "dependencyIds": [],
+      "testObligations": [
+        "PROV-013-T01",
+        "PROV-013-T02",
+        "PROV-013-T03",
+        "PROV-013-T04",
+        "PROV-013-T05"
+      ]
+    },
+    {
+      "id": "PROV-014",
+      "requirementIds": [
+        "REQ-038"
+      ],
+      "status": "not-started",
+      "userStory": "Debug export bundle - one redacted JSONL with session meta, deduped defs, turns, timings, errors; offline renderer",
+      "dependencyIds": [],
+      "testObligations": [
+        "PROV-014-T01",
+        "PROV-014-T02",
+        "PROV-014-T03",
+        "PROV-014-T04",
+        "PROV-014-T05"
+      ]
+    },
+    {
+      "id": "OPS-010",
+      "requirementIds": [
+        "REQ-037"
+      ],
+      "status": "not-started",
+      "userStory": "Doctor diagnostics command - checks auth, connectivity, tools, MCP; reports failures without log spelunking",
+      "dependencyIds": [],
+      "testObligations": [
+        "OPS-010-T01",
+        "OPS-010-T02",
+        "OPS-010-T03",
+        "OPS-010-T04",
+        "OPS-010-T05"
+      ]
+    },
+    {
+      "id": "EXT-013",
+      "requirementIds": [
+        "REQ-017",
+        "REQ-027"
+      ],
+      "status": "not-started",
+      "userStory": "Skill safe extraction - bundled files materialize once, owner-only 0600 O_EXCL O_NOFOLLOW, traversal rejected",
+      "dependencyIds": [],
+      "testObligations": [
+        "EXT-013-T01",
+        "EXT-013-T02",
+        "EXT-013-T03",
+        "EXT-013-T04",
+        "EXT-013-T05"
+      ]
+    },
+    {
+      "id": "SESS-018",
+      "requirementIds": [
+        "REQ-008"
+      ],
+      "status": "not-started",
+      "userStory": "Fork boundary is typed - branch copy only on fork, cache cleared at boundary",
+      "dependencyIds": [],
+      "testObligations": [
+        "SESS-018-T01",
+        "SESS-018-T02",
+        "SESS-018-T03",
+        "SESS-018-T04",
+        "SESS-018-T05"
+      ]
+    },
+    {
+      "id": "SESS-019",
+      "requirementIds": [
+        "REQ-008"
+      ],
+      "status": "not-started",
+      "userStory": "Revert is free pointer move distinct from truncating rollback with separate API names",
+      "dependencyIds": [],
+      "testObligations": [
+        "SESS-019-T01",
+        "SESS-019-T02",
+        "SESS-019-T03",
+        "SESS-019-T04",
+        "SESS-019-T05"
+      ]
+    },
+    {
+      "id": "SESS-020",
+      "requirementIds": [
+        "REQ-006"
+      ],
+      "status": "not-started",
+      "userStory": "Auto-compact thresholds plus warning states plus 3-strike circuit breaker with env kill-switches",
+      "dependencyIds": [],
+      "testObligations": [
+        "SESS-020-T01",
+        "SESS-020-T02",
+        "SESS-020-T03",
+        "SESS-020-T04",
+        "SESS-020-T05"
+      ]
+    },
+    {
+      "id": "ROUTE-012",
+      "requirementIds": [
+        "REQ-018"
+      ],
+      "status": "not-started",
+      "userStory": "Cheap-model chores routing - quota, topic, title, summarize go to cheapest capable model, fail-open",
+      "dependencyIds": [],
+      "testObligations": [
+        "ROUTE-012-T01",
+        "ROUTE-012-T02",
+        "ROUTE-012-T03",
+        "ROUTE-012-T04",
+        "ROUTE-012-T05"
+      ]
+    },
+    {
+      "id": "AGENT-031",
+      "requirementIds": [
+        "REQ-013"
+      ],
+      "status": "not-started",
+      "userStory": "Plan mode plus structured review child - plan permission mode with Enter and Exit tools, review returns machine-checkable findings",
+      "dependencyIds": [],
+      "testObligations": [
+        "AGENT-031-T01",
+        "AGENT-031-T02",
+        "AGENT-031-T03",
+        "AGENT-031-T04",
+        "AGENT-031-T05"
+      ]
+    },
+    {
+      "id": "REL-004",
+      "requirementIds": [
+        "REQ-016"
+      ],
+      "status": "not-started",
+      "userStory": "Per-turn cost counters - input, output, cache-read, cache-create, durations, lines changed, web-search count, unknown-cost flag",
+      "dependencyIds": [],
+      "testObligations": [
+        "REL-004-T01",
+        "REL-004-T02",
+        "REL-004-T03",
+        "REL-004-T04",
+        "REL-004-T05"
+      ]
+    },
+    {
+      "id": "UI-014",
+      "requirementIds": [
+        "REQ-016",
+        "REQ-018"
+      ],
+      "status": "not-started",
+      "userStory": "TUI composer - multiline editor, Enter sends, Shift+Enter newline, Ctrl+J fallback, send button, draft survives interrupt, queue-while-busy",
+      "dependencyIds": [],
+      "testObligations": [
+        "UI-014-T01",
+        "UI-014-T02",
+        "UI-014-T03",
+        "UI-014-T04",
+        "UI-014-T05"
+      ]
+    },
+    {
+      "id": "UI-015",
+      "requirementIds": [
+        "REQ-016"
+      ],
+      "status": "not-started",
+      "userStory": "TUI status bar - clickable model item opens provider-aware switcher, clickable context item opens context detail view; keyboard fallback",
+      "dependencyIds": [],
+      "testObligations": [
+        "UI-015-T01",
+        "UI-015-T02",
+        "UI-015-T03",
+        "UI-015-T04",
+        "UI-015-T05"
+      ]
+    },
+    {
+      "id": "UI-016",
+      "requirementIds": [
+        "REQ-016"
+      ],
+      "status": "not-started",
+      "userStory": "TUI context detail view - per-source token breakdown with cache-read vs fresh flags, largest blocks first, truncation markers",
+      "dependencyIds": [],
+      "testObligations": [
+        "UI-016-T01",
+        "UI-016-T02",
+        "UI-016-T03",
+        "UI-016-T04",
+        "UI-016-T05"
+      ]
+    },
+    {
+      "id": "UI-017",
+      "requirementIds": [
+        "REQ-006",
+        "REQ-016"
+      ],
+      "status": "not-started",
+      "userStory": "TUI /memory viewer - list loaded memory files with path bytes tokens cached flag, unload with prefix-cache cost warning, reload path",
+      "dependencyIds": [],
+      "testObligations": [
+        "UI-017-T01",
+        "UI-017-T02",
+        "UI-017-T03",
+        "UI-017-T04",
+        "UI-017-T05"
+      ]
+    },
+    {
+      "id": "UI-018",
+      "requirementIds": [
+        "REQ-019"
+      ],
+      "status": "not-started",
+      "userStory": "TUI keybindings help - footer hints plus /keybindings parity, configurable composer submit keymap",
+      "dependencyIds": [],
+      "testObligations": [
+        "UI-018-T01",
+        "UI-018-T02",
+        "UI-018-T03",
+        "UI-018-T04",
+        "UI-018-T05"
       ]
     }
   ]

@@ -1,6 +1,8 @@
 //! Bounded structured-concurrency primitives for the native runtime.
 #![forbid(unsafe_code)]
 pub mod config;
+pub mod lifecycle;
+pub mod effect;
 use std::{fmt, future::Future, ops::Deref, pin::Pin, sync::{atomic::{AtomicU64, AtomicUsize, Ordering}, Arc}, time::Duration};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

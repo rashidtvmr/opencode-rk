@@ -1,5 +1,6 @@
 //! Runtime-neutral domain and wire contracts shared by the OpenCode RK core.
 #![forbid(unsafe_code)]
+pub mod events;
 
 use std::{collections::BTreeMap, fmt, str::FromStr};
 
