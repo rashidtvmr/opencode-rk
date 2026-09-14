@@ -18,3 +18,7 @@ __pycache__/
 
 # repowise API keys (local)
 .repowise/.env
+
+# Autonomous controller state and lane worktrees - machine-local
+/state/
+/.worktrees/

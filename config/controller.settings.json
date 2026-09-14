@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "note": "Operator-editable controller settings. Budgets here are an explicit operator decision; the loop will not exceed them.",
+  "maxConcurrentLanes": 6,
+  "perTaskTimeoutSeconds": 3600,
+  "maxAttemptsPerTask": 3,
+  "totalBudgetUsd": 0,
+  "budgetMode": "free-workers-only",
+  "workerPool": [
+    "9router-oc-muse-spark-1-3-contributor-free",
+    "9router-gg-gonkagate-dsv4-flash",
+    "9router-kai-glm-53-free",
+    "9router-kai-qwen38-flash-free",
+    "9router-tr-glm-5-3-free",
+    "9router-vyce-dsv4-flash",
+    "gonkagate-minimax-m27",
+    "dahl-dsv4-flash",
+    "9router-bai-qwen38-flash",
+    "9router-bai-hy3",
+    "9router-bai-mimo-v25",
+    "9router-cf-glm47"
+  ],
+  "verifierWorkerPool": [
+    "9router-tr-glm-5-3-free",
+    "9router-vyce-dsv4-flash",
+    "9router-kai-glm-53-free",
+    "9router-gg-gonkagate-dsv4-flash"
+  ],
+  "stateDir": "state",
+  "worktreeRoot": ".worktrees",
+  "requeueBlockedAfterSeconds": 0,
+  "stopWhenNoReadyWork": true
+}
