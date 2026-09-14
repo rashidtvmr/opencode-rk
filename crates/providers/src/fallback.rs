@@ -1,0 +1,1 @@
+//! Provider fallback module stub.

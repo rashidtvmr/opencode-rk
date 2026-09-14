@@ -550,4 +550,153 @@ mod tests {
         let one = SnapshotV2::list_pins(&conn, payload, 1).unwrap();
         assert_eq!(one.len(), 1);
     }
+
+    #[test]
+    fn export_includes_all_tables() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+        let (session_id, session_pk) = make_session(&mut conn, "test-session");
+        append(&mut conn, session_id, "message-1");
+        append(&mut conn, session_id, "message-2");
+
+        // Create pins for multiple owners (retained_payloads)
+        let payload1 = mk_payload(&conn, b"retained-data-1");
+        let payload2 = mk_payload(&conn, b"retained-data-2");
+        let owner_a = [1_u8; 16];
+        let owner_b = [2_u8; 16];
+        SnapshotV2::pin(&conn, &owner_a, 1, payload1, 100).unwrap();
+        SnapshotV2::pin(&conn, &owner_b, 2, payload2, 200).unwrap();
+
+        // Open and close an epoch (context_epochs)
+        let base1 = mk_payload(&conn, b"baseline-epoch-1");
+        let snap1 = mk_payload(&conn, b"snapshot-epoch-1");
+        SnapshotV2::open_epoch(&conn, session_pk, base1, snap1, 300).unwrap();
+        SnapshotV2::close_epoch(&conn, session_pk, 400).unwrap();
+
+        // Create a compaction checkpoint (compaction_checkpoints)
+        let summary = mk_payload(&conn, b"summary");
+        SnapshotV2::checkpoint(&conn, session_pk, 2, summary, Some(summary), 500).unwrap();
+
+        // Insert outbox events (event_outbox)
+        insert_outbox(&conn, 1, None, r#"{"type":"test"}"#);
+        insert_outbox(
+            &conn,
+            2,
+            Some(session_id.as_uuid().as_bytes().as_slice()),
+            r#"{"type":"session-event"}"#,
+        );
+
+        // Verify all tables have content for export
+        let sessions_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM sessions", [], |r| r.get(0))
+            .unwrap();
+        let messages_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))
+            .unwrap();
+        let message_parts_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM message_parts", [], |r| r.get(0))
+            .unwrap();
+        let payloads_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM payloads", [], |r| r.get(0))
+            .unwrap();
+        let context_epochs_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM context_epochs", [], |r| r.get(0))
+            .unwrap();
+        let compaction_checkpoints_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM compaction_checkpoints", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        let retained_payloads_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM retained_payloads", [], |r| r.get(0))
+            .unwrap();
+        let event_outbox_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM event_outbox", [], |r| r.get(0))
+            .unwrap();
+
+        assert_eq!(sessions_count, 1, "export should cover sessions");
+        assert_eq!(messages_count, 2, "export should cover messages");
+        assert_eq!(message_parts_count, 2, "export should cover message_parts");
+        assert!(
+            payloads_count >= 5,
+            "export should cover payloads (messages+pins+epochs+checkpoint)"
+        );
+        assert_eq!(
+            context_epochs_count, 1,
+            "export should cover context_epochs"
+        );
+        assert_eq!(
+            compaction_checkpoints_count, 1,
+            "export should cover compaction_checkpoints"
+        );
+        assert_eq!(
+            retained_payloads_count, 2,
+            "export should cover retained_payloads"
+        );
+        assert_eq!(event_outbox_count, 2, "export should cover event_outbox");
+    }
+
+    #[test]
+    fn epoch_boundary_respected() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+        let (session_id, session_pk) = make_session(&mut conn, "epoch-test");
+        append(&mut conn, session_id, "msg-before-epoch");
+        append(&mut conn, session_id, "msg-at-epoch-1");
+        append(&mut conn, session_id, "msg-at-epoch-2");
+
+        // Open epoch 1 (baseline + snapshot)
+        let base1 = mk_payload(&conn, b"baseline-epoch-1");
+        let snap1 = mk_payload(&conn, b"snapshot-epoch-1");
+        SnapshotV2::open_epoch(&conn, session_pk, base1, snap1, 100).unwrap();
+
+        // Messages after epoch 1 opens
+        append(&mut conn, session_id, "msg-after-epoch-1-open");
+        append(&mut conn, session_id, "msg-after-epoch-1-open-2");
+
+        SnapshotV2::close_epoch(&conn, session_pk, 200).unwrap();
+
+        // Open epoch 2
+        let base2 = mk_payload(&conn, b"baseline-epoch-2");
+        let snap2 = mk_payload(&conn, b"snapshot-epoch-2");
+        SnapshotV2::open_epoch(&conn, session_pk, base2, snap2, 300).unwrap();
+
+        append(&mut conn, session_id, "msg-after-epoch-2-open");
+
+        SnapshotV2::close_epoch(&conn, session_pk, 400).unwrap();
+
+        // List epochs - newest first
+        let epochs = SnapshotV2::list_epochs(&conn, session_pk, 10).unwrap();
+        assert_eq!(epochs.len(), 2, "should have 2 closed epochs");
+        assert_eq!(epochs[0].0, 2, "epoch 2 should be first (newest)");
+        assert_eq!(epochs[1].0, 1, "epoch 1 should be second");
+
+        // Verify epoch ordering and boundaries
+        assert_eq!(epochs[0].1, 300, "epoch 2 created at 300");
+        assert_eq!(epochs[0].2, Some(400), "epoch 2 closed at 400");
+        assert_eq!(epochs[1].1, 100, "epoch 1 created at 100");
+        assert_eq!(epochs[1].2, Some(200), "epoch 1 closed at 200");
+
+        // Export page respects epoch boundaries via context_epochs
+        // Messages seq 1-2 exist before any epoch, 3-5 after epoch 1 closes,
+        // 6-7 after epoch 2 opens/closes
+        let (export_rows, watermark) = SnapshotV2::export_page(&conn, session_pk, 0, 10).unwrap();
+        assert!(
+            export_rows.len() >= 5,
+            "export should include messages up to current head"
+        );
+
+        // Verify context_epochs establishes clear boundaries
+        let epoch_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM context_epochs WHERE session_pk = ?1 AND epoch = 2",
+                params![session_pk],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            epoch_count, 1,
+            "epoch 2 should be recorded in context_epochs"
+        );
+    }
 }

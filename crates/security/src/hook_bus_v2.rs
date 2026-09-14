@@ -19,7 +19,7 @@ pub use crate::ssrf::SsrfBlocked;
 #[derive(Clone, Eq, PartialEq, Debug, Error)]
 pub enum HookError {
     #[error("SSRF blocked: {0}")]
-    SsrfBlocked(SsrfBlocked),
+    SsrfBlocked(#[from] SsrfBlocked),
 }
 
 /// A single pending hook entry.
@@ -184,7 +184,7 @@ mod tests {
     use super::*;
 
     fn url() -> String {
-        "https://hooks.example.com/webhook".to_owned()
+        "https://93.184.216.34/webhook".to_owned()
     }
 
     #[test]
@@ -195,7 +195,7 @@ mod tests {
         let drained = bus.drain_ready_mut();
         assert_eq!(drained.len(), 1);
         assert_eq!(drained[0].id, id);
-        assert_eq!(drained[0].url, "https://hooks.example.com/webhook");
+        assert_eq!(drained[0].url, "https://93.184.216.34/webhook");
         assert_eq!(drained[0].payload, "payload");
         assert!(bus.is_empty());
     }
@@ -203,7 +203,6 @@ mod tests {
     #[test]
     fn shift_drop_on_overflow() {
         let mut bus = HookBusV2::new();
-        // Enqueue MAX_PENDING (100) first
         for i in 0..MAX_PENDING {
             let _ = bus
                 .enqueue(url(), format!("p{i}"))
@@ -211,43 +210,37 @@ mod tests {
         }
         assert_eq!(bus.len(), MAX_PENDING);
 
-        // Enqueue 101st, oldest should be shift-dropped
-        let before = bus.drain_ready();
-        let old_first_id = before[0].id;
-        drop(before);
+        let first_entry = bus.drain_ready();
+        let first_id = first_entry.first().map(|h| h.id).unwrap();
+        drop(first_entry);
 
         let new_id = bus
             .enqueue(url(), "p100".to_owned())
             .expect("enqueue should succeed");
 
+        assert_eq!(bus.len(), MAX_PENDING);
         let drained = bus.drain_ready_mut();
-        assert_eq!(drained.len(), MAX_PENDING);
-        assert!(!drained.iter().any(|h| h.id == old_first_id));
+        assert!(!drained.iter().any(|h| h.id == first_id));
         assert!(drained.iter().any(|h| h.id == new_id));
     }
 
     #[test]
     fn always_emit_bypasses_queue() {
         let mut bus = HookBusV2::new();
-        bus.add_always_emit("https://hooks.example.com/important/*");
+        bus.add_always_emit("https://93.184.216.34/important/*");
 
-        // This is an IP-based URL, which SSRF would normally block,
-        // but the always-emit pattern bypasses SSRF + queue.
         let id = bus
             .enqueue(
-                "https://hooks.example.com/important/event".to_owned(),
+                "https://93.184.216.34/important/event".to_owned(),
                 "data".to_owned(),
             )
             .unwrap();
         assert!(id > 0);
         assert!(bus.is_empty(), "always-emit should not add to queue");
 
-        // A normal URL still goes into the queue.
+        // A normal public IP URL still goes into the queue.
         let _ = bus
-            .enqueue(
-                "http://example.invalid/webhook".to_owned(),
-                "data".to_owned(),
-            )
+            .enqueue("https://8.8.8.8/webhook".to_owned(), "data".to_owned())
             .unwrap();
         assert_eq!(bus.len(), 1);
     }

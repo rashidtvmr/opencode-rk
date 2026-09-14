@@ -1,0 +1,1 @@
+//! Provider metrics module stub.

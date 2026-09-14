@@ -1,0 +1,1 @@
+//! Tool mcp module stub.

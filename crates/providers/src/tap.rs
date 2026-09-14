@@ -1,0 +1,1 @@
+//! Provider tap module stub.

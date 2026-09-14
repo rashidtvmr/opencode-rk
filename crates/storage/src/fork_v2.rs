@@ -16,6 +16,7 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 use crate::StorageError;
 
 const MAX_FORK_COPY_MESSAGES: usize = 500;
+const MAX_FORK_DEPTH: usize = 8;
 
 pub struct ForkV2;
 
@@ -38,6 +39,32 @@ impl ForkV2 {
         }
         if through_seq < 0 {
             return Err(invalid_input());
+        }
+
+        // enforce fork depth: walk parent chain and reject if at cap
+        {
+            let mut current_id: Vec<u8> = parent_session_id_bytes.to_vec();
+            let mut depth = 0usize;
+            while depth < MAX_FORK_DEPTH {
+                let is_fork: i64 = connection.query_row(
+                    "SELECT COUNT(*) FROM sessions WHERE id=?1 AND fork_parent_id IS NOT NULL",
+                    params![current_id],
+                    |r| r.get(0),
+                )?;
+                if is_fork == 0 {
+                    break;
+                }
+                depth += 1;
+                let parent: Vec<u8> = connection.query_row(
+                    "SELECT fork_parent_id FROM sessions WHERE id=?1",
+                    params![current_id],
+                    |r| r.get(0),
+                )?;
+                current_id = parent;
+            }
+            if depth >= MAX_FORK_DEPTH {
+                return Err(invalid_input());
+            }
         }
 
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
@@ -572,5 +599,113 @@ mod tests {
             )
             .unwrap();
         assert_eq!(count, 1);
+    }
+
+    #[test]
+    fn fork_inherits_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+        let parent = SessionId::new();
+        let parent_pk = create_parent(&mut conn, parent);
+        append(&mut conn, parent, 1, "m1");
+        append(&mut conn, parent, 2, "m2");
+
+        let fork_id = SessionId::new();
+        let fork_pk = ForkV2::fork_session(
+            &mut conn,
+            parent.as_uuid().as_bytes(),
+            2,
+            fork_id,
+            "fork",
+            5000,
+        )
+        .unwrap();
+
+        // fork inherits parent's messages
+        let fork_msg_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE session_pk=?1",
+                params![fork_pk],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(fork_msg_count, 2);
+
+        // fork messages share payload references with parent
+        let parent_pks = payload_pks(&conn, parent_pk);
+        let fork_pks = payload_pks(&conn, fork_pk);
+        assert_eq!(fork_pks, parent_pks[..2]);
+
+        // verify fork points to parent
+        let got_parent: Option<Vec<u8>> = conn
+            .query_row(
+                "SELECT fork_parent_id FROM sessions WHERE pk=?1",
+                params![fork_pk],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            got_parent.as_deref(),
+            Some(parent.as_uuid().as_bytes().as_slice())
+        );
+    }
+
+    #[test]
+    fn fork_depth_bounded() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+
+        // create a chain of MAX_FORK_DEPTH forks
+        let mut ancestors: Vec<SessionId> = Vec::new();
+        let mut current = SessionId::new();
+        ancestors.push(current);
+
+        // create root session
+        create_parent(&mut conn, current);
+        append(&mut conn, current, 1, "root");
+
+        // create MAX_FORK_DEPTH forks chained together
+        for i in 0..MAX_FORK_DEPTH {
+            let fork_id = SessionId::new();
+            let result = ForkV2::fork_session(
+                &mut conn,
+                current.as_uuid().as_bytes(),
+                1,
+                fork_id,
+                "forked",
+                5000 + i as i64,
+            );
+            assert!(result.is_ok(), "fork {} should succeed", i);
+            let fork_pk = result.unwrap();
+
+            // verify fork has fork_parent_id set
+            let is_fork: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sessions WHERE pk=?1 AND fork_parent_id IS NOT NULL",
+                    params![fork_pk],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(is_fork, 1, "fork {} should have fork_parent_id", i);
+
+            ancestors.push(fork_id);
+            current = fork_id;
+        }
+
+        // attempt to fork at depth cap - should fail
+        let overflow_fork = SessionId::new();
+        let result = ForkV2::fork_session(
+            &mut conn,
+            current.as_uuid().as_bytes(),
+            1,
+            overflow_fork,
+            "overflow",
+            5000 + MAX_FORK_DEPTH as i64,
+        );
+        assert!(
+            result.is_err(),
+            "fork at depth {} should fail",
+            MAX_FORK_DEPTH
+        );
     }
 }

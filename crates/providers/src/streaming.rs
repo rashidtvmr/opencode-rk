@@ -1,0 +1,1 @@
+//! Provider streaming module stub.

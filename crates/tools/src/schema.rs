@@ -1,0 +1,1 @@
+//! Tool schema module stub.

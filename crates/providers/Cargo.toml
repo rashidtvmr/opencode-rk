@@ -1,0 +1,16 @@
+[package]
+name = "opencode-rk-providers"
+version = "0.1.0-alpha.1"
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+opencode-rk-contracts = { path = "../contracts" }
+opencode-rk-security = { path = "../security" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }

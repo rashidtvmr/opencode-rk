@@ -219,13 +219,14 @@ mod tests {
         let path = dir.path().join("workspace.db");
         let conn = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
         drop(conn);
+
         // Reopen should succeed when markers are intact.
         let _reopened = SchemaV2::open_existing(&path).unwrap();
 
         // Tamper with application_id: reopen must fail.
         {
-            let conn = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
-            conn.execute("PRAGMA application_id = -1").unwrap();
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA application_id = -1").unwrap();
             drop(conn);
             assert!(
                 SchemaV2::open_existing(&path).is_err(),
@@ -235,8 +236,8 @@ mod tests {
 
         // Tamper with user_version: reopen must fail.
         {
-            let conn = SchemaV2::initialize_workspace(&path, [1_u8; 16], [2_u8; 16], 10).unwrap();
-            conn.execute("PRAGMA user_version = 99").unwrap();
+            let conn = rusqlite::Connection::open(&path).unwrap();
+            conn.execute_batch("PRAGMA user_version = 99").unwrap();
             drop(conn);
             assert!(
                 SchemaV2::open_existing(&path).is_err(),

@@ -1,0 +1,1 @@
+//! Provider auth module stub.

@@ -11,6 +11,7 @@ pub mod import_v2;
 pub mod migrations;
 pub mod quota_v2;
 pub mod retention_v2;
+pub mod rollout_v2;
 pub mod schema_v2;
 pub mod snapshot_v2;
 pub mod writer_v2;

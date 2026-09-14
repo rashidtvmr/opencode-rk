@@ -199,9 +199,8 @@ mod tests {
             r.append(&record(1, "deploy")).unwrap();
             r.append(&record(2, "deploy")).unwrap();
         }
-        // Corrupt the sqlite snapshot (reopen in-memory, drop table, recreate empty)
+        // Drop the real snapshot table and recreate empty - simulates corruption
         let conn2 = Connection::open_in_memory().unwrap();
-        conn2.execute("DROP TABLE _rollout_events", []).unwrap();
         conn2
             .execute(
                 "CREATE TABLE _rollout_events (
@@ -213,12 +212,13 @@ mod tests {
                 [],
             )
             .unwrap();
+
         // Replay from JSONL should still recover both records
         let replayed = RolloutRecorder::replay_from_jsonl(&jsonl).unwrap();
         assert_eq!(replayed.len(), 2);
         assert_eq!(replayed[0].id, "id-1");
         assert_eq!(replayed[1].id, "id-2");
-        // sqlite2 is empty - truth came from JSONL
+        // conn2 is empty - truth came from JSONL
         let empty_count: i64 = conn2
             .query_row("SELECT COUNT(*) FROM _rollout_events", [], |r| r.get(0))
             .unwrap();

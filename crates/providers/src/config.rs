@@ -1,0 +1,1 @@
+//! Provider config module stub.
