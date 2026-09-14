@@ -13,6 +13,7 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     disc_status_errors,
     enterprise_remote_gap_errors,
     operations_ownership_gap_errors,
+    req017_extensibility_gap_errors,
     release_assurance_gap_errors,
     residual_evidence_kind_errors,
     routing_ownership_gap_errors,
@@ -233,6 +234,41 @@ class BacklogExhaustionTests(unittest.TestCase):
             changed = copy.deepcopy(original_release)
             changed["candidateValidatorContracts"][0]["ownershipEstablished"] = True
             self.assertTrue(any("cannot become owned from requirement arithmetic" in error for error in release_errors_for(changed)))
+
+    def test_req017_extensibility_gap_rejects_skill_command_task_inference(self):
+        ledger = load_ledger()
+        self.assertEqual(req017_extensibility_gap_errors(ledger["stories"], ROOT), [])
+
+        gap_path = ROOT / "sources/req017-extensibility-ownership-gap.json"
+        original_gap = json.loads(gap_path.read_text(encoding="utf-8"))
+
+        def errors_for(changed_gap):
+            from tools import validate_backlog_exhaustion as module
+
+            original_load = module._load
+
+            def fake_load(path):
+                if pathlib.Path(path) == gap_path:
+                    return changed_gap
+                return original_load(path)
+
+            with mock.patch("tools.validate_backlog_exhaustion._load", side_effect=fake_load):
+                return req017_extensibility_gap_errors(ledger["stories"], ROOT)
+
+        with self.subTest("task order cannot assign SkillV2 to EXT-001"):
+            changed = copy.deepcopy(original_gap)
+            changed["reviewedPartitions"][0]["candidateTaskOwner"] = "EXT-001"
+            self.assertTrue(any("cannot gain task owner by task order/arithmetic" in error for error in errors_for(changed)))
+
+        with self.subTest("identical EXT-001/002 surface signatures cannot silently diverge"):
+            changed = copy.deepcopy(original_gap)
+            changed["storySurfaceSignatures"]["EXT-002"] = []
+            self.assertTrue(any("EXT-002: REQ-017 extensibility surface signature drifted" in error for error in errors_for(changed)))
+
+        with self.subTest("command registry cannot become custom-slash ownership by subtraction"):
+            changed = copy.deepcopy(original_gap)
+            changed["candidateFragments"][1]["ownershipEstablished"] = True
+            self.assertTrue(any("cannot become owned from residual requirement arithmetic" in error for error in errors_for(changed)))
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())

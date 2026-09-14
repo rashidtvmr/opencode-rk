@@ -45,6 +45,7 @@
       "sources/evidence.json",
       "sources/operations-ownership-gap.json",
       "sources/release-assurance-gap.json",
+      "sources/req017-extensibility-ownership-gap.json",
       "sources/routing-ownership-gap.json",
       "sources/upstream.lock.json",
       "tasks/DISC-003.md",

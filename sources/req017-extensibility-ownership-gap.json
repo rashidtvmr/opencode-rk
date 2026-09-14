@@ -1,0 +1,229 @@
+{
+  "schemaVersion": 1,
+  "status": "source-reviewed-no-exact-task-owner",
+  "repositoryId": "opencode",
+  "repository": "anomalyco/opencode",
+  "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+  "treeSha": "b17683f6fb570317083ee8f62bd136435c023270",
+  "requirementId": "REQ-017",
+  "requirement": "Skills plugins and custom slash commands",
+  "requirementTaskIds": [
+    "EXT-001",
+    "EXT-002",
+    "UI-010",
+    "EXT-013",
+    "TOOL-007"
+  ],
+  "residualStoryIds": [
+    "EXT-001",
+    "EXT-002"
+  ],
+  "storySurfaceSignatures": {
+    "EXT-001": [
+      "opencode.extensibility"
+    ],
+    "EXT-002": [
+      "opencode.extensibility"
+    ]
+  },
+  "ownershipDecision": {
+    "EXT-001": null,
+    "EXT-002": null
+  },
+  "taskBindingState": {
+    "EXT-001": {
+      "controllerStatus": "in-progress",
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-017"
+      ],
+      "taskCard": null,
+      "worklog": null
+    },
+    "EXT-002": {
+      "controllerStatus": "in-progress",
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-017"
+      ],
+      "taskCard": null,
+      "worklog": null
+    }
+  },
+  "surfaceRulePatterns": [
+    "packages/core/src/plugin.ts",
+    "packages/core/src/plugin/**",
+    "packages/core/src/skill.ts",
+    "packages/core/src/skill/**",
+    "packages/core/src/command.ts",
+    "packages/plugin/**",
+    "specs/v2/catalog-config-plugin-lifecycle.md",
+    ".opencode/**"
+  ],
+  "subtractedRequirementOwners": [
+    {
+      "id": "UI-010",
+      "category": "dependency-constrained",
+      "reasonKey": "client-architecture-dependency",
+      "note": "Client/UI ownership remains dependency-constrained and is not reassigned to EXT-001/002."
+    },
+    {
+      "id": "EXT-013",
+      "category": "local-implemented-stale",
+      "implementationCommit": "accb2e919fe3e02ac34aa4b42851ec710f8ca282",
+      "taskCard": "tasks/EXT-013.md",
+      "worklog": "worklog/EXT-013.md",
+      "ownedPartition": "bounded safe bundled-skill file extraction and materialization"
+    },
+    {
+      "id": "TOOL-007",
+      "controllerStatus": "accepted",
+      "ownedPartition": "skill invocation passes the same policy gate as tools"
+    }
+  ],
+  "reviewedPartitions": [
+    {
+      "id": "skill-v2-discovery-and-listing",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/skill.ts",
+          "blobSha": "be1cd1d49adcc18643ca3e799d1b00af5313b786",
+          "reviewedLines": {
+            "from": 15,
+            "to": 132
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/server/src/handlers/skill.ts",
+          "blobSha": "8ffeaca8ea21a8c6a40ca7e39da2685e55854a11",
+          "reviewedLines": {
+            "from": 1,
+            "to": 8
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/skill.test.ts",
+          "blobSha": "0f8e1b3cb3d802bbe34a353a692445e0fbc775e7",
+          "reviewedLines": {
+            "from": 41,
+            "to": 124
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/v2/api.html",
+          "blobSha": "147d24f58bb30c479acca1e4a16f393eea4fead2",
+          "reviewedLines": {
+            "from": 953,
+            "to": 957
+          }
+        }
+      ],
+      "inputs": "ordered embedded, local-directory or remote-URL skill discovery sources plus agent permission context",
+      "outputs": "deduplicated SkillV2.Info list with later-source name precedence and permission-filtered availability",
+      "failureSemantics": "unreadable/invalid skill files are skipped; file glob/read failures are softened; remote discovery may fail through its discovery service",
+      "stateLifetime": "location-scoped transform state and an in-memory source-keyed loaded-skill cache",
+      "resourceLifetime": "filesystem traversal plus optional remote skill discovery; cache invalidation policy remains explicitly unresolved upstream",
+      "ownershipBlocker": "Both EXT-001 and EXT-002 have the same extensibility surface and identical REQ-017 story text; EXT-013 already owns safe bundled-file extraction and TOOL-007 owns skill policy gating."
+    },
+    {
+      "id": "command-v2-runtime-registry",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/command.ts",
+          "blobSha": "cb082a9f47ebb81623c13e9ced26400bcfc2c605",
+          "reviewedLines": {
+            "from": 8,
+            "to": 64
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/server/src/handlers/command.ts",
+          "blobSha": "bf41e79f835bd5d5ee11d5fd5b5b284f0f862375",
+          "reviewedLines": {
+            "from": 1,
+            "to": 8
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/command.test.ts",
+          "blobSha": "3da8523c5b5ecb94d37b2d44303975aa1059d91d",
+          "reviewedLines": {
+            "from": 11,
+            "to": 55
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/v2/api.html",
+          "blobSha": "147d24f58bb30c479acca1e4a16f393eea4fead2",
+          "reviewedLines": {
+            "from": 607,
+            "to": 611
+          }
+        }
+      ],
+      "inputs": "location-scoped command transform callbacks keyed by command name",
+      "outputs": "stable in-memory command lookup/list projection with later transform updates preserved",
+      "failureSemantics": "the reviewed registry has no transport/network failure path; State transform failures follow the shared State runtime semantics",
+      "stateLifetime": "location-scoped in-memory State transforms and command map",
+      "resourceLifetime": "bounded by registered command metadata in the owning location scope",
+      "ownershipBlocker": "The V2 runtime exposes command.list, but the config specification explicitly rejects separate user-authored command configuration; this may be internal/built-in runtime and is not task-bound to EXT-001 or EXT-002."
+    }
+  ],
+  "designCaveat": {
+    "path": "specs/v2/config.md",
+    "blobSha": "96b0f3ac901f6cd67bb9f3250940ab1bff3ce102",
+    "reviewedLines": {
+      "from": 37,
+      "to": 60
+    },
+    "conclusion": "V2 removes separate user-authored command configuration, places named reusable user workflows under skills, and leaves internal command routing/built-ins as runtime concerns. Therefore EXT-001/EXT-002 cannot be assigned as 'skills' versus 'custom commands' from requirement wording or task order."
+  },
+  "candidateFragments": [
+    {
+      "id": "skill-v2-discovery-and-listing",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "EXT-001 and EXT-002 have identical source-surface and requirement bindings.",
+        "SkillV2 mixes filesystem discovery, optional remote URL discovery, cache lifetime and permission filtering beyond a small pure registry.",
+        "Existing EXT-013 and TOOL-007 already own separate safe extraction and policy-gate behavior and must not be re-owned."
+      ]
+    },
+    {
+      "id": "command-v2-runtime-registry",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "No task card, worklog or pinned task-specific spec binds CommandV2 to EXT-001 or EXT-002.",
+        "The V2 config design explicitly removes separate user-authored command configuration and moves reusable workflows to skills.",
+        "An easy in-memory implementation would invent custom-slash ownership if treated as a residual task solely because CommandV2 exists."
+      ]
+    }
+  ],
+  "unresolvedPartitions": [
+    "skill-source-registration-discovery-precedence-and-cache-lifetime",
+    "skill-permission-filtering-versus-tool-policy-ownership",
+    "remote-skill-discovery-network-and-failure-lifetime",
+    "command-runtime-registry-versus-user-authored-workflow-boundary",
+    "slash-invocation-and-ui-presentation-boundary",
+    "plugin-skill-command-composition-and-location-scope"
+  ],
+  "historyReview": {
+    "state": "locked-checkout-grafted-at-pinned-commit",
+    "limitation": "The pinned OpenCode checkout is used only for current source/caller/test/spec contracts; missing historical intent is not used to assign EXT-001 versus EXT-002."
+  },
+  "closureCriteria": [
+    "Ownership must come from explicit task-specific source/path/spec evidence that distinguishes EXT-001 from EXT-002; task order, numeric IDs, residual requirement membership and surface arithmetic are never sufficient.",
+    "A candidate must specify inputs, outputs, failure semantics, state/resource lifetime and authority while excluding already-owned EXT-013/TOOL-007 behavior and dependency-constrained UI-010.",
+    "Any custom-command implementation must reconcile the pinned V2 design that removes separate user-authored command configuration and explain whether CommandV2 is internal runtime, user-visible slash behavior, or a different owning domain.",
+    "All six unresolved partitions must receive source-grounded task dispositions or remain blocked before REQ-017 extensibility ownership can be called decomposed."
+  ]
+}

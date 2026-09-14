@@ -75,6 +75,17 @@ RELEASE_ASSURANCE_PARTITIONS = (
     "strict-tdd-independent-verification-validator",
     "safety-resource-correctness-release-validator",
 )
+REQ017_EXTENSIBILITY_GAP_PATH = ROOT / "sources/req017-extensibility-ownership-gap.json"
+REQ017_RESIDUAL_STORIES = ("EXT-001", "EXT-002")
+REQ017_REQUIREMENT_TASKS = ("EXT-001", "EXT-002", "UI-010", "EXT-013", "TOOL-007")
+REQ017_UNRESOLVED_PARTITIONS = (
+    "skill-source-registration-discovery-precedence-and-cache-lifetime",
+    "skill-permission-filtering-versus-tool-policy-ownership",
+    "remote-skill-discovery-network-and-failure-lifetime",
+    "command-runtime-registry-versus-user-authored-workflow-boundary",
+    "slash-invocation-and-ui-presentation-boundary",
+    "plugin-skill-command-composition-and-location-scope",
+)
 
 CATEGORY_IDS = {
     "local-implemented-stale": {
@@ -1238,6 +1249,233 @@ def release_assurance_gap_errors(rows: list[object], root: pathlib.Path = ROOT) 
     return errors
 
 
+def req017_extensibility_gap_errors(rows: list[object], root: pathlib.Path = ROOT) -> list[str]:
+    """Prevent REQ-017 residual arithmetic from inventing EXT-001/EXT-002 ownership."""
+    errors: list[str] = []
+    gap_path = root / "sources/req017-extensibility-ownership-gap.json"
+    if not gap_path.is_file():
+        return ["missing machine-checkable REQ-017 extensibility ownership-gap record"]
+    try:
+        gap = _load(gap_path)
+    except (json.JSONDecodeError, OSError) as exc:
+        return [f"invalid REQ-017 extensibility ownership-gap record: {exc}"]
+
+    if gap.get("schemaVersion") != 1 or gap.get("status") != "source-reviewed-no-exact-task-owner":
+        errors.append("REQ-017 extensibility ownership-gap schema/status drifted")
+    if gap.get("repositoryId") != "opencode" or gap.get("repository") != "anomalyco/opencode":
+        errors.append("REQ-017 extensibility ownership-gap repository identity drifted")
+    if gap.get("requirementId") != "REQ-017" or gap.get("requirement") != "Skills plugins and custom slash commands":
+        errors.append("REQ-017 extensibility ownership-gap requirement text drifted")
+    if gap.get("requirementTaskIds") != list(REQ017_REQUIREMENT_TASKS):
+        errors.append("REQ-017 extensibility requirement task set drifted")
+    if gap.get("residualStoryIds") != list(REQ017_RESIDUAL_STORIES):
+        errors.append("REQ-017 extensibility residual story set drifted")
+    if gap.get("ownershipDecision") != {story_id: None for story_id in REQ017_RESIDUAL_STORIES}:
+        errors.append("REQ-017 extensibility ownership must remain unresolved until task-specific binding evidence exists")
+    if gap.get("unresolvedPartitions") != list(REQ017_UNRESOLVED_PARTITIONS):
+        errors.append("REQ-017 extensibility unresolved partition set drifted")
+
+    lock = _load(root / "sources/upstream.lock.json")
+    locked = next((item for item in lock.get("repositories", []) if item.get("id") == "opencode"), None)
+    locked_commit = str(locked.get("commit", "")) if isinstance(locked, Mapping) else ""
+    locked_tree = str(locked.get("treeSha", "")) if isinstance(locked, Mapping) else ""
+    if gap.get("commit") != locked_commit or gap.get("treeSha") != locked_tree:
+        errors.append("REQ-017 extensibility ownership-gap is not bound to locked OpenCode commit/tree")
+
+    requirements = _load(root / "requirements/user-requirements.json")
+    requirement = next(
+        (item for item in requirements.get("requirements", []) if isinstance(item, Mapping) and item.get("id") == "REQ-017"),
+        None,
+    )
+    if not isinstance(requirement, Mapping):
+        errors.append("REQ-017 disappeared from canonical requirements")
+    elif requirement.get("requirement") != gap.get("requirement") or requirement.get("tasks") != list(REQ017_REQUIREMENT_TASKS):
+        errors.append("REQ-017 canonical requirement topology drifted from extensibility ownership gap")
+
+    plan = _load(root / "ralph.json")
+    plan_by_id = {
+        str(item.get("id", "")): item
+        for item in plan.get("userStories", [])
+        if isinstance(item, Mapping)
+    }
+    binding = gap.get("taskBindingState")
+    if not isinstance(binding, Mapping) or list(binding) != list(REQ017_RESIDUAL_STORIES):
+        errors.append("REQ-017 extensibility task binding set drifted")
+        binding = {}
+    for story_id in REQ017_RESIDUAL_STORIES:
+        story = plan_by_id.get(story_id)
+        if not isinstance(story, Mapping):
+            errors.append(f"REQ-017 residual story disappeared from Ralph: {story_id}")
+            continue
+        if story.get("status") != "in-progress" or story.get("userStory") != "TBD - see source audit" or story.get("requirementIds") != ["REQ-017"]:
+            errors.append(f"{story_id}: REQ-017 ownership gap is stale after Ralph semantics changed")
+        recorded = binding.get(story_id)
+        if not isinstance(recorded, Mapping) or (
+            recorded.get("controllerStatus") != "in-progress"
+            or recorded.get("ralphStory") != "TBD - see source audit"
+            or recorded.get("requirementIds") != ["REQ-017"]
+            or recorded.get("taskCard") is not None
+            or recorded.get("worklog") is not None
+        ):
+            errors.append(f"{story_id}: REQ-017 task binding drifted")
+        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
+            errors.append(f"{story_id}: task/worklog appeared; REQ-017 ownership gap needs deliberate review")
+
+    rules = _load(root / "sources/behavior-surface-rules.json")
+    rule_rows = [item for item in rules.get("rules", []) if isinstance(item, Mapping)]
+    extensibility = next((item for item in rule_rows if item.get("id") == "opencode.extensibility"), None)
+    if not isinstance(extensibility, Mapping):
+        errors.append("REQ-017 extensibility behavior surface disappeared")
+    else:
+        if gap.get("surfaceRulePatterns") != extensibility.get("patterns"):
+            errors.append("REQ-017 extensibility surface rule patterns drifted")
+    live_signatures = {
+        story_id: sorted(
+            str(item.get("id"))
+            for item in rule_rows
+            if story_id in item.get("featureIds", [])
+        )
+        for story_id in REQ017_RESIDUAL_STORIES
+    }
+    signatures = gap.get("storySurfaceSignatures")
+    for story_id in REQ017_RESIDUAL_STORIES:
+        if not isinstance(signatures, Mapping) or signatures.get(story_id) != live_signatures[story_id]:
+            errors.append(f"{story_id}: REQ-017 extensibility surface signature drifted from live rules")
+    if live_signatures.get("EXT-001") != live_signatures.get("EXT-002"):
+        errors.append("REQ-017 EXT-001/EXT-002 no longer have identical live surface signatures; gap needs review")
+
+    row_by_id = {
+        str(item.get("id", "")): item
+        for item in rows
+        if isinstance(item, Mapping)
+    }
+    for story_id in REQ017_RESIDUAL_STORIES:
+        row = row_by_id.get(story_id)
+        if not isinstance(row, Mapping):
+            errors.append(f"REQ-017 residual story missing from exhaustion ledger: {story_id}")
+            continue
+        if row.get("category") != "unresolved-decomposition" or row.get("reasonKey") != "extensibility-family-not-decomposed":
+            errors.append(f"{story_id}: REQ-017 residual classification drifted")
+        if row.get("taskCard") is not None or row.get("worklog") is not None or row.get("implementationCommits") != []:
+            errors.append(f"{story_id}: local EXT ownership appeared; REQ-017 gap needs deliberate review")
+        if row.get("requirementIds") != ["REQ-017"] or sorted(row.get("surfaceIds", [])) != live_signatures[story_id]:
+            errors.append(f"{story_id}: REQ-017 exhaustion projection drifted")
+
+    expected_subtracted_ids = ["UI-010", "EXT-013", "TOOL-007"]
+    subtracted = gap.get("subtractedRequirementOwners")
+    if not isinstance(subtracted, list) or [str(item.get("id", "")) for item in subtracted if isinstance(item, Mapping)] != expected_subtracted_ids:
+        errors.append("REQ-017 subtracted requirement owner set drifted")
+    else:
+        ui = subtracted[0]
+        ui_row = row_by_id.get("UI-010")
+        if (
+            not isinstance(ui_row, Mapping)
+            or ui_row.get("category") != "dependency-constrained"
+            or ui_row.get("reasonKey") != "client-architecture-dependency"
+            or ui.get("category") != "dependency-constrained"
+            or ui.get("reasonKey") != "client-architecture-dependency"
+        ):
+            errors.append("UI-010: REQ-017 dependency-constrained exclusion drifted")
+
+        ext13 = subtracted[1]
+        ext13_row = row_by_id.get("EXT-013")
+        expected_commit = STALE_IMPLEMENTATION_COMMITS["EXT-013"][0]
+        if (
+            not isinstance(ext13_row, Mapping)
+            or ext13_row.get("category") != "local-implemented-stale"
+            or ext13_row.get("implementationCommits") != [expected_commit]
+            or ext13.get("category") != "local-implemented-stale"
+            or ext13.get("implementationCommit") != expected_commit
+            or ext13.get("taskCard") != "tasks/EXT-013.md"
+            or ext13.get("worklog") != "worklog/EXT-013.md"
+        ):
+            errors.append("EXT-013: REQ-017 implemented exclusion drifted")
+
+        tool = subtracted[2]
+        tool_story = plan_by_id.get("TOOL-007")
+        if (
+            not isinstance(tool_story, Mapping)
+            or tool_story.get("status") != "accepted"
+            or tool_story.get("requirementIds") != ["REQ-017"]
+            or tool.get("controllerStatus") != "accepted"
+            or not str(tool.get("ownedPartition", "")).strip()
+        ):
+            errors.append("TOOL-007: REQ-017 accepted exclusion drifted")
+
+    inventory, inventory_errors = _inventory_index(root, "opencode")
+    errors.extend(inventory_errors)
+    expected_partition_ids = ["skill-v2-discovery-and-listing", "command-v2-runtime-registry"]
+    partitions = gap.get("reviewedPartitions")
+    if not isinstance(partitions, list) or [str(item.get("id", "")) for item in partitions if isinstance(item, Mapping)] != expected_partition_ids:
+        errors.append("REQ-017 reviewed partition set drifted")
+    elif inventory:
+        for partition in partitions:
+            if partition.get("candidateTaskOwner") is not None:
+                errors.append(f"REQ-017 partition cannot gain task owner by task order/arithmetic: {partition.get('id')}")
+            for key in ("inputs", "outputs", "failureSemantics", "stateLifetime", "resourceLifetime", "ownershipBlocker"):
+                if not str(partition.get(key, "")).strip():
+                    errors.append(f"REQ-017 partition {partition.get('id')} lacks explicit {key}")
+            evidence = partition.get("evidence")
+            if not isinstance(evidence, list) or not evidence:
+                errors.append(f"REQ-017 partition lacks pinned evidence: {partition.get('id')}")
+                continue
+            for item in evidence:
+                if not isinstance(item, Mapping):
+                    errors.append("REQ-017 partition evidence must be an object")
+                    continue
+                path = str(item.get("path", ""))
+                inventory_row = inventory.get(path)
+                if inventory_row is None:
+                    errors.append(f"REQ-017 evidence escaped pinned inventory: {path}")
+                    continue
+                if inventory_row.get("commit") != locked_commit or inventory_row.get("blob") != item.get("blobSha"):
+                    errors.append(f"REQ-017 evidence pin drifted: {path}")
+                if item.get("kind") not in DISC_EVIDENCE_KINDS:
+                    errors.append(f"REQ-017 evidence has invalid kind: {path}")
+                reviewed_lines = item.get("reviewedLines")
+                if (
+                    not isinstance(reviewed_lines, Mapping)
+                    or not isinstance(reviewed_lines.get("from"), int)
+                    or not isinstance(reviewed_lines.get("to"), int)
+                    or reviewed_lines["from"] < 1
+                    or reviewed_lines["to"] < reviewed_lines["from"]
+                ):
+                    errors.append(f"REQ-017 evidence lacks reviewed line range: {path}")
+
+    caveat = gap.get("designCaveat")
+    if not isinstance(caveat, Mapping):
+        errors.append("REQ-017 design caveat is missing")
+    elif inventory:
+        path = str(caveat.get("path", ""))
+        inventory_row = inventory.get(path)
+        if (
+            path != "specs/v2/config.md"
+            or inventory_row is None
+            or inventory_row.get("commit") != locked_commit
+            or inventory_row.get("blob") != caveat.get("blobSha")
+            or caveat.get("reviewedLines") != {"from": 37, "to": 60}
+            or "removes separate user-authored command configuration" not in str(caveat.get("conclusion", ""))
+        ):
+            errors.append("REQ-017 V2 command-to-skill design caveat drifted")
+
+    candidates = gap.get("candidateFragments")
+    if not isinstance(candidates, list) or [str(item.get("id", "")) for item in candidates if isinstance(item, Mapping)] != expected_partition_ids:
+        errors.append("REQ-017 candidate fragment set drifted")
+    else:
+        for candidate in candidates:
+            if candidate.get("ownershipEstablished") is not False:
+                errors.append(f"REQ-017 candidate cannot become owned from residual requirement arithmetic: {candidate.get('id')}")
+            if not candidate.get("disqualifiers"):
+                errors.append(f"REQ-017 candidate lacks ownership disqualifiers: {candidate.get('id')}")
+
+    history = gap.get("historyReview")
+    if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit" or not str(history.get("limitation", "")).strip():
+        errors.append("REQ-017 history-review limitation drifted")
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 4:
+        errors.append("REQ-017 closure criteria drifted")
+    return errors
+
+
 def sync_features_status(root: pathlib.Path = ROOT) -> None:
     """Synchronize only the generated status mirrors in FEATURES.md from Ralph."""
     plan = _load(root / "ralph.json")
@@ -1400,6 +1638,7 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
     errors.extend(routing_ownership_gap_errors(rows, reconciliation, root))
     errors.extend(operations_ownership_gap_errors(rows, root))
     errors.extend(release_assurance_gap_errors(rows, root))
+    errors.extend(req017_extensibility_gap_errors(rows, root))
 
     errors.extend(_features_status_errors(root, plan))
     return errors
