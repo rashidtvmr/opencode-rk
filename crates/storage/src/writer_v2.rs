@@ -3,6 +3,7 @@
 use opencode_rk_contracts::{MessageId, MessageRole, PayloadRef, SessionId};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
+use crate::quota_v2::{QuotaSnapshot, QuotaV2, QuotaV2Error};
 use crate::StorageError;
 
 const MAX_TITLE_BYTES: usize = 1024;
@@ -27,6 +28,13 @@ pub struct NewMessage {
 }
 
 pub struct V2Writer;
+
+/// Admission budget for the quota-gated append paths. Zero means "admit
+/// nothing" for that resource (any measured usage exceeds a zero budget).
+pub struct QuotaBudget {
+    pub max_db_bytes: i64,
+    pub max_wal_bytes: i64,
+}
 
 impl V2Writer {
     pub fn create_session(
@@ -53,58 +61,7 @@ impl V2Writer {
         connection: &mut Connection,
         message: &NewMessage,
     ) -> Result<(), StorageError> {
-        let inline_data = match &message.body {
-            PayloadRef::Inline { text } if text.len() <= MAX_INLINE_PAYLOAD_BYTES => {
-                text.as_bytes()
-            }
-            PayloadRef::Inline { .. } | PayloadRef::Blob { .. } => {
-                return Err(StorageError::InlinePayloadTooLarge);
-            }
-        };
-        let role = encode_role(message.role);
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-
-        let session = transaction
-            .query_row(
-                "SELECT pk, next_message_seq FROM sessions WHERE id=?1",
-                params![message.session_id.as_uuid().as_bytes().as_slice()],
-                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()?;
-        let Some((session_pk, sequence)) = session else {
-            return Err(StorageError::SessionNotFound(message.session_id));
-        };
-        let next_sequence = sequence.checked_add(1).ok_or_else(invalid_input)?;
-
-        transaction.execute(
-            "UPDATE sessions SET next_message_seq=?1, updated_at_us=?2 WHERE pk=?3",
-            params![next_sequence, message.created_at_us, session_pk],
-        )?;
-        transaction.execute(
-            "INSERT INTO messages
-             (id, session_pk, seq, role, status, created_at_us, completed_at_us)
-             VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)",
-            params![
-                message.id.as_uuid().as_bytes().as_slice(),
-                session_pk,
-                sequence,
-                role,
-                message.created_at_us,
-            ],
-        )?;
-        let message_pk = transaction.last_insert_rowid();
-        transaction.execute(
-            "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
-            params![inline_data, inline_data.len() as i64, message.created_at_us],
-        )?;
-        let payload_pk = transaction.last_insert_rowid();
-        transaction.execute(
-            "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk)
-             VALUES (?1, 0, 0, ?2)",
-            params![message_pk, payload_pk],
-        )?;
-        transaction.commit()?;
-        Ok(())
+        insert_message(connection, message)
     }
 
     pub fn append_outbox_event(
@@ -113,28 +70,7 @@ impl V2Writer {
         kind: &str,
         payload_json: &str,
     ) -> Result<(), StorageError> {
-        if !(1..=MAX_EVENT_KIND_BYTES).contains(&kind.len()) {
-            return Err(invalid_input());
-        }
-        if payload_json.len() > MAX_EVENT_PAYLOAD_BYTES {
-            return Err(StorageError::EventPayloadTooLarge);
-        }
-        serde_json::from_str::<serde_json::Value>(payload_json).map_err(|_| invalid_input())?;
-
-        let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let sequence = allocate_event_sequence(&transaction)?;
-        transaction.execute(
-            "INSERT INTO event_outbox (seq, session_id, kind, payload_json, created_at_us)
-             VALUES (?1, ?2, ?3, ?4, 0)",
-            params![
-                sequence,
-                session_id.as_uuid().as_bytes().as_slice(),
-                kind,
-                payload_json,
-            ],
-        )?;
-        transaction.commit()?;
-        Ok(())
+        insert_outbox_event(connection, session_id, kind, payload_json)
     }
 
     pub fn list_recent_sessions(
@@ -178,6 +114,137 @@ impl V2Writer {
     }
 }
 
+fn insert_message(
+    connection: &mut Connection,
+    message: &NewMessage,
+) -> Result<(), StorageError> {
+    let inline_data = match &message.body {
+        PayloadRef::Inline { text } if text.len() <= MAX_INLINE_PAYLOAD_BYTES => text.as_bytes(),
+        PayloadRef::Inline { .. } | PayloadRef::Blob { .. } => {
+            return Err(StorageError::InlinePayloadTooLarge);
+        }
+    };
+    let role = encode_role(message.role);
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+    let session = transaction
+        .query_row(
+            "SELECT pk, next_message_seq FROM sessions WHERE id=?1",
+            params![message.session_id.as_uuid().as_bytes().as_slice()],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?)),
+        )
+        .optional()?;
+    let Some((session_pk, sequence)) = session else {
+        return Err(StorageError::SessionNotFound(message.session_id));
+    };
+    let next_sequence = sequence.checked_add(1).ok_or_else(invalid_input)?;
+
+    transaction.execute(
+        "UPDATE sessions SET next_message_seq=?1, updated_at_us=?2 WHERE pk=?3",
+        params![next_sequence, message.created_at_us, session_pk],
+    )?;
+    transaction.execute(
+        "INSERT INTO messages
+         (id, session_pk, seq, role, status, created_at_us, completed_at_us)
+         VALUES (?1, ?2, ?3, ?4, 1, ?5, ?5)",
+        params![
+            message.id.as_uuid().as_bytes().as_slice(),
+            session_pk,
+            sequence,
+            role,
+            message.created_at_us,
+        ],
+    )?;
+    let message_pk = transaction.last_insert_rowid();
+    transaction.execute(
+        "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
+        params![inline_data, inline_data.len() as i64, message.created_at_us],
+    )?;
+    let payload_pk = transaction.last_insert_rowid();
+    transaction.execute(
+        "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk)
+         VALUES (?1, 0, 0, ?2)",
+        params![message_pk, payload_pk],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+/// Quota-gated append. Measures the live DB/WAL snapshot, admits under
+/// the budget, and only on admit proceeds with the same insert as
+/// `append_message`. On a rejected limit the error names which resource hit it
+/// and nothing is written.
+pub fn append_message_checked(
+    connection: &mut Connection,
+    message: &NewMessage,
+    budget: &QuotaBudget,
+) -> Result<(), StorageError> {
+    let snapshot = QuotaV2::measure(connection)?;
+    admit_checked(connection, &snapshot, budget)?;
+    insert_message(connection, message)
+}
+
+/// Quota-gated outbox append, mirroring `append_outbox_event` after admission.
+pub fn append_outbox_event_checked(
+    connection: &mut Connection,
+    session_id: SessionId,
+    kind: &str,
+    payload_json: &str,
+    budget: &QuotaBudget,
+) -> Result<(), StorageError> {
+    let snapshot = QuotaV2::measure(connection)?;
+    admit_checked(connection, &snapshot, budget)?;
+    insert_outbox_event(connection, session_id, kind, payload_json)
+}
+
+fn admit_checked(
+    connection: &Connection,
+    snapshot: &QuotaSnapshot,
+    budget: &QuotaBudget,
+) -> Result<(), StorageError> {
+    match QuotaV2::admit(connection, snapshot, budget.max_db_bytes, budget.max_wal_bytes) {
+        Ok(()) => Ok(()),
+        Err(QuotaV2Error::DbBytes(n)) => Err(StorageError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("db budget exceeded: {n} bytes"),
+        ))),
+        Err(QuotaV2Error::WalBytes(n)) => Err(StorageError::Io(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("wal budget exceeded: {n} bytes"),
+        ))),
+    }
+}
+
+fn insert_outbox_event(
+    connection: &mut Connection,
+    session_id: SessionId,
+    kind: &str,
+    payload_json: &str,
+) -> Result<(), StorageError> {
+    if !(1..=MAX_EVENT_KIND_BYTES).contains(&kind.len()) {
+        return Err(invalid_input());
+    }
+    if payload_json.len() > MAX_EVENT_PAYLOAD_BYTES {
+        return Err(StorageError::EventPayloadTooLarge);
+    }
+    serde_json::from_str::<serde_json::Value>(payload_json).map_err(|_| invalid_input())?;
+
+    let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let sequence = allocate_event_sequence(&transaction)?;
+    transaction.execute(
+        "INSERT INTO event_outbox (seq, session_id, kind, payload_json, created_at_us)
+         VALUES (?1, ?2, ?3, ?4, 0)",
+        params![
+            sequence,
+            session_id.as_uuid().as_bytes().as_slice(),
+            kind,
+            payload_json,
+        ],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
 fn allocate_event_sequence(transaction: &Transaction<'_>) -> Result<i64, StorageError> {
     match transaction.query_row(
         "UPDATE workspace_state
@@ -218,4 +285,81 @@ fn encode_role(role: MessageRole) -> i64 {
 
 fn invalid_input() -> StorageError {
     StorageError::Sqlite(rusqlite::Error::InvalidQuery)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use opencode_rk_contracts::{MessageId, MessageRole, PayloadRef, SessionId};
+    use std::path::Path;
+    use tempfile::tempdir;
+
+    fn workspace(path: &Path) -> Connection {
+        crate::schema_v2::SchemaV2::initialize_workspace(path, [1_u8; 16], [2_u8; 16], 10).unwrap()
+    }
+
+    fn msg(session: SessionId, body: &str, ts: i64) -> NewMessage {
+        NewMessage {
+            id: MessageId::new(),
+            session_id: session,
+            role: MessageRole::User,
+            body: PayloadRef::Inline { text: body.to_owned() },
+            created_at_us: ts,
+        }
+    }
+
+    fn create_session(conn: &mut Connection, id: SessionId) {
+        V2Writer::create_session(
+            conn,
+            &NewSession {
+                id,
+                title: "t".to_owned(),
+                created_at_us: 100,
+                updated_at_us: 100,
+            },
+        )
+        .unwrap();
+    }
+
+    fn message_rows(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0)).unwrap()
+    }
+
+    fn payload_rows(conn: &Connection) -> i64 {
+        conn.query_row("SELECT COUNT(*) FROM payloads", [], |r| r.get(0)).unwrap()
+    }
+
+    #[test]
+    fn checked_append_generous_budget_inserts_same_rows_as_plain() {
+        let (dir_a, dir_b) = (tempdir().unwrap(), tempdir().unwrap());
+        let mut plain = workspace(&dir_a.path().join("w.db"));
+        let mut checked = workspace(&dir_b.path().join("w.db"));
+        let (sid_a, sid_b) = (SessionId::new(), SessionId::new());
+        create_session(&mut plain, sid_a);
+        create_session(&mut checked, sid_b);
+
+        V2Writer::append_message(&mut plain, &msg(sid_a, "hello", 1000)).unwrap();
+        let budget = QuotaBudget { max_db_bytes: i64::MAX, max_wal_bytes: i64::MAX };
+        append_message_checked(&mut checked, &msg(sid_b, "hello", 1000), &budget).unwrap();
+
+        assert_eq!(message_rows(&plain), message_rows(&checked));
+        assert_eq!(payload_rows(&plain), payload_rows(&checked));
+    }
+
+    #[test]
+    fn checked_append_zero_db_budget_rejects_and_writes_nothing() {
+        let dir = tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+        let sid = SessionId::new();
+        create_session(&mut conn, sid);
+
+        let before = message_rows(&conn);
+        let budget = QuotaBudget { max_db_bytes: 0, max_wal_bytes: i64::MAX };
+        let err = append_message_checked(&mut conn, &msg(sid, "nope", 1000), &budget).unwrap_err();
+        assert!(matches!(
+            err,
+            StorageError::Io(_)
+        ));
+        assert_eq!(message_rows(&conn), before);
+    }
 }

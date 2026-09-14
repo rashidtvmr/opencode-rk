@@ -81,7 +81,10 @@ impl ExecV2 {
         Ok(())
     }
 
-    /// Record a prepared provider attempt for an execution.
+    /// Record a prepared provider attempt for an execution. Rejects terminal
+    /// executions (2,3,5) via one conditional INSERT, so the state check and
+    /// the insert are atomic without widening the `&Connection` signature to
+    /// `&mut` for an IMMEDIATE transaction. Missing row yields changed == 0.
     pub fn record_attempt(
         connection: &Connection,
         exec_pk: i64,
@@ -93,13 +96,17 @@ impl ExecV2 {
         if ordinal < 0 || through_seq < 0 {
             return Err(invalid_input());
         }
-        connection.execute(
+        let changed = connection.execute(
             "INSERT INTO provider_attempts
              (id, execution_pk, ordinal, state, request_hash, through_message_seq,
               created_at_us)
-             VALUES (randomblob(16), ?1, ?2, 0, ?3, ?4, ?5)",
+             SELECT randomblob(16), ?1, ?2, 0, ?3, ?4, ?5
+             WHERE EXISTS (SELECT 1 FROM executions WHERE pk=?1 AND state IN (0,1,4))",
             params![exec_pk, ordinal, &request_hash[..], through_seq, now_us],
         )?;
+        if changed == 0 {
+            return Err(invalid_input());
+        }
         Ok(connection.last_insert_rowid())
     }
 
@@ -438,6 +445,15 @@ mod tests {
             )
             .unwrap();
         assert_eq!(state, 2);
+    }
+
+    #[test]
+    fn record_attempt_rejected_on_terminal_execution() {
+        let f = fixture();
+        let exec = start(&f);
+        ExecV2::transition_execution(&f.conn, exec, 0, 1, None).unwrap();
+        ExecV2::transition_execution(&f.conn, exec, 1, 2, Some(2000)).unwrap();
+        assert!(ExecV2::record_attempt(&f.conn, exec, 0, &[9_u8; 32], 1, 2100).is_err());
     }
 
     #[test]

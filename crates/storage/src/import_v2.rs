@@ -6,11 +6,14 @@
 //! `V2Writer::create_session`); this importer only appends its messages against the
 //! given `dest_session_pk` and advances `next_message_seq`.
 //!
-//! `ponytail:` source blob-backed messages and inline payloads wider than the v2
-//! 8 KiB inline ceiling cannot be copied faithfully without the source blob root or
-//! a destination blob spool. They are preserved as provenance in
-//! `message_parts.metadata_json` with a zero-byte payload. Add a blob-copy lane when
-//! the caller supplies a source blob store and a destination CAS writer.
+//! `ponytail:` fail-closed importer. Source blob-backed messages (inline is NULL)
+//! and inline payloads wider than the v2 8 KiB inline ceiling cannot be copied
+//! faithfully without the source blob root or a destination blob spool, so
+//! `page` returns `Err(StorageError::InlinePayloadTooLarge)` instead of writing
+//! a zero-byte payload with provenance metadata. A blob-copy lane can lift this
+//! once the caller supplies a source blob store and a destination CAS writer.
+//! A mid-import failure leaves the already-committed prefix in place; the
+//! offending row and everything after it are not written.
 use opencode_rk_contracts::MessageId;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
@@ -64,6 +67,9 @@ impl ImportV2 {
 
     /// Whole-session message-count verification: `COUNT(*)` over the destination
     /// session must equal `expected_messages` or the call fails.
+    ///
+    /// Counts only: a matching count does not prove bodies survived. Pair with
+    /// `verify_payload_bytes` when the source byte total is known.
     pub fn verify_counts(
         dest: &Connection,
         dest_session_pk: i64,
@@ -80,6 +86,28 @@ impl ImportV2 {
         Ok(())
     }
 
+    /// Whole-session payload-byte verification: `SUM(payloads.raw_bytes)` over
+    /// `message_parts` of the destination session must equal `expected_bytes`.
+    /// Catches body loss that `verify_counts` cannot see.
+    pub fn verify_payload_bytes(
+        dest: &Connection,
+        dest_session_pk: i64,
+        expected_bytes: u64,
+    ) -> Result<(), StorageError> {
+        let total: i64 = dest.query_row(
+            "SELECT COALESCE(SUM(p.raw_bytes),0) FROM messages m \
+              JOIN message_parts mp ON mp.message_pk=m.pk \
+              JOIN payloads p ON p.pk=mp.payload_pk \
+              WHERE m.session_pk=?1",
+            params![dest_session_pk],
+            |row| row.get(0),
+        )?;
+        if total as u64 != expected_bytes {
+            return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        Ok(())
+    }
+
     /// Import one bounded page of format-1 messages with `rowid > after_message_rowid`
     /// (resumable cursor). Returns `(imported_this_page, next_cursor)` where
     /// `next_cursor` is the last source rowid read; re-invoking with `next_cursor`
@@ -88,8 +116,10 @@ impl ImportV2 {
     /// The public signature carries no source session id, so the page is scoped to
     /// the next source session encountered at the cursor. This is exact for a source
     /// connection holding a single format-1 session; for multi-session sources use
-    /// `import_session`, which scopes by TEXT id. `ponytail:` a per-session cursor
-    /// would need the source session id threaded into this signature.
+    /// `import_session`, which scopes by TEXT id: `import_is_resumable` can
+    /// otherwise land another session's messages into this destination session.
+    /// `ponytail:` a per-session cursor would need the source session id threaded
+    /// into this signature.
     pub fn import_is_resumable(
         dest: &mut Connection,
         source: &Connection,
@@ -139,34 +169,25 @@ fn page(
     let mut imported: u64 = 0;
     let mut next_cursor: i64 = after_message_rowid;
     for result in rows {
-        let (rowid, role, inline, blob, byte_len, created_at) = result?;
+        let (rowid, role, inline, _blob, _byte_len, created_at) = result?;
         let created_us = parse_us(&created_at)?;
         let role_i = encode_role(&role)
             .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
-        let (body, metadata): (Vec<u8>, Option<String>) = match inline {
+        // Fail closed: blob-backed rows (inline is NULL) and inline bodies over
+        // the v2 ceiling cannot be represented faithfully, so reject them with
+        // the same variant `V2Writer::append_message` uses. Never write a
+        // zero-byte placeholder that `verify_counts` would accept as success.
+        let body: Vec<u8> = match inline {
             Some(text) => {
                 let bytes = text.into_bytes();
                 if bytes.len() > V2_INLINE_CEILING {
-                    // inline beyond v2 ceiling: keep provenance, drop body
-                    let meta = format!(
-                        r#"{{"source_truncated":true,"source_byte_len":{}}}"#,
-                        bytes.len()
-                    );
-                    (Vec::new(), Some(meta))
-                } else {
-                    (bytes, None)
+                    return Err(StorageError::InlinePayloadTooLarge);
                 }
+                bytes
             }
-            None => {
-                // blob-backed source: cannot read source blob here (read-only,
-                // no blob root). Preserve provenance in metadata_json.
-                let meta = format!(
-                    r#"{{"source_blob_hash":{blob:?},"source_byte_len":{byte_len}}}"#
-                );
-                (Vec::new(), Some(meta))
-            }
+            None => return Err(StorageError::InlinePayloadTooLarge),
         };
-        append_to_v2(dest, dest_session_pk, role_i, &body, created_us, metadata.as_deref())?;
+        append_to_v2(dest, dest_session_pk, role_i, &body, created_us, None)?;
         imported += 1;
         next_cursor = rowid;
     }
@@ -359,6 +380,58 @@ mod tests {
         }
         assert_eq!(total, 1200);
         ImportV2::verify_counts(&dest, pk, 1200).unwrap();
+    }
+
+    #[test]
+    fn import_rejects_blob_backed_row() {
+        let source = source_db(1);
+        source
+            .execute(
+                "INSERT INTO messages(id,session_id,role,inline_text,blob_hash,byte_len,created_at) \
+                 VALUES ('blob1','src1','user',NULL,'deadbeef',100,?1)",
+                params![now_rfc3339()],
+            )
+            .unwrap();
+        let (mut dest, pk, new_id) = dest_db();
+        let err =
+            ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap_err();
+        assert!(matches!(err, StorageError::InlinePayloadTooLarge));
+        let zero_bytes: i64 = dest
+            .query_row("SELECT COUNT(*) FROM payloads WHERE raw_bytes=0", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(zero_bytes, 0, "no zero-byte placeholder may be written");
+    }
+
+    #[test]
+    fn import_rejects_oversize_inline_row() {
+        let source = source_db(0);
+        let big = "x".repeat(V2_INLINE_CEILING + 1);
+        let big_len = big.len() as i64;
+        source
+            .execute(
+                "INSERT INTO messages(id,session_id,role,inline_text,blob_hash,byte_len,created_at) \
+                 VALUES ('big1','src1','user',?1,NULL,?2,?3)",
+                params![big, big_len, now_rfc3339()],
+            )
+            .unwrap();
+        let (mut dest, pk, new_id) = dest_db();
+        let err =
+            ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap_err();
+        assert!(matches!(err, StorageError::InlinePayloadTooLarge));
+        ImportV2::verify_counts(&dest, pk, 0).unwrap();
+    }
+
+    #[test]
+    fn verify_payload_bytes_accepts_exact_sum_rejects_others() {
+        let source = source_db(3);
+        let (mut dest, pk, new_id) = dest_db();
+        ImportV2::import_session(&mut dest, &source, "src1", &new_id, pk).unwrap();
+        // "hello 0".."hello 2" are 7 bytes each.
+        ImportV2::verify_payload_bytes(&dest, pk, 21).unwrap();
+        assert!(ImportV2::verify_payload_bytes(&dest, pk, 22).is_err());
+        assert!(ImportV2::verify_payload_bytes(&dest, pk, 0).is_err());
     }
 
     #[test]

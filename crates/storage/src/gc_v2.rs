@@ -68,6 +68,37 @@ const CLAIM_HEAD: &str = "UPDATE blobs SET state = 1 WHERE pk IN ( \
      WHERE state = 0 AND created_at_us <= ?1";
 const CLAIM_TAIL: &str = " ORDER BY created_at_us ASC, pk ASC LIMIT ?2)";
 
+/// Per-arm unreachability predicate for payloads. A payload is collectible
+/// when it is not referenced by any root table. Mirrors UNREFERENCED_ARMS
+/// but targets payloads directly (inline and blob-backed alike).
+const UNREFERENCED_PAYLOAD_ARM: &str = "
+  AND NOT EXISTS (
+    SELECT 1 FROM message_parts mp WHERE mp.payload_pk = p.pk
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM session_input_parts sp WHERE sp.payload_pk = p.pk
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM executions e WHERE e.config_payload_pk = p.pk
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM tool_calls t WHERE t.input_payload_pk = p.pk
+      OR t.output_payload_pk = p.pk
+      OR t.error_payload_pk = p.pk
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM context_epochs ce WHERE ce.baseline_payload_pk = p.pk
+      OR ce.snapshot_payload_pk = p.pk
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM compaction_checkpoints cc WHERE cc.summary_payload_pk = p.pk
+      OR cc.recent_payload_pk = p.pk
+  )
+  AND NOT EXISTS (
+    SELECT 1 FROM retained_payloads rp WHERE rp.payload_pk = p.pk
+  )
+";
+
 /// GC lifecycle: claim old unreferenced blobs as tombstones, finish their
 /// deletion, prune the outbox prefix, and report retention pressure.
 pub struct GcV2;
@@ -132,6 +163,27 @@ impl GcV2 {
         }
         transaction.commit()?;
         Ok(deleted as u64)
+    }
+
+    /// Collect unreferenced `payloads` rows (inline or blob-backed) older than
+    /// the cutoff via per-arm NOT EXISTS (same 7+ roots used by claim_unreferenced_for_deletion
+    /// and retention sweep), then DELETE them bounded LIMIT clamp(1,500).
+    /// Returns count. MUST NOT delete referenced payloads.
+    pub fn claim_orphan_payloads(
+        connection: &Connection,
+        older_than_us: i64,
+        limit: usize,
+    ) -> Result<usize, StorageError> {
+        let limit = limit.clamp(1, MAX_CLAIM_ROWS) as i64;
+        let sql = format!(
+            "DELETE FROM payloads WHERE pk IN ( \
+             SELECT p.pk FROM payloads p \
+             WHERE p.created_at_us <= ?1 \
+             {UNREFERENCED_PAYLOAD_ARM} \
+             ORDER BY p.created_at_us ASC, p.pk ASC LIMIT ?2)"
+        );
+        let deleted = connection.execute(&sql, params![older_than_us, limit])?;
+        Ok(deleted as usize)
     }
 
     /// `(ready, deleting/tombstone, unavailable)` blob counts by state:
@@ -374,5 +426,142 @@ mod tests {
         insert_blob(&conn, 1, 3);
         insert_blob(&conn, 2, 4);
         assert_eq!(GcV2::retention_counts(&conn).unwrap(), (2, 1, 1));
+    }
+
+    fn insert_inline_payload(connection: &Connection, created_at_us: i64) -> i64 {
+        connection
+            .query_row(
+                "INSERT INTO payloads (inline_data, raw_bytes, created_at_us)
+                 VALUES (randomblob(8192), 8192, ?1) RETURNING pk",
+                params![created_at_us],
+                |row| row.get(0),
+            )
+            .unwrap()
+    }
+
+    fn insert_session_message_parts(connection: &Connection) -> (i64, i64, i64) {
+        connection
+            .execute(
+                "INSERT INTO sessions (id, title, created_at_us, updated_at_us)
+                 VALUES (randomblob(16), 't', 0, 1)",
+                [],
+            )
+            .unwrap();
+        let session_pk = connection.last_insert_rowid();
+
+        connection
+            .execute(
+                "INSERT INTO messages (id, session_pk, seq, role, status, created_at_us, completed_at_us)
+                 VALUES (randomblob(16), ?1, 1, 1, 1, 0, 0)",
+                params![session_pk],
+            )
+            .unwrap();
+        let message_pk = connection.last_insert_rowid();
+
+        let payload_pk = connection
+            .query_row(
+                "INSERT INTO payloads (inline_data, raw_bytes, created_at_us)
+                 VALUES (randomblob(8192), 8192, 0) RETURNING pk",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+
+        connection
+            .execute(
+                "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk)
+                 VALUES (?1, 0, 0, ?2)",
+                params![message_pk, payload_pk],
+            )
+            .unwrap();
+
+        (session_pk, message_pk, payload_pk)
+    }
+
+    fn reference_payload_via_message(connection: &Connection, payload_pk: i64) {
+        connection
+            .execute(
+                "INSERT INTO sessions (id, title, created_at_us, updated_at_us)
+                 VALUES (randomblob(16), 't', 0, 1)",
+                [],
+            )
+            .unwrap();
+        let session_pk = connection.last_insert_rowid();
+
+        connection
+            .execute(
+                "INSERT INTO messages (id, session_pk, seq, role, status, created_at_us, completed_at_us)
+                 VALUES (randomblob(16), ?1, 1, 1, 1, 0, 0)",
+                params![session_pk],
+            )
+            .unwrap();
+        let message_pk = connection.last_insert_rowid();
+
+        connection
+            .execute(
+                "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk)
+                 VALUES (?1, 0, 0, ?2)",
+                params![message_pk, payload_pk],
+            )
+            .unwrap();
+    }
+
+    #[test]
+    fn claim_orphan_payloads_deletes_old_orphan_keeps_referenced() {
+        let (_dir, conn) = workspace();
+
+        // Insert old orphan inline payload (unreferenced, created_at_us = 1)
+        let orphan_pk = insert_inline_payload(&conn, 1);
+
+        // Insert referenced inline payload (created_at_us = 2, but referenced via message)
+        let referenced_payload_pk = insert_inline_payload(&conn, 2);
+        reference_payload_via_message(&conn, referenced_payload_pk);
+
+        let cutoff = 10;
+        let deleted = GcV2::claim_orphan_payloads(&conn, cutoff, 500).unwrap();
+        assert_eq!(deleted, 1);
+
+        // Verify orphan payload is gone
+        let orphan_exists: i64 = conn
+            .query_row("SELECT COUNT(*) FROM payloads WHERE pk = ?1", [orphan_pk], |row| row.get(0))
+            .unwrap();
+        assert_eq!(orphan_exists, 0);
+
+        // Verify referenced payload remains
+        let referenced_exists: i64 = conn
+            .query_row("SELECT COUNT(*) FROM payloads WHERE pk = ?1", [referenced_payload_pk], |row| row.get(0))
+            .unwrap();
+        assert_eq!(referenced_exists, 1);
+    }
+
+    #[test]
+    fn claim_is_fail_closed_when_referenced() {
+        let (_dir, conn) = workspace();
+
+        // Insert a blob with state=0 (ready), per DDL: hash 32 bytes, codec 0, raw_bytes >= 0, stored_bytes >= 52
+        let blob_pk = insert_blob(&conn, 0, 1);
+
+        // Claim it to tombstone (state 0 -> 1) - should succeed since blob is unreferenced
+        let claimed = GcV2::claim_unreferenced_for_deletion(&conn, 1, 500).unwrap();
+        assert_eq!(claimed, 1);
+        assert_eq!(state_of(&conn, blob_pk), Some(1));
+
+        // Attempt to create a payload referencing the tombstoned blob.
+        // The payload_ready trigger checks `state = 0`, so it must abort.
+        // A tombstoned blob cannot be resurrected via a new payload reference.
+        let result = conn.execute(
+            "INSERT INTO payloads (blob_pk, raw_bytes, created_at_us)
+             VALUES (?1, 9000, 0)",
+            params![blob_pk],
+        );
+        assert!(result.is_err(), "tombstoned blob must not accept new payload");
+
+        // Attempt to finish deletion of the tombstoned blob (no payload exists).
+        // This should succeed since the blob is now unreferenced.
+        assert!(GcV2::finish_deletion(&conn, blob_pk).is_ok());
+        assert_eq!(state_of(&conn, blob_pk), None);
+
+        // Attempt a double-finish - should fail (blob gone).
+        assert!(GcV2::finish_deletion(&conn, blob_pk).is_err());
     }
 }

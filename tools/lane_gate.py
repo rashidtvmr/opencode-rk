@@ -36,6 +36,7 @@ LANES: list[dict] = [
     {"id": "snapshot_v2", "kind": "module", "owner": "muse-spark", "path": "crates/storage/src/snapshot_v2.rs", "markers": ["pub fn open_epoch", "pub fn close_epoch", "pub fn checkpoint", "pub fn pin", "pub fn unpin", "pub fn export_page", "pub fn outbox_page"]},
     {"id": "import_v2", "kind": "module", "owner": "gonkagate", "path": "crates/storage/src/import_v2.rs", "markers": ["pub fn import_session", "pub fn verify_counts", "pub fn import_is_resumable"]},
     {"id": "quota_v2", "kind": "module", "owner": "gonkagate", "path": "crates/storage/src/quota_v2.rs", "markers": ["pub fn measure", "pub fn admit", "pub fn reclaim"]},
+    {"id": "retention_v2", "kind": "module", "owner": "gonkagate", "path": "crates/storage/src/retention_v2.rs", "markers": ["pub fn sweep_expired_receipts", "pub fn sweep_resolved_approvals", "pub fn sweep_orphan_inline_payloads", "pub fn retention_backlog"]},
     {"id": "test:integration_v2", "kind": "test", "owner": "cf-glm47", "target": "integration_v2", "path": "crates/storage/tests/integration_v2.rs", "min_tests": 2},
     {"id": "test:import_v2", "kind": "test", "owner": "tr-glm-5-3", "target": "import_v2", "path": "crates/storage/tests/import_v2.rs", "min_tests": 4},
     {"id": "test:quota_v2", "kind": "test", "owner": "vyce-dsv4", "target": "quota_v2", "path": "crates/storage/tests/quota_v2.rs", "min_tests": 4},

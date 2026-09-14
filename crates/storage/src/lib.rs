@@ -8,6 +8,7 @@ pub mod fork_v2;
 pub mod gc_v2;
 pub mod import_v2;
 pub mod quota_v2;
+pub mod retention_v2;
 pub mod schema_v2;
 pub mod snapshot_v2;
 pub mod writer_v2;
@@ -23,6 +24,7 @@ use opencode_rk_contracts::{
     Timestamp, MAX_INLINE_PAYLOAD_BYTES,
 };
 pub use quota_v2::QuotaV2;
+pub use retention_v2::RetentionV2;
 use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 pub use schema_v2::SchemaV2;
 pub use snapshot_v2::SnapshotV2;

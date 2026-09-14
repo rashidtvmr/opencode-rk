@@ -16,6 +16,7 @@ use rusqlite::{params, Connection};
 use crate::StorageError;
 
 const MAX_PAGE_SIZE: usize = 500;
+const MAX_SNAPSHOT_READ: usize = 200;
 
 pub struct SnapshotV2;
 
@@ -120,6 +121,79 @@ impl SnapshotV2 {
             return Err(invalid_input());
         }
         Ok(())
+    }
+
+    /// List epochs for a session, newest epoch first.
+    /// Limit clamped to 1..=200. Returns `(epoch, created_at_us, closed_at_us)`.
+    pub fn list_epochs(
+        connection: &Connection,
+        session_pk: i64,
+        limit: usize,
+    ) -> Result<Vec<(i64, i64, Option<i64>)>, StorageError> {
+        let limit = limit.clamp(1, MAX_SNAPSHOT_READ) as i64;
+        let mut statement = connection.prepare(
+            "SELECT epoch, created_at_us, closed_at_us FROM context_epochs
+             WHERE session_pk = ?1
+             ORDER BY epoch DESC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![session_pk, limit], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, Option<i64>>(2)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
+    }
+
+    /// Newest checkpoint for a session by boundary seq, or None when absent.
+    /// Returns `(boundary_seq, summary_payload_pk, created_at_us, recent_count)`.
+    /// `recent_count` is 1 when `recent_payload_pk` is set, else 0.
+    pub fn latest_checkpoint(
+        connection: &Connection,
+        session_pk: i64,
+    ) -> Result<Option<(i64, i64, i64, Option<i64>)>, StorageError> {
+        let mut statement = connection.prepare(
+            "SELECT boundary_message_seq, summary_payload_pk, created_at_us,
+                    CASE WHEN recent_payload_pk IS NULL THEN 0 ELSE 1 END
+             FROM compaction_checkpoints
+             WHERE session_pk = ?1
+             ORDER BY boundary_message_seq DESC LIMIT 1",
+        )?;
+        let mut rows = statement.query_map(params![session_pk], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, Option<i64>>(3)?,
+            ))
+        })?;
+        match rows.next() {
+            None => Ok(None),
+            Some(row) => Ok(Some(row?)),
+        }
+    }
+
+    /// List `(owner_id, purpose)` pins for a payload. Limit clamped to 1..=200.
+    pub fn list_pins(
+        connection: &Connection,
+        payload_pk: i64,
+        limit: usize,
+    ) -> Result<Vec<(Vec<u8>, i64)>, StorageError> {
+        let limit = limit.clamp(1, MAX_SNAPSHOT_READ) as i64;
+        let mut statement = connection.prepare(
+            "SELECT owner_id, purpose FROM retained_payloads
+             WHERE payload_pk = ?1
+             ORDER BY owner_id ASC, purpose ASC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![payload_pk, limit], |row| {
+            Ok((row.get::<_, Vec<u8>>(0)?, row.get::<_, i64>(1)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            out.push(row?);
+        }
+        Ok(out)
     }
 
     /// Keyset export of `(seq, message_pk)` after `after_seq`.
@@ -389,5 +463,82 @@ mod tests {
         let (rows, wm) = SnapshotV2::outbox_page(&conn, Some(&a), 99, 100, 10).unwrap();
         assert!(rows.is_empty());
         assert_eq!(wm, 99);
+    }
+
+    #[test]
+    fn list_epochs_newest_first_and_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+        let (_, pk) = make_session(&mut conn, "s");
+        let base = mk_payload(&conn, b"b");
+        let snap = mk_payload(&conn, b"s");
+        SnapshotV2::open_epoch(&conn, pk, base, snap, 5).unwrap();
+        SnapshotV2::close_epoch(&conn, pk, 6).unwrap();
+        SnapshotV2::open_epoch(&conn, pk, base, snap, 7).unwrap();
+        SnapshotV2::close_epoch(&conn, pk, 8).unwrap();
+        SnapshotV2::open_epoch(&conn, pk, base, snap, 9).unwrap();
+        let epochs = SnapshotV2::list_epochs(&conn, pk, 200).unwrap();
+        assert_eq!(epochs.len(), 3);
+        assert_eq!(epochs[0].0, 3);
+        assert_eq!(epochs[1].0, 2);
+        assert_eq!(epochs[2].0, 1);
+        assert_eq!(epochs[0].1, 9);
+        assert!(epochs[0].2.is_none(), "open epoch must have NULL closed_at_us");
+        assert_eq!(epochs[1].2, Some(8));
+        assert_eq!(epochs[2].2, Some(6));
+        let one = SnapshotV2::list_epochs(&conn, pk, 1).unwrap();
+        assert_eq!(one.len(), 1);
+        assert_eq!(one[0].0, 3);
+    }
+
+    #[test]
+    fn closed_epoch_shows_closed_at_us() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+        let (_, pk) = make_session(&mut conn, "s");
+        let base = mk_payload(&conn, b"b");
+        let snap = mk_payload(&conn, b"s");
+        SnapshotV2::open_epoch(&conn, pk, base, snap, 5).unwrap();
+        SnapshotV2::close_epoch(&conn, pk, 11).unwrap();
+        let epochs = SnapshotV2::list_epochs(&conn, pk, 10).unwrap();
+        assert_eq!(epochs.len(), 1);
+        assert_eq!(epochs[0], (1, 5, Some(11)));
+    }
+
+    #[test]
+    fn latest_checkpoint_none_then_some() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut conn = workspace(&dir.path().join("w.db"));
+        let (id, pk) = make_session(&mut conn, "s");
+        assert!(SnapshotV2::latest_checkpoint(&conn, pk).unwrap().is_none());
+        append(&mut conn, id, "m1");
+        append(&mut conn, id, "m2");
+        let summary = mk_payload(&conn, b"sum");
+        SnapshotV2::checkpoint(&conn, pk, 2, summary, None, 9).unwrap();
+        let got = SnapshotV2::latest_checkpoint(&conn, pk).unwrap().unwrap();
+        assert_eq!(got, (2, summary, 9, Some(0)));
+        let recent = mk_payload(&conn, b"recent");
+        append(&mut conn, id, "m3");
+        SnapshotV2::checkpoint(&conn, pk, 3, summary, Some(recent), 10).unwrap();
+        let got = SnapshotV2::latest_checkpoint(&conn, pk).unwrap().unwrap();
+        assert_eq!(got, (3, summary, 10, Some(1)));
+    }
+
+    #[test]
+    fn list_pins_empty_then_populated() {
+        let dir = tempfile::tempdir().unwrap();
+        let conn = workspace(&dir.path().join("w.db"));
+        let payload = mk_payload(&conn, b"p");
+        assert!(SnapshotV2::list_pins(&conn, payload, 10).unwrap().is_empty());
+        let owner_a = [7_u8; 16];
+        let owner_b = [9_u8; 16];
+        SnapshotV2::pin(&conn, &owner_a, 1, payload, 3).unwrap();
+        SnapshotV2::pin(&conn, &owner_b, 2, payload, 4).unwrap();
+        let pins = SnapshotV2::list_pins(&conn, payload, 10).unwrap();
+        assert_eq!(pins.len(), 2);
+        assert_eq!(pins[0], (owner_a.to_vec(), 1));
+        assert_eq!(pins[1], (owner_b.to_vec(), 2));
+        let one = SnapshotV2::list_pins(&conn, payload, 1).unwrap();
+        assert_eq!(one.len(), 1);
     }
 }
