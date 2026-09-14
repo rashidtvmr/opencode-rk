@@ -1,24 +1,24 @@
 {
-  "evidenceReferences": 43,
+  "evidenceReferences": 49,
   "implementationStatusCounts": {
     "partial": 7,
-    "reference-implemented": 4,
-    "unresolved": 21
+    "reference-implemented": 5,
+    "unresolved": 20
   },
   "inputs": {
     "evidenceCatalogSha256": "387cb91ac3529ee3e4740501cab37b0885fe792533911179ea318b8d82ed6f15",
-    "planSha256": "766caa0e1111efa1985fac331ef1404015b61bb3a67567b120051dffbf6cc6fd",
-    "reconciliationSha256": "3d84fad61d30885fe3550f42cb4a3af108866ad91e31f46d7b1dc343777e35a2",
-    "supplementalEvidenceSha256": "96170e344a179eb62200c41e1173f9cd7a02fc7b3d5b56bbb5de35311f581188",
+    "planSha256": "9f2eba64a34fb020de46cdb927f56b7390c4d1b6044d7933621926db0a4bca33",
+    "reconciliationSha256": "6fc4c16951df3d82d35364b6ea06bcc818185898c4521c4b564d0ea8567be97c",
+    "supplementalEvidenceSha256": "9915ca9917162a699e83bebaac4bed7126a78a5bbd4803bcbede68d06a9f1774",
     "surfaceRulesSha256": "1d2265a196f63555023ad17f36682969abb0521a7be5bb025de1f860eb202781"
   },
   "reviewStateCounts": {
-    "partial": 11,
-    "queued": 21
+    "partial": 12,
+    "queued": 20
   },
   "schemaVersion": 1,
   "status": "in-progress-not-release-evidence",
   "surfaceFamilies": 32,
-  "unresolvedFindings": 44,
+  "unresolvedFindings": 45,
   "warning": "DISC-003 reconciliation is review evidence only; it does not replace full pinned-tree inventory, independent review receipts, or acceptance tests."
 }

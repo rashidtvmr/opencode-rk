@@ -2,7 +2,7 @@
 
 Status: **IN PROGRESS / NOT ACCEPTED**.
 
-This slice converts every DISC-002 candidate family into an explicit reconciliation record. The current ledger contains 32 families: 11 have pinned partial source/caller/test/spec evidence and 21 remain queued with typed unresolved work. No queued family receives an implementation status by inference from its path.
+This slice converts every DISC-002 candidate family into an explicit reconciliation record. The current ledger contains 32 families: 12 have pinned partial evidence and 20 remain queued with typed unresolved work. No queued family receives an implementation status by inference from its path.
 
 Implemented in this slice:
 
@@ -12,6 +12,6 @@ Implemented in this slice:
 - `sources/disc-003-reconciliation.manifest.json` hash-binds the reconciliation to the DISC-002 rules, evidence catalog, and canonical Ralph plan.
 - Upstream status distinguishes V2 implementation, shared legacy, partial/planned behavior, reference-only 9router implementation, and unresolved candidates.
 
-Current evidence-backed findings include Session V2 parity gaps, process-local BackgroundJob semantics versus durable subagents, tool/permission boundaries, scoped plugin lifecycle with deferred reload/external activation, ModelsDev CLI/cache behavior, Integration OAuth/key HTTP surfaces, and 9router account persistence/routing/token-refresh reference semantics.
+Current evidence-backed findings include Session V2 parity gaps, process-local BackgroundJob semantics versus durable subagents, tool/permission boundaries, scoped plugin lifecycle with deferred reload/external activation, ModelsDev CLI/cache behavior, Integration OAuth/key HTTP surfaces, and 9router account persistence/routing/token-refresh/translation reference semantics. The translation slice is deliberately partial: direct Responses↔OpenAI and Codex tool-normalization tests are pinned, while the full provider/format/streaming matrix and known upstream failing edge cases remain unresolved.
 
-Completion remains blocked on the exact pinned checkouts and full caller/test/spec traversal, especially dynamic registration, generated APIs, platform gates, UI/client surfaces, legacy compatibility, and the complete 9router translation/dashboard surface.
+Completion remains blocked on full caller/test/spec traversal, especially dynamic registration, generated APIs, platform gates, UI/client surfaces, legacy compatibility, the remaining 9router dashboard/proxy surfaces, and complete translation provider/format/streaming coverage.

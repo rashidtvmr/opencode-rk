@@ -1,0 +1,29 @@
+# DISC-003 worklog
+
+## Current bounded reconciliation slice
+
+DISC-003 remains **IN PROGRESS / NOT ACCEPTED**. This change does not claim full public-surface extraction or release evidence. It advances exactly one previously queued candidate family, `9router.translation-proxy`, to a reviewed `partial` reference record while retaining explicit unresolved work.
+
+## Pinned evidence
+
+- 9router commit: `17c4cc76877bd1755030a8414f8d0083f48dcccf`.
+- New source evidence `NR-RESPONSES-TRANSLATOR`: `open-sse/translator/formats/responsesApi.js:1-194`, blob `5454f9f3f44f1d7fa428d2feae8e90f73f2a3e66`. It covers Responses input normalization, call-id/output coercion, and Responses→chat request translation but is not the complete format/provider matrix.
+- Existing caller evidence `NR-CHAT`: `src/sse/handlers/chat.js`, blob `7aa530d381c1cc1da4f6ca667a7abe271a8fbc8e`; the compatibility chat handler enters the shared SSE/provider translation path.
+- Existing executor/caller evidence `NR-CODEX-EXECUTOR`: `open-sse/executors/codex.js:1-55`, blob `de2af8229fcf97d04f12f1e1f73a0d92ad396296`; the executor imports Responses normalization and performs provider-specific request transformation.
+- Existing spec evidence `NR-ARCHITECTURE`: `docs/ARCHITECTURE.md:1-120`, blob `548c31908d73003617d630d7a15e45597e7b8183`; it explicitly describes request/response translation and the shared SSE + Translation Core.
+- New direct test evidence `NR-RESPONSES-TRANSLATION-TEST`: `tests/translator/bugs-codexCli-responses.test.js:1-75`, blob `573b5eb0c5ba99a8417c4c230a33dbb13458cd43`. It exercises Responses↔OpenAI conversion and also records two known upstream failing edge cases.
+- New direct test evidence `NR-CODEX-TOOL-NORMALIZATION-TEST`: `tests/unit/codex-tool-normalization.test.js:1-203`, blob `c71938983b578d0589bbb1e315908121569e540b`. It exercises Codex Responses tool normalization and schema sanitization.
+
+## Reconciliation decision
+
+- `9router.translation-proxy` is moved from `queued` to `partial`, with `implementationStatus: reference-implemented`. This status describes observed pinned 9router behavior only; it does not say OpenCode RK has implemented or must reproduce 9router's architecture.
+- The record keeps two unresolved findings: enumerate every request/response format adapter, provider executor, and streaming transform; and reconcile the broader provider/format test matrix plus the known-failing translation cases.
+- Ledger scope remains exactly 32 DISC-002 candidate families. The expected count moves from 11 partial / 21 queued to 12 partial / 20 queued. DISC-003 task status remains `IN PROGRESS` and controller acceptance remains untouched.
+
+## Validation
+
+- `/usr/bin/python3 tools/reconcile_surfaces.py` passed and regenerated the hash-bound manifest with exactly 32 families: 12 `partial`, 20 `queued`; implementation statuses 7 `partial`, 5 `reference-implemented`, 20 `unresolved`; 49 evidence references; 45 unresolved findings; zero validation errors.
+- `/usr/bin/python3 tools/validate_plan.py` => `validate_plan: OK  stories=219 requirements=38 obligations=1095 deps_synthesized=True`.
+- `jq empty` passed for the supplemental evidence catalog, reconciliation ledger, generated manifest, and workspace source map.
+- `git diff --check` passed.
+- No product/runtime source, task acceptance state, or `ralph.json` verifier/controller status is changed by this reconciliation slice.
