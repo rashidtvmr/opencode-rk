@@ -47,6 +47,7 @@
       "sources/release-assurance-gap.json",
       "sources/req017-extensibility-ownership-gap.json",
       "sources/routing-ownership-gap.json",
+      "sources/sharing-ownership-gap.json",
       "sources/upstream.lock.json",
       "tasks/DISC-003.md",
       "tests/bootstrap/test_backlog_exhaustion.py",

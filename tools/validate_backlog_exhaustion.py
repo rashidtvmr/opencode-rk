@@ -86,6 +86,18 @@ REQ017_UNRESOLVED_PARTITIONS = (
     "slash-invocation-and-ui-presentation-boundary",
     "plugin-skill-command-composition-and-location-scope",
 )
+SHARING_OWNERSHIP_GAP_PATH = ROOT / "sources/sharing-ownership-gap.json"
+SHARING_GAP_STORIES = ("SHARE-001", "SHARE-002", "SHARE-003", "SHARE-004", "SHARE-005")
+SHARING_UNRESOLVED_PARTITIONS = (
+    "local-share-metadata-and-secret-persistence",
+    "deterministic-data-keying-merge-and-snapshot-size-policy",
+    "legacy-event-compaction-to-snapshot-migration",
+    "legacy-versus-org-share-http-auth-and-failure-policy",
+    "event-subscription-coalescing-backpressure-and-retry-lifetime",
+    "share-create-remove-deletion-and-secret-lifetime",
+    "support-admin-removal-authority",
+    "enterprise-function-hosted-sync-and-deployment-boundary",
+)
 
 CATEGORY_IDS = {
     "local-implemented-stale": {
@@ -1476,6 +1488,235 @@ def req017_extensibility_gap_errors(rows: list[object], root: pathlib.Path = ROO
     return errors
 
 
+def sharing_ownership_gap_errors(rows: list[object], root: pathlib.Path = ROOT) -> list[str]:
+    """Keep the heterogeneous five-story sharing family source-bound and fail-closed."""
+    errors: list[str] = []
+    gap_path = root / "sources/sharing-ownership-gap.json"
+    if not gap_path.is_file():
+        return ["missing machine-checkable sharing ownership-gap record"]
+    try:
+        gap = _load(gap_path)
+    except (json.JSONDecodeError, OSError) as exc:
+        return [f"invalid sharing ownership-gap record: {exc}"]
+
+    if gap.get("schemaVersion") != 1 or gap.get("status") != "source-reviewed-no-exact-task-owner":
+        errors.append("sharing ownership-gap schema/status drifted")
+    if gap.get("repositoryId") != "opencode" or gap.get("repository") != "anomalyco/opencode":
+        errors.append("sharing ownership-gap repository identity drifted")
+    if gap.get("storyIds") != list(SHARING_GAP_STORIES):
+        errors.append("sharing ownership-gap story set drifted")
+    if gap.get("ownershipDecision") != {story_id: None for story_id in SHARING_GAP_STORIES}:
+        errors.append("sharing ownership must remain unresolved until task-specific source evidence changes")
+    if gap.get("unresolvedPartitions") != list(SHARING_UNRESOLVED_PARTITIONS):
+        errors.append("sharing unresolved decomposition partitions drifted")
+
+    lock = _load(root / "sources/upstream.lock.json")
+    locked = next((item for item in lock.get("repositories", []) if item.get("id") == "opencode"), None)
+    locked_commit = str(locked.get("commit", "")) if isinstance(locked, Mapping) else ""
+    locked_tree = str(locked.get("treeSha", "")) if isinstance(locked, Mapping) else ""
+    if not locked_commit or gap.get("commit") != locked_commit:
+        errors.append("sharing ownership-gap is not bound to the locked OpenCode commit")
+    if not locked_tree or gap.get("treeSha") != locked_tree:
+        errors.append("sharing ownership-gap is not bound to the locked OpenCode tree")
+
+    requirements = _load(root / "requirements/user-requirements.json")
+    req007 = next(
+        (item for item in requirements.get("requirements", []) if isinstance(item, Mapping) and item.get("id") == "REQ-007"),
+        None,
+    )
+    topology = gap.get("requirementTopology")
+    recorded_req007 = topology.get("REQ-007") if isinstance(topology, Mapping) else None
+    if not isinstance(req007, Mapping) or not isinstance(recorded_req007, Mapping):
+        errors.append("sharing ownership-gap REQ-007 topology is missing")
+    elif (
+        req007.get("requirement") != "Session sharing"
+        or req007.get("tasks") != ["SHARE-001", "SHARE-004", "SHARE-005"]
+        or recorded_req007.get("requirement") != req007.get("requirement")
+        or recorded_req007.get("tasks") != req007.get("tasks")
+        or not str(recorded_req007.get("conclusion", "")).strip()
+    ):
+        errors.append("sharing ownership-gap REQ-007 topology drifted")
+
+    plan = _load(root / "ralph.json")
+    plan_by_id = {
+        str(item.get("id", "")): item
+        for item in plan.get("userStories", [])
+        if isinstance(item, Mapping)
+    }
+    expected_requirements = {
+        "SHARE-001": ["REQ-007"],
+        "SHARE-002": [],
+        "SHARE-003": [],
+        "SHARE-004": ["REQ-007"],
+        "SHARE-005": ["REQ-007"],
+    }
+    generic_story = "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json"
+    expected_stories = {
+        story_id: (generic_story if story_id in {"SHARE-002", "SHARE-003"} else "TBD - see source audit")
+        for story_id in SHARING_GAP_STORIES
+    }
+    binding = gap.get("taskBindingState")
+    if not isinstance(binding, Mapping) or list(binding) != list(SHARING_GAP_STORIES):
+        errors.append("sharing ownership-gap task binding set drifted")
+        binding = {}
+    for story_id in SHARING_GAP_STORIES:
+        story = plan_by_id.get(story_id)
+        if not isinstance(story, Mapping):
+            errors.append(f"sharing ownership-gap story disappeared from Ralph: {story_id}")
+            continue
+        if (
+            story.get("status") != "not-started"
+            or story.get("userStory") != expected_stories[story_id]
+            or story.get("requirementIds") != expected_requirements[story_id]
+        ):
+            errors.append(f"{story_id}: sharing ownership-gap is stale after Ralph semantics changed")
+        recorded = binding.get(story_id)
+        if not isinstance(recorded, Mapping) or (
+            recorded.get("controllerStatus") != "not-started"
+            or recorded.get("ralphStory") != expected_stories[story_id]
+            or recorded.get("requirementIds") != expected_requirements[story_id]
+            or recorded.get("taskCard") is not None
+            or recorded.get("worklog") is not None
+        ):
+            errors.append(f"{story_id}: sharing ownership-gap task binding drifted")
+        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
+            errors.append(f"{story_id}: task/worklog appeared; sharing ownership gap needs deliberate review")
+
+    rules = _load(root / "sources/behavior-surface-rules.json")
+    rule_rows = [item for item in rules.get("rules", []) if isinstance(item, Mapping)]
+    rule_by_id = {str(item.get("id", "")): item for item in rule_rows}
+    live_signatures = {
+        story_id: sorted(
+            str(item.get("id"))
+            for item in rule_rows
+            if story_id in item.get("featureIds", [])
+        )
+        for story_id in SHARING_GAP_STORIES
+    }
+    signatures = gap.get("storySurfaceSignatures")
+    if not isinstance(signatures, Mapping):
+        errors.append("sharing ownership-gap storySurfaceSignatures must be an object")
+    else:
+        for story_id in SHARING_GAP_STORIES:
+            if signatures.get(story_id) != live_signatures[story_id]:
+                errors.append(f"{story_id}: sharing ownership-gap surface signature drifted from live rules")
+    expected_patterns = {
+        surface_id: list(rule_by_id.get(surface_id, {}).get("patterns", []))
+        for surface_id in ("opencode.sharing", "opencode.enterprise-remote")
+    }
+    if gap.get("surfaceRulePatterns") != expected_patterns:
+        errors.append("sharing ownership-gap surface rule patterns drifted")
+
+    row_by_id = {
+        str(item.get("id", "")): item
+        for item in rows
+        if isinstance(item, Mapping)
+    }
+    for story_id in SHARING_GAP_STORIES:
+        row = row_by_id.get(story_id)
+        if not isinstance(row, Mapping):
+            errors.append(f"sharing ownership-gap story missing from exhaustion ledger: {story_id}")
+            continue
+        if row.get("category") != "unresolved-decomposition" or row.get("reasonKey") != "sharing-family-not-decomposed":
+            errors.append(f"{story_id}: sharing ownership-gap classification drifted")
+        if row.get("taskCard") is not None or row.get("worklog") is not None or row.get("implementationCommits") != []:
+            errors.append(f"{story_id}: local sharing task ownership appeared; gap needs deliberate review")
+        if row.get("requirementIds") != expected_requirements[story_id] or sorted(row.get("surfaceIds", [])) != live_signatures[story_id]:
+            errors.append(f"{story_id}: sharing exhaustion projection drifted")
+    share003 = row_by_id.get("SHARE-003")
+    expected_share003_gaps = [{"missingKinds": ["spec"], "surfaceId": "opencode.enterprise-remote"}]
+    if not isinstance(share003, Mapping) or share003.get("surfaceEvidenceGaps") != expected_share003_gaps:
+        errors.append("SHARE-003: enterprise-remote spec gap disappeared or drifted")
+
+    enterprise_gap = _load(root / "sources/enterprise-remote-spec-gap.json")
+    recorded_enterprise = gap.get("enterpriseRemoteGap")
+    if not isinstance(recorded_enterprise, Mapping):
+        errors.append("sharing ownership-gap enterprise-remote linkage is missing")
+    else:
+        if recorded_enterprise.get("path") != "sources/enterprise-remote-spec-gap.json":
+            errors.append("sharing ownership-gap enterprise-remote path drifted")
+        if recorded_enterprise.get("status") != enterprise_gap.get("status"):
+            errors.append("sharing ownership-gap enterprise-remote status drifted")
+        if recorded_enterprise.get("storyId") != "SHARE-003" or "SHARE-003" not in enterprise_gap.get("residualStoryIds", []):
+            errors.append("sharing ownership-gap lost SHARE-003 enterprise-remote residual linkage")
+        if recorded_enterprise.get("missingKinds") != enterprise_gap.get("missingKinds") or enterprise_gap.get("missingKinds") != ["spec"]:
+            errors.append("sharing ownership-gap enterprise-remote missing-spec state drifted")
+        if recorded_enterprise.get("requiredDecompositionPartitions") != enterprise_gap.get("requiredDecompositionPartitions"):
+            errors.append("sharing ownership-gap enterprise-remote decomposition partitions drifted")
+        if not str(recorded_enterprise.get("conclusion", "")).strip():
+            errors.append("sharing ownership-gap enterprise-remote conclusion is missing")
+
+    inventory, inventory_errors = _inventory_index(root, "opencode")
+    errors.extend(inventory_errors)
+    expected_partition_ids = [
+        "share-metadata-persistence",
+        "deterministic-share-merge-and-secret-validation",
+        "legacy-share-snapshot-migration",
+        "enterprise-share-http-and-support-admin",
+        "share-event-subscription-and-coalescing-queue",
+    ]
+    partitions = gap.get("reviewedPartitions")
+    if not isinstance(partitions, list) or [str(item.get("id", "")) for item in partitions if isinstance(item, Mapping)] != expected_partition_ids:
+        errors.append("sharing ownership-gap reviewed partition set drifted")
+    elif inventory:
+        for partition in partitions:
+            if partition.get("candidateTaskOwner") is not None:
+                errors.append(f"sharing partition cannot gain task owner from requirement/surface arithmetic: {partition.get('id')}")
+            for key in ("inputs", "outputs", "failureSemantics", "stateLifetime", "resourceLifetime", "ownershipBlocker"):
+                if not str(partition.get(key, "")).strip():
+                    errors.append(f"sharing partition {partition.get('id')} lacks explicit {key}")
+            evidence = partition.get("evidence")
+            if not isinstance(evidence, list) or not evidence:
+                errors.append(f"sharing ownership-gap partition lacks pinned evidence: {partition.get('id')}")
+                continue
+            for item in evidence:
+                if not isinstance(item, Mapping):
+                    errors.append("sharing ownership-gap partition evidence must be an object")
+                    continue
+                source_path = str(item.get("path", ""))
+                inventory_row = inventory.get(source_path)
+                if inventory_row is None:
+                    errors.append(f"sharing ownership-gap evidence escaped pinned inventory: {source_path}")
+                    continue
+                if inventory_row.get("commit") != locked_commit or inventory_row.get("blob") != item.get("blobSha"):
+                    errors.append(f"sharing ownership-gap evidence pin drifted: {source_path}")
+                if item.get("kind") not in DISC_EVIDENCE_KINDS:
+                    errors.append(f"sharing ownership-gap evidence has invalid kind: {source_path}")
+                reviewed_lines = item.get("reviewedLines")
+                if (
+                    not isinstance(reviewed_lines, Mapping)
+                    or not isinstance(reviewed_lines.get("from"), int)
+                    or not isinstance(reviewed_lines.get("to"), int)
+                    or reviewed_lines["from"] < 1
+                    or reviewed_lines["to"] < reviewed_lines["from"]
+                ):
+                    errors.append(f"sharing ownership-gap evidence lacks reviewed line range: {source_path}")
+        queue = next((item for item in partitions if item.get("id") == "share-event-subscription-and-coalescing-queue"), None)
+        if not isinstance(queue, Mapping) or queue.get("boundEstablished") is not False:
+            errors.append("sharing queue bound must remain explicitly unresolved")
+
+    candidates = gap.get("candidateFragments")
+    expected_candidate_ids = ["deterministic-share-merge", "share-event-coalescing"]
+    if not isinstance(candidates, list) or [str(item.get("id", "")) for item in candidates if isinstance(item, Mapping)] != expected_candidate_ids:
+        errors.append("sharing ownership-gap candidate fragment set drifted")
+    else:
+        for candidate in candidates:
+            if candidate.get("ownershipEstablished") is not False:
+                errors.append(f"sharing candidate cannot become owned from residual arithmetic: {candidate.get('id')}")
+            for key in ("inputs", "outputs", "failureSemantics", "stateLifetime", "resourceLifetime"):
+                if not str(candidate.get(key, "")).strip():
+                    errors.append(f"sharing candidate {candidate.get('id')} lacks explicit {key}")
+            if not candidate.get("disqualifiers"):
+                errors.append(f"sharing candidate {candidate.get('id')} lacks ownership disqualifiers")
+
+    history = gap.get("historyReview")
+    if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit" or not str(history.get("limitation", "")).strip():
+        errors.append("sharing ownership-gap history-review limitation drifted")
+    if not isinstance(gap.get("closureCriteria"), list) or len(gap.get("closureCriteria", [])) != 4:
+        errors.append("sharing ownership-gap closure criteria drifted")
+    return errors
+
+
 def sync_features_status(root: pathlib.Path = ROOT) -> None:
     """Synchronize only the generated status mirrors in FEATURES.md from Ralph."""
     plan = _load(root / "ralph.json")
@@ -1639,6 +1880,7 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
     errors.extend(operations_ownership_gap_errors(rows, root))
     errors.extend(release_assurance_gap_errors(rows, root))
     errors.extend(req017_extensibility_gap_errors(rows, root))
+    errors.extend(sharing_ownership_gap_errors(rows, root))
 
     errors.extend(_features_status_errors(root, plan))
     return errors

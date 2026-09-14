@@ -17,6 +17,7 @@ from tools.validate_backlog_exhaustion import (  # noqa: E402
     release_assurance_gap_errors,
     residual_evidence_kind_errors,
     routing_ownership_gap_errors,
+    sharing_ownership_gap_errors,
     surface_evidence_gaps,
     validate_ledger,
 )
@@ -269,6 +270,47 @@ class BacklogExhaustionTests(unittest.TestCase):
             changed = copy.deepcopy(original_gap)
             changed["candidateFragments"][1]["ownershipEstablished"] = True
             self.assertTrue(any("cannot become owned from residual requirement arithmetic" in error for error in errors_for(changed)))
+
+    def test_sharing_gap_rejects_task_inference_and_unbounded_queue_promotion(self):
+        ledger = load_ledger()
+        self.assertEqual(sharing_ownership_gap_errors(ledger["stories"], ROOT), [])
+
+        gap_path = ROOT / "sources/sharing-ownership-gap.json"
+        original_gap = json.loads(gap_path.read_text(encoding="utf-8"))
+
+        def errors_for(changed_gap):
+            from tools import validate_backlog_exhaustion as module
+
+            original_load = module._load
+
+            def fake_load(path):
+                if pathlib.Path(path) == gap_path:
+                    return changed_gap
+                return original_load(path)
+
+            with mock.patch("tools.validate_backlog_exhaustion._load", side_effect=fake_load):
+                return sharing_ownership_gap_errors(ledger["stories"], ROOT)
+
+        with self.subTest("pure merge cannot be assigned from REQ-007 membership"):
+            changed = copy.deepcopy(original_gap)
+            changed["candidateFragments"][0]["ownershipEstablished"] = True
+            self.assertTrue(any("cannot become owned from residual arithmetic" in error for error in errors_for(changed)))
+
+        with self.subTest("SHARE-003 cannot become enterprise owner by overlap"):
+            changed = copy.deepcopy(original_gap)
+            changed["ownershipDecision"]["SHARE-003"] = "enterprise-share-http"
+            self.assertTrue(any("ownership must remain unresolved" in error for error in errors_for(changed)))
+
+        with self.subTest("coalescing queue cannot silently become bounded"):
+            changed = copy.deepcopy(original_gap)
+            queue = next(item for item in changed["reviewedPartitions"] if item["id"] == "share-event-subscription-and-coalescing-queue")
+            queue["boundEstablished"] = True
+            self.assertTrue(any("queue bound must remain explicitly unresolved" in error for error in errors_for(changed)))
+
+        with self.subTest("SHARE-004 signature cannot silently diverge"):
+            changed = copy.deepcopy(original_gap)
+            changed["storySurfaceSignatures"]["SHARE-004"] = []
+            self.assertTrue(any("SHARE-004: sharing ownership-gap surface signature drifted" in error for error in errors_for(changed)))
 
     def test_stale_local_implementation_receipts_cannot_disappear(self):
         bad = copy.deepcopy(load_ledger())

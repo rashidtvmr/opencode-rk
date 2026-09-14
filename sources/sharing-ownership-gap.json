@@ -1,0 +1,377 @@
+{
+  "schemaVersion": 1,
+  "status": "source-reviewed-no-exact-task-owner",
+  "repositoryId": "opencode",
+  "repository": "anomalyco/opencode",
+  "commit": "95daf90670b7c039c436c85537da5fbfe2205b41",
+  "treeSha": "b17683f6fb570317083ee8f62bd136435c023270",
+  "storyIds": [
+    "SHARE-001",
+    "SHARE-002",
+    "SHARE-003",
+    "SHARE-004",
+    "SHARE-005"
+  ],
+  "storySurfaceSignatures": {
+    "SHARE-001": [
+      "opencode.sharing"
+    ],
+    "SHARE-002": [
+      "opencode.sharing"
+    ],
+    "SHARE-003": [
+      "opencode.enterprise-remote",
+      "opencode.sharing"
+    ],
+    "SHARE-004": [
+      "opencode.sharing"
+    ],
+    "SHARE-005": [
+      "opencode.sharing"
+    ]
+  },
+  "ownershipDecision": {
+    "SHARE-001": null,
+    "SHARE-002": null,
+    "SHARE-003": null,
+    "SHARE-004": null,
+    "SHARE-005": null
+  },
+  "taskBindingState": {
+    "SHARE-001": {
+      "controllerStatus": "not-started",
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-007"
+      ],
+      "taskCard": null,
+      "worklog": null
+    },
+    "SHARE-002": {
+      "controllerStatus": "not-started",
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "SHARE-003": {
+      "controllerStatus": "not-started",
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "SHARE-004": {
+      "controllerStatus": "not-started",
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-007"
+      ],
+      "taskCard": null,
+      "worklog": null
+    },
+    "SHARE-005": {
+      "controllerStatus": "not-started",
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-007"
+      ],
+      "taskCard": null,
+      "worklog": null
+    }
+  },
+  "requirementTopology": {
+    "REQ-007": {
+      "requirement": "Session sharing",
+      "tasks": [
+        "SHARE-001",
+        "SHARE-004",
+        "SHARE-005"
+      ],
+      "conclusion": "The requirement groups three sharing stories but gives no semantic partition among them. SHARE-002 and SHARE-003 are DISC-generated rows without requirement bindings."
+    }
+  },
+  "surfaceRulePatterns": {
+    "opencode.sharing": [
+      "packages/core/src/share/**",
+      "packages/enterprise/**"
+    ],
+    "opencode.enterprise-remote": [
+      "packages/enterprise/**",
+      "packages/function/**"
+    ]
+  },
+  "enterpriseRemoteGap": {
+    "path": "sources/enterprise-remote-spec-gap.json",
+    "status": "searched-no-qualifying-in-surface-spec",
+    "storyId": "SHARE-003",
+    "missingKinds": [
+      "spec"
+    ],
+    "requiredDecompositionPartitions": [
+      "enterprise-share-http",
+      "function-syncserver-websocket-r2",
+      "function-support-relay",
+      "function-github-token-exchange-installation",
+      "deployment-resource-lifecycle"
+    ],
+    "conclusion": "SHARE-003 remains cross-surface and cannot be promoted merely because enterprise sharing code exists. The already-locked enterprise/function surface still lacks a qualifying in-surface specification."
+  },
+  "reviewedPartitions": [
+    {
+      "id": "share-metadata-persistence",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/core/src/share/sql.ts",
+          "blobSha": "a7a08d0c025436a1266cd642be984742925cd298",
+          "reviewedLines": {
+            "from": 1,
+            "to": 13
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/opencode/src/share/share-next.ts",
+          "blobSha": "60112e10d964b3d9693727501e1e40dac6b1fdf1",
+          "reviewedLines": {
+            "from": 224,
+            "to": 359
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/opencode/test/share/share-next.test.ts",
+          "blobSha": "fe036be8c959b889516a894266bf4bb390ce1827",
+          "reviewedLines": {
+            "from": 138,
+            "to": 224
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/storage/remove-opencode-db.md",
+          "blobSha": "071e70c1841eef11efe1b1dda2792c77494530cb",
+          "reviewedLines": {
+            "from": 1,
+            "to": 239
+          }
+        }
+      ],
+      "inputs": "session id plus remotely issued share id, secret and public URL",
+      "outputs": "one session_share row keyed by session id and removed with the session through the foreign-key lifecycle",
+      "failureSemantics": "database failures are fatal in ShareNext; create does not persist after a non-success remote response",
+      "stateLifetime": "secret-bearing share metadata persists in the local user database until explicit share/session deletion",
+      "resourceLifetime": "one local row per shared session plus in-memory cache entries",
+      "ownershipBlocker": "No SHARE task is bound to the persistence row; native implementation would mutate the user database and persist a remote secret, which is outside the authorized no-user-DB lane without explicit ownership."
+    },
+    {
+      "id": "deterministic-share-merge-and-secret-validation",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/enterprise/src/core/share.ts",
+          "blobSha": "781bcd5cbeb86000cb76a50a247f4666b0b72f43",
+          "reviewedLines": {
+            "from": 10,
+            "to": 172
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/enterprise/test/core/share.test.ts",
+          "blobSha": "35d52735e2efb5efd68c75e35b2667a0935ba51f",
+          "reviewedLines": {
+            "from": 25,
+            "to": 263
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/enterprise/src/routes/api/[...path].ts",
+          "blobSha": "4677d68d33c48c6a030ae66100d59823fc241aa9",
+          "reviewedLines": {
+            "from": 29,
+            "to": 140
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/storage/remove-opencode-db.md",
+          "blobSha": "071e70c1841eef11efe1b1dda2792c77494530cb",
+          "reviewedLines": {
+            "from": 1,
+            "to": 239
+          }
+        }
+      ],
+      "inputs": "existing snapshot data plus new typed session/message/part/diff/model records and share id/secret for storage-backed operations",
+      "outputs": "deterministically key-sorted last-write-wins snapshot data or typed NotFound/InvalidSecret errors",
+      "failureSemantics": "unknown share ids fail NotFound, mismatched secrets fail InvalidSecret, and storage failures propagate",
+      "stateLifetime": "the pure merge map is call-local; the surrounding share service writes unbounded snapshot data and secret-bearing metadata to enterprise storage",
+      "resourceLifetime": "merge memory scales with the full snapshot and incoming batch; no target byte/item bound is specified",
+      "ownershipBlocker": "The deterministic merge is mechanically portable but is private inside a broader storage/secret service. REQ-007 does not assign SHARE-001/004/005, SHARE-002 is generic, and SHARE-003 remains enterprise-remote blocked."
+    },
+    {
+      "id": "legacy-share-snapshot-migration",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/enterprise/src/core/share.ts",
+          "blobSha": "781bcd5cbeb86000cb76a50a247f4666b0b72f43",
+          "reviewedLines": {
+            "from": 78,
+            "to": 115
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/enterprise/test/core/share.test.ts",
+          "blobSha": "35d52735e2efb5efd68c75e35b2667a0935ba51f",
+          "reviewedLines": {
+            "from": 205,
+            "to": 225
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/storage/remove-opencode-db.md",
+          "blobSha": "071e70c1841eef11efe1b1dda2792c77494530cb",
+          "reviewedLines": {
+            "from": 1,
+            "to": 239
+          }
+        }
+      ],
+      "inputs": "legacy compaction state and ordered legacy share-event keys",
+      "outputs": "merged snapshot plus updated compaction marker when legacy events exist",
+      "failureSemantics": "storage read/write/list failures propagate; no task-specific retry or migration rollback contract is specified",
+      "stateLifetime": "persistent migration rewrites enterprise share snapshot/compaction state",
+      "resourceLifetime": "reads and merges all legacy event batches for one share; no explicit data bound is specified",
+      "ownershipBlocker": "This is migration/storage behavior, not a task-bound generic session-share contract, and implementing it would invent persistent remote compatibility semantics."
+    },
+    {
+      "id": "enterprise-share-http-and-support-admin",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/enterprise/src/routes/api/[...path].ts",
+          "blobSha": "4677d68d33c48c6a030ae66100d59823fc241aa9",
+          "reviewedLines": {
+            "from": 29,
+            "to": 155
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/opencode/src/share/share-next.ts",
+          "blobSha": "60112e10d964b3d9693727501e1e40dac6b1fdf1",
+          "reviewedLines": {
+            "from": 206,
+            "to": 359
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/opencode/test/share/share-next.test.ts",
+          "blobSha": "fe036be8c959b889516a894266bf4bb390ce1827",
+          "reviewedLines": {
+            "from": 84,
+            "to": 224
+          }
+        }
+      ],
+      "inputs": "HTTP create/sync/data/delete requests, share secret, optional support authorization, legacy or org endpoint selection",
+      "outputs": "share metadata, snapshot data, deletion response or authorization/validation/domain failure",
+      "failureSemantics": "create/delete require success responses in ShareNext; sync only logs HTTP status >=400; support admin has separate timing-safe bearer authorization",
+      "stateLifetime": "remote share/service state plus local auth/account/config selection and persisted local share metadata",
+      "resourceLifetime": "external network requests, credentials and support secret; remote deployment/storage lifetime is outside the native process",
+      "ownershipBlocker": "Network, credentials, support-admin authority and hosted service lifetime are not authorized by a generic SHARE story. SHARE-003 additionally remains blocked by the enterprise-remote missing-spec record."
+    },
+    {
+      "id": "share-event-subscription-and-coalescing-queue",
+      "candidateTaskOwner": null,
+      "evidence": [
+        {
+          "kind": "source",
+          "path": "packages/opencode/src/share/share-next.ts",
+          "blobSha": "60112e10d964b3d9693727501e1e40dac6b1fdf1",
+          "reviewedLines": {
+            "from": 112,
+            "to": 204
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/opencode/test/share/share-next.test.ts",
+          "blobSha": "fe036be8c959b889516a894266bf4bb390ce1827",
+          "reviewedLines": {
+            "from": 227,
+            "to": 324
+          }
+        }
+      ],
+      "inputs": "location-filtered session/message/part/diff/deletion EventV2 events and current share metadata",
+      "outputs": "latest-value-per-data-key queue followed by a delayed remote sync; queue/cache are cleared on scoped finalization",
+      "failureSemantics": "subscriber/flush causes are logged and swallowed; failed flush removes the queued batch before transport and no retry/requeue contract is present",
+      "stateLifetime": "one InstanceState per location with queue/shared maps and a child scope; finalizer closes the scope and clears both maps",
+      "resourceLifetime": "one-second delayed forks and keyed maps with no explicit global item, session or byte cap",
+      "boundEstablished": false,
+      "ownershipBlocker": "The upstream queue is coalescing but not explicitly bounded and its failure/retry semantics can lose a failed batch. Native subscriber/network work requires an explicit task owner and target bound/backpressure contract."
+    }
+  ],
+  "candidateFragments": [
+    {
+      "id": "deterministic-share-merge",
+      "inputs": "multiple lists of typed share records",
+      "outputs": "key-sorted last-write-wins list keyed by session/message/part/session_diff/model identity",
+      "failureSemantics": "pure total transform for schema-valid records",
+      "stateLifetime": "call-local map only",
+      "resourceLifetime": "O(unique record keys) retained during one call; no upstream target size cap",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "The helper is private inside the enterprise storage service and has no task-specific SHARE binding.",
+        "REQ-007 maps SHARE-001/004/005 together and does not distinguish merge ownership.",
+        "SHARE-002 is generic and SHARE-003 remains cross-surface/missing-spec blocked, so residual arithmetic cannot choose an owner."
+      ]
+    },
+    {
+      "id": "share-event-coalescing",
+      "inputs": "event-derived share records keyed by session and record identity",
+      "outputs": "latest pending value per key followed by delayed flush",
+      "failureSemantics": "flush/subscriber failures are logged; queued entries are removed before transport and are not requeued by the reviewed source",
+      "stateLifetime": "location-scoped queue/cache plus child scope",
+      "resourceLifetime": "coalescing maps and delayed fibers; no explicit item/byte/session cap",
+      "ownershipEstablished": false,
+      "disqualifiers": [
+        "No exact SHARE task owns event subscription or queue behavior.",
+        "No bounded queue/backpressure/slow-client contract exists in the pinned source/spec evidence.",
+        "The actual flush path requires HTTP transport, credentials/secret-bearing metadata and user-DB state."
+      ]
+    }
+  ],
+  "unresolvedPartitions": [
+    "local-share-metadata-and-secret-persistence",
+    "deterministic-data-keying-merge-and-snapshot-size-policy",
+    "legacy-event-compaction-to-snapshot-migration",
+    "legacy-versus-org-share-http-auth-and-failure-policy",
+    "event-subscription-coalescing-backpressure-and-retry-lifetime",
+    "share-create-remove-deletion-and-secret-lifetime",
+    "support-admin-removal-authority",
+    "enterprise-function-hosted-sync-and-deployment-boundary"
+  ],
+  "historyReview": {
+    "state": "locked-checkout-grafted-at-pinned-commit",
+    "limitation": "The pinned OpenCode checkout is used for the current share contracts only; unavailable historical intent is not used to assign SHARE-001..005."
+  },
+  "closureCriteria": [
+    "Each SHARE ownership decision requires explicit task-specific source, caller, direct test and genuine sharing specification evidence; REQ-007 membership, source-path order and residual intersections are not ownership proof.",
+    "SHARE-003 cannot close until its enterprise-remote missing-spec/decomposition state is resolved or deliberately replaced by narrower source-grounded ownership without weakening the existing negative evidence.",
+    "Any native queue/subscriber contract must define item/byte/session bounds, backpressure or coalescing policy, retry/loss behavior, scope/finalizer lifetime and slow/failing transport semantics before implementation.",
+    "Any persistence/network implementation must explicitly own secret lifetime, user-DB mutation, external credentials/auth, deletion guarantees and remote resource lifetime; otherwise those partitions remain blocked."
+  ]
+}

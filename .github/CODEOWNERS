@@ -49,6 +49,7 @@
 /sources/release-assurance-gap.json @rashidtvmr
 /sources/req017-extensibility-ownership-gap.json @rashidtvmr
 /sources/routing-ownership-gap.json @rashidtvmr
+/sources/sharing-ownership-gap.json @rashidtvmr
 /sources/upstream.lock.json @rashidtvmr
 /tasks/DISC-003.md @rashidtvmr
 /workspaces/DISC-003/source-map.json @rashidtvmr
