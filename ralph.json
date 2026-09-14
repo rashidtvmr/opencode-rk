@@ -6,7 +6,7 @@
     {
       "id": "AGENT-001",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -22,7 +22,7 @@
       "requirementIds": [
         "REQ-009"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -39,7 +39,7 @@
         "REQ-009",
         "REQ-012"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -56,7 +56,7 @@
         "REQ-009",
         "REQ-012"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -72,7 +72,7 @@
       "requirementIds": [
         "REQ-010"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -88,7 +88,7 @@
       "requirementIds": [
         "REQ-018"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -104,7 +104,7 @@
       "requirementIds": [
         "REQ-013"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -120,7 +120,7 @@
       "requirementIds": [
         "REQ-013"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -134,7 +134,7 @@
     {
       "id": "AGENT-009",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -150,7 +150,7 @@
       "requirementIds": [
         "REQ-009"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -166,7 +166,7 @@
       "requirementIds": [
         "REQ-014"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -180,7 +180,7 @@
     {
       "id": "AGENT-012",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -194,7 +194,7 @@
     {
       "id": "AGENT-013",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -208,7 +208,7 @@
     {
       "id": "AGENT-014",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -224,7 +224,7 @@
       "requirementIds": [
         "REQ-024"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -273,7 +273,7 @@
       "requirementIds": [
         "REQ-002"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -289,7 +289,7 @@
       "requirementIds": [
         "REQ-002"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -306,7 +306,7 @@
         "REQ-002",
         "REQ-004"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -322,7 +322,7 @@
       "requirementIds": [
         "REQ-002"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -852,7 +852,7 @@
       "requirementIds": [
         "REQ-017"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -868,7 +868,7 @@
       "requirementIds": [
         "REQ-017"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -882,7 +882,7 @@
     {
       "id": "EXT-003",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -896,7 +896,7 @@
     {
       "id": "EXT-004",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -912,7 +912,7 @@
       "requirementIds": [
         "REQ-005"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -926,7 +926,7 @@
     {
       "id": "EXT-006",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -940,7 +940,7 @@
     {
       "id": "EXT-007",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -956,7 +956,7 @@
       "requirementIds": [
         "REQ-020"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -972,7 +972,7 @@
       "requirementIds": [
         "REQ-005"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -986,7 +986,7 @@
     {
       "id": "EXT-010",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1000,7 +1000,7 @@
     {
       "id": "EXT-011",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1016,7 +1016,7 @@
       "requirementIds": [
         "REQ-005"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1030,7 +1030,7 @@
     {
       "id": "INT-001",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1044,7 +1044,7 @@
     {
       "id": "INT-002",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1058,7 +1058,7 @@
     {
       "id": "INT-003",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1072,7 +1072,7 @@
     {
       "id": "INT-004",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1086,7 +1086,7 @@
     {
       "id": "INT-005",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1100,7 +1100,7 @@
     {
       "id": "INT-006",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1114,7 +1114,7 @@
     {
       "id": "INT-007",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2472,7 +2472,7 @@
       "requirementIds": [
         "REQ-037"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "MCP tool own policy gate plus elicitation path with timeout and cancel",
       "dependencyIds": [],
       "testObligations": [
@@ -2761,7 +2761,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Spawn subagent with context fork - clone parent session state into child, selective context injection, parent-child relationship tracking",
       "dependencyIds": [],
       "testObligations": [
@@ -2777,7 +2777,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Spawn subagent with fresh context - zero-context launch with explicit context bundle, no inherited state leakage",
       "dependencyIds": [],
       "testObligations": [
@@ -2793,7 +2793,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Multi-provider subagent routing - spawn children on different providers/models than parent, per-child model override",
       "dependencyIds": [],
       "testObligations": [
@@ -2809,7 +2809,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Resume failed subagent - restore session state from last checkpoint, continue from failure point, preserve partial results",
       "dependencyIds": [],
       "testObligations": [
@@ -2825,7 +2825,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Retry with exponential backoff - classify error (transient/permanent), backoff schedule, jitter, max retries, circuit breaker",
       "dependencyIds": [],
       "testObligations": [
@@ -2841,7 +2841,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Change model mid-session - hot-swap provider/model for running subagent without losing context, model fallback chain",
       "dependencyIds": [],
       "testObligations": [
@@ -2857,7 +2857,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Subagent context compression - automatic context compaction when approaching token limit, configurable compression strategy",
       "dependencyIds": [],
       "testObligations": [
@@ -2873,7 +2873,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Structured handoff protocol - serialize subagent state to handoff document, transfer to new agent with fidelity guarantees",
       "dependencyIds": [],
       "testObligations": [
@@ -2889,7 +2889,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Auto context compression toggle - settings-driven automatic compression, threshold config, compression quality metrics",
       "dependencyIds": [],
       "testObligations": [
@@ -2905,7 +2905,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Dedicated subagent settings page - UI/config section for max concurrent, default model, retry policy, compression, timeout, budget per child",
       "dependencyIds": [],
       "testObligations": [
@@ -2921,7 +2921,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Subagent pool manager - maintain N running agents, auto-replace finished/failed, work queue drain, pool scaling",
       "dependencyIds": [],
       "testObligations": [
@@ -2937,7 +2937,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Subagent observability - live status dashboard, token usage per child, cost tracking, latency percentiles, error rates",
       "dependencyIds": [],
       "testObligations": [
@@ -2953,7 +2953,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Subagent permission inheritance - child inherits parent permissions with optional restriction, no privilege escalation",
       "dependencyIds": [],
       "testObligations": [
@@ -2969,7 +2969,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Subagent output aggregation - collect and merge results from parallel children, conflict resolution, dedup",
       "dependencyIds": [],
       "testObligations": [
@@ -2985,7 +2985,7 @@
       "requirementIds": [
         "REQ-036"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Subagent cancellation and cleanup - cancel running children, reclaim resources, cleanup worktrees, release locks",
       "dependencyIds": [],
       "testObligations": [
@@ -3051,7 +3051,7 @@
         "REQ-002",
         "REQ-012"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Turn submission state machine - submit to running to interrupted or complete as typed transitions with cancel cleanup",
       "dependencyIds": [],
       "testObligations": [
@@ -3116,7 +3116,7 @@
       "requirementIds": [
         "REQ-038"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Debug export bundle - one redacted JSONL with session meta, deduped defs, turns, timings, errors; offline renderer",
       "dependencyIds": [],
       "testObligations": [
@@ -3149,7 +3149,7 @@
         "REQ-017",
         "REQ-027"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Skill safe extraction - bundled files materialize once, owner-only 0600 O_EXCL O_NOFOLLOW, traversal rejected",
       "dependencyIds": [],
       "testObligations": [
@@ -3181,7 +3181,7 @@
       "requirementIds": [
         "REQ-008"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Revert is free pointer move distinct from truncating rollback with separate API names",
       "dependencyIds": [],
       "testObligations": [
@@ -3197,7 +3197,7 @@
       "requirementIds": [
         "REQ-006"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Auto-compact thresholds plus warning states plus 3-strike circuit breaker with env kill-switches",
       "dependencyIds": [],
       "testObligations": [
@@ -3213,7 +3213,7 @@
       "requirementIds": [
         "REQ-018"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Cheap-model chores routing - quota, topic, title, summarize go to cheapest capable model, fail-open",
       "dependencyIds": [],
       "testObligations": [
@@ -3229,7 +3229,7 @@
       "requirementIds": [
         "REQ-013"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Plan mode plus structured review child - plan permission mode with Enter and Exit tools, review returns machine-checkable findings",
       "dependencyIds": [],
       "testObligations": [

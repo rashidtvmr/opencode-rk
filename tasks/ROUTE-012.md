@@ -1,6 +1,6 @@
 # ROUTE-012
 
-Status: NOT STARTED. Kind: product. Runtime optional: False.
+Status: IN PROGRESS. Kind: product. Runtime optional: False.
 Mandatory for full declared release: yes.
 Requirements: REQ-018.
 Dependencies: none (milestone gating via tools/plan_model.py).
