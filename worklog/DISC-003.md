@@ -27,3 +27,21 @@ DISC-003 remains **IN PROGRESS / NOT ACCEPTED**. This change does not claim full
 - `jq empty` passed for the supplemental evidence catalog, reconciliation ledger, generated manifest, and workspace source map.
 - `git diff --check` passed.
 - No product/runtime source, task acceptance state, or `ralph.json` verifier/controller status is changed by this reconciliation slice.
+
+## Follow-on bounded reconciliation slice
+
+The next source-only slice keeps DISC-003 **IN PROGRESS / NOT ACCEPTED** and promotes three additional candidate families from `queued` to reviewed `partial` reference records without claiming target implementation:
+
+- `9router.dashboard-api`: pinned model-availability and provider-list API sources, dashboard callers, provider-status classification tests, and architecture evidence. The record explicitly leaves the canonical status projection unresolved because the reference separately exposes cooldown/unavailable model rows, provider connected/error totals, noAuth classification, expired-cooldown behavior, latest error metadata, and secret-free API projection.
+- `9router.dashboard-settings`: pinned settings GET/PATCH source, profile-page caller, settings persistence test, conditional E2E API read, and architecture evidence. The record keeps public-key enumeration, validation, secret handling, authentication settings, proxy/combo side effects, auto-ping loading, and other optional/runtime behaviors unresolved.
+- `9router.network-proxy`: pinned outbound proxy validation and per-connection proxy resolution sources, settings API caller, proxy security tests, and architecture evidence. The record keeps proxy pools/relay rewriting, proxy-test APIs, MITM handlers/certificates, platform branches, and the target native capability/security boundary unresolved; it does **not** infer that OpenCode RK should mutate inherited proxy environment or implement MITM.
+
+This moves the bounded ledger from 12 partial / 20 queued to 15 partial / 17 queued while preserving all 32 DISC-002 candidate families. No runtime source or controller acceptance state is changed.
+
+### Follow-on validation
+
+- `/usr/bin/python3 -m unittest tests.bootstrap.test_disc003_reconciliation -v` => 8/8 passed, including the negative checks for scope shrinkage, missing evidence, queued implementation claims, and manifest hash binding.
+- `/usr/bin/python3 tools/reconcile_surfaces.py` => passed with exactly 32 families: 15 `partial`, 17 `queued`; implementation statuses 7 `partial`, 8 `reference-implemented`, 17 `unresolved`; 65 evidence references; 48 unresolved findings; zero validation errors.
+- `/usr/bin/python3 tools/validate_plan.py` => `validate_plan: OK  stories=219 requirements=38 obligations=1095 deps_synthesized=True`.
+- JSON parsing passed for the supplemental evidence catalog, reconciliation ledger, generated manifest, and workspace source map.
+- `git diff --check` passed.
