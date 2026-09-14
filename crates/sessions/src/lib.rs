@@ -6,6 +6,7 @@ pub mod import;
 pub mod migration;
 pub mod auto_compact;
 pub mod query;
+pub mod reference;
 pub mod state;
 pub mod store;
 mod types;
