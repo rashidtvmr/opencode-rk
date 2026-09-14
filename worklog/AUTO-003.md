@@ -45,3 +45,7 @@ Harden the existing parallel controller with durable owner-checked worktree leas
 ## Remaining unknowns
 
 - None for this candidate. AUTO-004/AUTO-006 still lack source-grounded one-to-one semantics, and AUTO-005 is only constrained to REQ-004 verification territory; those tasks remain unassigned rather than guessed. Controller/verifier acceptance remains external and is not claimed.
+
+## Post-exhaustion bootstrap consistency follow-up
+
+The later DISC-003 exhaustion-normalization pass removed the historical fixture drift recorded above in `tests.bootstrap.test_auto_controller`. The controller/product implementation was not changed: the bootstrap tests now isolate `state/controller.json`, use an explicit all-`not-started` in-memory plan when testing generic readiness semantics, and separately assert the current live Ralph totals (`219` stories, `133 accepted`, `30 in-progress`, `56 not-started`). This keeps the bootstrap suite meaningful as the canonical plan grows instead of treating already-accepted M0 stories as if they were still ready. AUTO-004/AUTO-005/AUTO-006 remain unassigned blockers; no controller acceptance state changed.

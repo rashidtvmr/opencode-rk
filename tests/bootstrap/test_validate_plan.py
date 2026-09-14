@@ -100,6 +100,11 @@ class TestObligationTests(unittest.TestCase):
         self.assertTrue(plan.stories)  # guard: stories actually loaded
 
 
+class BacklogExhaustionIntegrationTests(unittest.TestCase):
+    def test_backlog_exhaustion_is_part_of_plan_validation(self) -> None:
+        self.assertEqual(validate_plan._check_backlog_exhaustion(ROOT), [])  # noqa: SLF001
+
+
 class DependencyAcycTests(unittest.TestCase):
     def test_synthesized_dependency_graph_is_acyclic(self) -> None:
         plan = _load()

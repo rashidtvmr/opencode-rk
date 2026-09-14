@@ -22,6 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.plan_model import load_plan  # noqa: E402
+from tools.validate_backlog_exhaustion import validate_ledger  # noqa: E402
 
 REQUIRED_FILES = [
     "PLAN.md",
@@ -31,6 +32,7 @@ REQUIRED_FILES = [
     "config/resource-targets.json",
     "config/controller.settings.json",
     "sources/upstream.lock.json",
+    "sources/backlog-exhaustion.json",
 ]
 
 
@@ -93,6 +95,14 @@ def _check_requirements(root: pathlib.Path) -> list[str]:
     return errors
 
 
+def _check_backlog_exhaustion(root: pathlib.Path) -> list[str]:
+    path = root / "sources/backlog-exhaustion.json"
+    if not path.is_file():
+        return ["missing required file: sources/backlog-exhaustion.json"]
+    document = json.loads(path.read_text(encoding="utf-8"))
+    return validate_ledger(document, root)
+
+
 def main() -> int:
     errors = _require_files()
     if not errors:
@@ -101,6 +111,7 @@ def main() -> int:
         errors.extend(_check_obligations(ROOT))
         errors.extend(_check_ledger(ROOT))
         errors.extend(_check_requirements(ROOT))
+        errors.extend(_check_backlog_exhaustion(ROOT))
 
     if errors:
         print(f"validate_plan: {len(errors)} error(s)")

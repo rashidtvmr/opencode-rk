@@ -48,6 +48,7 @@ class FreezeSourceTests(unittest.TestCase):
             "treeSha": "b" * 40,
             "licensePath": "LICENSE",
             "licenseBlobSha": "c" * 40,
+            "licenseSpdx": "MIT",
         }
         freeze.validate_spec(base)
         for field in ("commit", "treeSha", "licenseBlobSha"):
@@ -64,6 +65,7 @@ class FreezeSourceTests(unittest.TestCase):
             "treeSha": "b" * 40,
             "licensePath": "LICENSE",
             "licenseBlobSha": "c" * 40,
+            "licenseSpdx": "MIT",
         }
         bad_url = dict(base, url="https://evil.invalid/repo.git")
         with self.assertRaises(ValueError):
