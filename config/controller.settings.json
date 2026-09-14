@@ -11,6 +11,7 @@
     "9router-gg-gonkagate-dsv4-flash",
     "9router-kai-glm-53-free",
     "9router-kai-qwen38-flash-free",
+    "9router-ag-gemini-3-6-flash-high",
     "9router-tr-glm-5-3-free",
     "9router-vyce-dsv4-flash",
     "gonkagate-minimax-m27",
@@ -24,6 +25,7 @@
     "9router-tr-glm-5-3-free",
     "9router-vyce-dsv4-flash",
     "9router-kai-glm-53-free",
+    "9router-ag-gemini-3-6-flash-high",
     "9router-gg-gonkagate-dsv4-flash"
   ],
   "stateDir": "state",
