@@ -80,3 +80,24 @@ Validation for this slice:
 - `jq empty` passed for the supplemental evidence catalog, reconciliation ledger, generated manifest, and workspace source map.
 - `git diff --check` passed.
 - Dirty-tree inspection showed exactly the seven intended DISC-003 evidence/reconciliation/manifest/task/worklog/workspace files; no runtime source, `ralph.json`, verifier/controller status, or accepted task card was changed.
+
+## Contracts/schema reconciliation slice
+
+The next source-only slice keeps DISC-003 **IN PROGRESS / NOT ACCEPTED** and promotes `opencode.contracts-schema` from `queued` to reviewed `partial`.
+
+- Pinned source evidence now covers the browser-safe `Event` definition/inventory combinators, canonical `EventManifest`, and Core's exact `ServerDefinitions` facade.
+- Pinned caller evidence shows Protocol deriving its SSE event union and `/api/event` schema directly from `EventManifest.ServerDefinitions`, preserving one canonical contract identity rather than a second server-local schema.
+- Direct tests cover manifest/current-definition identity, durable-version selection, V1-only event exclusion, omitted-undefined encoding, stable unique identifiers, and avoidance of current-contract `Schema.Any`/mutable wrappers.
+- The package guide explicitly defines the authority boundary: Schema owns serializable browser-safe wire/storage contracts; service/runtime behavior, side effects, and host-local implementation stay in the owning domain packages.
+- Accepted/local `BASE-002`, accepted `DB-003`, and accepted/local `SESS-002` remain separate owners and are not reopened. Although those siblings leave `INT-008` as the only unfinished id within the contracts-schema feature set, `INT-008` is also nominated by the still-queued integrations, legacy-compatibility, and server-control-plane families. This promotion therefore does **not** invent an INT-008 product contract.
+
+This moves the bounded ledger from 19 partial / 13 queued to 20 partial / 12 queued, with 97 pinned evidence references and 56 explicit unresolved findings.
+
+Validation for this slice:
+
+- `/usr/bin/python3 -m unittest tests.bootstrap.test_disc003_reconciliation -v` => 8/8 passed.
+- `/usr/bin/python3 tools/reconcile_surfaces.py` => 32 families: 20 `partial`, 12 `queued`; implementation statuses 12 `partial`, 8 `reference-implemented`, 12 `unresolved`; 97 evidence references; 56 unresolved findings; zero errors.
+- `/usr/bin/python3 tools/validate_plan.py` => `validate_plan: OK  stories=219 requirements=38 obligations=1095 deps_synthesized=True`.
+- `jq empty` passed for the evidence catalog, reconciliation ledger, manifest, and workspace source map.
+- `git diff --check` passed.
+- Dirty-tree inspection showed exactly the seven intended DISC-003 evidence/reconciliation/manifest/task/worklog/workspace files; no runtime source, `ralph.json`, accepted task card, or verifier/controller state changed.
