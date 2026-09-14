@@ -29,6 +29,17 @@ pub enum IntegrationMethod {
     OAuth { id: String, label: String },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginIntegrationRegistration {
+    pub info: IntegrationInfo,
+    pub methods: Vec<IntegrationMethod>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PluginIntegrationDeclaration {
+    pub integrations: Vec<PluginIntegrationRegistration>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OAuthAttemptStatus {
     Pending,
@@ -111,6 +122,40 @@ impl IntegrationRegistry {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn register_plugin_scope(
+        &mut self,
+        scope_id: u64,
+        declaration: PluginIntegrationDeclaration,
+    ) -> Result<(), IntegrationError> {
+        if declaration.integrations.len() > MAX_INTEGRATIONS_PER_SCOPE {
+            return Err(IntegrationError::TooManyIntegrations {
+                max: MAX_INTEGRATIONS_PER_SCOPE,
+                actual: declaration.integrations.len(),
+            });
+        }
+        for registration in &declaration.integrations {
+            if registration.methods.len() > MAX_INTEGRATION_METHODS {
+                return Err(IntegrationError::TooManyMethods {
+                    max: MAX_INTEGRATION_METHODS,
+                    actual: registration.methods.len(),
+                });
+            }
+        }
+
+        // Apply plugin metadata to a bounded temporary registry so any invalid
+        // identifier/label or capacity failure leaves visible state unchanged.
+        let mut next = self.clone();
+        for registration in declaration.integrations {
+            let integration_id = registration.info.id.clone();
+            next.register(scope_id, registration.info)?;
+            for method in registration.methods {
+                next.set_method(scope_id, &integration_id, method)?;
+            }
+        }
+        *self = next;
+        Ok(())
     }
 
     pub fn register(
