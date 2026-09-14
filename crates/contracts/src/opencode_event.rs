@@ -8,6 +8,14 @@ use std::collections::BTreeMap;
 use serde::{de, Deserialize, Deserializer, Serialize};
 use serde_json::Value;
 
+fn deserialize_present_optional<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 #[serde(transparent)]
 pub struct OpenCodeEventId(pub String);
@@ -34,6 +42,38 @@ pub struct DurableEventMeta {
     pub version: i64,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(transparent)]
+pub struct OpenCodeWorkspaceId(pub String);
+
+impl<'de> Deserialize<'de> for OpenCodeWorkspaceId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        if value.starts_with("wrk") {
+            Ok(Self(value))
+        } else {
+            Err(de::Error::custom(
+                "OpenCode workspace id must start with wrk",
+            ))
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct OpenCodeLocationRef {
+    pub directory: String,
+    #[serde(
+        rename = "workspaceID",
+        default,
+        deserialize_with = "deserialize_present_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub workspace_id: Option<OpenCodeWorkspaceId>,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct OpenCodeEvent<T> {
     pub id: OpenCodeEventId,
@@ -44,8 +84,12 @@ pub struct OpenCodeEvent<T> {
     pub metadata: Option<BTreeMap<String, Value>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub durable: Option<DurableEventMeta>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub location: Option<Value>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present_optional",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub location: Option<OpenCodeLocationRef>,
 }
 
 #[derive(Debug, Serialize)]
