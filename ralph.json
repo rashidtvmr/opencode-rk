@@ -257,7 +257,7 @@
         "REQ-002",
         "REQ-004"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
