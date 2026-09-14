@@ -7,6 +7,8 @@ use opencode_rk_contracts::{
 use opencode_rk_server::{router, AppState};
 use opencode_rk_sessions::SessionService;
 use opencode_rk_storage::{Storage, StoragePaths};
+use opencode_rk_tools::registry::ToolRegistry;
+use serde::Serialize;
 use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 #[derive(Debug, Parser)]
@@ -136,7 +138,7 @@ async fn main() {
 }
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
-        Command::Doctor(args) => doctor(args)?,
+        Command::Doctor(args) => doctor(args).await?,
         Command::Session { command } => {
             let data = resolve_data_dir(cli.data_dir)?;
             let sessions = open_sessions(data)?;
@@ -153,7 +155,31 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
-fn doctor(args: DoctorArgs) -> Result<(), Box<dyn std::error::Error>> {
+#[derive(Debug, Serialize)]
+struct DoctorCheck {
+    status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    detail: Option<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    builtins: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorChecks {
+    auth: DoctorCheck,
+    connectivity: DoctorCheck,
+    tools: DoctorCheck,
+    mcp: DoctorCheck,
+}
+
+#[derive(Debug, Serialize)]
+struct DoctorOutput {
+    #[serde(flatten)]
+    report: DiagnosticReport,
+    checks: DoctorChecks,
+}
+
+async fn doctor(args: DoctorArgs) -> Result<(), Box<dyn std::error::Error>> {
     let report = DiagnosticReport {
         schema_version: WIRE_SCHEMA_VERSION,
         version: env!("CARGO_PKG_VERSION").to_owned(),
@@ -165,13 +191,117 @@ fn doctor(args: DoctorArgs) -> Result<(), Box<dyn std::error::Error>> {
             feature_profile: "foundation".to_owned(),
         },
     };
+    let checks = DoctorChecks {
+        auth: doctor_auth_check(),
+        connectivity: doctor_connectivity_check().await,
+        tools: doctor_tools_check(),
+        mcp: doctor_mcp_check(),
+    };
+    let output = DoctorOutput { report, checks };
     if args.json {
-        println!("{}", serde_json::to_string_pretty(&report)?);
+        println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
-        println!("OpenCode RK {}", report.version);
+        println!("OpenCode RK {}", output.report.version);
         println!("native core: yes\nembedded sqlite: yes\njavascript compatibility host: disabled\nos sandbox: not yet implemented");
+        println!("auth: {}", output.checks.auth.status);
+        println!("connectivity: {}", output.checks.connectivity.status);
+        println!("tools: {}", output.checks.tools.status);
+        println!("mcp: {}", output.checks.mcp.status);
     }
     Ok(())
+}
+
+fn doctor_auth_check() -> DoctorCheck {
+    const AUTH_ENV_KEYS: &[&str] = &[
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+    ];
+    let configured = AUTH_ENV_KEYS
+        .iter()
+        .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty()));
+    DoctorCheck {
+        status: if configured { "configured" } else { "unconfigured" },
+        detail: None,
+        builtins: Vec::new(),
+    }
+}
+
+async fn doctor_connectivity_check() -> DoctorCheck {
+    let Some(endpoint) = env::var_os("OPENCODE_RK_DOCTOR_ENDPOINT") else {
+        return DoctorCheck {
+            status: "unconfigured",
+            detail: None,
+            builtins: Vec::new(),
+        };
+    };
+    let endpoint = endpoint.to_string_lossy().into_owned();
+    let client = match reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(750))
+        .build()
+    {
+        Ok(client) => client,
+        Err(error) => {
+            return DoctorCheck {
+                status: "error",
+                detail: Some(error.to_string()),
+                builtins: Vec::new(),
+            };
+        }
+    };
+    match client.get(&endpoint).send().await {
+        Ok(response) if response.status().is_success() => DoctorCheck {
+            status: "ok",
+            detail: Some(response.status().as_u16().to_string()),
+            builtins: Vec::new(),
+        },
+        Ok(response) => DoctorCheck {
+            status: "error",
+            detail: Some(format!("HTTP {}", response.status().as_u16())),
+            builtins: Vec::new(),
+        },
+        Err(error) => DoctorCheck {
+            status: "error",
+            detail: Some(error.to_string()),
+            builtins: Vec::new(),
+        },
+    }
+}
+
+fn doctor_tools_check() -> DoctorCheck {
+    let mut builtins = ToolRegistry::new()
+        .list()
+        .into_iter()
+        .map(|tool| tool.id.clone())
+        .collect::<Vec<_>>();
+    builtins.sort();
+    DoctorCheck {
+        status: "ok",
+        detail: None,
+        builtins,
+    }
+}
+
+fn doctor_mcp_check() -> DoctorCheck {
+    let Some(raw) = env::var_os("OPENCODE_RK_MCP_CONFIG") else {
+        return DoctorCheck {
+            status: "unconfigured",
+            detail: None,
+            builtins: Vec::new(),
+        };
+    };
+    let raw = raw.to_string_lossy();
+    let status = serde_json::from_str::<serde_json::Value>(&raw)
+        .ok()
+        .and_then(|value| value.get("servers").and_then(|servers| servers.as_object()).cloned())
+        .filter(|servers| !servers.is_empty())
+        .map_or("error", |_| "configured");
+    DoctorCheck {
+        status,
+        detail: None,
+        builtins: Vec::new(),
+    }
 }
 fn open_sessions(data: PathBuf) -> Result<SessionService, Box<dyn std::error::Error>> {
     Ok(SessionService::new(Arc::new(Storage::open(
