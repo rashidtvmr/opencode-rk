@@ -6,7 +6,9 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::time::{Duration, Instant};
 use thiserror::Error;
+use tokio::sync::oneshot;
 
 /// Configuration for spawning an MCP client process.
 #[derive(Clone, Debug)]
@@ -83,6 +85,61 @@ pub enum McpError {
     Io(#[from] std::io::Error),
     #[error("Serialization error: {0}")]
     Serialization(String),
+    #[error("MCP policy denied tool '{0}'")]
+    PolicyDenied(String),
+    #[error("MCP tool '{0}' requires elicitation")]
+    ElicitationRequired(String),
+    #[error("MCP elicitation denied tool '{0}'")]
+    ElicitationDenied(String),
+    #[error("MCP elicitation owner cancelled tool '{0}'")]
+    ElicitationCancelled(String),
+    #[error("MCP elicitation for tool '{tool}' timed out after {timeout_secs}s")]
+    ElicitationTimeout { tool: String, timeout_secs: u64 },
+}
+
+/// Per-tool MCP policy. Unspecified tools preserve the existing allow behavior.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum McpPolicyDecision {
+    Allow,
+    Deny,
+    Elicit,
+}
+
+#[derive(Clone, Debug)]
+pub struct McpPolicy {
+    default: McpPolicyDecision,
+    rules: HashMap<String, McpPolicyDecision>,
+}
+
+impl Default for McpPolicy {
+    fn default() -> Self {
+        Self {
+            default: McpPolicyDecision::Allow,
+            rules: HashMap::new(),
+        }
+    }
+}
+
+impl McpPolicy {
+    #[must_use]
+    pub fn default_allow() -> Self {
+        Self::default()
+    }
+
+    pub fn set_rule(&mut self, tool: impl Into<String>, decision: McpPolicyDecision) {
+        self.rules.insert(tool.into(), decision);
+    }
+
+    #[must_use]
+    pub fn with_tool(mut self, tool: impl Into<String>, decision: McpPolicyDecision) -> Self {
+        self.set_rule(tool, decision);
+        self
+    }
+
+    #[must_use]
+    fn decision(&self, tool: &str) -> McpPolicyDecision {
+        self.rules.get(tool).copied().unwrap_or(self.default)
+    }
 }
 
 /// A tool discovered from an MCP server.
@@ -133,6 +190,7 @@ pub struct McpClient {
     /// Capabilities reported by the server.
     pub capabilities: HashMap<String, Value>,
     config: McpConfig,
+    policy: McpPolicy,
     request_id: u64,
     tools: Vec<McpTool>,
 }
@@ -146,6 +204,7 @@ impl McpClient {
             protocol_version: String::from("2024-11-05"),
             capabilities: HashMap::new(),
             config,
+            policy: McpPolicy::default(),
             request_id: 0,
             tools: Vec::new(),
         }
@@ -160,6 +219,13 @@ impl McpClient {
     /// Sets the access token for authentication.
     pub fn with_access_token(mut self, token: impl Into<String>) -> Self {
         self.access_token = Some(token.into());
+        self
+    }
+
+    /// Installs the MCP-specific tool policy for this client.
+    #[must_use]
+    pub fn with_policy(mut self, policy: McpPolicy) -> Self {
+        self.policy = policy;
         self
     }
 
@@ -196,22 +262,68 @@ impl McpClient {
         name: &str,
         args: Value,
     ) -> Result<crate::executor::ToolResult, McpError> {
+        self.require_tool(name)?;
+        match self.policy.decision(name) {
+            McpPolicyDecision::Allow => self.execute_tool(name, args),
+            McpPolicyDecision::Deny => Err(McpError::PolicyDenied(name.to_owned())),
+            McpPolicyDecision::Elicit => Err(McpError::ElicitationRequired(name.to_owned())),
+        }
+    }
+
+    /// Signature scaffold for the elicitation-owned MCP call path. Behavioral
+    /// enforcement is supplied after the frozen RED suite is established.
+    pub async fn call_tool_with_elicitation(
+        &mut self,
+        name: &str,
+        args: Value,
+        response: Option<oneshot::Receiver<bool>>,
+    ) -> Result<crate::executor::ToolResult, McpError> {
+        self.require_tool(name)?;
+        match self.policy.decision(name) {
+            McpPolicyDecision::Allow => self.execute_tool(name, args),
+            McpPolicyDecision::Deny => Err(McpError::PolicyDenied(name.to_owned())),
+            McpPolicyDecision::Elicit => {
+                let Some(response) = response else {
+                    return Err(McpError::ElicitationRequired(name.to_owned()));
+                };
+                match tokio::time::timeout(Duration::from_secs(self.config.timeout_secs), response)
+                    .await
+                {
+                    Ok(Ok(true)) => self.execute_tool(name, args),
+                    Ok(Ok(false)) => Err(McpError::ElicitationDenied(name.to_owned())),
+                    Ok(Err(_)) => Err(McpError::ElicitationCancelled(name.to_owned())),
+                    Err(_) => Err(McpError::ElicitationTimeout {
+                        tool: name.to_owned(),
+                        timeout_secs: self.config.timeout_secs,
+                    }),
+                }
+            }
+        }
+    }
+
+    fn require_tool(&self, name: &str) -> Result<(), McpError> {
+        if self.tools.iter().any(|tool| tool.name == name) {
+            Ok(())
+        } else {
+            Err(McpError::ToolNotFound(name.to_owned()))
+        }
+    }
+
+    fn execute_tool(
+        &mut self,
+        name: &str,
+        args: Value,
+    ) -> Result<crate::executor::ToolResult, McpError> {
         use crate::executor::ToolResult;
-        use std::time::Instant;
 
         let start = Instant::now();
+        self.request_id = self.request_id.saturating_add(1);
 
-        // Check if tool exists
-        if !self.tools.iter().any(|t| t.name == name) {
-            return Err(McpError::ToolNotFound(name.to_string()));
-        }
-
-        // Simulate tool call - in real implementation, send JSON-RPC request
+        // Simulate tool call - in real implementation, send JSON-RPC request.
         let duration_ms = start.elapsed().as_millis() as u64;
-
         Ok(ToolResult {
-            tool_id: name.to_string(),
-            output: format!("Result from {} with args: {}", name, args),
+            tool_id: name.to_owned(),
+            output: format!("Result from {name} with args: {args}"),
             success: true,
             duration_ms,
             error: None,
