@@ -240,7 +240,7 @@
       "requirementIds": [
         "REQ-002"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -820,7 +820,7 @@
       "requirementIds": [
         "REQ-035"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -836,7 +836,7 @@
       "requirementIds": [
         "REQ-003"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
