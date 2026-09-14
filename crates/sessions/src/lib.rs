@@ -5,6 +5,7 @@ pub mod index;
 pub mod import;
 pub mod migration;
 pub mod query;
+pub mod state;
 pub mod store;
 mod types;
 
