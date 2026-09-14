@@ -45,6 +45,7 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `REQ-033` | Embedded scalable storage without Postgres or Mongo install | `DB-001`, `DB-006`, `DB-008`, `DB-009` |
 | `REQ-034` | Safely import large existing OpenCode data | `DB-012`, `DB-016` |
 | `REQ-035` | Preserve safety and resource correctness rather than blindly translate files | `DISC-008`, `SEC-017`, `REL-002`, `REL-003` |
+| `REQ-036` | Full subagent lifecycle control: spawn, fork, resume, retry, model switching, context compression, structured handoff, dedicated settings | `AGENT-016`..`AGENT-030` |
 
 ## Requirement detail
 
@@ -251,9 +252,27 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 - `REL-002` (not-started): TBD - see source audit Obligations: `REL-002-T01`, `REL-002-T02`, `REL-002-T03`, `REL-002-T04`, `REL-002-T05`
 - `REL-003` (not-started): TBD - see source audit Obligations: `REL-003-T01`, `REL-003-T02`, `REL-003-T03`, `REL-003-T04`, `REL-003-T05`
 
+### REQ-036 - Full subagent lifecycle control
+
+- `AGENT-016` (not-started): Context fork - clone parent session into child with selective context injection Obligations: `AGENT-016-T01`..`T05`
+- `AGENT-017` (not-started): Fresh context spawn - zero-context with explicit bundle Obligations: `AGENT-017-T01`..`T05`
+- `AGENT-018` (not-started): Multi-provider routing - per-child model override, fallback chain Obligations: `AGENT-018-T01`..`T05`
+- `AGENT-019` (not-started): Resume failed subagent - checkpoint restore, continue from failure Obligations: `AGENT-019-T01`..`T05`
+- `AGENT-020` (not-started): Retry with exponential backoff - error classification, jitter, circuit breaker Obligations: `AGENT-020-T01`..`T05`
+- `AGENT-021` (not-started): Change model mid-session - hot-swap, context adaptation Obligations: `AGENT-021-T01`..`T05`
+- `AGENT-022` (not-started): Context compression - sliding window, summarize, hybrid strategies Obligations: `AGENT-022-T01`..`T05`
+- `AGENT-023` (not-started): Structured handoff - portable state document with integrity Obligations: `AGENT-023-T01`..`T05`
+- `AGENT-024` (not-started): Auto compression toggle - threshold, rate limit, quality target Obligations: `AGENT-024-T01`..`T05`
+- `AGENT-025` (not-started): Dedicated subagent settings - max concurrent, model, retry, budget, pool Obligations: `AGENT-025-T01`..`T05`
+- `AGENT-026` (not-started): Pool manager - maintain N agents, auto-replace, queue drain, scaling Obligations: `AGENT-026-T01`..`T05`
+- `AGENT-027` (not-started): Observability - live dashboard, tokens, cost, latency percentiles, error rates Obligations: `AGENT-027-T01`..`T05`
+- `AGENT-028` (not-started): Permission inheritance - narrow-only child permissions Obligations: `AGENT-028-T01`..`T05`
+- `AGENT-029` (not-started): Output aggregation - merge, conflict resolution, dedup Obligations: `AGENT-029-T01`..`T05`
+- `AGENT-030` (not-started): Cancellation and cleanup - cancel, reclaim, release locks Obligations: `AGENT-030-T01`..`T05`
+
 ## Story families (prefix index)
 
-### AGENT (15 stories)
+### AGENT (30 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -272,6 +291,21 @@ Stories: 178. Requirements: 35. Test obligations: 890.
 | `AGENT-013` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `AGENT-014` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `AGENT-015` | `REQ-024` | not-started | TBD - see source audit |
+| `AGENT-016` | `REQ-036` | not-started | Context fork spawn - clone parent session state into child with selective context |
+| `AGENT-017` | `REQ-036` | not-started | Fresh context spawn - zero-context launch with explicit context bundle |
+| `AGENT-018` | `REQ-036` | not-started | Multi-provider routing - spawn children on different providers/models |
+| `AGENT-019` | `REQ-036` | not-started | Resume failed subagent - restore from checkpoint, continue from failure point |
+| `AGENT-020` | `REQ-036` | not-started | Retry with exponential backoff - error classification, circuit breaker |
+| `AGENT-021` | `REQ-036` | not-started | Change model mid-session - hot-swap without losing context |
+| `AGENT-022` | `REQ-036` | not-started | Subagent context compression - automatic compaction near token limit |
+| `AGENT-023` | `REQ-036` | not-started | Structured handoff - portable state document for agent-to-agent transfer |
+| `AGENT-024` | `REQ-036` | not-started | Auto context compression toggle - settings-driven with thresholds |
+| `AGENT-025` | `REQ-036` | not-started | Dedicated subagent settings - max concurrent, model, retry, budget, pool |
+| `AGENT-026` | `REQ-036` | not-started | Subagent pool manager - maintain N agents, auto-replace, work queue drain |
+| `AGENT-027` | `REQ-036` | not-started | Subagent observability - live dashboard, tokens, cost, latency, error rates |
+| `AGENT-028` | `REQ-036` | not-started | Permission inheritance - child inherits parent, narrowing only |
+| `AGENT-029` | `REQ-036` | not-started | Output aggregation - merge parallel results, conflict resolution, dedup |
+| `AGENT-030` | `REQ-036` | not-started | Cancellation and cleanup - cancel children, reclaim resources, release locks |
 
 ### AUTO (6 stories)
 
