@@ -101,3 +101,27 @@ Validation for this slice:
 - `jq empty` passed for the evidence catalog, reconciliation ledger, manifest, and workspace source map.
 - `git diff --check` passed.
 - Dirty-tree inspection showed exactly the seven intended DISC-003 evidence/reconciliation/manifest/task/worklog/workspace files; no runtime source, `ralph.json`, accepted task card, or verifier/controller state changed.
+
+## INT-008 consumer-surface reconciliation slice
+
+The next source-only slice keeps DISC-003 **IN PROGRESS / NOT ACCEPTED** and promotes the three remaining INT-008 consumer families from `queued` to reviewed `partial`: `opencode.integrations`, `opencode.legacy-compatibility`, and `opencode.server-control-plane`.
+
+- `opencode.integrations`: pinned client/server contract projections both derive from the authoritative Protocol HttpApi, generation-equivalence tests reject transport drift, the Effect client decodes current SSE/durable metadata, and the typed Integration HTTP handler remains a thin caller over the core Integration service. The record leaves workspace/project/Git/PTY, generated SDK breadth, provider-specific auth, remote transports, and INT-001/003/005/006/007/009/010 unresolved.
+- `opencode.legacy-compatibility`: pinned `EventV2Bridge` maps current event payloads to the legacy `{id,type,properties}` bus shape plus durable versioned `sync` envelopes, while V2 config lowering emits explicit invalid/unsupported/conflict diagnostics. Canonical legacy schemas and Core wrapper identity have direct tests. The record does not assign GlobalBus lifecycle, location lookup, config ownership, or runtime subscriber side effects to INT-008.
+- `opencode.server-control-plane`: pinned Server/Protocol API composition, typed MoveSession control-plane service/handler, direct route test, and route-policy guide show that HttpApi owns wire/error translation while domain/storage services stay free of transport types. The record explicitly leaves Git/project/session mutations, event publication, daemon/bootstrap/auth/workspace routing, and WEB-004 remote exposure with their separate owners.
+
+Together with the already reviewed `opencode.contracts-schema`, the four behavior-rule families that nominate INT-008 now have pinned partial evidence. Their exact feature-set intersection is INT-008, but this reconciliation still does **not** prove that every observed behavior belongs in one Rust implementation: accepted BASE/DB/SESS semantics stay closed, generated-client/network behavior remains broader, and the legacy bridge contains runtime bus/location effects beyond a pure wire contract. A task-level ownership audit is required before any INT-008 RED suite is authored.
+
+This moves the bounded ledger from 20 partial / 12 queued to 23 partial / 9 queued, with 115 pinned evidence references and 62 explicit unresolved findings.
+
+Validation for this slice:
+
+- `git rev-parse --short HEAD` before commit => `d9b4b94`.
+- Dirty-tree inspection showed exactly the seven intended DISC-003 evidence/reconciliation/manifest/task/worklog/workspace files: `sources/disc-003-evidence.json`, `sources/disc-003-reconciliation.json`, `sources/disc-003-reconciliation.manifest.json`, `tasks/DISC-003.md`, `worklog/DISC-003.md`, `workspaces/DISC-003/progress.md`, and `workspaces/DISC-003/source-map.json`.
+- `git diff --name-only -- ralph.json` returned no path; no runtime source, accepted task card, verifier/controller state, or `ralph.json` acceptance field changed.
+- `/usr/bin/python3 -m unittest tests.bootstrap.test_disc003_reconciliation -v` => 8/8 passed.
+- `/usr/bin/python3 tools/reconcile_surfaces.py` => 32 families: 23 `partial`, 9 `queued`; implementation statuses 15 `partial`, 8 `reference-implemented`, 9 `unresolved`; 115 evidence references; 62 unresolved findings; zero errors.
+- `/usr/bin/python3 tools/validate_plan.py` => `validate_plan: OK  stories=219 requirements=38 obligations=1095 deps_synthesized=True`.
+- `jq empty` passed for `sources/disc-003-evidence.json`, `sources/disc-003-reconciliation.json`, `sources/disc-003-reconciliation.manifest.json`, and `workspaces/DISC-003/source-map.json`.
+- `git diff --check` passed.
+- DISC-003 remains **IN PROGRESS / NOT ACCEPTED** with reconciliation status `in-progress-not-release-evidence`; these results are local source-reconciliation evidence only and do not claim verifier/controller completion.
