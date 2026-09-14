@@ -7,6 +7,7 @@ pub mod sysfiles;
 pub mod project_boundary;
 pub mod hooks;
 pub mod ssrf;
+pub mod sql_classify;
 use std::{path::{Component,Path,PathBuf},sync::{Arc,Mutex},time::SystemTime}; use opencode_rk_contracts::ApprovalId; use serde::{Deserialize,Serialize};
 #[derive(Clone,Copy,Debug,Eq,PartialEq,Serialize,Deserialize)]#[serde(rename_all="snake_case")]pub enum FileAction{Read,Write,Delete,CreateDirectory}
 #[derive(Clone,Debug,Eq,PartialEq,Serialize,Deserialize)]#[serde(tag="type",rename_all="snake_case")]pub enum OperationIntent{File{action:FileAction,path:PathBuf},Process{program:String,args:Vec<String>,cwd:PathBuf},Sql{statement:String,database:String},Tool{name:String,description:String}}

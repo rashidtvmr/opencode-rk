@@ -923,6 +923,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "opencode-rk-contracts",
  "serde",
+ "serde_json",
  "thiserror",
 ]
 
