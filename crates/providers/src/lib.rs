@@ -9,6 +9,7 @@ pub mod debug_export;
 pub mod fallback;
 pub mod health;
 pub mod integration;
+pub mod integration_probe;
 pub mod metrics;
 pub mod model_route;
 pub mod proxy_route;
