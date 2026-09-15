@@ -1128,7 +1128,7 @@
     {
       "id": "INT-008",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1142,7 +1142,7 @@
     {
       "id": "INT-009",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1156,7 +1156,7 @@
     {
       "id": "INT-010",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1174,7 +1174,7 @@
         "REQ-024",
         "REQ-032"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1188,7 +1188,7 @@
     {
       "id": "OPS-002",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1202,7 +1202,7 @@
     {
       "id": "OPS-003",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1216,7 +1216,7 @@
     {
       "id": "OPS-004",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1230,7 +1230,7 @@
     {
       "id": "OPS-005",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1244,7 +1244,7 @@
     {
       "id": "OPS-006",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1261,7 +1261,7 @@
         "REQ-001",
         "REQ-024"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1275,7 +1275,7 @@
     {
       "id": "OPS-008",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1289,7 +1289,7 @@
     {
       "id": "OPS-009",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1475,7 +1475,7 @@
       "requirementIds": [
         "REQ-003"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1492,7 +1492,7 @@
         "REQ-004",
         "REQ-035"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1508,7 +1508,7 @@
       "requirementIds": [
         "REQ-035"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1524,7 +1524,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1540,7 +1540,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1554,7 +1554,7 @@
     {
       "id": "ROUTE-003",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1568,7 +1568,7 @@
     {
       "id": "ROUTE-004",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1584,7 +1584,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1598,7 +1598,7 @@
     {
       "id": "ROUTE-006",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1612,7 +1612,7 @@
     {
       "id": "ROUTE-007",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1628,7 +1628,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1642,7 +1642,7 @@
     {
       "id": "ROUTE-009",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1656,7 +1656,7 @@
     {
       "id": "ROUTE-010",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1672,7 +1672,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2191,7 +2191,7 @@
       "requirementIds": [
         "REQ-007"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2205,7 +2205,7 @@
     {
       "id": "SHARE-002",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2219,7 +2219,7 @@
     {
       "id": "SHARE-003",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2235,7 +2235,7 @@
       "requirementIds": [
         "REQ-007"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2251,7 +2251,7 @@
       "requirementIds": [
         "REQ-007"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2486,7 +2486,7 @@
     {
       "id": "UI-001",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2500,7 +2500,7 @@
     {
       "id": "UI-002",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2516,7 +2516,7 @@
       "requirementIds": [
         "REQ-023"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2532,7 +2532,7 @@
       "requirementIds": [
         "REQ-008"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2548,7 +2548,7 @@
       "requirementIds": [
         "REQ-013"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2564,7 +2564,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2580,7 +2580,7 @@
       "requirementIds": [
         "REQ-018"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2596,7 +2596,7 @@
       "requirementIds": [
         "REQ-021"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2612,7 +2612,7 @@
       "requirementIds": [
         "REQ-019"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2628,7 +2628,7 @@
       "requirementIds": [
         "REQ-017"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2645,7 +2645,7 @@
         "REQ-029",
         "REQ-032"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2661,7 +2661,7 @@
       "requirementIds": [
         "REQ-005"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2675,7 +2675,7 @@
     {
       "id": "UI-013",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2689,7 +2689,7 @@
     {
       "id": "WEB-001",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2703,7 +2703,7 @@
     {
       "id": "WEB-002",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2717,7 +2717,7 @@
     {
       "id": "WEB-003",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2731,7 +2731,7 @@
     {
       "id": "WEB-004",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2745,7 +2745,7 @@
     {
       "id": "WEB-005",
       "requirementIds": [],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -3132,7 +3132,7 @@
       "requirementIds": [
         "REQ-037"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Doctor diagnostics command - checks auth, connectivity, tools, MCP; reports failures without log spelunking",
       "dependencyIds": [],
       "testObligations": [
@@ -3245,7 +3245,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "Per-turn cost counters - input, output, cache-read, cache-create, durations, lines changed, web-search count, unknown-cost flag",
       "dependencyIds": [],
       "testObligations": [
@@ -3262,7 +3262,7 @@
         "REQ-016",
         "REQ-018"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TUI composer - multiline editor, Enter sends, Shift+Enter newline, Ctrl+J fallback, send button, draft survives interrupt, queue-while-busy",
       "dependencyIds": [],
       "testObligations": [
@@ -3278,7 +3278,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TUI status bar - clickable model item opens provider-aware switcher, clickable context item opens context detail view; keyboard fallback",
       "dependencyIds": [],
       "testObligations": [
@@ -3294,7 +3294,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TUI context detail view - per-source token breakdown with cache-read vs fresh flags, largest blocks first, truncation markers",
       "dependencyIds": [],
       "testObligations": [
@@ -3311,7 +3311,7 @@
         "REQ-006",
         "REQ-016"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TUI /memory viewer - list loaded memory files with path bytes tokens cached flag, unload with prefix-cache cost warning, reload path",
       "dependencyIds": [],
       "testObligations": [
@@ -3327,7 +3327,7 @@
       "requirementIds": [
         "REQ-019"
       ],
-      "status": "not-started",
+      "status": "in-progress",
       "userStory": "TUI keybindings help - footer hints plus /keybindings parity, configurable composer submit keymap",
       "dependencyIds": [],
       "testObligations": [
