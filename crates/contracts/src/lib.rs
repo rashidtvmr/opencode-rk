@@ -15,6 +15,10 @@ pub const WIRE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_TITLE_BYTES: usize = 512;
 pub const MAX_ERROR_MESSAGE_BYTES: usize = 8 * 1024;
 pub const MAX_INLINE_PAYLOAD_BYTES: usize = 64 * 1024;
+pub const MAX_DRAFT_ATTACHMENT_BYTES: usize = 8 * 1024 * 1024;
+pub const MAX_DRAFT_ATTACHMENTS: usize = 8;
+pub const MAX_ATTACHMENT_NAME_BYTES: usize = 255;
+pub const MAX_ATTACHMENT_MIME_BYTES: usize = 255;
 /// Provider-visible reasoning summaries are transcript metadata, not hidden chain of thought.
 /// Keep them small enough to fit one format-2 inline message part.
 pub const MAX_REASONING_SUMMARY_BYTES: usize = 8 * 1024;
@@ -65,6 +69,7 @@ uuid_id!(MessageId);
 uuid_id!(AgentId);
 uuid_id!(ToolCallId);
 uuid_id!(ApprovalId);
+uuid_id!(AttachmentId);
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -198,6 +203,17 @@ pub struct MessageRecord {
     pub session_id: SessionId,
     pub role: MessageRole,
     pub body: PayloadRef,
+    pub created_at: Timestamp,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct DraftAttachment {
+    pub id: AttachmentId,
+    pub session_id: SessionId,
+    pub name: String,
+    pub mime: String,
+    pub hash: String,
+    pub bytes: u64,
     pub created_at: Timestamp,
 }
 

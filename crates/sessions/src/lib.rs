@@ -46,8 +46,9 @@ pub mod ui_013;
 
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
-    AssistantActivity, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState,
-    SessionSummary, Timestamp, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES,
+    AssistantActivity, AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole,
+    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp, MAX_REASONING_SUMMARY_BYTES,
+    MAX_TITLE_BYTES,
 };
 use opencode_rk_storage::{NewMessage, NewSession, Storage, StorageError, V2Writer};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -467,6 +468,58 @@ impl SessionService {
         run_blocking(move || storage.append_message(&candidate)).await?;
         Ok(message)
     }
+    pub async fn create_draft_attachment(
+        &self,
+        session_id: SessionId,
+        name: String,
+        mime: String,
+        bytes: Vec<u8>,
+    ) -> Result<DraftAttachment, SessionError> {
+        if self.fork_manager_for(session_id).await?.is_some() {
+            return Err(SessionError::DraftAttachmentUnavailable);
+        }
+        let storage = Arc::clone(&self.storage);
+        match run_blocking(move || {
+            storage.create_draft_attachment(session_id, &name, &mime, &bytes)
+        })
+        .await
+        {
+            Err(SessionError::Storage(StorageError::InlinePayloadTooLarge)) => {
+                Err(SessionError::DraftAttachmentTooLarge)
+            }
+            Err(SessionError::Storage(StorageError::Sqlite(rusqlite::Error::InvalidQuery))) => {
+                Err(SessionError::InvalidDraftAttachment)
+            }
+            other => other,
+        }
+    }
+    pub async fn draft_attachments(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Vec<DraftAttachment>, SessionError> {
+        if self.fork_manager_for(session_id).await?.is_some() {
+            return Err(SessionError::DraftAttachmentUnavailable);
+        }
+        let storage = Arc::clone(&self.storage);
+        Ok(run_blocking(move || storage.list_draft_attachments(session_id)).await?)
+    }
+    pub async fn delete_draft_attachment(
+        &self,
+        session_id: SessionId,
+        attachment_id: AttachmentId,
+    ) -> Result<(), SessionError> {
+        if self.fork_manager_for(session_id).await?.is_some() {
+            return Err(SessionError::DraftAttachmentUnavailable);
+        }
+        let storage = Arc::clone(&self.storage);
+        match run_blocking(move || storage.delete_draft_attachment(session_id, attachment_id)).await {
+            Ok(()) => Ok(()),
+            Err(SessionError::Storage(StorageError::Sqlite(
+                rusqlite::Error::QueryReturnedNoRows,
+            ))) => Err(SessionError::DraftAttachmentNotFound(attachment_id)),
+            Err(other) => Err(other),
+        }
+    }
     pub async fn messages(
         &self,
         session_id: SessionId,
@@ -692,6 +745,14 @@ pub enum SessionError {
     ForkDepthExceeded,
     #[error("branching blob-backed history is unavailable until the format-2 blob adapter is active")]
     BranchPayloadUnsupported,
+    #[error("draft attachments are unavailable for format-2 branch sessions until blob stores are unified")]
+    DraftAttachmentUnavailable,
+    #[error("draft attachment exceeds the supported size bound")]
+    DraftAttachmentTooLarge,
+    #[error("draft attachment metadata is invalid or the per-chat attachment limit was reached")]
+    InvalidDraftAttachment,
+    #[error("draft attachment not found: {0}")]
+    DraftAttachmentNotFound(AttachmentId),
     #[error("storage mutex poisoned")]
     Poisoned,
 }

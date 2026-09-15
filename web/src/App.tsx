@@ -37,9 +37,11 @@ import {
   archiveSession,
   branchSessionFromMessage,
   createSession,
+  deleteDraftAttachment,
   getForkProvenance,
   getHealth,
   listAssistantActivity,
+  listDraftAttachments,
   listMessages,
   listModels,
   listSessions,
@@ -47,7 +49,9 @@ import {
   prepareRetryBranch,
   renameSession,
   runTurnStream,
+  uploadDraftAttachment,
   type AssistantActivity,
+  type DraftAttachmentState,
   type ForkProvenance,
   type HealthResponse,
   type MessageRecord,
@@ -153,6 +157,10 @@ function App() {
   const [messageLoadState, setMessageLoadState] = useState<MessageLoadState>('idle')
   const [messageError, setMessageError] = useState('')
   const [assistantActivity, setAssistantActivity] = useState<Record<string, AssistantActivity>>({})
+  const [attachmentState, setAttachmentState] = useState<DraftAttachmentState>({
+    attachments: [],
+    available: true,
+  })
   const [forkProvenance, setForkProvenance] = useState<ForkProvenance | null>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editingMessageText, setEditingMessageText] = useState('')
@@ -190,6 +198,7 @@ function App() {
     if (!selectedSessionId) {
       setMessages([])
       setAssistantActivity({})
+      setAttachmentState({ attachments: [], available: true })
       setForkProvenance(null)
       setMessageLoadState('idle')
       setMessageError('')
@@ -203,6 +212,7 @@ function App() {
     const controller = new AbortController()
     setMessages([])
     setAssistantActivity({})
+    setAttachmentState({ attachments: [], available: true })
     setForkProvenance(null)
     setMessageLoadState('loading')
     setMessageError('')
@@ -210,9 +220,10 @@ function App() {
     Promise.all([
       listMessages(selectedSessionId, 200, controller.signal),
       listAssistantActivity(selectedSessionId, 200, controller.signal),
+      listDraftAttachments(selectedSessionId, controller.signal),
       getForkProvenance(selectedSessionId, controller.signal),
     ])
-      .then(([result, activity, provenance]) => {
+      .then(([result, activity, attachments, provenance]) => {
         if (controller.signal.aborted) return
         setMessages(result)
         setAssistantActivity(
@@ -221,6 +232,7 @@ function App() {
             AssistantActivity
           >,
         )
+        setAttachmentState(attachments)
         setForkProvenance(provenance)
         setMessageLoadState('ready')
       })
@@ -460,8 +472,55 @@ function App() {
 
   const handleComposerSubmit = async (text: string, reasoningEffort: ReasoningEffort) => {
     if (!selectedSessionId) return false
+    if (attachmentState.attachments.length > 0) {
+      setNotice('Attached files are saved, but this provider turn adapter cannot send them yet.')
+      return false
+    }
     setSelectedReasoningEffort(reasoningEffort)
     return executeTurnInSession(selectedSessionId, text, reasoningEffort)
+  }
+
+  const handleFilesSelected = async (files: File[]) => {
+    if (!selectedSessionId || !attachmentState.available || files.length === 0) return
+    const remaining = Math.max(0, 8 - attachmentState.attachments.length)
+    if (remaining === 0) {
+      setNotice('This chat already has the maximum of 8 draft attachments.')
+      return
+    }
+    const accepted = files.slice(0, remaining)
+    if (files.length > remaining) {
+      setNotice(`Only ${remaining} more attachment${remaining === 1 ? '' : 's'} can be added.`)
+    }
+    for (const file of accepted) {
+      if (file.size === 0 || file.size > 8 * 1024 * 1024) {
+        setNotice(`${file.name || 'Attachment'} must be between 1 byte and 8 MiB.`)
+        continue
+      }
+      try {
+        const attachment = await uploadDraftAttachment(selectedSessionId, file)
+        setAttachmentState((current) => ({
+          ...current,
+          attachments: [...current.attachments, attachment],
+        }))
+        setNotice(`Attached ${attachment.name}. Sending attachments is not enabled yet.`)
+      } catch (cause) {
+        setNotice(cause instanceof Error ? cause.message : 'Could not store attachment')
+      }
+    }
+  }
+
+  const handleRemoveAttachment = async (attachmentId: string) => {
+    if (!selectedSessionId) return
+    try {
+      await deleteDraftAttachment(selectedSessionId, attachmentId)
+      setAttachmentState((current) => ({
+        ...current,
+        attachments: current.attachments.filter((attachment) => attachment.id !== attachmentId),
+      }))
+      setNotice('Removed attachment.')
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'Could not remove attachment')
+    }
   }
 
   const handleStopTurn = () => {
@@ -482,9 +541,10 @@ function App() {
 
     try {
       const result = await prepareRetryBranch(selectedSessionId, message.id)
-      const [childMessages, childActivity] = await Promise.all([
+      const [childMessages, childActivity, childAttachments] = await Promise.all([
         listMessages(result.session.id, 200),
         listAssistantActivity(result.session.id, 200),
+        listDraftAttachments(result.session.id),
       ])
       const requestText = editedText?.trim() || result.requestText
 
@@ -500,6 +560,7 @@ function App() {
           AssistantActivity
         >,
       )
+      setAttachmentState(childAttachments)
       setMessageLoadState('ready')
       setMessageError('')
       setEditingMessageId(null)
@@ -956,10 +1017,15 @@ function App() {
               disabled={!selectedSession}
               sessionId={selectedSession?.id ?? null}
               running={activeTurnSessionId === selectedSession?.id}
+              attachments={attachmentState.attachments}
+              attachmentsAvailable={attachmentState.available}
+              attachmentUnavailableReason={attachmentState.reason}
               models={models}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
               onReasoningEffortChange={setSelectedReasoningEffort}
+              onFilesSelected={handleFilesSelected}
+              onRemoveAttachment={handleRemoveAttachment}
               onStop={handleStopTurn}
               onSubmit={handleComposerSubmit}
             />

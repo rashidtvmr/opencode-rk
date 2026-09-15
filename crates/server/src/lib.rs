@@ -27,16 +27,17 @@ pub mod web_route;
 pub mod web_suffix;
 use axum::{
     body::{Body, Bytes},
-    extract::{Path, Query, State},
-    http::{header, StatusCode},
+    extract::{DefaultBodyLimit, Path, Query, State},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, post},
+    routing::{delete, get, post},
     Json, Router,
 };
 use futures_util::stream;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, WIRE_SCHEMA_VERSION,
+    AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId,
+    MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
     OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesInput, ResponsesRole,
@@ -65,6 +66,16 @@ pub fn router(state: AppState) -> Router {
         .route(
             "/api/sessions/{id}/messages",
             get(list_messages).post(append_message),
+        )
+        .route(
+            "/api/sessions/{id}/attachments",
+            get(list_draft_attachments)
+                .post(upload_draft_attachment)
+                .layer(DefaultBodyLimit::max(MAX_DRAFT_ATTACHMENT_BYTES)),
+        )
+        .route(
+            "/api/sessions/{id}/attachments/{attachment_id}",
+            delete(delete_draft_attachment),
         )
         .route("/api/sessions/{id}/activity", get(list_assistant_activity))
         .route(
@@ -253,6 +264,71 @@ async fn append_message(
         .await
         .map_err(ApiFailure::internal)?;
     Ok((StatusCode::CREATED, Json(json!({"message":message}))))
+}
+
+#[derive(Debug, Deserialize)]
+struct UploadAttachmentParams {
+    name: String,
+}
+
+async fn upload_draft_attachment(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<UploadAttachmentParams>,
+    headers: HeaderMap,
+    body: Bytes,
+) -> Result<(StatusCode, Json<Value>), ApiFailure> {
+    let id = parse_session_id(&id)?;
+    if body.is_empty() || body.len() > MAX_DRAFT_ATTACHMENT_BYTES {
+        return Err(ApiFailure::unprocessable("attachment exceeds the supported size bound"));
+    }
+    let mime = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("application/octet-stream")
+        .to_owned();
+    let attachment = state
+        .sessions
+        .create_draft_attachment(id, params.name, mime, body.to_vec())
+        .await
+        .map_err(attachment_failure)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({"attachment":attachment})),
+    ))
+}
+
+async fn list_draft_attachments(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    match state.sessions.draft_attachments(id).await {
+        Ok(attachments) => Ok(Json(json!({
+            "attachments":attachments,
+            "available":true,
+        }))),
+        Err(SessionError::DraftAttachmentUnavailable) => Ok(Json(json!({
+            "attachments":[],
+            "available":false,
+            "reason":"draft attachments are unavailable for this format-2 branch session until blob stores are unified",
+        }))),
+        Err(error) => Err(attachment_failure(error)),
+    }
+}
+
+async fn delete_draft_attachment(
+    State(state): State<AppState>,
+    Path((id, attachment_id)): Path<(String, String)>,
+) -> Result<StatusCode, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let attachment_id = parse_attachment_id(&attachment_id)?;
+    state
+        .sessions
+        .delete_draft_attachment(id, attachment_id)
+        .await
+        .map_err(attachment_failure)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn branch_session(
@@ -678,6 +754,20 @@ fn parse_session_id(value: &str) -> Result<SessionId, ApiFailure> {
 }
 fn parse_message_id(value: &str) -> Result<MessageId, ApiFailure> {
     MessageId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid message id"))
+}
+fn parse_attachment_id(value: &str) -> Result<AttachmentId, ApiFailure> {
+    AttachmentId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid attachment id"))
+}
+fn attachment_failure(error: SessionError) -> ApiFailure {
+    match error {
+        SessionError::NotFound(_) | SessionError::DraftAttachmentNotFound(_) => {
+            ApiFailure::not_found(error.to_string())
+        }
+        SessionError::DraftAttachmentUnavailable
+        | SessionError::DraftAttachmentTooLarge
+        | SessionError::InvalidDraftAttachment => ApiFailure::unprocessable(error.to_string()),
+        other => ApiFailure::internal(other),
+    }
 }
 fn branch_failure(error: SessionError) -> ApiFailure {
     match error {

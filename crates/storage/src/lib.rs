@@ -23,8 +23,10 @@ pub use execution_v2::ExecV2;
 pub use gc_v2::GcV2;
 pub use import_v2::ImportV2;
 use opencode_rk_contracts::{
-    AssistantActivity, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState,
-    SessionSummary, Timestamp, MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES,
+    AssistantActivity, AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole,
+    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp, MAX_ATTACHMENT_MIME_BYTES,
+    MAX_ATTACHMENT_NAME_BYTES, MAX_DRAFT_ATTACHMENTS, MAX_DRAFT_ATTACHMENT_BYTES,
+    MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES,
 };
 pub use quota_v2::QuotaV2;
 pub use retention_v2::RetentionV2;
@@ -220,6 +222,105 @@ impl Storage {
         tx.commit()?;
         Ok(())
     }
+    pub fn create_draft_attachment(
+        &self,
+        session_id: SessionId,
+        name: &str,
+        mime: &str,
+        bytes: &[u8],
+    ) -> Result<DraftAttachment, StorageError> {
+        if bytes.is_empty() || bytes.len() > MAX_DRAFT_ATTACHMENT_BYTES {
+            return Err(StorageError::InlinePayloadTooLarge);
+        }
+        if name.is_empty()
+            || name.as_bytes().len() > MAX_ATTACHMENT_NAME_BYTES
+            || mime.is_empty()
+            || mime.as_bytes().len() > MAX_ATTACHMENT_MIME_BYTES
+        {
+            return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        self.get_session(session_id)?;
+        let blob = self.blobs.put(bytes)?;
+        let created_at = parse_timestamp(Timestamp::now().to_string())?;
+        let attachment = DraftAttachment {
+            id: AttachmentId::new(),
+            session_id,
+            name: name.to_owned(),
+            mime: mime.to_owned(),
+            hash: blob.hash,
+            bytes: blob.raw_bytes,
+            created_at,
+        };
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM draft_attachments WHERE session_id=?1",
+            params![session_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if count as usize >= MAX_DRAFT_ATTACHMENTS {
+            return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        tx.execute(
+            "INSERT INTO draft_attachments (id,session_id,name,mime,blob_hash,byte_len,created_at)
+             VALUES (?1,?2,?3,?4,?5,?6,?7)",
+            params![
+                attachment.id.to_string(),
+                attachment.session_id.to_string(),
+                attachment.name,
+                attachment.mime,
+                attachment.hash,
+                attachment.bytes as i64,
+                attachment.created_at.to_string(),
+            ],
+        )?;
+        tx.commit()?;
+        Ok(attachment)
+    }
+    pub fn list_draft_attachments(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Vec<DraftAttachment>, StorageError> {
+        self.get_session(session_id)?;
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let mut statement = connection.prepare(
+            "SELECT id,name,mime,blob_hash,byte_len,created_at FROM draft_attachments
+             WHERE session_id=?1 ORDER BY rowid ASC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(
+            params![session_id.to_string(), MAX_DRAFT_ATTACHMENTS as i64],
+            |row| {
+                let id: String = row.get(0)?;
+                let created_at: String = row.get(5)?;
+                Ok(DraftAttachment {
+                    id: AttachmentId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    session_id,
+                    name: row.get(1)?,
+                    mime: row.get(2)?,
+                    hash: row.get(3)?,
+                    bytes: row.get::<_, i64>(4)?.max(0) as u64,
+                    created_at: parse_timestamp(created_at)?,
+                })
+            },
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+    pub fn delete_draft_attachment(
+        &self,
+        session_id: SessionId,
+        attachment_id: AttachmentId,
+    ) -> Result<(), StorageError> {
+        self.get_session(session_id)?;
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let changed = connection.execute(
+            "DELETE FROM draft_attachments WHERE session_id=?1 AND id=?2",
+            params![session_id.to_string(), attachment_id.to_string()],
+        )?;
+        if changed == 0 {
+            return Err(StorageError::Sqlite(rusqlite::Error::QueryReturnedNoRows));
+        }
+        Ok(())
+    }
     pub fn list_assistant_activity(
         &self,
         session_id: SessionId,
@@ -310,6 +411,19 @@ impl Storage {
     }
     fn migrate(connection: &Connection) -> Result<(), StorageError> {
         connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS draft_attachments(
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+                name TEXT NOT NULL CHECK(length(CAST(name AS BLOB)) BETWEEN 1 AND 255),
+                mime TEXT NOT NULL CHECK(length(CAST(mime AS BLOB)) BETWEEN 1 AND 255),
+                blob_hash TEXT NOT NULL CHECK(length(blob_hash)=64),
+                byte_len INTEGER NOT NULL CHECK(byte_len BETWEEN 1 AND 8388608),
+                created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS draft_attachments_session_idx
+                ON draft_attachments(session_id,created_at,id);",
+        )?;
         Ok(())
     }
 }

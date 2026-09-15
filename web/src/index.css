@@ -806,6 +806,60 @@
   opacity: 0.72;
 }
 
+.codex-attachment-area {
+  display: grid;
+  gap: 0.4rem;
+  padding: 0.15rem 0.75rem 0.45rem;
+}
+
+.codex-attachment-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.codex-attachment-chip {
+  min-width: 0;
+  max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border: 1px solid #4a4a4a;
+  border-radius: 0.65rem;
+  background: #292929;
+  padding: 0.25rem 0.3rem 0.25rem 0.5rem;
+  color: #d2d2d2;
+  font-size: 0.74rem;
+}
+
+.codex-attachment-chip > svg {
+  width: 0.8rem;
+  height: 0.8rem;
+  flex: 0 0 auto;
+}
+
+.codex-attachment-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-attachment-size {
+  flex: 0 0 auto;
+  color: #989898;
+}
+
+.codex-attachment-warning {
+  margin: 0;
+  color: #a8a8a8;
+  font-size: 0.7rem;
+  line-height: 1.4;
+}
+
 .codex-composer-toolbar {
   min-height: 2.85rem;
   display: flex;

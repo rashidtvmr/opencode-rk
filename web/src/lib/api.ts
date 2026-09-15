@@ -54,6 +54,22 @@ export interface AssistantActivity {
   reasoning_summary: string
 }
 
+export interface DraftAttachment {
+  id: string
+  session_id: string
+  name: string
+  mime: string
+  hash: string
+  bytes: number
+  created_at?: unknown
+}
+
+export interface DraftAttachmentState {
+  attachments: DraftAttachment[]
+  available: boolean
+  reason?: string
+}
+
 class ApiError extends Error {
   readonly status: number
 
@@ -137,6 +153,30 @@ function normalizeMessage(value: unknown): MessageRecord | null {
   }
 }
 
+function normalizeDraftAttachment(value: unknown): DraftAttachment | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.id !== 'string' ||
+    typeof candidate.session_id !== 'string' ||
+    typeof candidate.name !== 'string' ||
+    typeof candidate.mime !== 'string' ||
+    typeof candidate.hash !== 'string' ||
+    typeof candidate.bytes !== 'number'
+  ) {
+    return null
+  }
+  return {
+    id: candidate.id,
+    session_id: candidate.session_id,
+    name: candidate.name,
+    mime: candidate.mime,
+    hash: candidate.hash,
+    bytes: candidate.bytes,
+    created_at: candidate.created_at,
+  }
+}
+
 export async function getHealth() {
   return request<HealthResponse>('/health')
 }
@@ -185,6 +225,76 @@ export async function listMessages(id: string, limit = 200, signal?: AbortSignal
   return (payload.messages ?? [])
     .map(normalizeMessage)
     .filter((message): message is MessageRecord => Boolean(message))
+}
+
+export async function listDraftAttachments(id: string, signal?: AbortSignal) {
+  try {
+    const payload = await request<{
+      attachments?: unknown[]
+      available?: unknown
+      reason?: unknown
+    }>(
+      `/api/sessions/${encodeURIComponent(id)}/attachments`,
+      { signal },
+    )
+    const attachments = (payload.attachments ?? [])
+      .map(normalizeDraftAttachment)
+      .filter((attachment): attachment is DraftAttachment => Boolean(attachment))
+    return {
+      attachments,
+      available: typeof payload.available === 'boolean' ? payload.available : true,
+      reason: typeof payload.reason === 'string' ? payload.reason : undefined,
+    } satisfies DraftAttachmentState
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) {
+      return {
+        attachments: [],
+        available: false,
+        reason: 'Draft attachments require a newer native server.',
+      } satisfies DraftAttachmentState
+    }
+    throw cause
+  }
+}
+
+export async function uploadDraftAttachment(
+  id: string,
+  file: File,
+  signal?: AbortSignal,
+) {
+  const params = new URLSearchParams({ name: file.name || 'attachment' })
+  const response = await fetch(
+    `/api/sessions/${encodeURIComponent(id)}/attachments?${params.toString()}`,
+    {
+      method: 'POST',
+      headers: { 'content-type': file.type || 'application/octet-stream' },
+      body: file,
+      signal,
+    },
+  )
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { message?: string } | null
+    throw new ApiError(response.status, body?.message ?? `Request failed with ${response.status}`)
+  }
+  const payload = (await response.json()) as { attachment?: unknown }
+  const attachment = normalizeDraftAttachment(payload.attachment)
+  if (!attachment) throw new Error('Server returned an invalid attachment')
+  return attachment
+}
+
+export async function deleteDraftAttachment(
+  sessionId: string,
+  attachmentId: string,
+  signal?: AbortSignal,
+) {
+  const response = await fetch(
+    `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}`,
+    { method: 'DELETE', signal },
+  )
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { message?: string } | null
+    throw new ApiError(response.status, body?.message ?? `Request failed with ${response.status}`)
+  }
 }
 
 export async function branchSessionFromMessage(sessionId: string, messageId: string) {

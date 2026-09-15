@@ -16,6 +16,7 @@ import {
   Plus,
   SlidersHorizontal,
   Square,
+  X,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -33,7 +34,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { modelKey, modelLabel, type ModelSummary } from '@/lib/api'
+import { modelKey, modelLabel, type DraftAttachment, type ModelSummary } from '@/lib/api'
 
 const effortLevels = [
   { value: 'low', label: 'Low' },
@@ -59,10 +60,15 @@ interface ComposerProps {
   disabled?: boolean
   sessionId?: string | null
   running?: boolean
+  attachments?: DraftAttachment[]
+  attachmentsAvailable?: boolean
+  attachmentUnavailableReason?: string
   models: ModelSummary[]
   selectedModel: string
   onModelChange: (model: string) => void
   onReasoningEffortChange?: (effort: ReasoningEffort) => void
+  onFilesSelected?: (files: File[]) => void
+  onRemoveAttachment?: (attachmentId: string) => void
   onStop?: () => void
   onSubmit?: (
     value: string,
@@ -162,14 +168,20 @@ export function Composer({
   disabled = false,
   sessionId = null,
   running = false,
+  attachments = [],
+  attachmentsAvailable = true,
+  attachmentUnavailableReason,
   models,
   selectedModel,
   onModelChange,
   onReasoningEffortChange,
+  onFilesSelected,
+  onRemoveAttachment,
   onStop,
   onSubmit,
 }: ComposerProps) {
   const editorRef = useRef<HTMLDivElement>(null)
+  const fileInputRef = useRef<HTMLInputElement>(null)
   const lastAcceptedHtmlRef = useRef('')
   const [draftText, setDraftText] = useState('')
   const [draftError, setDraftError] = useState('')
@@ -222,7 +234,14 @@ export function Composer({
 
   const submit = async () => {
     const editor = editorRef.current
-    if (!editor || disabled || running || submitting || draftError) return
+    if (
+      !editor ||
+      disabled ||
+      running ||
+      submitting ||
+      draftError ||
+      attachments.length > 0
+    ) return
     const blocks = editorBlocks(editor)
     const message = lowerComposerDocument(blocks)
     if (!message) return
@@ -293,6 +312,19 @@ export function Composer({
 
   return (
     <div className="codex-composer" data-testid="codex-composer">
+      <input
+        ref={fileInputRef}
+        className="sr-only"
+        type="file"
+        multiple
+        tabIndex={-1}
+        aria-hidden="true"
+        onChange={(event) => {
+          const files = Array.from(event.currentTarget.files ?? [])
+          event.currentTarget.value = ''
+          if (files.length > 0) onFilesSelected?.(files)
+        }}
+      />
       <label className="sr-only" id="message-composer-label">
         Message
       </label>
@@ -313,6 +345,34 @@ export function Composer({
         onPaste={onPaste}
       />
 
+      {attachments.length > 0 ? (
+        <div className="codex-attachment-area">
+          <ul className="codex-attachment-list" aria-label="Draft attachments">
+            {attachments.map((attachment) => (
+              <li key={attachment.id} className="codex-attachment-chip">
+                <Paperclip aria-hidden="true" />
+                <span className="codex-attachment-name">{attachment.name}</span>
+                <span className="codex-attachment-size">
+                  {Math.max(1, Math.ceil(attachment.bytes / 1024))} KiB
+                </span>
+                <Button
+                  size="icon-xs"
+                  variant="ghost"
+                  aria-label={`Remove ${attachment.name}`}
+                  isDisabled={running}
+                  onPress={() => onRemoveAttachment?.(attachment.id)}
+                >
+                  <X aria-hidden="true" />
+                </Button>
+              </li>
+            ))}
+          </ul>
+          <p className="codex-attachment-warning" role="status">
+            Files are stored with this draft. Remove them before sending; the current provider adapter cannot transmit attachments yet.
+          </p>
+        </div>
+      ) : null}
+
       <div className="codex-composer-toolbar">
         <div className="codex-composer-tools">
           <DropdownMenuTrigger>
@@ -332,9 +392,12 @@ export function Composer({
                 Code block
               </DropdownMenuItem>
               <DropdownMenuSeparator />
-              <DropdownMenuItem isDisabled>
+              <DropdownMenuItem
+                isDisabled={!attachmentsAvailable || running}
+                onAction={() => fileInputRef.current?.click()}
+              >
                 <Paperclip aria-hidden="true" />
-                Files unavailable in this turn adapter
+                {attachmentsAvailable ? 'Add files' : 'Files unavailable for this chat'}
               </DropdownMenuItem>
               <DropdownMenuItem isDisabled>
                 <ImagePlus aria-hidden="true" />
@@ -416,6 +479,7 @@ export function Composer({
         <div className="codex-composer-actions">
           <p id="composer-help" className="sr-only">
             Enter sends from a text paragraph. Shift plus Enter inserts a new line. Enter inside a code block inserts a new line. Drafts are stored locally per chat.
+            {attachmentUnavailableReason ? ` ${attachmentUnavailableReason}` : ''}
           </p>
           <p id="composer-draft-status" className="sr-only" aria-live="polite">
             {draftError}
@@ -446,7 +510,13 @@ export function Composer({
               className="codex-send-button"
               aria-label="Send message"
               onPress={() => void submit()}
-              isDisabled={disabled || submitting || Boolean(draftError) || draftText.trim().length === 0}
+              isDisabled={
+                disabled ||
+                submitting ||
+                Boolean(draftError) ||
+                attachments.length > 0 ||
+                draftText.trim().length === 0
+              }
             >
               <ArrowUp aria-hidden="true" />
             </Button>
