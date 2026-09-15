@@ -9,6 +9,7 @@ pub mod query;
 pub mod reference;
 pub mod state;
 pub mod store;
+pub mod tui_state;
 mod types;
 
 use chrono::{DateTime, Utc};
