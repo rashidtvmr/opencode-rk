@@ -3262,7 +3262,7 @@
         "REQ-016",
         "REQ-018"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TUI composer - multiline editor, Enter sends, Shift+Enter newline, Ctrl+J fallback, send button, draft survives interrupt, queue-while-busy",
       "dependencyIds": [],
       "testObligations": [
@@ -3278,7 +3278,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TUI status bar - clickable model item opens provider-aware switcher, clickable context item opens context detail view; keyboard fallback",
       "dependencyIds": [],
       "testObligations": [
@@ -3294,7 +3294,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TUI context detail view - per-source token breakdown with cache-read vs fresh flags, largest blocks first, truncation markers",
       "dependencyIds": [],
       "testObligations": [
@@ -3311,7 +3311,7 @@
         "REQ-006",
         "REQ-016"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TUI /memory viewer - list loaded memory files with path bytes tokens cached flag, unload with prefix-cache cost warning, reload path",
       "dependencyIds": [],
       "testObligations": [
@@ -3327,7 +3327,7 @@
       "requirementIds": [
         "REQ-019"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TUI keybindings help - footer hints plus /keybindings parity, configurable composer submit keymap",
       "dependencyIds": [],
       "testObligations": [
