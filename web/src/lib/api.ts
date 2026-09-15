@@ -38,6 +38,17 @@ export interface MessageRecord {
   created_at?: unknown
 }
 
+export interface ForkProvenance {
+  parent_session_id: string
+  fork_message_seq: number
+  boundary_message_id: string | null
+}
+
+export interface BranchResult {
+  session: SessionSummary
+  fork: ForkProvenance
+}
+
 class ApiError extends Error {
   readonly status: number
 
@@ -169,6 +180,103 @@ export async function listMessages(id: string, limit = 200, signal?: AbortSignal
   return (payload.messages ?? [])
     .map(normalizeMessage)
     .filter((message): message is MessageRecord => Boolean(message))
+}
+
+export async function branchSessionFromMessage(sessionId: string, messageId: string) {
+  const payload = await request<{ session: unknown; fork?: unknown }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/branch`,
+    { method: 'POST', body: '{}' },
+  )
+  const session = normalizeSession(payload.session)
+  if (!session) throw new Error('Server returned an invalid branch session')
+  if (!payload.fork || typeof payload.fork !== 'object') {
+    throw new Error('Server returned invalid branch provenance')
+  }
+  const fork = payload.fork as Record<string, unknown>
+  if (
+    typeof fork.parent_session_id !== 'string' ||
+    typeof fork.fork_message_seq !== 'number' ||
+    typeof fork.boundary_message_id !== 'string'
+  ) {
+    throw new Error('Server returned invalid branch provenance')
+  }
+  return {
+    session,
+    fork: {
+      parent_session_id: fork.parent_session_id,
+      fork_message_seq: fork.fork_message_seq,
+      boundary_message_id: fork.boundary_message_id,
+    },
+  } satisfies BranchResult
+}
+
+export interface RetryBranchResult extends BranchResult {
+  requestText: string
+  triggerMessageId: string
+}
+
+export async function prepareRetryBranch(sessionId: string, messageId: string) {
+  const payload = await request<{
+    session: unknown
+    fork?: unknown
+    request_text?: unknown
+    trigger_message_id?: unknown
+  }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/retry-branch`,
+    { method: 'POST', body: '{}' },
+  )
+  const session = normalizeSession(payload.session)
+  if (!session) throw new Error('Server returned an invalid retry branch session')
+  if (!payload.fork || typeof payload.fork !== 'object') {
+    throw new Error('Server returned invalid retry branch provenance')
+  }
+  const fork = payload.fork as Record<string, unknown>
+  if (
+    typeof fork.parent_session_id !== 'string' ||
+    typeof fork.fork_message_seq !== 'number' ||
+    (fork.boundary_message_id !== null && typeof fork.boundary_message_id !== 'string') ||
+    typeof payload.request_text !== 'string' ||
+    typeof payload.trigger_message_id !== 'string'
+  ) {
+    throw new Error('Server returned invalid retry branch data')
+  }
+  return {
+    session,
+    fork: {
+      parent_session_id: fork.parent_session_id,
+      fork_message_seq: fork.fork_message_seq,
+      boundary_message_id: fork.boundary_message_id as string | null,
+    },
+    requestText: payload.request_text,
+    triggerMessageId: payload.trigger_message_id,
+  } satisfies RetryBranchResult
+}
+
+export async function getForkProvenance(sessionId: string, signal?: AbortSignal) {
+  try {
+    const payload = await request<{ fork?: unknown }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/fork`,
+      { signal },
+    )
+    if (payload.fork == null) return null
+    if (typeof payload.fork !== 'object') throw new Error('Server returned invalid fork provenance')
+    const fork = payload.fork as Record<string, unknown>
+    if (
+      typeof fork.parent_session_id !== 'string' ||
+      typeof fork.fork_message_seq !== 'number' ||
+      (fork.boundary_message_id !== null && typeof fork.boundary_message_id !== 'string')
+    ) {
+      throw new Error('Server returned invalid fork provenance')
+    }
+    return {
+      parent_session_id: fork.parent_session_id,
+      fork_message_seq: fork.fork_message_seq,
+      boundary_message_id: fork.boundary_message_id,
+    } satisfies ForkProvenance
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) return null
+    throw cause
+  }
 }
 
 export async function appendMessage(id: string, text: string, signal?: AbortSignal) {

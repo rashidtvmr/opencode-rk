@@ -15,8 +15,8 @@ use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
 
 use crate::StorageError;
 
-const MAX_FORK_COPY_MESSAGES: usize = 500;
-const MAX_FORK_DEPTH: usize = 8;
+pub const MAX_FORK_COPY_MESSAGES: usize = 500;
+pub const MAX_FORK_DEPTH: usize = 8;
 
 pub struct ForkV2;
 
@@ -69,11 +69,26 @@ impl ForkV2 {
 
         let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
-        let parent_pk: i64 = transaction
+        let (parent_pk, agent_name, provider_id, model_id, effort_json): (
+            i64,
+            String,
+            Option<String>,
+            Option<String>,
+            Option<String>,
+        ) = transaction
             .query_row(
-                "SELECT pk FROM sessions WHERE id=?1",
+                "SELECT pk, agent_name, provider_id, model_id, effort_json
+                 FROM sessions WHERE id=?1",
                 params![parent_session_id_bytes],
-                |row| row.get(0),
+                |row| {
+                    Ok((
+                        row.get(0)?,
+                        row.get(1)?,
+                        row.get(2)?,
+                        row.get(3)?,
+                        row.get(4)?,
+                    ))
+                },
             )
             .optional()?
             .ok_or_else(invalid_input)?;
@@ -90,12 +105,17 @@ impl ForkV2 {
 
         transaction.execute(
             "INSERT INTO sessions
-             (id, title, state, agent_name, fork_parent_id, fork_message_seq,
-              next_message_seq, next_input_seq, created_at_us, updated_at_us)
-             VALUES (?1, ?2, 0, 'default', ?3, ?4, ?5, 1, ?6, ?6)",
+             (id, title, state, agent_name, provider_id, model_id, effort_json,
+              fork_parent_id, fork_message_seq, next_message_seq, next_input_seq,
+              created_at_us, updated_at_us)
+             VALUES (?1, ?2, 0, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1, ?10, ?10)",
             params![
                 new_session_id.as_uuid().as_bytes().as_slice(),
                 title,
+                agent_name,
+                provider_id,
+                model_id,
+                effort_json,
                 parent_session_id_bytes,
                 through_seq,
                 in_range + 1,

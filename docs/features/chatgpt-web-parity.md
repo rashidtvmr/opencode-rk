@@ -122,8 +122,11 @@ by that daemon; Vite remains development tooling only.
   supported method. Escape/click-away closes it and focus returns to the Fork trigger.
 - Choosing **Branch in new chat** creates a new session whose inherited history ends
   at the selected message **inclusive**. The source session and all later source
-  messages remain untouched. The child stores both the parent session id and selected
-  parent message id as provenance, then the UI navigates to the child session.
+  messages remain untouched. The request is keyed by the selected message ID; the
+  server resolves that ID to an immutable sequence and the durable child stores parent
+  session ID plus `fork_message_seq`. The API may echo/derive the boundary message ID
+  for clients, but durable storage does not invent a separate `fork_message_id`. The UI
+  then navigates to the child session.
 - Forking is valid from either a user or assistant message. A user-message fork ends
   with that request awaiting the user's next action; an assistant-message fork includes
   that answer and lets the user continue after it. System/tool-only internal rows are

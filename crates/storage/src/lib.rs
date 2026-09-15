@@ -214,6 +214,31 @@ impl Storage {
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
     }
+    pub fn message_ordinal(
+        &self,
+        session_id: SessionId,
+        message_id: MessageId,
+    ) -> Result<Option<u64>, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let rowid: Option<i64> = connection
+            .query_row(
+                "SELECT rowid FROM messages WHERE session_id=?1 AND id=?2",
+                params![session_id.to_string(), message_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let Some(rowid) = rowid else {
+            return Ok(None);
+        };
+        let ordinal: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM messages WHERE session_id=?1 AND rowid<=?2",
+            params![session_id.to_string(), rowid],
+            |row| row.get(0),
+        )?;
+        u64::try_from(ordinal)
+            .map(Some)
+            .map_err(|_| StorageError::Sqlite(rusqlite::Error::InvalidQuery))
+    }
     pub fn append_event(
         &self,
         session_id: SessionId,

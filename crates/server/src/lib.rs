@@ -36,13 +36,13 @@ use axum::{
 use futures_util::stream;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    MessageRecord, MessageRole, PayloadRef, SessionId, WIRE_SCHEMA_VERSION,
+    MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
     OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesInput, ResponsesRole,
     ResponsesStreamEvent, MAX_RESPONSES_INPUT_MESSAGES,
 };
-use opencode_rk_sessions::SessionService;
+use opencode_rk_sessions::{SessionError, SessionService};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{convert::Infallible, str::FromStr, sync::Arc};
@@ -66,6 +66,15 @@ pub fn router(state: AppState) -> Router {
             "/api/sessions/{id}/messages",
             get(list_messages).post(append_message),
         )
+        .route(
+            "/api/sessions/{id}/messages/{message_id}/branch",
+            post(branch_session),
+        )
+        .route(
+            "/api/sessions/{id}/messages/{message_id}/retry-branch",
+            post(prepare_retry_branch),
+        )
+        .route("/api/sessions/{id}/fork", get(get_fork_provenance))
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
         .fallback(web_assets::serve)
@@ -228,6 +237,80 @@ async fn append_message(
         .await
         .map_err(ApiFailure::internal)?;
     Ok((StatusCode::CREATED, Json(json!({"message":message}))))
+}
+
+async fn branch_session(
+    State(state): State<AppState>,
+    Path((id, message_id)): Path<(String, String)>,
+) -> Result<(StatusCode, Json<Value>), ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let message_id = parse_message_id(&message_id)?;
+    let (session, fork) = state
+        .sessions
+        .branch_from_message(id, message_id)
+        .await
+        .map_err(branch_failure)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "session": session,
+            "fork": {
+                "parent_session_id": fork.parent_session_id,
+                "fork_message_seq": fork.fork_message_seq,
+                "boundary_message_id": message_id,
+            }
+        })),
+    ))
+}
+
+async fn prepare_retry_branch(
+    State(state): State<AppState>,
+    Path((id, message_id)): Path<(String, String)>,
+) -> Result<(StatusCode, Json<Value>), ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let message_id = parse_message_id(&message_id)?;
+    let (session, fork, request_text) = state
+        .sessions
+        .prepare_retry_branch(id, message_id)
+        .await
+        .map_err(branch_failure)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "session": session,
+            "fork": {
+                "parent_session_id": fork.parent_session_id,
+                "fork_message_seq": fork.fork_message_seq,
+                "boundary_message_id": fork.boundary_message_id,
+            },
+            "request_text": request_text,
+            "trigger_message_id": message_id,
+        })),
+    ))
+}
+
+async fn get_fork_provenance(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    state.sessions.get(id).await.map_err(|error| {
+        if error.to_string().contains("session not found") {
+            ApiFailure::not_found(error.to_string())
+        } else {
+            ApiFailure::internal(error)
+        }
+    })?;
+    let fork = state
+        .sessions
+        .fork_provenance(id)
+        .await
+        .map_err(ApiFailure::internal)?;
+    Ok(Json(json!({"fork": fork.map(|fork| json!({
+        "parent_session_id": fork.parent_session_id,
+        "fork_message_seq": fork.fork_message_seq,
+        "boundary_message_id": fork.boundary_message_id,
+    }))})))
 }
 
 #[derive(Debug, Deserialize)]
@@ -559,6 +642,20 @@ fn provider_failure(error: ResponsesError) -> ApiFailure {
 fn parse_session_id(value: &str) -> Result<SessionId, ApiFailure> {
     SessionId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid session id"))
 }
+fn parse_message_id(value: &str) -> Result<MessageId, ApiFailure> {
+    MessageId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid message id"))
+}
+fn branch_failure(error: SessionError) -> ApiFailure {
+    match error {
+        SessionError::BranchMessageNotFound(_) => ApiFailure::not_found(error.to_string()),
+        SessionError::InvalidBranchBoundary
+        | SessionError::ForkHistoryTooLarge
+        | SessionError::ForkDepthExceeded
+        | SessionError::BranchPayloadUnsupported => ApiFailure::unprocessable(error.to_string()),
+        SessionError::BranchingUnavailable => ApiFailure::service_unavailable(error.to_string()),
+        other => ApiFailure::internal(other),
+    }
+}
 #[derive(Debug)]
 struct ApiFailure {
     status: StatusCode,
@@ -577,6 +674,13 @@ impl ApiFailure {
         Self {
             status: StatusCode::NOT_FOUND,
             code: "not_found",
+            message: message.into(),
+        }
+    }
+    fn unprocessable(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
+            code: "unprocessable_entity",
             message: message.into(),
         }
     }

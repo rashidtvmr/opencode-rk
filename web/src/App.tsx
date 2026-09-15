@@ -10,11 +10,14 @@ import {
   Archive,
   CircleHelp,
   Command,
+  Copy,
   Ellipsis,
+  GitFork,
   Menu,
   MessageSquarePlus,
   PanelLeftClose,
   Pencil,
+  RefreshCw,
   Search,
   Settings,
   Sparkles,
@@ -29,16 +32,21 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import {
   archiveSession,
+  branchSessionFromMessage,
   createSession,
+  getForkProvenance,
   getHealth,
   listMessages,
   listModels,
   listSessions,
   modelKey,
+  prepareRetryBranch,
   renameSession,
   runTurnStream,
+  type ForkProvenance,
   type HealthResponse,
   type MessageRecord,
   type ModelSummary,
@@ -54,6 +62,73 @@ function messageText(message: MessageRecord) {
     : `Attachment · ${message.body.bytes} bytes`
 }
 
+function MessageActions({
+  message,
+  onCopy,
+  onBranch,
+  onEdit,
+  onRetry,
+}: {
+  message: MessageRecord
+  onCopy: (message: MessageRecord) => void
+  onBranch: (message: MessageRecord) => void
+  onEdit: (message: MessageRecord) => void
+  onRetry: (message: MessageRecord) => void
+}) {
+  if (message.role !== 'user' && message.role !== 'assistant') return null
+  const role = message.role
+
+  return (
+    <div className="codex-message-actions" role="group" aria-label={`Actions for ${role} message`}>
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        className="codex-message-action"
+        aria-label={`Copy ${role} message`}
+        onPress={() => onCopy(message)}
+      >
+        <Copy aria-hidden="true" />
+      </Button>
+      {role === 'user' ? (
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          className="codex-message-action"
+          aria-label="Edit user message"
+          onPress={() => onEdit(message)}
+        >
+          <Pencil aria-hidden="true" />
+        </Button>
+      ) : null}
+      <Button
+        size="icon-xs"
+        variant="ghost"
+        className="codex-message-action"
+        aria-label={role === 'user' ? 'Retry user message' : 'Regenerate assistant response'}
+        onPress={() => onRetry(message)}
+      >
+        <RefreshCw aria-hidden="true" />
+      </Button>
+      <DropdownMenuTrigger>
+        <Button
+          size="icon-xs"
+          variant="ghost"
+          className="codex-message-action"
+          aria-label={`Fork ${role} message`}
+        >
+          <GitFork aria-hidden="true" />
+        </Button>
+        <DropdownMenu placement={role === 'user' ? 'bottom end' : 'bottom start'}>
+          <DropdownMenuItem onAction={() => onBranch(message)} aria-label="Branch in new chat">
+            <GitFork aria-hidden="true" />
+            Branch in new chat
+          </DropdownMenuItem>
+        </DropdownMenu>
+      </DropdownMenuTrigger>
+    </div>
+  )
+}
+
 function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [models, setModels] = useState<ModelSummary[]>([])
@@ -62,6 +137,7 @@ function App() {
   const [error, setError] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
   const [selectedModel, setSelectedModel] = useState('')
+  const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<ReasoningEffort>('high')
   const [query, setQuery] = useState('')
   const [sidebarOpen, setSidebarOpen] = useState(() =>
     typeof window.matchMedia === 'function'
@@ -74,6 +150,10 @@ function App() {
   const [messages, setMessages] = useState<MessageRecord[]>([])
   const [messageLoadState, setMessageLoadState] = useState<MessageLoadState>('idle')
   const [messageError, setMessageError] = useState('')
+  const [forkProvenance, setForkProvenance] = useState<ForkProvenance | null>(null)
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
+  const [editingMessageText, setEditingMessageText] = useState('')
+  const [editingMessageBusy, setEditingMessageBusy] = useState(false)
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
@@ -104,20 +184,30 @@ function App() {
   useEffect(() => {
     if (!selectedSessionId) {
       setMessages([])
+      setForkProvenance(null)
       setMessageLoadState('idle')
       setMessageError('')
       return
     }
 
+    if (activeTurnRef.current?.sessionId === selectedSessionId) {
+      return
+    }
+
     const controller = new AbortController()
     setMessages([])
+    setForkProvenance(null)
     setMessageLoadState('loading')
     setMessageError('')
 
-    listMessages(selectedSessionId, 200, controller.signal)
-      .then((result) => {
+    Promise.all([
+      listMessages(selectedSessionId, 200, controller.signal),
+      getForkProvenance(selectedSessionId, controller.signal),
+    ])
+      .then(([result, provenance]) => {
         if (controller.signal.aborted) return
         setMessages(result)
+        setForkProvenance(provenance)
         setMessageLoadState('ready')
       })
       .catch((cause: unknown) => {
@@ -153,6 +243,9 @@ function App() {
   }, [query, sessions])
 
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null
+  const forkParent = forkProvenance
+    ? sessions.find((session) => session.id === forkProvenance.parent_session_id) ?? null
+    : null
 
   const handleCreateSession = async () => {
     const title = newTitle.trim()
@@ -204,19 +297,52 @@ function App() {
     }
   }
 
-  const handleComposerSubmit = async (text: string, reasoningEffort: ReasoningEffort) => {
-    if (!selectedSessionId) return false
+  const handleCopyMessage = (message: MessageRecord) => {
+    const text = messageText(message)
+    if (!navigator.clipboard?.writeText) {
+      setNotice('Copy is unavailable in this browser context.')
+      return
+    }
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => setNotice(`Copied ${message.role} message.`))
+      .catch(() => setNotice('Could not copy this message.'))
+  }
+
+  const handleBranchMessage = async (message: MessageRecord) => {
+    if (!selectedSessionId || message.session_id !== selectedSessionId) return
+    try {
+      const result = await branchSessionFromMessage(selectedSessionId, message.id)
+      setSessions((current) => [
+        result.session,
+        ...current.filter((session) => session.id !== result.session.id),
+      ])
+      setForkProvenance(result.fork)
+      setSelectedSessionId(result.session.id)
+      setNotice(`Branched chat from ${message.role} message.`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'Could not branch this chat')
+    }
+  }
+
+  const executeTurnInSession = async (
+    sessionId: string,
+    text: string,
+    reasoningEffort: ReasoningEffort,
+    initialMessages?: MessageRecord[],
+  ) => {
     if (!selectedModel) {
       setNotice('Choose a model before sending a message.')
       return false
     }
 
-    const sessionId = selectedSessionId
     activeTurnRef.current?.controller.abort()
     const controller = new AbortController()
     activeTurnRef.current = { sessionId, controller }
     setStreamingAssistantText('')
-    const previousIds = new Set(messages.map((message) => message.id))
+    const baselineMessages = initialMessages ?? messages
+    if (initialMessages) setMessages(initialMessages)
+    const previousIds = new Set(baselineMessages.map((message) => message.id))
 
     try {
       const turn = await runTurnStream(
@@ -274,6 +400,63 @@ function App() {
       }
       setNotice(cause instanceof Error ? cause.message : 'Could not execute the turn')
       return persisted
+    }
+  }
+
+  const handleComposerSubmit = async (text: string, reasoningEffort: ReasoningEffort) => {
+    if (!selectedSessionId) return false
+    setSelectedReasoningEffort(reasoningEffort)
+    return executeTurnInSession(selectedSessionId, text, reasoningEffort)
+  }
+
+  const handleRetryMessage = async (message: MessageRecord, editedText?: string) => {
+    if (!selectedSessionId || message.session_id !== selectedSessionId) return false
+    if (!selectedModel) {
+      setNotice('Choose a model before retrying a message.')
+      return false
+    }
+    const editing = editedText != null
+    if (editing && editingMessageBusy) return false
+    if (editing) setEditingMessageBusy(true)
+
+    try {
+      const result = await prepareRetryBranch(selectedSessionId, message.id)
+      const childMessages = await listMessages(result.session.id, 200)
+      const requestText = editedText?.trim() || result.requestText
+
+      setSessions((current) => [
+        result.session,
+        ...current.filter((session) => session.id !== result.session.id),
+      ])
+      setForkProvenance(result.fork)
+      setMessages(childMessages)
+      setMessageLoadState('ready')
+      setMessageError('')
+      setEditingMessageId(null)
+      setEditingMessageText('')
+      setSelectedSessionId(result.session.id)
+
+      const accepted = await executeTurnInSession(
+        result.session.id,
+        requestText,
+        selectedReasoningEffort,
+        childMessages,
+      )
+      if (accepted) {
+        setNotice(
+          editedText == null
+            ? message.role === 'assistant'
+              ? 'Regenerated response in a new branch.'
+              : 'Retried request in a new branch.'
+            : 'Sent edited request in a new branch.',
+        )
+      }
+      return accepted
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'Could not prepare retry branch')
+      return false
+    } finally {
+      if (editing) setEditingMessageBusy(false)
     }
   }
 
@@ -541,6 +724,25 @@ function App() {
               <>
                 <div className="codex-session-heading">
                   <h1 id="conversation-title">{selectedSession.title}</h1>
+                  {forkProvenance ? (
+                    <div className="codex-fork-lineage" aria-label="Branch lineage">
+                      <GitFork aria-hidden="true" />
+                      <span>Branched from</span>
+                      {forkParent ? (
+                        <Button
+                          variant="link"
+                          size="xs"
+                          className="codex-fork-parent"
+                          onPress={() => setSelectedSessionId(forkParent.id)}
+                        >
+                          {forkParent.title}
+                        </Button>
+                      ) : (
+                        <span>parent chat</span>
+                      )}
+                      <span>at message {forkProvenance.fork_message_seq}</span>
+                    </div>
+                  ) : null}
                   {messages.length === 0 && messageLoadState === 'ready' ? (
                     <p>Send a message to begin. Messages are stored locally in the native session database.</p>
                   ) : null}
@@ -567,16 +769,77 @@ function App() {
                     {messages.map((message) => (
                       <li
                         key={message.id}
-                        className={`codex-message codex-message-${message.role}`}
+                        className={`codex-message codex-message-row codex-message-${message.role}`}
                       >
-                        <div className="codex-message-content">
-                          <span className="sr-only">{message.role}: </span>
-                          {messageText(message)}
+                        <div className="codex-message-stack">
+                          {editingMessageId === message.id && message.role === 'user' ? (
+                            <form
+                              className="codex-message-edit"
+                              onSubmit={(event: FormEvent<HTMLFormElement>) => {
+                                event.preventDefault()
+                                void handleRetryMessage(message, editingMessageText)
+                              }}
+                            >
+                              <label className="sr-only" htmlFor={`edit-message-${message.id}`}>
+                                Edit user message
+                              </label>
+                              <Textarea
+                                id={`edit-message-${message.id}`}
+                                aria-label="Edit user message"
+                                value={editingMessageText}
+                                onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                                  setEditingMessageText(event.target.value)
+                                }
+                                rows={4}
+                                autoFocus
+                                disabled={editingMessageBusy}
+                              />
+                              <div className="codex-message-edit-actions">
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  isDisabled={editingMessageBusy}
+                                  onPress={() => {
+                                    setEditingMessageId(null)
+                                    setEditingMessageText('')
+                                  }}
+                                >
+                                  Cancel
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  type="submit"
+                                  isDisabled={editingMessageBusy || !editingMessageText.trim()}
+                                >
+                                  Send edit in new chat
+                                </Button>
+                              </div>
+                            </form>
+                          ) : (
+                            <div className="codex-message-content">
+                              <span className="sr-only">{message.role}: </span>
+                              {messageText(message)}
+                            </div>
+                          )}
+                          <MessageActions
+                            message={message}
+                            onCopy={handleCopyMessage}
+                            onBranch={(candidate) => void handleBranchMessage(candidate)}
+                            onEdit={(candidate) => {
+                              if (candidate.body.storage !== 'inline') {
+                                setNotice('Only text messages can be edited right now.')
+                                return
+                              }
+                              setEditingMessageId(candidate.id)
+                              setEditingMessageText(candidate.body.text)
+                            }}
+                            onRetry={(candidate) => void handleRetryMessage(candidate)}
+                          />
                         </div>
                       </li>
                     ))}
                     {streamingAssistantText ? (
-                      <li className="codex-message codex-message-assistant">
+                      <li className="codex-message codex-message-row codex-message-assistant">
                         <div className="codex-message-content">
                           <span className="sr-only">assistant: </span>
                           {streamingAssistantText}
@@ -605,6 +868,7 @@ function App() {
               models={models}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
+              onReasoningEffortChange={setSelectedReasoningEffort}
               onSubmit={handleComposerSubmit}
             />
             <p className="codex-composer-caption">

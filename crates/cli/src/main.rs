@@ -11,7 +11,7 @@ use opencode_rk_server::{
     },
     router, AppState,
 };
-use opencode_rk_sessions::SessionService;
+use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::Serialize;
@@ -337,6 +337,12 @@ fn open_sessions(data: PathBuf) -> Result<SessionService, Box<dyn std::error::Er
         StoragePaths::under(data),
     )?)))
 }
+fn open_web_sessions(data: &std::path::Path) -> Result<SessionService, Box<dyn std::error::Error>> {
+    let storage = Arc::new(Storage::open(StoragePaths::under(data.to_path_buf()))?);
+    let branch_path = data.join("workspaces/local/web-branches-v2.db");
+    let branch_manager = Arc::new(SessionManager::open_branch_workspace(&branch_path)?);
+    Ok(SessionService::with_branch_manager(storage, branch_manager))
+}
 async fn session_command(
     s: &SessionService,
     c: SessionCommand,
@@ -464,7 +470,7 @@ async fn serve(
         }
         Err(error) => return Err(Box::new(error)),
     };
-    let sessions = open_sessions(data.clone())?;
+    let sessions = open_web_sessions(&data)?;
     let path = args
         .models_file
         .unwrap_or_else(|| catalog_cache_path(&data));

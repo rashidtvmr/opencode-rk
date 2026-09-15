@@ -4,6 +4,7 @@
 pub mod auto_compact;
 pub mod auto_lease;
 pub mod auto_sched;
+pub mod branch_v2;
 pub mod import;
 pub mod index;
 pub mod legacy_view;
@@ -46,12 +47,13 @@ pub mod ui_013;
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
     MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary,
-    Timestamp,
+    Timestamp, MAX_TITLE_BYTES,
 };
 use opencode_rk_storage::{NewMessage, NewSession, Storage, StorageError, V2Writer};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
+pub use branch_v2::ForkProvenance;
 pub type SessionRecord = SessionSummary;
 pub use opencode_rk_contracts::MessageRole as Role;
 const ACTIVE: i64 = 0;
@@ -299,11 +301,22 @@ fn hex(bytes: &[u8]) -> String {
 #[derive(Clone)]
 pub struct SessionService {
     storage: Arc<Storage>,
+    branch_manager: Option<Arc<SessionManager>>,
 }
 impl SessionService {
     #[must_use]
     pub fn new(storage: Arc<Storage>) -> Self {
-        Self { storage }
+        Self {
+            storage,
+            branch_manager: None,
+        }
+    }
+    #[must_use]
+    pub fn with_branch_manager(storage: Arc<Storage>, branch_manager: Arc<SessionManager>) -> Self {
+        Self {
+            storage,
+            branch_manager: Some(branch_manager),
+        }
     }
     pub async fn create(&self, title: impl Into<String>) -> Result<SessionSummary, SessionError> {
         let now = Timestamp::now();
@@ -321,24 +334,43 @@ impl SessionService {
         Ok(session)
     }
     pub async fn get(&self, id: SessionId) -> Result<SessionSummary, SessionError> {
+        if let Some(manager) = self.fork_manager_for(id).await? {
+            let session = run_session_blocking(move || manager.get_session(id)).await?;
+            return session.ok_or(SessionError::NotFound(id));
+        }
         let storage = Arc::clone(&self.storage);
         Ok(run_blocking(move || storage.get_session(id)).await?)
     }
     pub async fn list(&self, all: bool) -> Result<Vec<SessionSummary>, SessionError> {
         let storage = Arc::clone(&self.storage);
-        Ok(run_blocking(move || storage.list_sessions(all)).await?)
+        let mut sessions = run_blocking(move || storage.list_sessions(all)).await?;
+        if let Some(manager) = &self.branch_manager {
+            let manager = Arc::clone(manager);
+            let mut forks =
+                run_session_blocking(move || manager.list_fork_sessions(all, 500)).await?;
+            sessions.append(&mut forks);
+            sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+        }
+        Ok(sessions)
     }
     pub async fn rename(
         &self,
         id: SessionId,
         title: impl Into<String>,
     ) -> Result<(), SessionError> {
+        if let Some(manager) = self.fork_manager_for(id).await? {
+            let title = title.into();
+            return run_session_blocking(move || manager.rename_session(id, &title)).await;
+        }
         let storage = Arc::clone(&self.storage);
         let title = title.into();
         run_blocking(move || storage.rename_session(id, &title, Timestamp::now())).await?;
         Ok(())
     }
     pub async fn archive(&self, id: SessionId) -> Result<(), SessionError> {
+        if let Some(manager) = self.fork_manager_for(id).await? {
+            return run_session_blocking(move || manager.archive_session(id)).await;
+        }
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.archive_session(id, Timestamp::now())).await?;
         Ok(())
@@ -349,8 +381,13 @@ impl SessionService {
         role: MessageRole,
         text: impl Into<String>,
     ) -> Result<MessageRecord, SessionError> {
+        let text = text.into();
+        if let Some(manager) = self.fork_manager_for(session_id).await? {
+            return run_session_blocking(move || manager.append_fork_text(session_id, role, text))
+                .await;
+        }
         let body =
-            PayloadRef::inline(text.into()).map_err(|e| SessionError::Contract(e.to_string()))?;
+            PayloadRef::inline(text).map_err(|e| SessionError::Contract(e.to_string()))?;
         let message = MessageRecord {
             id: MessageId::new(),
             session_id,
@@ -369,6 +406,9 @@ impl SessionService {
         role: MessageRole,
         bytes: Vec<u8>,
     ) -> Result<MessageRecord, SessionError> {
+        if self.fork_manager_for(session_id).await?.is_some() {
+            return Err(SessionError::BranchPayloadUnsupported);
+        }
         let storage = Arc::clone(&self.storage);
         let (hash, byte_len) = run_blocking(move || {
             storage
@@ -394,9 +434,168 @@ impl SessionService {
         session_id: SessionId,
         limit: usize,
     ) -> Result<Vec<MessageRecord>, SessionError> {
+        if let Some(manager) = self.fork_manager_for(session_id).await? {
+            return run_session_blocking(move || manager.list_messages_paged(session_id, limit))
+                .await;
+        }
         let storage = Arc::clone(&self.storage);
         Ok(run_blocking(move || storage.list_messages(session_id, limit)).await?)
     }
+    pub async fn branch_from_message(
+        &self,
+        parent_session_id: SessionId,
+        through_message_id: MessageId,
+    ) -> Result<(SessionSummary, ForkProvenance), SessionError> {
+        let manager = self
+            .branch_manager
+            .as_ref()
+            .cloned()
+            .ok_or(SessionError::BranchingUnavailable)?;
+        let parent = self.get(parent_session_id).await?;
+        let is_v2_parent = {
+            let manager = Arc::clone(&manager);
+            run_session_blocking(move || manager.is_fork_session(parent_session_id)).await?
+        };
+        if !is_v2_parent {
+            let storage = Arc::clone(&self.storage);
+            let ordinal = run_blocking(move || {
+                storage.message_ordinal(parent_session_id, through_message_id)
+            })
+            .await?
+            .ok_or(SessionError::BranchMessageNotFound(through_message_id))?;
+            if ordinal > opencode_rk_storage::fork_v2::MAX_FORK_COPY_MESSAGES as u64 {
+                return Err(SessionError::ForkHistoryTooLarge);
+            }
+            let storage = Arc::clone(&self.storage);
+            let prefix = run_blocking(move || {
+                storage.list_messages(parent_session_id, ordinal as usize)
+            })
+            .await?;
+            let manager_for_sync = Arc::clone(&manager);
+            let parent_for_sync = parent.clone();
+            run_session_blocking(move || {
+                manager_for_sync.synchronize_legacy_shadow(&parent_for_sync, &prefix)
+            })
+            .await?;
+        }
+        let title = branch_title(&parent.title);
+        run_session_blocking(move || {
+            manager.fork_from_message(parent_session_id, through_message_id, &title)
+        })
+        .await
+    }
+    pub async fn prepare_retry_branch(
+        &self,
+        parent_session_id: SessionId,
+        target_message_id: MessageId,
+    ) -> Result<(SessionSummary, ForkProvenance, String), SessionError> {
+        let manager = self
+            .branch_manager
+            .as_ref()
+            .cloned()
+            .ok_or(SessionError::BranchingUnavailable)?;
+        let parent = self.get(parent_session_id).await?;
+        let is_v2_parent = {
+            let manager = Arc::clone(&manager);
+            run_session_blocking(move || manager.is_fork_session(parent_session_id)).await?
+        };
+        let (request_message_id, request_text) = if is_v2_parent {
+            let manager_for_request = Arc::clone(&manager);
+            run_session_blocking(move || {
+                manager_for_request.retry_request(parent_session_id, target_message_id)
+            })
+            .await?
+        } else {
+            let storage = Arc::clone(&self.storage);
+            let ordinal = run_blocking(move || storage.message_ordinal(parent_session_id, target_message_id))
+                .await?
+                .ok_or(SessionError::BranchMessageNotFound(target_message_id))?;
+            if ordinal > opencode_rk_storage::fork_v2::MAX_FORK_COPY_MESSAGES as u64 {
+                return Err(SessionError::ForkHistoryTooLarge);
+            }
+            let storage = Arc::clone(&self.storage);
+            let prefix = run_blocking(move || storage.list_messages(parent_session_id, ordinal as usize)).await?;
+            let target = prefix.last().ok_or(SessionError::InvalidBranchBoundary)?;
+            if target.id != target_message_id {
+                return Err(SessionError::BranchMessageNotFound(target_message_id));
+            }
+            let request = if target.role == MessageRole::User {
+                target
+            } else if target.role == MessageRole::Assistant {
+                prefix
+                    .iter()
+                    .rev()
+                    .skip(1)
+                    .find(|message| message.role == MessageRole::User)
+                    .ok_or(SessionError::InvalidBranchBoundary)?
+            } else {
+                return Err(SessionError::InvalidBranchBoundary);
+            };
+            let PayloadRef::Inline { text } = &request.body else {
+                return Err(SessionError::BranchPayloadUnsupported);
+            };
+            let request_message_id = request.id;
+            let request_text = text.clone();
+            let request_ordinal = prefix
+                .iter()
+                .position(|message| message.id == request_message_id)
+                .ok_or(SessionError::InvalidBranchBoundary)?
+                + 1;
+            let shadow_prefix = prefix[..request_ordinal].to_vec();
+            let manager_for_sync = Arc::clone(&manager);
+            let parent_for_sync = parent.clone();
+            run_session_blocking(move || {
+                manager_for_sync.synchronize_legacy_shadow(&parent_for_sync, &shadow_prefix)
+            })
+            .await?;
+            (request_message_id, request_text)
+        };
+        let title = branch_title(&parent.title);
+        let manager_for_fork = Arc::clone(&manager);
+        let (child, provenance) = run_session_blocking(move || {
+            manager_for_fork.fork_before_user_message(parent_session_id, request_message_id, &title)
+        })
+        .await?;
+        Ok((child, provenance, request_text))
+    }
+
+    pub async fn fork_provenance(
+        &self,
+        child_session_id: SessionId,
+    ) -> Result<Option<ForkProvenance>, SessionError> {
+        let Some(manager) = &self.branch_manager else {
+            return Ok(None);
+        };
+        let manager = Arc::clone(manager);
+        run_session_blocking(move || manager.fork_provenance(child_session_id)).await
+    }
+    async fn fork_manager_for(
+        &self,
+        session_id: SessionId,
+    ) -> Result<Option<Arc<SessionManager>>, SessionError> {
+        let Some(manager) = &self.branch_manager else {
+            return Ok(None);
+        };
+        let manager = Arc::clone(manager);
+        let check = Arc::clone(&manager);
+        if run_session_blocking(move || check.is_fork_session(session_id)).await? {
+            Ok(Some(manager))
+        } else {
+            Ok(None)
+        }
+    }
+}
+fn branch_title(source: &str) -> String {
+    const PREFIX: &str = "Branch: ";
+    let mut title = String::with_capacity((PREFIX.len() + source.len()).min(MAX_TITLE_BYTES));
+    title.push_str(PREFIX);
+    for ch in source.chars() {
+        if title.len() + ch.len_utf8() > MAX_TITLE_BYTES {
+            break;
+        }
+        title.push(ch);
+    }
+    title
 }
 async fn run_blocking<T, F>(operation: F) -> Result<T, SessionError>
 where
@@ -408,6 +607,15 @@ where
         .map_err(|e| SessionError::BlockingTask(e.to_string()))?
         .map_err(SessionError::Storage)
 }
+async fn run_session_blocking<T, F>(operation: F) -> Result<T, SessionError>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, SessionError> + Send + 'static,
+{
+    tokio::task::spawn_blocking(operation)
+        .await
+        .map_err(|e| SessionError::BlockingTask(e.to_string()))?
+}
 #[derive(Debug, Error)]
 pub enum SessionError {
     #[error(transparent)]
@@ -418,6 +626,18 @@ pub enum SessionError {
     BlockingTask(String),
     #[error("contract violation: {0}")]
     Contract(String),
+    #[error("branching is unavailable because the format-2 branch workspace is not configured")]
+    BranchingUnavailable,
+    #[error("branch boundary message not found: {0}")]
+    BranchMessageNotFound(MessageId),
+    #[error("message role cannot be used as a visible branch boundary")]
+    InvalidBranchBoundary,
+    #[error("fork history exceeds the format-2 copy bound")]
+    ForkHistoryTooLarge,
+    #[error("fork depth exceeds the format-2 branch bound")]
+    ForkDepthExceeded,
+    #[error("branching blob-backed history is unavailable until the format-2 blob adapter is active")]
+    BranchPayloadUnsupported,
     #[error("storage mutex poisoned")]
     Poisoned,
 }

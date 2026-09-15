@@ -39,6 +39,7 @@ interface ComposerProps {
   models: ModelSummary[]
   selectedModel: string
   onModelChange: (model: string) => void
+  onReasoningEffortChange?: (effort: ReasoningEffort) => void
   onSubmit?: (
     value: string,
     reasoningEffort: ReasoningEffort,
@@ -50,6 +51,7 @@ export function Composer({
   models,
   selectedModel,
   onModelChange,
+  onReasoningEffortChange,
   onSubmit,
 }: ComposerProps) {
   const [value, setValue] = useState('')
@@ -166,7 +168,10 @@ export function Composer({
                 <DropdownMenuItem
                   key={level.value}
                   id={level.value}
-                  onAction={() => setEffort(level.value)}
+                  onAction={() => {
+                    setEffort(level.value)
+                    onReasoningEffortChange?.(level.value)
+                  }}
                 >
                   {level.label}
                 </DropdownMenuItem>

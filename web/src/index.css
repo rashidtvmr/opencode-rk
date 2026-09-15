@@ -482,7 +482,7 @@
 }
 
 .codex-conversation-inner {
-  width: min(100% - 2rem, 768px);
+  width: min(100% - 2rem, 960px);
   min-height: 100%;
   margin: 0 auto;
   padding: 3.2rem 0 12rem;
@@ -530,6 +530,19 @@
   width: 100%;
 }
 
+.codex-message-stack {
+  min-width: 0;
+  max-width: min(100%, 42rem);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.codex-message-user .codex-message-stack {
+  max-width: min(78%, 34rem);
+  align-items: flex-end;
+}
+
 .codex-message-content {
   max-width: min(100%, 42rem);
   white-space: pre-wrap;
@@ -550,6 +563,52 @@
   padding: 0.62rem 0.9rem;
 }
 
+.codex-message-user .codex-message-stack .codex-message-content {
+  max-width: 100%;
+}
+
+.codex-message-actions {
+  min-height: 1.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.08rem;
+  margin-top: 0.3rem;
+  color: var(--muted-foreground);
+}
+
+.codex-message-action[data-slot="button"] {
+  width: 1.8rem;
+  height: 1.8rem;
+  border-radius: 0.5rem;
+  color: var(--muted-foreground);
+}
+
+.codex-message-action[data-slot="button"]:hover,
+.codex-message-action[data-slot="button"]:focus-visible,
+.codex-message-action[data-slot="button"][aria-expanded="true"] {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.codex-message-edit {
+  width: min(100%, 34rem);
+  display: grid;
+  gap: 0.55rem;
+}
+
+.codex-message-edit [data-slot="textarea"] {
+  min-height: 6rem;
+  border-color: #555555;
+  border-radius: 0.9rem;
+  background: #303030;
+}
+
+.codex-message-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.4rem;
+}
+
 .codex-message-assistant,
 .codex-message-system,
 .codex-message-tool {
@@ -560,6 +619,28 @@
 .codex-message-tool .codex-message-content {
   color: #b6b6b6;
   font-size: 0.8rem;
+}
+
+.codex-fork-lineage {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+  margin-top: 0.55rem;
+  color: var(--muted-foreground);
+  font-size: 0.74rem;
+}
+
+.codex-fork-lineage > svg {
+  width: 0.8rem;
+  height: 0.8rem;
+}
+
+.codex-fork-parent[data-slot="button"] {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  font-size: inherit;
 }
 
 .codex-empty-state {
