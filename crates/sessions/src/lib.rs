@@ -46,9 +46,9 @@ pub mod ui_013;
 
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
-    AssistantActivity, AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole,
-    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp, MAX_REASONING_SUMMARY_BYTES,
-    MAX_TITLE_BYTES,
+    ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity, AttachmentId,
+    DraftAttachment, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState,
+    SessionSummary, Timestamp, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES,
 };
 use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, StorageError, V2Writer};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -188,6 +188,29 @@ impl SessionManager {
         )?;
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(SessionError::from)
+    }
+    pub fn get_message_record(
+        &self,
+        session: SessionId,
+        message_id: MessageId,
+    ) -> Result<MessageRecord, SessionError> {
+        let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
+        conn.query_row(
+            "SELECT m.id, m.seq, m.role, m.created_at_us, p.inline_data, p.blob_pk, p.raw_bytes, b.hash
+             FROM messages m
+             JOIN sessions s ON s.pk=m.session_pk
+             JOIN message_parts mp ON mp.message_pk=m.pk AND mp.ordinal=0
+             JOIN payloads p ON p.pk=mp.payload_pk
+             LEFT JOIN blobs b ON b.pk=p.blob_pk
+             WHERE s.id=?1 AND m.id=?2",
+            params![
+                session.as_uuid().as_bytes().as_slice(),
+                message_id.as_uuid().as_bytes().as_slice(),
+            ],
+            |row| decode_message_row(session, row),
+        )
+        .optional()?
+        .ok_or(SessionError::ArtifactSourceInvalid(message_id))
     }
     pub fn session_message_count(&self, session: SessionId) -> Result<u64, SessionError> {
         let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
@@ -607,6 +630,89 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         Ok(run_blocking(move || storage.list_assistant_activity(session_id, limit)).await?)
     }
+    pub async fn create_artifact(
+        &self,
+        session_id: SessionId,
+        source_message_id: MessageId,
+        kind: ArtifactKind,
+        title: String,
+        language: Option<String>,
+        content: String,
+    ) -> Result<ArtifactDocument, SessionError> {
+        let source = if let Some(manager) = self.fork_manager_for(session_id).await? {
+            run_session_blocking(move || manager.get_message_record(session_id, source_message_id))
+                .await?
+        } else {
+            let storage = Arc::clone(&self.storage);
+            match run_blocking(move || storage.get_message(session_id, source_message_id)).await {
+                Ok(message) => message,
+                Err(SessionError::Storage(StorageError::MessageNotFound(_))) => {
+                    return Err(SessionError::ArtifactSourceInvalid(source_message_id));
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        if source.role != MessageRole::Assistant {
+            return Err(SessionError::ArtifactSourceInvalid(source_message_id));
+        }
+        let storage = Arc::clone(&self.storage);
+        map_artifact_storage_result(
+            run_blocking(move || {
+                storage.create_artifact(
+                    session_id,
+                    source_message_id,
+                    kind,
+                    &title,
+                    language.as_deref(),
+                    &content,
+                    Timestamp::now(),
+                )
+            })
+            .await,
+        )
+    }
+    pub async fn artifacts(
+        &self,
+        session_id: SessionId,
+        limit: usize,
+    ) -> Result<Vec<ArtifactSummary>, SessionError> {
+        self.get(session_id).await?;
+        let storage = Arc::clone(&self.storage);
+        map_artifact_storage_result(
+            run_blocking(move || storage.list_artifacts(session_id, limit)).await,
+        )
+    }
+    pub async fn artifact(
+        &self,
+        session_id: SessionId,
+        artifact_id: ArtifactId,
+    ) -> Result<ArtifactDocument, SessionError> {
+        self.get(session_id).await?;
+        let storage = Arc::clone(&self.storage);
+        map_artifact_storage_result(
+            run_blocking(move || storage.get_artifact(session_id, artifact_id)).await,
+        )
+    }
+    pub async fn append_artifact_version(
+        &self,
+        session_id: SessionId,
+        artifact_id: ArtifactId,
+        content: String,
+    ) -> Result<ArtifactDocument, SessionError> {
+        self.get(session_id).await?;
+        let storage = Arc::clone(&self.storage);
+        map_artifact_storage_result(
+            run_blocking(move || {
+                storage.append_artifact_version(
+                    session_id,
+                    artifact_id,
+                    &content,
+                    Timestamp::now(),
+                )
+            })
+            .await,
+        )
+    }
     pub async fn branch_from_message(
         &self,
         parent_session_id: SessionId,
@@ -786,6 +892,23 @@ where
         .await
         .map_err(|e| SessionError::BlockingTask(e.to_string()))?
 }
+fn map_artifact_storage_result<T>(result: Result<T, SessionError>) -> Result<T, SessionError> {
+    match result {
+        Err(SessionError::Storage(StorageError::ArtifactNotFound(id))) => {
+            Err(SessionError::ArtifactNotFound(id))
+        }
+        Err(SessionError::Storage(StorageError::ArtifactContentTooLarge)) => {
+            Err(SessionError::ArtifactContentTooLarge)
+        }
+        Err(SessionError::Storage(StorageError::ArtifactLimitExceeded)) => {
+            Err(SessionError::ArtifactLimitExceeded)
+        }
+        Err(SessionError::Storage(StorageError::InvalidArtifact)) => {
+            Err(SessionError::InvalidArtifact)
+        }
+        other => other,
+    }
+}
 #[derive(Debug, Error)]
 pub enum SessionError {
     #[error(transparent)]
@@ -818,6 +941,16 @@ pub enum SessionError {
     DraftAttachmentNotFound(AttachmentId),
     #[error("history cursor message not found: {0}")]
     HistoryCursorNotFound(MessageId),
+    #[error("artifact source must be an assistant message in the selected session: {0}")]
+    ArtifactSourceInvalid(MessageId),
+    #[error("artifact not found: {0}")]
+    ArtifactNotFound(ArtifactId),
+    #[error("artifact content exceeds the supported size bound")]
+    ArtifactContentTooLarge,
+    #[error("artifact count, version history, or retained bytes exceeded the supported bound")]
+    ArtifactLimitExceeded,
+    #[error("artifact metadata is invalid")]
+    InvalidArtifact,
     #[error("storage mutex poisoned")]
     Poisoned,
 }

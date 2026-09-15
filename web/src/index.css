@@ -760,6 +760,121 @@
   font-size: inherit;
 }
 
+.codex-artifact-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.75rem;
+  color: #8f8f8f;
+  font-size: 0.72rem;
+}
+
+.codex-artifact-strip [data-slot="button"] {
+  max-width: 18rem;
+  color: #c7c7c7;
+}
+
+.codex-artifact-strip [data-slot="button"] svg {
+  width: 0.85rem;
+  height: 0.85rem;
+}
+
+.codex-artifact-panel {
+  position: fixed;
+  z-index: 35;
+  top: 4rem;
+  right: 1rem;
+  bottom: 7rem;
+  width: min(34rem, calc(100vw - 2rem));
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  border: 1px solid #494949;
+  border-radius: 0.9rem;
+  background: #242424;
+  padding: 0.9rem;
+  box-shadow: 0 18px 55px rgb(0 0 0 / 38%);
+}
+
+.codex-artifact-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.codex-artifact-panel-header h2 {
+  margin: 0.15rem 0 0;
+  color: #f0f0f0;
+  font-size: 1rem;
+  font-weight: 600;
+}
+
+.codex-artifact-panel-header p,
+.codex-artifact-execution p {
+  margin: 0.25rem 0 0;
+  color: #8f8f8f;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.codex-artifact-kicker {
+  color: #a8a8a8;
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.codex-artifact-toolbar,
+.codex-artifact-execution {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.codex-artifact-textarea[data-slot="textarea"] {
+  min-height: 0;
+  flex: 1;
+  resize: none;
+  border-color: #4a4a4a;
+  background: #1d1d1d;
+  color: #eeeeee;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.83rem;
+  line-height: 1.55;
+}
+
+.codex-artifact-preview {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  margin: 0;
+  border: 1px solid #444444;
+  border-radius: 0.65rem;
+  background: #1d1d1d;
+  padding: 0.8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #e5e5e5;
+  font-size: 0.84rem;
+  line-height: 1.6;
+}
+
+.codex-artifact-code-preview {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+
+.codex-artifact-execution {
+  border-top: 1px solid #3a3a3a;
+  padding-top: 0.7rem;
+}
+
+.codex-artifact-execution p {
+  flex-basis: 100%;
+}
+
 .codex-empty-state {
   min-height: calc(100dvh - 17rem);
   display: flex;
@@ -1105,6 +1220,12 @@
 
   .codex-composer-caption {
     font-size: 0.62rem;
+  }
+
+  .codex-artifact-panel {
+    inset: 3.6rem 0.5rem 0.5rem;
+    width: auto;
+    border-radius: 0.8rem;
   }
 }
 

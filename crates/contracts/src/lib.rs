@@ -22,6 +22,12 @@ pub const MAX_ATTACHMENT_MIME_BYTES: usize = 255;
 /// Provider-visible reasoning summaries are transcript metadata, not hidden chain of thought.
 /// Keep them small enough to fit one format-2 inline message part.
 pub const MAX_REASONING_SUMMARY_BYTES: usize = 8 * 1024;
+pub const MAX_ARTIFACT_CONTENT_BYTES: usize = 64 * 1024;
+pub const MAX_ARTIFACT_TITLE_BYTES: usize = 256;
+pub const MAX_ARTIFACT_LANGUAGE_BYTES: usize = 64;
+pub const MAX_ARTIFACTS_PER_SESSION: usize = 32;
+pub const MAX_ARTIFACT_VERSIONS: usize = 16;
+pub const MAX_ARTIFACT_TOTAL_BYTES: usize = 1024 * 1024;
 
 macro_rules! uuid_id {
     ($name:ident) => {
@@ -70,6 +76,7 @@ uuid_id!(AgentId);
 uuid_id!(ToolCallId);
 uuid_id!(ApprovalId);
 uuid_id!(AttachmentId);
+uuid_id!(ArtifactId);
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -221,6 +228,41 @@ pub struct DraftAttachment {
 pub struct AssistantActivity {
     pub message_id: MessageId,
     pub reasoning_summary: String,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ArtifactKind {
+    Writing,
+    Code,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactSummary {
+    pub id: ArtifactId,
+    pub session_id: SessionId,
+    pub source_message_id: MessageId,
+    pub kind: ArtifactKind,
+    pub title: String,
+    pub language: Option<String>,
+    pub current_version: u16,
+    pub created_at: Timestamp,
+    pub updated_at: Timestamp,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactVersion {
+    pub version: u16,
+    pub bytes: u64,
+    pub created_at: Timestamp,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct ArtifactDocument {
+    #[serde(flatten)]
+    pub summary: ArtifactSummary,
+    pub content: String,
+    pub versions: Vec<ArtifactVersion>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

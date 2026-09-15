@@ -12,6 +12,7 @@ import {
   Command,
   Copy,
   Ellipsis,
+  FileText,
   GitFork,
   Menu,
   MessageSquarePlus,
@@ -36,12 +37,15 @@ import { Textarea } from '@/components/ui/textarea'
 import {
   archiveSession,
   branchSessionFromMessage,
+  createArtifact,
   createSession,
   deleteDraftAttachment,
   getForkProvenance,
+  getArtifact,
   getHealth,
   getWebCapabilities,
   listAssistantActivity,
+  listArtifacts,
   listDraftAttachments,
   listHistoryPage,
   listMessages,
@@ -52,7 +56,11 @@ import {
   prepareRetryBranch,
   renameSession,
   runTurnStream,
+  saveArtifactVersion,
   uploadDraftAttachment,
+  type ArtifactCatalogState,
+  type ArtifactDocument,
+  type ArtifactKind,
   type AssistantActivity,
   type DraftAttachmentState,
   type ForkProvenance,
@@ -77,18 +85,23 @@ function messageText(message: MessageRecord) {
     : `Attachment · ${message.body.bytes} bytes`
 }
 
+const MAX_ARTIFACT_DRAFT_BYTES = 64 * 1024
+const MAX_ARTIFACT_EDITOR_HISTORY = 32
+
 function MessageActions({
   message,
   onCopy,
   onBranch,
   onEdit,
   onRetry,
+  onArtifact,
 }: {
   message: MessageRecord
   onCopy: (message: MessageRecord) => void
   onBranch: (message: MessageRecord) => void
   onEdit: (message: MessageRecord) => void
   onRetry: (message: MessageRecord) => void
+  onArtifact: (message: MessageRecord, kind: ArtifactKind) => void
 }) {
   if (message.role !== 'user' && message.role !== 'assistant') return null
   const role = message.role
@@ -124,6 +137,27 @@ function MessageActions({
       >
         <RefreshCw aria-hidden="true" />
       </Button>
+      {role === 'assistant' && message.body.storage === 'inline' ? (
+        <DropdownMenuTrigger>
+          <Button
+            size="icon-xs"
+            variant="ghost"
+            className="codex-message-action"
+            aria-label="Open assistant response as artifact"
+            data-artifact-source={message.id}
+          >
+            <FileText aria-hidden="true" />
+          </Button>
+          <DropdownMenu placement="bottom start">
+            <DropdownMenuItem onAction={() => onArtifact(message, 'writing')}>
+              Open as writing artifact
+            </DropdownMenuItem>
+            <DropdownMenuItem onAction={() => onArtifact(message, 'code')}>
+              Open as code artifact
+            </DropdownMenuItem>
+          </DropdownMenu>
+        </DropdownMenuTrigger>
+      ) : null}
       <DropdownMenuTrigger>
         <Button
           size="icon-xs"
@@ -181,6 +215,20 @@ function App() {
     attachments: [],
     available: true,
   })
+  const [artifactCatalog, setArtifactCatalog] = useState<ArtifactCatalogState>({
+    available: false,
+    artifacts: [],
+    runAvailable: false,
+    applyAvailable: false,
+    reason: 'Artifacts not loaded yet.',
+  })
+  const [activeArtifact, setActiveArtifact] = useState<ArtifactDocument | null>(null)
+  const [artifactDraft, setArtifactDraft] = useState('')
+  const [artifactPreview, setArtifactPreview] = useState(false)
+  const [artifactBusy, setArtifactBusy] = useState(false)
+  const [artifactUndo, setArtifactUndo] = useState<string[]>([])
+  const [artifactRedo, setArtifactRedo] = useState<string[]>([])
+  const artifactReturnFocusRef = useRef<{ kind: 'source' | 'artifact'; id: string } | null>(null)
   const [forkProvenance, setForkProvenance] = useState<ForkProvenance | null>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editingMessageText, setEditingMessageText] = useState('')
@@ -227,6 +275,17 @@ function App() {
       setHistoryBefore(null)
       setAssistantActivity({})
       setAttachmentState({ attachments: [], available: true })
+      setArtifactCatalog({
+        available: false,
+        artifacts: [],
+        runAvailable: false,
+        applyAvailable: false,
+        reason: 'Artifacts not loaded yet.',
+      })
+      setActiveArtifact(null)
+      setArtifactDraft('')
+      setArtifactUndo([])
+      setArtifactRedo([])
       setForkProvenance(null)
       setMessageLoadState('idle')
       setMessageError('')
@@ -242,6 +301,17 @@ function App() {
     setHistoryBefore(null)
     setAssistantActivity({})
     setAttachmentState({ attachments: [], available: true })
+    setArtifactCatalog({
+      available: false,
+      artifacts: [],
+      runAvailable: false,
+      applyAvailable: false,
+      reason: 'Artifacts loading.',
+    })
+    setActiveArtifact(null)
+    setArtifactDraft('')
+    setArtifactUndo([])
+    setArtifactRedo([])
     setForkProvenance(null)
     setMessageLoadState('loading')
     setMessageError('')
@@ -250,9 +320,10 @@ function App() {
       listHistoryPage(selectedSessionId, 50, null, controller.signal),
       listAssistantActivity(selectedSessionId, 200, controller.signal),
       listDraftAttachments(selectedSessionId, controller.signal),
+      listArtifacts(selectedSessionId, controller.signal),
       getForkProvenance(selectedSessionId, controller.signal),
     ])
-      .then(([history, activity, attachments, provenance]) => {
+      .then(([history, activity, attachments, artifacts, provenance]) => {
         if (controller.signal.aborted) return
         setMessages(history.messages)
         setHistoryBefore(history.nextBefore)
@@ -263,6 +334,7 @@ function App() {
           >,
         )
         setAttachmentState(attachments)
+        setArtifactCatalog(artifacts)
         setForkProvenance(provenance)
         setMessageLoadState('ready')
       })
@@ -293,6 +365,12 @@ function App() {
     },
     [],
   )
+
+  useEffect(() => {
+    if (!activeArtifact || artifactPreview) return
+    const editor = document.getElementById(`artifact-editor-${activeArtifact.id}`)
+    if (editor instanceof HTMLTextAreaElement) editor.focus()
+  }, [activeArtifact?.id, artifactPreview])
 
   const filteredSessions = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -555,6 +633,182 @@ function App() {
     }
   }
 
+  const setOpenArtifact = (artifact: ArtifactDocument) => {
+    setActiveArtifact(artifact)
+    setArtifactDraft(artifact.content)
+    setArtifactPreview(false)
+    setArtifactUndo([])
+    setArtifactRedo([])
+    setArtifactCatalog((current) => ({
+      ...current,
+      available: true,
+      artifacts: [
+        {
+          id: artifact.id,
+          session_id: artifact.session_id,
+          source_message_id: artifact.source_message_id,
+          kind: artifact.kind,
+          title: artifact.title,
+          language: artifact.language,
+          current_version: artifact.current_version,
+          created_at: artifact.created_at,
+          updated_at: artifact.updated_at,
+        },
+        ...current.artifacts.filter((candidate) => candidate.id !== artifact.id),
+      ],
+    }))
+  }
+
+  const handleOpenArtifact = async (message: MessageRecord, kind: ArtifactKind) => {
+    if (!selectedSessionId || message.session_id !== selectedSessionId) return
+    if (message.role !== 'assistant' || message.body.storage !== 'inline') {
+      setNotice('Only text assistant messages can become editable artifacts.')
+      return
+    }
+    if (!artifactCatalog.available) {
+      setNotice(artifactCatalog.reason ?? 'Editable artifacts are unavailable on this native server.')
+      return
+    }
+    artifactReturnFocusRef.current = { kind: 'source', id: message.id }
+    setArtifactBusy(true)
+    try {
+      const existing = artifactCatalog.artifacts.find(
+        (artifact) => artifact.source_message_id === message.id && artifact.kind === kind,
+      )
+      const artifact = existing
+        ? await getArtifact(selectedSessionId, existing.id)
+        : await createArtifact(selectedSessionId, message.id, {
+            kind,
+            title: kind === 'code' ? 'Assistant code' : 'Assistant draft',
+            language: kind === 'code' ? 'text' : null,
+            content: message.body.text,
+          })
+      setOpenArtifact(artifact)
+      setNotice(existing ? `Opened ${artifact.title}.` : `Created ${artifact.title}.`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'Could not open this artifact')
+    } finally {
+      setArtifactBusy(false)
+    }
+  }
+
+  const handleOpenSavedArtifact = async (artifactId: string) => {
+    if (!selectedSessionId || artifactBusy) return
+    artifactReturnFocusRef.current = { kind: 'artifact', id: artifactId }
+    setArtifactBusy(true)
+    try {
+      setOpenArtifact(await getArtifact(selectedSessionId, artifactId))
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'Could not load this artifact')
+    } finally {
+      setArtifactBusy(false)
+    }
+  }
+
+  const handleArtifactDraftChange = (next: string) => {
+    if (new TextEncoder().encode(next).byteLength > MAX_ARTIFACT_DRAFT_BYTES) {
+      setNotice('Artifact drafts are limited to 64 KiB per version.')
+      return
+    }
+    if (next === artifactDraft) return
+    setArtifactUndo((history) => [...history, artifactDraft].slice(-MAX_ARTIFACT_EDITOR_HISTORY))
+    setArtifactRedo([])
+    setArtifactDraft(next)
+  }
+
+  const handleArtifactUndo = () => {
+    const previous = artifactUndo[artifactUndo.length - 1]
+    if (previous == null) return
+    const editor = activeArtifact
+      ? document.getElementById(`artifact-editor-${activeArtifact.id}`)
+      : null
+    const selectionStart = editor instanceof HTMLTextAreaElement ? editor.selectionStart : previous.length
+    const selectionEnd = editor instanceof HTMLTextAreaElement ? editor.selectionEnd : previous.length
+    setArtifactUndo((history) => history.slice(0, -1))
+    setArtifactRedo((history) => [...history, artifactDraft].slice(-MAX_ARTIFACT_EDITOR_HISTORY))
+    setArtifactDraft(previous)
+    if (activeArtifact) {
+      const artifactId = activeArtifact.id
+      setTimeout(() => {
+        const nextEditor = document.getElementById(`artifact-editor-${artifactId}`)
+        if (!(nextEditor instanceof HTMLTextAreaElement)) return
+        const start = Math.min(selectionStart, nextEditor.value.length)
+        const end = Math.min(selectionEnd, nextEditor.value.length)
+        nextEditor.focus()
+        nextEditor.setSelectionRange(start, end)
+      }, 0)
+    }
+  }
+
+  const handleArtifactRedo = () => {
+    const next = artifactRedo[artifactRedo.length - 1]
+    if (next == null) return
+    const editor = activeArtifact
+      ? document.getElementById(`artifact-editor-${activeArtifact.id}`)
+      : null
+    const selectionStart = editor instanceof HTMLTextAreaElement ? editor.selectionStart : next.length
+    const selectionEnd = editor instanceof HTMLTextAreaElement ? editor.selectionEnd : next.length
+    setArtifactRedo((history) => history.slice(0, -1))
+    setArtifactUndo((history) => [...history, artifactDraft].slice(-MAX_ARTIFACT_EDITOR_HISTORY))
+    setArtifactDraft(next)
+    if (activeArtifact) {
+      const artifactId = activeArtifact.id
+      setTimeout(() => {
+        const nextEditor = document.getElementById(`artifact-editor-${artifactId}`)
+        if (!(nextEditor instanceof HTMLTextAreaElement)) return
+        const start = Math.min(selectionStart, nextEditor.value.length)
+        const end = Math.min(selectionEnd, nextEditor.value.length)
+        nextEditor.focus()
+        nextEditor.setSelectionRange(start, end)
+      }, 0)
+    }
+  }
+
+  const handleSaveArtifact = async () => {
+    if (!selectedSessionId || !activeArtifact || artifactBusy || artifactDraft === activeArtifact.content) return
+    setArtifactBusy(true)
+    try {
+      const artifact = await saveArtifactVersion(selectedSessionId, activeArtifact.id, artifactDraft)
+      setOpenArtifact(artifact)
+      setNotice(`Saved ${artifact.title} as version ${artifact.current_version}.`)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'Could not save this artifact')
+    } finally {
+      setArtifactBusy(false)
+    }
+  }
+
+  const handleCopyArtifact = () => {
+    if (!activeArtifact) return
+    if (!navigator.clipboard?.writeText) {
+      setNotice('Copy is unavailable in this browser context.')
+      return
+    }
+    void navigator.clipboard
+      .writeText(artifactDraft)
+      .then(() => setNotice(`Copied ${activeArtifact.title}.`))
+      .catch(() => setNotice('Could not copy this artifact.'))
+  }
+
+  const handleCloseArtifact = () => {
+    const returnTarget = artifactReturnFocusRef.current
+    artifactReturnFocusRef.current = null
+    setActiveArtifact(null)
+    setArtifactDraft('')
+    setArtifactUndo([])
+    setArtifactRedo([])
+    setTimeout(() => {
+      if (!returnTarget) return
+      const attribute = returnTarget.kind === 'source' ? 'artifactSource' : 'artifactId'
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLElement>(
+          returnTarget.kind === 'source' ? '[data-artifact-source]' : '[data-artifact-id]',
+        ),
+      )
+      candidates.find((candidate) => candidate.dataset[attribute] === returnTarget.id)?.focus()
+    }, 0)
+  }
+
   const handleStopTurn = () => {
     const active = activeTurnRef.current
     if (!active || active.sessionId !== selectedSessionId) return
@@ -590,10 +844,11 @@ function App() {
 
     try {
       const result = await prepareRetryBranch(selectedSessionId, message.id)
-      const [childMessages, childActivity, childAttachments] = await Promise.all([
+      const [childMessages, childActivity, childAttachments, childArtifacts] = await Promise.all([
         listMessages(result.session.id, 200),
         listAssistantActivity(result.session.id, 200),
         listDraftAttachments(result.session.id),
+        listArtifacts(result.session.id),
       ])
       const requestText = editedText?.trim() || result.requestText
 
@@ -610,6 +865,11 @@ function App() {
         >,
       )
       setAttachmentState(childAttachments)
+      setArtifactCatalog(childArtifacts)
+      setActiveArtifact(null)
+      setArtifactDraft('')
+      setArtifactUndo([])
+      setArtifactRedo([])
       setMessageLoadState('ready')
       setMessageError('')
       setEditingMessageId(null)
@@ -962,6 +1222,24 @@ function App() {
                       <span>at message {forkProvenance.fork_message_seq}</span>
                     </div>
                   ) : null}
+                  {artifactCatalog.artifacts.length > 0 ? (
+                    <div className="codex-artifact-strip" aria-label="Artifacts">
+                      <span>Artifacts</span>
+                      {artifactCatalog.artifacts.map((artifact) => (
+                        <Button
+                          key={artifact.id}
+                          size="xs"
+                          variant="ghost"
+                          isDisabled={artifactBusy}
+                          data-artifact-id={artifact.id}
+                          onPress={() => void handleOpenSavedArtifact(artifact.id)}
+                        >
+                          <FileText aria-hidden="true" />
+                          {artifact.title} · v{artifact.current_version}
+                        </Button>
+                      ))}
+                    </div>
+                  ) : null}
                   {messages.length === 0 && messageLoadState === 'ready' ? (
                     <p>Send a message to begin. Messages are stored locally in the native session database.</p>
                   ) : null}
@@ -1074,6 +1352,7 @@ function App() {
                               setEditingMessageText(candidate.body.text)
                             }}
                             onRetry={(candidate) => void handleRetryMessage(candidate)}
+                            onArtifact={(candidate, kind) => void handleOpenArtifact(candidate, kind)}
                           />
                         </div>
                       </li>
@@ -1110,6 +1389,117 @@ function App() {
             )}
           </div>
         </section>
+
+        {activeArtifact ? (
+          <aside className="codex-artifact-panel" aria-label="Artifact editor">
+            <div className="codex-artifact-panel-header">
+              <div>
+                <span className="codex-artifact-kicker">
+                  {activeArtifact.kind === 'code' ? 'Code artifact' : 'Writing artifact'}
+                </span>
+                <h2>{activeArtifact.title}</h2>
+                <p>
+                  Version {activeArtifact.current_version} · {activeArtifact.versions.length} saved
+                  version{activeArtifact.versions.length === 1 ? '' : 's'}
+                </p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-label="Close artifact editor"
+                onPress={handleCloseArtifact}
+              >
+                Close
+              </Button>
+            </div>
+
+            <div className="codex-artifact-toolbar" role="group" aria-label="Artifact editing controls">
+              <Button
+                size="sm"
+                variant="ghost"
+                isDisabled={artifactUndo.length === 0 || artifactBusy}
+                onPress={handleArtifactUndo}
+              >
+                Undo
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                isDisabled={artifactRedo.length === 0 || artifactBusy}
+                onPress={handleArtifactRedo}
+              >
+                Redo
+              </Button>
+              <Button size="sm" variant="ghost" onPress={handleCopyArtifact}>
+                Copy
+              </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                aria-pressed={artifactPreview}
+                onPress={() => setArtifactPreview((current) => !current)}
+              >
+                {artifactPreview ? 'Edit' : 'Preview'}
+              </Button>
+              <Button
+                size="sm"
+                isDisabled={artifactBusy || artifactDraft === activeArtifact.content}
+                onPress={() => void handleSaveArtifact()}
+              >
+                {artifactBusy ? 'Saving…' : 'Save version'}
+              </Button>
+            </div>
+
+            {artifactPreview ? (
+              activeArtifact.kind === 'code' ? (
+                <pre className="codex-artifact-preview codex-artifact-code-preview" aria-label="Code artifact preview">
+                  <code>{artifactDraft}</code>
+                </pre>
+              ) : (
+                <div className="codex-artifact-preview" role="document" aria-label="Writing artifact preview">
+                  {artifactDraft}
+                </div>
+              )
+            ) : (
+              <>
+                <label className="sr-only" htmlFor={`artifact-editor-${activeArtifact.id}`}>
+                  Edit {activeArtifact.title}
+                </label>
+                <Textarea
+                  id={`artifact-editor-${activeArtifact.id}`}
+                  className="codex-artifact-textarea"
+                  aria-label={`Edit ${activeArtifact.title}`}
+                  value={artifactDraft}
+                  onChange={(event: ChangeEvent<HTMLTextAreaElement>) =>
+                    handleArtifactDraftChange(event.target.value)
+                  }
+                  disabled={artifactBusy}
+                  rows={18}
+                />
+              </>
+            )}
+
+            <div className="codex-artifact-execution" aria-label="Artifact execution availability">
+              <Button
+                size="sm"
+                variant="outline"
+                isDisabled={!artifactCatalog.runAvailable}
+                title="Run requires a safe native execution and approval bridge."
+              >
+                {artifactCatalog.runAvailable ? 'Run' : 'Run unavailable'}
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                isDisabled={!artifactCatalog.applyAvailable}
+                title="Apply requires a safe native execution and approval bridge."
+              >
+                {artifactCatalog.applyAvailable ? 'Apply' : 'Apply unavailable'}
+              </Button>
+              <p>Run and Apply stay disabled until the native executor owns permission and approval state.</p>
+            </div>
+          </aside>
+        ) : null}
 
         <footer className="codex-composer-dock" id="models">
           <div className="codex-composer-wrap">

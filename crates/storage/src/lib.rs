@@ -23,8 +23,11 @@ pub use execution_v2::ExecV2;
 pub use gc_v2::GcV2;
 pub use import_v2::ImportV2;
 use opencode_rk_contracts::{
-    AssistantActivity, AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole,
-    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp, MAX_ATTACHMENT_MIME_BYTES,
+    ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, ArtifactVersion, AssistantActivity,
+    AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId,
+    SessionState, SessionSummary, Timestamp, MAX_ARTIFACTS_PER_SESSION,
+    MAX_ARTIFACT_CONTENT_BYTES, MAX_ARTIFACT_LANGUAGE_BYTES, MAX_ARTIFACT_TITLE_BYTES,
+    MAX_ARTIFACT_TOTAL_BYTES, MAX_ARTIFACT_VERSIONS, MAX_ATTACHMENT_MIME_BYTES,
     MAX_ATTACHMENT_NAME_BYTES, MAX_DRAFT_ATTACHMENTS, MAX_DRAFT_ATTACHMENT_BYTES,
     MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES,
 };
@@ -55,6 +58,14 @@ pub enum StorageError {
     SessionNotFound(SessionId),
     #[error("message not found: {0}")]
     MessageNotFound(MessageId),
+    #[error("artifact not found: {0}")]
+    ArtifactNotFound(ArtifactId),
+    #[error("artifact content exceeds the supported size bound")]
+    ArtifactContentTooLarge,
+    #[error("artifact count, version history, or retained bytes exceeded the supported bound")]
+    ArtifactLimitExceeded,
+    #[error("artifact metadata is invalid")]
+    InvalidArtifact,
     #[error("payload exceeds inline limit and must be stored as a blob")]
     InlinePayloadTooLarge,
     #[error("event payload exceeds {MAX_EVENT_PAYLOAD_BYTES} bytes")]
@@ -344,6 +355,176 @@ impl Storage {
         })?;
         rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
     }
+    pub fn get_message(
+        &self,
+        session_id: SessionId,
+        message_id: MessageId,
+    ) -> Result<MessageRecord, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        connection
+            .query_row(
+                "SELECT id,session_id,role,inline_text,blob_hash,byte_len,created_at
+                 FROM messages WHERE session_id=?1 AND id=?2",
+                params![session_id.to_string(), message_id.to_string()],
+                decode_message,
+            )
+            .optional()?
+            .ok_or(StorageError::MessageNotFound(message_id))
+    }
+    pub fn create_artifact(
+        &self,
+        session_id: SessionId,
+        source_message_id: MessageId,
+        kind: ArtifactKind,
+        title: &str,
+        language: Option<&str>,
+        content: &str,
+        at: Timestamp,
+    ) -> Result<ArtifactDocument, StorageError> {
+        validate_artifact_metadata(title, language)?;
+        validate_artifact_content(content)?;
+        let artifact_id = ArtifactId::new();
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let count: i64 = tx.query_row(
+            "SELECT COUNT(*) FROM artifacts WHERE session_id=?1",
+            params![session_id.to_string()],
+            |row| row.get(0),
+        )?;
+        if count as usize >= MAX_ARTIFACTS_PER_SESSION {
+            return Err(StorageError::ArtifactLimitExceeded);
+        }
+        let at = at.to_string();
+        tx.execute(
+            "INSERT INTO artifacts
+             (id,session_id,source_message_id,kind,title,language,current_version,created_at,updated_at)
+             VALUES (?1,?2,?3,?4,?5,?6,1,?7,?7)",
+            params![
+                artifact_id.to_string(),
+                session_id.to_string(),
+                source_message_id.to_string(),
+                encode_artifact_kind(kind),
+                title,
+                language,
+                at,
+            ],
+        )?;
+        tx.execute(
+            "INSERT INTO artifact_versions (artifact_id,version,content,byte_len,created_at)
+             VALUES (?1,1,?2,?3,?4)",
+            params![artifact_id.to_string(), content, content.len() as i64, at],
+        )?;
+        tx.commit()?;
+        drop(connection);
+        self.get_artifact(session_id, artifact_id)
+    }
+    pub fn list_artifacts(
+        &self,
+        session_id: SessionId,
+        limit: usize,
+    ) -> Result<Vec<ArtifactSummary>, StorageError> {
+        let limit = limit.clamp(1, MAX_ARTIFACTS_PER_SESSION) as i64;
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let mut statement = connection.prepare(
+            "SELECT id,session_id,source_message_id,kind,title,language,current_version,created_at,updated_at
+             FROM artifacts WHERE session_id=?1 ORDER BY updated_at DESC,id DESC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![session_id.to_string(), limit], decode_artifact_summary)?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+    }
+    pub fn get_artifact(
+        &self,
+        session_id: SessionId,
+        artifact_id: ArtifactId,
+    ) -> Result<ArtifactDocument, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let summary = connection
+            .query_row(
+                "SELECT id,session_id,source_message_id,kind,title,language,current_version,created_at,updated_at
+                 FROM artifacts WHERE session_id=?1 AND id=?2",
+                params![session_id.to_string(), artifact_id.to_string()],
+                decode_artifact_summary,
+            )
+            .optional()?
+            .ok_or(StorageError::ArtifactNotFound(artifact_id))?;
+        let content: String = connection.query_row(
+            "SELECT content FROM artifact_versions WHERE artifact_id=?1 AND version=?2",
+            params![artifact_id.to_string(), i64::from(summary.current_version)],
+            |row| row.get(0),
+        )?;
+        let mut statement = connection.prepare(
+            "SELECT version,byte_len,created_at FROM artifact_versions
+             WHERE artifact_id=?1 ORDER BY version ASC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(
+            params![artifact_id.to_string(), MAX_ARTIFACT_VERSIONS as i64],
+            |row| {
+                let version = row.get::<_, i64>(0)?;
+                let bytes = row.get::<_, i64>(1)?;
+                Ok(ArtifactVersion {
+                    version: u16::try_from(version).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    bytes: u64::try_from(bytes).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                    created_at: parse_timestamp(row.get(2)?)?,
+                })
+            },
+        )?;
+        let versions = rows.collect::<Result<Vec<_>, _>>()?;
+        Ok(ArtifactDocument {
+            summary,
+            content,
+            versions,
+        })
+    }
+    pub fn append_artifact_version(
+        &self,
+        session_id: SessionId,
+        artifact_id: ArtifactId,
+        content: &str,
+        at: Timestamp,
+    ) -> Result<ArtifactDocument, StorageError> {
+        validate_artifact_content(content)?;
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let state: Option<(i64, i64)> = tx
+            .query_row(
+                "SELECT a.current_version,COALESCE(SUM(v.byte_len),0)
+                 FROM artifacts a LEFT JOIN artifact_versions v ON v.artifact_id=a.id
+                 WHERE a.session_id=?1 AND a.id=?2 GROUP BY a.id,a.current_version",
+                params![session_id.to_string(), artifact_id.to_string()],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        let Some((current_version, retained_bytes)) = state else {
+            return Err(StorageError::ArtifactNotFound(artifact_id));
+        };
+        if current_version as usize >= MAX_ARTIFACT_VERSIONS
+            || retained_bytes.saturating_add(content.len() as i64) > MAX_ARTIFACT_TOTAL_BYTES as i64
+        {
+            return Err(StorageError::ArtifactLimitExceeded);
+        }
+        let next_version = current_version
+            .checked_add(1)
+            .ok_or(StorageError::ArtifactLimitExceeded)?;
+        let at = at.to_string();
+        tx.execute(
+            "INSERT INTO artifact_versions (artifact_id,version,content,byte_len,created_at)
+             VALUES (?1,?2,?3,?4,?5)",
+            params![
+                artifact_id.to_string(),
+                next_version,
+                content,
+                content.len() as i64,
+                at,
+            ],
+        )?;
+        tx.execute(
+            "UPDATE artifacts SET current_version=?1,updated_at=?2 WHERE id=?3",
+            params![next_version, at, artifact_id.to_string()],
+        )?;
+        tx.commit()?;
+        drop(connection);
+        self.get_artifact(session_id, artifact_id)
+    }
     pub fn list_messages(
         &self,
         session_id: SessionId,
@@ -464,6 +645,29 @@ impl Storage {
             CREATE INDEX IF NOT EXISTS draft_attachments_session_idx
                 ON draft_attachments(session_id,created_at,id);",
         )?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS artifacts(
+                id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                source_message_id TEXT NOT NULL,
+                kind TEXT NOT NULL CHECK(kind IN ('writing','code')),
+                title TEXT NOT NULL CHECK(length(CAST(title AS BLOB)) BETWEEN 1 AND 256),
+                language TEXT CHECK(language IS NULL OR length(CAST(language AS BLOB)) BETWEEN 1 AND 64),
+                current_version INTEGER NOT NULL CHECK(current_version BETWEEN 1 AND 16),
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS artifacts_session_idx
+                ON artifacts(session_id,updated_at DESC,id DESC);
+            CREATE TABLE IF NOT EXISTS artifact_versions(
+                artifact_id TEXT NOT NULL REFERENCES artifacts(id) ON DELETE CASCADE,
+                version INTEGER NOT NULL CHECK(version BETWEEN 1 AND 16),
+                content TEXT NOT NULL CHECK(length(CAST(content AS BLOB))<=65536),
+                byte_len INTEGER NOT NULL CHECK(byte_len>=0 AND byte_len=length(CAST(content AS BLOB))),
+                created_at TEXT NOT NULL,
+                PRIMARY KEY(artifact_id,version)
+            );",
+        )?;
         Ok(())
     }
 }
@@ -561,6 +765,50 @@ fn decode_role(value: &str) -> Result<MessageRole, rusqlite::Error> {
         "tool" => Ok(MessageRole::Tool),
         _ => Err(rusqlite::Error::InvalidQuery),
     }
+}
+fn encode_artifact_kind(kind: ArtifactKind) -> &'static str {
+    match kind {
+        ArtifactKind::Writing => "writing",
+        ArtifactKind::Code => "code",
+    }
+}
+fn decode_artifact_kind(value: &str) -> Result<ArtifactKind, rusqlite::Error> {
+    match value {
+        "writing" => Ok(ArtifactKind::Writing),
+        "code" => Ok(ArtifactKind::Code),
+        _ => Err(rusqlite::Error::InvalidQuery),
+    }
+}
+fn validate_artifact_metadata(title: &str, language: Option<&str>) -> Result<(), StorageError> {
+    if title.is_empty()
+        || title.as_bytes().len() > MAX_ARTIFACT_TITLE_BYTES
+        || language.is_some_and(|value| {
+            value.is_empty() || value.as_bytes().len() > MAX_ARTIFACT_LANGUAGE_BYTES
+        })
+    {
+        return Err(StorageError::InvalidArtifact);
+    }
+    Ok(())
+}
+fn validate_artifact_content(content: &str) -> Result<(), StorageError> {
+    if content.as_bytes().len() > MAX_ARTIFACT_CONTENT_BYTES {
+        return Err(StorageError::ArtifactContentTooLarge);
+    }
+    Ok(())
+}
+fn decode_artifact_summary(row: &rusqlite::Row<'_>) -> Result<ArtifactSummary, rusqlite::Error> {
+    let current_version = row.get::<_, i64>(6)?;
+    Ok(ArtifactSummary {
+        id: parse_id(row.get(0)?)?,
+        session_id: parse_id(row.get(1)?)?,
+        source_message_id: parse_id(row.get(2)?)?,
+        kind: decode_artifact_kind(&row.get::<_, String>(3)?)?,
+        title: row.get(4)?,
+        language: row.get(5)?,
+        current_version: u16::try_from(current_version).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        created_at: parse_timestamp(row.get(7)?)?,
+        updated_at: parse_timestamp(row.get(8)?)?,
+    })
 }
 fn parse_id<T>(value: String) -> Result<T, rusqlite::Error>
 where

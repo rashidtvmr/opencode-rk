@@ -107,7 +107,7 @@ by that daemon; Vite remains development tooling only.
 | Chat navigation | Durable archive + loaded-title filter + bounded recent/older message paging; pin/share/temp chat explicitly unavailable | Pin, unified search, archive, share, temporary chat, progressive history paging and keyboard shortcuts |
 | Projects/workspaces/memory | Canonical `data/catalog.db` workspace registry is exposed read-only in the web client; session/file membership, context and memory remain explicitly unavailable | Project-scoped chats/files/context, memory/context inspector and disclosure of context sources used |
 | Voice/dictation | Daemon capability reports no adapter and composer exposes an accessible disabled voice control | Browser capture + native audio/realtime adapter; honest unavailable state until real transport exists |
-| Editable artifacts/code | Plain assistant text | Separate editable writing/code artifacts with copy/edit/preview/run only through safe native execution boundaries |
+| Editable artifacts/code | Durable bounded writing/code artifacts with immutable versions, copy/edit/undo/redo/inert preview; Run/Apply explicitly disabled until safe native execution ownership exists | Run/apply only through safe native execution + approval boundaries |
 | Long conversation UX | Legacy oldest-page context limitation | Recent-window provider context plus progressively paged UI history, both bounded |
 | Accessibility | Semantic shell + axe smoke | Keyboard-complete menus/editor/dialogs, focus restoration, 200%/400% reflow, reduced motion and non-spammy live regions |
 

@@ -36,7 +36,7 @@ use axum::{
 use futures_util::stream;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId,
+    ArtifactId, ArtifactKind, AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId,
     MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
@@ -82,6 +82,19 @@ pub fn router(state: AppState) -> Router {
             delete(delete_draft_attachment),
         )
         .route("/api/sessions/{id}/activity", get(list_assistant_activity))
+        .route("/api/sessions/{id}/artifacts", get(list_artifacts))
+        .route(
+            "/api/sessions/{id}/messages/{message_id}/artifacts",
+            post(create_artifact),
+        )
+        .route(
+            "/api/sessions/{id}/artifacts/{artifact_id}",
+            get(get_artifact),
+        )
+        .route(
+            "/api/sessions/{id}/artifacts/{artifact_id}/versions",
+            post(append_artifact_version),
+        )
         .route(
             "/api/sessions/{id}/messages/{message_id}/branch",
             post(branch_session),
@@ -152,8 +165,11 @@ async fn web_capabilities() -> Json<Value> {
             "reason": "no native transcription or realtime audio adapter is installed"
         },
         "artifacts": {
-            "available": false,
-            "reason": "no durable artifact/version service is wired to the web daemon"
+            "available": true,
+            "editing_available": true,
+            "run_available": false,
+            "apply_available": false,
+            "reason": "durable editing and versioning are available; run/apply require a safe native execution and approval bridge"
         }
     }))
 }
@@ -466,6 +482,106 @@ async fn delete_draft_attachment(
         .await
         .map_err(attachment_failure)?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+struct CreateArtifactBody {
+    kind: ArtifactKind,
+    title: String,
+    language: Option<String>,
+    content: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AppendArtifactVersionBody {
+    content: String,
+}
+
+async fn list_artifacts(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let artifacts = state
+        .sessions
+        .artifacts(id, 32)
+        .await
+        .map_err(artifact_failure)?;
+    Ok(Json(json!({
+        "available": true,
+        "artifacts": artifacts,
+        "run_available": false,
+        "apply_available": false,
+    })))
+}
+
+async fn create_artifact(
+    State(state): State<AppState>,
+    Path((id, message_id)): Path<(String, String)>,
+    Json(body): Json<CreateArtifactBody>,
+) -> Result<(StatusCode, Json<Value>), ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let message_id = parse_message_id(&message_id)?;
+    let artifact = state
+        .sessions
+        .create_artifact(
+            id,
+            message_id,
+            body.kind,
+            body.title,
+            body.language,
+            body.content,
+        )
+        .await
+        .map_err(artifact_failure)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "artifact": artifact,
+            "run_available": false,
+            "apply_available": false,
+        })),
+    ))
+}
+
+async fn get_artifact(
+    State(state): State<AppState>,
+    Path((id, artifact_id)): Path<(String, String)>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let artifact_id = parse_artifact_id(&artifact_id)?;
+    let artifact = state
+        .sessions
+        .artifact(id, artifact_id)
+        .await
+        .map_err(artifact_failure)?;
+    Ok(Json(json!({
+        "artifact": artifact,
+        "run_available": false,
+        "apply_available": false,
+    })))
+}
+
+async fn append_artifact_version(
+    State(state): State<AppState>,
+    Path((id, artifact_id)): Path<(String, String)>,
+    Json(body): Json<AppendArtifactVersionBody>,
+) -> Result<(StatusCode, Json<Value>), ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let artifact_id = parse_artifact_id(&artifact_id)?;
+    let artifact = state
+        .sessions
+        .append_artifact_version(id, artifact_id, body.content)
+        .await
+        .map_err(artifact_failure)?;
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "artifact": artifact,
+            "run_available": false,
+            "apply_available": false,
+        })),
+    ))
 }
 
 async fn branch_session(
@@ -895,6 +1011,9 @@ fn parse_message_id(value: &str) -> Result<MessageId, ApiFailure> {
 fn parse_attachment_id(value: &str) -> Result<AttachmentId, ApiFailure> {
     AttachmentId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid attachment id"))
 }
+fn parse_artifact_id(value: &str) -> Result<ArtifactId, ApiFailure> {
+    ArtifactId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid artifact id"))
+}
 fn attachment_failure(error: SessionError) -> ApiFailure {
     match error {
         SessionError::NotFound(_) | SessionError::DraftAttachmentNotFound(_) => {
@@ -914,6 +1033,18 @@ fn branch_failure(error: SessionError) -> ApiFailure {
         | SessionError::ForkDepthExceeded
         | SessionError::BranchPayloadUnsupported => ApiFailure::unprocessable(error.to_string()),
         SessionError::BranchingUnavailable => ApiFailure::service_unavailable(error.to_string()),
+        other => ApiFailure::internal(other),
+    }
+}
+fn artifact_failure(error: SessionError) -> ApiFailure {
+    match error {
+        SessionError::NotFound(_) | SessionError::ArtifactNotFound(_) => {
+            ApiFailure::not_found(error.to_string())
+        }
+        SessionError::ArtifactSourceInvalid(_)
+        | SessionError::ArtifactContentTooLarge
+        | SessionError::ArtifactLimitExceeded
+        | SessionError::InvalidArtifact => ApiFailure::unprocessable(error.to_string()),
         other => ApiFailure::internal(other),
     }
 }

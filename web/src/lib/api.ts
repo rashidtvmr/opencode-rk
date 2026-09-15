@@ -112,6 +112,39 @@ export interface WorkspaceCatalogState {
   reason?: string
 }
 
+export type ArtifactKind = 'writing' | 'code'
+
+export interface ArtifactSummary {
+  id: string
+  session_id: string
+  source_message_id: string
+  kind: ArtifactKind
+  title: string
+  language: string | null
+  current_version: number
+  created_at?: unknown
+  updated_at?: unknown
+}
+
+export interface ArtifactVersion {
+  version: number
+  bytes: number
+  created_at?: unknown
+}
+
+export interface ArtifactDocument extends ArtifactSummary {
+  content: string
+  versions: ArtifactVersion[]
+}
+
+export interface ArtifactCatalogState {
+  available: boolean
+  artifacts: ArtifactSummary[]
+  runAvailable: boolean
+  applyAvailable: boolean
+  reason?: string
+}
+
 function unavailableCapabilities(reason: string): WebCapabilities {
   return {
     tools: [],
@@ -229,6 +262,56 @@ function normalizeDraftAttachment(value: unknown): DraftAttachment | null {
     hash: candidate.hash,
     bytes: candidate.bytes,
     created_at: candidate.created_at,
+  }
+}
+
+function normalizeArtifactSummary(value: unknown): ArtifactSummary | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (
+    typeof candidate.id !== 'string' ||
+    typeof candidate.session_id !== 'string' ||
+    typeof candidate.source_message_id !== 'string' ||
+    (candidate.kind !== 'writing' && candidate.kind !== 'code') ||
+    typeof candidate.title !== 'string' ||
+    !(candidate.language === null || typeof candidate.language === 'string') ||
+    typeof candidate.current_version !== 'number'
+  ) {
+    return null
+  }
+  return {
+    id: candidate.id,
+    session_id: candidate.session_id,
+    source_message_id: candidate.source_message_id,
+    kind: candidate.kind,
+    title: candidate.title,
+    language: candidate.language,
+    current_version: candidate.current_version,
+    created_at: candidate.created_at,
+    updated_at: candidate.updated_at,
+  }
+}
+
+function normalizeArtifactDocument(value: unknown): ArtifactDocument | null {
+  const summary = normalizeArtifactSummary(value)
+  if (!summary || !value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  if (typeof candidate.content !== 'string' || !Array.isArray(candidate.versions)) return null
+  const versions = candidate.versions.map((version) => {
+    if (!version || typeof version !== 'object') return null
+    const row = version as Record<string, unknown>
+    if (typeof row.version !== 'number' || typeof row.bytes !== 'number') return null
+    return {
+      version: row.version,
+      bytes: row.bytes,
+      created_at: row.created_at,
+    } satisfies ArtifactVersion
+  })
+  if (versions.some((version) => version === null)) return null
+  return {
+    ...summary,
+    content: candidate.content,
+    versions: versions as ArtifactVersion[],
   }
 }
 
@@ -523,6 +606,85 @@ export async function deleteDraftAttachment(
     const body = (await response.json().catch(() => null)) as { message?: string } | null
     throw new ApiError(response.status, body?.message ?? `Request failed with ${response.status}`)
   }
+}
+
+const MAX_ARTIFACT_CONTENT_BYTES = 64 * 1024
+
+function assertArtifactContent(content: string) {
+  if (new TextEncoder().encode(content).byteLength > MAX_ARTIFACT_CONTENT_BYTES) {
+    throw new Error('Artifact content exceeds the 64 KiB editor limit')
+  }
+}
+
+export async function listArtifacts(
+  sessionId: string,
+  signal?: AbortSignal,
+): Promise<ArtifactCatalogState> {
+  try {
+    const payload = await request<Record<string, unknown>>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/artifacts`,
+      { signal },
+    )
+    if (!Array.isArray(payload.artifacts)) throw new Error('Server returned invalid artifact catalog')
+    const artifacts = payload.artifacts.map(normalizeArtifactSummary)
+    if (artifacts.some((artifact) => artifact === null)) {
+      throw new Error('Server returned invalid artifact metadata')
+    }
+    return {
+      available: typeof payload.available === 'boolean' ? payload.available : true,
+      artifacts: artifacts as ArtifactSummary[],
+      runAvailable: payload.run_available === true,
+      applyAvailable: payload.apply_available === true,
+      reason: typeof payload.reason === 'string' ? payload.reason : undefined,
+    }
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) {
+      return {
+        available: false,
+        artifacts: [],
+        runAvailable: false,
+        applyAvailable: false,
+        reason: 'Editable artifacts require a newer native server.',
+      }
+    }
+    throw cause
+  }
+}
+
+export async function createArtifact(
+  sessionId: string,
+  messageId: string,
+  input: { kind: ArtifactKind; title: string; language: string | null; content: string },
+) {
+  assertArtifactContent(input.content)
+  const payload = await request<{ artifact?: unknown }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/artifacts`,
+    { method: 'POST', body: JSON.stringify(input) },
+  )
+  const artifact = normalizeArtifactDocument(payload.artifact)
+  if (!artifact) throw new Error('Server returned an invalid artifact')
+  return artifact
+}
+
+export async function getArtifact(sessionId: string, artifactId: string, signal?: AbortSignal) {
+  const payload = await request<{ artifact?: unknown }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifactId)}`,
+    { signal },
+  )
+  const artifact = normalizeArtifactDocument(payload.artifact)
+  if (!artifact) throw new Error('Server returned an invalid artifact')
+  return artifact
+}
+
+export async function saveArtifactVersion(sessionId: string, artifactId: string, content: string) {
+  assertArtifactContent(content)
+  const payload = await request<{ artifact?: unknown }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/artifacts/${encodeURIComponent(artifactId)}/versions`,
+    { method: 'POST', body: JSON.stringify({ content }) },
+  )
+  const artifact = normalizeArtifactDocument(payload.artifact)
+  if (!artifact) throw new Error('Server returned an invalid artifact')
+  return artifact
 }
 
 export async function branchSessionFromMessage(sessionId: string, messageId: string) {
