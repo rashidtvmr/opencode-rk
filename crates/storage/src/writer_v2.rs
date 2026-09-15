@@ -1,6 +1,8 @@
 //! Bounded writers for the format-2 workspace schema.
 
-use opencode_rk_contracts::{MessageId, MessageRole, PayloadRef, SessionId};
+use opencode_rk_contracts::{
+    MessageId, MessageRole, PayloadRef, SessionId, MAX_REASONING_SUMMARY_BYTES,
+};
 use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
 use crate::quota_v2::{QuotaSnapshot, QuotaV2, QuotaV2Error};
@@ -11,6 +13,8 @@ const MAX_INLINE_PAYLOAD_BYTES: usize = 8192;
 const MAX_EVENT_KIND_BYTES: usize = 128;
 const MAX_EVENT_PAYLOAD_BYTES: usize = 4096;
 const MAX_SESSION_PAGE_SIZE: usize = 500;
+pub const MESSAGE_PART_TEXT: i64 = 0;
+pub const MESSAGE_PART_REASONING_SUMMARY: i64 = 1;
 
 pub struct NewSession {
     pub id: SessionId,
@@ -61,7 +65,15 @@ impl V2Writer {
         connection: &mut Connection,
         message: &NewMessage,
     ) -> Result<(), StorageError> {
-        insert_message(connection, message)
+        insert_message(connection, message, None)
+    }
+
+    pub fn append_message_with_reasoning(
+        connection: &mut Connection,
+        message: &NewMessage,
+        reasoning_summary: Option<&str>,
+    ) -> Result<(), StorageError> {
+        insert_message(connection, message, reasoning_summary)
     }
 
     pub fn append_outbox_event(
@@ -114,7 +126,11 @@ impl V2Writer {
     }
 }
 
-fn insert_message(connection: &mut Connection, message: &NewMessage) -> Result<(), StorageError> {
+fn insert_message(
+    connection: &mut Connection,
+    message: &NewMessage,
+    reasoning_summary: Option<&str>,
+) -> Result<(), StorageError> {
     let inline_data = match &message.body {
         PayloadRef::Inline { text } if text.len() <= MAX_INLINE_PAYLOAD_BYTES => text.as_bytes(),
         PayloadRef::Inline { .. } | PayloadRef::Blob { .. } => {
@@ -122,6 +138,11 @@ fn insert_message(connection: &mut Connection, message: &NewMessage) -> Result<(
         }
     };
     let role = encode_role(message.role);
+    if let Some(summary) = reasoning_summary {
+        if message.role != MessageRole::Assistant || summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES {
+            return Err(StorageError::InlinePayloadTooLarge);
+        }
+    }
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
     let session = transaction
@@ -160,9 +181,21 @@ fn insert_message(connection: &mut Connection, message: &NewMessage) -> Result<(
     let payload_pk = transaction.last_insert_rowid();
     transaction.execute(
         "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk)
-         VALUES (?1, 0, 0, ?2)",
-        params![message_pk, payload_pk],
+         VALUES (?1, 0, ?2, ?3)",
+        params![message_pk, MESSAGE_PART_TEXT, payload_pk],
     )?;
+    if let Some(summary) = reasoning_summary.filter(|summary| !summary.is_empty()) {
+        transaction.execute(
+            "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
+            params![summary.as_bytes(), summary.len() as i64, message.created_at_us],
+        )?;
+        let summary_payload_pk = transaction.last_insert_rowid();
+        transaction.execute(
+            "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk, mime, name)
+             VALUES (?1, 1, ?2, ?3, 'text/plain; charset=utf-8', 'reasoning_summary')",
+            params![message_pk, MESSAGE_PART_REASONING_SUMMARY, summary_payload_pk],
+        )?;
+    }
     transaction.commit()?;
     Ok(())
 }
@@ -178,7 +211,7 @@ pub fn append_message_checked(
 ) -> Result<(), StorageError> {
     let snapshot = QuotaV2::measure(connection)?;
     admit_checked(connection, &snapshot, budget)?;
-    insert_message(connection, message)
+    insert_message(connection, message, None)
 }
 
 /// Quota-gated outbox append, mirroring `append_outbox_event` after admission.

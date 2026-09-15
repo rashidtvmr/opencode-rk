@@ -15,6 +15,9 @@ pub const WIRE_SCHEMA_VERSION: u16 = 1;
 pub const MAX_TITLE_BYTES: usize = 512;
 pub const MAX_ERROR_MESSAGE_BYTES: usize = 8 * 1024;
 pub const MAX_INLINE_PAYLOAD_BYTES: usize = 64 * 1024;
+/// Provider-visible reasoning summaries are transcript metadata, not hidden chain of thought.
+/// Keep them small enough to fit one format-2 inline message part.
+pub const MAX_REASONING_SUMMARY_BYTES: usize = 8 * 1024;
 
 macro_rules! uuid_id {
     ($name:ident) => {
@@ -196,6 +199,12 @@ pub struct MessageRecord {
     pub role: MessageRole,
     pub body: PayloadRef,
     pub created_at: Timestamp,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AssistantActivity {
+    pub message_id: MessageId,
+    pub reasoning_summary: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

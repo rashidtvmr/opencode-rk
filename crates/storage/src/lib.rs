@@ -23,8 +23,8 @@ pub use execution_v2::ExecV2;
 pub use gc_v2::GcV2;
 pub use import_v2::ImportV2;
 use opencode_rk_contracts::{
-    MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary,
-    Timestamp, MAX_INLINE_PAYLOAD_BYTES,
+    AssistantActivity, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState,
+    SessionSummary, Timestamp, MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES,
 };
 pub use quota_v2::QuotaV2;
 pub use retention_v2::RetentionV2;
@@ -180,6 +180,13 @@ impl Storage {
         Ok(())
     }
     pub fn append_message(&self, message: &MessageRecord) -> Result<(), StorageError> {
+        self.append_message_with_reasoning(message, None)
+    }
+    pub fn append_message_with_reasoning(
+        &self,
+        message: &MessageRecord,
+        reasoning_summary: Option<&str>,
+    ) -> Result<(), StorageError> {
         let (inline_text, blob_hash, byte_len) = match &message.body {
             PayloadRef::Inline { text } => {
                 if text.len() > MAX_INLINE_PAYLOAD_BYTES {
@@ -189,9 +196,20 @@ impl Storage {
             }
             PayloadRef::Blob { hash, bytes } => (None, Some(hash.as_str()), *bytes),
         };
+        if let Some(summary) = reasoning_summary {
+            if message.role != MessageRole::Assistant || summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES {
+                return Err(StorageError::InlinePayloadTooLarge);
+            }
+        }
         let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("INSERT INTO messages (id,session_id,role,inline_text,blob_hash,byte_len,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![message.id.to_string(),message.session_id.to_string(),encode_role(message.role),inline_text,blob_hash,byte_len as i64,message.created_at.to_string()])?;
+        if let Some(summary) = reasoning_summary.filter(|summary| !summary.is_empty()) {
+            tx.execute(
+                "INSERT INTO message_activity (message_id,reasoning_summary) VALUES (?1,?2)",
+                params![message.id.to_string(), summary],
+            )?;
+        }
         tx.execute(
             "UPDATE sessions SET updated_at=?1 WHERE id=?2",
             params![
@@ -201,6 +219,29 @@ impl Storage {
         )?;
         tx.commit()?;
         Ok(())
+    }
+    pub fn list_assistant_activity(
+        &self,
+        session_id: SessionId,
+        limit: usize,
+    ) -> Result<Vec<AssistantActivity>, StorageError> {
+        let limit = limit.clamp(1, 500) as i64;
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let mut statement = connection.prepare(
+            "SELECT m.id,a.reasoning_summary FROM messages m
+             JOIN message_activity a ON a.message_id=m.id
+             WHERE m.session_id=?1 AND m.role='assistant'
+             ORDER BY m.rowid ASC LIMIT ?2",
+        )?;
+        let rows = statement.query_map(params![session_id.to_string(), limit], |row| {
+            let id: String = row.get(0)?;
+            let message_id = MessageId::from_str(&id).map_err(|_| rusqlite::Error::InvalidQuery)?;
+            Ok(AssistantActivity {
+                message_id,
+                reasoning_summary: row.get(1)?,
+            })
+        })?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
     }
     pub fn list_messages(
         &self,
@@ -268,7 +309,7 @@ impl Storage {
         Ok(())
     }
     fn migrate(connection: &Connection) -> Result<(), StorageError> {
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
         Ok(())
     }
 }

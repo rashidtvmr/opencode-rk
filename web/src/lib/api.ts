@@ -49,6 +49,11 @@ export interface BranchResult {
   fork: ForkProvenance
 }
 
+export interface AssistantActivity {
+  message_id: string
+  reasoning_summary: string
+}
+
 class ApiError extends Error {
   readonly status: number
 
@@ -279,6 +284,40 @@ export async function getForkProvenance(sessionId: string, signal?: AbortSignal)
   }
 }
 
+const MAX_REASONING_SUMMARY_BYTES = 8 * 1024
+
+export async function listAssistantActivity(sessionId: string, limit = 200, signal?: AbortSignal) {
+  const boundedLimit = Math.max(1, Math.min(500, Math.trunc(limit)))
+  try {
+    const payload = await request<{ activity?: unknown[] }>(
+      `/api/sessions/${encodeURIComponent(sessionId)}/activity?limit=${boundedLimit}`,
+      { signal },
+    )
+    const encoder = new TextEncoder()
+    return (payload.activity ?? []).map((value) => {
+      if (!value || typeof value !== 'object') {
+        throw new Error('Server returned invalid assistant activity')
+      }
+      const candidate = value as Record<string, unknown>
+      if (
+        typeof candidate.message_id !== 'string' ||
+        typeof candidate.reasoning_summary !== 'string' ||
+        encoder.encode(candidate.reasoning_summary).byteLength > MAX_REASONING_SUMMARY_BYTES
+      ) {
+        throw new Error('Server returned invalid assistant activity')
+      }
+      return {
+        message_id: candidate.message_id,
+        reasoning_summary: candidate.reasoning_summary,
+      } satisfies AssistantActivity
+    })
+  } catch (cause) {
+    // Older native servers do not expose structured assistant activity yet.
+    if (cause instanceof ApiError && cause.status === 404) return []
+    throw cause
+  }
+}
+
 export async function appendMessage(id: string, text: string, signal?: AbortSignal) {
   const payload = await request<{ message: unknown }>(
     `/api/sessions/${encodeURIComponent(id)}/messages`,
@@ -301,7 +340,9 @@ export interface TurnResult {
 
 export interface TurnStreamHandlers {
   onUserMessage?: (message: MessageRecord) => void
+  onReasoningSummaryDelta?: (delta: string) => void
   onAssistantDelta?: (delta: string) => void
+  onAssistantActivity?: (activity: AssistantActivity) => void
   onAssistantMessage?: (message: MessageRecord) => void
 }
 
@@ -319,6 +360,7 @@ function parseTurnStreamEvent(
     userMessage: MessageRecord | null
     assistantMessage: MessageRecord | null
     assistantText: string
+    reasoningSummary: string
   },
 ) {
   let value: unknown
@@ -345,6 +387,17 @@ function parseTurnStreamEvent(
       handlers.onUserMessage?.(message)
       break
     }
+    case 'reasoning_summary_delta': {
+      if (typeof event.delta !== 'string') {
+        throw streamError('Server returned an invalid reasoning summary delta')
+      }
+      state.reasoningSummary += event.delta
+      if (new TextEncoder().encode(state.reasoningSummary).byteLength > MAX_REASONING_SUMMARY_BYTES) {
+        throw streamError('Reasoning summary exceeded the browser safety limit')
+      }
+      handlers.onReasoningSummaryDelta?.(event.delta)
+      break
+    }
     case 'assistant_delta': {
       if (typeof event.delta !== 'string') {
         throw streamError('Server returned an invalid assistant delta')
@@ -367,7 +420,24 @@ function parseTurnStreamEvent(
       if (message.body.text !== state.assistantText) {
         throw streamError('Final assistant message did not match streamed output')
       }
+      const rawSummary = event.reasoning_summary
+      if (rawSummary !== undefined && rawSummary !== null && typeof rawSummary !== 'string') {
+        throw streamError('Server returned an invalid final reasoning summary')
+      }
+      const reasoningSummary = typeof rawSummary === 'string' ? rawSummary : ''
+      if (reasoningSummary !== state.reasoningSummary) {
+        throw streamError('Final reasoning summary did not match streamed output')
+      }
+      if (new TextEncoder().encode(reasoningSummary).byteLength > MAX_REASONING_SUMMARY_BYTES) {
+        throw streamError('Reasoning summary exceeded the browser safety limit')
+      }
       state.assistantMessage = message
+      if (reasoningSummary) {
+        handlers.onAssistantActivity?.({
+          message_id: message.id,
+          reasoning_summary: reasoningSummary,
+        })
+      }
       handlers.onAssistantMessage?.(message)
       break
     }
@@ -463,6 +533,7 @@ export async function runTurnStream(
     userMessage: null as MessageRecord | null,
     assistantMessage: null as MessageRecord | null,
     assistantText: '',
+    reasoningSummary: '',
   }
 
   const consumeLine = (line: string) => {

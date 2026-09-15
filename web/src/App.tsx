@@ -39,6 +39,7 @@ import {
   createSession,
   getForkProvenance,
   getHealth,
+  listAssistantActivity,
   listMessages,
   listModels,
   listSessions,
@@ -46,6 +47,7 @@ import {
   prepareRetryBranch,
   renameSession,
   runTurnStream,
+  type AssistantActivity,
   type ForkProvenance,
   type HealthResponse,
   type MessageRecord,
@@ -150,6 +152,7 @@ function App() {
   const [messages, setMessages] = useState<MessageRecord[]>([])
   const [messageLoadState, setMessageLoadState] = useState<MessageLoadState>('idle')
   const [messageError, setMessageError] = useState('')
+  const [assistantActivity, setAssistantActivity] = useState<Record<string, AssistantActivity>>({})
   const [forkProvenance, setForkProvenance] = useState<ForkProvenance | null>(null)
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null)
   const [editingMessageText, setEditingMessageText] = useState('')
@@ -157,6 +160,7 @@ function App() {
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
+  const [streamingReasoningSummary, setStreamingReasoningSummary] = useState('')
   const activeTurnRef = useRef<{ sessionId: string; controller: AbortController } | null>(null)
 
   useEffect(() => {
@@ -184,6 +188,7 @@ function App() {
   useEffect(() => {
     if (!selectedSessionId) {
       setMessages([])
+      setAssistantActivity({})
       setForkProvenance(null)
       setMessageLoadState('idle')
       setMessageError('')
@@ -196,17 +201,25 @@ function App() {
 
     const controller = new AbortController()
     setMessages([])
+    setAssistantActivity({})
     setForkProvenance(null)
     setMessageLoadState('loading')
     setMessageError('')
 
     Promise.all([
       listMessages(selectedSessionId, 200, controller.signal),
+      listAssistantActivity(selectedSessionId, 200, controller.signal),
       getForkProvenance(selectedSessionId, controller.signal),
     ])
-      .then(([result, provenance]) => {
+      .then(([result, activity, provenance]) => {
         if (controller.signal.aborted) return
         setMessages(result)
+        setAssistantActivity(
+          Object.fromEntries(activity.map((entry) => [entry.message_id, entry])) as Record<
+            string,
+            AssistantActivity
+          >,
+        )
         setForkProvenance(provenance)
         setMessageLoadState('ready')
       })
@@ -225,6 +238,7 @@ function App() {
       active.controller.abort()
       activeTurnRef.current = null
       setStreamingAssistantText('')
+      setStreamingReasoningSummary('')
     }
   }, [selectedSessionId])
 
@@ -330,6 +344,7 @@ function App() {
     text: string,
     reasoningEffort: ReasoningEffort,
     initialMessages?: MessageRecord[],
+    initialActivity?: AssistantActivity[],
   ) => {
     if (!selectedModel) {
       setNotice('Choose a model before sending a message.')
@@ -340,8 +355,17 @@ function App() {
     const controller = new AbortController()
     activeTurnRef.current = { sessionId, controller }
     setStreamingAssistantText('')
+    setStreamingReasoningSummary('')
     const baselineMessages = initialMessages ?? messages
     if (initialMessages) setMessages(initialMessages)
+    if (initialActivity) {
+      setAssistantActivity(
+        Object.fromEntries(initialActivity.map((entry) => [entry.message_id, entry])) as Record<
+          string,
+          AssistantActivity
+        >,
+      )
+    }
     const previousIds = new Set(baselineMessages.map((message) => message.id))
 
     try {
@@ -357,13 +381,23 @@ function App() {
               current.some((item) => item.id === message.id) ? current : [...current, message],
             )
           },
+          onReasoningSummaryDelta: (delta) => {
+            if (activeTurnRef.current?.controller !== controller) return
+            setStreamingReasoningSummary((current) => current + delta)
+          },
           onAssistantDelta: (delta) => {
             if (activeTurnRef.current?.controller !== controller) return
             setStreamingAssistantText((current) => current + delta)
           },
+          onAssistantActivity: (activity) => {
+            if (activeTurnRef.current?.controller !== controller) return
+            setAssistantActivity((current) => ({ ...current, [activity.message_id]: activity }))
+            setStreamingReasoningSummary('')
+          },
           onAssistantMessage: (message) => {
             if (activeTurnRef.current?.controller !== controller) return
             setStreamingAssistantText('')
+            setStreamingReasoningSummary('')
             setMessages((current) =>
               current.some((item) => item.id === message.id) ? current : [...current, message],
             )
@@ -384,9 +418,13 @@ function App() {
       if (controller.signal.aborted) return false
       if (activeTurnRef.current?.controller === controller) activeTurnRef.current = null
       setStreamingAssistantText('')
+      setStreamingReasoningSummary('')
       let persisted = false
       try {
-        const refreshed = await listMessages(sessionId, 200)
+        const [refreshed, refreshedActivity] = await Promise.all([
+          listMessages(sessionId, 200),
+          listAssistantActivity(sessionId, 200),
+        ])
         persisted = refreshed.some(
           (message) =>
             !previousIds.has(message.id) &&
@@ -395,6 +433,11 @@ function App() {
             message.body.text === text,
         )
         setMessages(refreshed)
+        setAssistantActivity(
+          Object.fromEntries(
+            refreshedActivity.map((entry) => [entry.message_id, entry]),
+          ) as Record<string, AssistantActivity>,
+        )
       } catch {
         // Keep the existing transcript when a follow-up refresh also fails.
       }
@@ -421,7 +464,10 @@ function App() {
 
     try {
       const result = await prepareRetryBranch(selectedSessionId, message.id)
-      const childMessages = await listMessages(result.session.id, 200)
+      const [childMessages, childActivity] = await Promise.all([
+        listMessages(result.session.id, 200),
+        listAssistantActivity(result.session.id, 200),
+      ])
       const requestText = editedText?.trim() || result.requestText
 
       setSessions((current) => [
@@ -430,6 +476,12 @@ function App() {
       ])
       setForkProvenance(result.fork)
       setMessages(childMessages)
+      setAssistantActivity(
+        Object.fromEntries(childActivity.map((entry) => [entry.message_id, entry])) as Record<
+          string,
+          AssistantActivity
+        >,
+      )
       setMessageLoadState('ready')
       setMessageError('')
       setEditingMessageId(null)
@@ -441,6 +493,7 @@ function App() {
         requestText,
         selectedReasoningEffort,
         childMessages,
+        childActivity,
       )
       if (accepted) {
         setNotice(
@@ -760,11 +813,11 @@ function App() {
                   </p>
                 ) : null}
 
-                {messages.length > 0 || streamingAssistantText ? (
+                {messages.length > 0 || streamingAssistantText || streamingReasoningSummary ? (
                   <ol
                     className="codex-transcript"
                     aria-label="Conversation messages"
-                    aria-busy={streamingAssistantText ? true : undefined}
+                    aria-busy={streamingAssistantText || streamingReasoningSummary ? true : undefined}
                   >
                     {messages.map((message) => (
                       <li
@@ -816,10 +869,18 @@ function App() {
                               </div>
                             </form>
                           ) : (
-                            <div className="codex-message-content">
-                              <span className="sr-only">{message.role}: </span>
-                              {messageText(message)}
-                            </div>
+                            <>
+                              {message.role === 'assistant' && assistantActivity[message.id] ? (
+                                <details className="codex-assistant-activity">
+                                  <summary>Reasoning summary</summary>
+                                  <p>{assistantActivity[message.id].reasoning_summary}</p>
+                                </details>
+                              ) : null}
+                              <div className="codex-message-content">
+                                <span className="sr-only">{message.role}: </span>
+                                {messageText(message)}
+                              </div>
+                            </>
                           )}
                           <MessageActions
                             message={message}
@@ -838,11 +899,21 @@ function App() {
                         </div>
                       </li>
                     ))}
-                    {streamingAssistantText ? (
+                    {streamingAssistantText || streamingReasoningSummary ? (
                       <li className="codex-message codex-message-row codex-message-assistant">
-                        <div className="codex-message-content">
-                          <span className="sr-only">assistant: </span>
-                          {streamingAssistantText}
+                        <div className="codex-message-stack">
+                          {streamingReasoningSummary ? (
+                            <details className="codex-assistant-activity" open>
+                              <summary>Reasoning summary</summary>
+                              <p>{streamingReasoningSummary}</p>
+                            </details>
+                          ) : null}
+                          {streamingAssistantText ? (
+                            <div className="codex-message-content">
+                              <span className="sr-only">assistant: </span>
+                              {streamingAssistantText}
+                            </div>
+                          ) : null}
                         </div>
                       </li>
                     ) : null}

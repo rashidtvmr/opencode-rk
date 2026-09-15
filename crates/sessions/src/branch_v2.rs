@@ -10,11 +10,12 @@
 use crate::{SessionError, SessionManager};
 use chrono::Utc;
 use opencode_rk_contracts::{
-    MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionSummary,
+    AssistantActivity, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionSummary,
 };
 use opencode_rk_storage::{
     fork_v2::{ForkV2, MAX_FORK_COPY_MESSAGES, MAX_FORK_DEPTH},
-    NewMessage, NewSession, SchemaV2, StorageError, V2Writer,
+    writer_v2::MESSAGE_PART_REASONING_SUMMARY, NewMessage, NewSession, SchemaV2, StorageError,
+    V2Writer,
 };
 use rusqlite::{params, OptionalExtension};
 use std::path::Path;
@@ -91,6 +92,7 @@ impl SessionManager {
         &self,
         parent: &SessionSummary,
         source: &[MessageRecord],
+        activity: &[AssistantActivity],
     ) -> Result<(), SessionError> {
         if source.len() > MAX_FORK_COPY_MESSAGES {
             return Err(SessionError::ForkHistoryTooLarge);
@@ -162,16 +164,18 @@ impl SessionManager {
             if !matches!(message.body, PayloadRef::Inline { .. }) {
                 return Err(SessionError::BranchPayloadUnsupported);
             }
-            V2Writer::append_message(
-                &mut conn,
-                &NewMessage {
-                    id: message.id,
-                    session_id: parent.id,
-                    role: message.role,
-                    body: message.body.clone(),
-                    created_at_us: message.created_at.as_datetime().timestamp_micros(),
-                },
-            )?;
+            let candidate = NewMessage {
+                id: message.id,
+                session_id: parent.id,
+                role: message.role,
+                body: message.body.clone(),
+                created_at_us: message.created_at.as_datetime().timestamp_micros(),
+            };
+            let summary = activity
+                .iter()
+                .find(|entry| entry.message_id == message.id)
+                .map(|entry| entry.reasoning_summary.as_str());
+            V2Writer::append_message_with_reasoning(&mut conn, &candidate, summary)?;
         }
         Ok(())
     }
@@ -203,6 +207,77 @@ impl SessionManager {
             },
         )?;
         Ok(message)
+    }
+
+    pub fn append_fork_assistant_with_reasoning(
+        &self,
+        session_id: SessionId,
+        text: String,
+        reasoning_summary: Option<String>,
+    ) -> Result<MessageRecord, SessionError> {
+        let body = PayloadRef::inline(text)
+            .map_err(|error| SessionError::Contract(error.to_string()))?;
+        let message = MessageRecord {
+            id: MessageId::new(),
+            session_id,
+            role: MessageRole::Assistant,
+            body,
+            created_at: opencode_rk_contracts::Timestamp::now(),
+        };
+        let mut conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
+        V2Writer::append_message_with_reasoning(
+            &mut conn,
+            &NewMessage {
+                id: message.id,
+                session_id,
+                role: MessageRole::Assistant,
+                body: message.body.clone(),
+                created_at_us: message.created_at.as_datetime().timestamp_micros(),
+            },
+            reasoning_summary.as_deref(),
+        )?;
+        Ok(message)
+    }
+
+    pub fn list_assistant_activity(
+        &self,
+        session_id: SessionId,
+        limit: usize,
+    ) -> Result<Vec<AssistantActivity>, SessionError> {
+        let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
+        let mut statement = conn.prepare(
+            "SELECT m.id,p.inline_data,p.blob_pk FROM messages m
+             JOIN sessions s ON s.pk=m.session_pk
+             JOIN message_parts mp ON mp.message_pk=m.pk AND mp.kind=?2
+             JOIN payloads p ON p.pk=mp.payload_pk
+             WHERE s.id=?1 AND m.role=2
+             ORDER BY m.seq ASC LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            params![
+                session_id.as_uuid().as_bytes().as_slice(),
+                MESSAGE_PART_REASONING_SUMMARY,
+                limit.clamp(1, 500) as i64,
+            ],
+            |row| {
+                let id: Vec<u8> = row.get(0)?;
+                let inline: Option<Vec<u8>> = row.get(1)?;
+                let blob_pk: Option<i64> = row.get(2)?;
+                if blob_pk.is_some() {
+                    return Err(rusqlite::Error::InvalidQuery);
+                }
+                let reasoning_summary = String::from_utf8(inline.unwrap_or_default())
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                let message_id = MessageId::from_uuid(
+                    uuid::Uuid::from_slice(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
+                );
+                Ok(AssistantActivity {
+                    message_id,
+                    reasoning_summary,
+                })
+            },
+        )?;
+        rows.collect::<Result<Vec<_>, _>>().map_err(SessionError::from)
     }
 
     pub fn retry_request(

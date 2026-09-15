@@ -2,7 +2,7 @@
 
 use std::time::Duration;
 
-use opencode_rk_contracts::MAX_INLINE_PAYLOAD_BYTES;
+use opencode_rk_contracts::{MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES};
 use reqwest::redirect::Policy;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -67,6 +67,10 @@ pub enum ResponsesError {
     EmptyOutput,
     #[error("assistant output exceeds {max} bytes")]
     OutputTooLarge { max: usize },
+    #[error("reasoning summary exceeds {max} bytes")]
+    ReasoningSummaryTooLarge { max: usize },
+    #[error("unsupported provider stream event: {0}")]
+    UnsupportedStreamEvent(String),
     #[error("provider stream failed: {0}")]
     StreamFailed(String),
     #[error("provider stream ended before a completion event")]
@@ -76,6 +80,7 @@ pub enum ResponsesError {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResponsesStreamEvent {
     OutputTextDelta(String),
+    ReasoningSummaryDelta(String),
     Completed,
 }
 
@@ -84,6 +89,7 @@ pub struct OpenAiResponsesStream {
     pending: Vec<u8>,
     received_bytes: usize,
     output_bytes: usize,
+    reasoning_summary_bytes: usize,
     completed: bool,
 }
 
@@ -166,7 +172,7 @@ impl OpenAiResponsesClient {
         let payload = json!({
             "model": model,
             "input": input,
-            "reasoning": { "effort": reasoning_effort },
+            "reasoning": { "effort": reasoning_effort, "summary": "auto" },
             "max_output_tokens": self.max_output_tokens,
             "stream": true,
         });
@@ -200,6 +206,7 @@ impl OpenAiResponsesClient {
             pending: Vec::new(),
             received_bytes: 0,
             output_bytes: 0,
+            reasoning_summary_bytes: 0,
             completed: false,
         })
     }
@@ -293,6 +300,21 @@ impl OpenAiResponsesStream {
                     delta.to_owned(),
                 )))
             }
+            Some("response.reasoning_summary_text.delta") => {
+                let delta = value.get("delta").and_then(Value::as_str).ok_or_else(|| {
+                    ResponsesError::InvalidJson("reasoning summary delta is missing text".into())
+                })?;
+                self.reasoning_summary_bytes =
+                    self.reasoning_summary_bytes.saturating_add(delta.len());
+                if self.reasoning_summary_bytes > MAX_REASONING_SUMMARY_BYTES {
+                    return Err(ResponsesError::ReasoningSummaryTooLarge {
+                        max: MAX_REASONING_SUMMARY_BYTES,
+                    });
+                }
+                Ok(Some(ResponsesStreamEvent::ReasoningSummaryDelta(
+                    delta.to_owned(),
+                )))
+            }
             Some("response.completed") => {
                 if self.output_bytes == 0 {
                     return Err(ResponsesError::EmptyOutput);
@@ -310,7 +332,23 @@ impl OpenAiResponsesStream {
                     .to_owned();
                 Err(ResponsesError::StreamFailed(message))
             }
-            _ => Ok(None),
+            Some(
+                "response.created"
+                | "response.queued"
+                | "response.in_progress"
+                | "response.output_item.added"
+                | "response.content_part.added"
+                | "response.output_text.done"
+                | "response.content_part.done"
+                | "response.output_item.done"
+                | "response.reasoning_summary_part.added"
+                | "response.reasoning_summary_part.done"
+                | "response.reasoning_summary_text.done",
+            ) => Ok(None),
+            Some(other) => Err(ResponsesError::UnsupportedStreamEvent(other.to_owned())),
+            None => Err(ResponsesError::InvalidJson(
+                "provider stream event is missing type".to_owned(),
+            )),
         }
     }
 }

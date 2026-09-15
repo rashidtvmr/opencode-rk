@@ -46,8 +46,8 @@ pub mod ui_013;
 
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
-    MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary,
-    Timestamp, MAX_TITLE_BYTES,
+    AssistantActivity, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState,
+    SessionSummary, Timestamp, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES,
 };
 use opencode_rk_storage::{NewMessage, NewSession, Storage, StorageError, V2Writer};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -400,6 +400,44 @@ impl SessionService {
         run_blocking(move || storage.append_message(&candidate)).await?;
         Ok(message)
     }
+    pub async fn append_assistant_with_reasoning(
+        &self,
+        session_id: SessionId,
+        text: impl Into<String>,
+        reasoning_summary: Option<String>,
+    ) -> Result<MessageRecord, SessionError> {
+        let text = text.into();
+        if reasoning_summary
+            .as_ref()
+            .is_some_and(|summary| summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES)
+        {
+            return Err(SessionError::Contract(
+                "reasoning summary exceeds the transcript activity bound".to_owned(),
+            ));
+        }
+        if let Some(manager) = self.fork_manager_for(session_id).await? {
+            return run_session_blocking(move || {
+                manager.append_fork_assistant_with_reasoning(session_id, text, reasoning_summary)
+            })
+            .await;
+        }
+        let body =
+            PayloadRef::inline(text).map_err(|e| SessionError::Contract(e.to_string()))?;
+        let message = MessageRecord {
+            id: MessageId::new(),
+            session_id,
+            role: MessageRole::Assistant,
+            body,
+            created_at: Timestamp::now(),
+        };
+        let storage = Arc::clone(&self.storage);
+        let candidate = message.clone();
+        run_blocking(move || {
+            storage.append_message_with_reasoning(&candidate, reasoning_summary.as_deref())
+        })
+        .await?;
+        Ok(message)
+    }
     pub async fn append_blob(
         &self,
         session_id: SessionId,
@@ -441,6 +479,18 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         Ok(run_blocking(move || storage.list_messages(session_id, limit)).await?)
     }
+    pub async fn assistant_activity(
+        &self,
+        session_id: SessionId,
+        limit: usize,
+    ) -> Result<Vec<AssistantActivity>, SessionError> {
+        if let Some(manager) = self.fork_manager_for(session_id).await? {
+            return run_session_blocking(move || manager.list_assistant_activity(session_id, limit))
+                .await;
+        }
+        let storage = Arc::clone(&self.storage);
+        Ok(run_blocking(move || storage.list_assistant_activity(session_id, limit)).await?)
+    }
     pub async fn branch_from_message(
         &self,
         parent_session_id: SessionId,
@@ -473,8 +523,10 @@ impl SessionService {
             .await?;
             let manager_for_sync = Arc::clone(&manager);
             let parent_for_sync = parent.clone();
+            let storage = Arc::clone(&self.storage);
+            let activity = run_blocking(move || storage.list_assistant_activity(parent_session_id, 500)).await?;
             run_session_blocking(move || {
-                manager_for_sync.synchronize_legacy_shadow(&parent_for_sync, &prefix)
+                manager_for_sync.synchronize_legacy_shadow(&parent_for_sync, &prefix, &activity)
             })
             .await?;
         }
@@ -544,8 +596,10 @@ impl SessionService {
             let shadow_prefix = prefix[..request_ordinal].to_vec();
             let manager_for_sync = Arc::clone(&manager);
             let parent_for_sync = parent.clone();
+            let storage = Arc::clone(&self.storage);
+            let activity = run_blocking(move || storage.list_assistant_activity(parent_session_id, 500)).await?;
             run_session_blocking(move || {
-                manager_for_sync.synchronize_legacy_shadow(&parent_for_sync, &shadow_prefix)
+                manager_for_sync.synchronize_legacy_shadow(&parent_for_sync, &shadow_prefix, &activity)
             })
             .await?;
             (request_message_id, request_text)

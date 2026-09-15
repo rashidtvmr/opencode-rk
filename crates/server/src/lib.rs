@@ -66,6 +66,7 @@ pub fn router(state: AppState) -> Router {
             "/api/sessions/{id}/messages",
             get(list_messages).post(append_message),
         )
+        .route("/api/sessions/{id}/activity", get(list_assistant_activity))
         .route(
             "/api/sessions/{id}/messages/{message_id}/branch",
             post(branch_session),
@@ -218,6 +219,21 @@ async fn list_messages(
         .await
         .map_err(ApiFailure::internal)?;
     Ok(Json(json!({"messages":messages})))
+}
+
+async fn list_assistant_activity(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<MessageListParams>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    let activity = state
+        .sessions
+        .assistant_activity(id, params.limit.unwrap_or(100).clamp(1, 500))
+        .await
+        .map_err(ApiFailure::internal)?;
+    Ok(Json(json!({"activity": activity})))
 }
 
 #[derive(Debug, Deserialize)]
@@ -399,6 +415,7 @@ struct TurnStreamState {
     session_id: SessionId,
     user_message: Option<MessageRecord>,
     assistant_text: String,
+    reasoning_summary: String,
     stage: TurnStreamStage,
     _permit: SemaphorePermit<'static>,
 }
@@ -476,6 +493,7 @@ async fn create_turn_stream(
             session_id: id,
             user_message: Some(user_message),
             assistant_text: String::new(),
+            reasoning_summary: String::new(),
             stage: TurnStreamStage::User,
             _permit: permit,
         },
@@ -507,14 +525,27 @@ async fn create_turn_stream(
                                 state,
                             ));
                         }
+                        Ok(Some(ResponsesStreamEvent::ReasoningSummaryDelta(delta))) => {
+                            state.reasoning_summary.push_str(&delta);
+                            return Some((
+                                Ok::<Bytes, Infallible>(ndjson(json!({
+                                    "type": "reasoning_summary_delta",
+                                    "delta": delta,
+                                }))),
+                                state,
+                            ));
+                        }
                         Ok(Some(ResponsesStreamEvent::Completed)) => {
                             let assistant_text = std::mem::take(&mut state.assistant_text);
+                            let reasoning_summary = std::mem::take(&mut state.reasoning_summary);
+                            let persisted_summary = (!reasoning_summary.is_empty())
+                                .then_some(reasoning_summary);
                             match state
                                 .sessions
-                                .append_text(
+                                .append_assistant_with_reasoning(
                                     state.session_id,
-                                    MessageRole::Assistant,
                                     assistant_text,
+                                    persisted_summary.clone(),
                                 )
                                 .await
                             {
@@ -524,6 +555,7 @@ async fn create_turn_stream(
                                         Ok::<Bytes, Infallible>(ndjson(json!({
                                             "type": "assistant_message",
                                             "message": message,
+                                            "reasoning_summary": persisted_summary,
                                         }))),
                                         state,
                                     ));
@@ -635,6 +667,8 @@ fn provider_failure(error: ResponsesError) -> ApiFailure {
         | ResponsesError::InvalidJson(_)
         | ResponsesError::EmptyOutput
         | ResponsesError::OutputTooLarge { .. }
+        | ResponsesError::ReasoningSummaryTooLarge { .. }
+        | ResponsesError::UnsupportedStreamEvent(_)
         | ResponsesError::StreamFailed(_)
         | ResponsesError::UnexpectedStreamEnd => ApiFailure::bad_gateway(error.to_string()),
     }
