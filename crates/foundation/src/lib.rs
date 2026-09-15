@@ -2,9 +2,11 @@
 #![forbid(unsafe_code)]
 pub mod auto_budget;
 pub mod config;
+pub mod config_overlay;
 pub mod delegation;
 pub mod effect;
 pub mod inbuilt_optout;
+pub mod install_meta;
 pub mod lifecycle;
 pub mod ops_budget;
 pub mod ops_guard;
@@ -12,12 +14,15 @@ pub mod ops_lock;
 pub mod ops_health;
 pub mod ops_metrics;
 pub mod ops_ping;
+pub mod ops_replay;
 pub mod ops_runtime;
+pub mod ops_repo_ref;
 pub mod ops_scope;
 pub mod ops_seq;
 pub mod ops_state;
 pub mod rel_check;
 pub mod rel_gate;
+pub mod repo_ref_ext;
 pub mod resource_ledger;
 pub mod runtime_report;
 pub mod stats_collect;
