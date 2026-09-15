@@ -2486,7 +2486,7 @@
     {
       "id": "UI-001",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2500,7 +2500,7 @@
     {
       "id": "UI-002",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2516,7 +2516,7 @@
       "requirementIds": [
         "REQ-023"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2532,7 +2532,7 @@
       "requirementIds": [
         "REQ-008"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2548,7 +2548,7 @@
       "requirementIds": [
         "REQ-013"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2564,7 +2564,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2580,7 +2580,7 @@
       "requirementIds": [
         "REQ-018"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2596,7 +2596,7 @@
       "requirementIds": [
         "REQ-021"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2612,7 +2612,7 @@
       "requirementIds": [
         "REQ-019"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2628,7 +2628,7 @@
       "requirementIds": [
         "REQ-017"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2645,7 +2645,7 @@
         "REQ-029",
         "REQ-032"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2661,7 +2661,7 @@
       "requirementIds": [
         "REQ-005"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2675,7 +2675,7 @@
     {
       "id": "UI-013",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
