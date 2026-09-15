@@ -1598,7 +1598,7 @@
     {
       "id": "ROUTE-006",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1628,7 +1628,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1642,7 +1642,7 @@
     {
       "id": "ROUTE-009",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1656,7 +1656,7 @@
     {
       "id": "ROUTE-010",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
