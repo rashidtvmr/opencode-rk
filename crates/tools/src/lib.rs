@@ -23,3 +23,8 @@ pub mod skill_commands;
 pub mod ext_lifecycle;
 pub mod ext_commands;
 pub mod ext_hooks;
+pub mod ext_compat;
+pub mod ext_secure;
+pub mod ext_rate;
+pub mod rel_notes;
+pub mod auto_steps;

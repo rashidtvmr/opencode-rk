@@ -9,6 +9,9 @@ pub mod app_client;
 pub mod web_config;
 pub mod desktop_bridge;
 pub mod enterprise_link;
+pub mod auto_loop;
+pub mod rel_verify;
+pub mod auto_report;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
