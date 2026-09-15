@@ -52,6 +52,18 @@ No changes to the user's existing OpenCode database in the implementation loop.
 Use generated test datasets or an explicitly provided read-only copy. Never run
 host-destructive test commands; use disposable restricted fixtures.
 
+## Strict no-stub / real-code policy (binding on main agent and all subagents)
+
+- No stubs, placeholders, `todo!()`, `unimplemented!()`, mock-only modules,
+  or dead code committed as "done". Every owned file must contain real,
+  functional code wired into its callers.
+- Tests must assert real behavior against the real implementation. No mocked
+  success, no weakened assertions, no fabricated logs.
+- Tests are frozen after RED. NEVER edit a test to make code pass. Strictly fix
+  the implementation code until the frozen tests pass.
+- A lane reporting GREEN with stub content, edited tests, or missing wiring is
+  FAIL. Re-delegate until the gate passes on real code.
+
 ## Scratchpad format
 
 Keep `worklog/<TASK-ID>.md` in the candidate: claim, source evidence, observed
