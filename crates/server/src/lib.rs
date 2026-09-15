@@ -3,17 +3,28 @@
 pub mod app_client;
 pub mod auto_loop;
 pub mod auto_report;
+pub mod auto_window;
 pub mod clients;
+pub mod control_decode;
 pub mod daemon;
 pub mod desktop_bridge;
 pub mod enterprise_link;
+pub mod error_translate;
 pub mod event_bus;
+pub mod origin_check;
+pub mod rel_stamp;
 pub mod rel_verify;
 pub mod remote_ledger;
 pub mod repo_ops;
+pub mod route_table;
 pub mod web_assets;
 pub mod web_config;
+pub mod web_cors;
 pub mod web_footer;
+pub mod web_headers;
+pub mod web_host;
+pub mod web_route;
+pub mod web_suffix;
 use axum::{
     body::{Body, Bytes},
     extract::{Path, Query, State},

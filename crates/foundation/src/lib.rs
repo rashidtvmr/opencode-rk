@@ -4,13 +4,24 @@ pub mod auto_budget;
 pub mod config;
 pub mod delegation;
 pub mod effect;
+pub mod inbuilt_optout;
 pub mod lifecycle;
+pub mod ops_budget;
 pub mod ops_guard;
+pub mod ops_lock;
 pub mod ops_health;
+pub mod ops_metrics;
+pub mod ops_ping;
 pub mod ops_runtime;
 pub mod ops_scope;
+pub mod ops_seq;
+pub mod ops_state;
+pub mod rel_check;
 pub mod rel_gate;
+pub mod resource_ledger;
 pub mod runtime_report;
+pub mod stats_collect;
+pub mod stats_report;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,

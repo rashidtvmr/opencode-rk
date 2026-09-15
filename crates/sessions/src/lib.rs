@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 pub mod auto_compact;
 pub mod auto_lease;
+pub mod auto_sched;
 pub mod import;
 pub mod index;
 pub mod legacy_view;
@@ -12,10 +13,20 @@ pub mod query;
 pub mod reference;
 pub mod remote_share;
 pub mod share;
+pub mod share_audit;
+pub mod share_count;
+pub mod share_expiry;
+pub mod share_invite;
+pub mod share_list;
+pub mod share_merge;
 pub mod share_policy;
+pub mod share_queue;
+pub mod share_revoke;
+pub mod share_scope;
 pub mod share_token;
 pub mod state;
 pub mod store;
+pub mod task_quota;
 pub mod tui_state;
 mod types;
 pub mod ui_001;

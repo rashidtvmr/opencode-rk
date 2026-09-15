@@ -2,9 +2,11 @@
 #![forbid(unsafe_code)]
 
 pub mod cache;
+pub mod config;
 pub mod events;
 pub mod health;
 pub mod registry;
+pub mod risk_graph;
 pub mod search;
 pub mod stats;
 
