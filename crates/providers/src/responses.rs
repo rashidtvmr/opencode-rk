@@ -67,6 +67,24 @@ pub enum ResponsesError {
     EmptyOutput,
     #[error("assistant output exceeds {max} bytes")]
     OutputTooLarge { max: usize },
+    #[error("provider stream failed: {0}")]
+    StreamFailed(String),
+    #[error("provider stream ended before a completion event")]
+    UnexpectedStreamEnd,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResponsesStreamEvent {
+    OutputTextDelta(String),
+    Completed,
+}
+
+pub struct OpenAiResponsesStream {
+    response: reqwest::Response,
+    pending: Vec<u8>,
+    received_bytes: usize,
+    output_bytes: usize,
+    completed: bool,
 }
 
 /// One reusable, redirect-disabled OpenAI Responses client.
@@ -136,6 +154,191 @@ impl OpenAiResponsesClient {
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
         extract_output_text(&value)
     }
+
+    pub async fn stream(
+        &self,
+        model: &str,
+        reasoning_effort: &str,
+        input: &[ResponsesInput],
+    ) -> Result<OpenAiResponsesStream, ResponsesError> {
+        validate_request(model, reasoning_effort, input)?;
+
+        let payload = json!({
+            "model": model,
+            "input": input,
+            "reasoning": { "effort": reasoning_effort },
+            "max_output_tokens": self.max_output_tokens,
+            "stream": true,
+        });
+        let mut response = self
+            .http
+            .post(format!("{}/responses", self.base_url))
+            .bearer_auth(&self.api_key)
+            .json(&payload)
+            .send()
+            .await
+            .map_err(|error| ResponsesError::Request(error.to_string()))?;
+        let status = response.status();
+        if !status.is_success() {
+            let body = read_bounded_body(&mut response).await?;
+            return Err(ResponsesError::Upstream {
+                status: status.as_u16(),
+                message: upstream_message(&body),
+            });
+        }
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_RESPONSES_BODY_BYTES as u64)
+        {
+            return Err(ResponsesError::ResponseTooLarge {
+                max: MAX_RESPONSES_BODY_BYTES,
+            });
+        }
+
+        Ok(OpenAiResponsesStream {
+            response,
+            pending: Vec::new(),
+            received_bytes: 0,
+            output_bytes: 0,
+            completed: false,
+        })
+    }
+}
+
+impl OpenAiResponsesStream {
+    pub async fn next_event(&mut self) -> Result<Option<ResponsesStreamEvent>, ResponsesError> {
+        if self.completed {
+            return Ok(None);
+        }
+
+        loop {
+            if let Some(event) = take_sse_event(&mut self.pending) {
+                if let Some(parsed) = self.parse_event(&event)? {
+                    return Ok(Some(parsed));
+                }
+                continue;
+            }
+
+            match self
+                .response
+                .chunk()
+                .await
+                .map_err(|error| ResponsesError::Request(error.to_string()))?
+            {
+                Some(chunk) => {
+                    self.received_bytes = self.received_bytes.saturating_add(chunk.len());
+                    if self.received_bytes > MAX_RESPONSES_BODY_BYTES {
+                        return Err(ResponsesError::ResponseTooLarge {
+                            max: MAX_RESPONSES_BODY_BYTES,
+                        });
+                    }
+                    self.pending.extend_from_slice(&chunk);
+                }
+                None => {
+                    if self.pending.iter().any(|byte| !byte.is_ascii_whitespace()) {
+                        return Err(ResponsesError::UnexpectedStreamEnd);
+                    }
+                    return Err(ResponsesError::UnexpectedStreamEnd);
+                }
+            }
+        }
+    }
+
+    fn parse_event(
+        &mut self,
+        event: &[u8],
+    ) -> Result<Option<ResponsesStreamEvent>, ResponsesError> {
+        let event = std::str::from_utf8(event)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        let mut event_name = None;
+        let mut data = String::new();
+
+        for line in event.lines() {
+            let line = line.trim_end_matches('\r');
+            if line.starts_with(':') {
+                continue;
+            }
+            if let Some(value) = line.strip_prefix("event:") {
+                event_name = Some(value.trim());
+            } else if let Some(value) = line.strip_prefix("data:") {
+                if !data.is_empty() {
+                    data.push('\n');
+                }
+                data.push_str(value.trim_start());
+            }
+        }
+
+        if data.is_empty() {
+            return Ok(None);
+        }
+        if data == "[DONE]" {
+            return Ok(None);
+        }
+
+        let value: Value = serde_json::from_str(&data)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        let event_type = value.get("type").and_then(Value::as_str).or(event_name);
+        match event_type {
+            Some("response.output_text.delta") => {
+                let delta = value.get("delta").and_then(Value::as_str).ok_or_else(|| {
+                    ResponsesError::InvalidJson("stream delta is missing text".into())
+                })?;
+                self.output_bytes = self.output_bytes.saturating_add(delta.len());
+                if self.output_bytes > MAX_INLINE_PAYLOAD_BYTES {
+                    return Err(ResponsesError::OutputTooLarge {
+                        max: MAX_INLINE_PAYLOAD_BYTES,
+                    });
+                }
+                Ok(Some(ResponsesStreamEvent::OutputTextDelta(
+                    delta.to_owned(),
+                )))
+            }
+            Some("response.completed") => {
+                if self.output_bytes == 0 {
+                    return Err(ResponsesError::EmptyOutput);
+                }
+                self.completed = true;
+                Ok(Some(ResponsesStreamEvent::Completed))
+            }
+            Some("response.failed") | Some("error") => {
+                let message = value
+                    .pointer("/response/error/message")
+                    .or_else(|| value.pointer("/error/message"))
+                    .or_else(|| value.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("provider stream failed")
+                    .to_owned();
+                Err(ResponsesError::StreamFailed(message))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+fn take_sse_event(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
+    let lf = buffer
+        .windows(2)
+        .position(|window| window == b"\n\n")
+        .map(|index| (index, 2));
+    let crlf = buffer
+        .windows(4)
+        .position(|window| window == b"\r\n\r\n")
+        .map(|index| (index, 4));
+    let (index, delimiter_len) = match (lf, crlf) {
+        (Some(left), Some(right)) => {
+            if left.0 <= right.0 {
+                left
+            } else {
+                right
+            }
+        }
+        (Some(found), None) | (None, Some(found)) => found,
+        (None, None) => return None,
+    };
+
+    let event = buffer[..index].to_vec();
+    buffer.drain(..index + delimiter_len);
+    Some(event)
 }
 
 fn validate_request(

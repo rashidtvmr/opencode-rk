@@ -31,11 +31,18 @@ opencode-rk models sync
 OPENAI_API_KEY=... opencode-rk serve
 ```
 
-Turn responses are currently returned after the provider request completes.
-Incremental streaming, attachments, screenshots, voice input, and native turn
-adapters for providers other than OpenAI remain separate runtime work and are not
-simulated by the UI. Older daemons that do not expose `/turns` retain the durable
-message-only fallback.
+OpenAI turns stream incrementally through
+`POST /api/sessions/{id}/turns/stream`. The native server consumes real Responses
+API SSE events and exposes bounded NDJSON to the browser; the UI renders real text
+deltas as they arrive and reconciles them to the final persisted assistant
+message. Dropping the browser response also drops the native upstream request;
+there is no detached background stream producer. The completed JSON `/turns`
+endpoint remains available, and older daemons that do not expose the streaming
+route fall back to it (then to the durable message-only endpoint on older
+message-only daemons).
+
+Attachments, screenshots, voice input, and native turn adapters for providers
+other than OpenAI remain separate runtime work and are not simulated by the UI.
 
 Accessibility is treated as an application contract rather than assumed from the
 component library: the shell includes semantic landmarks, skip navigation,

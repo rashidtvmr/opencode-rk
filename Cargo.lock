@@ -961,6 +961,7 @@ name = "opencode-rk-server"
 version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
+ "futures-util",
  "opencode-rk-catalog",
  "opencode-rk-contracts",
  "opencode-rk-providers",

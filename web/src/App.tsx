@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ChangeEvent,
   type FormEvent,
@@ -37,7 +38,7 @@ import {
   listSessions,
   modelKey,
   renameSession,
-  runTurn,
+  runTurnStream,
   type HealthResponse,
   type MessageRecord,
   type ModelSummary,
@@ -75,6 +76,8 @@ function App() {
   const [messageError, setMessageError] = useState('')
   const [editingSessionId, setEditingSessionId] = useState<string | null>(null)
   const [editingTitle, setEditingTitle] = useState('')
+  const [streamingAssistantText, setStreamingAssistantText] = useState('')
+  const activeTurnRef = useRef<{ sessionId: string; controller: AbortController } | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -125,6 +128,23 @@ function App() {
 
     return () => controller.abort()
   }, [selectedSessionId])
+
+  useEffect(() => {
+    const active = activeTurnRef.current
+    if (active && active.sessionId !== selectedSessionId) {
+      active.controller.abort()
+      activeTurnRef.current = null
+      setStreamingAssistantText('')
+    }
+  }, [selectedSessionId])
+
+  useEffect(
+    () => () => {
+      activeTurnRef.current?.controller.abort()
+      activeTurnRef.current = null
+    },
+    [],
+  )
 
   const filteredSessions = useMemo(() => {
     const needle = query.trim().toLowerCase()
@@ -191,13 +211,42 @@ function App() {
       return false
     }
 
+    const sessionId = selectedSessionId
+    activeTurnRef.current?.controller.abort()
+    const controller = new AbortController()
+    activeTurnRef.current = { sessionId, controller }
+    setStreamingAssistantText('')
+    const previousIds = new Set(messages.map((message) => message.id))
+
     try {
-      const turn = await runTurn(selectedSessionId, text, selectedModel, reasoningEffort)
-      setMessages((current) => [
-        ...current,
-        turn.userMessage,
-        ...(turn.assistantMessage ? [turn.assistantMessage] : []),
-      ])
+      const turn = await runTurnStream(
+        sessionId,
+        text,
+        selectedModel,
+        reasoningEffort,
+        {
+          onUserMessage: (message) => {
+            if (activeTurnRef.current?.controller !== controller) return
+            setMessages((current) =>
+              current.some((item) => item.id === message.id) ? current : [...current, message],
+            )
+          },
+          onAssistantDelta: (delta) => {
+            if (activeTurnRef.current?.controller !== controller) return
+            setStreamingAssistantText((current) => current + delta)
+          },
+          onAssistantMessage: (message) => {
+            if (activeTurnRef.current?.controller !== controller) return
+            setStreamingAssistantText('')
+            setMessages((current) =>
+              current.some((item) => item.id === message.id) ? current : [...current, message],
+            )
+          },
+        },
+        controller.signal,
+      )
+      if (activeTurnRef.current?.controller !== controller) return false
+      activeTurnRef.current = null
       setMessageLoadState('ready')
       setNotice(
         turn.executed
@@ -206,10 +255,12 @@ function App() {
       )
       return true
     } catch (cause) {
-      const previousIds = new Set(messages.map((message) => message.id))
+      if (controller.signal.aborted) return false
+      if (activeTurnRef.current?.controller === controller) activeTurnRef.current = null
+      setStreamingAssistantText('')
       let persisted = false
       try {
-        const refreshed = await listMessages(selectedSessionId, 200)
+        const refreshed = await listMessages(sessionId, 200)
         persisted = refreshed.some(
           (message) =>
             !previousIds.has(message.id) &&
@@ -507,8 +558,12 @@ function App() {
                   </p>
                 ) : null}
 
-                {messages.length > 0 ? (
-                  <ol className="codex-transcript" aria-label="Conversation messages">
+                {messages.length > 0 || streamingAssistantText ? (
+                  <ol
+                    className="codex-transcript"
+                    aria-label="Conversation messages"
+                    aria-busy={streamingAssistantText ? true : undefined}
+                  >
                     {messages.map((message) => (
                       <li
                         key={message.id}
@@ -520,6 +575,14 @@ function App() {
                         </div>
                       </li>
                     ))}
+                    {streamingAssistantText ? (
+                      <li className="codex-message codex-message-assistant">
+                        <div className="codex-message-content">
+                          <span className="sr-only">assistant: </span>
+                          {streamingAssistantText}
+                        </div>
+                      </li>
+                    ) : null}
                   </ol>
                 ) : null}
               </>

@@ -14,23 +14,27 @@ pub mod repo_ops;
 pub mod web_config;
 pub mod web_footer;
 use axum::{
+    body::{Body, Bytes},
     extract::{Path, Query, State},
-    http::StatusCode,
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
+use futures_util::stream;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
-use opencode_rk_contracts::{MessageRole, PayloadRef, SessionId, WIRE_SCHEMA_VERSION};
+use opencode_rk_contracts::{
+    MessageRecord, MessageRole, PayloadRef, SessionId, WIRE_SCHEMA_VERSION,
+};
 use opencode_rk_providers::responses::{
-    OpenAiResponsesClient, ResponsesError, ResponsesInput, ResponsesRole,
-    MAX_RESPONSES_INPUT_MESSAGES,
+    OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesInput, ResponsesRole,
+    ResponsesStreamEvent, MAX_RESPONSES_INPUT_MESSAGES,
 };
 use opencode_rk_sessions::SessionService;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{str::FromStr, sync::Arc};
-use tokio::sync::Semaphore;
+use std::{convert::Infallible, str::FromStr, sync::Arc};
+use tokio::sync::{Semaphore, SemaphorePermit};
 
 static TURN_PERMITS: Semaphore = Semaphore::const_new(2);
 #[derive(Clone)]
@@ -51,6 +55,7 @@ pub fn router(state: AppState) -> Router {
             get(list_messages).post(append_message),
         )
         .route("/api/sessions/{id}/turns", post(create_turn))
+        .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
         .with_state(state)
 }
 async fn health() -> Json<Value> {
@@ -292,6 +297,206 @@ async fn create_turn(
     ))
 }
 
+struct TurnStreamState {
+    provider: OpenAiResponsesStream,
+    sessions: SessionService,
+    session_id: SessionId,
+    user_message: Option<MessageRecord>,
+    assistant_text: String,
+    stage: TurnStreamStage,
+    _permit: SemaphorePermit<'static>,
+}
+
+#[derive(Clone, Copy)]
+enum TurnStreamStage {
+    User,
+    Provider,
+    Done,
+}
+
+async fn create_turn_stream(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<CreateTurnBody>,
+) -> Result<Response, ApiFailure> {
+    let permit = TURN_PERMITS
+        .try_acquire()
+        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let id = parse_session_id(&id)?;
+    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+
+    if body.text.trim().is_empty() {
+        return Err(ApiFailure::bad_request("turn text must not be empty"));
+    }
+    let (provider_id, model_id) = body
+        .model
+        .split_once('/')
+        .filter(|(provider, model)| !provider.is_empty() && !model.is_empty())
+        .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
+    if provider_id != "openai" {
+        return Err(ApiFailure::bad_request(format!(
+            "provider '{provider_id}' does not have a native turn adapter yet"
+        )));
+    }
+    if !matches!(
+        body.reasoning_effort.as_str(),
+        "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    ) {
+        return Err(ApiFailure::bad_request("unsupported reasoning effort"));
+    }
+
+    let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
+    let user_message = state
+        .sessions
+        .append_text(id, MessageRole::User, body.text)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let history = state
+        .sessions
+        .messages(id, 500)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let mut input = responses_history(&history)?;
+    if !history.iter().any(|message| message.id == user_message.id) {
+        if input.len() == MAX_RESPONSES_INPUT_MESSAGES {
+            input.remove(0);
+        }
+        let PayloadRef::Inline { text } = &user_message.body else {
+            return Err(ApiFailure::internal(
+                "newly appended user message was not stored inline",
+            ));
+        };
+        input.push(ResponsesInput::new(ResponsesRole::User, text.clone()));
+    }
+    let provider = provider
+        .stream(model_id, &body.reasoning_effort, &input)
+        .await
+        .map_err(provider_failure)?;
+
+    let stream = stream::unfold(
+        TurnStreamState {
+            provider,
+            sessions: state.sessions,
+            session_id: id,
+            user_message: Some(user_message),
+            assistant_text: String::new(),
+            stage: TurnStreamStage::User,
+            _permit: permit,
+        },
+        |mut state| async move {
+            loop {
+                match state.stage {
+                    TurnStreamStage::User => {
+                        state.stage = TurnStreamStage::Provider;
+                        let message = state
+                            .user_message
+                            .take()
+                            .expect("stream user message is emitted once");
+                        return Some((
+                            Ok::<Bytes, Infallible>(ndjson(json!({
+                                "type": "user_message",
+                                "message": message,
+                            }))),
+                            state,
+                        ));
+                    }
+                    TurnStreamStage::Provider => match state.provider.next_event().await {
+                        Ok(Some(ResponsesStreamEvent::OutputTextDelta(delta))) => {
+                            state.assistant_text.push_str(&delta);
+                            return Some((
+                                Ok::<Bytes, Infallible>(ndjson(json!({
+                                    "type": "assistant_delta",
+                                    "delta": delta,
+                                }))),
+                                state,
+                            ));
+                        }
+                        Ok(Some(ResponsesStreamEvent::Completed)) => {
+                            let assistant_text = std::mem::take(&mut state.assistant_text);
+                            match state
+                                .sessions
+                                .append_text(
+                                    state.session_id,
+                                    MessageRole::Assistant,
+                                    assistant_text,
+                                )
+                                .await
+                            {
+                                Ok(message) => {
+                                    state.stage = TurnStreamStage::Done;
+                                    return Some((
+                                        Ok::<Bytes, Infallible>(ndjson(json!({
+                                            "type": "assistant_message",
+                                            "message": message,
+                                        }))),
+                                        state,
+                                    ));
+                                }
+                                Err(error) => {
+                                    state.stage = TurnStreamStage::Done;
+                                    return Some((
+                                        Ok::<Bytes, Infallible>(stream_error(
+                                            "internal_error",
+                                            error.to_string(),
+                                        )),
+                                        state,
+                                    ));
+                                }
+                            }
+                        }
+                        Ok(None) => {
+                            state.stage = TurnStreamStage::Done;
+                            return Some((
+                                Ok::<Bytes, Infallible>(stream_error(
+                                    "bad_gateway",
+                                    "provider stream ended before completion",
+                                )),
+                                state,
+                            ));
+                        }
+                        Err(error) => {
+                            let failure = provider_failure(error);
+                            state.stage = TurnStreamStage::Done;
+                            return Some((
+                                Ok::<Bytes, Infallible>(stream_error(
+                                    failure.code,
+                                    failure.message,
+                                )),
+                                state,
+                            ));
+                        }
+                    },
+                    TurnStreamStage::Done => return None,
+                }
+            }
+        },
+    );
+
+    Ok((
+        StatusCode::CREATED,
+        [
+            (header::CONTENT_TYPE, "application/x-ndjson"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        Body::from_stream(stream),
+    )
+        .into_response())
+}
+
+fn ndjson(value: Value) -> Bytes {
+    let mut bytes = serde_json::to_vec(&value).expect("stream event serialization");
+    bytes.push(b'\n');
+    Bytes::from(bytes)
+}
+
+fn stream_error(code: &'static str, message: impl Into<String>) -> Bytes {
+    ndjson(json!({
+        "type": "error",
+        "code": code,
+        "message": message.into(),
+    }))
+}
+
 fn responses_history(
     history: &[opencode_rk_contracts::MessageRecord],
 ) -> Result<Vec<ResponsesInput>, ApiFailure> {
@@ -333,7 +538,9 @@ fn provider_failure(error: ResponsesError) -> ApiFailure {
         | ResponsesError::ResponseTooLarge { .. }
         | ResponsesError::InvalidJson(_)
         | ResponsesError::EmptyOutput
-        | ResponsesError::OutputTooLarge { .. } => ApiFailure::bad_gateway(error.to_string()),
+        | ResponsesError::OutputTooLarge { .. }
+        | ResponsesError::StreamFailed(_)
+        | ResponsesError::UnexpectedStreamEnd => ApiFailure::bad_gateway(error.to_string()),
     }
 }
 fn parse_session_id(value: &str) -> Result<SessionId, ApiFailure> {

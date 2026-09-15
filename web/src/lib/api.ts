@@ -171,12 +171,13 @@ export async function listMessages(id: string, limit = 200, signal?: AbortSignal
     .filter((message): message is MessageRecord => Boolean(message))
 }
 
-export async function appendMessage(id: string, text: string) {
+export async function appendMessage(id: string, text: string, signal?: AbortSignal) {
   const payload = await request<{ message: unknown }>(
     `/api/sessions/${encodeURIComponent(id)}/messages`,
     {
       method: 'POST',
       body: JSON.stringify({ text }),
+      signal,
     },
   )
   const message = normalizeMessage(payload.message)
@@ -190,11 +191,96 @@ export interface TurnResult {
   executed: boolean
 }
 
+export interface TurnStreamHandlers {
+  onUserMessage?: (message: MessageRecord) => void
+  onAssistantDelta?: (delta: string) => void
+  onAssistantMessage?: (message: MessageRecord) => void
+}
+
+const MAX_TURN_STREAM_BYTES = 2 * 1024 * 1024
+const MAX_TURN_STREAM_LINE_BYTES = 256 * 1024
+
+function streamError(message: string) {
+  return new Error(message)
+}
+
+function parseTurnStreamEvent(
+  line: string,
+  handlers: TurnStreamHandlers,
+  state: {
+    userMessage: MessageRecord | null
+    assistantMessage: MessageRecord | null
+    assistantText: string
+  },
+) {
+  let value: unknown
+  try {
+    value = JSON.parse(line)
+  } catch {
+    throw streamError('Server returned invalid turn stream data')
+  }
+  if (!value || typeof value !== 'object') {
+    throw streamError('Server returned invalid turn stream data')
+  }
+
+  const event = value as Record<string, unknown>
+  switch (event.type) {
+    case 'user_message': {
+      const message = normalizeMessage(event.message)
+      if (!message || message.role !== 'user') {
+        throw streamError('Server returned an invalid streamed user message')
+      }
+      if (state.userMessage) {
+        throw streamError('Server returned duplicate streamed user messages')
+      }
+      state.userMessage = message
+      handlers.onUserMessage?.(message)
+      break
+    }
+    case 'assistant_delta': {
+      if (typeof event.delta !== 'string') {
+        throw streamError('Server returned an invalid assistant delta')
+      }
+      state.assistantText += event.delta
+      if (state.assistantText.length > MAX_TURN_STREAM_BYTES) {
+        throw streamError('Assistant stream exceeded the browser safety limit')
+      }
+      handlers.onAssistantDelta?.(event.delta)
+      break
+    }
+    case 'assistant_message': {
+      const message = normalizeMessage(event.message)
+      if (!message || message.role !== 'assistant' || message.body.storage !== 'inline') {
+        throw streamError('Server returned an invalid streamed assistant message')
+      }
+      if (state.assistantMessage) {
+        throw streamError('Server returned duplicate streamed assistant messages')
+      }
+      if (message.body.text !== state.assistantText) {
+        throw streamError('Final assistant message did not match streamed output')
+      }
+      state.assistantMessage = message
+      handlers.onAssistantMessage?.(message)
+      break
+    }
+    case 'error': {
+      throw streamError(
+        typeof event.message === 'string' && event.message.trim()
+          ? event.message
+          : 'Native server reported a turn stream error',
+      )
+    }
+    default:
+      throw streamError('Server returned an unknown turn stream event')
+  }
+}
+
 export async function runTurn(
   id: string,
   text: string,
   model: string,
   reasoningEffort: string,
+  signal?: AbortSignal,
 ): Promise<TurnResult> {
   try {
     const payload = await request<{ user_message: unknown; assistant_message: unknown }>(
@@ -206,6 +292,7 @@ export async function runTurn(
           model,
           reasoning_effort: reasoningEffort,
         }),
+        signal,
       },
     )
     const userMessage = normalizeMessage(payload.user_message)
@@ -217,10 +304,106 @@ export async function runTurn(
     // Preserve that compatibility path while the web client and daemon may be
     // upgraded independently.
     if (cause instanceof ApiError && cause.status === 404) {
-      const userMessage = await appendMessage(id, text)
+      const userMessage = await appendMessage(id, text, signal)
       return { userMessage, assistantMessage: null, executed: false }
     }
     throw cause
+  }
+}
+
+export async function runTurnStream(
+  id: string,
+  text: string,
+  model: string,
+  reasoningEffort: string,
+  handlers: TurnStreamHandlers = {},
+  signal?: AbortSignal,
+): Promise<TurnResult> {
+  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/turns/stream`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      text,
+      model,
+      reasoning_effort: reasoningEffort,
+    }),
+    signal,
+  })
+
+  if (response.status === 404) {
+    const turn = await runTurn(id, text, model, reasoningEffort, signal)
+    handlers.onUserMessage?.(turn.userMessage)
+    if (turn.assistantMessage) handlers.onAssistantMessage?.(turn.assistantMessage)
+    return turn
+  }
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as { message?: string } | null
+    throw new ApiError(response.status, body?.message ?? `Request failed with ${response.status}`)
+  }
+  if (!response.headers.get('content-type')?.toLowerCase().startsWith('application/x-ndjson')) {
+    throw streamError('Native server returned an unsupported turn stream format')
+  }
+  if (!response.body) throw streamError('Native server returned an empty turn stream')
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder()
+  const encoder = new TextEncoder()
+  let buffered = ''
+  let receivedBytes = 0
+  const state = {
+    userMessage: null as MessageRecord | null,
+    assistantMessage: null as MessageRecord | null,
+    assistantText: '',
+  }
+
+  const consumeLine = (line: string) => {
+    if (!line.trim()) return
+    if (encoder.encode(line).byteLength > MAX_TURN_STREAM_LINE_BYTES) {
+      throw streamError('Turn stream event exceeded the browser safety limit')
+    }
+    parseTurnStreamEvent(line, handlers, state)
+  }
+
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      receivedBytes += value.byteLength
+      if (receivedBytes > MAX_TURN_STREAM_BYTES) {
+        throw streamError('Turn stream exceeded the browser safety limit')
+      }
+
+      buffered += decoder.decode(value, { stream: true })
+      let newline = buffered.indexOf('\n')
+      while (newline !== -1) {
+        const line = buffered.slice(0, newline).replace(/\r$/, '')
+        buffered = buffered.slice(newline + 1)
+        consumeLine(line)
+        newline = buffered.indexOf('\n')
+      }
+      if (buffered.length > MAX_TURN_STREAM_LINE_BYTES) {
+        throw streamError('Turn stream event exceeded the browser safety limit')
+      }
+    }
+
+    buffered += decoder.decode()
+    if (buffered.trim()) consumeLine(buffered.replace(/\r$/, ''))
+  } catch (cause) {
+    await reader.cancel().catch(() => undefined)
+    throw cause
+  } finally {
+    reader.releaseLock()
+  }
+
+  if (!state.userMessage) throw streamError('Turn stream ended before the user message was confirmed')
+  if (!state.assistantMessage) {
+    throw streamError('Turn stream ended before the assistant message was completed')
+  }
+  return {
+    userMessage: state.userMessage,
+    assistantMessage: state.assistantMessage,
+    executed: true,
   }
 }
 
