@@ -758,6 +758,54 @@
   background: transparent;
 }
 
+.codex-structured-editor {
+  width: 100%;
+  min-height: 4.45rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  border: 0;
+  border-radius: 1.55rem 1.55rem 0 0;
+  background: transparent;
+  color: #f2f2f2;
+  padding: 0.9rem 1rem 0.25rem;
+  font-size: 0.96rem;
+  line-height: 1.5;
+  outline: none;
+}
+
+.codex-structured-editor:empty::before {
+  content: attr(data-placeholder);
+  color: #a3a3a3;
+  pointer-events: none;
+}
+
+.codex-structured-editor p,
+.codex-structured-editor pre {
+  margin: 0 0 0.55rem;
+}
+
+.codex-structured-editor p:last-child,
+.codex-structured-editor pre:last-child {
+  margin-bottom: 0;
+}
+
+.codex-structured-editor pre {
+  overflow-x: auto;
+  border: 1px solid #474747;
+  border-radius: 0.55rem;
+  background: #242424;
+  padding: 0.55rem 0.65rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.86rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.codex-structured-editor[contenteditable="false"] {
+  cursor: default;
+  opacity: 0.72;
+}
+
 .codex-composer-toolbar {
   min-height: 2.85rem;
   display: flex;

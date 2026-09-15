@@ -99,7 +99,7 @@ by that daemon; Vite remains development tooling only.
 | Tool calls | V2 tool-call persistence exists; Responses adapter rejects tool transcript | Collapsed tool-call cards with input/state/output/error and approval UI, driven by real execution records |
 | References/citations | Plugin reference registry exists, not answer citations | Dedicated References section bound to per-turn source records/citations; links/files reopen their source |
 | Streaming | Real OpenAI text + provider reasoning-summary deltas stream; unsupported structured events fail closed | Text, reasoning-summary, tool and source events stream progressively without live-region token spam |
-| Composer | Plain textarea + model/effort | Accessible WYSIWYG structured editor with text/code, slash commands, mentions, model/effort, attachment chips and tool/plugin chooser |
+| Composer | Structured paragraph/code editor lowers to native text; model/effort, per-chat bounded drafts and real Stop are wired; unsupported chips are disabled | Accessible WYSIWYG structured editor with text/code, slash commands, mentions, model/effort, attachment chips and tool/plugin chooser |
 | Attachments | Blob storage/multipart schema exists; turn adapter rejects blobs | Real file/image/screenshot paste/drop/upload pipeline with bounded metadata and provider adapter |
 | Library/context files | No browser library | Searchable local/project Library backed by native content records, attach-by-reference, source preview |
 | Plugins/apps/tools | Tool registry + partial plugin contracts | Capability picker exposes installed/enabled real tools/plugins; permissions and unavailable states are explicit |

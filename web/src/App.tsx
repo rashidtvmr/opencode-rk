@@ -161,6 +161,7 @@ function App() {
   const [editingTitle, setEditingTitle] = useState('')
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
   const [streamingReasoningSummary, setStreamingReasoningSummary] = useState('')
+  const [activeTurnSessionId, setActiveTurnSessionId] = useState<string | null>(null)
   const activeTurnRef = useRef<{ sessionId: string; controller: AbortController } | null>(null)
 
   useEffect(() => {
@@ -237,6 +238,7 @@ function App() {
     if (active && active.sessionId !== selectedSessionId) {
       active.controller.abort()
       activeTurnRef.current = null
+      setActiveTurnSessionId(null)
       setStreamingAssistantText('')
       setStreamingReasoningSummary('')
     }
@@ -354,6 +356,7 @@ function App() {
     activeTurnRef.current?.controller.abort()
     const controller = new AbortController()
     activeTurnRef.current = { sessionId, controller }
+    setActiveTurnSessionId(sessionId)
     setStreamingAssistantText('')
     setStreamingReasoningSummary('')
     const baselineMessages = initialMessages ?? messages
@@ -407,6 +410,7 @@ function App() {
       )
       if (activeTurnRef.current?.controller !== controller) return false
       activeTurnRef.current = null
+      setActiveTurnSessionId(null)
       setMessageLoadState('ready')
       setNotice(
         turn.executed
@@ -415,8 +419,16 @@ function App() {
       )
       return true
     } catch (cause) {
-      if (controller.signal.aborted) return false
+      if (controller.signal.aborted) {
+        if (activeTurnRef.current?.controller === controller) activeTurnRef.current = null
+        setActiveTurnSessionId((current) => (current === sessionId ? null : current))
+        setStreamingAssistantText('')
+        setStreamingReasoningSummary('')
+        setNotice('Turn stopped.')
+        return false
+      }
       if (activeTurnRef.current?.controller === controller) activeTurnRef.current = null
+      setActiveTurnSessionId((current) => (current === sessionId ? null : current))
       setStreamingAssistantText('')
       setStreamingReasoningSummary('')
       let persisted = false
@@ -450,6 +462,12 @@ function App() {
     if (!selectedSessionId) return false
     setSelectedReasoningEffort(reasoningEffort)
     return executeTurnInSession(selectedSessionId, text, reasoningEffort)
+  }
+
+  const handleStopTurn = () => {
+    const active = activeTurnRef.current
+    if (!active || active.sessionId !== selectedSessionId) return
+    active.controller.abort()
   }
 
   const handleRetryMessage = async (message: MessageRecord, editedText?: string) => {
@@ -936,10 +954,13 @@ function App() {
           <div className="codex-composer-wrap">
             <Composer
               disabled={!selectedSession}
+              sessionId={selectedSession?.id ?? null}
+              running={activeTurnSessionId === selectedSession?.id}
               models={models}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
               onReasoningEffortChange={setSelectedReasoningEffort}
+              onStop={handleStopTurn}
               onSubmit={handleComposerSubmit}
             />
             <p className="codex-composer-caption">
