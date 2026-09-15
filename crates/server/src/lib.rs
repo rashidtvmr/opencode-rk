@@ -69,6 +69,7 @@ pub fn router(state: AppState) -> Router {
             "/api/sessions/{id}/messages",
             get(list_messages).post(append_message),
         )
+        .route("/api/sessions/{id}/history", get(list_history_page))
         .route(
             "/api/sessions/{id}/attachments",
             get(list_draft_attachments)
@@ -278,6 +279,12 @@ struct MessageListParams {
     limit: Option<usize>,
 }
 
+#[derive(Debug, Deserialize)]
+struct HistoryPageParams {
+    limit: Option<usize>,
+    before: Option<String>,
+}
+
 async fn list_messages(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -290,6 +297,33 @@ async fn list_messages(
         .await
         .map_err(ApiFailure::internal)?;
     Ok(Json(json!({"messages":messages})))
+}
+
+async fn list_history_page(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<HistoryPageParams>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let before = params
+        .before
+        .as_deref()
+        .map(parse_message_id)
+        .transpose()?;
+    let (messages, next_before) = state
+        .sessions
+        .history_page(id, before, params.limit.unwrap_or(50).clamp(1, 100))
+        .await
+        .map_err(|error| match error {
+            SessionError::HistoryCursorNotFound(_) | SessionError::NotFound(_) => {
+                ApiFailure::not_found(error.to_string())
+            }
+            other => ApiFailure::internal(other),
+        })?;
+    Ok(Json(json!({
+        "messages": messages,
+        "next_before": next_before,
+    })))
 }
 
 async fn list_assistant_activity(

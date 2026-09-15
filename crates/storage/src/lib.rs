@@ -356,6 +356,46 @@ impl Storage {
         rows.collect::<Result<Vec<_>, _>>()
             .map_err(StorageError::from)
     }
+    pub fn list_message_history_page(
+        &self,
+        session_id: SessionId,
+        before: Option<MessageId>,
+        limit: usize,
+    ) -> Result<(Vec<MessageRecord>, Option<MessageId>), StorageError> {
+        self.get_session(session_id)?;
+        let limit = limit.clamp(1, 100);
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let before_rowid = match before {
+            Some(message_id) => connection
+                .query_row(
+                    "SELECT rowid FROM messages WHERE session_id=?1 AND id=?2",
+                    params![session_id.to_string(), message_id.to_string()],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .ok_or(StorageError::MessageNotFound(message_id))?,
+            None => i64::MAX,
+        };
+        let mut statement = connection.prepare(
+            "SELECT id,session_id,role,inline_text,blob_hash,byte_len,created_at
+             FROM messages WHERE session_id=?1 AND rowid<?2
+             ORDER BY rowid DESC LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            params![session_id.to_string(), before_rowid, (limit + 1) as i64],
+            decode_message,
+        )?;
+        let mut messages = rows.collect::<Result<Vec<_>, _>>()?;
+        let has_more = messages.len() > limit;
+        messages.truncate(limit);
+        messages.reverse();
+        let next_before = if has_more {
+            messages.first().map(|message| message.id)
+        } else {
+            None
+        };
+        Ok((messages, next_before))
+    }
     pub fn message_ordinal(
         &self,
         session_id: SessionId,

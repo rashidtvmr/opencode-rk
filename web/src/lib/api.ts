@@ -351,6 +351,40 @@ export async function listMessages(id: string, limit = 200, signal?: AbortSignal
     .filter((message): message is MessageRecord => Boolean(message))
 }
 
+export interface HistoryPage {
+  messages: MessageRecord[]
+  nextBefore: string | null
+}
+
+export async function listHistoryPage(
+  id: string,
+  limit = 50,
+  before?: string | null,
+  signal?: AbortSignal,
+): Promise<HistoryPage> {
+  const boundedLimit = Math.max(1, Math.min(100, Math.trunc(limit)))
+  const params = new URLSearchParams({ limit: String(boundedLimit) })
+  if (before) params.set('before', before)
+  try {
+    const payload = await request<{ messages?: unknown[]; next_before?: unknown }>(
+      `/api/sessions/${encodeURIComponent(id)}/history?${params.toString()}`,
+      { signal },
+    )
+    const messages = (payload.messages ?? [])
+      .map(normalizeMessage)
+      .filter((message): message is MessageRecord => Boolean(message))
+    if (payload.next_before != null && typeof payload.next_before !== 'string') {
+      throw new Error('Server returned an invalid history cursor')
+    }
+    return { messages, nextBefore: payload.next_before ?? null }
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404 && !before) {
+      return { messages: await listMessages(id, boundedLimit, signal), nextBefore: null }
+    }
+    throw cause
+  }
+}
+
 export async function listDraftAttachments(id: string, signal?: AbortSignal) {
   try {
     const payload = await request<{

@@ -517,6 +517,28 @@
   font-size: 0.8rem;
 }
 
+.codex-history-loader {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0 0.25rem;
+}
+
+.codex-history-loader [data-slot="button"] {
+  color: #a8a8a8;
+  font-size: 0.75rem;
+}
+
+.codex-history-loader {
+  display: flex;
+  justify-content: center;
+  margin: 1rem 0 0.25rem;
+}
+
+.codex-history-loader [data-slot="button"] {
+  color: #a8a8a8;
+  font-size: 0.75rem;
+}
+
 .codex-transcript {
   display: grid;
   gap: 1.55rem;

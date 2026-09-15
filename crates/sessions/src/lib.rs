@@ -532,6 +532,26 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         Ok(run_blocking(move || storage.list_messages(session_id, limit)).await?)
     }
+    pub async fn history_page(
+        &self,
+        session_id: SessionId,
+        before: Option<MessageId>,
+        limit: usize,
+    ) -> Result<(Vec<MessageRecord>, Option<MessageId>), SessionError> {
+        if let Some(manager) = self.fork_manager_for(session_id).await? {
+            return run_session_blocking(move || {
+                manager.list_message_history_page(session_id, before, limit)
+            })
+            .await;
+        }
+        let storage = Arc::clone(&self.storage);
+        match run_blocking(move || storage.list_message_history_page(session_id, before, limit)).await {
+            Err(SessionError::Storage(StorageError::MessageNotFound(message_id))) => {
+                Err(SessionError::HistoryCursorNotFound(message_id))
+            }
+            other => other,
+        }
+    }
     pub async fn assistant_activity(
         &self,
         session_id: SessionId,
@@ -753,6 +773,8 @@ pub enum SessionError {
     InvalidDraftAttachment,
     #[error("draft attachment not found: {0}")]
     DraftAttachmentNotFound(AttachmentId),
+    #[error("history cursor message not found: {0}")]
+    HistoryCursorNotFound(MessageId),
     #[error("storage mutex poisoned")]
     Poisoned,
 }

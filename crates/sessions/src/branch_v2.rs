@@ -28,6 +28,59 @@ pub struct ForkProvenance {
 }
 
 impl SessionManager {
+    pub fn list_message_history_page(
+        &self,
+        session_id: SessionId,
+        before: Option<MessageId>,
+        limit: usize,
+    ) -> Result<(Vec<MessageRecord>, Option<MessageId>), SessionError> {
+        let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
+        let limit = limit.clamp(1, 100);
+        let before_seq = match before {
+            Some(message_id) => conn
+                .query_row(
+                    "SELECT m.seq FROM messages m JOIN sessions s ON s.pk=m.session_pk
+                     WHERE s.id=?1 AND m.id=?2",
+                    params![
+                        session_id.as_uuid().as_bytes().as_slice(),
+                        message_id.as_uuid().as_bytes().as_slice(),
+                    ],
+                    |row| row.get::<_, i64>(0),
+                )
+                .optional()?
+                .ok_or(SessionError::HistoryCursorNotFound(message_id))?,
+            None => i64::MAX,
+        };
+        let mut statement = conn.prepare(
+            "SELECT m.id, m.seq, m.role, m.created_at_us, p.inline_data, p.blob_pk, p.raw_bytes, b.hash
+             FROM messages m
+             JOIN sessions s ON s.pk=m.session_pk
+             JOIN message_parts mp ON mp.message_pk=m.pk AND mp.ordinal=0
+             JOIN payloads p ON p.pk=mp.payload_pk
+             LEFT JOIN blobs b ON b.pk=p.blob_pk
+             WHERE s.id=?1 AND m.seq<?2
+             ORDER BY m.seq DESC LIMIT ?3",
+        )?;
+        let rows = statement.query_map(
+            params![
+                session_id.as_uuid().as_bytes().as_slice(),
+                before_seq,
+                (limit + 1) as i64,
+            ],
+            |row| crate::decode_message_row(session_id, row),
+        )?;
+        let mut messages = rows.collect::<Result<Vec<_>, _>>()?;
+        let has_more = messages.len() > limit;
+        messages.truncate(limit);
+        messages.reverse();
+        let next_before = if has_more {
+            messages.first().map(|message| message.id)
+        } else {
+            None
+        };
+        Ok((messages, next_before))
+    }
+
     pub fn open_branch_workspace(path: &Path) -> Result<Self, SessionError> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(StorageError::from)?;

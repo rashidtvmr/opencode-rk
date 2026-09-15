@@ -43,6 +43,7 @@ import {
   getWebCapabilities,
   listAssistantActivity,
   listDraftAttachments,
+  listHistoryPage,
   listMessages,
   listModels,
   listSessions,
@@ -159,6 +160,8 @@ function App() {
   const [messages, setMessages] = useState<MessageRecord[]>([])
   const [messageLoadState, setMessageLoadState] = useState<MessageLoadState>('idle')
   const [messageError, setMessageError] = useState('')
+  const [historyBefore, setHistoryBefore] = useState<string | null>(null)
+  const [loadingOlder, setLoadingOlder] = useState(false)
   const [assistantActivity, setAssistantActivity] = useState<Record<string, AssistantActivity>>({})
   const [attachmentState, setAttachmentState] = useState<DraftAttachmentState>({
     attachments: [],
@@ -201,6 +204,7 @@ function App() {
   useEffect(() => {
     if (!selectedSessionId) {
       setMessages([])
+      setHistoryBefore(null)
       setAssistantActivity({})
       setAttachmentState({ attachments: [], available: true })
       setForkProvenance(null)
@@ -215,6 +219,7 @@ function App() {
 
     const controller = new AbortController()
     setMessages([])
+    setHistoryBefore(null)
     setAssistantActivity({})
     setAttachmentState({ attachments: [], available: true })
     setForkProvenance(null)
@@ -222,14 +227,15 @@ function App() {
     setMessageError('')
 
     Promise.all([
-      listMessages(selectedSessionId, 200, controller.signal),
+      listHistoryPage(selectedSessionId, 50, null, controller.signal),
       listAssistantActivity(selectedSessionId, 200, controller.signal),
       listDraftAttachments(selectedSessionId, controller.signal),
       getForkProvenance(selectedSessionId, controller.signal),
     ])
-      .then(([result, activity, attachments, provenance]) => {
+      .then(([history, activity, attachments, provenance]) => {
         if (controller.signal.aborted) return
-        setMessages(result)
+        setMessages(history.messages)
+        setHistoryBefore(history.nextBefore)
         setAssistantActivity(
           Object.fromEntries(activity.map((entry) => [entry.message_id, entry])) as Record<
             string,
@@ -533,6 +539,23 @@ function App() {
     active.controller.abort()
   }
 
+  const handleLoadOlder = async () => {
+    if (!selectedSessionId || !historyBefore || loadingOlder) return
+    setLoadingOlder(true)
+    try {
+      const page = await listHistoryPage(selectedSessionId, 50, historyBefore)
+      setMessages((current) => {
+        const ids = new Set(current.map((message) => message.id))
+        return [...page.messages.filter((message) => !ids.has(message.id)), ...current]
+      })
+      setHistoryBefore(page.nextBefore)
+    } catch (cause) {
+      setNotice(cause instanceof Error ? cause.message : 'Could not load older messages')
+    } finally {
+      setLoadingOlder(false)
+    }
+  }
+
   const handleRetryMessage = async (message: MessageRecord, editedText?: string) => {
     if (!selectedSessionId || message.session_id !== selectedSessionId) return false
     if (!selectedModel) {
@@ -678,7 +701,7 @@ function App() {
             type="search"
             value={query}
             onChange={(event: ChangeEvent<HTMLInputElement>) => setQuery(event.target.value)}
-            placeholder="Search chats"
+            placeholder="Search loaded chat titles"
             className="border-0 bg-transparent shadow-none focus-visible:ring-0 dark:bg-transparent"
           />
         </div>
@@ -745,6 +768,10 @@ function App() {
                         <Archive aria-hidden="true" />
                         Archive chat
                       </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem isDisabled>Pin unavailable</DropdownMenuItem>
+                      <DropdownMenuItem isDisabled>Share unavailable</DropdownMenuItem>
+                      <DropdownMenuItem isDisabled>Temporary chat unavailable</DropdownMenuItem>
                     </DropdownMenu>
                   </DropdownMenuTrigger>
                 </div>
@@ -894,6 +921,19 @@ function App() {
                   <p className="codex-transcript-status text-destructive" role="alert">
                     {messageError}
                   </p>
+                ) : null}
+
+                {historyBefore ? (
+                  <div className="codex-history-loader">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      isDisabled={loadingOlder}
+                      onPress={() => void handleLoadOlder()}
+                    >
+                      {loadingOlder ? 'Loading older messages…' : 'Load older messages'}
+                    </Button>
+                  </div>
                 ) : null}
 
                 {messages.length > 0 || streamingAssistantText || streamingReasoningSummary ? (
