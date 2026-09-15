@@ -1,6 +1,7 @@
 //! Bounded structured-concurrency primitives for the native runtime.
 #![forbid(unsafe_code)]
 pub mod config;
+pub mod delegation;
 pub mod effect;
 pub mod lifecycle;
 use serde::{Deserialize, Serialize};

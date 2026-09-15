@@ -15,3 +15,7 @@ pub mod schema;
 pub mod search;
 pub mod shell_tool;
 pub mod skill_gate;
+pub mod compat_commands;
+pub mod hooks_bridge;
+pub mod plugin_manifest;
+pub mod op_receipts;

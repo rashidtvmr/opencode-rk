@@ -8,6 +8,8 @@ pub mod auto_compact;
 pub mod query;
 pub mod reference;
 pub mod state;
+pub mod share;
+pub mod legacy_view;
 pub mod store;
 pub mod tui_state;
 mod types;
