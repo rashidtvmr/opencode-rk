@@ -273,7 +273,7 @@
       "requirementIds": [
         "REQ-002"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -882,7 +882,7 @@
     {
       "id": "EXT-003",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -940,7 +940,7 @@
     {
       "id": "EXT-007",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1072,7 +1072,7 @@
     {
       "id": "INT-004",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1128,7 +1128,7 @@
     {
       "id": "INT-008",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1524,7 +1524,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1540,7 +1540,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1554,7 +1554,7 @@
     {
       "id": "ROUTE-003",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1568,7 +1568,7 @@
     {
       "id": "ROUTE-004",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1584,7 +1584,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1612,7 +1612,7 @@
     {
       "id": "ROUTE-007",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1672,7 +1672,7 @@
       "requirementIds": [
         "REQ-022"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2472,7 +2472,7 @@
       "requirementIds": [
         "REQ-037"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "MCP tool own policy gate plus elicitation path with timeout and cancel",
       "dependencyIds": [],
       "testObligations": [
@@ -3051,7 +3051,7 @@
         "REQ-002",
         "REQ-012"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Turn submission state machine - submit to running to interrupted or complete as typed transitions with cancel cleanup",
       "dependencyIds": [],
       "testObligations": [
@@ -3116,7 +3116,7 @@
       "requirementIds": [
         "REQ-038"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Debug export bundle - one redacted JSONL with session meta, deduped defs, turns, timings, errors; offline renderer",
       "dependencyIds": [],
       "testObligations": [
@@ -3132,7 +3132,7 @@
       "requirementIds": [
         "REQ-037"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Doctor diagnostics command - checks auth, connectivity, tools, MCP; reports failures without log spelunking",
       "dependencyIds": [],
       "testObligations": [
@@ -3149,7 +3149,7 @@
         "REQ-017",
         "REQ-027"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Skill safe extraction - bundled files materialize once, owner-only 0600 O_EXCL O_NOFOLLOW, traversal rejected",
       "dependencyIds": [],
       "testObligations": [
@@ -3181,7 +3181,7 @@
       "requirementIds": [
         "REQ-008"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Revert is free pointer move distinct from truncating rollback with separate API names",
       "dependencyIds": [],
       "testObligations": [
@@ -3197,7 +3197,7 @@
       "requirementIds": [
         "REQ-006"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Auto-compact thresholds plus warning states plus 3-strike circuit breaker with env kill-switches",
       "dependencyIds": [],
       "testObligations": [
@@ -3213,7 +3213,7 @@
       "requirementIds": [
         "REQ-018"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Cheap-model chores routing - quota, topic, title, summarize go to cheapest capable model, fail-open",
       "dependencyIds": [],
       "testObligations": [
@@ -3245,7 +3245,7 @@
       "requirementIds": [
         "REQ-016"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Per-turn cost counters - input, output, cache-read, cache-create, durations, lines changed, web-search count, unknown-cost flag",
       "dependencyIds": [],
       "testObligations": [
