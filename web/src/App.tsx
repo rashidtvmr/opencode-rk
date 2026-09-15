@@ -47,6 +47,7 @@ import {
   listMessages,
   listModels,
   listSessions,
+  listWorkspaces,
   modelKey,
   prepareRetryBranch,
   renameSession,
@@ -60,10 +61,15 @@ import {
   type ModelSummary,
   type SessionSummary,
   type WebCapabilities,
+  type WorkspaceCatalogState,
 } from '@/lib/api'
 
 type LoadState = 'loading' | 'ready' | 'error'
 type MessageLoadState = 'idle' | LoadState
+
+function workspaceStatusLabel(status: number) {
+  return ['Provisioning', 'Ready', 'Deleting', 'Unavailable'][status] ?? `Status ${status}`
+}
 
 function messageText(message: MessageRecord) {
   return message.body.storage === 'inline'
@@ -142,6 +148,14 @@ function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [models, setModels] = useState<ModelSummary[]>([])
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null)
+  const [workspaceState, setWorkspaceState] = useState<WorkspaceCatalogState>({
+    available: false,
+    workspaces: [],
+    session_scope_available: false,
+    memory_available: false,
+    reason: 'Workspace registry not loaded yet.',
+  })
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState('')
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [error, setError] = useState('')
@@ -181,13 +195,19 @@ function App() {
   useEffect(() => {
     const controller = new AbortController()
 
-    Promise.all([getHealth(), listSessions(), listModels(), getWebCapabilities()])
-      .then(([healthResult, sessionResult, modelResult, capabilityResult]) => {
+    Promise.all([getHealth(), listSessions(), listModels(), getWebCapabilities(), listWorkspaces()])
+      .then(([healthResult, sessionResult, modelResult, capabilityResult, workspaceResult]) => {
         if (controller.signal.aborted) return
         setHealth(healthResult)
         setSessions(sessionResult)
         setModels(modelResult)
         setCapabilities(capabilityResult)
+        setWorkspaceState(workspaceResult)
+        setSelectedWorkspaceId((current) =>
+          current && workspaceResult.workspaces.some((workspace) => workspace.id === current)
+            ? current
+            : workspaceResult.workspaces[0]?.id ?? '',
+        )
         setSelectedSessionId((current) => current ?? sessionResult[0]?.id ?? null)
         setSelectedModel((current) => current || (modelResult[0] ? modelKey(modelResult[0], 0) : ''))
         setLoadState('ready')
@@ -281,6 +301,8 @@ function App() {
   }, [query, sessions])
 
   const selectedSession = sessions.find((session) => session.id === selectedSessionId) ?? null
+  const selectedWorkspace =
+    workspaceState.workspaces.find((workspace) => workspace.id === selectedWorkspaceId) ?? null
   const forkParent = forkProvenance
     ? sessions.find((session) => session.id === forkProvenance.parent_session_id) ?? null
     : null
@@ -662,6 +684,40 @@ function App() {
             Settings
           </a>
         </nav>
+
+        <section className="codex-workspace-catalog" aria-label="Workspace catalog">
+          <div className="codex-workspace-heading">
+            <label htmlFor="workspace-catalog-select">Workspace</label>
+            <span>Registry only</span>
+          </div>
+          <select
+            id="workspace-catalog-select"
+            aria-label="Workspace"
+            value={selectedWorkspaceId}
+            disabled={!workspaceState.available || workspaceState.workspaces.length === 0}
+            onChange={(event) => setSelectedWorkspaceId(event.target.value)}
+          >
+            {workspaceState.workspaces.length === 0 ? (
+              <option value="">Workspace unavailable</option>
+            ) : null}
+            {workspaceState.workspaces.map((workspace) => (
+              <option key={workspace.id} value={workspace.id}>
+                {workspace.label}
+              </option>
+            ))}
+          </select>
+          {selectedWorkspace ? (
+            <p className="codex-workspace-detail">
+              <span>{workspaceStatusLabel(selectedWorkspace.status)}</span>
+              <span>{selectedWorkspace.project_root ?? 'No project root'}</span>
+            </p>
+          ) : (
+            <p className="codex-workspace-detail">{workspaceState.reason ?? 'Workspace registry unavailable.'}</p>
+          )}
+          <p className="codex-workspace-boundary">
+            Chats, files, context and memory are not workspace-scoped yet.
+          </p>
+        </section>
 
         {creating ? (
           <form

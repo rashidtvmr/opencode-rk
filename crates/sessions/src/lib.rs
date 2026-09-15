@@ -50,9 +50,9 @@ use opencode_rk_contracts::{
     PayloadRef, SessionId, SessionState, SessionSummary, Timestamp, MAX_REASONING_SUMMARY_BYTES,
     MAX_TITLE_BYTES,
 };
-use opencode_rk_storage::{NewMessage, NewSession, Storage, StorageError, V2Writer};
+use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, StorageError, V2Writer};
 use rusqlite::{params, Connection, OptionalExtension};
-use std::sync::{Arc, Mutex};
+use std::{path::{Path, PathBuf}, sync::{Arc, Mutex}};
 use thiserror::Error;
 pub use branch_v2::ForkProvenance;
 pub type SessionRecord = SessionSummary;
@@ -303,13 +303,25 @@ fn hex(bytes: &[u8]) -> String {
 pub struct SessionService {
     storage: Arc<Storage>,
     branch_manager: Option<Arc<SessionManager>>,
+    workspace_catalog_path: Option<Arc<PathBuf>>,
 }
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WorkspaceSummary {
+    pub id: [u8; 16],
+    pub label: String,
+    pub project_root: Option<String>,
+    pub status: u8,
+    pub created_at_us: i64,
+}
+
 impl SessionService {
     #[must_use]
     pub fn new(storage: Arc<Storage>) -> Self {
         Self {
             storage,
             branch_manager: None,
+            workspace_catalog_path: None,
         }
     }
     #[must_use]
@@ -317,7 +329,38 @@ impl SessionService {
         Self {
             storage,
             branch_manager: Some(branch_manager),
+            workspace_catalog_path: None,
         }
+    }
+    pub fn with_workspace_catalog_path(mut self, path: &Path) -> Result<Self, SessionError> {
+        CatalogV2::open_existing(path)?;
+        self.workspace_catalog_path = Some(Arc::new(path.to_path_buf()));
+        Ok(self)
+    }
+    pub async fn list_workspaces(
+        &self,
+        limit: usize,
+    ) -> Result<Option<Vec<WorkspaceSummary>>, SessionError> {
+        let Some(path) = self.workspace_catalog_path.as_ref() else {
+            return Ok(None);
+        };
+        let path = Arc::clone(path);
+        let workspaces = run_blocking(move || {
+            let connection = CatalogV2::open_existing(path.as_ref())?;
+            let rows = CatalogV2::list_workspaces(&connection, limit)?;
+            Ok(rows
+                .into_iter()
+                .map(|row| WorkspaceSummary {
+                    id: row.id,
+                    label: row.label,
+                    project_root: row.project_root,
+                    status: row.status,
+                    created_at_us: row.created_at_us,
+                })
+                .collect())
+        })
+        .await?;
+        Ok(Some(workspaces))
     }
     pub async fn create(&self, title: impl Into<String>) -> Result<SessionSummary, SessionError> {
         let now = Timestamp::now();

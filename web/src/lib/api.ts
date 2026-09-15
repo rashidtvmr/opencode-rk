@@ -96,6 +96,22 @@ export interface WebCapabilities {
   artifacts: { available: boolean; reason: string }
 }
 
+export interface WorkspaceSummary {
+  id: string
+  label: string
+  project_root: string | null
+  status: number
+  created_at_us: number
+}
+
+export interface WorkspaceCatalogState {
+  available: boolean
+  workspaces: WorkspaceSummary[]
+  session_scope_available: boolean
+  memory_available: boolean
+  reason?: string
+}
+
 function unavailableCapabilities(reason: string): WebCapabilities {
   return {
     tools: [],
@@ -300,6 +316,60 @@ export async function getWebCapabilities() {
   } catch (cause) {
     if (cause instanceof ApiError && cause.status === 404) {
       return unavailableCapabilities('This native server does not expose web capability discovery.')
+    }
+    throw cause
+  }
+}
+
+export async function listWorkspaces(): Promise<WorkspaceCatalogState> {
+  try {
+    const payload = await request<Record<string, unknown>>('/api/workspaces')
+    if (
+      typeof payload.available !== 'boolean' ||
+      !Array.isArray(payload.workspaces) ||
+      typeof payload.session_scope_available !== 'boolean' ||
+      typeof payload.memory_available !== 'boolean'
+    ) {
+      throw new Error('Server returned invalid workspace catalog state')
+    }
+    const workspaces = payload.workspaces.map((value) => {
+      if (!value || typeof value !== 'object') {
+        throw new Error('Server returned invalid workspace metadata')
+      }
+      const candidate = value as Record<string, unknown>
+      if (
+        typeof candidate.id !== 'string' ||
+        typeof candidate.label !== 'string' ||
+        !(candidate.project_root === null || typeof candidate.project_root === 'string') ||
+        typeof candidate.status !== 'number' ||
+        typeof candidate.created_at_us !== 'number'
+      ) {
+        throw new Error('Server returned invalid workspace metadata')
+      }
+      return {
+        id: candidate.id,
+        label: candidate.label,
+        project_root: candidate.project_root,
+        status: candidate.status,
+        created_at_us: candidate.created_at_us,
+      } satisfies WorkspaceSummary
+    })
+    return {
+      available: payload.available,
+      workspaces,
+      session_scope_available: payload.session_scope_available,
+      memory_available: payload.memory_available,
+      reason: typeof payload.reason === 'string' ? payload.reason : undefined,
+    }
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) {
+      return {
+        available: false,
+        workspaces: [],
+        session_scope_available: false,
+        memory_available: false,
+        reason: 'This native server does not expose workspace catalog metadata.',
+      }
     }
     throw cause
   }

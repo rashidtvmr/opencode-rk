@@ -60,6 +60,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
         .route("/api/capabilities", get(web_capabilities))
+        .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
         .route("/api/models/{provider}/{model}", get(get_model))
         .route("/api/sessions", get(list_sessions).post(create_session))
@@ -155,6 +156,48 @@ async fn web_capabilities() -> Json<Value> {
             "reason": "no durable artifact/version service is wired to the web daemon"
         }
     }))
+}
+async fn list_workspaces(State(state): State<AppState>) -> Result<Json<Value>, ApiFailure> {
+    let Some(workspaces) = state
+        .sessions
+        .list_workspaces(500)
+        .await
+        .map_err(ApiFailure::internal)?
+    else {
+        return Ok(Json(json!({
+            "schema_version": WIRE_SCHEMA_VERSION,
+            "available": false,
+            "workspaces": [],
+            "session_scope_available": false,
+            "memory_available": false,
+            "reason": "the native workspace catalog is not configured for this server"
+        })));
+    };
+    let workspaces = workspaces
+        .into_iter()
+        .map(|workspace| {
+            let id = workspace
+                .id
+                .iter()
+                .map(|byte| format!("{byte:02x}"))
+                .collect::<String>();
+            json!({
+                "id": id,
+                "label": workspace.label,
+                "project_root": workspace.project_root,
+                "status": workspace.status,
+                "created_at_us": workspace.created_at_us,
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(Json(json!({
+        "schema_version": WIRE_SCHEMA_VERSION,
+        "available": true,
+        "workspaces": workspaces,
+        "session_scope_available": false,
+        "memory_available": false,
+        "reason": "workspace registry metadata is available; session membership and memory/context authority are not implemented"
+    })))
 }
 #[derive(Debug, Deserialize)]
 struct ModelSearchParams {

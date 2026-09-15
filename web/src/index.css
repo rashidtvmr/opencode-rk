@@ -254,6 +254,70 @@
   color: #b4b4b4;
 }
 
+.codex-workspace-catalog {
+  display: grid;
+  gap: 0.4rem;
+  margin: 0.15rem 0.55rem 0.6rem;
+  padding: 0.6rem;
+  border: 1px solid var(--sidebar-border);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--sidebar) 88%, #ffffff 4%);
+}
+
+.codex-workspace-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  color: #d0d0d0;
+}
+
+.codex-workspace-heading label {
+  font-weight: 600;
+}
+
+.codex-workspace-heading span,
+.codex-workspace-boundary {
+  color: #858585;
+}
+
+.codex-workspace-catalog select {
+  min-width: 0;
+  height: 2rem;
+  border: 1px solid #3d3d3d;
+  border-radius: 0.5rem;
+  background: #171717;
+  color: #e3e3e3;
+  padding: 0 0.5rem;
+  font: inherit;
+  font-size: 0.76rem;
+}
+
+.codex-workspace-catalog select:focus-visible {
+  outline: 2px solid #888888;
+  outline-offset: 2px;
+}
+
+.codex-workspace-catalog select:disabled {
+  color: #858585;
+  cursor: not-allowed;
+}
+
+.codex-workspace-detail,
+.codex-workspace-boundary {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.codex-workspace-detail {
+  display: grid;
+  gap: 0.15rem;
+  color: #adadad;
+  overflow-wrap: anywhere;
+}
+
 .codex-new-chat-form {
   display: grid;
   gap: 0.5rem;

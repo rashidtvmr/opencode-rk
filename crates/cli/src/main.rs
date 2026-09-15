@@ -341,7 +341,13 @@ fn open_web_sessions(data: &std::path::Path) -> Result<SessionService, Box<dyn s
     let storage = Arc::new(Storage::open(StoragePaths::under(data.to_path_buf()))?);
     let branch_path = data.join("workspaces/local/web-branches-v2.db");
     let branch_manager = Arc::new(SessionManager::open_branch_workspace(&branch_path)?);
-    Ok(SessionService::with_branch_manager(storage, branch_manager))
+    let sessions = SessionService::with_branch_manager(storage, branch_manager);
+    let catalog_path = data.join("catalog.db");
+    if catalog_path.exists() {
+        Ok(sessions.with_workspace_catalog_path(&catalog_path)?)
+    } else {
+        Ok(sessions)
+    }
 }
 async fn session_command(
     s: &SessionService,
