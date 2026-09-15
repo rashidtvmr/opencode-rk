@@ -1,6 +1,11 @@
 //! Singleton daemon: PID-file lock plus Unix socket listener.
+use fs2::FileExt;
+use serde::{Deserialize, Serialize};
 use std::{
     fmt,
+    fs::{File, OpenOptions},
+    io::{Seek, SeekFrom, Write},
+    net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
@@ -15,6 +20,7 @@ use tokio::{
 pub enum DaemonError {
     AlreadyRunning(PathBuf),
     Io(String),
+    Descriptor(String),
 }
 impl fmt::Display for DaemonError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -23,6 +29,7 @@ impl fmt::Display for DaemonError {
                 write!(f, "daemon already running (pid file {})", p.display())
             }
             Self::Io(e) => write!(f, "daemon io: {e}"),
+            Self::Descriptor(e) => write!(f, "daemon descriptor: {e}"),
         }
     }
 }
@@ -33,38 +40,58 @@ impl From<std::io::Error> for DaemonError {
     }
 }
 pub type Result<T> = std::result::Result<T, DaemonError>;
-// ponytail: liveness via /proc/<pid> exists check (Linux, keeps forbid(unsafe_code) with no new deps); use kill(pid,0) via libc when portable.
 fn pid_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
     Path::new(&format!("/proc/{pid}")).exists()
 }
-fn read_pid(path: &Path) -> Option<u32> {
-    std::fs::read_to_string(path).ok()?.trim().parse().ok()
-}
 pub struct PidLock {
     path: PathBuf,
+    file: File,
 }
 impl PidLock {
     pub fn acquire(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
-        if let Some(pid) = read_pid(&path) {
-            if pid_alive(pid) {
-                return Err(DaemonError::AlreadyRunning(path));
-            }
-        }
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        std::fs::write(&path, std::process::id().to_string())?;
-        Ok(Self { path })
+        let mut file = OpenOptions::new()
+            .create(true)
+            .read(true)
+            .write(true)
+            .open(&path)?;
+        match file.try_lock_exclusive() {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                return Err(DaemonError::AlreadyRunning(path));
+            }
+            Err(error) => return Err(DaemonError::Io(error.to_string())),
+        }
+        file.set_len(0)?;
+        file.seek(SeekFrom::Start(0))?;
+        file.write_all(std::process::id().to_string().as_bytes())?;
+        file.sync_data()?;
+        Ok(Self { path, file })
     }
     #[must_use]
     pub fn is_held(path: impl AsRef<Path>) -> bool {
-        read_pid(path.as_ref()).is_some_and(pid_alive)
+        let Ok(file) = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(path.as_ref())
+        else {
+            return false;
+        };
+        match file.try_lock_exclusive() {
+            Ok(()) => {
+                let _ = FileExt::unlock(&file);
+                false
+            }
+            Err(error) => error.kind() == std::io::ErrorKind::WouldBlock,
+        }
     }
     #[must_use]
     pub fn path(&self) -> &Path {
@@ -73,8 +100,75 @@ impl PidLock {
 }
 impl Drop for PidLock {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(&self.path);
+        let _ = FileExt::unlock(&self.file);
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct BackendDescriptor {
+    pub pid: u32,
+    pub http_origin: String,
+    pub schema_version: u16,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DaemonPaths {
+    pub pid: PathBuf,
+    pub socket: PathBuf,
+    pub descriptor: PathBuf,
+}
+
+impl DaemonPaths {
+    #[must_use]
+    pub fn for_data_dir(data_dir: impl AsRef<Path>) -> Self {
+        let runtime = data_dir.as_ref().join("runtime");
+        Self {
+            pid: runtime.join("opencode-rk.pid"),
+            socket: runtime.join("opencode-rk.sock"),
+            descriptor: runtime.join("backend.json"),
+        }
+    }
+}
+
+pub fn read_backend_descriptor(data_dir: impl AsRef<Path>) -> Result<Option<BackendDescriptor>> {
+    let path = DaemonPaths::for_data_dir(data_dir).descriptor;
+    let bytes = match std::fs::read(&path) {
+        Ok(bytes) => bytes,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let descriptor: BackendDescriptor = serde_json::from_slice(&bytes)
+        .map_err(|error| DaemonError::Descriptor(error.to_string()))?;
+    if descriptor.schema_version != opencode_rk_contracts::WIRE_SCHEMA_VERSION
+        || !pid_alive(descriptor.pid)
+        || !descriptor.http_origin.starts_with("http://127.0.0.1:")
+    {
+        return Ok(None);
+    }
+    Ok(Some(descriptor))
+}
+
+pub fn publish_backend_descriptor(
+    data_dir: impl AsRef<Path>,
+    address: SocketAddr,
+) -> Result<BackendDescriptor> {
+    let paths = DaemonPaths::for_data_dir(data_dir);
+    if let Some(parent) = paths.descriptor.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let descriptor = BackendDescriptor {
+        pid: std::process::id(),
+        http_origin: format!("http://{address}"),
+        schema_version: opencode_rk_contracts::WIRE_SCHEMA_VERSION,
+    };
+    let bytes = serde_json::to_vec(&descriptor)
+        .map_err(|error| DaemonError::Descriptor(error.to_string()))?;
+    let temporary = paths
+        .descriptor
+        .with_extension(format!("json.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, bytes)?;
+    std::fs::rename(&temporary, &paths.descriptor)?;
+    Ok(descriptor)
 }
 pub struct ClientConnection {
     pub id: u64,

@@ -4,7 +4,13 @@ use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
     CapabilityReport, DiagnosticReport, MessageRole, SessionId, WIRE_SCHEMA_VERSION,
 };
-use opencode_rk_server::{router, AppState};
+use opencode_rk_server::{
+    daemon::{
+        publish_backend_descriptor, read_backend_descriptor, DaemonError, DaemonPaths,
+        SingletonDaemon,
+    },
+    router, AppState,
+};
 use opencode_rk_sessions::SessionService;
 use opencode_rk_storage::{Storage, StoragePaths};
 use opencode_rk_tools::registry::ToolRegistry;
@@ -35,6 +41,7 @@ enum Command {
         command: ModelCommand,
     },
     Serve(ServeArgs),
+    Web(WebArgs),
 }
 #[derive(Debug, Args)]
 struct DoctorArgs {
@@ -47,6 +54,15 @@ struct ServeArgs {
     listen: SocketAddr,
     #[arg(long)]
     models_file: Option<PathBuf>,
+}
+#[derive(Debug, Args)]
+struct WebArgs {
+    #[arg(long, default_value = "127.0.0.1:4096")]
+    listen: SocketAddr,
+    #[arg(long)]
+    models_file: Option<PathBuf>,
+    #[arg(long)]
+    no_open: bool,
 }
 #[derive(Debug, Subcommand)]
 enum SessionCommand {
@@ -150,7 +166,11 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Command::Serve(args) => {
             let data = resolve_data_dir(cli.data_dir)?;
-            serve(data, args).await?;
+            serve(data, args, false).await?;
+        }
+        Command::Web(args) => {
+            let data = resolve_data_dir(cli.data_dir)?;
+            web(data, args).await?;
         }
     }
     Ok(())
@@ -404,7 +424,46 @@ async fn model_command(data: PathBuf, c: ModelCommand) -> Result<(), Box<dyn std
     }
     Ok(())
 }
-async fn serve(data: PathBuf, args: ServeArgs) -> Result<(), Box<dyn std::error::Error>> {
+async fn web(data: PathBuf, args: WebArgs) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(descriptor) = read_backend_descriptor(&data)? {
+        println!("{}", descriptor.http_origin);
+        if !args.no_open {
+            open_web_browser(&descriptor.http_origin)?;
+        }
+        return Ok(());
+    }
+
+    serve(
+        data,
+        ServeArgs {
+            listen: args.listen,
+            models_file: args.models_file,
+        },
+        !args.no_open,
+    )
+    .await
+}
+
+async fn serve(
+    data: PathBuf,
+    args: ServeArgs,
+    open_browser: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let daemon_paths = DaemonPaths::for_data_dir(&data);
+    let daemon = match SingletonDaemon::bind(&daemon_paths.socket, &daemon_paths.pid) {
+        Ok(daemon) => Arc::new(daemon),
+        Err(DaemonError::AlreadyRunning(_)) => {
+            let descriptor = read_backend_descriptor(&data)?.ok_or_else(|| {
+                "backend is already running but its endpoint descriptor is unavailable".to_string()
+            })?;
+            println!("{}", descriptor.http_origin);
+            if open_browser {
+                open_web_browser(&descriptor.http_origin)?;
+            }
+            return Ok(());
+        }
+        Err(error) => return Err(Box::new(error)),
+    };
     let sessions = open_sessions(data.clone())?;
     let path = args
         .models_file
@@ -415,8 +474,50 @@ async fn serve(data: PathBuf, args: ServeArgs) -> Result<(), Box<dyn std::error:
         Arc::new(Catalog::default())
     };
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
-    tracing::info!(listen=%args.listen,"native server listening");
-    axum::serve(listener, router(AppState { sessions, catalog })).await?;
+    let listen = listener.local_addr()?;
+    let descriptor = publish_backend_descriptor(&data, listen)?;
+    println!("{}", descriptor.http_origin);
+    if open_browser {
+        open_web_browser(&descriptor.http_origin)?;
+    }
+    tracing::info!(listen=%listen,"native singleton server listening");
+    let daemon_accept = Arc::clone(&daemon);
+    let control = tokio::spawn(async move {
+        daemon_accept.accept_clients().await;
+    });
+    let result = axum::serve(listener, router(AppState { sessions, catalog })).await;
+    daemon.shutdown();
+    let _ = control.await;
+    result?;
+    Ok(())
+}
+fn open_web_browser(origin: &str) -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = std::process::Command::new("cmd");
+        command.args(["/C", "start", "", origin]);
+        command
+    };
+    #[cfg(target_os = "macos")]
+    let mut command = {
+        let mut command = std::process::Command::new("open");
+        command.arg(origin);
+        command
+    };
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let mut command = {
+        let mut command = std::process::Command::new("xdg-open");
+        command.arg(origin);
+        command
+    };
+    #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
+    return Err("opening a browser is unsupported on this platform; use --no-open".into());
+
+    command
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()?;
     Ok(())
 }
 fn catalog_cache_path(data: &std::path::Path) -> PathBuf {

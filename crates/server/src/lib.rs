@@ -11,6 +11,7 @@ pub mod event_bus;
 pub mod rel_verify;
 pub mod remote_ledger;
 pub mod repo_ops;
+pub mod web_assets;
 pub mod web_config;
 pub mod web_footer;
 use axum::{
@@ -56,6 +57,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
+        .fallback(web_assets::serve)
         .with_state(state)
 }
 async fn health() -> Json<Value> {

@@ -1,18 +1,35 @@
 # OpenCode RK web
 
-Fast local web client for the native Rust server.
+Fast local web client for the native Rust singleton daemon.
 
 Stack: React 19, Vite, TypeScript, Tailwind CSS 4, and **shadcn/ui** using its
 `aria-nova` React Aria component base. `components.json` is the shadcn registry
 configuration and components under `src/components/ui` are generated shadcn
 source owned by this app.
 
+For normal use, no Vite server is required. The production bundle is embedded in
+the Rust binary and served from the same loopback origin as `/api/*`:
+
+```sh
+opencode-rk models sync
+OPENAI_API_KEY=... opencode-rk web
+```
+
+`opencode-rk web` reuses the healthy backend for the active data directory when one
+already exists (for example, once the native TUI is wired to the same daemon). If no
+backend exists, the `web` command itself owns the canonical singleton; a separate
+`opencode-rk serve` terminal is not required. Pass `--no-open` to suppress launching
+the system browser and print/serve the URL only.
+
+For frontend development only:
+
 ```sh
 pnpm install
+opencode-rk web --no-open
 pnpm dev
 ```
 
-The dev server proxies `/health` and `/api/*` to `http://127.0.0.1:4096` by
+The Vite dev server proxies `/health` and `/api/*` to `http://127.0.0.1:4096` by
 default. Override that for another native-server port:
 
 ```sh
@@ -28,8 +45,11 @@ populated:
 
 ```sh
 opencode-rk models sync
-OPENAI_API_KEY=... opencode-rk serve
+OPENAI_API_KEY=... opencode-rk web
 ```
+
+`pnpm build` writes the release bundle to `crates/server/web_dist`; that directory is
+embedded into the native server binary at Rust build time.
 
 OpenAI turns stream incrementally through
 `POST /api/sessions/{id}/turns/stream`. The native server consumes real Responses

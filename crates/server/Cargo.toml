@@ -9,6 +9,8 @@ rust-version.workspace = true
 [dependencies]
 axum.workspace = true
 futures-util = "0.3"
+fs2.workspace = true
+include_dir.workspace = true
 opencode-rk-catalog = { path = "../catalog" }
 opencode-rk-contracts = { path = "../contracts" }
 opencode-rk-providers = { path = "../providers" }
