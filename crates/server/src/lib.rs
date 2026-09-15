@@ -44,6 +44,7 @@ use opencode_rk_providers::responses::{
     ResponsesStreamEvent, MAX_RESPONSES_INPUT_MESSAGES,
 };
 use opencode_rk_sessions::{SessionError, SessionService};
+use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{convert::Infallible, str::FromStr, sync::Arc};
@@ -58,6 +59,7 @@ pub struct AppState {
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/api/capabilities", get(web_capabilities))
         .route("/api/models", get(search_models))
         .route("/api/models/{provider}/{model}", get(get_model))
         .route("/api/sessions", get(list_sessions).post(create_session))
@@ -94,6 +96,64 @@ pub fn router(state: AppState) -> Router {
 }
 async fn health() -> Json<Value> {
     Json(json!({"schema_version":WIRE_SCHEMA_VERSION,"status":"ok","runtime":"native-rust"}))
+}
+async fn web_capabilities() -> Json<Value> {
+    let registry = ToolRegistry::new();
+    let mut tools = registry
+        .list()
+        .into_iter()
+        .map(|tool| {
+            json!({
+                "id": tool.id,
+                "name": tool.name,
+                "description": tool.description,
+                "enabled": tool.enabled,
+                "type": tool.tool_type,
+                "tags": tool.tags,
+                "available_for_web_turn": false,
+                "reason": "the current web Responses turn adapter does not execute native tools",
+            })
+        })
+        .collect::<Vec<_>>();
+    tools.sort_by(|left, right| {
+        left["id"]
+            .as_str()
+            .unwrap_or_default()
+            .cmp(right["id"].as_str().unwrap_or_default())
+    });
+    Json(json!({
+        "schema_version": WIRE_SCHEMA_VERSION,
+        "tools": tools,
+        "plugins": {
+            "available_for_web_turn": false,
+            "reason": "the web daemon does not yet own a plugin host or turn adapter"
+        },
+        "approvals": {
+            "available_for_web_turn": false,
+            "reason": "approval records exist natively but the web turn path has no execution-owned approval flow"
+        },
+        "attachments": {
+            "draft_ingest": true,
+            "available_for_web_turn": false,
+            "reason": "draft files are persisted but the provider attachment adapter is unavailable"
+        },
+        "search": {
+            "available": false,
+            "reason": "local grep is not a web-search adapter"
+        },
+        "deep_research": {
+            "available": false,
+            "reason": "no native research execution and citation adapter is installed"
+        },
+        "voice": {
+            "available": false,
+            "reason": "no native transcription or realtime audio adapter is installed"
+        },
+        "artifacts": {
+            "available": false,
+            "reason": "no durable artifact/version service is wired to the web daemon"
+        }
+    }))
 }
 #[derive(Debug, Deserialize)]
 struct ModelSearchParams {

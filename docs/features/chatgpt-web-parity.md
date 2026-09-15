@@ -102,11 +102,11 @@ by that daemon; Vite remains development tooling only.
 | Composer | Structured paragraph/code editor lowers to native text; model/effort, per-chat bounded drafts and real Stop are wired; unsupported chips are disabled | Accessible WYSIWYG structured editor with text/code, slash commands, mentions, model/effort, attachment chips and tool/plugin chooser |
 | Attachments | Bounded draft file picker/CAS storage/reload/remove exists for legacy web sessions; attached send and branch blob storage remain unavailable | Real file/image/screenshot paste/drop/upload pipeline with bounded metadata and provider adapter |
 | Library/context files | No native browser Library/reference attach contract yet | Searchable local/project Library backed by native content records, attach-by-reference, source preview |
-| Plugins/apps/tools | Tool registry + partial plugin contracts | Capability picker exposes installed/enabled real tools/plugins; permissions and unavailable states are explicit |
-| Search/research | Generic grep tool only; no web-research turn mode | Search/deep-research mode with source selection, plan/progress/steering and cited result once native tools exist |
+| Plugins/apps/tools | Daemon enumerates the real built-in ToolRegistry; web-turn tool/plugin/approval adapters are explicitly unavailable | Capability picker exposes installed/enabled real tools/plugins; permissions and unavailable states are explicit |
+| Search/research | Daemon explicitly reports Search/Deep Research unavailable; local grep is not relabeled | Search/deep-research mode with source selection, plan/progress/steering and cited result once native tools exist |
 | Chat navigation | Sidebar + text filter | Pin, unified search, archive, share, temporary chat, progressive history paging and keyboard shortcuts |
 | Projects/workspaces/memory | Workspace storage primitives; TUI context/memory state | Project-scoped chats/files/context, memory/context inspector and disclosure of context sources used |
-| Voice/dictation | No adapter | Browser capture + native audio/realtime adapter; honest unavailable state until real transport exists |
+| Voice/dictation | Daemon capability reports no adapter and composer exposes an accessible disabled voice control | Browser capture + native audio/realtime adapter; honest unavailable state until real transport exists |
 | Editable artifacts/code | Plain assistant text | Separate editable writing/code artifacts with copy/edit/preview/run only through safe native execution boundaries |
 | Long conversation UX | Legacy oldest-page context limitation | Recent-window provider context plus progressively paged UI history, both bounded |
 | Accessibility | Semantic shell + axe smoke | Keyboard-complete menus/editor/dialogs, focus restoration, 200%/400% reflow, reduced motion and non-spammy live regions |

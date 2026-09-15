@@ -15,6 +15,7 @@ opencode-rk-catalog = { path = "../catalog" }
 opencode-rk-contracts = { path = "../contracts" }
 opencode-rk-providers = { path = "../providers" }
 opencode-rk-sessions = { path = "../sessions" }
+opencode-rk-tools = { path = "../tools" }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

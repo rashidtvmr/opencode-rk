@@ -70,6 +70,45 @@ export interface DraftAttachmentState {
   reason?: string
 }
 
+export interface WebToolCapability {
+  id: string
+  name: string
+  description: string
+  enabled: boolean
+  type?: string | null
+  tags: string[]
+  available_for_web_turn: boolean
+  reason: string
+}
+
+export interface WebCapabilities {
+  tools: WebToolCapability[]
+  plugins: { available_for_web_turn: boolean; reason: string }
+  approvals: { available_for_web_turn: boolean; reason: string }
+  attachments: {
+    draft_ingest: boolean
+    available_for_web_turn: boolean
+    reason: string
+  }
+  search: { available: boolean; reason: string }
+  deep_research: { available: boolean; reason: string }
+  voice: { available: boolean; reason: string }
+  artifacts: { available: boolean; reason: string }
+}
+
+function unavailableCapabilities(reason: string): WebCapabilities {
+  return {
+    tools: [],
+    plugins: { available_for_web_turn: false, reason },
+    approvals: { available_for_web_turn: false, reason },
+    attachments: { draft_ingest: false, available_for_web_turn: false, reason },
+    search: { available: false, reason },
+    deep_research: { available: false, reason },
+    voice: { available: false, reason },
+    artifacts: { available: false, reason },
+  }
+}
+
 class ApiError extends Error {
   readonly status: number
 
@@ -179,6 +218,91 @@ function normalizeDraftAttachment(value: unknown): DraftAttachment | null {
 
 export async function getHealth() {
   return request<HealthResponse>('/health')
+}
+
+export async function getWebCapabilities() {
+  try {
+    const payload = await request<Record<string, unknown>>('/api/capabilities')
+    const field = (name: string) => {
+      const value = payload[name]
+      if (!value || typeof value !== 'object') throw new Error('Server returned invalid capabilities')
+      return value as Record<string, unknown>
+    }
+    const tools = Array.isArray(payload.tools)
+      ? payload.tools.map((value) => {
+          if (!value || typeof value !== 'object') throw new Error('Server returned invalid tool capability')
+          const candidate = value as Record<string, unknown>
+          if (
+            typeof candidate.id !== 'string' ||
+            typeof candidate.name !== 'string' ||
+            typeof candidate.description !== 'string' ||
+            typeof candidate.enabled !== 'boolean' ||
+            typeof candidate.available_for_web_turn !== 'boolean' ||
+            typeof candidate.reason !== 'string' ||
+            !Array.isArray(candidate.tags) ||
+            candidate.tags.some((tag) => typeof tag !== 'string')
+          ) {
+            throw new Error('Server returned invalid tool capability')
+          }
+          return {
+            id: candidate.id,
+            name: candidate.name,
+            description: candidate.description,
+            enabled: candidate.enabled,
+            type: typeof candidate.type === 'string' ? candidate.type : null,
+            tags: candidate.tags as string[],
+            available_for_web_turn: candidate.available_for_web_turn,
+            reason: candidate.reason,
+          } satisfies WebToolCapability
+        })
+      : []
+    const booleanCapability = (name: string, key: string) => {
+      const value = field(name)
+      if (typeof value[key] !== 'boolean' || typeof value.reason !== 'string') {
+        throw new Error('Server returned invalid capabilities')
+      }
+      return { available: value[key] as boolean, reason: value.reason }
+    }
+    const plugins = field('plugins')
+    const approvals = field('approvals')
+    const attachments = field('attachments')
+    if (
+      typeof plugins.available_for_web_turn !== 'boolean' ||
+      typeof plugins.reason !== 'string' ||
+      typeof approvals.available_for_web_turn !== 'boolean' ||
+      typeof approvals.reason !== 'string' ||
+      typeof attachments.draft_ingest !== 'boolean' ||
+      typeof attachments.available_for_web_turn !== 'boolean' ||
+      typeof attachments.reason !== 'string'
+    ) {
+      throw new Error('Server returned invalid capabilities')
+    }
+    return {
+      tools,
+      plugins: {
+        available_for_web_turn: plugins.available_for_web_turn,
+        reason: plugins.reason,
+      },
+      approvals: {
+        available_for_web_turn: approvals.available_for_web_turn,
+        reason: approvals.reason,
+      },
+      attachments: {
+        draft_ingest: attachments.draft_ingest,
+        available_for_web_turn: attachments.available_for_web_turn,
+        reason: attachments.reason,
+      },
+      search: booleanCapability('search', 'available'),
+      deep_research: booleanCapability('deep_research', 'available'),
+      voice: booleanCapability('voice', 'available'),
+      artifacts: booleanCapability('artifacts', 'available'),
+    } satisfies WebCapabilities
+  } catch (cause) {
+    if (cause instanceof ApiError && cause.status === 404) {
+      return unavailableCapabilities('This native server does not expose web capability discovery.')
+    }
+    throw cause
+  }
 }
 
 export async function listSessions() {

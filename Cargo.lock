@@ -998,6 +998,7 @@ dependencies = [
  "opencode-rk-providers",
  "opencode-rk-sessions",
  "opencode-rk-storage",
+ "opencode-rk-tools",
  "serde",
  "serde_json",
  "tempfile",

@@ -16,7 +16,9 @@ import {
   Plus,
   SlidersHorizontal,
   Square,
+  Search,
   X,
+  Wrench,
 } from 'lucide-react'
 
 import { Button } from '@/components/ui/button'
@@ -34,7 +36,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select'
-import { modelKey, modelLabel, type DraftAttachment, type ModelSummary } from '@/lib/api'
+import {
+  modelKey,
+  modelLabel,
+  type DraftAttachment,
+  type ModelSummary,
+  type WebCapabilities,
+} from '@/lib/api'
 
 const effortLevels = [
   { value: 'low', label: 'Low' },
@@ -63,6 +71,7 @@ interface ComposerProps {
   attachments?: DraftAttachment[]
   attachmentsAvailable?: boolean
   attachmentUnavailableReason?: string
+  capabilities?: WebCapabilities | null
   models: ModelSummary[]
   selectedModel: string
   onModelChange: (model: string) => void
@@ -171,6 +180,7 @@ export function Composer({
   attachments = [],
   attachmentsAvailable = true,
   attachmentUnavailableReason,
+  capabilities = null,
   models,
   selectedModel,
   onModelChange,
@@ -411,6 +421,38 @@ export function Composer({
               size="icon"
               variant="ghost"
               className="codex-composer-icon-button"
+              aria-label="Tools and apps"
+              isDisabled={disabled || running}
+            >
+              <Wrench aria-hidden="true" />
+            </Button>
+            <DropdownMenu placement="top start" className="w-80">
+              <DropdownMenuLabel>Native tools</DropdownMenuLabel>
+              {capabilities?.tools.length ? (
+                capabilities.tools.map((tool) => (
+                  <DropdownMenuItem key={tool.id} id={`tool-${tool.id}`} isDisabled>
+                    <Wrench aria-hidden="true" />
+                    {tool.name} · {tool.available_for_web_turn ? 'Available' : tool.reason}
+                  </DropdownMenuItem>
+                ))
+              ) : (
+                <DropdownMenuItem isDisabled>No daemon tool capabilities reported</DropdownMenuItem>
+              )}
+              <DropdownMenuSeparator />
+              <DropdownMenuItem isDisabled>
+                Plugins/apps · {capabilities?.plugins.reason ?? 'capability discovery unavailable'}
+              </DropdownMenuItem>
+              <DropdownMenuItem isDisabled>
+                Approvals · {capabilities?.approvals.reason ?? 'capability discovery unavailable'}
+              </DropdownMenuItem>
+            </DropdownMenu>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuTrigger>
+            <Button
+              size="icon"
+              variant="ghost"
+              className="codex-composer-icon-button"
               aria-label="Commands and mentions"
               isDisabled={disabled || running}
             >
@@ -421,6 +463,15 @@ export function Composer({
               <DropdownMenuItem isDisabled>Slash commands · native endpoint unavailable</DropdownMenuItem>
               <DropdownMenuItem isDisabled>Mentions · native endpoint unavailable</DropdownMenuItem>
               <DropdownMenuItem isDisabled>Queue / steer · native endpoint unavailable</DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem isDisabled>
+                <Search aria-hidden="true" />
+                Search · {capabilities?.search.reason ?? 'capability discovery unavailable'}
+              </DropdownMenuItem>
+              <DropdownMenuItem isDisabled>
+                <Search aria-hidden="true" />
+                Deep research · {capabilities?.deep_research.reason ?? 'capability discovery unavailable'}
+              </DropdownMenuItem>
             </DropdownMenu>
           </DropdownMenuTrigger>
 
@@ -489,7 +540,8 @@ export function Composer({
             size="icon"
             variant="ghost"
             className="codex-composer-icon-button"
-            aria-label="Voice input unavailable"
+            aria-label={`Voice input unavailable: ${capabilities?.voice.reason ?? 'native audio adapter unavailable'}`}
+            title={capabilities?.voice.reason ?? 'Native audio adapter unavailable'}
             isDisabled
           >
             <Mic aria-hidden="true" />

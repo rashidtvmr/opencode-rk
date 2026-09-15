@@ -40,6 +40,7 @@ import {
   deleteDraftAttachment,
   getForkProvenance,
   getHealth,
+  getWebCapabilities,
   listAssistantActivity,
   listDraftAttachments,
   listMessages,
@@ -57,6 +58,7 @@ import {
   type MessageRecord,
   type ModelSummary,
   type SessionSummary,
+  type WebCapabilities,
 } from '@/lib/api'
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -138,6 +140,7 @@ function MessageActions({
 function App() {
   const [sessions, setSessions] = useState<SessionSummary[]>([])
   const [models, setModels] = useState<ModelSummary[]>([])
+  const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null)
   const [health, setHealth] = useState<HealthResponse | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [error, setError] = useState('')
@@ -175,12 +178,13 @@ function App() {
   useEffect(() => {
     const controller = new AbortController()
 
-    Promise.all([getHealth(), listSessions(), listModels()])
-      .then(([healthResult, sessionResult, modelResult]) => {
+    Promise.all([getHealth(), listSessions(), listModels(), getWebCapabilities()])
+      .then(([healthResult, sessionResult, modelResult, capabilityResult]) => {
         if (controller.signal.aborted) return
         setHealth(healthResult)
         setSessions(sessionResult)
         setModels(modelResult)
+        setCapabilities(capabilityResult)
         setSelectedSessionId((current) => current ?? sessionResult[0]?.id ?? null)
         setSelectedModel((current) => current || (modelResult[0] ? modelKey(modelResult[0], 0) : ''))
         setLoadState('ready')
@@ -1020,6 +1024,7 @@ function App() {
               attachments={attachmentState.attachments}
               attachmentsAvailable={attachmentState.available}
               attachmentUnavailableReason={attachmentState.reason}
+              capabilities={capabilities}
               models={models}
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
