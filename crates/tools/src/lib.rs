@@ -20,3 +20,6 @@ pub mod hooks_bridge;
 pub mod plugin_manifest;
 pub mod op_receipts;
 pub mod skill_commands;
+pub mod ext_lifecycle;
+pub mod ext_commands;
+pub mod ext_hooks;

@@ -10,6 +10,8 @@ pub mod reference;
 pub mod state;
 pub mod share;
 pub mod legacy_view;
+pub mod share_policy;
+pub mod remote_share;
 pub mod store;
 pub mod tui_state;
 pub mod ui_001;

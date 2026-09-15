@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 pub mod config;
 pub mod delegation;
+pub mod ops_scope;
+pub mod runtime_report;
 pub mod effect;
 pub mod lifecycle;
 use serde::{Deserialize, Serialize};

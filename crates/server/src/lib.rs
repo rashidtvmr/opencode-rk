@@ -6,6 +6,9 @@ pub mod event_bus;
 pub mod repo_ops;
 pub mod remote_ledger;
 pub mod app_client;
+pub mod web_config;
+pub mod desktop_bridge;
+pub mod enterprise_link;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
