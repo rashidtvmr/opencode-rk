@@ -21,11 +21,18 @@ use axum::{
     Json, Router,
 };
 use opencode_rk_catalog::{Catalog, CatalogQuery};
-use opencode_rk_contracts::{MessageRole, SessionId, WIRE_SCHEMA_VERSION};
+use opencode_rk_contracts::{MessageRole, PayloadRef, SessionId, WIRE_SCHEMA_VERSION};
+use opencode_rk_providers::responses::{
+    OpenAiResponsesClient, ResponsesError, ResponsesInput, ResponsesRole,
+    MAX_RESPONSES_INPUT_MESSAGES,
+};
 use opencode_rk_sessions::SessionService;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{str::FromStr, sync::Arc};
+use tokio::sync::Semaphore;
+
+static TURN_PERMITS: Semaphore = Semaphore::const_new(2);
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: SessionService,
@@ -43,6 +50,7 @@ pub fn router(state: AppState) -> Router {
             "/api/sessions/{id}/messages",
             get(list_messages).post(append_message),
         )
+        .route("/api/sessions/{id}/turns", post(create_turn))
         .with_state(state)
 }
 async fn health() -> Json<Value> {
@@ -203,6 +211,131 @@ async fn append_message(
         .map_err(ApiFailure::internal)?;
     Ok((StatusCode::CREATED, Json(json!({"message":message}))))
 }
+
+#[derive(Debug, Deserialize)]
+struct CreateTurnBody {
+    text: String,
+    model: String,
+    reasoning_effort: String,
+}
+
+async fn create_turn(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<CreateTurnBody>,
+) -> Result<(StatusCode, Json<Value>), ApiFailure> {
+    let _permit = TURN_PERMITS
+        .try_acquire()
+        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let id = parse_session_id(&id)?;
+    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+
+    if body.text.trim().is_empty() {
+        return Err(ApiFailure::bad_request("turn text must not be empty"));
+    }
+    let (provider_id, model_id) = body
+        .model
+        .split_once('/')
+        .filter(|(provider, model)| !provider.is_empty() && !model.is_empty())
+        .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
+    if provider_id != "openai" {
+        return Err(ApiFailure::bad_request(format!(
+            "provider '{provider_id}' does not have a native turn adapter yet"
+        )));
+    }
+    if !matches!(
+        body.reasoning_effort.as_str(),
+        "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    ) {
+        return Err(ApiFailure::bad_request("unsupported reasoning effort"));
+    }
+
+    let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
+    let user_message = state
+        .sessions
+        .append_text(id, MessageRole::User, body.text)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let history = state
+        .sessions
+        .messages(id, 500)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let mut input = responses_history(&history)?;
+    if !history.iter().any(|message| message.id == user_message.id) {
+        if input.len() == MAX_RESPONSES_INPUT_MESSAGES {
+            input.remove(0);
+        }
+        let PayloadRef::Inline { text } = &user_message.body else {
+            return Err(ApiFailure::internal(
+                "newly appended user message was not stored inline",
+            ));
+        };
+        input.push(ResponsesInput::new(ResponsesRole::User, text.clone()));
+    }
+    let assistant_text = provider
+        .create(model_id, &body.reasoning_effort, &input)
+        .await
+        .map_err(provider_failure)?;
+    let assistant_message = state
+        .sessions
+        .append_text(id, MessageRole::Assistant, assistant_text)
+        .await
+        .map_err(ApiFailure::internal)?;
+
+    Ok((
+        StatusCode::CREATED,
+        Json(json!({
+            "user_message": user_message,
+            "assistant_message": assistant_message
+        })),
+    ))
+}
+
+fn responses_history(
+    history: &[opencode_rk_contracts::MessageRecord],
+) -> Result<Vec<ResponsesInput>, ApiFailure> {
+    let start = history.len().saturating_sub(MAX_RESPONSES_INPUT_MESSAGES);
+    history[start..]
+        .iter()
+        .map(|message| {
+            let role = match message.role {
+                MessageRole::System => ResponsesRole::System,
+                MessageRole::User => ResponsesRole::User,
+                MessageRole::Assistant => ResponsesRole::Assistant,
+                MessageRole::Tool => {
+                    return Err(ApiFailure::bad_request(
+                        "tool transcript entries need a native Responses tool adapter",
+                    ));
+                }
+            };
+            let PayloadRef::Inline { text } = &message.body else {
+                return Err(ApiFailure::bad_request(
+                    "blob transcript entries need a native Responses attachment adapter",
+                ));
+            };
+            Ok(ResponsesInput::new(role, text.clone()))
+        })
+        .collect()
+}
+
+fn provider_failure(error: ResponsesError) -> ApiFailure {
+    match error {
+        ResponsesError::MissingCredential(_) | ResponsesError::InvalidConfig(_) => {
+            ApiFailure::service_unavailable(error.to_string())
+        }
+        ResponsesError::EmptyModel
+        | ResponsesError::UnsupportedReasoningEffort(_)
+        | ResponsesError::TooManyMessages { .. }
+        | ResponsesError::InputTooLarge { .. } => ApiFailure::bad_request(error.to_string()),
+        ResponsesError::Request(_)
+        | ResponsesError::Upstream { .. }
+        | ResponsesError::ResponseTooLarge { .. }
+        | ResponsesError::InvalidJson(_)
+        | ResponsesError::EmptyOutput
+        | ResponsesError::OutputTooLarge { .. } => ApiFailure::bad_gateway(error.to_string()),
+    }
+}
 fn parse_session_id(value: &str) -> Result<SessionId, ApiFailure> {
     SessionId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid session id"))
 }
@@ -224,6 +357,27 @@ impl ApiFailure {
         Self {
             status: StatusCode::NOT_FOUND,
             code: "not_found",
+            message: message.into(),
+        }
+    }
+    fn too_many_requests(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::TOO_MANY_REQUESTS,
+            code: "too_many_requests",
+            message: message.into(),
+        }
+    }
+    fn service_unavailable(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::SERVICE_UNAVAILABLE,
+            code: "service_unavailable",
+            message: message.into(),
+        }
+    }
+    fn bad_gateway(message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_GATEWAY,
+            code: "bad_gateway",
             message: message.into(),
         }
     }

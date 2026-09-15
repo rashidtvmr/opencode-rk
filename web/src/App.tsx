@@ -19,7 +19,7 @@ import {
   Sparkles,
 } from 'lucide-react'
 
-import { Composer } from '@/components/composer'
+import { Composer, type ReasoningEffort } from '@/components/composer'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -29,7 +29,6 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
 import {
-  appendMessage,
   archiveSession,
   createSession,
   getHealth,
@@ -38,6 +37,7 @@ import {
   listSessions,
   modelKey,
   renameSession,
+  runTurn,
   type HealthResponse,
   type MessageRecord,
   type ModelSummary,
@@ -184,18 +184,45 @@ function App() {
     }
   }
 
-  const handleComposerSubmit = async (text: string) => {
+  const handleComposerSubmit = async (text: string, reasoningEffort: ReasoningEffort) => {
     if (!selectedSessionId) return false
+    if (!selectedModel) {
+      setNotice('Choose a model before sending a message.')
+      return false
+    }
 
     try {
-      const message = await appendMessage(selectedSessionId, text)
-      setMessages((current) => [...current, message])
+      const turn = await runTurn(selectedSessionId, text, selectedModel, reasoningEffort)
+      setMessages((current) => [
+        ...current,
+        turn.userMessage,
+        ...(turn.assistantMessage ? [turn.assistantMessage] : []),
+      ])
       setMessageLoadState('ready')
-      setNotice('Message saved. Agent turn execution is not connected yet.')
+      setNotice(
+        turn.executed
+          ? 'Assistant reply received.'
+          : 'Message saved. Upgrade the native server to enable turn execution.',
+      )
       return true
     } catch (cause) {
-      setNotice(cause instanceof Error ? cause.message : 'Could not save the message')
-      return false
+      const previousIds = new Set(messages.map((message) => message.id))
+      let persisted = false
+      try {
+        const refreshed = await listMessages(selectedSessionId, 200)
+        persisted = refreshed.some(
+          (message) =>
+            !previousIds.has(message.id) &&
+            message.role === 'user' &&
+            message.body.storage === 'inline' &&
+            message.body.text === text,
+        )
+        setMessages(refreshed)
+      } catch {
+        // Keep the existing transcript when a follow-up refresh also fails.
+      }
+      setNotice(cause instanceof Error ? cause.message : 'Could not execute the turn')
+      return persisted
     }
   }
 

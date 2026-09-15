@@ -19,11 +19,23 @@ default. Override that for another native-server port:
 VITE_API_ORIGIN=http://127.0.0.1:4097 pnpm dev
 ```
 
-The web client currently uses the native server for health, model discovery,
-session create/rename/archive, and bounded persisted message history. Sending a
-message stores the user message in the native session database. Agent/model turn
-execution, streaming assistant responses, attachments, screenshots, and voice
-input still require native runtime endpoints and are not simulated by the UI.
+The web client uses the native server for health, model discovery,
+session create/rename/archive, bounded persisted message history, and OpenAI
+Responses turns. The server keeps `OPENAI_API_KEY` on the native side; the web
+client only sends the selected `provider/model`, reasoning effort, and message.
+Sync the model catalog before starting a fresh daemon so the model picker is
+populated:
+
+```sh
+opencode-rk models sync
+OPENAI_API_KEY=... opencode-rk serve
+```
+
+Turn responses are currently returned after the provider request completes.
+Incremental streaming, attachments, screenshots, voice input, and native turn
+adapters for providers other than OpenAI remain separate runtime work and are not
+simulated by the UI. Older daemons that do not expose `/turns` retain the durable
+message-only fallback.
 
 Accessibility is treated as an application contract rather than assumed from the
 component library: the shell includes semantic landmarks, skip navigation,

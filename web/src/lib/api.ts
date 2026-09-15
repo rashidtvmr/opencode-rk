@@ -38,6 +38,16 @@ export interface MessageRecord {
   created_at?: unknown
 }
 
+class ApiError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -51,7 +61,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     const body = (await response.json().catch(() => null)) as
       | { message?: string }
       | null
-    throw new Error(body?.message ?? `Request failed with ${response.status}`)
+    throw new ApiError(response.status, body?.message ?? `Request failed with ${response.status}`)
   }
 
   return (await response.json()) as T
@@ -172,6 +182,46 @@ export async function appendMessage(id: string, text: string) {
   const message = normalizeMessage(payload.message)
   if (!message) throw new Error('Server returned an invalid message')
   return message
+}
+
+export interface TurnResult {
+  userMessage: MessageRecord
+  assistantMessage: MessageRecord | null
+  executed: boolean
+}
+
+export async function runTurn(
+  id: string,
+  text: string,
+  model: string,
+  reasoningEffort: string,
+): Promise<TurnResult> {
+  try {
+    const payload = await request<{ user_message: unknown; assistant_message: unknown }>(
+      `/api/sessions/${encodeURIComponent(id)}/turns`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          text,
+          model,
+          reasoning_effort: reasoningEffort,
+        }),
+      },
+    )
+    const userMessage = normalizeMessage(payload.user_message)
+    const assistantMessage = normalizeMessage(payload.assistant_message)
+    if (!userMessage || !assistantMessage) throw new Error('Server returned an invalid turn')
+    return { userMessage, assistantMessage, executed: true }
+  } catch (cause) {
+    // Older native servers support durable messages without turn execution.
+    // Preserve that compatibility path while the web client and daemon may be
+    // upgraded independently.
+    if (cause instanceof ApiError && cause.status === 404) {
+      const userMessage = await appendMessage(id, text)
+      return { userMessage, assistantMessage: null, executed: false }
+    }
+    throw cause
+  }
 }
 
 export async function listModels() {

@@ -26,15 +26,23 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { modelKey, modelLabel, type ModelSummary } from '@/lib/api'
 
-const effortLevels = ['Low', 'Medium', 'High', 'Extra High'] as const
-type EffortLevel = (typeof effortLevels)[number]
+const effortLevels = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+  { value: 'xhigh', label: 'Extra High' },
+] as const
+export type ReasoningEffort = (typeof effortLevels)[number]['value']
 
 interface ComposerProps {
   disabled?: boolean
   models: ModelSummary[]
   selectedModel: string
   onModelChange: (model: string) => void
-  onSubmit?: (value: string) => boolean | void | Promise<boolean | void>
+  onSubmit?: (
+    value: string,
+    reasoningEffort: ReasoningEffort,
+  ) => boolean | void | Promise<boolean | void>
 }
 
 export function Composer({
@@ -45,7 +53,7 @@ export function Composer({
   onSubmit,
 }: ComposerProps) {
   const [value, setValue] = useState('')
-  const [effort, setEffort] = useState<EffortLevel>('High')
+  const [effort, setEffort] = useState<ReasoningEffort>('high')
   const [submitting, setSubmitting] = useState(false)
 
   const modelItems = useMemo(
@@ -63,7 +71,7 @@ export function Composer({
 
     setSubmitting(true)
     try {
-      const accepted = await onSubmit?.(message)
+      const accepted = await onSubmit?.(message, effort)
       if (accepted !== false) setValue('')
     } finally {
       setSubmitting(false)
@@ -146,21 +154,21 @@ export function Composer({
               size="sm"
               variant="ghost"
               className="codex-composer-effort"
-              aria-label={`Reasoning effort: ${effort}`}
+              aria-label={`Reasoning effort: ${effortLevels.find((level) => level.value === effort)?.label}`}
             >
               <SlidersHorizontal aria-hidden="true" className="size-3.5" />
-              {effort}
+              {effortLevels.find((level) => level.value === effort)?.label}
             </Button>
             <DropdownMenu placement="top start" selectionMode="single" selectedKeys={[effort]}>
               <DropdownMenuLabel>Reasoning effort</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {effortLevels.map((level) => (
                 <DropdownMenuItem
-                  key={level}
-                  id={level}
-                  onAction={() => setEffort(level)}
+                  key={level.value}
+                  id={level.value}
+                  onAction={() => setEffort(level.value)}
                 >
-                  {level}
+                  {level.label}
                 </DropdownMenuItem>
               ))}
             </DropdownMenu>

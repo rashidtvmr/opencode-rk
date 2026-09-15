@@ -938,6 +938,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "opencode-rk-contracts",
  "opencode-rk-security",
+ "reqwest",
  "serde",
  "serde_json",
  "tempfile",
@@ -962,10 +963,14 @@ dependencies = [
  "axum",
  "opencode-rk-catalog",
  "opencode-rk-contracts",
+ "opencode-rk-providers",
  "opencode-rk-sessions",
+ "opencode-rk-storage",
  "serde",
  "serde_json",
+ "tempfile",
  "tokio",
+ "tower",
  "tracing",
 ]
 
@@ -982,6 +987,7 @@ dependencies = [
  "thiserror",
  "tokio",
  "uuid",
+ "zstd",
 ]
 
 [[package]]

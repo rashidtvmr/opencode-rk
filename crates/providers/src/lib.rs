@@ -25,6 +25,7 @@ pub mod proxy_route;
 pub mod rate_limit;
 pub mod recording;
 pub mod registry;
+pub mod responses;
 pub mod retry;
 pub mod route_compose;
 pub mod router;
