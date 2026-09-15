@@ -1,0 +1,15 @@
+{
+  "commands": {
+    "green": "python3 -m pytest fixtures/release-tdd/tests -q",
+    "red": "python3 -m pytest fixtures/release-tdd/tests -x -q",
+    "verifier": "python3 -m pytest fixtures/release-tdd/tests -q"
+  },
+  "files": [
+    {
+      "path": "tests/test_slice.py",
+      "sha256": "c894d98107791ddfbb8ca5a42d4c371a4cfcbcd90ab9dc5db32788cad97f2fa0"
+    }
+  ],
+  "partition": "strict-tdd-independent-verification-validator",
+  "revision": "863a0019fc6f0b9779d867792fe00c4a9ab84c87"
+}

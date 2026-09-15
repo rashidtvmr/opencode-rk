@@ -1,0 +1,8 @@
+{
+  "command": "python3 -m pytest tests -q",
+  "exit_code": 0,
+  "independent": true,
+  "kind": "verifier",
+  "revision": "auto005-rev-001",
+  "test_hash": "ca32e83d968f0bc526d1b276c7f5c080fbaf1311606a3935e87907a02b83c6ad"
+}

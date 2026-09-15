@@ -83,6 +83,36 @@ next safe task; never disable a safeguard to keep the loop moving.
 
 These apply to the main agent AND every delegated subagent.
 
+### 8 GB interactive test budget
+- Treat 8 GiB of RAM as the hard host budget for the implementation loop. Keep
+  at least 2 GiB available for the OS, editor, agent harness, and database
+  services; do not intentionally fill the machine with test or build workers.
+- Run one resource-heavy validation command at a time. Do not launch parallel
+  workspace builds, full test suites, browser sessions, or delegated test jobs
+  unless their combined memory has been measured and fits the remaining budget.
+- Prefer the smallest useful scope in this order: one test, one test target, one
+  crate, then the workspace. Start with focused tests and expand only after the
+  preceding scope is green.
+- Use bounded commands for long-running checks, for example
+  `timeout 120 rtk cargo test -p <crate> --test <target>` and
+  `timeout 300 rtk cargo test --workspace`. If a command reaches its timeout,
+  stop and narrow the scope instead of immediately retrying the same workload.
+- Cap build and test parallelism for interactive work. Use
+  `CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2` by default, and lower both to `1`
+  when resident memory rises or the host becomes unresponsive. Never use an
+  unbounded job count derived from all host CPUs.
+- Before a broad run, record available memory with `rtk free -h` or an
+  equivalent bounded system query. During a long run, inspect the process and
+  memory state rather than starting another command. Stop the run if available
+  memory falls below 1 GiB, swap pressure is sustained, or the desktop becomes
+  unstable.
+- Avoid running `cargo test --workspace` concurrently with `cargo check`, a
+  browser, database migrations, or another Cargo process. Reuse compiled
+  artifacts and run targeted regressions after source changes.
+- Interactive testing must use disposable fixtures and the approved test
+  database only. It must not modify the user's existing OpenCode database,
+  host data, credentials, or broad filesystem state.
+
 ### RTK token optimization
 - Prefix EVERY shell command with `rtk`. If rtk has no filter it passes through
   unchanged, so it is always safe. Cuts context use 60-90%.

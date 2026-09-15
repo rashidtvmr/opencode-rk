@@ -1,0 +1,17 @@
+{
+  "edges": [
+    {
+      "requirement": "REQ-003",
+      "task": "DISC-001"
+    },
+    {
+      "requirement": "REQ-003",
+      "task": "DISC-010"
+    },
+    {
+      "requirement": "REQ-003",
+      "task": "REL-001"
+    }
+  ],
+  "partition": "release-feature-accounting-validator"
+}

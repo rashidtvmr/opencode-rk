@@ -1,0 +1,1 @@
+{"broad_grant": null, "cancel_tokens": ["scope-release"], "capabilities": ["fs.read:gates", "report.write:out"], "grants": ["fs:read"], "secret_canary": "REL003-CANARY-9f8e7d6c5b4a"}

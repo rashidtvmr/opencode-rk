@@ -1,0 +1,30 @@
+{
+  "controls": [
+    {
+      "bypassed_by": null,
+      "control": "SecretFileProtection",
+      "denied": true
+    },
+    {
+      "bypassed_by": null,
+      "control": "DestructiveCommandBlock",
+      "denied": true
+    },
+    {
+      "bypassed_by": null,
+      "control": "SystemFileWriteBlock",
+      "denied": true
+    },
+    {
+      "control": "SsrfBlock",
+      "denied": false,
+      "bypassed_by": "*"
+    },
+    {
+      "bypassed_by": null,
+      "control": "SqlInjectionBlock",
+      "denied": true
+    }
+  ],
+  "revision": "863a0019fc6f0b9779d867792fe00c4a9ab84c87"
+}

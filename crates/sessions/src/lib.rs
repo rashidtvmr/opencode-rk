@@ -8,6 +8,7 @@ pub mod branch_v2;
 pub mod import;
 pub mod index;
 pub mod legacy_view;
+pub mod mcp_status_panel;
 pub mod migration;
 pub mod ops_limits;
 pub mod query;

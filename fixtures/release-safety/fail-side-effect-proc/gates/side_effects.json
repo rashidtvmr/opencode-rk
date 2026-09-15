@@ -1,0 +1,19 @@
+{
+  "denied_ops": [
+    {
+      "denied": true,
+      "fs_diff": [],
+      "op": "write:/tmp/rel003-probe-blocked",
+      "proc_started": false,
+      "secret_bytes_logged": 0
+    },
+    {
+      "op": "exec:/bin/rel003-probe-blocked",
+      "denied": true,
+      "fs_diff": [],
+      "proc_started": true,
+      "secret_bytes_logged": 0
+    }
+  ],
+  "revision": "863a0019fc6f0b9779d867792fe00c4a9ab84c87"
+}

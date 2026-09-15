@@ -1,0 +1,10 @@
+{
+  "body_schema_ref": "openai.chat-completions.request.v1",
+  "headers": {
+    "Authorization": "REDACTED",
+    "Content-Type": "application/json"
+  },
+  "method": "POST",
+  "provider": "openai",
+  "url_template": "https://api.openai.com/v1/chat/completions"
+}

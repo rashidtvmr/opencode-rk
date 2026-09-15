@@ -1,0 +1,21 @@
+{
+  "edges": [
+    {
+      "card": "tasks/DISC-001.md",
+      "requirement": "REQ-003",
+      "task": "DISC-001",
+      "tests": [
+        "DISC-001-T01"
+      ]
+    },
+    {
+      "card": "tasks/DISC-010.md",
+      "requirement": "REQ-003",
+      "task": "DISC-010",
+      "tests": [
+        "DISC-010-T01"
+      ]
+    }
+  ],
+  "partition": "pin-verification"
+}

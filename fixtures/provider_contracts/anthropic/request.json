@@ -1,0 +1,11 @@
+{
+  "body_schema_ref": "anthropic.messages.request.v1",
+  "headers": {
+    "Content-Type": "application/json",
+    "anthropic-version": "2023-06-01",
+    "x-api-key": "REDACTED"
+  },
+  "method": "POST",
+  "provider": "anthropic",
+  "url_template": "https://api.anthropic.com/v1/messages"
+}

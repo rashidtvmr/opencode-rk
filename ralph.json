@@ -3340,99 +3340,685 @@
     },
     {
       "id": "WEB-006",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "in-progress",
       "userStory": "Shared singleton daemon and embedded web host - web, future TUI and CLI use one per-user/data-dir native backend authority without a separate web-only serve process",
       "dependencyIds": [],
-      "testObligations": ["WEB-006-T01", "WEB-006-T02", "WEB-006-T03", "WEB-006-T04", "WEB-006-T05"]
+      "testObligations": [
+        "WEB-006-T01",
+        "WEB-006-T02",
+        "WEB-006-T03",
+        "WEB-006-T04",
+        "WEB-006-T05"
+      ]
     },
     {
       "id": "WEB-007",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Full-width role-aligned transcript rows with request/response action bars below each message and honest capability-gated actions",
       "dependencyIds": [],
-      "testObligations": ["WEB-007-T01", "WEB-007-T02", "WEB-007-T03", "WEB-007-T04", "WEB-007-T05"]
+      "testObligations": [
+        "WEB-007-T01",
+        "WEB-007-T02",
+        "WEB-007-T03",
+        "WEB-007-T04",
+        "WEB-007-T05"
+      ]
     },
     {
       "id": "WEB-008",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Real edit, retry, regenerate and branch/fork actions preserve original conversation history and expose branch navigation",
       "dependencyIds": [],
-      "testObligations": ["WEB-008-T01", "WEB-008-T02", "WEB-008-T03", "WEB-008-T04", "WEB-008-T05"]
+      "testObligations": [
+        "WEB-008-T01",
+        "WEB-008-T02",
+        "WEB-008-T03",
+        "WEB-008-T04",
+        "WEB-008-T05"
+      ]
     },
     {
       "id": "WEB-009",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Structured assistant turns render collapsed provider reasoning summaries and tool activity separately from final answer text with a dedicated references section; raw hidden chain-of-thought is never exposed",
       "dependencyIds": [],
-      "testObligations": ["WEB-009-T01", "WEB-009-T02", "WEB-009-T03", "WEB-009-T04", "WEB-009-T05"]
+      "testObligations": [
+        "WEB-009-T01",
+        "WEB-009-T02",
+        "WEB-009-T03",
+        "WEB-009-T04",
+        "WEB-009-T05"
+      ]
     },
     {
       "id": "WEB-010",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Accessible WYSIWYG structured chat composer with model and effort controls, slash commands, mentions, attachment/tool/plugin affordances, drafts and stop/queue/steer state",
       "dependencyIds": [],
-      "testObligations": ["WEB-010-T01", "WEB-010-T02", "WEB-010-T03", "WEB-010-T04", "WEB-010-T05"]
+      "testObligations": [
+        "WEB-010-T01",
+        "WEB-010-T02",
+        "WEB-010-T03",
+        "WEB-010-T04",
+        "WEB-010-T05"
+      ]
     },
     {
       "id": "WEB-011",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Real bounded files, images and screenshots through picker, paste, drag/drop and a searchable local Library with native attachment-provider mapping",
       "dependencyIds": [],
-      "testObligations": ["WEB-011-T01", "WEB-011-T02", "WEB-011-T03", "WEB-011-T04", "WEB-011-T05"]
+      "testObligations": [
+        "WEB-011-T01",
+        "WEB-011-T02",
+        "WEB-011-T03",
+        "WEB-011-T04",
+        "WEB-011-T05"
+      ]
     },
     {
       "id": "WEB-012",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Composer plugin, app and tool discovery/selection backed by real native capabilities with permission approvals and durable tool-call results",
       "dependencyIds": [],
-      "testObligations": ["WEB-012-T01", "WEB-012-T02", "WEB-012-T03", "WEB-012-T04", "WEB-012-T05"]
+      "testObligations": [
+        "WEB-012-T01",
+        "WEB-012-T02",
+        "WEB-012-T03",
+        "WEB-012-T04",
+        "WEB-012-T05"
+      ]
     },
     {
       "id": "WEB-013",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Search and deep-research mode with real source/tool selection, reviewable plan, progress, steering, cancellation and cited final results",
       "dependencyIds": [],
-      "testObligations": ["WEB-013-T01", "WEB-013-T02", "WEB-013-T03", "WEB-013-T04", "WEB-013-T05"]
+      "testObligations": [
+        "WEB-013-T01",
+        "WEB-013-T02",
+        "WEB-013-T03",
+        "WEB-013-T04",
+        "WEB-013-T05"
+      ]
     },
     {
       "id": "WEB-014",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Chat navigation parity with pins, unified history search, archive/share, temporary chat, progressive long-history paging and keyboard navigation",
       "dependencyIds": [],
-      "testObligations": ["WEB-014-T01", "WEB-014-T02", "WEB-014-T03", "WEB-014-T04", "WEB-014-T05"]
+      "testObligations": [
+        "WEB-014-T01",
+        "WEB-014-T02",
+        "WEB-014-T03",
+        "WEB-014-T04",
+        "WEB-014-T05"
+      ]
     },
     {
       "id": "WEB-015",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Projects and workspaces group chats, files and reusable context with memory/context inspection and disclosure of sources used",
       "dependencyIds": [],
-      "testObligations": ["WEB-015-T01", "WEB-015-T02", "WEB-015-T03", "WEB-015-T04", "WEB-015-T05"]
+      "testObligations": [
+        "WEB-015-T01",
+        "WEB-015-T02",
+        "WEB-015-T03",
+        "WEB-015-T04",
+        "WEB-015-T05"
+      ]
     },
     {
       "id": "WEB-016",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Voice and dictation with explicit microphone state, visible transcript and a real native audio/realtime adapter",
       "dependencyIds": [],
-      "testObligations": ["WEB-016-T01", "WEB-016-T02", "WEB-016-T03", "WEB-016-T04", "WEB-016-T05"]
+      "testObligations": [
+        "WEB-016-T01",
+        "WEB-016-T02",
+        "WEB-016-T03",
+        "WEB-016-T04",
+        "WEB-016-T05"
+      ]
     },
     {
       "id": "WEB-017",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "status": "not-started",
       "userStory": "Editable writing and code artifacts with copy/edit/undo/preview and explicitly authorized safe run/apply actions",
       "dependencyIds": [],
-      "testObligations": ["WEB-017-T01", "WEB-017-T02", "WEB-017-T03", "WEB-017-T04", "WEB-017-T05"]
+      "testObligations": [
+        "WEB-017-T01",
+        "WEB-017-T02",
+        "WEB-017-T03",
+        "WEB-017-T04",
+        "WEB-017-T05"
+      ]
+    },
+    {
+      "id": "PROV-015",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Provider auth profile model with explicit auth provenance - API key, official OAuth, imported local credential, and keyring-backed states; never log or serialize token material",
+      "dependencyIds": [
+        "PROV-001",
+        "PROV-006"
+      ],
+      "testObligations": [
+        "PROV-015-T01",
+        "PROV-015-T02",
+        "PROV-015-T03",
+        "PROV-015-T04",
+        "PROV-015-T05"
+      ]
+    },
+    {
+      "id": "PROV-016",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Official OpenAI Codex OAuth connector - browser/device login, refresh lifecycle, logout, account status, and provider-native model routing without impersonation headers",
+      "dependencyIds": [
+        "PROV-015",
+        "INT-006"
+      ],
+      "testObligations": [
+        "PROV-016-T01",
+        "PROV-016-T02",
+        "PROV-016-T03",
+        "PROV-016-T04",
+        "PROV-016-T05"
+      ]
+    },
+    {
+      "id": "PROV-017",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Official Anthropic Claude Code OAuth connector - PKCE/loopback consent flow, refresh lifecycle, logout, account status, and provider-native model routing without impersonation headers",
+      "dependencyIds": [
+        "PROV-015",
+        "INT-006"
+      ],
+      "testObligations": [
+        "PROV-017-T01",
+        "PROV-017-T02",
+        "PROV-017-T03",
+        "PROV-017-T04",
+        "PROV-017-T05"
+      ]
+    },
+    {
+      "id": "PROV-018",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Consent-based local credential import - read Codex ~/.codex/auth.json and Claude Code ~/.claude/.credentials.json or configured directories, validate schema and permissions, copy into protected storage without exposing tokens",
+      "dependencyIds": [
+        "PROV-015",
+        "SEC-004",
+        "SEC-005"
+      ],
+      "testObligations": [
+        "PROV-018-T01",
+        "PROV-018-T02",
+        "PROV-018-T03",
+        "PROV-018-T04",
+        "PROV-018-T05"
+      ]
+    },
+    {
+      "id": "PROV-019",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Provider request profiles - use documented API authentication and required headers, explicit provider identity, bounded retries/timeouts, and redacted wire diagnostics; prohibit CLI impersonation and detection-evasion headers",
+      "dependencyIds": [
+        "PROV-015",
+        "PROV-016",
+        "PROV-017"
+      ],
+      "testObligations": [
+        "PROV-019-T01",
+        "PROV-019-T02",
+        "PROV-019-T03",
+        "PROV-019-T04",
+        "PROV-019-T05"
+      ]
+    },
+    {
+      "id": "PROV-020",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Auth connector commands and status surface - connect/login, import, list, inspect, refresh, logout; show provider, account, auth mode, expiry, and actionable errors without secret material",
+      "dependencyIds": [
+        "PROV-016",
+        "PROV-017",
+        "PROV-018"
+      ],
+      "testObligations": [
+        "PROV-020-T01",
+        "PROV-020-T02",
+        "PROV-020-T03",
+        "PROV-020-T04",
+        "PROV-020-T05"
+      ]
+    },
+    {
+      "id": "PROV-021",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Provider usage and limits telemetry - current model/provider, auth source, request count, input/output tokens, cost when available, rate-limit/reset metadata, and bounded status-panel snapshots",
+      "dependencyIds": [
+        "PROV-019",
+        "PROV-020"
+      ],
+      "testObligations": [
+        "PROV-021-T01",
+        "PROV-021-T02",
+        "PROV-021-T03",
+        "PROV-021-T04",
+        "PROV-021-T05"
+      ]
+    },
+    {
+      "id": "PROV-022",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Auth storage hardening - OS keyring when available, 0600 file fallback, atomic refresh persistence, path allowlist, no inherited secrets, and deterministic redacted diagnostics",
+      "dependencyIds": [
+        "PROV-018"
+      ],
+      "testObligations": [
+        "PROV-022-T01",
+        "PROV-022-T02",
+        "PROV-022-T03",
+        "PROV-022-T04",
+        "PROV-022-T05"
+      ]
+    },
+    {
+      "id": "PROV-023",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Provider compatibility catalog - versioned documentation-backed records for supported official auth flows, endpoints, required headers, model aliases, refresh behavior, and known limitations with source dates",
+      "dependencyIds": [
+        "PROV-016",
+        "PROV-017",
+        "PROV-019"
+      ],
+      "testObligations": [
+        "PROV-023-T01",
+        "PROV-023-T02",
+        "PROV-023-T03",
+        "PROV-023-T04",
+        "PROV-023-T05"
+      ]
+    },
+    {
+      "id": "PROV-024",
+      "requirementIds": [
+        "REQ-041"
+      ],
+      "status": "not-started",
+      "userStory": "Differential provider contract fixtures - offline request-shape and auth-state tests for OpenAI, Anthropic, and other supported providers, with secret redaction and no live credential use",
+      "dependencyIds": [
+        "PROV-019",
+        "PROV-023"
+      ],
+      "testObligations": [
+        "PROV-024-T01",
+        "PROV-024-T02",
+        "PROV-024-T03",
+        "PROV-024-T04",
+        "PROV-024-T05"
+      ]
+    },
+    {
+      "id": "UI-019",
+      "requirementIds": [
+        "REQ-042"
+      ],
+      "status": "not-started",
+      "userStory": "Right-side TUI information panel with bounded live metadata: current directory, workspace/session, provider/model/auth mode, context usage, tokens, cost, MCP counts, active tools, queue state, timestamps and warnings; redact secrets and support narrow terminals",
+      "dependencyIds": [
+        "UI-013",
+        "PROV-021"
+      ],
+      "testObligations": [
+        "UI-019-T01",
+        "UI-019-T02",
+        "UI-019-T03",
+        "UI-019-T04",
+        "UI-019-T05"
+      ]
+    },
+    {
+      "id": "TOOL-016",
+      "requirementIds": [
+        "REQ-042"
+      ],
+      "status": "not-started",
+      "userStory": "MCP catalog search at top of MCP list using a versioned source-attributed popular-library index; search names, descriptions and tags with bounded results and safe install metadata",
+      "dependencyIds": [
+        "TOOL-009",
+        "TOOL-015"
+      ],
+      "testObligations": [
+        "TOOL-016-T01",
+        "TOOL-016-T02",
+        "TOOL-016-T03",
+        "TOOL-016-T04",
+        "TOOL-016-T05"
+      ]
+    },
+    {
+      "id": "TOOL-017",
+      "requirementIds": [
+        "REQ-042"
+      ],
+      "status": "not-started",
+      "userStory": "MCP selection and bulk actions with keyboard/mouse selection, select-all/clear/invert, enable/disable/remove/refresh/install, bounded selection and confirmations for destructive actions",
+      "dependencyIds": [
+        "TOOL-016"
+      ],
+      "testObligations": [
+        "TOOL-017-T01",
+        "TOOL-017-T02",
+        "TOOL-017-T03",
+        "TOOL-017-T04",
+        "TOOL-017-T05"
+      ]
+    },
+    {
+      "id": "TOOL-018",
+      "requirementIds": [
+        "REQ-042"
+      ],
+      "status": "not-started",
+      "userStory": "Per-MCP power toggle and lifecycle state with enabled/disabled/starting/ready/error, persistence, reconnect and refresh; off means no tool registration or invocation",
+      "dependencyIds": [
+        "TOOL-017"
+      ],
+      "testObligations": [
+        "TOOL-018-T01",
+        "TOOL-018-T02",
+        "TOOL-018-T03",
+        "TOOL-018-T04",
+        "TOOL-018-T05"
+      ]
+    },
+    {
+      "id": "TOOL-019",
+      "requirementIds": [
+        "REQ-042"
+      ],
+      "status": "not-started",
+      "userStory": "MCP payload filtering excludes disabled MCP servers and tools from message payloads and execution lookup, with deterministic snapshots and no stale enabled state",
+      "dependencyIds": [
+        "TOOL-018"
+      ],
+      "testObligations": [
+        "TOOL-019-T01",
+        "TOOL-019-T02",
+        "TOOL-019-T03",
+        "TOOL-019-T04",
+        "TOOL-019-T05"
+      ]
+    },
+    {
+      "id": "TOOL-020",
+      "requirementIds": [
+        "REQ-042"
+      ],
+      "status": "not-started",
+      "userStory": "MCP state integration into the right-side info panel and status events with bounded updates, counts, active tools, last error and latency, without blocking agent turns",
+      "dependencyIds": [
+        "TOOL-019",
+        "UI-019"
+      ],
+      "testObligations": [
+        "TOOL-020-T01",
+        "TOOL-020-T02",
+        "TOOL-020-T03",
+        "TOOL-020-T04",
+        "TOOL-020-T05"
+      ]
+    },
+    {
+      "id": "SYNC-001",
+      "requirementIds": [
+        "REQ-043"
+      ],
+      "status": "not-started",
+      "userStory": "Versioned sync log with monotonic sequence allocation per aggregate, idempotent apply, projector registry, post-freeze definition rejection, deterministic replay.",
+      "dependencyIds": [
+        "DB-017"
+      ],
+      "testObligations": [
+        "SYNC-001-T01",
+        "SYNC-001-T02",
+        "SYNC-001-T03",
+        "SYNC-001-T04",
+        "SYNC-001-T05"
+      ]
+    },
+    {
+      "id": "SYNC-002",
+      "requirementIds": [
+        "REQ-043"
+      ],
+      "status": "not-started",
+      "userStory": "Persisted message/part create-update-remove events versus ephemeral part-deltas; deltas never persist/replay; late foreign-key update warns without duplicating.",
+      "dependencyIds": [
+        "SYNC-001"
+      ],
+      "testObligations": [
+        "SYNC-002-T01",
+        "SYNC-002-T02",
+        "SYNC-002-T03",
+        "SYNC-002-T04",
+        "SYNC-002-T05"
+      ]
+    },
+    {
+      "id": "RUN-001",
+      "requirementIds": [
+        "REQ-044"
+      ],
+      "status": "not-started",
+      "userStory": "Per-session single normal runner: second prompt gets typed BusyError with zero side effects; shell lane runs concurrently; cancel reclaims task and removes idle runner.",
+      "dependencyIds": [],
+      "testObligations": [
+        "RUN-001-T01",
+        "RUN-001-T02",
+        "RUN-001-T03",
+        "RUN-001-T04",
+        "RUN-001-T05"
+      ]
+    },
+    {
+      "id": "ACP-001",
+      "requirementIds": [
+        "REQ-045"
+      ],
+      "status": "not-started",
+      "userStory": "ACP v1 JSONL framing over caller-supplied byte streams: initialize, session new/load/prompt, modes/models/variants; malformed frame rejected without state change.",
+      "dependencyIds": [],
+      "testObligations": [
+        "ACP-001-T01",
+        "ACP-001-T02",
+        "ACP-001-T03",
+        "ACP-001-T04",
+        "ACP-001-T05"
+      ]
+    },
+    {
+      "id": "ACP-002",
+      "requirementIds": [
+        "REQ-045"
+      ],
+      "status": "not-started",
+      "userStory": "ACP text-file read/write with byte caps; unsupported full update stream, tool-call reporting, mode switch, auth, real terminal, full history restore return typed Unsupported.",
+      "dependencyIds": [
+        "ACP-001"
+      ],
+      "testObligations": [
+        "ACP-002-T01",
+        "ACP-002-T02",
+        "ACP-002-T03",
+        "ACP-002-T04",
+        "ACP-002-T05"
+      ]
+    },
+    {
+      "id": "WSX-001",
+      "requirementIds": [
+        "REQ-046"
+      ],
+      "status": "not-started",
+      "userStory": "Workspace HTTP/WS proxy strips hop/routing headers, bounded queue-until-open, bridges /__workspace_ws, routes local versus remote by directory.",
+      "dependencyIds": [],
+      "testObligations": [
+        "WSX-001-T01",
+        "WSX-001-T02",
+        "WSX-001-T03",
+        "WSX-001-T04",
+        "WSX-001-T05"
+      ]
+    },
+    {
+      "id": "WSX-002",
+      "requirementIds": [
+        "REQ-046"
+      ],
+      "status": "not-started",
+      "userStory": "Remote workspace SSE sync loop with connected/connecting/disconnected/error statuses, bounded reconnect backoff, disposal closes queue/socket.",
+      "dependencyIds": [
+        "WSX-001"
+      ],
+      "testObligations": [
+        "WSX-002-T01",
+        "WSX-002-T02",
+        "WSX-002-T03",
+        "WSX-002-T04",
+        "WSX-002-T05"
+      ]
+    },
+    {
+      "id": "SDK-001",
+      "requirementIds": [
+        "REQ-047"
+      ],
+      "status": "not-started",
+      "userStory": "Typed SDK client with directory header/query rewriting, abort/timeout propagation, typed decode errors, no process spawn.",
+      "dependencyIds": [],
+      "testObligations": [
+        "SDK-001-T01",
+        "SDK-001-T02",
+        "SDK-001-T03",
+        "SDK-001-T04",
+        "SDK-001-T05"
+      ]
+    },
+    {
+      "id": "SDK-002",
+      "requirementIds": [
+        "REQ-047"
+      ],
+      "status": "not-started",
+      "userStory": "SDK server/process/TUI spawners with owned child lifecycle, single owner, kill-on-drop, no detached tasks, bounded startup timeout.",
+      "dependencyIds": [
+        "SDK-001"
+      ],
+      "testObligations": [
+        "SDK-002-T01",
+        "SDK-002-T02",
+        "SDK-002-T03",
+        "SDK-002-T04",
+        "SDK-002-T05"
+      ]
+    },
+    {
+      "id": "HEAD-001",
+      "requirementIds": [
+        "REQ-048"
+      ],
+      "status": "not-started",
+      "userStory": "Headless run execution with inline/block renderers, attachment conversion, bounded output, typed exit codes, uncompressed prompt streaming.",
+      "dependencyIds": [],
+      "testObligations": [
+        "HEAD-001-T01",
+        "HEAD-001-T02",
+        "HEAD-001-T03",
+        "HEAD-001-T04",
+        "HEAD-001-T05"
+      ]
+    },
+    {
+      "id": "HEAD-002",
+      "requirementIds": [
+        "REQ-048"
+      ],
+      "status": "not-started",
+      "userStory": "Session export to caller-supplied writer as redacted JSON with explicit session id, no interactive picker in non-TTY, byte cap, no secret bytes.",
+      "dependencyIds": [],
+      "testObligations": [
+        "HEAD-002-T01",
+        "HEAD-002-T02",
+        "HEAD-002-T03",
+        "HEAD-002-T04",
+        "HEAD-002-T05"
+      ]
     }
   ]
 }

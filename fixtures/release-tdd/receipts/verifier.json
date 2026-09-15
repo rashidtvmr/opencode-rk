@@ -1,0 +1,8 @@
+{
+  "command": "python3 -m pytest fixtures/release-tdd/tests -q",
+  "exit_code": 0,
+  "independent": true,
+  "kind": "verifier",
+  "revision": "863a0019fc6f0b9779d867792fe00c4a9ab84c87",
+  "test_hash": "c894d98107791ddfbb8ca5a42d4c371a4cfcbcd90ab9dc5db32788cad97f2fa0"
+}

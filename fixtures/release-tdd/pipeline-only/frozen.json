@@ -1,0 +1,16 @@
+{
+  "commands": {
+    "green": "python3 -m pytest fixtures/release-tdd/tests -q",
+    "red": "python3 -m pytest fixtures/release-tdd/tests -x -q",
+    "verifier": "python3 -m pytest fixtures/release-tdd/tests -q"
+  },
+  "files": [
+    {
+      "path": "tests/test_slice.py",
+      "sha256": "ee2d31a437d168f8ffb414051d05a9cf372c6c37a620ea9ce5f32b313b2582a2"
+    }
+  ],
+  "owner": "AUTO-005",
+  "partition": "trusted-red-green-pipeline",
+  "revision": "863a0019fc6f0b9779d867792fe00c4a9ab84c87"
+}

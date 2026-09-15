@@ -430,6 +430,89 @@
         "WEB-017"
       ],
       "mandatory": true
+    },
+    {
+      "id": "REQ-041",
+      "requirement": "Official provider compatibility, OAuth connectors, consent-based Codex and Claude Code credential import, documented request profiles, and provider usage/status telemetry",
+      "tasks": [
+        "PROV-015",
+        "PROV-016",
+        "PROV-017",
+        "PROV-018",
+        "PROV-019",
+        "PROV-020",
+        "PROV-021",
+        "PROV-022",
+        "PROV-023",
+        "PROV-024"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-042",
+      "requirement": "TUI operational information panel and searchable, selectable, toggleable MCP catalog and lifecycle management",
+      "tasks": [
+        "UI-019",
+        "TOOL-016",
+        "TOOL-017",
+        "TOOL-018",
+        "TOOL-019",
+        "TOOL-020"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-043",
+      "requirement": "Versioned sync event log with projector replay and persisted-versus-ephemeral part-event split",
+      "tasks": [
+        "SYNC-001",
+        "SYNC-002"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-044",
+      "requirement": "Bounded per-session runner with busy rejection, concurrent shell lane, and owned cancellation",
+      "tasks": [
+        "RUN-001"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-045",
+      "requirement": "ACP v1 JSON-lines bridge over stdio with stated capability limits",
+      "tasks": [
+        "ACP-001",
+        "ACP-002"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-046",
+      "requirement": "Workspace HTTP/WebSocket proxy and remote sync loop",
+      "tasks": [
+        "WSX-001",
+        "WSX-002"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-047",
+      "requirement": "Typed SDK client with server/process/TUI spawners and directory scoping",
+      "tasks": [
+        "SDK-001",
+        "SDK-002"
+      ],
+      "mandatory": true
+    },
+    {
+      "id": "REQ-048",
+      "requirement": "Headless run execution and session export",
+      "tasks": [
+        "HEAD-001",
+        "HEAD-002"
+      ],
+      "mandatory": true
     }
   ]
 }

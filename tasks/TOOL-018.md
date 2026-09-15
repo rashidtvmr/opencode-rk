@@ -1,121 +1,63 @@
 # TOOL-018
 
-Status: NOT STARTED. Kind: product. Runtime optional: True.
+Status: NOT STARTED. Kind: product. Runtime optional: False.
 Mandatory for full declared release: yes.
-Requirements: REQ-039 (proposed, change-risk/why/dep-path queries).
-Dependencies: none.
+Requirements: REQ-042.
+Dependencies: none (milestone gating via tools/plan_model.py).
 Test obligations: TOOL-018-T01, TOOL-018-T02, TOOL-018-T03, TOOL-018-T04, TOOL-018-T05.
+Ownership locks: crates/tools/src/mcp_lifecycle.rs only; worker never edits shared lib.rs, Cargo.toml, schemas, migrations.
+Suggested module: crates/tools/src/mcp_lifecycle.rs (new module in crate opencode-rk-tools; lib.rs wiring left to integrator).
 
 ## User-observable outcome
 
-Bounded local queries over the workspace symbol index: `blast_radius(sym)`
-estimates change risk (direct + transitive dependents, capped), `why(sym)`
-explains a symbol (owner file:line, kind, dependent count), `dep_path(a, b)`
-returns one short dependency path between two symbols. All answers cite
-`file:line`; index is advisory, every cited edge re-verified against source
-before acting. Default-on but inert when index disabled or empty: zero
-background work, zero network, queries return explicit empty/unavailable,
-no hidden cost.
+Per-MCP power toggle and lifecycle state: each server is enabled, disabled, starting, ready, or error; state persists across restarts; reconnect and refresh are explicit user actions; off means no tool registration and no invocation.
 
 ## Source evidence
 
-- PLAN.md sections 5-6: slice independence rules, mandatory RED/GREEN lifecycle.
-- docs/TDD.md sections 2-5: lifecycle order, compiling RED, frozen hash, GREEN minimum.
-- tasks/TOOL-014.md: task-card model (Status/Kind/contract/test obligations).
-- tasks/TOOL-021.md: REQ-039 proposed precedent (Runtime optional True, mandatory yes, deps none, T01..T05 mirror pattern).
-- docs/proposals/RW-SLICE-03-risk-spec.md: risk spec, contract, bounds,
-  RW-RSK-T01..T05 definitions mirrored below as TOOL-018-T01..T05.
-- Classification: new user requirement (REQ-039 proposed), deliberate
-  resource-bounded deviation (BFS capped at max_nodes/max_depth; presentational
-  risk estimate, caller re-verifies cited file:line against source).
+- crates/tools/src/mcp.rs for existing MCP/extension policy surfaces (McpConfig, McpPolicy, McpTool, McpClient).
+- crates/tools/src/ext_perms.rs for existing MCP/extension policy surfaces (grant_perm, MAX_EXT_PERMS).
+- crates/tools/src/ext_secure.rs for existing MCP/extension policy surfaces (grant_all, MAX_SECURE_PERMS).
+- crates/tools/src/tool_allow.rs:8 for bounded tool allowlist precedent (MAX_TOOL_ALLOW).
+- crates/server/src/event_bus.rs for bounded event delivery (ServerEvent, BusError Full/Closed).
+- docs/SECURITY.md:14-32 brokered permissions, no direct secret access/unrestricted env.
 
 ## Observable contract
 
-- `RiskIndex::new(caps: RiskCaps)` builds empty graph; no IO, no threads.
-- `index_symbol(SymDef { name, kind, file, line }) -> Result<(), RiskError>`
-  upserts; duplicate name overwrites, count unchanged.
-- `index_edge(Edge { from, to }) -> Result<(), RiskError>`; both ends must
-  exist else `UnknownSymbol`; self-edge rejected (`SelfEdge`); duplicate edge
-  ignored, count unchanged.
-- `blast_radius(name, limit) -> Result<BlastRadius, RiskError>`: BFS over
-  reverse edges from `name`; `truncated=true` when dependents exceed
-  `limit.max_nodes`; `members.len() <= max_nodes`; unknown name =>
-  `UnknownSymbol`. `depth` per member = BFS distance; sorted by (depth, name).
-- `why(name) -> Result<Why, RiskError>`: returns `{ def, dependents,
-  dependents_truncated }`; `def` carries verified `file:line`; unknown name
-  => `UnknownSymbol`. Dependent list capped at `limit.max_nodes`.
-- `dep_path(a, b, limit) -> Result<Option<Path>, RiskError>`: BFS forward
-  from `a` following edges; returns node list `[a..b]` with
-  `len <= limit.max_depth + 1`; `None` when unreachable within depth;
-  unknown endpoint => `UnknownSymbol`.
-- `owner_of(file) -> Vec<&SymDef>`: file-defined symbols in line order;
-  empty when none. Pure local scan of indexed defs, no FS read.
-- `clear()` empties defs + edges, resets counts to zero.
-- `stats() -> (symbols, edges)` reflects current counts.
-- Opt-out: `RiskIndex::disabled()` (or `enabled=false` config) makes every
-  query return `RiskError::Disabled`; `index_*` becomes no-op `Ok`;
-  construction spawns nothing, holds only empty vecs.
-- Suggested module boundary: new module owning `RiskIndex, RiskCaps,
-  SymDef, Edge, BlastRadius, Why, Path, RiskError`; shared `lib.rs`
-  wiring left to integrator, worker never edits it.
+- `LifecycleState { Disabled, Enabled, Starting, Ready, Error { code } }`: explicit per-server state; Error carries code only, never secrets or stack contents.
+- `set_enabled(registry, id, on) -> LifecycleState`: true moves Disabled to Enabled; false moves any state to Disabled and unregisters tools; unknown id yields error.
+- `mark_starting / mark_ready / mark_error(registry, id, code)`: forward-only transitions from Enabled/Starting; terminal Error requires explicit reconnect.
+- `reconnect(id) -> Enabled`: explicit user action only; never automatic, never on a timer.
+- `is_runnable(id) -> bool`: true only in Ready; Disabled/Enabled/Starting/Error all return false.
+- `persist(registry) -> PersistedShape`: serializable id plus state-code pairs only, bounded length; reload restores Disabled/Enabled plus Error codes, never auto-starts.
+- Bounds: servers max 64, id 1..=128 chars; persisted bytes max 16 KiB.
+- Deterministic: same transition sequence yields byte-identical registry order (sorted ids); no I/O, no network, no clock inside transitions.
+- Suggested module boundary: crates/tools/src/mcp_lifecycle.rs owning LifecycleState, LifecycleRegistry, LifecycleError, transitions, is_runnable, persist/restore; shared lib.rs wiring left to integrator.
 
 ## Failure states
 
-- `UnknownSymbol(name)` on any query/edge touching a missing symbol.
-- `SelfEdge` on `from == to`; `Disabled` on all queries when opted out.
-- `LimitExceeded` never hard-errors BFS: instead truncate + flag
-  (`truncated=true`, `dependents_truncated=true`, `None` for over-depth path).
-- Empty index (enabled, zero symbols): queries return `UnknownSymbol` (blast/
-  why/path) or empty vec (owner_of), never panic, never scan FS.
-- Over-cap `index_symbol`/`index_edge` rejects with `CapExceeded`, counts unchanged.
-- Stale index: caller re-verifies cited `file:line` against source before
-  acting; index advisory only.
+- Unknown id on any transition: `Err(LifecycleError::Unknown)`; registry unchanged.
+- mark_ready from Disabled: `Err(LifecycleError::NotEnabled)`; registry unchanged.
+- Empty id: `Err(LifecycleError::EmptyId)`; registry unchanged.
+- Registry full at 64 plus new id: `Err(LifecycleError::Overflow)`; registry unchanged.
+- Off-means-off invariant: Disabled servers contribute zero tools to registration and fail invocation lookup with NotEnabled.
+- Secret safety: states, errors, and persisted shapes contain ids and codes only. Tests use disposable in-memory registries; no live servers started.
 
 ## Resource bounds
 
-- `RiskCaps { max_symbols: 20_000, max_edges: 100_000, max_nodes: 200,
-  max_depth: 8 }`; `index_*` rejects beyond caps with `CapExceeded`.
-- BFS early-exits at `max_nodes`/`max_depth`; all queries O(V+E) worst case.
-- Memory: two vecs + adjacency map only; no threads, no channels, no global
-  state; `Send` but no interior locking required.
-- No FS, no network, no wall clock in queries; deterministic fixtures only.
-- Disabled path: no heap alloc, O(1) early return; zero background work.
+- Pure state machine: no Command, no thread, no I/O, no network; caller owns registry lifetime.
+- Bounded servers and persisted bytes; O(n) listing, O(1) transitions.
+- No unbounded queue, no unbounded retained output; owner and cancel path defined per crates/tools/src/tool_allow.rs:8 bounded-allowlist precedent.
 
-## Test obligations (frozen)
+## Acceptance criteria
 
-- TOOL-018-T01 (blast radius bounded, mirrors RW-RSK-T01): chain a->b->c
-  plus 300 extra dependents of b, `max_nodes=200`; `assert!(r.truncated)`;
-  `assert!(r.members.len() <= 200)`;
-  `assert!(r.members.iter().any(|m| m.name == "c"))`.
-- TOOL-018-T02 (why cites owner, mirrors RW-RSK-T02): index `fn pay` at
-  `pay.rs:42` with 2 callers; `assert_eq!(w.def.file, "pay.rs")`;
-  `assert_eq!(w.def.line, 42)`; `assert_eq!(w.dependents.len(), 2)`.
-- TOOL-018-T03 (dep path depth-bound, mirrors RW-RSK-T03): diamond a->b->d,
-  a->c->d, d->e; `dep_path("a", "e")` returns `Some(p)` with `p[0] == "a"`,
-  `p[last] == "e"`, `p.len() <= max_depth + 1`;
-  `dep_path("e", "a")` returns `None`.
-- TOOL-018-T04 (failure states, mirrors RW-RSK-T04): unknown symbol query
-  asserts `err == UnknownSymbol`; self-edge asserts `err == SelfEdge`;
-  duplicate edge keeps `stats().1` unchanged; over-cap `index_symbol`
-  asserts `CapExceeded`.
-- TOOL-018-T05 (opt-out zero cost, mirrors RW-RSK-T05):
-  `RiskIndex::disabled()`; all queries assert `err == Disabled`;
-  `index_symbol` returns `Ok`; `stats() == (0, 0)`; construction spawns
-  nothing, holds only empty vecs, no background task.
+- TOOL-018-T01: toggle happy path: Disabled enables to Enabled, Starting then Ready yields is_runnable true; disabling a Ready server yields is_runnable false with zero registered tools.
+- TOOL-018-T02: error and reconnect: mark_error from Starting yields Error with code and is_runnable false; reconnect yields Enabled (not Ready); auto-transition never occurs.
+- TOOL-018-T03: transition guards: mark_ready from Disabled yields NotEnabled; unknown id yields Unknown; empty id yields EmptyId; 65th server yields Overflow.
+- TOOL-018-T04: persistence: persist plus restore round-trips ids and states without auto-starting; persisted bytes within 16 KiB with no secret substrings.
+- TOOL-018-T05: determinism and isolation: same sequence byte-identical listing; Debug plus serialize contain ids and codes only; no subprocess, network, or file writes.
 
-## TDD steps
+## Test-first execution
 
-1. Inspect: PLAN.md 5-6, TDD.md 2-5, TOOL-014.md, TOOL-021.md,
-   RW-SLICE-03-risk-spec.md (done, see evidence).
-2. Contract: defined above.
-3. Author tests TOOL-018-T01..T05; establish compiling RED (fail: no index).
-4. Freeze test hash + command manifest.
-5. Implement minimum `RiskIndex` natively in Rust.
-6. GREEN, refactor, rerun; negative tests (unknown/self-edge/caps/truncate).
-7. Evidence + patch; verifier decides acceptance.
-
-## Verification
-
-```bash
-git status --short -- tasks/TOOL-018.md
-```
+- RED: author tests TOOL-018-T01..T05 against crates/tools/src/mcp_lifecycle.rs; establish compiling RED (fail: no mcp_lifecycle module).
+- GREEN: implement minimum native Rust toggle plus lifecycle machine with off-means-off; GREEN, refactor, rerun; negative tests (unknown, not-enabled, overflow, auto-start never).
+- Evidence: `cargo test -p opencode-rk-tools mcp_lifecycle`; `cargo check --workspace`; frozen test hash plus command manifest; verifier decides acceptance.

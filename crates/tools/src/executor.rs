@@ -8,6 +8,10 @@ use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::time::timeout;
 
+fn elapsed_ms(start: Instant) -> u64 {
+    start.elapsed().as_millis().max(1) as u64
+}
+
 /// Configuration for tool execution timeouts.
 #[derive(Clone, Copy, Debug)]
 pub struct TimeoutConfig {
@@ -104,7 +108,7 @@ impl ToolExecutor {
         } else if call.name == "echo" {
             self.execute_echo(&call, effective_timeout).await
         } else {
-            let duration_ms = start.elapsed().as_millis() as u64;
+            let duration_ms = elapsed_ms(start);
             ToolResult {
                 tool_id: call.tool_id,
                 output: String::new(),
@@ -128,7 +132,7 @@ impl ToolExecutor {
                 match timeout(timeout_duration, cmd).await {
                     Ok(output_result) => match output_result {
                         Ok(output) => {
-                            let duration_ms = start.elapsed().as_millis() as u64;
+                            let duration_ms = elapsed_ms(start);
                             let success = output.status.success();
                             let stdout = String::from_utf8_lossy(&output.stdout).to_string();
 
@@ -150,12 +154,12 @@ impl ToolExecutor {
                             tool_id: call.tool_id.clone(),
                             output: String::new(),
                             success: false,
-                            duration_ms: start.elapsed().as_millis() as u64,
+                            duration_ms: elapsed_ms(start),
                             error: Some(format!("Failed to execute command: {}", e)),
                         },
                     },
                     Err(_) => {
-                        let duration_ms = start.elapsed().as_millis() as u64;
+                        let duration_ms = elapsed_ms(start);
                         ToolResult {
                             tool_id: call.tool_id.clone(),
                             output: String::new(),
@@ -170,7 +174,7 @@ impl ToolExecutor {
                 tool_id: call.tool_id.clone(),
                 output: String::new(),
                 success: false,
-                duration_ms: start.elapsed().as_millis() as u64,
+                duration_ms: elapsed_ms(start),
                 error: Some("Missing 'command' field in input".to_string()),
             },
         }
@@ -190,7 +194,7 @@ impl ToolExecutor {
         match timeout(timeout_duration, cmd).await {
             Ok(output_result) => match output_result {
                 Ok(output) => {
-                    let duration_ms = start.elapsed().as_millis() as u64;
+                    let duration_ms = elapsed_ms(start);
                     let stdout = String::from_utf8_lossy(&output.stdout).to_string();
                     ToolResult {
                         tool_id: call.tool_id.clone(),
@@ -204,7 +208,7 @@ impl ToolExecutor {
                     tool_id: call.tool_id.clone(),
                     output: String::new(),
                     success: false,
-                    duration_ms: start.elapsed().as_millis() as u64,
+                    duration_ms: elapsed_ms(start),
                     error: Some(format!("Echo failed: {}", e)),
                 },
             },
@@ -212,7 +216,7 @@ impl ToolExecutor {
                 tool_id: call.tool_id.clone(),
                 output: String::new(),
                 success: false,
-                duration_ms: start.elapsed().as_millis() as u64,
+                duration_ms: elapsed_ms(start),
                 error: Some("Execution timed out".to_string()),
             },
         }

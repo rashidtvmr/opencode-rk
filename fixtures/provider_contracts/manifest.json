@@ -1,0 +1,16 @@
+{
+  "files": [
+    "anthropic/auth_state.json",
+    "anthropic/request.json",
+    "google/auth_state.json",
+    "google/request.json",
+    "openai/auth_state.json",
+    "openai/request.json"
+  ],
+  "providers": [
+    "anthropic",
+    "google",
+    "openai"
+  ],
+  "version": "1"
+}

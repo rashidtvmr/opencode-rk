@@ -4,7 +4,7 @@ Generated from `ralph.json` (canonical extended plan) and `requirements/user-req
 Every story is mandatory to the declared full release even when its feature is off by default at runtime (PLAN.md section 1).
 `prd.json` is the flat conventional Ralph export of the same data. Dependency eligibility is decided by `ralph.json` plus the milestone ranks in PLAN.md section 4; see `tools/plan_model.py`.
 
-Stories: 231. Requirements: 39. Test obligations: 1155.
+Stories: 258. Requirements: 47. Test obligations: 1290.
 
 ## Requirements to stories
 
@@ -49,6 +49,14 @@ Stories: 231. Requirements: 39. Test obligations: 1155.
 | `REQ-037` | Lean harness mining adoption: typed tool contract, diagnostics, and review discipline | `TOOL-006`, `TOOL-009`, `TOOL-015`, `OPS-010` |
 | `REQ-038` | Provider-boundary observability: tap with redaction plus debug export | `PROV-013`, `PROV-014` |
 | `REQ-040` | ChatGPT-class local web client parity on the shared singleton daemon | `WEB-006`..`WEB-017` |
+| `REQ-041` | Official provider compatibility, OAuth connectors, consent-based Codex and Claude Code credential import, documented request profiles, and provider usage/status telemetry | `PROV-015`..`PROV-024` |
+| `REQ-042` | TUI operational information panel and searchable, selectable, toggleable MCP catalog and lifecycle management | `UI-019`, `TOOL-016`..`TOOL-020` |
+| `REQ-043` | Versioned sync event log with projector replay and persisted-versus-ephemeral part-event split | `SYNC-001`, `SYNC-002` |
+| `REQ-044` | Bounded per-session runner with busy rejection, concurrent shell lane, and owned cancellation | `RUN-001` |
+| `REQ-045` | ACP v1 JSON-lines bridge over stdio with stated capability limits | `ACP-001`, `ACP-002` |
+| `REQ-046` | Workspace HTTP/WebSocket proxy and remote sync loop | `WSX-001`, `WSX-002` |
+| `REQ-047` | Typed SDK client with server/process/TUI spawners and directory scoping | `SDK-001`, `SDK-002` |
+| `REQ-048` | Headless run execution and session export | `HEAD-001`, `HEAD-002` |
 
 ## Requirement detail
 
@@ -310,6 +318,57 @@ Stories: 231. Requirements: 39. Test obligations: 1155.
 - `WEB-016` (not-started): Voice and dictation backed by a real native audio/realtime adapter Obligations: `WEB-016-T01`..`T05`
 - `WEB-017` (not-started): Editable writing/code artifacts with safe preview/run/apply boundaries Obligations: `WEB-017-T01`..`T05`
 
+### REQ-041 - Official provider compatibility and consent-based CLI authentication
+
+- `PROV-015` (not-started): Provider auth profile model with explicit auth provenance and redacted storage Obligations: `PROV-015-T01`..`T05`
+- `PROV-016` (not-started): Official OpenAI Codex OAuth connector with refresh, logout and account status Obligations: `PROV-016-T01`..`T05`
+- `PROV-017` (not-started): Official Anthropic Claude Code OAuth connector with PKCE/loopback consent flow Obligations: `PROV-017-T01`..`T05`
+- `PROV-018` (not-started): Consent-based import of Codex and Claude Code local credential files Obligations: `PROV-018-T01`..`T05`
+- `PROV-019` (not-started): Documented provider request profiles with explicit identity and redacted diagnostics; no impersonation Obligations: `PROV-019-T01`..`T05`
+- `PROV-020` (not-started): Auth connector commands and status surface Obligations: `PROV-020-T01`..`T05`
+- `PROV-021` (not-started): Provider usage and limits telemetry with bounded status snapshots Obligations: `PROV-021-T01`..`T05`
+- `PROV-022` (not-started): Auth storage hardening with keyring, 0600 fallback and atomic refresh persistence Obligations: `PROV-022-T01`..`T05`
+- `PROV-023` (not-started): Versioned documentation-backed provider compatibility catalog Obligations: `PROV-023-T01`..`T05`
+- `PROV-024` (not-started): Offline differential provider contract fixtures with secret redaction Obligations: `PROV-024-T01`..`T05`
+
+### REQ-042 - TUI information panel and MCP management
+
+- `UI-019` (not-started): Right-side TUI information panel with bounded live session, provider, context, MCP and warning metadata Obligations: `UI-019-T01`..`T05`
+- `TOOL-016` (not-started): Bounded, source-attributed MCP catalog search and safe install metadata Obligations: `TOOL-016-T01`..`T05`
+- `TOOL-017` (not-started): MCP selection and bulk lifecycle actions with confirmations and partial failure reporting Obligations: `TOOL-017-T01`..`T05`
+- `TOOL-018` (not-started): Per-MCP power toggle and bounded lifecycle state persistence Obligations: `TOOL-018-T01`..`T05`
+- `TOOL-019` (not-started): Disabled MCP servers and tools excluded from payloads and execution lookup Obligations: `TOOL-019-T01`..`T05`
+- `TOOL-020` (not-started): MCP status events integrated into the TUI information panel Obligations: `TOOL-020-T01`..`T05`
+
+### REQ-043 - Versioned sync event log with projector replay and persisted-versus-ephemeral part-event split
+
+- `SYNC-001` (not-started): Versioned sync log with monotonic sequence allocation per aggregate, idempotent apply, projector registry, post-freeze definition rejection, deterministic replay Obligations: `SYNC-001-T01`..`T05`
+- `SYNC-002` (not-started): Persisted message/part create-update-remove events versus ephemeral part-deltas; deltas never persist/replay; late foreign-key update warns without duplicating Obligations: `SYNC-002-T01`..`T05`
+
+### REQ-044 - Bounded per-session runner with busy rejection, concurrent shell lane, and owned cancellation
+
+- `RUN-001` (not-started): Per-session single normal runner: second prompt gets typed BusyError with zero side effects; shell lane runs concurrently; cancel reclaims task and removes idle runner Obligations: `RUN-001-T01`..`T05`
+
+### REQ-045 - ACP v1 JSON-lines bridge over stdio with stated capability limits
+
+- `ACP-001` (not-started): ACP v1 JSONL framing over caller-supplied byte streams: initialize, session new/load/prompt, modes/models/variants; malformed frame rejected without state change Obligations: `ACP-001-T01`..`T05`
+- `ACP-002` (not-started): ACP text-file read/write with byte caps; unsupported full update stream, tool-call reporting, mode switch, auth, real terminal, full history restore return typed Unsupported Obligations: `ACP-002-T01`..`T05`
+
+### REQ-046 - Workspace HTTP/WebSocket proxy and remote sync loop
+
+- `WSX-001` (not-started): Workspace HTTP/WS proxy strips hop/routing headers, bounded queue-until-open, bridges /__workspace_ws, routes local versus remote by directory Obligations: `WSX-001-T01`..`T05`
+- `WSX-002` (not-started): Remote workspace SSE sync loop with connected/connecting/disconnected/error statuses, bounded reconnect backoff, disposal closes queue/socket Obligations: `WSX-002-T01`..`T05`
+
+### REQ-047 - Typed SDK client with server/process/TUI spawners and directory scoping
+
+- `SDK-001` (not-started): Typed SDK client with directory header/query rewriting, abort/timeout propagation, typed decode errors, no process spawn Obligations: `SDK-001-T01`..`T05`
+- `SDK-002` (not-started): SDK server/process/TUI spawners with owned child lifecycle, single owner, kill-on-drop, no detached tasks, bounded startup timeout Obligations: `SDK-002-T01`..`T05`
+
+### REQ-048 - Headless run execution and session export
+
+- `HEAD-001` (not-started): Headless run execution with inline/block renderers, attachment conversion, bounded output, typed exit codes, uncompressed prompt streaming Obligations: `HEAD-001-T01`..`T05`
+- `HEAD-002` (not-started): Session export to caller-supplied writer as redacted JSON with explicit session id, no interactive picker in non-TTY, byte cap, no secret bytes Obligations: `HEAD-002-T01`..`T05`
+
 - `AGENT-016` (accepted): Context fork - clone parent session into child with selective context injection Obligations: `AGENT-016-T01`..`T05`
 - `AGENT-017` (accepted): Fresh context spawn - zero-context with explicit bundle Obligations: `AGENT-017-T01`..`T05`
 - `AGENT-018` (accepted): Multi-provider routing - per-child model override, fallback chain Obligations: `AGENT-018-T01`..`T05`
@@ -474,7 +533,7 @@ Stories: 231. Requirements: 39. Test obligations: 1155.
 | `OPS-008` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `OPS-009` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 
-### PROV (14 stories)
+### PROV (24 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -490,6 +549,16 @@ Stories: 231. Requirements: 39. Test obligations: 1155.
 | `PROV-010` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `PROV-011` | `REQ-010` | accepted | TBD - see source audit |
 | `PROV-012` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `PROV-015` | `REQ-041` | not-started | Provider auth profile model with explicit auth provenance and redacted storage |
+| `PROV-016` | `REQ-041` | not-started | Official OpenAI Codex OAuth connector |
+| `PROV-017` | `REQ-041` | not-started | Official Anthropic Claude Code OAuth connector |
+| `PROV-018` | `REQ-041` | not-started | Consent-based Codex and Claude Code local credential import |
+| `PROV-019` | `REQ-041` | not-started | Documented provider request profiles without impersonation |
+| `PROV-020` | `REQ-041` | not-started | Auth connector commands and status surface |
+| `PROV-021` | `REQ-041` | not-started | Provider usage and limits telemetry |
+| `PROV-022` | `REQ-041` | not-started | Auth storage hardening and atomic refresh persistence |
+| `PROV-023` | `REQ-041` | not-started | Versioned provider compatibility catalog |
+| `PROV-024` | `REQ-041` | not-started | Offline differential provider contract fixtures |
 
 ### REL (4 stories)
 
@@ -568,7 +637,7 @@ Stories: 231. Requirements: 39. Test obligations: 1155.
 | `SHARE-004` | `REQ-007` | not-started | TBD - see source audit |
 | `SHARE-005` | `REQ-007` | not-started | TBD - see source audit |
 
-### TOOL (15 stories)
+### TOOL (20 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -577,13 +646,23 @@ Stories: 231. Requirements: 39. Test obligations: 1155.
 | `TOOL-003` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `TOOL-004` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `TOOL-005` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `TOOL-006` | `REQ-037` | not-started | Typed tool contract and capability-bound tool invocation |
+| `TOOL-007` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `TOOL-008` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `TOOL-009` | `REQ-037` | not-started | Tool diagnostics and bounded execution reporting |
+| `TOOL-010` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `TOOL-011` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `TOOL-012` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `TOOL-013` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `TOOL-014` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `TOOL-015` | `REQ-037` | not-started | Tool allow-list and review discipline |
+| `TOOL-016` | `REQ-042` | not-started | Bounded, source-attributed MCP catalog search and safe install metadata |
+| `TOOL-017` | `REQ-042` | not-started | MCP selection and bulk lifecycle actions with confirmations and partial failure reporting |
+| `TOOL-018` | `REQ-042` | not-started | Per-MCP power toggle and bounded lifecycle state persistence |
+| `TOOL-019` | `REQ-042` | not-started | Disabled MCP servers and tools excluded from payloads and execution lookup |
+| `TOOL-020` | `REQ-042` | not-started | MCP status events integrated into the TUI information panel |
 
-### UI (18 stories)
+### UI (19 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -600,6 +679,7 @@ Stories: 231. Requirements: 39. Test obligations: 1155.
 | `UI-011` | `REQ-029`, `REQ-032` | not-started | TBD - see source audit |
 | `UI-012` | `REQ-005` | not-started | TBD - see source audit |
 | `UI-013` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `UI-019` | `REQ-042` | not-started | Right-side TUI information panel with bounded live session, provider, context, MCP and warning metadata |
 
 ### WEB (17 stories)
 
@@ -754,3 +834,44 @@ These stories carry `requirementIds: []` in `ralph.json`. They are still mandato
 - `WEB-003` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `WEB-004` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `WEB-005` (not-started): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+
+### SYNC (2 stories)
+
+| Story | Requirements | Status | User story |
+|---|---|---|---|
+| `SYNC-001` | `REQ-043` | not-started | Versioned sync log with monotonic sequence allocation per aggregate, idempotent apply, projector registry, post-freeze definition rejection, deterministic replay |
+| `SYNC-002` | `REQ-043` | not-started | Persisted message/part create-update-remove events versus ephemeral part-deltas; deltas never persist/replay; late foreign-key update warns without duplicating |
+
+### RUN (1 story)
+
+| Story | Requirements | Status | User story |
+|---|---|---|---|
+| `RUN-001` | `REQ-044` | not-started | Per-session single normal runner: second prompt gets typed BusyError with zero side effects; shell lane runs concurrently; cancel reclaims task and removes idle runner |
+
+### ACP (2 stories)
+
+| Story | Requirements | Status | User story |
+|---|---|---|---|
+| `ACP-001` | `REQ-045` | not-started | ACP v1 JSONL framing over caller-supplied byte streams: initialize, session new/load/prompt, modes/models/variants; malformed frame rejected without state change |
+| `ACP-002` | `REQ-045` | not-started | ACP text-file read/write with byte caps; unsupported full update stream, tool-call reporting, mode switch, auth, real terminal, full history restore return typed Unsupported |
+
+### WSX (2 stories)
+
+| Story | Requirements | Status | User story |
+|---|---|---|---|
+| `WSX-001` | `REQ-046` | not-started | Workspace HTTP/WS proxy strips hop/routing headers, bounded queue-until-open, bridges /__workspace_ws, routes local versus remote by directory |
+| `WSX-002` | `REQ-046` | not-started | Remote workspace SSE sync loop with connected/connecting/disconnected/error statuses, bounded reconnect backoff, disposal closes queue/socket |
+
+### SDK (2 stories)
+
+| Story | Requirements | Status | User story |
+|---|---|---|---|
+| `SDK-001` | `REQ-047` | not-started | Typed SDK client with directory header/query rewriting, abort/timeout propagation, typed decode errors, no process spawn |
+| `SDK-002` | `REQ-047` | not-started | SDK server/process/TUI spawners with owned child lifecycle, single owner, kill-on-drop, no detached tasks, bounded startup timeout |
+
+### HEAD (2 stories)
+
+| Story | Requirements | Status | User story |
+|---|---|---|---|
+| `HEAD-001` | `REQ-048` | not-started | Headless run execution with inline/block renderers, attachment conversion, bounded output, typed exit codes, uncompressed prompt streaming |
+| `HEAD-002` | `REQ-048` | not-started | Session export to caller-supplied writer as redacted JSON with explicit session id, no interactive picker in non-TTY, byte cap, no secret bytes |

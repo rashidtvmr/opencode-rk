@@ -1,116 +1,60 @@
 # TOOL-020
 
-Status: NOT STARTED. Kind: product. Runtime optional: True.
+Status: NOT STARTED. Kind: product. Runtime optional: False.
 Mandatory for full declared release: yes.
-Requirements: REQ-039 (proposed, RTK failure-only test/build/lint filters).
-Dependencies: none.
+Requirements: REQ-042.
+Dependencies: none (milestone gating via tools/plan_model.py).
 Test obligations: TOOL-020-T01, TOOL-020-T02, TOOL-020-T03, TOOL-020-T04, TOOL-020-T05.
+Ownership locks: crates/sessions/src/mcp_status_panel.rs only; worker never edits shared lib.rs, Cargo.toml, schemas, migrations.
+Suggested module: crates/sessions/src/mcp_status_panel.rs (new module in crate opencode-rk-sessions; lib.rs wiring left to integrator).
 
 ## User-observable outcome
 
-Native inbuilt Rust failure-only filters for `pytest`, `cargo test`,
-`tsc`, `lint`: passing runs emit the verdict line only; failing runs
-emit every failing test/rule plus trailing context (diff/snippet) plus
-the verdict line. A filtered failing run never looks green. Filters are
-ON by default with opt-out; zero cost when off (passthrough, input
-returned verbatim).
+MCP state integrated into the right-side info panel and status events: bounded EventBus updates carry counts, tools, last error, and latency; panel refreshes without blocking agent turns; diagnostics redacted.
 
 ## Source evidence
 
-- PLAN.md sections 5-6: slice independence rules, mandatory RED/GREEN lifecycle.
-- docs/TDD.md sections 2-5: lifecycle order, compiling RED, frozen hash, GREEN minimum.
-- tasks/TOOL-014.md: task-card model (Status/Kind/contract/test obligations).
-- tasks/TOOL-021.md: sibling opt-out default-on card shape (Status NOT STARTED,
-  Runtime optional True, REQ-039 proposed, deps none).
-- docs/proposals/RTK-SLICE-02-test-spec.md fully: filter contract, failure
-  states, bounds, RTK-TEST-T01..T05 definitions mirrored below as TOOL-020-T01..T05.
-- Classification: new user requirement (REQ-039 proposed), deliberate
-  resource-bounded deviation (filtering is presentational; raw log retained
-  by caller, exit code never altered).
+- crates/server/src/event_bus.rs for bounded event delivery (ServerEvent, EventKind, BusError Full/Closed, bounded fan-out).
+- crates/sessions/src/ui_006.rs:13-41 existing status panel shape and bounds (StatusCounts, StatusPanel, StatusPanelError, build_panel, MAX_PANEL_SESSIONS).
+- crates/tools/src/mcp.rs for existing MCP/extension policy surfaces (McpConfig, McpPolicy, McpTool, McpClient).
+- crates/tools/src/ext_perms.rs for existing MCP/extension policy surfaces (grant_perm, MAX_EXT_PERMS).
+- crates/tools/src/ext_secure.rs for existing MCP/extension policy surfaces (grant_all, MAX_SECURE_PERMS).
+- crates/tools/src/tool_allow.rs:8 for bounded tool allowlist precedent (MAX_TOOL_ALLOW).
+- docs/SECURITY.md:14-32 brokered permissions, no direct secret access/unrestricted env.
 
 ## Observable contract
 
-- `filter_test_output(tool: TestTool, stdout: &str, exit: i32, opts: &FilterOpts) -> FilteredOutput`
-  where `TestTool = Pytest | CargoTest | Tsc | Lint`.
-- All-pass (exit 0): output is verdict line(s) only (e.g. `5 passed in 1.2s`,
-  `test result: ok`, `0 errors`, `All checks passed`); passing per-test/dot
-  noise removed.
-- Failure (exit != 0): output contains every failing test/rule id + its
-  trailing context block (assert diff / error snippet, up to `CTX_LINES`
-  lines each), plus the original verdict/summary line(s) verbatim, plus exit code.
-- Verdict detection per tool: pytest (`passed|failed|error` summary),
-  cargo test (`test result: ...`), tsc (`error TS|Found N errors`),
-  lint (`E.../W...` + `N problems`).
-- `FilteredOutput { text: String, verdict: String, exit: i32, truncated: bool }`.
-- Opt-out default-on: `no_filter=true` or env `RTK_NO_FILTER=1` returns input
-  verbatim (single branch, no parse, no allocation beyond return).
-- Over-budget: truncate middle, keep first failing block + verdict, append
-  marker `\n... [rtk: truncated, full log in <path>]`.
-- Suggested module boundary: `crates/rtk/src/test_filter.rs` owning
-  `TestTool`, `FilterOpts`, `FilteredOutput`, `filter_test_output`;
-  `lib.rs` only re-exports (integrator wires per PLAN.md section 5).
+- `McpStatus { connected, enabled_count, disabled_count, tools: BoundedVec<String>, last_error: Option<String>, latency_ms: Option<u64>, updated_ms: u64 }`: caller-supplied values; last_error is a code/label only, never secrets.
+- `summarize(status) -> McpCounts { connected, enabled, disabled, tools_shown, truncated: bool }`: bounded counts with honest truncation flag.
+- `render(status, width) -> Vec<String>`: pure panel fragment; every line within width; compact form below 60 columns.
+- `publish(bus, status) -> Result<(), PublishOutcome>`: bounded non-blocking EventBus send; Full bus yields Skipped rather than blocking the agent turn.
+- Bounds: tools max 16 shown, error label max 256 chars, latency max 3_600_000 ms; over-cap truncates with marker.
+- Deterministic: same status plus width yields byte-identical lines; no I/O, no clock reads inside render/publish (caller supplies updated_ms).
+- Suggested module boundary: crates/sessions/src/mcp_status_panel.rs owning McpStatus, McpCounts, McpPanelError, summarize, render, publish; shared lib.rs wiring left to integrator.
 
 ## Failure states
 
-- Failed run never looks green: `exit != 0 => text` contains a failure marker
-  (`FAILED|failed|error|problems`) AND the verdict line (issue-fix invariant).
-- Exit != 0 but no failure block matched: emit full tail (last 50 lines) +
-  verdict if found, else emit everything; never emit empty output on failure.
-- Exit == 0 but output unparseable: emit verdict line if found, else single
-  line `ok (exit 0)`; never fail the filter itself.
-- Filter panic/OOM: fall back to raw tail + verdict; filter never changes exit code.
-- `FilteredOutput.exit` always equals input exit; non-zero is never mapped to zero.
+- Full event bus: publish returns Skipped, agent turn continues; never blocks, never retries unboundedly.
+- Empty tool entries or over-long error label: truncated or skipped with flag; never exceeds caps.
+- Width below 20 columns: `Err(McpPanelError::TooNarrow)`; caller falls back to counts line only.
+- Stale status (updated_ms older than caller horizon): rendered with "stale" marker, never presented as live.
+- Secret safety: statuses, events, errors, and logs contain counts, names, and codes only. Tests use disposable snapshots and a bounded fake bus only.
 
 ## Resource bounds
 
-- Zero cost when off: single opt-out branch, no parse, no heap beyond return.
-- Streaming line-based; retained output bounded by `MAX_KEPT_BYTES = 64 KiB`
-  per run (configurable, default 64 KiB); input scan O(n) time, O(1) extra
-  besides kept blocks; trailing context cap `CTX_LINES = 30` per failure block,
-  max `MAX_BLOCKS = 20` blocks, rest counted and noted.
-- No I/O, no clock, no network, no global state; pure function of inputs.
+- Pure summarize/render plus single bounded send; O(tools) time, O(lines) memory within caps; no background threads.
+- Refresh never blocks agent turns: publish is try-send only; no unbounded queue beyond the bus cap, no unbounded retained output; owner and cancel path defined per crates/server/src/event_bus.rs bounded fan-out precedent.
 
-## Test obligations (frozen, mirror RTK-TEST-T01..T05)
+## Acceptance criteria
 
-- TOOL-020-T01 (all-pass verdict only, mirrors RTK-TEST-T01): given pytest
-  `5 passed` log with 200 dot/per-test lines, assert output has `5 passed`
-  and zero lines matching `PASSED|ok$`; assert `exit == 0`, `truncated == false`.
-- TOOL-020-T02 (failure shows failing test + diff, mirrors RTK-TEST-T02):
-  given pytest failure with `FAILED test_x` + `assert 1 == 2` diff, assert
-  output contains `test_x` AND `assert 1 == 2`, and does NOT contain a passing
-  test id from input.
-- TOOL-020-T03 (exit code preserved, mirrors RTK-TEST-T03): for each tool
-  fixture with exit 1/2/101, assert `FilteredOutput.exit == input exit`;
-  assert filter returns Ok and never maps non-zero to zero.
-- TOOL-020-T04 (verdict never filtered, mirrors RTK-TEST-T04): for each tool
-  failing fixture, assert output contains the exact verdict line
-  (`test result: FAILED`, `Found 3 errors`, `1 problem`); assert all-pass
-  output contains verdict too; grep-based check on frozen fixtures.
-- TOOL-020-T05 (over-budget truncates with marker, mirrors RTK-TEST-T05):
-  given 500 KiB failure log, assert `text.len() <= MAX_KEPT_BYTES + 1 KiB`,
-  `truncated == true`, text ends with `[rtk: truncated`, and still contains
-  verdict line.
+- TOOL-020-T01: panel happy path: representative status at width 120 renders connected/enabled/disabled counts, tools, last error code, latency, and timestamp within width.
+- TOOL-020-T02: narrow and stale: width 50 renders compact form within width; stale updated_ms renders with stale marker and unchanged counts.
+- TOOL-020-T03: non-blocking publish: full fake bus yields Skipped with the agent-turn fixture unblocked; ready bus yields Sent with counts intact.
+- TOOL-020-T04: truncation: 30 tools truncate to 16 with marker and truncated true; over-long error label truncates within 256 chars.
+- TOOL-020-T05: redaction and determinism: output plus published events contain no fixture secrets; repeated render byte-identical; no network or file writes.
 
-## TDD steps
+## Test-first execution
 
-1. Inspect: PLAN.md 5-6, TDD.md 2-5, TOOL-014.md, RTK-SLICE-02-test-spec.md
-   (done, see evidence).
-2. Contract: defined above.
-3. Author tests TOOL-020-T01..T05; establish compiling RED (fail: no filter).
-4. Freeze test hash + command manifest.
-5. Implement minimum `filter_test_output` natively in Rust (verdict match +
-   block capture + caps).
-6. GREEN, refactor, rerun; negative tests (exit != 0 unknown format shows
-   tail, never empty/green).
-7. Evidence + patch; verifier decides acceptance.
-
-## Verification
-
-```bash
-git status --short -- tasks/TOOL-020.md
-cargo test -p <rtk-crate> --test test_filter
-cargo check -p <rtk-crate>
-```
-
-(`<rtk-crate>` resolves at implement time; no `crates/rtk` exists yet;
-suggested boundary is `crates/rtk/src/test_filter.rs` per RTK-SLICE-02.)
+- RED: author tests TOOL-020-T01..T05 against crates/sessions/src/mcp_status_panel.rs; establish compiling RED (fail: no mcp_status_panel module).
+- GREEN: implement minimum native Rust MCP status fragment with non-blocking publish; GREEN, refactor, rerun; negative tests (full-bus, too-narrow, stale, truncation, leak scan).
+- Evidence: `cargo test -p opencode-rk-sessions mcp_status_panel`; `cargo check --workspace`; frozen test hash plus command manifest; verifier decides acceptance.

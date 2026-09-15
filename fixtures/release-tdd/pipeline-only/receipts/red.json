@@ -1,0 +1,9 @@
+{
+  "command": "python3 -m pytest fixtures/release-tdd/tests -x -q",
+  "compiled": true,
+  "exit_code": 1,
+  "failure_reason": "missing-behavior",
+  "kind": "red",
+  "revision": "863a0019fc6f0b9779d867792fe00c4a9ab84c87",
+  "test_hash": "ee2d31a437d168f8ffb414051d05a9cf372c6c37a620ea9ce5f32b313b2582a2"
+}

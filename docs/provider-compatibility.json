@@ -1,0 +1,90 @@
+{
+  "catalog_version": "1",
+  "providers": [
+    {
+      "display_name": "Anthropic",
+      "doc_date": "2026-09-15",
+      "doc_source": "https://platform.claude.com/docs/en/api/overview",
+      "endpoints": [
+        {
+          "auth_headers": [
+            "Authorization",
+            "anthropic-version",
+            "x-api-key"
+          ],
+          "kind": "messages",
+          "url_template": "https://api.anthropic.com/v1/messages"
+        }
+      ],
+      "id": "anthropic",
+      "limitations": [
+        "The API supports API keys and workload identity federation tokens; credential lifecycle is caller-managed.",
+        "The Messages API request size limit is 32 MB.",
+        "The anthropic-version header is required; the documented current version is 2023-06-01."
+      ],
+      "model_aliases": [
+        "claude-haiku-4-5",
+        "claude-opus-4-5"
+      ],
+      "refresh": {
+        "method": "not applicable to API-key authentication",
+        "supported": false
+      }
+    },
+    {
+      "display_name": "Google Gemini",
+      "doc_date": "2026-09-15",
+      "doc_source": "https://ai.google.dev/api/generate-content",
+      "endpoints": [
+        {
+          "auth_headers": [
+            "x-goog-api-key"
+          ],
+          "kind": "generate-content",
+          "url_template": "https://generativelanguage.googleapis.com/v1beta/{model=models/*}:generateContent"
+        }
+      ],
+      "id": "google",
+      "limitations": [
+        "Experimental models can have more restrictive rate limits and changing availability.",
+        "Standard API keys are transitioning to authorization keys; key management remains provider-controlled.",
+        "The model path uses the documented models/{model} format."
+      ],
+      "model_aliases": [
+        "gemini-flash-latest"
+      ],
+      "refresh": {
+        "method": "not applicable to API-key authentication",
+        "supported": false
+      }
+    },
+    {
+      "display_name": "OpenAI",
+      "doc_date": "2026-09-15",
+      "doc_source": "https://platform.openai.com/docs/api-reference/authentication",
+      "endpoints": [
+        {
+          "auth_headers": [
+            "Authorization"
+          ],
+          "kind": "chat-completions",
+          "url_template": "https://api.openai.com/v1/chat/completions"
+        }
+      ],
+      "id": "openai",
+      "limitations": [
+        "Authorization credentials are secrets and must remain server-side or in a protected credential store.",
+        "Chat Completions parameter support can vary by model; OpenAI recommends Responses for new projects.",
+        "The max_tokens parameter is deprecated in favor of max_completion_tokens and is not compatible with o-series models."
+      ],
+      "model_aliases": [
+        "gpt-5.6"
+      ],
+      "refresh": {
+        "method": "not applicable to API-key authentication",
+        "supported": false
+      }
+    }
+  ],
+  "updated": "2026-09-15"
+}

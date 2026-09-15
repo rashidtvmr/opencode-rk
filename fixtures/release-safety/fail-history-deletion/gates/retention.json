@@ -1,0 +1,8 @@
+{
+  "retention": {
+    "policy": "archive-precious",
+    "precious_deleted": true,
+    "archival_receipt": null
+  },
+  "revision": "863a0019fc6f0b9779d867792fe00c4a9ab84c87"
+}

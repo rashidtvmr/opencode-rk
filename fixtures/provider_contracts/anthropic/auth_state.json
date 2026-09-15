@@ -1,0 +1,21 @@
+{
+  "provider": "anthropic",
+  "states": [
+    {
+      "state": "logged-out"
+    },
+    {
+      "consent_url": "https://console.anthropic.com/oauth/authorize",
+      "device_code": "REDACTED",
+      "state": "pending-consent"
+    },
+    {
+      "expires_at": "2030-01-01T00:00:00Z",
+      "state": "ready"
+    },
+    {
+      "expires_at": "2020-01-01T00:00:00Z",
+      "state": "expired"
+    }
+  ]
+}

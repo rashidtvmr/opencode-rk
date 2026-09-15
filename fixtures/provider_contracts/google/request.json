@@ -1,0 +1,10 @@
+{
+  "body_schema_ref": "google.generate-content.request.v1",
+  "headers": {
+    "Content-Type": "application/json",
+    "x-goog-api-key": "REDACTED"
+  },
+  "method": "POST",
+  "provider": "google",
+  "url_template": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+}
