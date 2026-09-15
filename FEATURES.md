@@ -4,7 +4,7 @@ Generated from `ralph.json` (canonical extended plan) and `requirements/user-req
 Every story is mandatory to the declared full release even when its feature is off by default at runtime (PLAN.md section 1).
 `prd.json` is the flat conventional Ralph export of the same data. Dependency eligibility is decided by `ralph.json` plus the milestone ranks in PLAN.md section 4; see `tools/plan_model.py`.
 
-Stories: 219. Requirements: 38. Test obligations: 1095.
+Stories: 231. Requirements: 39. Test obligations: 1155.
 
 ## Requirements to stories
 
@@ -48,6 +48,7 @@ Stories: 219. Requirements: 38. Test obligations: 1095.
 | `REQ-036` | Full subagent lifecycle control: spawn, fork, resume, retry, model switching, context compression, structured handoff, dedicated settings | `AGENT-016`..`AGENT-030` |
 | `REQ-037` | Lean harness mining adoption: typed tool contract, diagnostics, and review discipline | `TOOL-006`, `TOOL-009`, `TOOL-015`, `OPS-010` |
 | `REQ-038` | Provider-boundary observability: tap with redaction plus debug export | `PROV-013`, `PROV-014` |
+| `REQ-040` | ChatGPT-class local web client parity on the shared singleton daemon | `WEB-006`..`WEB-017` |
 
 ## Requirement detail
 
@@ -293,6 +294,21 @@ Stories: 219. Requirements: 38. Test obligations: 1095.
 
 - `PROV-013` (accepted): Provider-boundary tap with redaction Obligations: `PROV-013-T01`..`T05`
 - `PROV-014` (in-progress): Debug export bundle plus offline renderer Obligations: `PROV-014-T01`..`T05`
+
+### REQ-040 - ChatGPT-class local web client parity on the shared singleton daemon
+
+- `WEB-006` (in-progress): Shared singleton daemon and embedded web host; web/future TUI/CLI reuse one per-user/data-dir backend authority Obligations: `WEB-006-T01`..`T05`
+- `WEB-007` (not-started): Full-width role-aligned transcript rows with action bars below each message Obligations: `WEB-007-T01`..`T05`
+- `WEB-008` (not-started): Real edit/retry/regenerate/branch actions with preserved original history Obligations: `WEB-008-T01`..`T05`
+- `WEB-009` (not-started): Collapsed safe reasoning summaries and tool activity, final answer separation and dedicated references Obligations: `WEB-009-T01`..`T05`
+- `WEB-010` (not-started): Accessible WYSIWYG structured composer with model/effort, commands, mentions and capability affordances Obligations: `WEB-010-T01`..`T05`
+- `WEB-011` (not-started): Real attachments, screenshots and local Library with bounded native provider mapping Obligations: `WEB-011-T01`..`T05`
+- `WEB-012` (not-started): Plugin/app/tool chooser with native discovery, permissions, approvals and durable tool results Obligations: `WEB-012-T01`..`T05`
+- `WEB-013` (not-started): Search/deep-research mode with source selection, plan, progress, steering and citations Obligations: `WEB-013-T01`..`T05`
+- `WEB-014` (not-started): Pins, unified search, temporary chat and progressively paged long-history navigation Obligations: `WEB-014-T01`..`T05`
+- `WEB-015` (not-started): Projects/workspaces, reusable context and memory/source disclosure Obligations: `WEB-015-T01`..`T05`
+- `WEB-016` (not-started): Voice and dictation backed by a real native audio/realtime adapter Obligations: `WEB-016-T01`..`T05`
+- `WEB-017` (not-started): Editable writing/code artifacts with safe preview/run/apply boundaries Obligations: `WEB-017-T01`..`T05`
 
 - `AGENT-016` (accepted): Context fork - clone parent session into child with selective context injection Obligations: `AGENT-016-T01`..`T05`
 - `AGENT-017` (accepted): Fresh context spawn - zero-context with explicit bundle Obligations: `AGENT-017-T01`..`T05`
@@ -585,7 +601,7 @@ Stories: 219. Requirements: 38. Test obligations: 1095.
 | `UI-012` | `REQ-005` | not-started | TBD - see source audit |
 | `UI-013` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 
-### WEB (5 stories)
+### WEB (17 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
@@ -594,6 +610,18 @@ Stories: 219. Requirements: 38. Test obligations: 1095.
 | `WEB-003` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `WEB-004` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `WEB-005` | - | not-started | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `WEB-006` | `REQ-040` | in-progress | Shared singleton daemon and embedded web host - web, future TUI and CLI use one per-user/data-dir native backend authority without a separate web-only serve process |
+| `WEB-007` | `REQ-040` | not-started | Full-width role-aligned transcript rows with request/response action bars below each message and honest capability-gated actions |
+| `WEB-008` | `REQ-040` | not-started | Real edit, retry, regenerate and branch/fork actions preserve original conversation history and expose branch navigation |
+| `WEB-009` | `REQ-040` | not-started | Structured assistant turns render collapsed provider reasoning summaries and tool activity separately from final answer text with a dedicated references section; raw hidden chain-of-thought is never exposed |
+| `WEB-010` | `REQ-040` | not-started | Accessible WYSIWYG structured chat composer with model and effort controls, slash commands, mentions, attachment/tool/plugin affordances, drafts and stop/queue/steer state |
+| `WEB-011` | `REQ-040` | not-started | Real bounded files, images and screenshots through picker, paste, drag/drop and a searchable local Library with native attachment-provider mapping |
+| `WEB-012` | `REQ-040` | not-started | Composer plugin, app and tool discovery/selection backed by real native capabilities with permission approvals and durable tool-call results |
+| `WEB-013` | `REQ-040` | not-started | Search and deep-research mode with real source/tool selection, reviewable plan, progress, steering, cancellation and cited final results |
+| `WEB-014` | `REQ-040` | not-started | Chat navigation parity with pins, unified history search, archive/share, temporary chat, progressive long-history paging and keyboard navigation |
+| `WEB-015` | `REQ-040` | not-started | Projects and workspaces group chats, files and reusable context with memory/context inspection and disclosure of sources used |
+| `WEB-016` | `REQ-040` | not-started | Voice and dictation with explicit microphone state, visible transcript and a real native audio/realtime adapter |
+| `WEB-017` | `REQ-040` | not-started | Editable writing and code artifacts with copy/edit/undo/preview and explicitly authorized safe run/apply actions |
 
 ## Stories without a direct requirement link (96)
 

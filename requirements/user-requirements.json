@@ -411,6 +411,25 @@
         "PROV-014"
       ],
       "mandatory": true
+    },
+    {
+      "id": "REQ-040",
+      "requirement": "ChatGPT-class local web client parity on the shared singleton daemon: full-width role-aligned transcript actions, safe reasoning summaries, tool activity, references, WYSIWYG composition, attachments and Library, plugins/tools/apps, research, navigation, projects/context, voice and editable artifacts",
+      "tasks": [
+        "WEB-006",
+        "WEB-007",
+        "WEB-008",
+        "WEB-009",
+        "WEB-010",
+        "WEB-011",
+        "WEB-012",
+        "WEB-013",
+        "WEB-014",
+        "WEB-015",
+        "WEB-016",
+        "WEB-017"
+      ],
+      "mandatory": true
     }
   ]
 }

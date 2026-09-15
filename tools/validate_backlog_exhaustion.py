@@ -185,6 +185,9 @@ CATEGORY_IDS = {
         *(f"UI-{number:03d}" for number in range(1, 19)),
         "WEB-001", "WEB-002", "WEB-003", "WEB-005",
     },
+    "user-directed-product": {
+        *(f"WEB-{number:03d}" for number in range(6, 18)),
+    },
     "unresolved-decomposition": {
         "EXT-001", "EXT-002", "EXT-004", "EXT-005", "EXT-006", "EXT-009", "EXT-010",
         "EXT-011", "EXT-012", "INT-001", "INT-003", "INT-005", "INT-006", "INT-007",
@@ -237,6 +240,8 @@ REASON_BY_ID.update({
 })
 for _id in CATEGORY_IDS["dependency-constrained"]:
     REASON_BY_ID[_id] = "client-architecture-dependency"
+for _id in CATEGORY_IDS["user-directed-product"]:
+    REASON_BY_ID[_id] = "explicit-user-web-parity-requirement"
 for _id in CATEGORY_IDS["unresolved-decomposition"]:
     prefix = _id.split("-", 1)[0]
     REASON_BY_ID[_id] = {
@@ -266,6 +271,7 @@ def _reason_policy(category: str) -> str:
         "local-implemented-stale": "controller-verifier-acceptance-external",
         "explicit-blocker": "material-new-pinned-evidence-required",
         "dependency-constrained": "approved-client-architecture-and-dependencies-required",
+        "user-directed-product": "active-user-directed-product-work",
         "unresolved-decomposition": "source-grounded-task-decomposition-required",
     }[category]
 
@@ -286,6 +292,12 @@ def _local_evidence_paths(root: pathlib.Path, story_id: str, category: str, surf
         paths.extend(["requirements/user-requirements.json", "FEATURES.md", "PLAN.md", "docs/TDD.md", "docs/SECURITY.md"])
     elif story_id.startswith("UI-"):
         paths.extend(["requirements/user-requirements.json", "FEATURES.md", "PLAN.md"])
+    elif category == "user-directed-product":
+        paths.extend([
+            "requirements/user-requirements.json",
+            "FEATURES.md",
+            "docs/features/chatgpt-web-parity.md",
+        ])
     elif category == "local-implemented-stale":
         # Stale local implementations without a DISC surface are fully evidenced
         # by their task/worklog plus the implementation commit(s).
@@ -2646,7 +2658,8 @@ def main() -> int:
         "validate_backlog_exhaustion: OK  "
         f"stories={summary['storyCount']} accepted={summary['controllerAccepted']} "
         f"stale={counts['local-implemented-stale']} blockers={counts['explicit-blocker']} "
-        f"dependency={counts['dependency-constrained']} unresolved={counts['unresolved-decomposition']}"
+        f"dependency={counts['dependency-constrained']} unresolved={counts['unresolved-decomposition']} "
+        f"user_directed={counts.get('user-directed-product', 0)}"
     )
     return 0
 

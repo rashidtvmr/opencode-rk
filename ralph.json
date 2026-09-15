@@ -3337,6 +3337,102 @@
         "UI-018-T04",
         "UI-018-T05"
       ]
+    },
+    {
+      "id": "WEB-006",
+      "requirementIds": ["REQ-040"],
+      "status": "in-progress",
+      "userStory": "Shared singleton daemon and embedded web host - web, future TUI and CLI use one per-user/data-dir native backend authority without a separate web-only serve process",
+      "dependencyIds": [],
+      "testObligations": ["WEB-006-T01", "WEB-006-T02", "WEB-006-T03", "WEB-006-T04", "WEB-006-T05"]
+    },
+    {
+      "id": "WEB-007",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Full-width role-aligned transcript rows with request/response action bars below each message and honest capability-gated actions",
+      "dependencyIds": [],
+      "testObligations": ["WEB-007-T01", "WEB-007-T02", "WEB-007-T03", "WEB-007-T04", "WEB-007-T05"]
+    },
+    {
+      "id": "WEB-008",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Real edit, retry, regenerate and branch/fork actions preserve original conversation history and expose branch navigation",
+      "dependencyIds": [],
+      "testObligations": ["WEB-008-T01", "WEB-008-T02", "WEB-008-T03", "WEB-008-T04", "WEB-008-T05"]
+    },
+    {
+      "id": "WEB-009",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Structured assistant turns render collapsed provider reasoning summaries and tool activity separately from final answer text with a dedicated references section; raw hidden chain-of-thought is never exposed",
+      "dependencyIds": [],
+      "testObligations": ["WEB-009-T01", "WEB-009-T02", "WEB-009-T03", "WEB-009-T04", "WEB-009-T05"]
+    },
+    {
+      "id": "WEB-010",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Accessible WYSIWYG structured chat composer with model and effort controls, slash commands, mentions, attachment/tool/plugin affordances, drafts and stop/queue/steer state",
+      "dependencyIds": [],
+      "testObligations": ["WEB-010-T01", "WEB-010-T02", "WEB-010-T03", "WEB-010-T04", "WEB-010-T05"]
+    },
+    {
+      "id": "WEB-011",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Real bounded files, images and screenshots through picker, paste, drag/drop and a searchable local Library with native attachment-provider mapping",
+      "dependencyIds": [],
+      "testObligations": ["WEB-011-T01", "WEB-011-T02", "WEB-011-T03", "WEB-011-T04", "WEB-011-T05"]
+    },
+    {
+      "id": "WEB-012",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Composer plugin, app and tool discovery/selection backed by real native capabilities with permission approvals and durable tool-call results",
+      "dependencyIds": [],
+      "testObligations": ["WEB-012-T01", "WEB-012-T02", "WEB-012-T03", "WEB-012-T04", "WEB-012-T05"]
+    },
+    {
+      "id": "WEB-013",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Search and deep-research mode with real source/tool selection, reviewable plan, progress, steering, cancellation and cited final results",
+      "dependencyIds": [],
+      "testObligations": ["WEB-013-T01", "WEB-013-T02", "WEB-013-T03", "WEB-013-T04", "WEB-013-T05"]
+    },
+    {
+      "id": "WEB-014",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Chat navigation parity with pins, unified history search, archive/share, temporary chat, progressive long-history paging and keyboard navigation",
+      "dependencyIds": [],
+      "testObligations": ["WEB-014-T01", "WEB-014-T02", "WEB-014-T03", "WEB-014-T04", "WEB-014-T05"]
+    },
+    {
+      "id": "WEB-015",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Projects and workspaces group chats, files and reusable context with memory/context inspection and disclosure of sources used",
+      "dependencyIds": [],
+      "testObligations": ["WEB-015-T01", "WEB-015-T02", "WEB-015-T03", "WEB-015-T04", "WEB-015-T05"]
+    },
+    {
+      "id": "WEB-016",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Voice and dictation with explicit microphone state, visible transcript and a real native audio/realtime adapter",
+      "dependencyIds": [],
+      "testObligations": ["WEB-016-T01", "WEB-016-T02", "WEB-016-T03", "WEB-016-T04", "WEB-016-T05"]
+    },
+    {
+      "id": "WEB-017",
+      "requirementIds": ["REQ-040"],
+      "status": "not-started",
+      "userStory": "Editable writing and code artifacts with copy/edit/undo/preview and explicitly authorized safe run/apply actions",
+      "dependencyIds": [],
+      "testObligations": ["WEB-017-T01", "WEB-017-T02", "WEB-017-T03", "WEB-017-T04", "WEB-017-T05"]
     }
   ]
 }
