@@ -1,10 +1,12 @@
-use opencode_rk_sessions::legacy_view::{
-    LegacyViewError, MAX_LEGACY_SESSIONS, project_legacy,
-};
+use opencode_rk_sessions::legacy_view::{project_legacy, LegacyViewError, MAX_LEGACY_SESSIONS};
 
 #[test]
 fn legacy_t01_projects_in_order() {
-    let input = [("a", "Alpha", false), ("b", "Beta", true), ("c", "Gamma", false)];
+    let input = [
+        ("a", "Alpha", false),
+        ("b", "Beta", true),
+        ("c", "Gamma", false),
+    ];
     let got = project_legacy(&input).unwrap();
     assert_eq!(got.len(), 3);
     assert_eq!(got[0].id, "a");

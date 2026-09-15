@@ -207,7 +207,10 @@ fn route_011_t05_invalid_duplicate_oversized_and_attempt_overflow_are_typed_and_
         coordinator.excluded_account_ids(),
         before_duplicate.as_slice()
     );
-    assert_eq!(coordinator.last_failure(), before_duplicate_failure.as_ref());
+    assert_eq!(
+        coordinator.last_failure(),
+        before_duplicate_failure.as_ref()
+    );
 
     let mut capped = AccountFallbackCoordinator::new();
     for index in 0..MAX_ACCOUNT_SELECTION_CANDIDATES {

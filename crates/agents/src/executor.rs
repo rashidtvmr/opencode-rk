@@ -95,9 +95,10 @@ impl ExecutionManager {
     pub fn execute(&self, agent_id: AgentId) -> Result<String, ExecutionError> {
         let id = agent_id.to_string();
         let execution = AgentExecution::new(agent_id);
-        let mut map = self.executions.lock().map_err(|_| {
-            ExecutionError::NotFound("mutex poisoned".to_string())
-        })?;
+        let mut map = self
+            .executions
+            .lock()
+            .map_err(|_| ExecutionError::NotFound("mutex poisoned".to_string()))?;
         if map.contains_key(&id) {
             return Err(ExecutionError::AlreadyExists(id));
         }
@@ -129,7 +130,9 @@ impl ExecutionManager {
             Err(_) => return Vec::new(),
         };
         map.values()
-            .filter(|e| e.status == ExecutionStatus::Completed || e.status == ExecutionStatus::Failed)
+            .filter(|e| {
+                e.status == ExecutionStatus::Completed || e.status == ExecutionStatus::Failed
+            })
             .cloned()
             .collect()
     }

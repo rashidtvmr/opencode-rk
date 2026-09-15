@@ -153,13 +153,7 @@ fn int_004_t04_code_oauth_missing_code_is_non_mutating_and_completion_returns_me
 
     let mut attempts = OAuthAttempts::new();
     attempts
-        .start_code(
-            "attempt-1",
-            "openai",
-            "chatgpt",
-            Some("Personal"),
-            1_000,
-        )
+        .start_code("attempt-1", "openai", "chatgpt", Some("Personal"), 1_000)
         .expect("code oauth attempt should start");
 
     let before = attempts
@@ -208,7 +202,10 @@ fn int_004_t05_expiry_cancel_duplicates_and_public_caps_are_explicit_and_typed()
     let mut registry = IntegrationRegistry::new();
     for scope in 0..MAX_INTEGRATION_SCOPES {
         registry
-            .register(scope as u64, integration(&format!("i-{scope}"), "Integration"))
+            .register(
+                scope as u64,
+                integration(&format!("i-{scope}"), "Integration"),
+            )
             .expect("exact active-scope bound should succeed");
     }
     assert_eq!(

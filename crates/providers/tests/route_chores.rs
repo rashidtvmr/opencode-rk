@@ -35,12 +35,7 @@ fn route_012_t01_quota_uses_cheapest_capable_model_and_caps_output_at_one() {
     let cheap = model("anthropic", "haiku");
     let expensive = model("openai", "mini");
     let candidates = vec![
-        candidate(
-            expensive,
-            5,
-            true,
-            vec![ChoreKind::QuotaProbe],
-        ),
+        candidate(expensive, 5, true, vec![ChoreKind::QuotaProbe]),
         candidate(cheap.clone(), 1, true, vec![ChoreKind::QuotaProbe]),
     ];
 

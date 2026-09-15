@@ -28,12 +28,17 @@ pub fn resolve_alias(aliases: &[(&str, &str)], name: &str) -> Result<String, Com
         return Err(CompatError::EmptyName);
     }
     if aliases.len() > MAX_ALIASES {
-        return Err(CompatError::TooManyAliases { max: MAX_ALIASES, actual: aliases.len() });
+        return Err(CompatError::TooManyAliases {
+            max: MAX_ALIASES,
+            actual: aliases.len(),
+        });
     }
     for (old, canonical) in aliases {
         if *old == name {
             return Ok((*canonical).to_string());
         }
     }
-    Err(CompatError::UnknownAlias { name: name.to_string() })
+    Err(CompatError::UnknownAlias {
+        name: name.to_string(),
+    })
 }

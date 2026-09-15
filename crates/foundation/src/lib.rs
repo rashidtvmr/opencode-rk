@@ -1,14 +1,16 @@
 //! Bounded structured-concurrency primitives for the native runtime.
 #![forbid(unsafe_code)]
+pub mod auto_budget;
 pub mod config;
 pub mod delegation;
-pub mod ops_scope;
-pub mod runtime_report;
-pub mod auto_budget;
-pub mod rel_gate;
-pub mod ops_guard;
 pub mod effect;
 pub mod lifecycle;
+pub mod ops_guard;
+pub mod ops_health;
+pub mod ops_runtime;
+pub mod ops_scope;
+pub mod rel_gate;
+pub mod runtime_report;
 use serde::{Deserialize, Serialize};
 use std::{
     fmt,

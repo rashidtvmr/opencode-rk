@@ -8,7 +8,7 @@ use std::time::Instant;
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::process::Child;
-use tokio::time::{timeout as tokio_timeout, Duration};
+use tokio::time::{Duration, timeout as tokio_timeout};
 
 /// Maximum output bytes retained for stdout/stderr (10 MiB).
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
@@ -127,9 +127,7 @@ impl ShellTool {
         if cfg.allowed_commands.is_empty() {
             return false;
         }
-        cfg.allowed_commands
-            .iter()
-            .any(|a| a == &self.command)
+        cfg.allowed_commands.iter().any(|a| a == &self.command)
     }
 
     fn max_bytes(&self, cfg: &ShellConfig) -> usize {
@@ -148,26 +146,26 @@ impl ShellTool {
 
         let limit = self.max_bytes(&config);
         let mut cmd = tokio::process::Command::new(&self.command);
-        cmd.args(&self.args)
-            .env_clear();
+        cmd.args(&self.args).env_clear();
 
         // Merge provided env with a minimal safe PATH.
         for (k, v) in &self.env {
             cmd.env(k, v);
         }
         if !self.env.contains_key("PATH") {
-            cmd.env("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin");
+            cmd.env(
+                "PATH",
+                "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+            );
         }
 
         if let Some(cwd) = &self.cwd {
             cmd.current_dir(PathBuf::from(cwd));
         }
 
-        cmd.stdout(Stdio::piped())
-            .stderr(Stdio::piped());
+        cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-        let mut child = cmd.spawn()
-            .map_err(|e| ShellError::Spawn(e.to_string()))?;
+        let mut child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
         self.child = Some(child);
 
         // Borrow child for reading; take it back before we await kill on drop.
@@ -283,8 +281,11 @@ mod tests {
     async fn env_vars() {
         let mut env = HashMap::new();
         env.insert("MY_TEST_VAR".to_string(), "foobar".to_string());
-        let tool = ShellTool::new("sh".to_string(), vec!["-c".to_string(), "echo $MY_TEST_VAR".to_string()])
-            .env(env);
+        let tool = ShellTool::new(
+            "sh".to_string(),
+            vec!["-c".to_string(), "echo $MY_TEST_VAR".to_string()],
+        )
+        .env(env);
         let res = tool.execute(cfg(&["sh"])).await.expect("should succeed");
         assert!(res.success);
         assert!(res.stdout.trim().ends_with("foobar"));
@@ -293,8 +294,7 @@ mod tests {
     #[tokio::test]
     async fn timeout() {
         // `sleep 5` with a 1s timeout should fail as Timeout.
-        let tool = ShellTool::new("sleep".to_string(), vec!["5".to_string()])
-            .timeout(1);
+        let tool = ShellTool::new("sleep".to_string(), vec!["5".to_string()]).timeout(1);
         let res = with_timeout(1, tool.execute(cfg(&["sleep"]))).await;
         assert!(matches!(res, Err(ShellError::Timeout(1))));
     }
@@ -304,9 +304,7 @@ mod tests {
         let mut tool = ShellTool::new("sleep".to_string(), vec!["30".to_string()]);
         tool.timeout_secs = 30;
         // Spawn in background so we can observe cancellation on drop.
-        let handle = tokio::spawn(async move {
-            tool.execute(cfg(&["sleep"])).await
-        });
+        let handle = tokio::spawn(async move { tool.execute(cfg(&["sleep"])).await });
         // Give it a moment to start.
         tokio::time::sleep(Duration::from_millis(100)).await;
         drop(handle);
@@ -332,7 +330,10 @@ mod tests {
         assert!(matches!(res3, Err(ShellError::NoCommand)));
 
         // Command failing with non-zero exit.
-        let tool4 = ShellTool::new("sh".to_string(), vec!["-c".to_string(), "exit 7".to_string()]);
+        let tool4 = ShellTool::new(
+            "sh".to_string(),
+            vec!["-c".to_string(), "exit 7".to_string()],
+        );
         let res4 = tool4.execute(cfg(&["sh"])).await.expect("should run");
         assert!(!res4.success);
         assert_eq!(res4.exit_code, Some(7));

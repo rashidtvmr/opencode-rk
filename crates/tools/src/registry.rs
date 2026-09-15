@@ -304,7 +304,11 @@ mod tests {
         reg.register(make_tool("b", "b", &["network"]));
         reg.register(make_tool("c", "c", &["storage"]));
 
-        let network: Vec<&str> = reg.find_by_tag("network").iter().map(|t| t.id.as_str()).collect();
+        let network: Vec<&str> = reg
+            .find_by_tag("network")
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
         assert_eq!(network, vec!["a", "b"]);
         assert!(reg.find_by_tag("missing-tag").is_empty());
     }
@@ -316,7 +320,11 @@ mod tests {
         reg.register(make_tool("t-ssh", "t-ssh", &[]).with_type("network"));
         reg.register(make_tool("t-db", "t-db", &[]).with_type("storage"));
 
-        let network: Vec<&str> = reg.find_by_type("network").iter().map(|t| t.id.as_str()).collect();
+        let network: Vec<&str> = reg
+            .find_by_type("network")
+            .iter()
+            .map(|t| t.id.as_str())
+            .collect();
         assert_eq!(network.len(), 2);
         assert!(network.contains(&"t-http"));
         assert!(network.contains(&"t-ssh"));

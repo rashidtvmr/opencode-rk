@@ -39,12 +39,7 @@ impl ShareLedger {
         Self { links: Vec::new() }
     }
 
-    pub fn create(
-        &mut self,
-        session_id: &str,
-        token: &str,
-        now: u64,
-    ) -> Result<(), ShareError> {
+    pub fn create(&mut self, session_id: &str, token: &str, now: u64) -> Result<(), ShareError> {
         if session_id.is_empty() {
             return Err(ShareError::EmptySession);
         }
@@ -90,7 +85,5 @@ impl ShareLedger {
 }
 
 fn valid_token(token: &str) -> bool {
-    !token.is_empty()
-        && !token.contains('/')
-        && !token.chars().any(char::is_whitespace)
+    !token.is_empty() && !token.contains('/') && !token.chars().any(char::is_whitespace)
 }

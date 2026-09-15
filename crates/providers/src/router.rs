@@ -274,17 +274,17 @@ pub fn select_account(
             }
 
             let mut by_recency = candidates.iter().collect::<Vec<_>>();
-            by_recency.sort_by(|left, right| match (left.last_used_at, right.last_used_at) {
-                (None, None) => left.priority.cmp(&right.priority),
-                (None, Some(_)) => std::cmp::Ordering::Greater,
-                (Some(_), None) => std::cmp::Ordering::Less,
-                (Some(left_used), Some(right_used)) => right_used.cmp(&left_used),
-            });
+            by_recency.sort_by(
+                |left, right| match (left.last_used_at, right.last_used_at) {
+                    (None, None) => left.priority.cmp(&right.priority),
+                    (None, Some(_)) => std::cmp::Ordering::Greater,
+                    (Some(_), None) => std::cmp::Ordering::Less,
+                    (Some(left_used), Some(right_used)) => right_used.cmp(&left_used),
+                },
+            );
 
             let current = by_recency[0];
-            if current.last_used_at.is_some()
-                && current.consecutive_use_count < sticky_limit
-            {
+            if current.last_used_at.is_some() && current.consecutive_use_count < sticky_limit {
                 return Ok(AccountSelectionDecision {
                     selected_id: current.id.clone(),
                     patch: Some(AccountSelectionPatch {
@@ -295,12 +295,14 @@ pub fn select_account(
             }
 
             let mut by_oldest = candidates.iter().collect::<Vec<_>>();
-            by_oldest.sort_by(|left, right| match (left.last_used_at, right.last_used_at) {
-                (None, None) => left.priority.cmp(&right.priority),
-                (None, Some(_)) => std::cmp::Ordering::Less,
-                (Some(_), None) => std::cmp::Ordering::Greater,
-                (Some(left_used), Some(right_used)) => left_used.cmp(&right_used),
-            });
+            by_oldest.sort_by(
+                |left, right| match (left.last_used_at, right.last_used_at) {
+                    (None, None) => left.priority.cmp(&right.priority),
+                    (None, Some(_)) => std::cmp::Ordering::Less,
+                    (Some(_), None) => std::cmp::Ordering::Greater,
+                    (Some(left_used), Some(right_used)) => left_used.cmp(&right_used),
+                },
+            );
             let selected = by_oldest[0];
 
             Ok(AccountSelectionDecision {
@@ -346,10 +348,9 @@ pub fn eligible_accounts(
         .filter(|lock_until| *lock_until > now)
         .min();
 
-    retry_at.map_or(
-        Err(AccountEligibilityError::Unavailable),
-        |retry_at| Err(AccountEligibilityError::RateLimited { retry_at }),
-    )
+    retry_at.map_or(Err(AccountEligibilityError::Unavailable), |retry_at| {
+        Err(AccountEligibilityError::RateLimited { retry_at })
+    })
 }
 
 /// Select the cheapest available model that explicitly supports `chore`.
@@ -364,9 +365,7 @@ pub fn route_chore(
 ) -> RouteDecision {
     let model = candidates
         .iter()
-        .filter(|candidate| {
-            candidate.available && candidate.supported_chores.contains(&chore)
-        })
+        .filter(|candidate| candidate.available && candidate.supported_chores.contains(&chore))
         .min_by(|left, right| {
             left.cost_microunits
                 .cmp(&right.cost_microunits)

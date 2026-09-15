@@ -91,7 +91,9 @@ impl TurnSubmissionState {
 
     pub fn submit(&mut self, turn: TurnSubmission) -> Result<(), TurnStateError> {
         if let Some(active) = self.active.as_ref() {
-            return Err(TurnStateError::AlreadyActive { active: active.id() });
+            return Err(TurnStateError::AlreadyActive {
+                active: active.id(),
+            });
         }
         self.active = Some(turn);
         self.phase = TurnPhase::Submitted;

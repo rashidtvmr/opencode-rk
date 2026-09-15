@@ -3,10 +3,10 @@
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
 pub mod executor;
+pub mod message;
 pub mod turn_state;
 
 use std::collections::HashMap;
-use std::str::FromStr;
 
 use opencode_rk_contracts::AgentId;
 use serde::{Deserialize, Serialize};
@@ -73,10 +73,11 @@ impl AgentManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
 
     fn make_agent(id: &str, name: &str) -> Agent {
         Agent {
-            id: AgentId::from_str(id).unwrap(),
+            id: AgentId::from_uuid(Uuid::parse_str(id).unwrap()),
             name: name.to_owned(),
             capabilities: vec![],
             config: AgentConfig {
@@ -137,6 +138,9 @@ mod tests {
         mgr.register(a1.clone()).unwrap();
         let result = mgr.register(a1);
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), AgentError::Duplicate(id_str.to_string()));
+        assert_eq!(
+            result.unwrap_err(),
+            AgentError::Duplicate(id_str.to_string())
+        );
     }
 }

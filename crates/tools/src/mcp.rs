@@ -359,8 +359,8 @@ mod tests {
             }
         });
 
-        let tool = McpTool::new("test_tool", "A test tool", schema.clone())
-            .with_handler("std::math");
+        let tool =
+            McpTool::new("test_tool", "A test tool", schema.clone()).with_handler("std::math");
 
         assert_eq!(tool.name, "test_tool");
         assert_eq!(tool.description, "A test tool");
@@ -410,9 +410,7 @@ mod tests {
     async fn call_tool_error() {
         let mut client = McpClient::new(McpConfig::default());
 
-        let result = client
-            .call_tool("missing_tool", json!({}))
-            .await;
+        let result = client.call_tool("missing_tool", json!({})).await;
 
         assert!(result.is_err());
         let err = result.unwrap_err();

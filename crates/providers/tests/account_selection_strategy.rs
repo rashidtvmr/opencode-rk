@@ -146,51 +146,29 @@ fn route_002_t04_round_robin_at_limit_prefers_unused_then_priority_and_caller_or
 
 #[test]
 fn route_002_t05_invalid_or_unbounded_inputs_return_typed_errors_and_boundary_is_allowed() {
-    let empty = select_account(
-        &[],
-        None,
-        AccountSelectionStrategy::FillFirst,
-        3,
-        100,
-    )
-    .expect_err("an empty post-eligibility candidate slice is invalid");
+    let empty = select_account(&[], None, AccountSelectionStrategy::FillFirst, 3, 100)
+        .expect_err("an empty post-eligibility candidate slice is invalid");
     assert_eq!(empty, AccountSelectionError::EmptyCandidates);
 
     let one = vec![candidate("only", 1, None, 0)];
-    let invalid_sticky = select_account(
-        &one,
-        None,
-        AccountSelectionStrategy::RoundRobin,
-        0,
-        100,
-    )
-    .expect_err("round-robin sticky limit must be positive");
+    let invalid_sticky = select_account(&one, None, AccountSelectionStrategy::RoundRobin, 0, 100)
+        .expect_err("round-robin sticky limit must be positive");
     assert_eq!(invalid_sticky, AccountSelectionError::InvalidStickyLimit);
 
     let boundary = (0..MAX_ACCOUNT_SELECTION_CANDIDATES)
         .map(|index| candidate(&format!("account-{index:02}"), index as u32, None, 0))
         .collect::<Vec<_>>();
-    let boundary_decision = select_account(
-        &boundary,
-        None,
-        AccountSelectionStrategy::FillFirst,
-        1,
-        100,
-    )
-    .expect("the documented candidate bound should be accepted");
+    let boundary_decision =
+        select_account(&boundary, None, AccountSelectionStrategy::FillFirst, 1, 100)
+            .expect("the documented candidate bound should be accepted");
     assert_eq!(boundary_decision.selected_id, "account-00");
 
     let overflow = (0..=MAX_ACCOUNT_SELECTION_CANDIDATES)
         .map(|index| candidate(&format!("account-{index:02}"), index as u32, None, 0))
         .collect::<Vec<_>>();
-    let overflow_error = select_account(
-        &overflow,
-        None,
-        AccountSelectionStrategy::FillFirst,
-        1,
-        100,
-    )
-    .expect_err("candidate slices above the public bound must be rejected");
+    let overflow_error =
+        select_account(&overflow, None, AccountSelectionStrategy::FillFirst, 1, 100)
+            .expect_err("candidate slices above the public bound must be rejected");
     assert_eq!(
         overflow_error,
         AccountSelectionError::TooManyCandidates {

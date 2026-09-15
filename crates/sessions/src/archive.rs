@@ -21,9 +21,8 @@ impl Compression {
     pub fn compress(&self, data: &[u8]) -> Vec<u8> {
         match self {
             Compression::None => data.to_vec(),
-            // Gzip and Brotli would require external crates; return raw data as stub.
-            // ponytail: add flate2/brotli deps and real compression when needed.
-            _ => data.to_vec(),
+            Compression::Gzip => gzip_compress(data),
+            Compression::Brotli => zstd::encode_all(data, 1).unwrap_or_else(|_| data.to_vec()),
         }
     }
 

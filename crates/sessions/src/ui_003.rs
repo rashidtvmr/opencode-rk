@@ -14,7 +14,11 @@ pub fn format_ts(micros: i64) -> Result<String, TsError> {
     if micros < 0 {
         return Err(TsError::NegativeTs);
     }
-    Ok(format!("{}.{:03}s", micros / 1_000_000, (micros % 1_000_000) / 1000))
+    Ok(format!(
+        "{}.{:03}s",
+        micros / 1_000_000,
+        (micros % 1_000_000) / 1000
+    ))
 }
 
 pub fn format_batch(ts: &[i64]) -> Result<Vec<String>, TsError> {

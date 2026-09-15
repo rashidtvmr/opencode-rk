@@ -24,11 +24,7 @@ impl std::fmt::Display for WebConfigError {
 
 impl std::error::Error for WebConfigError {}
 
-pub fn build_web_config(
-    title: &str,
-    port: u16,
-    dev: bool,
-) -> Result<WebConfig, WebConfigError> {
+pub fn build_web_config(title: &str, port: u16, dev: bool) -> Result<WebConfig, WebConfigError> {
     let title = title.trim();
     if title.is_empty() {
         return Err(WebConfigError::EmptyTitle);

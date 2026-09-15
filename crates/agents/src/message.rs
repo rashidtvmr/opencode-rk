@@ -1,7 +1,6 @@
 //! Message struct, role enum, and in-memory message store for agent conversations.
 #![forbid(unsafe_code)]
 
-use chrono::Utc;
 use opencode_rk_contracts::{MessageId, Timestamp};
 use std::collections::HashMap;
 
@@ -120,7 +119,6 @@ impl MessageStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
 
     #[test]
     fn append_and_get() {
@@ -190,12 +188,12 @@ mod tests {
 
     #[test]
     fn message_timestamp() {
+        use chrono::{Duration, Utc};
         let msg = Message::new(MessageRole::User, "timed message");
         let before = Utc::now();
         // Timestamp::now() is set during construction; verify it's close to "now"
         let ts_after = msg.timestamp.as_datetime();
-        let ts_before = before;
-        assert!(ts_after >= ts_before - chrono::Duration::milliseconds(100));
-        assert!(ts_after <= Utc::now() + chrono::Duration::milliseconds(100));
+        assert!(ts_after >= before - Duration::milliseconds(100));
+        assert!(ts_after <= Utc::now() + Duration::milliseconds(100));
     }
 }

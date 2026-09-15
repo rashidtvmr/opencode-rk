@@ -92,10 +92,7 @@ mod tests {
     fn emit_data() {
         let mut handler = StreamingHandler::new();
         handler.start_session("session-2");
-        handler.emit(
-            "session-2",
-            StreamEvent::Data("hello ".to_string()),
-        );
+        handler.emit("session-2", StreamEvent::Data("hello ".to_string()));
         handler.emit("session-2", StreamEvent::Data("world".to_string()));
 
         let events = handler.stream("session-2");
@@ -118,10 +115,7 @@ mod tests {
         let events = handler.stream("session-3");
         assert_eq!(
             events,
-            vec![
-                StreamEvent::Data("chunk".to_string()),
-                StreamEvent::Done,
-            ]
+            vec![StreamEvent::Data("chunk".to_string()), StreamEvent::Done,]
         );
         assert!(handler.pending_tokens.is_empty());
     }
@@ -158,7 +152,10 @@ mod tests {
         // Never-started sessions stream empty and do not become pending.
         handler.emit("ghost", StreamEvent::Error("boom".to_string()));
         handler.end_session("ghost");
-        assert_eq!(handler.stream("ghost"), vec![StreamEvent::Error("boom".to_string())]);
+        assert_eq!(
+            handler.stream("ghost"),
+            vec![StreamEvent::Error("boom".to_string())]
+        );
         assert!(handler.pending_tokens.is_empty());
     }
 }

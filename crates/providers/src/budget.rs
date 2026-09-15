@@ -219,10 +219,7 @@ mod tests {
 
         // Now try to consume any more - should fail
         let err = budget.consume_tokens(1).expect_err("should fail");
-        assert!(matches!(
-            err,
-            BudgetError::TokenLimitExceeded { .. }
-        ));
+        assert!(matches!(err, BudgetError::TokenLimitExceeded { .. }));
 
         // After failed consume, check_budget still reports within limit
         // since state didn't change. Test over-limit condition directly.

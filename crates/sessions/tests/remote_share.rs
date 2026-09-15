@@ -1,5 +1,5 @@
 use opencode_rk_sessions::remote_share::{
-    RemoteShareError, RemoteTarget, MAX_REMOTE_TARGETS, select_target,
+    select_target, RemoteShareError, RemoteTarget, MAX_REMOTE_TARGETS,
 };
 
 fn target(name: &str, url: &str) -> RemoteTarget {

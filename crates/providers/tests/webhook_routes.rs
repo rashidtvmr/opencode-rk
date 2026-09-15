@@ -1,4 +1,4 @@
-use opencode_rk_providers::webhook::{MAX_WEBHOOK_ROUTES, WebhookError, plan_routes};
+use opencode_rk_providers::webhook::{plan_routes, WebhookError, MAX_WEBHOOK_ROUTES};
 
 #[test]
 fn wh_t01_valid() {
@@ -28,7 +28,10 @@ fn wh_t03_empty_topic() {
 
 #[test]
 fn wh_t04_empty_path() {
-    assert_eq!(plan_routes(&[("", "topic.a")]), Err(WebhookError::EmptyPath));
+    assert_eq!(
+        plan_routes(&[("", "topic.a")]),
+        Err(WebhookError::EmptyPath)
+    );
 }
 
 #[test]

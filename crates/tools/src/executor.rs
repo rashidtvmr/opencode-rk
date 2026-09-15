@@ -250,13 +250,18 @@ impl ToolExecutor {
             }
         }
 
-        results.into_iter().map(|r| r.unwrap_or_else(|| ToolResult {
-            tool_id: String::new(),
-            output: String::new(),
-            success: false,
-            duration_ms: 0,
-            error: Some("missing result".to_string()),
-        })).collect()
+        results
+            .into_iter()
+            .map(|r| {
+                r.unwrap_or_else(|| ToolResult {
+                    tool_id: String::new(),
+                    output: String::new(),
+                    success: false,
+                    duration_ms: 0,
+                    error: Some("missing result".to_string()),
+                })
+            })
+            .collect()
     }
 }
 

@@ -61,7 +61,7 @@ pub fn extract_skill_file(
 
     #[cfg(unix)]
     {
-        use std::os::unix::fs::{PermissionsExt, MetadataExt};
+        use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
         let metadata = file.metadata()?;
         if !metadata.file_type().is_file() || metadata.nlink() != 1 {

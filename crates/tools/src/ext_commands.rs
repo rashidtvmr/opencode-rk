@@ -23,7 +23,10 @@ pub enum ExtCmdError {
 /// Each name must start with `/`, have length >= 2, and contain no spaces.
 pub fn qualify_commands(cmds: &[&str]) -> Result<Vec<String>, ExtCmdError> {
     if cmds.len() > MAX_EXT_CMDS {
-        return Err(ExtCmdError::TooManyCmds { max: MAX_EXT_CMDS, actual: cmds.len() });
+        return Err(ExtCmdError::TooManyCmds {
+            max: MAX_EXT_CMDS,
+            actual: cmds.len(),
+        });
     }
     let mut out = Vec::with_capacity(cmds.len());
     for c in cmds {

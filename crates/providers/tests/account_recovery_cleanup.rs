@@ -17,7 +17,11 @@ fn account_wide_lock(expires_at: u64) -> AccountLock {
     }
 }
 
-fn state(test_status_unavailable: bool, last_error_present: bool, backoff_level: u32) -> AccountRecoveryState {
+fn state(
+    test_status_unavailable: bool,
+    last_error_present: bool,
+    backoff_level: u32,
+) -> AccountRecoveryState {
     AccountRecoveryState {
         test_status_unavailable,
         last_error_present,
@@ -75,10 +79,7 @@ fn route_004_t02_success_clears_current_model_account_wide_and_expired_locks() {
 
 #[test]
 fn route_004_t03_active_unrelated_lock_remains_and_prevents_error_reset() {
-    let locks = vec![
-        model_lock("model-a", 500),
-        model_lock("model-b", 900),
-    ];
+    let locks = vec![model_lock("model-a", 500), model_lock("model-b", 900)];
 
     let patch = plan_account_recovery(
         Some("conn-a"),

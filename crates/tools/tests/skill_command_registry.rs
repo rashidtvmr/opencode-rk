@@ -22,7 +22,10 @@ fn skills_t01_register_and_lookup() {
     reg.register_skill(skill("alpha")).unwrap();
     reg.register_command(command("/alpha")).unwrap();
     assert_eq!(reg.skill("alpha").unwrap().description, "desc for alpha");
-    assert_eq!(reg.command("/alpha").unwrap().description, "desc for /alpha");
+    assert_eq!(
+        reg.command("/alpha").unwrap().description,
+        "desc for /alpha"
+    );
     assert_eq!(reg.skills().len(), 1);
     assert_eq!(reg.commands().len(), 1);
 }

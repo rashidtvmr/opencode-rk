@@ -9,7 +9,8 @@ fn compat_t01_known_alias_resolves() {
 #[test]
 fn compat_t02_canonical_passthrough_when_listed() {
     // Canonical value alone is not a match: no guessing.
-    let err = resolve_alias(&[("old-cmd", "new-cmd")], "new-cmd").expect_err("canonical must be Unknown");
+    let err =
+        resolve_alias(&[("old-cmd", "new-cmd")], "new-cmd").expect_err("canonical must be Unknown");
     assert!(matches!(err, CompatError::UnknownAlias { .. }));
 }
 
@@ -27,10 +28,13 @@ fn compat_t04_empty_rejected() {
 
 #[test]
 fn compat_t05_overflow_rejected() {
-    let pairs: Vec<(String, String)> =
-        (0..MAX_ALIASES + 1).map(|i| (format!("old-{i}"), format!("new-{i}"))).collect();
-    let refs: Vec<(&str, &str)> =
-        pairs.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let pairs: Vec<(String, String)> = (0..MAX_ALIASES + 1)
+        .map(|i| (format!("old-{i}"), format!("new-{i}")))
+        .collect();
+    let refs: Vec<(&str, &str)> = pairs
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
     let err = resolve_alias(&refs, "old-0").expect_err("overflow rejected");
     assert!(matches!(err, CompatError::TooManyAliases { .. }));
 }

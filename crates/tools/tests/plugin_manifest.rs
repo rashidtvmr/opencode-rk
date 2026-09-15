@@ -1,6 +1,4 @@
-use opencode_rk_tools::plugin_manifest::{
-    ManifestError, PluginManifest, validate_manifest,
-};
+use opencode_rk_tools::plugin_manifest::{ManifestError, PluginManifest, validate_manifest};
 
 fn valid() -> PluginManifest {
     PluginManifest {
@@ -27,7 +25,9 @@ fn manifest_t02_empty_name_rejected() {
 
 #[test]
 fn manifest_t03_bad_version_rejected() {
-    for bad in ["", "1", "1.2", "1.2.3.4", "a.b.c", "1..3", "1.2.x", "v1.2.3"] {
+    for bad in [
+        "", "1", "1.2", "1.2.3.4", "a.b.c", "1..3", "1.2.x", "v1.2.3",
+    ] {
         let mut m = valid();
         m.version = bad.to_string();
         assert!(

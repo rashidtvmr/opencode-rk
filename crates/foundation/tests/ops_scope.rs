@@ -1,4 +1,4 @@
-use opencode_rk_foundation::ops_scope::{OpsScopeError, build_scope};
+use opencode_rk_foundation::ops_scope::{build_scope, OpsScopeError};
 
 #[test]
 fn ops_t01_valid() {

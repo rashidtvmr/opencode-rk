@@ -79,29 +79,19 @@ impl SessionIndex {
             .or_default()
             .push(pos);
         let state_key = Self::state_key(summary.state);
-        self.by_state
-            .entry(state_key)
-            .or_default()
-            .push(pos);
+        self.by_state.entry(state_key).or_default().push(pos);
     }
 
     /// Returns the session with the given id, if present.
     pub fn get(&self, id: SessionId) -> Option<&SessionSummary> {
-        self.by_id
-            .get(&id)
-            .map(|&pos| &self.sessions[pos])
+        self.by_id.get(&id).map(|&pos| &self.sessions[pos])
     }
 
     /// Returns all sessions whose title matches exactly.
     pub fn find_by_title(&self, title: &str) -> Vec<&SessionSummary> {
         self.by_title
             .get(title)
-            .map(|indices| {
-                indices
-                    .iter()
-                    .map(|&i| &self.sessions[i])
-                    .collect()
-            })
+            .map(|indices| indices.iter().map(|&i| &self.sessions[i]).collect())
             .unwrap_or_default()
     }
 
@@ -110,12 +100,7 @@ impl SessionIndex {
         let key = Self::state_key(state);
         self.by_state
             .get(&key)
-            .map(|indices| {
-                indices
-                    .iter()
-                    .map(|&i| &self.sessions[i])
-                    .collect()
-            })
+            .map(|indices| indices.iter().map(|&i| &self.sessions[i]).collect())
             .unwrap_or_default()
     }
 
@@ -132,10 +117,7 @@ impl SessionIndex {
                 .entry(session.title.clone())
                 .or_default()
                 .push(pos);
-            self.by_state
-                .entry(state_key)
-                .or_default()
-                .push(pos);
+            self.by_state.entry(state_key).or_default().push(pos);
         }
     }
 
@@ -152,11 +134,7 @@ impl SessionIndex {
     /// The tuple is `(by_id_count, by_title_count, by_state_count)`.
     #[must_use]
     pub fn stats(&self) -> (usize, usize, usize) {
-        (
-            self.by_id.len(),
-            self.by_title.len(),
-            self.by_state.len(),
-        )
+        (self.by_id.len(), self.by_title.len(), self.by_state.len())
     }
 }
 

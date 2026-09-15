@@ -1,5 +1,5 @@
 use opencode_rk_sessions::share_policy::{
-    SharePolicyError, Visibility, parse_visibility, visibility_label,
+    parse_visibility, visibility_label, SharePolicyError, Visibility,
 };
 
 #[test]

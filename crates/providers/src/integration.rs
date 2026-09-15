@@ -184,7 +184,11 @@ impl IntegrationRegistry {
     }
 
     pub fn close_scope(&mut self, scope_id: u64) -> bool {
-        let Some(index) = self.layers.iter().position(|layer| layer.scope_id == scope_id) else {
+        let Some(index) = self
+            .layers
+            .iter()
+            .position(|layer| layer.scope_id == scope_id)
+        else {
             return false;
         };
         self.layers.remove(index);
@@ -220,11 +224,7 @@ impl IntegrationRegistry {
         if integration_id.is_empty() {
             return Err(IntegrationError::InvalidIntegrationId);
         }
-        validate_len(
-            "integration_id",
-            integration_id,
-            MAX_INTEGRATION_ID_BYTES,
-        )?;
+        validate_len("integration_id", integration_id, MAX_INTEGRATION_ID_BYTES)?;
         match &method {
             IntegrationMethod::Key { label } => {
                 validate_len("method_label", label, MAX_INTEGRATION_LABEL_BYTES)?;
@@ -250,7 +250,10 @@ impl IntegrationRegistry {
             .entry(integration_id.to_owned())
             .or_insert(inherited);
 
-        if let Some(index) = methods.iter().position(|current| same_method_slot(current, &method)) {
+        if let Some(index) = methods
+            .iter()
+            .position(|current| same_method_slot(current, &method))
+        {
             methods[index] = method;
             return Ok(());
         }
@@ -275,7 +278,11 @@ impl IntegrationRegistry {
     }
 
     fn ensure_scope(&mut self, scope_id: u64) -> Result<usize, IntegrationError> {
-        if let Some(index) = self.layers.iter().position(|layer| layer.scope_id == scope_id) {
+        if let Some(index) = self
+            .layers
+            .iter()
+            .position(|layer| layer.scope_id == scope_id)
+        {
             return Ok(index);
         }
         if self.layers.len() >= MAX_INTEGRATION_SCOPES {
@@ -296,7 +303,11 @@ impl IntegrationRegistry {
         scope_id: u64,
         integration_id: &str,
     ) -> Result<Vec<IntegrationMethod>, IntegrationError> {
-        let Some(index) = self.layers.iter().position(|layer| layer.scope_id == scope_id) else {
+        let Some(index) = self
+            .layers
+            .iter()
+            .position(|layer| layer.scope_id == scope_id)
+        else {
             return Ok(self.methods(integration_id));
         };
         Ok(self.layers[..index]
@@ -350,11 +361,7 @@ impl OAuthAttempts {
             return Err(IntegrationError::InvalidMethodId);
         }
         validate_len("attempt_id", attempt_id, MAX_INTEGRATION_ID_BYTES)?;
-        validate_len(
-            "integration_id",
-            integration_id,
-            MAX_INTEGRATION_ID_BYTES,
-        )?;
+        validate_len("integration_id", integration_id, MAX_INTEGRATION_ID_BYTES)?;
         validate_len("method_id", method_id, MAX_INTEGRATION_ID_BYTES)?;
         if let Some(label) = label {
             validate_len("attempt_label", label, MAX_INTEGRATION_LABEL_BYTES)?;
@@ -393,12 +400,12 @@ impl OAuthAttempts {
         attempt_id: &str,
         code: Option<&str>,
     ) -> Result<OAuthCompletion, IntegrationError> {
-        let attempt = self
-            .attempts
-            .get(attempt_id)
-            .ok_or_else(|| IntegrationError::AttemptNotFound {
-                attempt_id: attempt_id.to_owned(),
-            })?;
+        let attempt =
+            self.attempts
+                .get(attempt_id)
+                .ok_or_else(|| IntegrationError::AttemptNotFound {
+                    attempt_id: attempt_id.to_owned(),
+                })?;
         if attempt.status != OAuthAttemptStatus::Pending {
             return Err(IntegrationError::AttemptNotPending {
                 attempt_id: attempt_id.to_owned(),
@@ -450,11 +457,7 @@ impl OAuthAttempts {
     }
 }
 
-fn validate_len(
-    field: &'static str,
-    value: &str,
-    max: usize,
-) -> Result<(), IntegrationError> {
+fn validate_len(field: &'static str, value: &str, max: usize) -> Result<(), IntegrationError> {
     if value.len() > max {
         return Err(IntegrationError::TextTooLong {
             field,

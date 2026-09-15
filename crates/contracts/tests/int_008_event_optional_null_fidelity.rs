@@ -60,8 +60,8 @@ fn int_008_optional_null_t04_metadata_object_may_contain_null_values_and_roundtr
         "data": {}
     });
 
-    let event: OpenCodeEvent<Value> =
-        serde_json::from_value(wire.clone()).expect("null metadata values are valid unknown values");
+    let event: OpenCodeEvent<Value> = serde_json::from_value(wire.clone())
+        .expect("null metadata values are valid unknown values");
     let encoded = serde_json::to_value(event).expect("metadata object should re-encode");
 
     assert_eq!(encoded, wire);

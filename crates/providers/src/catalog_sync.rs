@@ -58,8 +58,7 @@ pub fn plan_catalog_sync(
     check_side(cur)?;
     check_side(nxt)?;
 
-    let cur_by_id: HashMap<&str, &CatalogEntry> =
-        cur.iter().map(|e| (e.id.as_str(), e)).collect();
+    let cur_by_id: HashMap<&str, &CatalogEntry> = cur.iter().map(|e| (e.id.as_str(), e)).collect();
     let nxt_ids: HashSet<&str> = nxt.iter().map(|e| e.id.as_str()).collect();
 
     let mut to_add: Vec<String> = nxt

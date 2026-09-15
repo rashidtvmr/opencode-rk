@@ -65,8 +65,10 @@ pub fn plan_account_sync(
     check_side(cached)?;
     check_side(remote)?;
 
-    let cached_by_id: HashMap<&str, &SyncedAccount> =
-        cached.iter().map(|entry| (entry.account_id.as_str(), entry)).collect();
+    let cached_by_id: HashMap<&str, &SyncedAccount> = cached
+        .iter()
+        .map(|entry| (entry.account_id.as_str(), entry))
+        .collect();
     let remote_ids: HashSet<&str> = remote
         .iter()
         .map(|entry| entry.account_id.as_str())

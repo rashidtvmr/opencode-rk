@@ -8,6 +8,7 @@ rust-version.workspace = true
 
 [dependencies]
 chrono.workspace = true
+zstd.workspace = true
 opencode-rk-contracts = { path = "../contracts" }
 opencode-rk-storage = { path = "../storage" }
 rusqlite.workspace = true

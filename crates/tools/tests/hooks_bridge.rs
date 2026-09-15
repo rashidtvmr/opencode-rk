@@ -34,9 +34,11 @@ fn hooks_t03_prefix_match() {
         hooks_for(&hooks, "fs.read", &HookTiming::Post).unwrap(),
         vec!["p1".to_string()]
     );
-    assert!(hooks_for(&hooks, "other", &HookTiming::Post)
-        .unwrap()
-        .is_empty());
+    assert!(
+        hooks_for(&hooks, "other", &HookTiming::Post)
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[test]

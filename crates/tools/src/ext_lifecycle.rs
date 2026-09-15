@@ -33,7 +33,9 @@ pub fn parse_phase(n: &str) -> Result<ExtPhase, ExtLifecycleError> {
     } else if t.eq_ignore_ascii_case("uninstall") {
         Ok(ExtPhase::Uninstall)
     } else {
-        Err(ExtLifecycleError::UnknownPhase { name: t.to_string() })
+        Err(ExtLifecycleError::UnknownPhase {
+            name: t.to_string(),
+        })
     }
 }
 

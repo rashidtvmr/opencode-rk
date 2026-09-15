@@ -1,6 +1,4 @@
-use opencode_rk_providers::integration_sync::{
-    MAX_SYNC_ITEMS, SyncError, SyncItem, plan_sync,
-};
+use opencode_rk_providers::integration_sync::{plan_sync, SyncError, SyncItem, MAX_SYNC_ITEMS};
 
 fn item(id: &str, rev: u64) -> SyncItem {
     SyncItem {
@@ -39,8 +37,7 @@ fn sync_t03_changed_rev_fetched() {
     assert!(drop.is_empty());
 
     let same = vec![item("a", 1)];
-    let (fetch, drop) =
-        plan_sync(&same, &same).expect("same rev must not fetch");
+    let (fetch, drop) = plan_sync(&same, &same).expect("same rev must not fetch");
     assert!(fetch.is_empty());
     assert!(drop.is_empty());
 }

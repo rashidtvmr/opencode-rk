@@ -74,7 +74,10 @@ impl ProviderTap {
     ///
     /// Returns the new request count after incrementing.
     pub fn record_request(&mut self, provider_id: &str) -> u64 {
-        let count = self.request_count.entry(provider_id.to_string()).or_insert(0);
+        let count = self
+            .request_count
+            .entry(provider_id.to_string())
+            .or_insert(0);
         *count += 1;
         *count
     }
@@ -144,10 +147,7 @@ mod tests {
         let decision = tap.tap("provider-b");
         assert!(!decision.allowed);
         assert_eq!(decision.limit_remaining, None);
-        assert_eq!(
-            decision.reason.as_deref(),
-            Some("denied by tap rule")
-        );
+        assert_eq!(decision.reason.as_deref(), Some("denied by tap rule"));
     }
 
     #[test]
@@ -176,10 +176,7 @@ mod tests {
         let d = tap.tap("provider-c");
         assert!(!d.allowed);
         assert_eq!(d.limit_remaining, Some(0));
-        assert_eq!(
-            d.reason.as_deref(),
-            Some("rate limit exceeded")
-        );
+        assert_eq!(d.reason.as_deref(), Some("rate limit exceeded"));
     }
 
     #[test]
@@ -198,10 +195,7 @@ mod tests {
         let d = tap.tap("provider-d");
         assert!(d.allowed);
         assert_eq!(d.limit_remaining, None);
-        assert_eq!(
-            d.reason.as_deref(),
-            Some("no tap rule configured")
-        );
+        assert_eq!(d.reason.as_deref(), Some("no tap rule configured"));
 
         // Removing a non-existent rule returns false.
         assert!(!tap.remove_rule("provider-d"));

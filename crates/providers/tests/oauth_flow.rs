@@ -1,9 +1,12 @@
-use opencode_rk_providers::oauth_flow::{MAX_OAUTH_STEPS, OAuthFlowError, plan_flow};
+use opencode_rk_providers::oauth_flow::{plan_flow, OAuthFlowError, MAX_OAUTH_STEPS};
 
 #[test]
 fn oauth_t01_valid() {
-    let out = plan_flow(&[("auth", "https://example.com/auth"), ("token", "https://example.com/token")])
-        .expect("valid flow");
+    let out = plan_flow(&[
+        ("auth", "https://example.com/auth"),
+        ("token", "https://example.com/token"),
+    ])
+    .expect("valid flow");
     assert_eq!(out.len(), 2);
     assert_eq!(out[0].name, "auth");
     assert_eq!(out[0].url, "https://example.com/auth");

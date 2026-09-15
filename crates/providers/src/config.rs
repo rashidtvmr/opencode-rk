@@ -127,7 +127,10 @@ impl ProviderConfig {
         }
 
         if !self.base_url.starts_with("http://") && !self.base_url.starts_with("https://") {
-            return Err(format!("base_url must start with http:// or https://, got: {}", self.base_url));
+            return Err(format!(
+                "base_url must start with http:// or https://, got: {}",
+                self.base_url
+            ));
         }
 
         if self.api_key_env.is_empty() {
@@ -185,12 +188,33 @@ impl ProviderConfigSet {
         let mut map = Map::new();
         for (id, config) in &self.configs {
             let mut config_map = Map::new();
-            config_map.insert("provider_id".to_string(), Value::String(config.provider_id.clone()));
-            config_map.insert("base_url".to_string(), Value::String(config.base_url.clone()));
-            config_map.insert("api_key_env".to_string(), Value::String(config.api_key_env.clone()));
-            config_map.insert("timeout_secs".to_string(), Value::Number(config.timeout_secs.into()));
-            config_map.insert("max_tokens".to_string(), Value::Number(config.max_tokens.into()));
-            config_map.insert("temperature".to_string(), Value::Number(serde_json::Number::from_f64(config.temperature as f64).unwrap_or(serde_json::Number::from_f64(0.7).unwrap())));
+            config_map.insert(
+                "provider_id".to_string(),
+                Value::String(config.provider_id.clone()),
+            );
+            config_map.insert(
+                "base_url".to_string(),
+                Value::String(config.base_url.clone()),
+            );
+            config_map.insert(
+                "api_key_env".to_string(),
+                Value::String(config.api_key_env.clone()),
+            );
+            config_map.insert(
+                "timeout_secs".to_string(),
+                Value::Number(config.timeout_secs.into()),
+            );
+            config_map.insert(
+                "max_tokens".to_string(),
+                Value::Number(config.max_tokens.into()),
+            );
+            config_map.insert(
+                "temperature".to_string(),
+                Value::Number(
+                    serde_json::Number::from_f64(config.temperature as f64)
+                        .unwrap_or(serde_json::Number::from_f64(0.7).unwrap()),
+                ),
+            );
             map.insert(id.clone(), Value::Object(config_map));
         }
         Value::Object(map)
@@ -264,7 +288,9 @@ mod tests {
 
         let result = config.validate();
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("base_url must start with http:// or https://"));
+        assert!(result
+            .unwrap_err()
+            .contains("base_url must start with http:// or https://"));
     }
 
     #[test]

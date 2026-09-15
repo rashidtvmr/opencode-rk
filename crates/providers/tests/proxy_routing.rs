@@ -1,6 +1,6 @@
 use opencode_rk_providers::proxy_route::{
-    MAX_NO_PROXY_ENTRIES, ProxyMode, ProxyRouteError, ProxyRouteInput, TranslationAdapter,
-    decide_proxy_route,
+    decide_proxy_route, ProxyMode, ProxyRouteError, ProxyRouteInput, TranslationAdapter,
+    MAX_NO_PROXY_ENTRIES,
 };
 
 fn base_input() -> ProxyRouteInput {

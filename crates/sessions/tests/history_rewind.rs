@@ -1,17 +1,11 @@
-use opencode_rk_sessions::state::{
-    HistoryBoundary, HistoryEntry, HistoryError, SessionHistory,
-};
+use opencode_rk_sessions::state::{HistoryBoundary, HistoryEntry, HistoryError, SessionHistory};
 
 fn entry(id: u64, text: &str) -> HistoryEntry {
     HistoryEntry::new(id, text)
 }
 
 fn history() -> SessionHistory {
-    SessionHistory::new(vec![
-        entry(1, "one"),
-        entry(2, "two"),
-        entry(3, "three"),
-    ])
+    SessionHistory::new(vec![entry(1, "one"), entry(2, "two"), entry(3, "three")])
 }
 
 #[test]

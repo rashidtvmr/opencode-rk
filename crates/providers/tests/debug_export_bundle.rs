@@ -175,7 +175,10 @@ fn prov_014_t04_record_and_byte_budgets_truncate_with_an_explicit_marker() {
     .expect("record-bounded export should succeed with a truncation marker");
     let record_rows = parse_jsonl(&record_bundle.jsonl);
 
-    assert!(record_rows.len() <= 3, "marker must count toward record budget");
+    assert!(
+        record_rows.len() <= 3,
+        "marker must count toward record budget"
+    );
     assert!(
         record_rows.iter().any(|row| row["kind"] == "truncation"),
         "record-budget truncation must be explicit"
@@ -215,10 +218,22 @@ fn prov_014_t05_offline_renderer_is_self_contained_and_has_no_network_urls() {
     let html = bundle.renderer_html.to_ascii_lowercase();
 
     assert!(html.contains("<!doctype html"));
-    assert!(html.contains("<style"), "renderer should carry its own styles");
-    assert!(html.contains("<script"), "renderer should carry its own script");
+    assert!(
+        html.contains("<style"),
+        "renderer should carry its own styles"
+    );
+    assert!(
+        html.contains("<script"),
+        "renderer should carry its own script"
+    );
 
-    for forbidden in ["http://", "https://", "//cdn.", "<script src=", "<link rel="] {
+    for forbidden in [
+        "http://",
+        "https://",
+        "//cdn.",
+        "<script src=",
+        "<link rel=",
+    ] {
         assert!(
             !html.contains(forbidden),
             "offline renderer must not require network resource {forbidden:?}"

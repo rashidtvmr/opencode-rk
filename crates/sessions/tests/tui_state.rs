@@ -1,7 +1,7 @@
 use opencode_rk_sessions::tui_state::{
-    Composer, ComposerError, ComposerKey, KeyHint, MemoryFile, MemoryViewer, ModelEntry,
-    SourceUsage, StatusAction, StatusItem, SubmitKeymap, decide_composer_key, footer_hints,
-    keybinding_help, keyboard_fallback, status_click, validate_memory_path, MAX_QUEUED,
+    decide_composer_key, footer_hints, keybinding_help, keyboard_fallback, status_click,
+    validate_memory_path, Composer, ComposerError, ComposerKey, KeyHint, MemoryFile, MemoryViewer,
+    ModelEntry, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_QUEUED,
 };
 
 // UI-014: Enter=submit, Shift+Enter/Ctrl+J=newline, send enablement,
@@ -56,10 +56,7 @@ fn ui_014_composer_submit_vs_newline() {
         assert!(c2.submit().is_ok());
     }
     c2.set_draft("overflow").unwrap();
-    assert!(matches!(
-        c2.submit(),
-        Err(ComposerError::QueueFull { .. })
-    ));
+    assert!(matches!(c2.submit(), Err(ComposerError::QueueFull { .. })));
 }
 
 // UI-015: model click opens provider-aware switcher, context click opens
@@ -79,8 +76,7 @@ fn ui_015_statusbar_switcher_fallback() {
         ModelEntry::new("b", "other", "high"),
         ModelEntry::new("c", "acme", "high"),
     ];
-    let (filtered, truncated) =
-        opencode_rk_sessions::tui_state::filter_models(&models, "acme");
+    let (filtered, truncated) = opencode_rk_sessions::tui_state::filter_models(&models, "acme");
     assert!(!truncated);
     assert_eq!(filtered.len(), 2);
     assert!(filtered.iter().all(|m| m.provider == "acme"));
@@ -145,7 +141,9 @@ fn ui_017_memory_unload_warning() {
     // reload validates path
     assert!(validate_memory_path("").is_err());
     assert!(validate_memory_path("../evil.md").is_err());
-    viewer.reload(MemoryFile::new("c.md", 10, 5, false)).unwrap();
+    viewer
+        .reload(MemoryFile::new("c.md", 10, 5, false))
+        .unwrap();
     assert!(viewer.list().iter().any(|f| f.path == "c.md"));
 }
 
@@ -156,8 +154,14 @@ fn ui_018_keybinding_help() {
     assert!(!hints_enter.is_empty());
     assert!(hints_enter.len() <= opencode_rk_sessions::tui_state::MAX_HINTS);
     let help_enter = keybinding_help(SubmitKeymap::Enter);
-    assert!(help_enter.contains("Enter"), "help names Enter: {help_enter}");
-    assert!(help_enter.contains("Ctrl+J"), "help names Ctrl+J: {help_enter}");
+    assert!(
+        help_enter.contains("Enter"),
+        "help names Enter: {help_enter}"
+    );
+    assert!(
+        help_enter.contains("Ctrl+J"),
+        "help names Ctrl+J: {help_enter}"
+    );
     let help_ctrl = keybinding_help(SubmitKeymap::CtrlJ);
     assert_ne!(help_enter, help_ctrl);
     let hints_ctrl = footer_hints(SubmitKeymap::CtrlJ);

@@ -160,23 +160,27 @@ impl Default for FileTool {
 /// Executes a file operation and returns the result.
 pub fn execute(op: FileOperation) -> Result<FileResult, ToolError> {
     match op {
-        FileOperation::Read { path, offset, limit } => {
-            read_file(&path, offset, limit)
-        }
-        FileOperation::Write { path, content, append } => {
-            write_file(&path, &content, append)
-        }
-        FileOperation::List { path } => {
-            list_dir(&path)
-        }
-        FileOperation::CreateDir { path, recursive } => {
-            create_directory(&path, recursive)
-        }
+        FileOperation::Read {
+            path,
+            offset,
+            limit,
+        } => read_file(&path, offset, limit),
+        FileOperation::Write {
+            path,
+            content,
+            append,
+        } => write_file(&path, &content, append),
+        FileOperation::List { path } => list_dir(&path),
+        FileOperation::CreateDir { path, recursive } => create_directory(&path, recursive),
     }
 }
 
 /// Reads a file at the given path with optional offset and limit.
-fn read_file(path: &Path, offset: Option<usize>, limit: Option<usize>) -> Result<FileResult, ToolError> {
+fn read_file(
+    path: &Path,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<FileResult, ToolError> {
     if !path.exists() {
         return Ok(FileResult::failure(format!("File not found: {:?}", path)));
     }
@@ -215,22 +219,33 @@ fn write_file(path: &Path, content: &str, append: bool) -> Result<FileResult, To
             .append(true)
             .open(path)
             .map_err(ToolError::IoError)?;
-        file.write_all(content.as_bytes()).map_err(ToolError::IoError)?;
+        file.write_all(content.as_bytes())
+            .map_err(ToolError::IoError)?;
     } else {
         fs::write(path, content).map_err(ToolError::IoError)?;
     }
 
-    Ok(FileResult::success(format!("Successfully wrote {} bytes to {:?}", content.len(), path)))
+    Ok(FileResult::success(format!(
+        "Successfully wrote {} bytes to {:?}",
+        content.len(),
+        path
+    )))
 }
 
 /// Lists the contents of a directory.
 fn list_dir(path: &Path) -> Result<FileResult, ToolError> {
     if !path.exists() {
-        return Ok(FileResult::failure(format!("Directory not found: {:?}", path)));
+        return Ok(FileResult::failure(format!(
+            "Directory not found: {:?}",
+            path
+        )));
     }
 
     if !path.is_dir() {
-        return Ok(FileResult::failure(format!("Path is not a directory: {:?}", path)));
+        return Ok(FileResult::failure(format!(
+            "Path is not a directory: {:?}",
+            path
+        )));
     }
 
     let mut entries: Vec<String> = Vec::new();
@@ -242,7 +257,9 @@ fn list_dir(path: &Path) -> Result<FileResult, ToolError> {
     }
 
     entries.sort();
-    Ok(FileResult::success(serde_json::to_string(&entries).unwrap()))
+    Ok(FileResult::success(
+        serde_json::to_string(&entries).unwrap(),
+    ))
 }
 
 /// Creates a directory at the given path.
@@ -253,7 +270,10 @@ fn create_directory(path: &Path, recursive: bool) -> Result<FileResult, ToolErro
         fs::create_dir(path).map_err(ToolError::IoError)?;
     }
 
-    Ok(FileResult::success(format!("Successfully created directory {:?}", path)))
+    Ok(FileResult::success(format!(
+        "Successfully created directory {:?}",
+        path
+    )))
 }
 
 #[cfg(test)]

@@ -1,7 +1,12 @@
-use opencode_rk_tools::ext_hooks::{ExtHook, ExtHookError, ExtHookRegistry, MAX_EXT_HOOKS, valid_events};
+use opencode_rk_tools::ext_hooks::{
+    ExtHook, ExtHookError, ExtHookRegistry, MAX_EXT_HOOKS, valid_events,
+};
 
 fn hook(id: &str, event: &str) -> ExtHook {
-    ExtHook { id: id.to_string(), event: event.to_string() }
+    ExtHook {
+        id: id.to_string(),
+        event: event.to_string(),
+    }
 }
 
 #[test]
@@ -20,7 +25,9 @@ fn exth_t01_register_get() {
 #[test]
 fn exth_t02_bad_event() {
     let mut reg = ExtHookRegistry::new();
-    let err = reg.register(hook("h1", "bogus")).expect_err("bad event rejected");
+    let err = reg
+        .register(hook("h1", "bogus"))
+        .expect_err("bad event rejected");
     assert!(matches!(err, ExtHookError::EmptyEvent));
 }
 
@@ -39,11 +46,13 @@ fn exth_t03_dup_rejected() {
 fn exth_t04_empty_rejected() {
     let mut reg = ExtHookRegistry::new();
     assert!(matches!(
-        reg.register(hook("", "pre")).expect_err("empty id rejected"),
+        reg.register(hook("", "pre"))
+            .expect_err("empty id rejected"),
         ExtHookError::EmptyId
     ));
     assert!(matches!(
-        reg.register(hook("h1", "")).expect_err("empty event rejected"),
+        reg.register(hook("h1", ""))
+            .expect_err("empty event rejected"),
         ExtHookError::EmptyEvent
     ));
 }
@@ -52,7 +61,8 @@ fn exth_t04_empty_rejected() {
 fn exth_t05_overflow() {
     let mut reg = ExtHookRegistry::new();
     for i in 0..MAX_EXT_HOOKS {
-        reg.register(hook(&format!("h{i}"), "pre")).expect("fill ok");
+        reg.register(hook(&format!("h{i}"), "pre"))
+            .expect("fill ok");
     }
     match reg.register(hook("overflow", "pre")) {
         Err(ExtHookError::TooManyHooks { max, actual }) => {

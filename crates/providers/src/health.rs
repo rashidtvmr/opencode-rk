@@ -72,9 +72,7 @@ impl HealthMonitor {
     /// treated as unknown and returns `false`.
     pub fn check_health(&self, provider_id: &str) -> bool {
         match self.providers.get(provider_id) {
-            Some(h) => {
-                h.status == HealthStatus::Healthy && !self.is_expired(h.last_check)
-            }
+            Some(h) => h.status == HealthStatus::Healthy && !self.is_expired(h.last_check),
             None => false,
         }
     }

@@ -1,20 +1,23 @@
 //! Session lifecycle over the format-2 workspace schema (primary) plus the
 //! legacy format-1 [`SessionService`] kept for the server/CLI boundary.
 #![forbid(unsafe_code)]
-pub mod index;
-pub mod import;
-pub mod migration;
 pub mod auto_compact;
+pub mod auto_lease;
+pub mod import;
+pub mod index;
+pub mod legacy_view;
+pub mod migration;
+pub mod ops_limits;
 pub mod query;
 pub mod reference;
-pub mod state;
-pub mod share;
-pub mod legacy_view;
-pub mod share_policy;
 pub mod remote_share;
-pub mod auto_lease;
+pub mod share;
+pub mod share_policy;
+pub mod share_token;
+pub mod state;
 pub mod store;
 pub mod tui_state;
+mod types;
 pub mod ui_001;
 pub mod ui_002;
 pub mod ui_003;
@@ -28,7 +31,6 @@ pub mod ui_010;
 pub mod ui_011;
 pub mod ui_012;
 pub mod ui_013;
-mod types;
 
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{

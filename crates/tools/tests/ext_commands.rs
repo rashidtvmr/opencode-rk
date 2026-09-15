@@ -28,6 +28,9 @@ fn extcmd_t05_overflow() {
     let refs: Vec<&str> = many.iter().map(String::as_str).collect();
     assert_eq!(
         qualify_commands(&refs),
-        Err(ExtCmdError::TooManyCmds { max: MAX_EXT_CMDS, actual: MAX_EXT_CMDS + 1 })
+        Err(ExtCmdError::TooManyCmds {
+            max: MAX_EXT_CMDS,
+            actual: MAX_EXT_CMDS + 1
+        })
     );
 }

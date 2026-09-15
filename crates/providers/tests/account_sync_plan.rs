@@ -1,5 +1,5 @@
 use opencode_rk_providers::account_sync::{
-    AccountSyncError, SyncedAccount, MAX_SYNC_ACCOUNTS, plan_account_sync,
+    plan_account_sync, AccountSyncError, SyncedAccount, MAX_SYNC_ACCOUNTS,
 };
 
 fn acct(id: &str, provider: &str, active: bool, updated_at: u64) -> SyncedAccount {
@@ -13,10 +13,7 @@ fn acct(id: &str, provider: &str, active: bool, updated_at: u64) -> SyncedAccoun
 
 #[test]
 fn route_009_t01_identical_is_empty_plan() {
-    let snapshot = vec![
-        acct("alpha", "p1", true, 10),
-        acct("beta", "p1", false, 20),
-    ];
+    let snapshot = vec![acct("alpha", "p1", true, 10), acct("beta", "p1", false, 20)];
     let plan = plan_account_sync(&snapshot, &snapshot).expect("identical snapshots must plan");
     assert!(plan.upsert.is_empty());
     assert!(plan.delete_ids.is_empty());
@@ -47,9 +44,8 @@ fn route_009_t03_changed_fields_are_upsert() {
         (acct("a", "p1", true, 1), acct("a", "p1", false, 1)),
         (acct("a", "p1", true, 1), acct("a", "p1", true, 2)),
     ] {
-        let plan =
-            plan_account_sync(std::slice::from_ref(&cached), std::slice::from_ref(&remote))
-                .expect("changed field must plan");
+        let plan = plan_account_sync(std::slice::from_ref(&cached), std::slice::from_ref(&remote))
+            .expect("changed field must plan");
         assert_eq!(plan.upsert, vec![remote]);
         assert!(plan.delete_ids.is_empty());
     }

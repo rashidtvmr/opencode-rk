@@ -1,17 +1,18 @@
 //! Small HTTP boundary over the native catalog and session services.
 #![forbid(unsafe_code)]
+pub mod app_client;
+pub mod auto_loop;
+pub mod auto_report;
 pub mod clients;
 pub mod daemon;
-pub mod event_bus;
-pub mod repo_ops;
-pub mod remote_ledger;
-pub mod app_client;
-pub mod web_config;
 pub mod desktop_bridge;
 pub mod enterprise_link;
-pub mod auto_loop;
+pub mod event_bus;
 pub mod rel_verify;
-pub mod auto_report;
+pub mod remote_ledger;
+pub mod repo_ops;
+pub mod web_config;
+pub mod web_footer;
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
@@ -20,7 +21,7 @@ use axum::{
     Json, Router,
 };
 use opencode_rk_catalog::{Catalog, CatalogQuery};
-use opencode_rk_contracts::{SessionId, WIRE_SCHEMA_VERSION};
+use opencode_rk_contracts::{MessageRole, SessionId, WIRE_SCHEMA_VERSION};
 use opencode_rk_sessions::SessionService;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -38,6 +39,10 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
         .route("/api/sessions/{id}/archive", post(archive_session))
+        .route(
+            "/api/sessions/{id}/messages",
+            get(list_messages).post(append_message),
+        )
         .with_state(state)
 }
 async fn health() -> Json<Value> {
@@ -159,6 +164,44 @@ async fn archive_session(
         .map_err(ApiFailure::internal)?;
     let session = state.sessions.get(id).await.map_err(ApiFailure::internal)?;
     Ok(Json(json!({"session":session})))
+}
+
+#[derive(Debug, Deserialize)]
+struct MessageListParams {
+    limit: Option<usize>,
+}
+
+async fn list_messages(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Query(params): Query<MessageListParams>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let messages = state
+        .sessions
+        .messages(id, params.limit.unwrap_or(100).clamp(1, 500))
+        .await
+        .map_err(ApiFailure::internal)?;
+    Ok(Json(json!({"messages":messages})))
+}
+
+#[derive(Debug, Deserialize)]
+struct AppendMessageBody {
+    text: String,
+}
+
+async fn append_message(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(body): Json<AppendMessageBody>,
+) -> Result<(StatusCode, Json<Value>), ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let message = state
+        .sessions
+        .append_text(id, MessageRole::User, body.text)
+        .await
+        .map_err(ApiFailure::internal)?;
+    Ok((StatusCode::CREATED, Json(json!({"message":message}))))
 }
 fn parse_session_id(value: &str) -> Result<SessionId, ApiFailure> {
     SessionId::from_str(value).map_err(|_| ApiFailure::bad_request("invalid session id"))

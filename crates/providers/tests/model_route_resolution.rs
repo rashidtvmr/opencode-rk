@@ -52,11 +52,11 @@ fn route_005_t02_known_combo_resolves_to_named_combo_and_member_list() {
 
 #[test]
 fn route_005_t03_combo_name_wins_over_same_name_alias() {
-    let aliases = BTreeMap::from([(
-        "fast".to_owned(),
-        model("anthropic", "claude-haiku"),
-    )]);
-    let combo_members = vec![model("openai", "gpt-5-mini"), model("google", "gemini-flash")];
+    let aliases = BTreeMap::from([("fast".to_owned(), model("anthropic", "claude-haiku"))]);
+    let combo_members = vec![
+        model("openai", "gpt-5-mini"),
+        model("google", "gemini-flash"),
+    ];
     let combos = BTreeMap::from([("fast".to_owned(), combo_members.clone())]);
 
     let resolved = resolve_model_route("fast", &aliases, &combos)
@@ -73,10 +73,7 @@ fn route_005_t03_combo_name_wins_over_same_name_alias() {
 
 #[test]
 fn route_005_t04_known_alias_resolves_to_explicit_provider_model() {
-    let aliases = BTreeMap::from([(
-        "coding".to_owned(),
-        model("anthropic", "claude-sonnet"),
-    )]);
+    let aliases = BTreeMap::from([("coding".to_owned(), model("anthropic", "claude-sonnet"))]);
     let combos = BTreeMap::new();
 
     let resolved = resolve_model_route("coding", &aliases, &combos)
@@ -90,7 +87,10 @@ fn route_005_t04_known_alias_resolves_to_explicit_provider_model() {
 
 #[test]
 fn route_005_t05_invalid_unknown_and_combo_size_limits_return_typed_results() {
-    assert_eq!(MAX_COMBO_MODELS, 8, "combo member bound is part of the public contract");
+    assert_eq!(
+        MAX_COMBO_MODELS, 8,
+        "combo member bound is part of the public contract"
+    );
 
     let aliases = BTreeMap::new();
     let empty_combos = BTreeMap::new();
@@ -115,8 +115,7 @@ fn route_005_t05_invalid_unknown_and_combo_size_limits_return_typed_results() {
     let boundary_members = (0..MAX_COMBO_MODELS)
         .map(|index| model("provider", &format!("model-{index}")))
         .collect::<Vec<_>>();
-    let boundary_combos =
-        BTreeMap::from([("boundary".to_owned(), boundary_members.clone())]);
+    let boundary_combos = BTreeMap::from([("boundary".to_owned(), boundary_members.clone())]);
 
     assert_eq!(
         resolve_model_route("boundary", &aliases, &boundary_combos),

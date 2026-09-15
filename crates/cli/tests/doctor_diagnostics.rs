@@ -153,7 +153,11 @@ fn ops_010_t03_connectivity_passes_on_loopback_and_fails_cleanly_when_unavailabl
                 break;
             }
             Err(error) if error.kind() == ErrorKind::WouldBlock => {
-                if child.try_wait().expect("check doctor child status").is_some() {
+                if child
+                    .try_wait()
+                    .expect("check doctor child status")
+                    .is_some()
+                {
                     break;
                 }
                 thread::sleep(Duration::from_millis(10));
@@ -165,11 +169,11 @@ fn ops_010_t03_connectivity_passes_on_loopback_and_fails_cleanly_when_unavailabl
         .wait_with_output()
         .expect("collect doctor loopback output");
     let available_json = parse_successful_json(&available);
-    assert!(accepted, "doctor connectivity check must probe the configured endpoint");
-    assert_eq!(
-        available_json["checks"]["connectivity"]["status"],
-        "ok"
+    assert!(
+        accepted,
+        "doctor connectivity check must probe the configured endpoint"
     );
+    assert_eq!(available_json["checks"]["connectivity"]["status"], "ok");
 
     let unavailable_listener =
         TcpListener::bind("127.0.0.1:0").expect("reserve unavailable loopback endpoint");
@@ -210,18 +214,12 @@ fn ops_010_t04_tools_check_reports_core_builtins() {
 fn ops_010_t05_mcp_reports_configured_or_unconfigured_without_launching_external_mcp() {
     let configured_home = TestHome::new("mcp-configured");
     let mcp_config = r#"{"servers":{"fixture":{"command":"command-that-must-not-run"}}}"#;
-    let configured = run_doctor(
-        &configured_home,
-        &[("OPENCODE_RK_MCP_CONFIG", mcp_config)],
-    );
+    let configured = run_doctor(&configured_home, &[("OPENCODE_RK_MCP_CONFIG", mcp_config)]);
     let configured_json = parse_successful_json(&configured);
     assert_eq!(configured_json["checks"]["mcp"]["status"], "configured");
 
     let unconfigured_home = TestHome::new("mcp-unconfigured");
     let unconfigured = run_doctor(&unconfigured_home, &[]);
     let unconfigured_json = parse_successful_json(&unconfigured);
-    assert_eq!(
-        unconfigured_json["checks"]["mcp"]["status"],
-        "unconfigured"
-    );
+    assert_eq!(unconfigured_json["checks"]["mcp"]["status"], "unconfigured");
 }

@@ -117,10 +117,7 @@ fn split_lines(content: &str) -> Vec<String> {
     if content.is_empty() {
         return vec![];
     }
-    content
-        .lines()
-        .map(|l| l.to_string())
-        .collect()
+    content.lines().map(|l| l.to_string()).collect()
 }
 
 /// Computes a line-based diff between two text contents.
@@ -140,7 +137,13 @@ pub fn diff(old_content: &str, new_content: &str, options: &DiffOptions) -> Diff
         .map(|l| normalize_line(l, options))
         .collect();
 
-    let changes = compute_diff(&old_normalized, &new_normalized, &old_lines, &new_lines, options);
+    let changes = compute_diff(
+        &old_normalized,
+        &new_normalized,
+        &old_lines,
+        &new_lines,
+        options,
+    );
 
     DiffResult {
         has_changes: !changes.is_empty(),
@@ -289,14 +292,26 @@ pub fn unified_diff(changes: &[DiffChange]) -> String {
     for change in changes {
         match change.change_type {
             ChangeType::Add => {
-                output.push_str(&format!("+{}\n", change.new_line.clone().unwrap_or_default()));
+                output.push_str(&format!(
+                    "+{}\n",
+                    change.new_line.clone().unwrap_or_default()
+                ));
             }
             ChangeType::Delete => {
-                output.push_str(&format!("-{}\n", change.old_line.clone().unwrap_or_default()));
+                output.push_str(&format!(
+                    "-{}\n",
+                    change.old_line.clone().unwrap_or_default()
+                ));
             }
             ChangeType::Replace => {
-                output.push_str(&format!("-{}\n", change.old_line.clone().unwrap_or_default()));
-                output.push_str(&format!("+{}\n", change.new_line.clone().unwrap_or_default()));
+                output.push_str(&format!(
+                    "-{}\n",
+                    change.old_line.clone().unwrap_or_default()
+                ));
+                output.push_str(&format!(
+                    "+{}\n",
+                    change.new_line.clone().unwrap_or_default()
+                ));
             }
         }
     }
@@ -326,7 +341,10 @@ pub fn side_by_side_diff(changes: &[DiffChange]) -> String {
         let old_padded = format!("{:<30}", &old_str[..old_str.len().min(30)]);
         let new_padded = format!("{:<30}", &new_str[..new_str.len().min(30)]);
 
-        output.push_str(&format!("{} |  {}     | {}\n", old_padded, type_char, new_padded));
+        output.push_str(&format!(
+            "{} |  {}     | {}\n",
+            old_padded, type_char, new_padded
+        ));
     }
 
     output
@@ -392,7 +410,10 @@ mod tests {
         let result_ignore_case = diff(
             old,
             new,
-            &DiffOptions { ignore_case: true, ignore_whitespace: false },
+            &DiffOptions {
+                ignore_case: true,
+                ignore_whitespace: false,
+            },
         );
         assert!(!result_ignore_case.has_changes);
         assert!(result_ignore_case.changes.is_empty());
@@ -401,7 +422,10 @@ mod tests {
         let result_ignore_ws = diff(
             "Hello  ",
             "Hello",
-            &DiffOptions { ignore_whitespace: true, ignore_case: false },
+            &DiffOptions {
+                ignore_whitespace: true,
+                ignore_case: false,
+            },
         );
         assert!(!result_ignore_ws.has_changes);
     }

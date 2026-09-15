@@ -86,18 +86,9 @@ pub fn export_debug_bundle(
         let line = serde_json::to_string(&value)?;
 
         if emitted_records >= budget.max_records
-            || jsonl
-                .len()
-                .saturating_add(line.len())
-                .saturating_add(1)
-                > budget.max_bytes
+            || jsonl.len().saturating_add(line.len()).saturating_add(1) > budget.max_bytes
         {
-            append_truncation_marker(
-                &mut jsonl,
-                &mut line_starts,
-                &mut emitted_records,
-                budget,
-            )?;
+            append_truncation_marker(&mut jsonl, &mut line_starts, &mut emitted_records, budget)?;
             return Ok(DebugBundle {
                 renderer_html: offline_renderer(&jsonl),
                 jsonl,

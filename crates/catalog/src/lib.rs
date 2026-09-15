@@ -3,6 +3,7 @@
 
 pub mod cache;
 pub mod events;
+pub mod health;
 pub mod registry;
 pub mod search;
 pub mod stats;

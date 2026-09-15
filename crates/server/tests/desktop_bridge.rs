@@ -28,12 +28,18 @@ fn bridge_t03_unknown_rejected() {
 fn bridge_t04_empty_topic() {
     let ch = Channel::Stable;
     assert!(matches!(topic_for(&ch, ""), Err(BridgeError::EmptyTopic)));
-    assert!(matches!(topic_for(&ch, "   "), Err(BridgeError::EmptyTopic)));
+    assert!(matches!(
+        topic_for(&ch, "   "),
+        Err(BridgeError::EmptyTopic)
+    ));
 }
 
 #[test]
 fn bridge_t05_topic_format() {
-    assert_eq!(topic_for(&Channel::Stable, "events").unwrap(), "stable:events");
+    assert_eq!(
+        topic_for(&Channel::Stable, "events").unwrap(),
+        "stable:events"
+    );
     assert_eq!(
         topic_for(&Channel::Beta, "  events  ").unwrap(),
         "beta:events"

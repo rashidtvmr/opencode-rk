@@ -2,8 +2,8 @@ use std::collections::BTreeMap;
 
 use opencode_rk_providers::{
     model_route::{
-        CompatibleProviderNode, CompatibleProviderPrefixError, MAX_COMPATIBLE_PROVIDER_NODES,
-        resolve_compatible_provider_prefix,
+        resolve_compatible_provider_prefix, CompatibleProviderNode, CompatibleProviderPrefixError,
+        MAX_COMPATIBLE_PROVIDER_NODES,
     },
     router::ModelRef,
 };
@@ -120,9 +120,11 @@ fn route_007_t05_compatible_node_input_is_bounded_at_public_limit() {
     overflow.push(node("overflow-node", "overflow"));
     assert_eq!(
         resolve_compatible_provider_prefix("overflow/model", &aliases, &overflow),
-        Err(CompatibleProviderPrefixError::TooManyCompatibleProviderNodes {
-            max: MAX_COMPATIBLE_PROVIDER_NODES,
-            actual: MAX_COMPATIBLE_PROVIDER_NODES + 1,
-        })
+        Err(
+            CompatibleProviderPrefixError::TooManyCompatibleProviderNodes {
+                max: MAX_COMPATIBLE_PROVIDER_NODES,
+                actual: MAX_COMPATIBLE_PROVIDER_NODES + 1,
+            }
+        )
     );
 }

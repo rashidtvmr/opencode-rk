@@ -1,6 +1,4 @@
-use opencode_rk_providers::router::{
-    eligible_accounts, AccountCandidate, AccountEligibilityError,
-};
+use opencode_rk_providers::router::{eligible_accounts, AccountCandidate, AccountEligibilityError};
 
 fn account(
     id: &str,
@@ -28,7 +26,10 @@ fn route_001_t01_active_unlocked_non_excluded_accounts_sort_by_priority_then_id(
 
     let eligible = eligible_accounts(&candidates, 100).expect("eligible accounts should exist");
 
-    let ids: Vec<&str> = eligible.iter().map(|candidate| candidate.id.as_str()).collect();
+    let ids: Vec<&str> = eligible
+        .iter()
+        .map(|candidate| candidate.id.as_str())
+        .collect();
     assert_eq!(ids, vec!["alpha", "beta", "zeta"]);
 }
 

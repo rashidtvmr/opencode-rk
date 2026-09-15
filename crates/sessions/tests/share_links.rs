@@ -24,7 +24,14 @@ fn share_t02_active_filters_revoked() {
     let active = ledger.active();
     assert_eq!(active.len(), 1);
     assert_eq!(active[0].token, "tok-b");
-    assert!(ledger.list().iter().find(|l| l.token == "tok-a").unwrap().revoked);
+    assert!(
+        ledger
+            .list()
+            .iter()
+            .find(|l| l.token == "tok-a")
+            .unwrap()
+            .revoked
+    );
 }
 
 #[test]
@@ -64,7 +71,9 @@ fn share_t04_bad_token_rejected() {
 fn share_t05_overflow_rejected() {
     let mut ledger = ShareLedger::new();
     for i in 0..MAX_SHARE_LINKS {
-        ledger.create("s1", &format!("tok-{i:04}"), i as u64).unwrap();
+        ledger
+            .create("s1", &format!("tok-{i:04}"), i as u64)
+            .unwrap();
     }
     let err = ledger.create("s1", "one-too-many", 999).unwrap_err();
     match err {

@@ -30,8 +30,14 @@ fn ext_013_t02_absolute_and_traversal_paths_are_rejected_without_writes() {
 
     assert!(traversal.is_err(), "parent traversal must be rejected");
     assert!(absolute.is_err(), "absolute paths must be rejected");
-    assert!(!traversal_target.exists(), "traversal rejection must not write outside root");
-    assert!(!absolute_target.exists(), "absolute-path rejection must not create the target");
+    assert!(
+        !traversal_target.exists(),
+        "traversal rejection must not write outside root"
+    );
+    assert!(
+        !absolute_target.exists(),
+        "absolute-path rejection must not create the target"
+    );
     assert_eq!(
         fs::read_dir(&root)
             .expect("extraction root should remain readable")
@@ -49,7 +55,10 @@ fn ext_013_t03_existing_file_is_not_overwritten() {
 
     let result = extract_skill_file(root.path(), Path::new("skill.md"), b"replacement");
 
-    assert!(result.is_err(), "exclusive creation must refuse an existing file");
+    assert!(
+        result.is_err(),
+        "exclusive creation must refuse an existing file"
+    );
     assert_eq!(
         fs::read(&target).expect("existing file should remain readable"),
         b"existing-content",

@@ -11,7 +11,9 @@ fn auto_007_t01_submit_owns_one_pending_turn() {
     let mut state = TurnSubmissionState::new();
     let turn = submission(1);
 
-    state.submit(turn.clone()).expect("idle state should accept one turn");
+    state
+        .submit(turn.clone())
+        .expect("idle state should accept one turn");
 
     assert_eq!(state.phase(), TurnPhase::Submitted);
     assert_eq!(state.active(), Some(&turn));
@@ -79,16 +81,16 @@ fn auto_007_t05_duplicate_and_invalid_transitions_are_typed_and_non_mutating() {
     let mut state = TurnSubmissionState::new();
     let first = submission(7);
     let first_id = first.id();
-    state.submit(first.clone()).expect("first submit should succeed");
+    state
+        .submit(first.clone())
+        .expect("first submit should succeed");
 
     let duplicate = state
         .submit(submission(8))
         .expect_err("a second active submission must not be queued");
     assert_eq!(
         duplicate,
-        TurnStateError::AlreadyActive {
-            active: first_id,
-        }
+        TurnStateError::AlreadyActive { active: first_id }
     );
     assert_eq!(state.phase(), TurnPhase::Submitted);
     assert_eq!(state.active(), Some(&first));

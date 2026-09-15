@@ -1,4 +1,4 @@
-use opencode_rk_providers::integration_probe::{MAX_PROBES, ProbeError, plan_probes};
+use opencode_rk_providers::integration_probe::{plan_probes, ProbeError, MAX_PROBES};
 
 #[test]
 fn probe_t01_valid_plans() {
@@ -48,7 +48,13 @@ fn probe_t04_zero_timeout_rejected() {
 fn probe_t05_overflow_rejected() {
     assert_eq!(MAX_PROBES, 32);
     let rows: Vec<(String, String, u64)> = (0..MAX_PROBES + 1)
-        .map(|i| (format!("id-{i}"), "https://example.com/health".to_owned(), 1_000))
+        .map(|i| {
+            (
+                format!("id-{i}"),
+                "https://example.com/health".to_owned(),
+                1_000,
+            )
+        })
         .collect();
     let refs: Vec<(&str, &str, u64)> = rows
         .iter()

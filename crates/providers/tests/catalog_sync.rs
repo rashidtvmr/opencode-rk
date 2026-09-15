@@ -1,5 +1,5 @@
 use opencode_rk_providers::catalog_sync::{
-    CatalogEntry, CatalogSyncError, MAX_CATALOG_ENTRIES, plan_catalog_sync,
+    plan_catalog_sync, CatalogEntry, CatalogSyncError, MAX_CATALOG_ENTRIES,
 };
 
 fn entry(id: &str, version: u64) -> CatalogEntry {
@@ -63,16 +63,12 @@ fn cat_t05_dup_overflow() {
     let nxt = vec![entry("a", 1)];
     assert_eq!(
         plan_catalog_sync(&dup_cur, &nxt).expect_err("cur dup must fail"),
-        CatalogSyncError::DuplicateId {
-            id: "a".to_owned()
-        }
+        CatalogSyncError::DuplicateId { id: "a".to_owned() }
     );
     let dup_nxt = vec![entry("b", 1), entry("b", 2)];
     assert_eq!(
         plan_catalog_sync(&nxt, &dup_nxt).expect_err("nxt dup must fail"),
-        CatalogSyncError::DuplicateId {
-            id: "b".to_owned()
-        }
+        CatalogSyncError::DuplicateId { id: "b".to_owned() }
     );
     let big: Vec<CatalogEntry> = (0..MAX_CATALOG_ENTRIES + 1)
         .map(|i| entry(&format!("id-{i:04}"), i as u64))

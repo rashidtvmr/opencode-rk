@@ -1,4 +1,6 @@
-use opencode_rk_server::remote_ledger::{LedgerError, RemoteEntry, RemoteLedger, MAX_LEDGER_ENTRIES};
+use opencode_rk_server::remote_ledger::{
+    LedgerError, RemoteEntry, RemoteLedger, MAX_LEDGER_ENTRIES,
+};
 
 fn entry(r: &str, hash: &str, at: u64) -> RemoteEntry {
     RemoteEntry {
@@ -34,10 +36,12 @@ fn ledger_t01_record_and_get() {
 #[test]
 fn ledger_t02_upsert_replaces() {
     let mut l = RemoteLedger::new();
-    l.record(entry("refs/heads/main", &good_hash(1), 1)).unwrap();
+    l.record(entry("refs/heads/main", &good_hash(1), 1))
+        .unwrap();
     l.record(entry("refs/heads/dev", &good_hash(2), 2)).unwrap();
     // upsert same ref: replace in place, no dup, insertion order kept
-    l.record(entry("refs/heads/main", &good_hash(9), 99)).unwrap();
+    l.record(entry("refs/heads/main", &good_hash(9), 99))
+        .unwrap();
     assert_eq!(l.list().len(), 2);
     assert_eq!(l.list()[0].ref_name, "refs/heads/main");
     assert_eq!(l.list()[0].hash, good_hash(9));
@@ -91,8 +95,12 @@ fn ledger_t05_overflow_rejected() {
     let mut l = RemoteLedger::new();
     for i in 0..MAX_LEDGER_ENTRIES {
         let seed = (i % 250) as u8 + 1;
-        l.record(entry(&format!("refs/heads/b{i}"), &good_hash(seed), i as u64))
-            .unwrap();
+        l.record(entry(
+            &format!("refs/heads/b{i}"),
+            &good_hash(seed),
+            i as u64,
+        ))
+        .unwrap();
     }
     assert_eq!(l.list().len(), MAX_LEDGER_ENTRIES);
     let r = l.record(entry("refs/heads/overflow", &good_hash(7), 999));

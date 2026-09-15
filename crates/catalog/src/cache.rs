@@ -181,7 +181,7 @@ mod tests {
         cache.set("key2".to_string(), json!({"id": 2}));
 
         // Access key1 to make it most recently used
-        cache.get("key1");
+        let _ = cache.get("key1");
 
         // Insert new key, should evict key2 (LRU)
         cache.set("key3".to_string(), json!({"id": 3}));

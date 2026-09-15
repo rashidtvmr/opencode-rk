@@ -222,7 +222,11 @@ fn doctor_auth_check() -> DoctorCheck {
         .iter()
         .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty()));
     DoctorCheck {
-        status: if configured { "configured" } else { "unconfigured" },
+        status: if configured {
+            "configured"
+        } else {
+            "unconfigured"
+        },
         detail: None,
         builtins: Vec::new(),
     }
@@ -294,7 +298,12 @@ fn doctor_mcp_check() -> DoctorCheck {
     let raw = raw.to_string_lossy();
     let status = serde_json::from_str::<serde_json::Value>(&raw)
         .ok()
-        .and_then(|value| value.get("servers").and_then(|servers| servers.as_object()).cloned())
+        .and_then(|value| {
+            value
+                .get("servers")
+                .and_then(|servers| servers.as_object())
+                .cloned()
+        })
         .filter(|servers| !servers.is_empty())
         .map_or("error", |_| "configured");
     DoctorCheck {
