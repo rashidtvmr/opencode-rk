@@ -72,10 +72,7 @@ fn ops006_t04_failure_states() {
         normalize_reference("owner/repo", Some("a/b"), &root),
         Err(RefError::UnsafeBranch)
     );
-    assert_eq!(
-        RelPath::new("cache/../evil"),
-        Err(RefError::BadCacheRoot)
-    );
+    assert_eq!(RelPath::new("cache/../evil"), Err(RefError::BadCacheRoot));
     assert_eq!(RelPath::new(".."), Err(RefError::BadCacheRoot));
 }
 

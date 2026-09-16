@@ -5,7 +5,7 @@
 mod control_decode;
 
 use control_decode::{
-    InputDecodeError, MoveSessionInput, MAX_CONTROL_INPUT_BYTES, decode_move_session_input,
+    decode_move_session_input, InputDecodeError, MoveSessionInput, MAX_CONTROL_INPUT_BYTES,
 };
 use std::cell::{Cell, RefCell};
 
@@ -149,7 +149,8 @@ fn web001_t05_control_plane_inputs_no_side_effect_and_safety() {
     assert_eq!(entries.len(), 1);
 
     // Error rendering carries field names only, never input-body bytes.
-    let secret = br#"{"session_id":"ses_SUPERSECRET","target_directory":"proj/x","target_workspace":42}"#;
+    let secret =
+        br#"{"session_id":"ses_SUPERSECRET","target_directory":"proj/x","target_workspace":42}"#;
     let err = decode_move_session_input(secret).unwrap_err();
     let log_line = format!("decode_failed err={err}");
     assert!(log_line.contains("target_workspace"));

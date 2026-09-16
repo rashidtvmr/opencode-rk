@@ -26,7 +26,10 @@ fn alw_t04_overflow() {
     let mut list: Vec<String> = (0..MAX_TOOL_ALLOW).map(|i| format!("tool-{i}")).collect();
     assert_eq!(
         allow_tool(&mut list, "one-more"),
-        Err(AllowError::TooMany { max: MAX_TOOL_ALLOW, actual: MAX_TOOL_ALLOW })
+        Err(AllowError::TooMany {
+            max: MAX_TOOL_ALLOW,
+            actual: MAX_TOOL_ALLOW
+        })
     );
     assert_eq!(list.len(), MAX_TOOL_ALLOW);
 }

@@ -139,7 +139,9 @@ fn insert_message(
     };
     let role = encode_role(message.role);
     if let Some(summary) = reasoning_summary {
-        if message.role != MessageRole::Assistant || summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES {
+        if message.role != MessageRole::Assistant
+            || summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES
+        {
             return Err(StorageError::InlinePayloadTooLarge);
         }
     }
@@ -187,13 +189,21 @@ fn insert_message(
     if let Some(summary) = reasoning_summary.filter(|summary| !summary.is_empty()) {
         transaction.execute(
             "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
-            params![summary.as_bytes(), summary.len() as i64, message.created_at_us],
+            params![
+                summary.as_bytes(),
+                summary.len() as i64,
+                message.created_at_us
+            ],
         )?;
         let summary_payload_pk = transaction.last_insert_rowid();
         transaction.execute(
             "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk, mime, name)
              VALUES (?1, 1, ?2, ?3, 'text/plain; charset=utf-8', 'reasoning_summary')",
-            params![message_pk, MESSAGE_PART_REASONING_SUMMARY, summary_payload_pk],
+            params![
+                message_pk,
+                MESSAGE_PART_REASONING_SUMMARY,
+                summary_payload_pk
+            ],
         )?;
     }
     transaction.commit()?;

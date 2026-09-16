@@ -100,7 +100,11 @@ impl DeferredLog {
         }
     }
 
-    fn push(&mut self, plugin: Option<PluginId>, reason: DeferredReason) -> Result<u64, BoundaryError> {
+    fn push(
+        &mut self,
+        plugin: Option<PluginId>,
+        reason: DeferredReason,
+    ) -> Result<u64, BoundaryError> {
         if self.events.len() >= EXT4_MAX_DEFERRED {
             return Err(BoundaryError::Overflow);
         }

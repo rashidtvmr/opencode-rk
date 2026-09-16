@@ -266,8 +266,7 @@ impl CacheStore {
         // registry stores ids only; rebuild a canonical slot view
         CacheSlot {
             cache_id: id.to_string(),
-            path: RelPath::new(&format!("slots/{id}"))
-                .unwrap_or(RelPath::new("slots/x").unwrap()),
+            path: RelPath::new(&format!("slots/{id}")).unwrap_or(RelPath::new("slots/x").unwrap()),
             branch: "main".to_string(),
             state: SlotState::Missing,
         }

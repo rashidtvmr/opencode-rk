@@ -67,14 +67,22 @@ pub struct RtkConfig {
 
 impl Default for RtkConfig {
     fn default() -> Self {
-        Self { enabled: true, max_bytes: 65536, no_filter: false }
+        Self {
+            enabled: true,
+            max_bytes: 65536,
+            no_filter: false,
+        }
     }
 }
 
 impl RtkConfig {
     /// Passthrough config: [`filter_pass`] behaves exactly like [`raw`].
     pub fn disabled() -> Self {
-        Self { enabled: false, max_bytes: usize::MAX, no_filter: false }
+        Self {
+            enabled: false,
+            max_bytes: usize::MAX,
+            no_filter: false,
+        }
     }
 }
 
@@ -89,7 +97,12 @@ pub struct Filtered {
 
 /// Escape hatch: byte-identical streams and code, `truncated: false`.
 pub fn raw(stdout: &[u8], stderr: &[u8], code: i32) -> Filtered {
-    Filtered { stdout: stdout.to_vec(), stderr: stderr.to_vec(), code, truncated: false }
+    Filtered {
+        stdout: stdout.to_vec(),
+        stderr: stderr.to_vec(),
+        code,
+        truncated: false,
+    }
 }
 
 static SHRINK_CALLS: AtomicUsize = AtomicUsize::new(0);
@@ -107,7 +120,11 @@ pub fn reset_shrink_calls() {
 /// Pure mapping of an env-var value to opt-out. Accepts `1`/`true`/`yes`.
 pub fn env_flag_value(v: Option<&OsStr>) -> bool {
     match v.and_then(|s| s.to_str()) {
-        Some(s) => s.eq_ignore_ascii_case("1") || s.eq_ignore_ascii_case("true") || s.eq_ignore_ascii_case("yes"),
+        Some(s) => {
+            s.eq_ignore_ascii_case("1")
+                || s.eq_ignore_ascii_case("true")
+                || s.eq_ignore_ascii_case("yes")
+        }
         None => false,
     }
 }
@@ -259,7 +276,9 @@ fn floor_char_boundary(bytes: &[u8], idx: usize) -> usize {
 /// or error signal. Byte-level compare, lowercase on the fly, no regex.
 fn is_noise(line: &[u8]) -> bool {
     const NOISE: [&[u8]; 6] = [b"info:", b"debug:", b"trace:", b"ok ", b"pass ", b"nominal"];
-    const SIGNAL: [&[u8]; 7] = [b"verdict", b"error", b"fail", b"panic", b"e0", b"warn", b"deny"];
+    const SIGNAL: [&[u8]; 7] = [
+        b"verdict", b"error", b"fail", b"panic", b"e0", b"warn", b"deny",
+    ];
     let has = |needle: &[u8]| {
         line.len() >= needle.len()
             && (0..=line.len() - needle.len()).any(|s| {
@@ -274,7 +293,10 @@ fn is_noise(line: &[u8]) -> bool {
     }
     NOISE.iter().any(|n| {
         line.len() >= n.len()
-            && line[..n.len()].iter().zip(n.iter()).all(|(a, b)| a.to_ascii_lowercase() == *b)
+            && line[..n.len()]
+                .iter()
+                .zip(n.iter())
+                .all(|(a, b)| a.to_ascii_lowercase() == *b)
     })
 }
 
@@ -346,14 +368,22 @@ fn has_trunc_marker(bytes: &[u8]) -> bool {
     if !bytes.ends_with(TRUNC_MARKER_SUFFIX.as_bytes()) {
         return false;
     }
-    bytes.windows(TRUNC_MARKER_PREFIX.len()).any(|w| w == TRUNC_MARKER_PREFIX)
+    bytes
+        .windows(TRUNC_MARKER_PREFIX.len())
+        .any(|w| w == TRUNC_MARKER_PREFIX)
 }
 
 /// Filter `stdout` for `kind`, preserve `stderr` verbatim and `code`
 /// untouched. Order: opt-out alias to [`raw`] (zero shrink work) -> strip
 /// ANSI -> failures-only shrink -> byte-budget truncate with marker.
 /// Unknown/empty: byte-identical passthrough. No spawn/thread/I-O.
-pub fn filter_pass(kind: PassKind, stdout: &[u8], stderr: &[u8], code: i32, cfg: &RtkConfig) -> Filtered {
+pub fn filter_pass(
+    kind: PassKind,
+    stdout: &[u8],
+    stderr: &[u8],
+    code: i32,
+    cfg: &RtkConfig,
+) -> Filtered {
     if !cfg.enabled || cfg.no_filter || env_no_filter() {
         return raw(stdout, stderr, code);
     }
@@ -368,11 +398,21 @@ pub fn filter_pass(kind: PassKind, stdout: &[u8], stderr: &[u8], code: i32, cfg:
     SHRINK_CALLS.fetch_add(1, Ordering::Relaxed);
     let stripped = strip_ansi(stdout);
     if has_trunc_marker(&stripped) {
-        return Filtered { stdout: stripped, stderr: stderr.to_vec(), code, truncated: true };
+        return Filtered {
+            stdout: stripped,
+            stderr: stderr.to_vec(),
+            code,
+            truncated: true,
+        };
     }
     let shrunk = shrink(&stripped);
     if shrunk.len() <= cfg.max_bytes {
-        return Filtered { stdout: shrunk, stderr: stderr.to_vec(), code, truncated: false };
+        return Filtered {
+            stdout: shrunk,
+            stderr: stderr.to_vec(),
+            code,
+            truncated: false,
+        };
     }
     // Over budget: truncate the shrunk middle but keep the tail verdict line.
     // Head keeps the first `head_budget` bytes; the verdict line (when found)
@@ -408,7 +448,12 @@ pub fn filter_pass(kind: PassKind, stdout: &[u8], stderr: &[u8], code: i32, cfg:
     out.extend_from_slice(TRUNC_MARKER_MIDDLE);
     out.extend_from_slice(TRUNC_MARKER_SUFFIX.as_bytes());
     debug_assert!(out.len() <= cfg.max_bytes.saturating_add(MARKER_MAX));
-    Filtered { stdout: out, stderr: stderr.to_vec(), code, truncated: true }
+    Filtered {
+        stdout: out,
+        stderr: stderr.to_vec(),
+        code,
+        truncated: true,
+    }
 }
 
 /// Byte index of the last line containing `verdict` (case-insensitive).
@@ -441,7 +486,9 @@ fn find_verdict(bytes: &[u8]) -> Option<usize> {
 /// `proxy`: output byte-identical AND `accounted += lens`; never shrinks,
 /// truncates, or marks, even over budget. O(1) extra beyond the copies.
 pub fn proxy(stdout: &[u8], stderr: &[u8], code: i32, accounted: &mut usize) -> Filtered {
-    *accounted = accounted.saturating_add(stdout.len()).saturating_add(stderr.len());
+    *accounted = accounted
+        .saturating_add(stdout.len())
+        .saturating_add(stderr.len());
     raw(stdout, stderr, code)
 }
 

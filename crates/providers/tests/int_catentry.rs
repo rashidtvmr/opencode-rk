@@ -1,4 +1,4 @@
-use opencode_rk_providers::int_catentry::{CatEntryError, make_entry};
+use opencode_rk_providers::int_catentry::{make_entry, CatEntryError};
 
 #[test]
 fn ce_t01_valid() {
@@ -9,10 +9,7 @@ fn ce_t01_valid() {
 
 #[test]
 fn t02_empty_id() {
-    assert!(matches!(
-        make_entry("", "T"),
-        Err(CatEntryError::EmptyId)
-    ));
+    assert!(matches!(make_entry("", "T"), Err(CatEntryError::EmptyId)));
     assert!(matches!(
         make_entry("   ", "T"),
         Err(CatEntryError::EmptyId)
@@ -40,10 +37,7 @@ fn t04_trims() {
 
 #[test]
 fn t05_both_empty_id_first() {
-    assert!(matches!(
-        make_entry("", ""),
-        Err(CatEntryError::EmptyId)
-    ));
+    assert!(matches!(make_entry("", ""), Err(CatEntryError::EmptyId)));
     assert!(matches!(
         make_entry("   ", "   "),
         Err(CatEntryError::EmptyId)

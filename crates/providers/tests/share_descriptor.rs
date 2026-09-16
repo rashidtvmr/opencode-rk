@@ -7,8 +7,7 @@
 mod share_descriptor;
 
 use share_descriptor::{
-    HostedKind, ShareDesc, ShareError, ShareSync, SyncOp, MAX_ID_LEN, MAX_KEYREF_LEN,
-    MAX_SHARES,
+    HostedKind, ShareDesc, ShareError, ShareSync, SyncOp, MAX_ID_LEN, MAX_KEYREF_LEN, MAX_SHARES,
 };
 
 fn desc(id: &str, key_ref: &str, digest: &str, seq: u64) -> ShareDesc {
@@ -122,13 +121,7 @@ fn int_010_t03_validation_and_overflow_leave_store_byte_identical() {
     }
 
     let long_key = "k".repeat(MAX_KEYREF_LEN + 1);
-    for bad in [
-        "",
-        long_key.as_str(),
-        "bad/key",
-        "has space",
-        "-lead",
-    ] {
+    for bad in ["", long_key.as_str(), "bad/key", "has space", "-lead"] {
         let err = sync
             .apply(SyncOp::Upsert(desc("b", bad, &hex_digest(0x09), 1)))
             .expect_err("bad key_ref must be typed");
@@ -374,8 +367,11 @@ fn int_010_t05_full_matrix_no_process_files_sockets_env_or_log_leak() {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(after_files, before_files);
-    assert!(std::fs::read_dir(dir.path()).expect("dir").flatten().all(|entry| {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        !name.ends_with(".db") && !name.ends_with(".sqlite")
-    }));
+    assert!(std::fs::read_dir(dir.path())
+        .expect("dir")
+        .flatten()
+        .all(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            !name.ends_with(".db") && !name.ends_with(".sqlite")
+        }));
 }

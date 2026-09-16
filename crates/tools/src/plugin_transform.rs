@@ -69,6 +69,11 @@ fn value_valid(value: &str) -> bool {
 
 /// Bounded in-memory transform log. Caller owns the lifetime and the scope
 /// ids; all methods are synchronous and spawn nothing.
+///
+/// Invariant: every scope in `disabled` is present in `entries`, so
+/// `disabled.len() <= entries.len() <= EXT11_MAX_TRANSFORMS`. Disabling an
+/// unknown scope is a true no-op (records nothing), which keeps the list
+/// bounded against scopes that have no entries.
 #[derive(Debug, Default)]
 pub struct TransformLog {
     entries: Vec<Transform>,
@@ -117,10 +122,12 @@ impl TransformLog {
 
     /// Disable (`true`) or re-enable (`false`) a scope: future
     /// [`TransformLog::project`] skips or includes that scope's transforms.
-    /// The record is retained. Unknown scope is a harmless no-op.
+    /// The record is retained. Unknown scope is a harmless no-op (records
+    /// nothing, so `disabled` never holds scopes absent from `entries` and
+    /// stays bounded by `EXT11_MAX_TRANSFORMS`).
     pub fn set_scope_disabled(&mut self, scope: u64, disabled: bool) {
         if disabled {
-            if !self.disabled.contains(&scope) {
+            if !self.disabled.contains(&scope) && self.entries.iter().any(|t| t.scope == scope) {
                 self.disabled.push(scope);
             }
         } else {

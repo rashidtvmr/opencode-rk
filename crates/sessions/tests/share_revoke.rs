@@ -1,4 +1,4 @@
-use opencode_rk_sessions::share_revoke::{RevokeError, revoke_token};
+use opencode_rk_sessions::share_revoke::{revoke_token, RevokeError};
 
 #[test]
 fn rev_t01_revoke() {

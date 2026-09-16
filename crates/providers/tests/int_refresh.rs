@@ -3,7 +3,7 @@
 #[path = "../src/int_refresh.rs"]
 mod int_refresh;
 
-use int_refresh::{IntRefreshGate, IntRefreshState, CredKey, needs_int_refresh};
+use int_refresh::{needs_int_refresh, CredKey, IntRefreshGate, IntRefreshState};
 
 fn state(expires: u64) -> IntRefreshState {
     IntRefreshState {
@@ -22,7 +22,9 @@ fn int005_t01_decision_and_success() {
     assert!(!needs_int_refresh(&far, now, 300_000));
     let gate = IntRefreshGate::new(128);
     let guard = gate.try_begin("cred-a").expect("begin");
-    let rec = guard.complete(&gate, now + 3_600_000, now).expect("complete");
+    let rec = guard
+        .complete(&gate, now + 3_600_000, now)
+        .expect("complete");
     assert_eq!(rec.expires_at_ms, now + 3_600_000);
     assert!(gate.try_begin("cred-a").is_ok(), "slot released");
 }
@@ -39,7 +41,9 @@ fn int005_t02_single_flight() {
     let _h = gate.try_begin("cred-b").expect("independent cred ok");
     drop(_g);
     let _ = gate.fail_for("cred-b", int_refresh::IntRefreshFail::ExpiredGrant);
-    let g2 = gate.try_begin("cred-a").expect("re-begin after complete/drop");
+    let g2 = gate
+        .try_begin("cred-a")
+        .expect("re-begin after complete/drop");
     let _ = g2.complete(&gate, now + 10_000, now).expect("complete A");
     assert!(gate.try_begin("cred-a").is_ok());
 }
@@ -62,7 +66,9 @@ fn int005_t03_caps_hold() {
     assert_eq!(gate.inflight(), 0);
     for i in 0..10_000u64 {
         let g = gate.try_begin(&format!("bulk-{i}")).expect("cycle admit");
-        let _ = g.complete(&gate, now + 60_000 + i, now).expect("cycle complete");
+        let _ = g
+            .complete(&gate, now + 60_000 + i, now)
+            .expect("cycle complete");
     }
     assert_eq!(gate.inflight(), 0);
 }
@@ -96,7 +102,10 @@ fn int005_t04_failure_states() {
     let _ = gate.fail_for("cred-h", int_refresh::IntRefreshFail::ExpiredGrant);
     let g3 = gate.try_begin("cred-drop").expect("begin drop");
     drop(g3);
-    assert!(gate.try_begin("cred-drop").is_ok(), "dropped guard reclaimed");
+    assert!(
+        gate.try_begin("cred-drop").is_ok(),
+        "dropped guard reclaimed"
+    );
 }
 
 #[test]

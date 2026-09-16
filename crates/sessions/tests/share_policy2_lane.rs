@@ -7,8 +7,8 @@
 mod share_policy2_lane;
 
 use share_policy2_lane::{
-    DeleteOutcome, Endpoint, ShareId, ShareRecord, SyncBatch, SyncOutcome, SyncPolicy,
-    decide_create, decide_delete, log_event, request_target, should_send,
+    decide_create, decide_delete, log_event, request_target, should_send, DeleteOutcome, Endpoint,
+    ShareId, ShareRecord, SyncBatch, SyncOutcome, SyncPolicy,
 };
 use std::collections::HashMap;
 
@@ -86,14 +86,8 @@ fn share005_t02_retry_mapping() {
         other => panic!("expected capped retry, got {other:?}"),
     }
     // Attempts beyond max_retries => Abort (default max 3: attempts 0..2 retry).
-    assert!(matches!(
-        policy.classify(500, 3),
-        SyncOutcome::Abort { .. }
-    ));
-    assert!(matches!(
-        policy.classify(429, 4),
-        SyncOutcome::Abort { .. }
-    ));
+    assert!(matches!(policy.classify(500, 3), SyncOutcome::Abort { .. }));
+    assert!(matches!(policy.classify(429, 4), SyncOutcome::Abort { .. }));
     // Delete path retries then refuses once exhausted.
     assert!(matches!(
         decide_delete(&policy, 503, 0),
@@ -172,7 +166,10 @@ fn share005_t05_safety_determinism() {
     let policy = SyncPolicy::default();
     // Determinism across repeated calls.
     assert_eq!(policy.classify(503, 1), policy.classify(503, 1));
-    assert_eq!(decide_delete(&policy, 400, 0), decide_delete(&policy, 400, 0));
+    assert_eq!(
+        decide_delete(&policy, 400, 0),
+        decide_delete(&policy, 400, 0)
+    );
     assert_eq!(decide_create(500), decide_create(500));
     assert_eq!(should_send(7, 8), should_send(7, 8));
     let id = ShareId::new("share-1");

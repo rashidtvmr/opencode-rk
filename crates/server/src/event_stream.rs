@@ -43,7 +43,8 @@ impl StreamConfig {
     /// Hard per-subscriber byte ceiling (worst case, normally KiB-scale).
     #[must_use]
     pub fn byte_cap(&self) -> usize {
-        self.max_buffered_frames.saturating_mul(self.max_frame_bytes)
+        self.max_buffered_frames
+            .saturating_mul(self.max_frame_bytes)
     }
 
     /// Encode one payload into a single complete SSE `data:` frame.
@@ -306,7 +307,10 @@ impl Hub {
     /// Buffered frames still held for `id` (empty after disconnect).
     #[must_use]
     pub fn received(&self, id: u64) -> Vec<String> {
-        self.subs.get(&id).map(|s| s.buffer.clone()).unwrap_or_default()
+        self.subs
+            .get(&id)
+            .map(|s| s.buffer.clone())
+            .unwrap_or_default()
     }
 
     /// Total oversize drops counted (subscriber kept alive).
@@ -358,8 +362,7 @@ impl Hub {
     /// Whether any frame was ever flushed to a closed subscriber.
     #[must_use]
     pub fn flushed_after_close(&self) -> bool {
-        self.flushed_after_close
-            || self.subs.values().any(|s| s.ever_flushed_after_close)
+        self.flushed_after_close || self.subs.values().any(|s| s.ever_flushed_after_close)
     }
 
     /// Disconnect `id`, reclaiming buffer/counters/task slot. Returns false if unknown.

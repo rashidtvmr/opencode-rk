@@ -82,12 +82,23 @@ impl fmt::Debug for ShareSecret {
     }
 }
 
-/// One shareable record. Identity key is `(kind, key)`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// One shareable record. Identity key is `(kind, key)`. `Debug` renders
+/// kind + key + payload length only, never payload bytes.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ShareRecord {
     pub kind: RecordKind,
     pub key: String,
     pub payload: Vec<u8>,
+}
+
+impl fmt::Debug for ShareRecord {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShareRecord")
+            .field("kind", &self.kind)
+            .field("key", &self.key)
+            .field("payload_len", &self.payload.len())
+            .finish()
+    }
 }
 
 /// Merge result: key-sorted last-write-wins records plus skipped-invalid count.

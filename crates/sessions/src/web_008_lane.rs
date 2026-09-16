@@ -152,10 +152,7 @@ pub fn fork_from_message(
         .iter()
         .find(|m| m.id == boundary_id)
         .ok_or_else(|| BranchError::MessageNotFound(boundary_id.to_owned()))?;
-    if !matches!(
-        boundary.role,
-        BranchRole::User | BranchRole::Assistant
-    ) {
+    if !matches!(boundary.role, BranchRole::User | BranchRole::Assistant) {
         return Err(BranchError::InvalidBoundary);
     }
     let boundary_seq = boundary.seq;
@@ -201,13 +198,11 @@ pub fn fork_provenance(session: &BranchSession) -> Option<ForkProvenance> {
         session.fork_message_id.clone(),
         session.fork_seq,
     ) {
-        (Some(parent_session_id), Some(fork_message_id), Some(fork_seq)) => {
-            Some(ForkProvenance {
-                parent_session_id,
-                fork_message_id,
-                fork_seq,
-            })
-        }
+        (Some(parent_session_id), Some(fork_message_id), Some(fork_seq)) => Some(ForkProvenance {
+            parent_session_id,
+            fork_message_id,
+            fork_seq,
+        }),
         _ => None,
     }
 }
@@ -453,7 +448,11 @@ pub fn decode_snapshot(text: &str) -> Result<BranchSnapshot, BranchError> {
                 let fork_seq = if cols[5] == "-" {
                     None
                 } else {
-                    Some(cols[5].parse::<u64>().map_err(|_| BranchError::BadEncoding)?)
+                    Some(
+                        cols[5]
+                            .parse::<u64>()
+                            .map_err(|_| BranchError::BadEncoding)?,
+                    )
                 };
                 sessions.push(BranchSession {
                     id,
@@ -489,7 +488,12 @@ pub fn decode_snapshot(text: &str) -> Result<BranchSnapshot, BranchError> {
                     _ => return Err(BranchError::BadEncoding),
                 };
                 let body = unescape(&cols[4])?;
-                session.messages.push(BranchMessage { id, seq, role, body });
+                session.messages.push(BranchMessage {
+                    id,
+                    seq,
+                    role,
+                    body,
+                });
             }
             _ => return Err(BranchError::BadEncoding),
         }

@@ -102,11 +102,7 @@ impl ReadyQueue {
             .tasks
             .values()
             .filter(|t| !accepted.contains(&t.id) && !blocked.contains(&t.id))
-            .filter(|t| {
-                Self::all_deps(plan, t)
-                    .iter()
-                    .all(|d| accepted.contains(d))
-            })
+            .filter(|t| Self::all_deps(plan, t).iter().all(|d| accepted.contains(d)))
             .map(|t| (t.rank, t.id.clone()))
             .collect();
         ready.sort();
@@ -123,11 +119,7 @@ impl ReadyQueue {
         plan.tasks
             .values()
             .filter(|t| !accepted.contains(&t.id) && !blocked.contains(&t.id))
-            .filter(|t| {
-                Self::all_deps(plan, t)
-                    .iter()
-                    .any(|d| blocked.contains(d))
-            })
+            .filter(|t| Self::all_deps(plan, t).iter().any(|d| blocked.contains(d)))
             .map(|t| t.id.clone())
             .collect()
     }
@@ -174,12 +166,7 @@ impl LeaseTable {
     /// One lane owns exactly one file: a second file for the same lane, a
     /// live file claimed by another lane, or a live file claimed by another
     /// owner all fail with [`LeaseError::LeaseDenied`] and mutate nothing.
-    pub fn acquire(
-        &mut self,
-        task: &str,
-        owner: OwnerToken,
-        file: &str,
-    ) -> Result<(), LeaseError> {
+    pub fn acquire(&mut self, task: &str, owner: OwnerToken, file: &str) -> Result<(), LeaseError> {
         if let Some(live) = self.by_task.get(task) {
             if live.owner == owner && live.file == file {
                 return Ok(());
@@ -326,12 +313,7 @@ impl Driver {
         }
     }
 
-    pub fn acquire(
-        &mut self,
-        task: &str,
-        owner: OwnerToken,
-        file: &str,
-    ) -> Result<(), LeaseError> {
+    pub fn acquire(&mut self, task: &str, owner: OwnerToken, file: &str) -> Result<(), LeaseError> {
         self.leases.acquire(task, owner, file)
     }
 
@@ -380,10 +362,13 @@ impl Driver {
 
     #[must_use]
     pub fn status(&self, task: &str) -> LaneStatus {
-        self.status.get(task).cloned().unwrap_or(LaneStatus::Blocked {
-            task: task.to_owned(),
-            last_error: "verification failed: no lane record".to_owned(),
-        })
+        self.status
+            .get(task)
+            .cloned()
+            .unwrap_or(LaneStatus::Blocked {
+                task: task.to_owned(),
+                last_error: "verification failed: no lane record".to_owned(),
+            })
     }
 
     pub fn commit(&mut self, task: &str) -> Result<(), DriverError> {

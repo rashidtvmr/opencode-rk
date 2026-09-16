@@ -99,11 +99,7 @@ impl LangTag {
     /// Primary subtag (`"vi"` for `"vi"`, `"vi-VN"`, `"vi_VN"`).
     #[must_use]
     pub fn primary(&self) -> &str {
-        self.0
-            .split(['-', '_'])
-            .next()
-            .unwrap_or("")
-            .trim()
+        self.0.split(['-', '_']).next().unwrap_or("").trim()
     }
 
     #[must_use]
@@ -363,7 +359,11 @@ fn capitalize(text: &str) -> String {
 
 /// Body lines as complete numbered-step sentences.
 fn steps_of(body: &str, fallback: &str) -> Vec<String> {
-    let lines: Vec<&str> = body.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = body
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     if lines.is_empty() {
         return vec![ensure_terminated(fallback)];
     }
@@ -375,7 +375,11 @@ fn steps_of(body: &str, fallback: &str) -> Vec<String> {
 
 /// Body as complete sentences on one line.
 fn sentences_of(body: &str, fallback: &str) -> String {
-    let lines: Vec<&str> = body.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = body
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     if lines.is_empty() {
         return ensure_terminated(fallback);
     }

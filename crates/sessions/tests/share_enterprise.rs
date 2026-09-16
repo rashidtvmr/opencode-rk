@@ -9,7 +9,7 @@
 mod share_enterprise;
 
 use share_enterprise::{
-    EnterpriseBoundary, EnterpriseOp, partition, refusal_reason, BoundaryError,
+    partition, refusal_reason, BoundaryError, EnterpriseBoundary, EnterpriseOp,
 };
 
 /// All five ops with their exact required gap partitions
@@ -77,9 +77,7 @@ fn share003_t02_partition_mapping_and_reason() {
         );
     }
     for (op, _) in ALL_OPS {
-        let Err(BoundaryError::Refused { reason, .. }) =
-            EnterpriseBoundary::authorize(op)
-        else {
+        let Err(BoundaryError::Refused { reason, .. }) = EnterpriseBoundary::authorize(op) else {
             panic!("op {op:?} must be refused");
         };
         assert!(
@@ -201,14 +199,7 @@ fn share003_t05_safety_and_determinism() {
             "rendered refusal must name the partition for {op:?}"
         );
         for marker in [
-            "://",
-            "bearer",
-            "ghp_",
-            "gho_",
-            "sk-",
-            "api_key",
-            "passwd",
-            "password",
+            "://", "bearer", "ghp_", "gho_", "sk-", "api_key", "passwd", "password",
         ] {
             assert!(
                 !rendered.to_lowercase().contains(marker),

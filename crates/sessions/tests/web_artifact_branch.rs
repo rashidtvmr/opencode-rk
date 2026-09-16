@@ -9,9 +9,8 @@ use tempfile::tempdir;
 async fn web_017_branch_sessions_can_link_artifacts_to_inherited_assistant_messages() {
     let dir = tempdir().unwrap();
     let storage = Arc::new(Storage::open_in_memory(dir.path().join("blobs")).unwrap());
-    let manager = Arc::new(
-        SessionManager::open_branch_workspace(&dir.path().join("branches.db")).unwrap(),
-    );
+    let manager =
+        Arc::new(SessionManager::open_branch_workspace(&dir.path().join("branches.db")).unwrap());
     let sessions = SessionService::with_branch_manager(storage, manager);
     let parent = sessions.create("Parent").await.unwrap();
     sessions

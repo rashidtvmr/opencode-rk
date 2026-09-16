@@ -5,8 +5,8 @@
 mod control_plane_errors;
 
 use control_plane_errors::{
-    DomainError, MAX_ERROR_MESSAGE_BYTES, all_codes, domain_imports_have_no_http,
-    move_session, translate, wire_body,
+    all_codes, domain_imports_have_no_http, move_session, translate, wire_body, DomainError,
+    MAX_ERROR_MESSAGE_BYTES,
 };
 
 // WEB-002-T01: mapping happy path, frozen 404/409/422/500 table.
@@ -21,11 +21,7 @@ fn web002_t01_translate_maps_each_variant_to_frozen_status_and_code() {
             "target_unreadable",
         ),
         (DomainError::ConflictOrLocked, 409, "conflict_or_locked"),
-        (
-            DomainError::Internal("boom".to_string()),
-            500,
-            "internal",
-        ),
+        (DomainError::Internal("boom".to_string()), 500, "internal"),
     ];
     for (err, status, code) in &table {
         let http = translate(err);
@@ -38,8 +34,7 @@ fn web002_t01_translate_maps_each_variant_to_frozen_status_and_code() {
 #[test]
 fn web002_t02_wire_body_is_exact_error_envelope() {
     let body = wire_body(&DomainError::SessionNotFound);
-    let value: serde_json::Value =
-        serde_json::from_str(&body).expect("wire body is valid JSON");
+    let value: serde_json::Value = serde_json::from_str(&body).expect("wire body is valid JSON");
     let top = value.as_object().expect("top-level object");
     assert_eq!(top.len(), 1, "exactly one top-level key");
     let inner = top
@@ -53,9 +48,7 @@ fn web002_t02_wire_body_is_exact_error_envelope() {
     assert!(!message.is_empty(), "template is non-empty");
     assert_eq!(
         body,
-        format!(
-            "{{\"error\":{{\"code\":\"session_not_found\",\"message\":\"{message}\"}}}}"
-        ),
+        format!("{{\"error\":{{\"code\":\"session_not_found\",\"message\":\"{message}\"}}}}"),
         "byte-exact envelope, insertion order"
     );
     assert!(body.len() <= 2048, "bounded wire body");

@@ -55,14 +55,20 @@ pub struct RtkConfig {
 
 impl Default for RtkConfig {
     fn default() -> Self {
-        Self { enabled: true, max_bytes: 65536 }
+        Self {
+            enabled: true,
+            max_bytes: 65536,
+        }
     }
 }
 
 impl RtkConfig {
     /// Passthrough config: [`filter`] behaves exactly like [`raw`].
     pub fn disabled() -> Self {
-        Self { enabled: false, max_bytes: usize::MAX }
+        Self {
+            enabled: false,
+            max_bytes: usize::MAX,
+        }
     }
 }
 

@@ -23,9 +23,9 @@ pub use execution_v2::ExecV2;
 pub use gc_v2::GcV2;
 pub use import_v2::ImportV2;
 use opencode_rk_contracts::{
-    ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, ArtifactVersion, AssistantActivity,
-    AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId,
-    SessionState, SessionSummary, Timestamp, MAX_ARTIFACTS_PER_SESSION,
+    ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, ArtifactVersion,
+    AssistantActivity, AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole,
+    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp, MAX_ARTIFACTS_PER_SESSION,
     MAX_ARTIFACT_CONTENT_BYTES, MAX_ARTIFACT_LANGUAGE_BYTES, MAX_ARTIFACT_TITLE_BYTES,
     MAX_ARTIFACT_TOTAL_BYTES, MAX_ARTIFACT_VERSIONS, MAX_ATTACHMENT_MIME_BYTES,
     MAX_ATTACHMENT_NAME_BYTES, MAX_DRAFT_ATTACHMENTS, MAX_DRAFT_ATTACHMENT_BYTES,
@@ -210,7 +210,9 @@ impl Storage {
             PayloadRef::Blob { hash, bytes } => (None, Some(hash.as_str()), *bytes),
         };
         if let Some(summary) = reasoning_summary {
-            if message.role != MessageRole::Assistant || summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES {
+            if message.role != MessageRole::Assistant
+                || summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES
+            {
                 return Err(StorageError::InlinePayloadTooLarge);
             }
         }
@@ -314,7 +316,8 @@ impl Storage {
                 })
             },
         )?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
     pub fn delete_draft_attachment(
         &self,
@@ -353,7 +356,8 @@ impl Storage {
                 reasoning_summary: row.get(1)?,
             })
         })?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
     pub fn get_message(
         &self,
@@ -429,8 +433,12 @@ impl Storage {
             "SELECT id,session_id,source_message_id,kind,title,language,current_version,created_at,updated_at
              FROM artifacts WHERE session_id=?1 ORDER BY updated_at DESC,id DESC LIMIT ?2",
         )?;
-        let rows = statement.query_map(params![session_id.to_string(), limit], decode_artifact_summary)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(StorageError::from)
+        let rows = statement.query_map(
+            params![session_id.to_string(), limit],
+            decode_artifact_summary,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(StorageError::from)
     }
     pub fn get_artifact(
         &self,
@@ -805,7 +813,8 @@ fn decode_artifact_summary(row: &rusqlite::Row<'_>) -> Result<ArtifactSummary, r
         kind: decode_artifact_kind(&row.get::<_, String>(3)?)?,
         title: row.get(4)?,
         language: row.get(5)?,
-        current_version: u16::try_from(current_version).map_err(|_| rusqlite::Error::InvalidQuery)?,
+        current_version: u16::try_from(current_version)
+            .map_err(|_| rusqlite::Error::InvalidQuery)?,
         created_at: parse_timestamp(row.get(7)?)?,
         updated_at: parse_timestamp(row.get(8)?)?,
     })

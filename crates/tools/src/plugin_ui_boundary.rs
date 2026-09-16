@@ -142,9 +142,11 @@ impl UiBoundary {
         if !valid_detail(&decl.detail) {
             return Err(UiError::InvalidDetail);
         }
-        if self.entries.iter().any(|(_, s, d)| {
-            *s == scope && d.surface == decl.surface && d.label == decl.label
-        }) {
+        if self
+            .entries
+            .iter()
+            .any(|(_, s, d)| *s == scope && d.surface == decl.surface && d.label == decl.label)
+        {
             return Err(UiError::Duplicate);
         }
         if self.entries.len() >= MAX_UI_DECLS {

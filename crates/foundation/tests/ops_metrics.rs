@@ -23,7 +23,10 @@ fn met_t03_overflow() {
     }
     assert_eq!(
         push_metric(&mut buf, "extra", 1),
-        Err(MetricError::TooMany { max: MAX_METRICS, actual: MAX_METRICS })
+        Err(MetricError::TooMany {
+            max: MAX_METRICS,
+            actual: MAX_METRICS
+        })
     );
     assert_eq!(buf.len(), MAX_METRICS);
 }

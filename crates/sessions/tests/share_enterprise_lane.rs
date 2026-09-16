@@ -7,7 +7,9 @@
 #[path = "../src/share_enterprise_lane.rs"]
 mod share_enterprise_lane;
 
-use share_enterprise_lane::{BoundaryError, EnterpriseBoundary, EnterpriseOp, partition, refusal_reason};
+use share_enterprise_lane::{
+    partition, refusal_reason, BoundaryError, EnterpriseBoundary, EnterpriseOp,
+};
 
 /// All five ops with their exact required gap partitions
 /// (sources/enterprise-remote-spec-gap.json
@@ -196,14 +198,7 @@ fn share003_t05_safety_and_determinism() {
             "rendered refusal must name the partition for {op:?}"
         );
         for marker in [
-            "://",
-            "bearer",
-            "ghp_",
-            "gho_",
-            "sk-",
-            "api_key",
-            "passwd",
-            "password",
+            "://", "bearer", "ghp_", "gho_", "sk-", "api_key", "passwd", "password",
         ] {
             assert!(
                 !rendered.to_lowercase().contains(marker),

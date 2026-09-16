@@ -90,10 +90,7 @@ impl MessageStore {
     /// Find all messages with the given role.
     #[must_use]
     pub fn find_by_role(&self, role: MessageRole) -> Vec<&Message> {
-        self.messages
-            .iter()
-            .filter(|m| m.role == role)
-            .collect()
+        self.messages.iter().filter(|m| m.role == role).collect()
     }
 
     /// Return the last `n` messages (or fewer if store has less).

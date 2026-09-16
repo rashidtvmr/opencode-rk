@@ -107,11 +107,7 @@ fn ext011_t03_validation_log_unchanged() {
     let before = proj_bytes(&log);
     assert_eq!(log.add(1, "dup", "c"), Err(TransformError::Duplicate));
     assert_eq!(proj_bytes(&log), before, "duplicate must not mutate");
-    assert_eq!(
-        log.add(1, "next", "x"),
-        Ok(3),
-        "failed add consumes no seq"
-    );
+    assert_eq!(log.add(1, "next", "x"), Ok(3), "failed add consumes no seq");
 
     // Bad keys: empty, too long, bad charset / leading punctuation.
     let bad_keys: Vec<String> = vec![
@@ -144,10 +140,7 @@ fn ext011_t03_validation_log_unchanged() {
     );
     assert_eq!(proj_bytes(&log), before, "long value must not mutate");
     let before = proj_bytes(&log);
-    assert_eq!(
-        log.add(4, "nul", "a\0b"),
-        Err(TransformError::InvalidValue)
-    );
+    assert_eq!(log.add(4, "nul", "a\0b"), Err(TransformError::InvalidValue));
     assert_eq!(proj_bytes(&log), before, "NUL value must not mutate");
 
     // Fill to cap, then one more overflows without growth.

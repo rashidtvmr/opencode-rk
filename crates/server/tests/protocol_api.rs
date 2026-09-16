@@ -6,10 +6,10 @@
 mod protocol_api;
 
 use protocol_api::{
-    DomainCallSpy, Method, ProtocolRoute, RouteKind, MAX_ROUTES, PROTOCOL_ROUTES,
     assert_protocol_coverage, build_router, build_router_with_extra, check_protocol_coverage,
-    check_served, dispatch_move_session, domain_calls_per_request,
-    no_direct_git_fs_net_imports, route_kind, served_routes,
+    check_served, dispatch_move_session, domain_calls_per_request, no_direct_git_fs_net_imports,
+    route_kind, served_routes, DomainCallSpy, Method, ProtocolRoute, RouteKind, MAX_ROUTES,
+    PROTOCOL_ROUTES,
 };
 
 const CLEAN_MOVE_SESSION_HANDLER: &str = r#"
@@ -100,7 +100,11 @@ fn web003_t03_thin_handlers() {
 
     let spy = DomainCallSpy::new();
     dispatch_move_session(&spy);
-    assert_eq!(spy.calls(), 1, "thin handler calls exactly one domain method");
+    assert_eq!(
+        spy.calls(),
+        1,
+        "thin handler calls exactly one domain method"
+    );
     let spy2 = DomainCallSpy::new();
     dispatch_move_session(&spy2);
     assert_eq!(
@@ -158,7 +162,9 @@ fn web003_t05_no_side_effect_and_safety() {
         before,
         "coverage failure must not touch files"
     );
-    let entries: Vec<_> = std::fs::read_dir(dir.path()).expect("list fixture").collect();
+    let entries: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("list fixture")
+        .collect();
     assert_eq!(entries.len(), 1, "no new files from coverage failure");
 
     let undisclosed = "ses_SUPERSECRET_value";

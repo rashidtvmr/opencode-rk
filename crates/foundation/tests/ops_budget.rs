@@ -105,14 +105,8 @@ fn ops_budget_t04_invalid_limits() {
     for (bad, name) in cases {
         assert_eq!(bad.validate(), Err(BudgetError::InvalidLimit(name)));
         // Policy entry points surface the same verdict, never admit.
-        assert_eq!(
-            bad.admit(0, 0, 0),
-            Err(BudgetError::InvalidLimit(name))
-        );
-        assert_eq!(
-            bad.reserve_preview(0),
-            Err(BudgetError::InvalidLimit(name))
-        );
+        assert_eq!(bad.admit(0, 0, 0), Err(BudgetError::InvalidLimit(name)));
+        assert_eq!(bad.reserve_preview(0), Err(BudgetError::InvalidLimit(name)));
     }
     // u64::MAX byte request: OverCap, never admit, never panic.
     let b = OpsBudget::default();

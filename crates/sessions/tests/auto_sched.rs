@@ -1,4 +1,4 @@
-use opencode_rk_sessions::auto_sched::{MAX_SCHED, SchedEntry, SchedError, add_sched};
+use opencode_rk_sessions::auto_sched::{add_sched, SchedEntry, SchedError, MAX_SCHED};
 
 #[test]
 fn sch_t01_add() {

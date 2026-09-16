@@ -7,8 +7,8 @@
 mod location_ctx;
 
 use location_ctx::{
-    CtxError, DirHint, IdentHints, Identity, RequestCtx, SessionPin, VcsInfo, resolve_request,
-    resolve_session,
+    resolve_request, resolve_session, CtxError, DirHint, IdentHints, Identity, RequestCtx,
+    SessionPin, VcsInfo,
 };
 
 fn req(dir: Option<&str>, ws: Option<&str>) -> RequestCtx {
@@ -36,7 +36,10 @@ fn int009_t01_request_happy_path_and_precedence() {
     let out = resolve_request(&ctx, "/fallback", vcs, &ids).expect("request resolves");
     assert_eq!(out.directory, "/a/b");
     assert_eq!(out.workspace_id.as_deref(), Some("wrk1"));
-    assert_eq!(out.identity, Identity::Remote("https://example/r".to_owned()));
+    assert_eq!(
+        out.identity,
+        Identity::Remote("https://example/r".to_owned())
+    );
     // file-scheme remote contributes no identity: falls through to CommonDir.
     let vcs_file = Some(VcsInfo {
         remote: Some("file:///x".to_owned()),
@@ -78,21 +81,23 @@ fn int009_t03_fallback_rules_and_input_immutability() {
     // Malformed dir falls back byte-exact; malformed ws drops to None.
     let ctx = req(Some(""), Some("bad ws!"));
     let before = ctx.clone();
-    let out = resolve_request(&ctx, "/dflt", None, &IdentHints::default()).expect("fallback resolves");
+    let out =
+        resolve_request(&ctx, "/dflt", None, &IdentHints::default()).expect("fallback resolves");
     assert_eq!(out.directory, "/dflt");
     assert_eq!(out.workspace_id, None);
-    assert_eq!(ctx, before, "caller inputs must be byte-identical after call");
+    assert_eq!(
+        ctx, before,
+        "caller inputs must be byte-identical after call"
+    );
     // Valid dir survives alongside malformed ws.
     let ctx2 = req(Some("/ok"), Some("nope!"));
-    let out2 =
-        resolve_request(&ctx2, "/dflt", None, &IdentHints::default()).expect("resolves");
+    let out2 = resolve_request(&ctx2, "/dflt", None, &IdentHints::default()).expect("resolves");
     assert_eq!(out2.directory, "/ok");
     assert_eq!(out2.workspace_id, None);
     // Over-long dir also falls back byte-exact.
     let long = format!("/{}", "a".repeat(300));
     let ctx3 = req(Some(long.as_str()), None);
-    let out3 =
-        resolve_request(&ctx3, "/dflt", None, &IdentHints::default()).expect("resolves");
+    let out3 = resolve_request(&ctx3, "/dflt", None, &IdentHints::default()).expect("resolves");
     assert_eq!(out3.directory, "/dflt");
     // Malformed default => InvalidDefault; nothing invented.
     match resolve_request(&ctx, "relative", None, &IdentHints::default()) {
@@ -103,7 +108,10 @@ fn int009_t03_fallback_rules_and_input_immutability() {
 
 #[test]
 fn int009_t04_identity_precedence_order() {
-    let ctx = RequestCtx { dir: None, ws: None };
+    let ctx = RequestCtx {
+        dir: None,
+        ws: None,
+    };
     // Remote wins over CommonDir + RootCommit.
     let all = IdentHints {
         common_dir: Some("c1".to_owned()),
@@ -114,7 +122,10 @@ fn int009_t04_identity_precedence_order() {
         branch: Some("main".to_owned()),
     });
     let out = resolve_request(&ctx, "/d", vcs, &all).expect("resolves");
-    assert_eq!(out.identity, Identity::Remote("https://example/r".to_owned()));
+    assert_eq!(
+        out.identity,
+        Identity::Remote("https://example/r".to_owned())
+    );
     // CommonDir wins over RootCommit once the remote is file-scheme.
     let file_vcs = Some(VcsInfo {
         remote: Some("file:///x".to_owned()),
@@ -165,7 +176,11 @@ fn int009_t05_no_side_effects() {
     std::env::remove_var("INT009_SENTINEL_DIR");
     let without_env = resolve_request(&ctx, "/dflt", vcs, &ids).expect("resolves");
     assert_eq!(with_env, without_env, "resolution must not depend on env");
-    assert_eq!(snapshot(), before, "no files written outside disposable dir");
+    assert_eq!(
+        snapshot(),
+        before,
+        "no files written outside disposable dir"
+    );
     // Error displays carry no hint bytes and nothing credential-like.
     let bad = SessionPin {
         directory: "/a/b".to_owned()[..0].to_owned() + "rel",

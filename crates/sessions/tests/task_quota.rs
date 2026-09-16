@@ -1,4 +1,4 @@
-use opencode_rk_sessions::task_quota::{TaskQuota, TaskQuotaError, check_task_quota, consume_task};
+use opencode_rk_sessions::task_quota::{check_task_quota, consume_task, TaskQuota, TaskQuotaError};
 
 #[test]
 fn tsq_t01_remaining() {
@@ -34,7 +34,10 @@ fn tsq_t04_zero() {
     let q = TaskQuota { limit: 0, used: 0 };
     assert_eq!(check_task_quota(&q).unwrap_err(), TaskQuotaError::ZeroLimit);
     let mut q2 = TaskQuota { limit: 0, used: 0 };
-    assert_eq!(consume_task(&mut q2).unwrap_err(), TaskQuotaError::ZeroLimit);
+    assert_eq!(
+        consume_task(&mut q2).unwrap_err(),
+        TaskQuotaError::ZeroLimit
+    );
     assert_eq!(q2.used, 0);
 }
 

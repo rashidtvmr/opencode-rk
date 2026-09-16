@@ -158,9 +158,7 @@ impl SyncPolicy {
 fn backoff(base_ms: u64, attempt: u32) -> u64 {
     const CAP_MS: u64 = 30_000;
     let shift = attempt.min(31);
-    base_ms
-        .saturating_mul(1u64 << shift)
-        .min(CAP_MS)
+    base_ms.saturating_mul(1u64 << shift).min(CAP_MS)
 }
 
 /// At-most-once per sequence number: send only when the batch starts past

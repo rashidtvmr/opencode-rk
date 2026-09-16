@@ -8,8 +8,8 @@
 mod provider_dispatch;
 
 use provider_dispatch::{
-    MAX_INPUT_BYTES, MAX_METHODS_PER_PROVIDER, MAX_PROVIDERS, MethodError, MethodInput,
-    MethodTable, ProviderMethodKind,
+    MethodError, MethodInput, MethodTable, ProviderMethodKind, MAX_INPUT_BYTES,
+    MAX_METHODS_PER_PROVIDER, MAX_PROVIDERS,
 };
 
 fn input(bytes: &[u8]) -> MethodInput<'_> {
@@ -26,10 +26,18 @@ fn contains_bytes(haystack: &[u8], needle: &[u8]) -> bool {
 #[test]
 fn int_003_t01_register_dispatch_happy_path() {
     let mut table = MethodTable::new();
-    table.register("prov-a", "key", 1).expect("register prov-a/key");
-    table.register("prov-a", "oauth", 2).expect("register prov-a/oauth");
-    table.register("prov-b", "key", 3).expect("register prov-b/key");
-    table.register("prov-b", "oauth", 4).expect("register prov-b/oauth");
+    table
+        .register("prov-a", "key", 1)
+        .expect("register prov-a/key");
+    table
+        .register("prov-a", "oauth", 2)
+        .expect("register prov-a/oauth");
+    table
+        .register("prov-b", "key", 3)
+        .expect("register prov-b/key");
+    table
+        .register("prov-b", "oauth", 4)
+        .expect("register prov-b/oauth");
 
     assert_eq!(table.providers().len(), 2);
     assert_eq!(table.list_methods("prov-a").len(), 2);
@@ -86,7 +94,8 @@ fn int_003_t02_determinism_ordering_replace() {
     );
 
     let before = t1.len();
-    t1.register("prov", "a", 99).expect("duplicate replaces in place");
+    t1.register("prov", "a", 99)
+        .expect("duplicate replaces in place");
     assert_eq!(t1.len(), before);
     let receipt = t1
         .dispatch("prov", "a", &input(b"h"))

@@ -43,7 +43,10 @@ async fn create_session(app: &axum::Router) -> String {
         )
         .await
         .unwrap();
-    body(response).await["session"]["id"].as_str().unwrap().to_owned()
+    body(response).await["session"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 async fn append(app: &axum::Router, session_id: &str, text: &str) -> String {
@@ -60,7 +63,10 @@ async fn append(app: &axum::Router, session_id: &str, text: &str) -> String {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::CREATED);
-    body(response).await["message"]["id"].as_str().unwrap().to_owned()
+    body(response).await["message"]["id"]
+        .as_str()
+        .unwrap()
+        .to_owned()
 }
 
 #[tokio::test]

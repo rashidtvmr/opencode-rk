@@ -1,4 +1,4 @@
-use opencode_rk_providers::int_state::{ConnState, next_state};
+use opencode_rk_providers::int_state::{next_state, ConnState};
 
 #[test]
 fn cst_t01_open() {

@@ -193,7 +193,12 @@ fn ext008_t05_no_host_side_effects() {
     let dir = tempfile::tempdir().expect("disposable test dir");
     let entries_before: Vec<String> = std::fs::read_dir(dir.path())
         .expect("read disposable dir")
-        .map(|e| e.expect("dir entry").file_name().to_string_lossy().into_owned())
+        .map(|e| {
+            e.expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
 
     let mut invocations: usize = 0;
@@ -233,7 +238,12 @@ fn ext008_t05_no_host_side_effects() {
 
     let mut entries_after: Vec<String> = std::fs::read_dir(dir.path())
         .expect("reread disposable dir")
-        .map(|e| e.expect("dir entry").file_name().to_string_lossy().into_owned())
+        .map(|e| {
+            e.expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     entries_after.sort();
     let mut expected = entries_before;

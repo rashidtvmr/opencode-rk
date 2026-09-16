@@ -1,6 +1,5 @@
 use opencode_rk_contracts::{
-    ArtifactKind, MessageId, SessionId, Timestamp, MAX_ARTIFACTS_PER_SESSION,
-    MAX_ARTIFACT_VERSIONS,
+    ArtifactKind, MessageId, SessionId, Timestamp, MAX_ARTIFACTS_PER_SESSION, MAX_ARTIFACT_VERSIONS,
 };
 use opencode_rk_storage::{Storage, StorageError};
 use tempfile::tempdir;

@@ -1,4 +1,4 @@
-use opencode_rk_providers::int_token::{TokenShapeError, qualify_shape};
+use opencode_rk_providers::int_token::{qualify_shape, TokenShapeError};
 
 #[test]
 fn tks_t01_len() {

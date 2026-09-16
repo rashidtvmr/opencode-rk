@@ -65,13 +65,7 @@ fn qry_t04_byte_budget_truncation_marker() {
         max_bytes: 256,
     };
     let idx: Vec<IndexedDoc> = (0..200u32)
-        .map(|i| {
-            doc(
-                &format!("docs/{i:03}.rs"),
-                i + 1,
-                "tool output line marker",
-            )
-        })
+        .map(|i| doc(&format!("docs/{i:03}.rs"), i + 1, "tool output line marker"))
         .collect();
     let r = query(&idx, "tool output", &cfg).unwrap();
     assert!(r.truncated);

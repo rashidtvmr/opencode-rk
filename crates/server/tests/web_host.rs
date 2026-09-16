@@ -1,4 +1,4 @@
-use opencode_rk_server::web_host::{HostError, qualify_host};
+use opencode_rk_server::web_host::{qualify_host, HostError};
 
 #[test]
 fn hst_t01_valid() {

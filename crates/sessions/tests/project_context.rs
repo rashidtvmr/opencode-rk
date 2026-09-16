@@ -21,9 +21,7 @@ fn web015_t01_open_project_loads_only_scoped_items() {
         .add_session(a, "ses-a1")
         .expect("add session to alpha");
     store.add_session(b, "ses-b1").expect("add session to beta");
-    store
-        .add_file(a, "notes.md")
-        .expect("add file to alpha");
+    store.add_file(a, "notes.md").expect("add file to alpha");
     store.add_file(b, "other.md").expect("add file to beta");
     store
         .add_instruction(a, "guide.md")

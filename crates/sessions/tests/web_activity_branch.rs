@@ -33,7 +33,10 @@ async fn web_009_t05_branch_inherits_persisted_reasoning_summary_without_reexecu
         .unwrap();
     let activity = sessions.assistant_activity(child.id, 50).await.unwrap();
     assert_eq!(activity.len(), 1);
-    assert_eq!(activity[0].reasoning_summary, "Checked the relevant constraints.");
+    assert_eq!(
+        activity[0].reasoning_summary,
+        "Checked the relevant constraints."
+    );
 
     let child_messages = sessions.messages(child.id, 50).await.unwrap();
     assert_eq!(child_messages.len(), 2);

@@ -1,10 +1,13 @@
-use opencode_rk_providers::int_routekey::{RouteKeyError, qualify_routekey};
+use opencode_rk_providers::int_routekey::{qualify_routekey, RouteKeyError};
 
 #[test]
 fn rk_t01_valid() {
     assert_eq!(qualify_routekey("abc").expect("valid"), "abc");
     assert_eq!(qualify_routekey("a1-b2").expect("valid"), "a1-b2");
-    assert_eq!(qualify_routekey("route-42-ok").expect("valid"), "route-42-ok");
+    assert_eq!(
+        qualify_routekey("route-42-ok").expect("valid"),
+        "route-42-ok"
+    );
 }
 
 #[test]

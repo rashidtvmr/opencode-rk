@@ -177,8 +177,7 @@ impl DraftQueue {
                 actual: self.drafts.len(),
             });
         }
-        self.drafts
-            .push((owner.to_string(), text.to_string()));
+        self.drafts.push((owner.to_string(), text.to_string()));
         Ok(())
     }
 
@@ -229,9 +228,7 @@ impl DraftQueue {
 fn lower_node(node: &ComposerNode) -> Result<String, ComposerError> {
     match node {
         ComposerNode::Paragraph { text } => Ok(text.clone()),
-        ComposerNode::CodeBlock { lang, text } => {
-            Ok(format!("```{lang}\n{text}\n```"))
-        }
+        ComposerNode::CodeBlock { lang, text } => Ok(format!("```{lang}\n{text}\n```")),
         ComposerNode::Mention { target, .. } => Ok(format!("@{target}")),
         ComposerNode::Command { name, args } => {
             if args.trim().is_empty() {
@@ -326,8 +323,9 @@ pub fn sanitize_doc(doc: &ComposerDoc) -> SanitizedDoc {
             | ComposerNode::Mention { .. }
             | ComposerNode::Command { .. } => true,
             ComposerNode::Html { .. } | ComposerNode::Embed { .. } => false,
-            ComposerNode::ToolChip { active, .. }
-            | ComposerNode::PluginChip { active, .. } => *active,
+            ComposerNode::ToolChip { active, .. } | ComposerNode::PluginChip { active, .. } => {
+                *active
+            }
         };
         if sendable {
             kept.push(node.clone());
@@ -371,7 +369,10 @@ pub fn accessible_label(node: &ComposerNode) -> String {
         ComposerNode::Html { .. } => "Pasted content (sanitized)".to_string(),
         ComposerNode::Embed { kind, label } => format!("Attachment {label} ({kind})"),
         ComposerNode::ToolChip { tool, active } => {
-            format!("Tool {tool} ({})", if *active { "active" } else { "inactive" })
+            format!(
+                "Tool {tool} ({})",
+                if *active { "active" } else { "inactive" }
+            )
         }
         ComposerNode::PluginChip { plugin, active } => {
             format!(
@@ -561,9 +562,7 @@ fn draft_string(
 }
 
 /// Decode one draft node. `Ok(None)` means "unknown kind: drop and count".
-fn decode_node(
-    value: &serde_json::Value,
-) -> Result<Option<ComposerNode>, ComposerError> {
+fn decode_node(value: &serde_json::Value) -> Result<Option<ComposerNode>, ComposerError> {
     let object = value
         .as_object()
         .ok_or(ComposerError::MalformedDraft("nodes"))?;

@@ -212,8 +212,7 @@ impl MethodTable {
     /// always produce identical output.
     #[must_use]
     pub fn providers(&self) -> Vec<ProviderId> {
-        let mut out: Vec<ProviderId> =
-            self.providers.iter().map(|e| e.provider.clone()).collect();
+        let mut out: Vec<ProviderId> = self.providers.iter().map(|e| e.provider.clone()).collect();
         out.sort();
         out
     }

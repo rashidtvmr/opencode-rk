@@ -28,11 +28,7 @@ pub const MAX_TOOL_AUDIT: usize = 512;
 
 /// Record one tool outcome. Rejects empty names and a full buffer without
 /// mutating; on success pushes with `seq = len + 1`, preserving order.
-pub fn record_tool(
-    buf: &mut Vec<ToolAudit>,
-    tool: &str,
-    ok: bool,
-) -> Result<(), ToolAuditError> {
+pub fn record_tool(buf: &mut Vec<ToolAudit>, tool: &str, ok: bool) -> Result<(), ToolAuditError> {
     if tool.is_empty() {
         return Err(ToolAuditError::EmptyTool);
     }

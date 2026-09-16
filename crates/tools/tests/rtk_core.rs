@@ -97,8 +97,15 @@ fn tool019_t04_overbudget_marker() {
             format!("line {i:05} padding padding padding padding padding padding\n").as_bytes(),
         );
     }
-    assert!(input.len() > 100 * 1024, "fixture under 100 KiB: {}", input.len());
-    let cfg = RtkConfig { enabled: true, max_bytes: 1024 };
+    assert!(
+        input.len() > 100 * 1024,
+        "fixture under 100 KiB: {}",
+        input.len()
+    );
+    let cfg = RtkConfig {
+        enabled: true,
+        max_bytes: 1024,
+    };
     let out = filter(FilterKind::Read, &input, b"", 0, &cfg);
     assert!(out.truncated, "truncated flag not set over budget");
     assert!(

@@ -1,7 +1,9 @@
 #[path = "../src/web_013.rs"]
 mod web_013;
 
-use web_013::{Citation, ResearchError, ResearchMode, ResearchRun, RunState, MAX_PROGRESS_EVENTS, MAX_SOURCES};
+use web_013::{
+    Citation, ResearchError, ResearchMode, ResearchRun, RunState, MAX_PROGRESS_EVENTS, MAX_SOURCES,
+};
 
 // WEB-013-T01: selected sources yield a reviewable plan, streamed progress,
 // steering, and a cited final result.
@@ -14,16 +16,24 @@ fn web013_t01_research_lifecycle() {
     assert_eq!(run.plan().len(), 2);
     run.start().unwrap();
     assert_eq!(run.state(), RunState::Running);
-    run.push_progress("survey sources", "fetched 2 hits").unwrap();
+    run.push_progress("survey sources", "fetched 2 hits")
+        .unwrap();
     run.steer(Some("verify citations")).unwrap();
     assert_eq!(run.state(), RunState::Steered);
     assert_eq!(run.plan().len(), 3);
-    run.push_progress("verify citations", "checked quotes").unwrap();
+    run.push_progress("verify citations", "checked quotes")
+        .unwrap();
     run.finish(
         2,
         vec![
-            Citation { claim: 0, source: "web-search".to_owned() },
-            Citation { claim: 1, source: "docs".to_owned() },
+            Citation {
+                claim: 0,
+                source: "web-search".to_owned(),
+            },
+            Citation {
+                claim: 1,
+                source: "docs".to_owned(),
+            },
         ],
         "final with cites",
     )
@@ -54,14 +64,20 @@ fn web013_t02_no_adapter_or_plain_chat() {
     run.start().unwrap();
     let bad = run.finish(
         1,
-        vec![Citation { claim: 0, source: "ghost".to_owned() }],
+        vec![Citation {
+            claim: 0,
+            source: "ghost".to_owned(),
+        }],
         "x",
     );
     assert!(matches!(bad, Err(ResearchError::UnknownSource(_))));
     assert_ne!(run.state(), RunState::Done);
     let bad_claim = run.finish(
         2,
-        vec![Citation { claim: 7, source: "web-search".to_owned() }],
+        vec![Citation {
+            claim: 7,
+            source: "web-search".to_owned(),
+        }],
         "x",
     );
     assert!(matches!(
@@ -70,7 +86,10 @@ fn web013_t02_no_adapter_or_plain_chat() {
     ));
     let uncited = run.finish(
         2,
-        vec![Citation { claim: 0, source: "web-search".to_owned() }],
+        vec![Citation {
+            claim: 0,
+            source: "web-search".to_owned(),
+        }],
         "x",
     );
     assert!(matches!(uncited, Err(ResearchError::UncitedClaim(1))));
@@ -126,7 +145,10 @@ fn web013_t04_bounds_and_cancel() {
     run.cancel();
     assert_eq!(run.state(), RunState::Cancelled);
     assert_eq!(run.child_work(), 0);
-    assert!(run.plan().iter().all(|s| s.state != web_013::StepState::Active));
+    assert!(run
+        .plan()
+        .iter()
+        .all(|s| s.state != web_013::StepState::Active));
     assert!(run.keyboard_actions().contains(&"retry"));
 }
 
@@ -141,7 +163,10 @@ fn web013_t05_replay_from_record() {
     run.spawn_child().unwrap();
     run.finish(
         1,
-        vec![Citation { claim: 0, source: "docs".to_owned() }],
+        vec![Citation {
+            claim: 0,
+            source: "docs".to_owned(),
+        }],
         "cited final",
     )
     .unwrap();

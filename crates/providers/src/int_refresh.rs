@@ -14,8 +14,8 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{
-    Arc, Mutex, Weak,
     atomic::{AtomicU64, Ordering},
+    Arc, Mutex, Weak,
 };
 
 /// Default refresh window: 5 minutes, matching pinned `refreshWindowMinutes: 5`.
@@ -327,9 +327,7 @@ impl IntRefreshGuard {
             expires_at_ms: new_expiry_ms,
             refreshed_at_ms: now_ms,
         };
-        inner
-            .records
-            .insert(self.cred.clone(), recorded.clone());
+        inner.records.insert(self.cred.clone(), recorded.clone());
         Ok(recorded)
     }
 

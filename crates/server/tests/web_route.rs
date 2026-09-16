@@ -1,4 +1,4 @@
-use opencode_rk_server::web_route::{MAX_WEB_ROUTES, WebRouteError, add_route};
+use opencode_rk_server::web_route::{add_route, WebRouteError, MAX_WEB_ROUTES};
 
 #[test]
 fn wrt_t01_add() {

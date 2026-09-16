@@ -93,7 +93,9 @@ impl WorkKind {
 /// Refusal. Counters only, never paths or bodies.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum OverBudget {
-    SlotsExhausted { kind: WorkKind },
+    SlotsExhausted {
+        kind: WorkKind,
+    },
     BytesExhausted {
         kind: WorkKind,
         requested: u64,
@@ -313,10 +315,8 @@ impl BudgetLedger {
 
     fn byte_cap(&self, kind: WorkKind) -> u64 {
         match kind {
-            WorkKind::AgentSlot => {
-                (self.caps.max_queued_agents as u64)
-                    .saturating_mul(self.caps.max_preview_bytes_per_tool)
-            }
+            WorkKind::AgentSlot => (self.caps.max_queued_agents as u64)
+                .saturating_mul(self.caps.max_preview_bytes_per_tool),
             WorkKind::SessionInput => self.caps.max_input_bytes_per_session,
             WorkKind::ToolPreview => self.caps.max_preview_bytes_per_tool,
             WorkKind::SubscriberBuffer => self.caps.max_subscriber_bytes,
@@ -352,7 +352,8 @@ impl BudgetLedger {
     #[must_use]
     pub fn available_slots(&self, kind: WorkKind) -> u64 {
         let state = self.state.lock().expect("ledger lock");
-        self.count_cap(kind).saturating_sub(state.used[kind.index()].slots)
+        self.count_cap(kind)
+            .saturating_sub(state.used[kind.index()].slots)
     }
 
     #[must_use]
@@ -400,7 +401,9 @@ impl BudgetLedger {
         let n = self.spills.fetch_add(1, Ordering::SeqCst);
         let path = dir.join(format!("spill-{n}.bin"));
         if !path.starts_with(dir) {
-            return Err(LedgerError::Io("spill path escaped fixture dir".to_string()));
+            return Err(LedgerError::Io(
+                "spill path escaped fixture dir".to_string(),
+            ));
         }
         std::fs::write(&path, bytes).map_err(|e| LedgerError::Io(e.to_string()))?;
         log.push_str(&format!(

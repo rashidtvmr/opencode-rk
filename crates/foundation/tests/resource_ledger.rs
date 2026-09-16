@@ -4,8 +4,8 @@
 mod resource_ledger;
 
 use resource_ledger::{
-    attest_disabled, attest_single_enabled, AdmissionCaps, AttestError, BudgetLedger, LedgerError,
-    OverBudget, RetentionPolicy, SubsystemProbe, WorkKind, DisabledCostAttestation,
+    attest_disabled, attest_single_enabled, AdmissionCaps, AttestError, BudgetLedger,
+    DisabledCostAttestation, LedgerError, OverBudget, RetentionPolicy, SubsystemProbe, WorkKind,
 };
 use std::fs;
 
@@ -53,7 +53,10 @@ fn resource_ledger_t02_single_enable_isolation() {
     let before = probes[2].report();
     probes[0] = SubsystemProbe::enabled("plugin_host", 2, 2, 1, 0, 8192);
     assert_eq!(probes[2].report(), before);
-    assert_eq!(probes[0].report(), SubsystemProbe::enabled("plugin_host", 2, 2, 1, 0, 8192).report());
+    assert_eq!(
+        probes[0].report(),
+        SubsystemProbe::enabled("plugin_host", 2, 2, 1, 0, 8192).report()
+    );
     // No longer exactly one enabled: isolation verdict refuses.
     assert!(attest_single_enabled(&probes, "file_watcher").is_err());
 }
@@ -67,12 +70,18 @@ fn resource_ledger_t03_admit_release_accounting() {
     for _ in 0..10 {
         reservations.push(ledger.admit(WorkKind::SessionInput, 1000).unwrap());
     }
-    assert_eq!(ledger.available_bytes(WorkKind::SessionInput), bytes0 - 10_000);
+    assert_eq!(
+        ledger.available_bytes(WorkKind::SessionInput),
+        bytes0 - 10_000
+    );
     assert_eq!(ledger.available_slots(WorkKind::SessionInput), slots0 - 10);
     // Release half via drop: available rises by exactly the released amount.
     let released: Vec<_> = reservations.drain(..5).collect();
     drop(released);
-    assert_eq!(ledger.available_bytes(WorkKind::SessionInput), bytes0 - 5_000);
+    assert_eq!(
+        ledger.available_bytes(WorkKind::SessionInput),
+        bytes0 - 5_000
+    );
     assert_eq!(ledger.available_slots(WorkKind::SessionInput), slots0 - 5);
     // Re-admit succeeds.
     for _ in 0..5 {
@@ -169,7 +178,13 @@ fn resource_ledger_t05_no_silent_deletion_and_invalid_caps() {
     assert_eq!(fs::read(&spilled.path).unwrap(), payload);
     // Zero spilled-body bytes in captured logs.
     assert!(!log.contains("precious-user-history"));
-    assert!(!log.contains(marker.iter().map(|b| *b as char).collect::<String>().as_str()));
+    assert!(!log.contains(
+        marker
+            .iter()
+            .map(|b| *b as char)
+            .collect::<String>()
+            .as_str()
+    ));
     // Nothing written outside the fixture dir.
     assert_eq!(fs::read(&sentinel).unwrap(), b"untouched");
     let mut stray = Vec::new();

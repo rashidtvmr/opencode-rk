@@ -188,7 +188,10 @@ impl ProjectContextStore {
         session: impl Into<String>,
     ) -> Result<(), ProjectError> {
         let session = truncate_label(&session.into());
-        let project = self.projects.get_mut(&id).ok_or(ProjectError::Unavailable)?;
+        let project = self
+            .projects
+            .get_mut(&id)
+            .ok_or(ProjectError::Unavailable)?;
         if project.source_count() >= MAX_CONTEXT_SOURCES {
             evict_oldest_source(project);
         }
@@ -201,7 +204,10 @@ impl ProjectContextStore {
     pub fn add_file(&mut self, id: ProjectId, path: &str) -> Result<(), ProjectError> {
         validate_path(path)?;
         let label = truncate_label(path);
-        let project = self.projects.get_mut(&id).ok_or(ProjectError::Unavailable)?;
+        let project = self
+            .projects
+            .get_mut(&id)
+            .ok_or(ProjectError::Unavailable)?;
         if project.source_count() >= MAX_CONTEXT_SOURCES {
             evict_oldest_source(project);
         }
@@ -262,7 +268,10 @@ impl ProjectContextStore {
     /// to another project are `Unavailable` here, never leaked.
     pub fn load_file(&mut self, id: ProjectId, path: &str) -> Result<String, ProjectError> {
         validate_path(path)?;
-        let project = self.projects.get_mut(&id).ok_or(ProjectError::Unavailable)?;
+        let project = self
+            .projects
+            .get_mut(&id)
+            .ok_or(ProjectError::Unavailable)?;
         if !project.files.iter().any(|f| f == path) {
             return Err(ProjectError::Unavailable);
         }
@@ -384,7 +393,10 @@ impl ProjectContextStore {
         enabled: bool,
     ) -> Result<(), ProjectError> {
         validate_path(name)?;
-        let project = self.projects.get_mut(&id).ok_or(ProjectError::Unavailable)?;
+        let project = self
+            .projects
+            .get_mut(&id)
+            .ok_or(ProjectError::Unavailable)?;
         if let Some(slot) = project.memory.iter_mut().find(|(n, _)| n == name) {
             slot.1 = enabled;
         } else {
@@ -415,7 +427,10 @@ impl ProjectContextStore {
 
     #[must_use]
     pub fn source_count(&self, id: ProjectId) -> usize {
-        self.projects.get(&id).map(|p| p.source_count()).unwrap_or(0)
+        self.projects
+            .get(&id)
+            .map(|p| p.source_count())
+            .unwrap_or(0)
     }
 
     #[must_use]

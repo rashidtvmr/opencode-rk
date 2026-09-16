@@ -25,11 +25,7 @@ pub enum EnableError {
 
 /// Flip `name` to `on`, returning new state. Missing names are pushed
 /// (enabled=`on`) unless the vec is at [`MAX_EXT_ENTRIES`].
-pub fn set_enabled(
-    entries: &mut Vec<ExtEntry>,
-    name: &str,
-    on: bool,
-) -> Result<bool, EnableError> {
+pub fn set_enabled(entries: &mut Vec<ExtEntry>, name: &str, on: bool) -> Result<bool, EnableError> {
     if name.is_empty() {
         return Err(EnableError::EmptyName);
     }

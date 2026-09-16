@@ -180,10 +180,7 @@ impl LaneCoalescingQueue {
 
     fn insert_inner(&mut self, event: LaneShareEvent) {
         // Degenerate caps admit nothing: drop, count eviction, no loop.
-        if self.caps.max_items == 0
-            || self.caps.max_bytes == 0
-            || self.caps.max_sessions == 0
-        {
+        if self.caps.max_items == 0 || self.caps.max_bytes == 0 || self.caps.max_sessions == 0 {
             self.evicted = self.evicted.saturating_add(1);
             return;
         }

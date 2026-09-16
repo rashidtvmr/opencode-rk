@@ -230,7 +230,10 @@ fn validate_branch(branch: &str) -> Result<String, ()> {
     if branch.starts_with('.') || branch.ends_with('.') || branch.ends_with(".lock") {
         return Err(());
     }
-    if branch.bytes().any(|b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r') {
+    if branch
+        .bytes()
+        .any(|b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r')
+    {
         return Err(());
     }
     if branch.bytes().any(|b| {
@@ -259,7 +262,8 @@ fn cache_identity(canonical: &str, branch: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut words = [0u64; 4];
     for (i, w) in words.iter_mut().enumerate() {
-        let mut h: u64 = 0xcbf29ce484222325 ^ (0x9e3779b97f4a7c15u64.wrapping_add(i as u64 * 0x100000001b3));
+        let mut h: u64 =
+            0xcbf29ce484222325 ^ (0x9e3779b97f4a7c15u64.wrapping_add(i as u64 * 0x100000001b3));
         for b in canonical
             .bytes()
             .chain(std::iter::once(0))

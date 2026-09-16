@@ -106,9 +106,7 @@ fn assert_no_loader_artifacts() {
                 && !l.contains("watch")
                 && !l.contains("loader")
                 && !(l.contains("discover")
-                    && (l.contains("loader")
-                        || l.contains("watch")
-                        || l.contains("notify"))),
+                    && (l.contains("loader") || l.contains("watch") || l.contains("notify"))),
             "loader/watcher thread spawned: {n}"
         );
     }
@@ -169,10 +167,7 @@ fn ext010_t02_scope_revoke() {
     assert_eq!(b.declare(9, pkg("alpha")), Ok(4));
     let list = b.list_deferred();
     assert_eq!(list.len(), 2);
-    assert_eq!(
-        list.iter().map(|e| e.seq).collect::<Vec<_>>(),
-        vec![3, 4]
-    );
+    assert_eq!(list.iter().map(|e| e.seq).collect::<Vec<_>>(), vec![3, 4]);
 }
 
 #[test]
@@ -208,7 +203,10 @@ fn ext010_t03_validation_and_caps() {
     }
     // Overlong file (257 chars).
     let before = snap(&b);
-    assert_eq!(b.declare(1, file(&"f".repeat(257))), Err(DiscoveryError::InvalidRef));
+    assert_eq!(
+        b.declare(1, file(&"f".repeat(257))),
+        Err(DiscoveryError::InvalidRef)
+    );
     assert_eq!(snap(&b), before, "failed declare must leave log unchanged");
     // Bad charset.
     for bad in [pkg("has space"), pkg("semi;colon"), file("back\\slash")] {
@@ -319,7 +317,10 @@ fn ext010_t05_zero_cost_when_off_and_safety() {
     } else {
         None
     };
-    assert!(boundary.is_none(), "disabled boundary must construct nothing");
+    assert!(
+        boundary.is_none(),
+        "disabled boundary must construct nothing"
+    );
     assert_no_loader_artifacts();
     assert_eq!(children_count(), kids_before);
     // Disposable dir only; implementation performs zero I/O so it stays empty

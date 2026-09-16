@@ -132,8 +132,5 @@ fn ops009_t05_redaction_and_isolation() {
     );
     let disp = format!("{err}");
     assert!(!disp.contains(decoy), "display leaks decoy: {disp}");
-    assert!(
-        !disp.contains(wrong_actual),
-        "display leaks actual: {disp}"
-    );
+    assert!(!disp.contains(wrong_actual), "display leaks actual: {disp}");
 }

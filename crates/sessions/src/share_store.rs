@@ -131,10 +131,7 @@ impl fmt::Debug for ShareStore {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ShareStore")
             .field("len", &self.records.len())
-            .field(
-                "records",
-                &self.records.values().collect::<Vec<_>>(),
-            )
+            .field("records", &self.records.values().collect::<Vec<_>>())
             .finish_non_exhaustive()
     }
 }
@@ -224,7 +221,10 @@ fn valid_url(url: &str) -> bool {
     if url.is_empty() || url.len() > MAX_URL_BYTES {
         return false;
     }
-    if url.bytes().any(|b| b.is_ascii_whitespace() || b.is_ascii_control()) {
+    if url
+        .bytes()
+        .any(|b| b.is_ascii_whitespace() || b.is_ascii_control())
+    {
         return false;
     }
     let Some(rest) = url.strip_prefix("https://") else {

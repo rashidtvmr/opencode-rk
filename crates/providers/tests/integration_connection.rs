@@ -7,7 +7,7 @@
 mod integration_connection;
 
 use integration_connection::{
-    ConnectError, ConnectInput, ConnectionInfo, ConnectionState, ConnectionTable, ConnId,
+    ConnId, ConnectError, ConnectInput, ConnectionInfo, ConnectionState, ConnectionTable,
     MethodKind, MAX_CODE_LEN, MAX_CONNECTIONS,
 };
 use std::cell::Cell;
@@ -238,8 +238,7 @@ fn child_pids() -> Vec<u32> {
         };
         let mut fields = stat[close + 2..].split_whitespace();
         fields.next(); // state
-        let is_child =
-            fields.next().and_then(|ppid| ppid.parse::<u32>().ok()) == Some(me);
+        let is_child = fields.next().and_then(|ppid| ppid.parse::<u32>().ok()) == Some(me);
         if !is_child {
             continue;
         }
@@ -352,8 +351,11 @@ fn int_002_t05_full_matrix_spawns_nothing_writes_nothing_leaks_nothing() {
         .map(|entry| entry.file_name().to_string_lossy().into_owned())
         .collect();
     assert_eq!(after_files, before_files);
-    assert!(std::fs::read_dir(dir.path()).expect("dir").flatten().all(|entry| {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        !name.ends_with(".db") && !name.ends_with(".sqlite")
-    }));
+    assert!(std::fs::read_dir(dir.path())
+        .expect("dir")
+        .flatten()
+        .all(|entry| {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            !name.ends_with(".db") && !name.ends_with(".sqlite")
+        }));
 }

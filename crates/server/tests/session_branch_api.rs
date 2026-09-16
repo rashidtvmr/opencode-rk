@@ -108,7 +108,10 @@ async fn web_008_t01_branch_from_user_or_assistant_is_inclusive_and_source_is_un
         let lineage = json_body(lineage).await;
         assert_eq!(lineage["fork"]["parent_session_id"], parent.id.to_string());
         assert_eq!(lineage["fork"]["fork_message_seq"], expected_len as u64);
-        assert_eq!(lineage["fork"]["boundary_message_id"], boundary_id.to_string());
+        assert_eq!(
+            lineage["fork"]["boundary_message_id"],
+            boundary_id.to_string()
+        );
         assert_eq!(messages[0]["body"]["text"], "first request");
         assert_ne!(messages[0]["id"], user.id.to_string());
         if expected_len == 2 {
@@ -279,7 +282,10 @@ async fn web_008_t02_retry_branch_starts_before_the_user_request() {
         )
         .await
         .unwrap();
-    assert_eq!(json_body(child).await["messages"].as_array().unwrap().len(), 0);
+    assert_eq!(
+        json_body(child).await["messages"].as_array().unwrap().len(),
+        0
+    );
 
     let user_retry = app
         .clone()

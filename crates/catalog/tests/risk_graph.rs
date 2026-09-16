@@ -42,7 +42,8 @@ fn tool018_t01_blast_radius_bounded() {
     idx.index_edge(edge("b", "c")).unwrap();
     for i in 0..300u32 {
         let d = format!("dep{i:03}");
-        idx.index_symbol(sym(&d, "fn", "extra.rs", 1000 + i)).unwrap();
+        idx.index_symbol(sym(&d, "fn", "extra.rs", 1000 + i))
+            .unwrap();
         idx.index_edge(edge("b", &d)).unwrap();
     }
     let r = idx.blast_radius("b").unwrap();
@@ -72,13 +73,7 @@ fn tool018_t03_dep_path_depth_bound() {
     for n in ["a", "b", "c", "d", "e"] {
         idx.index_symbol(sym(n, "fn", "g.rs", 1)).unwrap();
     }
-    for (f, t) in [
-        ("a", "b"),
-        ("a", "c"),
-        ("b", "d"),
-        ("c", "d"),
-        ("d", "e"),
-    ] {
+    for (f, t) in [("a", "b"), ("a", "c"), ("b", "d"), ("c", "d"), ("d", "e")] {
         idx.index_edge(edge(f, t)).unwrap();
     }
     let max_depth = RiskCaps::default().max_depth;
@@ -107,7 +102,9 @@ fn tool018_t04_failure_states() {
         ..RiskCaps::default()
     });
     small.index_symbol(sym("only", "fn", "o.rs", 1)).unwrap();
-    let err = small.index_symbol(sym("extra", "fn", "e.rs", 2)).unwrap_err();
+    let err = small
+        .index_symbol(sym("extra", "fn", "e.rs", 2))
+        .unwrap_err();
     assert_eq!(err, RiskError::CapExceeded);
 }
 
@@ -118,9 +115,6 @@ fn tool018_t05_opt_out_zero_cost() {
     assert_eq!(idx.stats(), (0, 0));
     assert_eq!(idx.blast_radius("a").unwrap_err(), RiskError::Disabled);
     assert_eq!(idx.why("a").unwrap_err(), RiskError::Disabled);
-    assert_eq!(
-        idx.dep_path("a", "b").unwrap_err(),
-        RiskError::Disabled
-    );
+    assert_eq!(idx.dep_path("a", "b").unwrap_err(), RiskError::Disabled);
     assert!(idx.owner_of("a.rs").is_empty());
 }

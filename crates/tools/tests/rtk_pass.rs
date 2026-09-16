@@ -68,7 +68,11 @@ fn fail_log_big() -> Vec<u8> {
 #[test]
 fn rtk_pass_t01_unknown_passthrough_identical() {
     let input = ansi_big();
-    assert!(input.len() > 100 * 1024, "fixture under 100 KiB: {}", input.len());
+    assert!(
+        input.len() > 100 * 1024,
+        "fixture under 100 KiB: {}",
+        input.len()
+    );
     let stderr = b"\x1b[31mwarn boom\x1b[0m\n".to_vec();
     let out = filter_pass(PassKind::Unknown, &input, &stderr, 3, &RtkConfig::default());
     assert_eq!(out.stdout, input);
@@ -102,29 +106,57 @@ fn rtk_pass_t02_chain_segments_independent() {
     let b_in = b"info: start\nFAIL-ID-7749 ERROR worker crashed\nverdict: FAIL 7749\n".to_vec();
     let c_in = b"\x1b[33mraw?\x1b[0m\n".to_vec();
     let chain = vec![
-        Segment { kind: PassKind::Log, stdout: a_in.clone(), stderr: vec![], code: 0 },
-        Segment { kind: PassKind::Err, stdout: b_in.clone(), stderr: b"kept\n".to_vec(), code: 2 },
-        Segment { kind: PassKind::Unknown, stdout: c_in.clone(), stderr: vec![], code: 0 },
+        Segment {
+            kind: PassKind::Log,
+            stdout: a_in.clone(),
+            stderr: vec![],
+            code: 0,
+        },
+        Segment {
+            kind: PassKind::Err,
+            stdout: b_in.clone(),
+            stderr: b"kept\n".to_vec(),
+            code: 2,
+        },
+        Segment {
+            kind: PassKind::Unknown,
+            stdout: c_in.clone(),
+            stderr: vec![],
+            code: 0,
+        },
     ];
     let (outs, exit) = filter_chain(&chain, &RtkConfig::default());
     assert_eq!(outs.len(), 3);
     assert!(outs[0].stdout.len() < a_in.len(), "seg A not shrunk");
-    assert!(contains(&outs[1].stdout, b"FAIL-ID-7749"), "seg B lost fail id");
+    assert!(
+        contains(&outs[1].stdout, b"FAIL-ID-7749"),
+        "seg B lost fail id"
+    );
     assert!(contains(&outs[1].stdout, b"verdict"), "seg B lost verdict");
     assert_eq!(outs[1].stderr, b"kept\n", "seg B stderr altered");
     assert_eq!(outs[2].stdout, c_in, "seg C rewritten by sibling failure");
     assert_eq!(exit, 2);
-    assert!(!contains(&outs[0].stdout, b"FAIL-ID-7749"), "failure leaked into seg A");
+    assert!(
+        !contains(&outs[0].stdout, b"FAIL-ID-7749"),
+        "failure leaked into seg A"
+    );
 }
 
 #[test]
 fn rtk_pass_t03_proxy_accounts_without_filtering() {
     let input = fail_log_big();
-    assert!(input.len() > 100 * 1024, "fixture under 100 KiB: {}", input.len());
+    assert!(
+        input.len() > 100 * 1024,
+        "fixture under 100 KiB: {}",
+        input.len()
+    );
     let stderr = b"proxy-err\n".to_vec();
     // Sanity: the plain path would truncate this input over the default budget.
     let plain = filter_pass(PassKind::Log, &input, &stderr, 1, &RtkConfig::default());
-    assert!(plain.truncated, "fixture does not exceed budget, proxy test vacuous");
+    assert!(
+        plain.truncated,
+        "fixture does not exceed budget, proxy test vacuous"
+    );
     let mut accounted = 0usize;
     let out = proxy(&input, &stderr, 1, &mut accounted);
     assert_eq!(out.stdout, input);
@@ -140,10 +172,20 @@ fn rtk_pass_t04_opt_out_zero_overhead() {
     let input = fail_log();
     let stderr = b"e\n".to_vec();
     let cfgs = [
-        RtkConfig { enabled: true, ..RtkConfig::default() },
-        RtkConfig { enabled: true, no_filter: true, ..RtkConfig::default() },
+        RtkConfig {
+            enabled: true,
+            ..RtkConfig::default()
+        },
+        RtkConfig {
+            enabled: true,
+            no_filter: true,
+            ..RtkConfig::default()
+        },
         RtkConfig::disabled(),
-        RtkConfig { no_filter: true, ..RtkConfig::disabled() },
+        RtkConfig {
+            no_filter: true,
+            ..RtkConfig::disabled()
+        },
     ];
     // Control first: enabled + no per-command flag really shrinks.
     reset_shrink_calls();
@@ -154,7 +196,10 @@ fn rtk_pass_t04_opt_out_zero_overhead() {
             shrunk_any = true;
         }
     }
-    assert!(shrunk_any, "control config does not shrink, opt-out test vacuous");
+    assert!(
+        shrunk_any,
+        "control config does not shrink, opt-out test vacuous"
+    );
     assert!(shrink_calls() > 0, "shrink counter dead");
     // Opt-out matrix: global OR per-command each suffices, zero shrink work.
     reset_shrink_calls();
@@ -181,9 +226,17 @@ fn rtk_pass_t04_opt_out_zero_overhead() {
 #[test]
 fn rtk_pass_t05_budget_marker() {
     let input = fail_log_big();
-    assert!(input.len() > 500 * 1024, "fixture under 500 KiB: {}", input.len());
+    assert!(
+        input.len() > 500 * 1024,
+        "fixture under 500 KiB: {}",
+        input.len()
+    );
     let stderr = b"kept-stderr\n".to_vec();
-    let cfg = RtkConfig { enabled: true, max_bytes: 65536, no_filter: false };
+    let cfg = RtkConfig {
+        enabled: true,
+        max_bytes: 65536,
+        no_filter: false,
+    };
     let out = filter_pass(PassKind::Err, &input, &stderr, 1, &cfg);
     assert!(out.truncated);
     assert!(
@@ -195,7 +248,10 @@ fn rtk_pass_t05_budget_marker() {
         ends_with(&out.stdout, TRUNC_MARKER_SUFFIX.as_bytes()),
         "missing marker suffix"
     );
-    assert!(contains(&out.stdout, b"verdict"), "verdict lost under budget");
+    assert!(
+        contains(&out.stdout, b"verdict"),
+        "verdict lost under budget"
+    );
     assert_eq!(out.stderr, stderr, "stderr dropped");
     assert_eq!(out.code, 1, "code remapped");
 }

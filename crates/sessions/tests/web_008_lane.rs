@@ -11,10 +11,9 @@ mod web_008_lane;
 
 use web_008_lane::{
     begin_retry, branch_child_title, cancel_retry, complete_retry, decode_snapshot,
-    encode_snapshot, fork_depth, fork_from_message, fork_provenance, keyboard_actions,
-    move_focus, open_branch, BranchError, BranchFocus, BranchKey, BranchMessage, BranchRole,
-    BranchSession, RetryTurn, TurnState, MAX_ACTIVE_TURNS, MAX_FORK_COPY_MESSAGES, MAX_FORK_DEPTH,
-    MAX_TITLE,
+    encode_snapshot, fork_depth, fork_from_message, fork_provenance, keyboard_actions, move_focus,
+    open_branch, BranchError, BranchFocus, BranchKey, BranchMessage, BranchRole, BranchSession,
+    RetryTurn, TurnState, MAX_ACTIVE_TURNS, MAX_FORK_COPY_MESSAGES, MAX_FORK_DEPTH, MAX_TITLE,
 };
 
 fn user(id: &str, seq: u64, body: &str) -> BranchMessage {
@@ -63,7 +62,11 @@ fn web008_t01_real_branch_user_and_assistant() {
     assert_eq!(sessions.len(), 2);
     let child = sessions.iter().find(|s| s.id == "c1").unwrap();
     assert_eq!(
-        child.messages.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        child
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
         vec!["u1", "a2", "u3"]
     );
     assert_eq!(child.title, "Branch: Parent chat");
@@ -80,7 +83,11 @@ fn web008_t01_real_branch_user_and_assistant() {
     fork_from_message(&mut sessions, "p", "a2", "c2").unwrap();
     let child = sessions.iter().find(|s| s.id == "c2").unwrap();
     assert_eq!(
-        child.messages.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
+        child
+            .messages
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect::<Vec<_>>(),
         vec!["u1", "a2"]
     );
     let provenance = fork_provenance(child).unwrap();
@@ -131,10 +138,7 @@ fn web008_t02_retry_failure_no_fake_record() {
 #[test]
 fn web008_t03_accessible_actions_navigation() {
     assert_eq!(web_008_lane::fork_accessible_name(), "Fork");
-    assert_eq!(
-        web_008_lane::popover_announcement(),
-        "Branch in new chat"
-    );
+    assert_eq!(web_008_lane::popover_announcement(), "Branch in new chat");
 
     let user_actions = keyboard_actions(BranchRole::User);
     assert!(user_actions.contains(&"edit"));
@@ -242,7 +246,14 @@ fn web008_t04_bounds_and_cancel() {
     assert_eq!(active, 0);
     begin_retry(&mut active, &mut second, history, "u3").unwrap();
     assert_eq!(second.state, TurnState::Running);
-    complete_retry(&mut active, &mut second, &mut sessions.clone()[0].messages, "a5", "fresh").unwrap();
+    complete_retry(
+        &mut active,
+        &mut second,
+        &mut sessions.clone()[0].messages,
+        "a5",
+        "fresh",
+    )
+    .unwrap();
     assert_eq!(active, 0);
 }
 

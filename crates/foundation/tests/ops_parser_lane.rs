@@ -4,7 +4,9 @@
 #[path = "../src/ops_parser_lane.rs"]
 mod ops_parser_lane;
 
-use ops_parser_lane::{ops_lane_basename, ops_lane_failure_hint, ops_lane_normalize, OpsLaneError, OpsLaneRoot};
+use ops_parser_lane::{
+    ops_lane_basename, ops_lane_failure_hint, ops_lane_normalize, OpsLaneError, OpsLaneRoot,
+};
 
 fn fixture_root() -> OpsLaneRoot {
     OpsLaneRoot::new("target/fixtures/ops006-lane-cache").expect("fixture root")
@@ -58,7 +60,10 @@ fn ops006_t03_caps() {
 #[test]
 fn ops006_t04_failure_states() {
     let root = fixture_root();
-    assert_eq!(ops_lane_normalize("", None, &root), Err(OpsLaneError::Invalid));
+    assert_eq!(
+        ops_lane_normalize("", None, &root),
+        Err(OpsLaneError::Invalid)
+    );
     assert_eq!(
         ops_lane_normalize(":::bad", None, &root),
         Err(OpsLaneError::Invalid)
@@ -88,7 +93,8 @@ fn ops006_t05_purity_and_safety() {
     assert_eq!(before, after);
     assert!(is_hex64(&after.cache_id));
 
-    let probe_root = OpsLaneRoot::new("target/fixtures/ops006-lane-probe-7f3a").expect("probe root");
+    let probe_root =
+        OpsLaneRoot::new("target/fixtures/ops006-lane-probe-7f3a").expect("probe root");
     let probe = ops_lane_normalize("owner/repo", Some("main"), &probe_root).expect("probe");
     assert!(!std::path::Path::new(probe.cache_path.as_str()).exists());
 

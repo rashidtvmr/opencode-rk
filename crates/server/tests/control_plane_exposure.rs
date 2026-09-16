@@ -7,9 +7,8 @@
 mod control_plane_exposure;
 
 use control_plane_exposure::{
-    BindAddr, Exposure, ExposureDeny, PeerAddr, check_exposure, check_socket_peer,
-    check_with_headers, deny_body, deny_code, deny_log_line, deny_status, is_gated_route,
-    peer_family_label,
+    check_exposure, check_socket_peer, check_with_headers, deny_body, deny_code, deny_log_line,
+    deny_status, is_gated_route, peer_family_label, BindAddr, Exposure, ExposureDeny, PeerAddr,
 };
 use std::cell::{Cell, RefCell};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
@@ -113,13 +112,8 @@ fn web004_t03_grant_allows_remote_but_spoofed_headers_stay_denied() {
     assert_eq!(spy.order(), ["exposure", "auth", "service"]);
 
     // Spoofed loopback headers must not flip a transport-peer deny.
-    let denied = check_with_headers(
-        remote_v4(),
-        &Exposure::default(),
-        Some("127.0.0.1"),
-        None,
-    )
-    .unwrap_err();
+    let denied =
+        check_with_headers(remote_v4(), &Exposure::default(), Some("127.0.0.1"), None).unwrap_err();
     assert_eq!(denied, ExposureDeny::RemoteDenied);
     let denied = check_with_headers(
         remote_v4(),
@@ -154,10 +148,7 @@ fn web004_t04_health_exempt_and_socket_peer_local() {
     // Unix-socket peer (no IP) is local.
     assert!(check_socket_peer(&Exposure::default()).is_ok());
     assert_eq!(peer_family_label(&PeerAddr::Socket), "socket");
-    assert_eq!(
-        peer_family_label(&PeerAddr::Ip(loopback_v4())),
-        "v4"
-    );
+    assert_eq!(peer_family_label(&PeerAddr::Ip(loopback_v4())), "v4");
     assert_eq!(
         peer_family_label(&PeerAddr::Ip(IpAddr::V6(Ipv6Addr::LOCALHOST))),
         "v6"
@@ -211,7 +202,10 @@ fn web004_t05_deny_is_side_effect_free_and_redacted() {
     );
 
     let log_line = deny_log_line(&PeerAddr::Ip(peer));
-    assert!(log_line.contains("v4"), "family label only, got: {log_line}");
+    assert!(
+        log_line.contains("v4"),
+        "family label only, got: {log_line}"
+    );
     for rendered in [
         log_line.as_str(),
         deny_body().as_str(),
@@ -224,6 +218,8 @@ fn web004_t05_deny_is_side_effect_free_and_redacted() {
         std::fs::read(&sentinel).expect("reread sentinel"),
         b"untouched"
     );
-    let entries: Vec<_> = std::fs::read_dir(dir.path()).expect("list fixture").collect();
+    let entries: Vec<_> = std::fs::read_dir(dir.path())
+        .expect("list fixture")
+        .collect();
     assert_eq!(entries.len(), 1, "nothing written beside the sentinel");
 }

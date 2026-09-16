@@ -1,4 +1,4 @@
-use opencode_rk_providers::int_mapping::{MAX_MAPPINGS, MappingError, lookup};
+use opencode_rk_providers::int_mapping::{lookup, MappingError, MAX_MAPPINGS};
 
 #[test]
 fn map_t01_hit() {
@@ -42,10 +42,13 @@ fn map_t04_unknown_is_emptyvalue() {
 #[test]
 fn map_t05_overflow() {
     assert_eq!(MAX_MAPPINGS, 128);
-    let owned: Vec<(String, String)> =
-        (0..(MAX_MAPPINGS + 1)).map(|i| (format!("k{i}"), format!("v{i}"))).collect();
-    let refs: Vec<(&str, &str)> =
-        owned.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+    let owned: Vec<(String, String)> = (0..(MAX_MAPPINGS + 1))
+        .map(|i| (format!("k{i}"), format!("v{i}")))
+        .collect();
+    let refs: Vec<(&str, &str)> = owned
+        .iter()
+        .map(|(k, v)| (k.as_str(), v.as_str()))
+        .collect();
     match lookup(&refs, "k0") {
         Err(MappingError::TooMany { max, actual }) => {
             assert_eq!(max, MAX_MAPPINGS);

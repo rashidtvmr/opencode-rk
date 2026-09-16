@@ -11,8 +11,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use ext_lifecycle_lane::{
-    MAX_CAPABILITIES, MAX_PLUGINS, PluginDecl, PluginError, PluginId, PluginRegistry,
-    PluginState, SUPPORTED_CONTRACT_VERSION,
+    MAX_CAPABILITIES, MAX_PLUGINS, PluginDecl, PluginError, PluginId, PluginRegistry, PluginState,
+    SUPPORTED_CONTRACT_VERSION,
 };
 
 fn decl(name: &str) -> PluginDecl {
@@ -107,10 +107,7 @@ fn ext001_t03_validation_and_overflow_registry_unchanged() {
     let before = snapshot(&reg);
     let mut d = decl("too-many-caps");
     d.capabilities = (0..17).map(|i| format!("c{i}")).collect();
-    assert_eq!(
-        reg.add(d).unwrap_err(),
-        PluginError::InvalidCapabilities
-    );
+    assert_eq!(reg.add(d).unwrap_err(), PluginError::InvalidCapabilities);
     assert_eq!(snapshot(&reg), before);
 
     // Bad capability entries: empty, space, too long, intra-decl duplicate.
@@ -136,10 +133,7 @@ fn ext001_t03_validation_and_overflow_registry_unchanged() {
     let before = snapshot(&reg);
     let mut d = decl("bad-version");
     d.contract_version = 999;
-    assert_eq!(
-        reg.add(d).unwrap_err(),
-        PluginError::UnsupportedContract
-    );
+    assert_eq!(reg.add(d).unwrap_err(), PluginError::UnsupportedContract);
     assert_eq!(snapshot(&reg), before);
     assert_eq!(MAX_CAPABILITIES, 16);
 
@@ -161,10 +155,7 @@ fn ext001_t03_validation_and_overflow_registry_unchanged() {
 #[test]
 fn ext001_t04_wait_cancel() {
     let mut reg = PluginRegistry::new();
-    assert_eq!(
-        reg.mark_ready(PluginId(999)),
-        Err(PluginError::Unknown)
-    );
+    assert_eq!(reg.mark_ready(PluginId(999)), Err(PluginError::Unknown));
     let cancel = AtomicBool::new(false);
     assert_eq!(
         reg.wait_ready(PluginId(999), &cancel),
@@ -175,10 +166,7 @@ fn ext001_t04_wait_cancel() {
     let id = reg.add(decl("slow")).unwrap();
     let preset = AtomicBool::new(true);
     let start = Instant::now();
-    assert_eq!(
-        reg.wait_ready(id, &preset),
-        Err(PluginError::Cancelled)
-    );
+    assert_eq!(reg.wait_ready(id, &preset), Err(PluginError::Cancelled));
     assert!(
         start.elapsed() < Duration::from_millis(50),
         "pre-set cancel must return within 50 ms"

@@ -353,7 +353,10 @@ pub fn snapshot(sel: &Selection, queue: &ApprovalQueue) -> String {
 /// Rehydrate a snapshot. Atomic: any malformed line fails the whole input.
 /// Well-formed lines for unknown ids drop; disabled/denied ids never
 /// reactivate into the selection. Oversize input fails before parsing.
-pub fn rehydrate(text: &str, reg: &Registry) -> Result<(Selection, Vec<DecisionRecord>), ChooserError> {
+pub fn rehydrate(
+    text: &str,
+    reg: &Registry,
+) -> Result<(Selection, Vec<DecisionRecord>), ChooserError> {
     if text.len() > MAX_SNAPSHOT_BYTES {
         return Err(ChooserError::SnapshotTooLarge);
     }

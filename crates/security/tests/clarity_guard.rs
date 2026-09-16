@@ -94,14 +94,28 @@ fn assert_no_banned(out: &str) {
 
 fn has_verb(line: &str) -> bool {
     const VERBS: &[&str] = &[
-        "is", "are", "uses", "use", "requires", "require", "confirms", "confirm", "run",
-        "runs", "check", "checks", "apply", "applies", "complete", "completes",
-        "xac", "hay", "vui",
+        "is",
+        "are",
+        "uses",
+        "use",
+        "requires",
+        "require",
+        "confirms",
+        "confirm",
+        "run",
+        "runs",
+        "check",
+        "checks",
+        "apply",
+        "applies",
+        "complete",
+        "completes",
+        "xac",
+        "hay",
+        "vui",
     ];
     let lower = line.to_ascii_lowercase();
-    VERBS.iter().any(|v| {
-        lower
-            .split(|c: char| !c.is_alphanumeric())
-            .any(|w| w == *v)
-    })
+    VERBS
+        .iter()
+        .any(|v| lower.split(|c: char| !c.is_alphanumeric()).any(|w| w == *v))
 }

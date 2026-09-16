@@ -5,9 +5,9 @@
 mod route_table;
 
 use route_table::{
-    DomainCallSpy, Method, ProtocolRoute, RouteKind, MAX_ROUTES, PROTOCOL_ROUTES,
     assert_protocol_coverage, build_router, build_router_with_extra, check_protocol_coverage,
     check_served, dispatch_move_session, no_direct_io_imports, route_kind, served_routes,
+    DomainCallSpy, Method, ProtocolRoute, RouteKind, MAX_ROUTES, PROTOCOL_ROUTES,
 };
 
 const CLEAN_MOVE_SESSION_HANDLER: &str = r#"
@@ -67,8 +67,7 @@ fn web003_t01_projection_subset_and_seed() {
 
 #[test]
 fn web003_t02_rogue_route_rejected() {
-    let err =
-        build_router_with_extra(&[(Method::Post, "/rogue_no_protocol")]).unwrap_err();
+    let err = build_router_with_extra(&[(Method::Post, "/rogue_no_protocol")]).unwrap_err();
     let message = format!("{err}");
     assert!(
         message.contains("/rogue_no_protocol"),
@@ -99,17 +98,18 @@ fn web003_t03_thin_handlers() {
 
     let spy = DomainCallSpy::new();
     dispatch_move_session(&spy);
-    assert_eq!(spy.calls(), 1, "thin handler calls exactly one domain method");
+    assert_eq!(
+        spy.calls(),
+        1,
+        "thin handler calls exactly one domain method"
+    );
 }
 
 #[test]
 fn web003_t04_sse_kind_and_determinism() {
     assert_eq!(route_kind("/events"), RouteKind::Sse);
     assert_eq!(route_kind("/health"), RouteKind::Json);
-    assert_eq!(
-        route_kind("/control/move_session"),
-        RouteKind::Json
-    );
+    assert_eq!(route_kind("/control/move_session"), RouteKind::Json);
 
     let first = served_routes();
     let second = served_routes();
@@ -138,8 +138,7 @@ fn web003_t05_no_side_effect_and_safety() {
     std::fs::write(&sentinel, b"sentinel-bytes").expect("sentinel fixture");
     let before = std::fs::read(&sentinel).expect("read sentinel");
 
-    let rogue =
-        build_router_with_extra(&[(Method::Post, "/rogue_no_protocol")]).unwrap_err();
+    let rogue = build_router_with_extra(&[(Method::Post, "/rogue_no_protocol")]).unwrap_err();
     let duplicated = vec![
         (Method::Get, "/health"),
         (Method::Post, "/control/move_session"),

@@ -160,9 +160,7 @@ impl IntegrationRegistry {
         if !self.is_visible(&desc.name) && self.visible_count() >= MAX_INTEGRATIONS {
             return Err(RegistryError::Overflow);
         }
-        self.layers[index]
-            .entries
-            .insert(desc.name.clone(), desc);
+        self.layers[index].entries.insert(desc.name.clone(), desc);
         Ok(())
     }
 

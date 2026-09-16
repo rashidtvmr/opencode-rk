@@ -1,6 +1,4 @@
-use opencode_rk_sessions::share_audit::{
-    MAX_SHARE_AUDIT, ShareAudit, AuditError, record_audit,
-};
+use opencode_rk_sessions::share_audit::{record_audit, AuditError, ShareAudit, MAX_SHARE_AUDIT};
 
 #[test]
 fn aud_t01_record() {

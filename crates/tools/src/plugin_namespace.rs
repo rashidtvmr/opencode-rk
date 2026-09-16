@@ -53,9 +53,9 @@ fn name_valid(name: &str) -> bool {
     if !bytes[0].is_ascii_alphanumeric() {
         return false;
     }
-    bytes[1..].iter().all(|b| {
-        b.is_ascii_alphanumeric() || *b == b'.' || *b == b'_' || *b == b'-'
-    })
+    bytes[1..]
+        .iter()
+        .all(|b| b.is_ascii_alphanumeric() || *b == b'.' || *b == b'_' || *b == b'-')
 }
 
 impl Namespace {

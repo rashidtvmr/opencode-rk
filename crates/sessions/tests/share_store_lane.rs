@@ -30,9 +30,7 @@ fn share004_t01_lifecycle_happy_path() {
     assert!(store.is_empty());
     let sess = session();
     let sec = secret("t01-owner-secret");
-    let meta = store
-        .create(sess, share_id("sh-t01"), URL_A, &sec)
-        .unwrap();
+    let meta = store.create(sess, share_id("sh-t01"), URL_A, &sec).unwrap();
     assert_eq!(meta.share_id.as_str(), "sh-t01");
     assert_eq!(meta.public_url, URL_A);
     assert_eq!(meta.last_synced_seq, 0);
@@ -93,9 +91,7 @@ fn share004_t03_failure_states() {
     assert_eq!(store.remove(unknown).unwrap_err(), StoreError::NotFound);
     // Seq regression rejected, marker unchanged.
     let sess = session();
-    store
-        .create(sess, share_id("sh-r"), URL_A, &sec)
-        .unwrap();
+    store.create(sess, share_id("sh-r"), URL_A, &sec).unwrap();
     store.mark_synced(sess, 9).unwrap();
     assert_eq!(
         store.mark_synced(sess, 4).unwrap_err(),
@@ -112,9 +108,7 @@ fn share004_t03_failure_states() {
     ] {
         let s = session();
         assert_eq!(
-            store
-                .create(s, share_id("sh-bad"), bad, &sec)
-                .unwrap_err(),
+            store.create(s, share_id("sh-bad"), bad, &sec).unwrap_err(),
             StoreError::InvalidUrl,
             "url {bad:?}"
         );
@@ -134,13 +128,8 @@ fn share004_t03_failure_states() {
     // Oversized store rejected.
     let mut full = ShareStore::new();
     for i in 0..MAX_SHARES {
-        full.create(
-            session(),
-            ShareId::new(format!("sh-{i:04}")),
-            URL_A,
-            &sec,
-        )
-        .unwrap();
+        full.create(session(), ShareId::new(format!("sh-{i:04}")), URL_A, &sec)
+            .unwrap();
     }
     assert_eq!(full.len(), MAX_SHARES);
     assert_eq!(
@@ -158,9 +147,7 @@ fn share004_t04_no_secret_retention() {
     let mut store = ShareStore::new();
     let sess = session();
     let mut sec = secret(CANARY);
-    store
-        .create(sess, share_id("sh-s"), URL_A, &sec)
-        .unwrap();
+    store.create(sess, share_id("sh-s"), URL_A, &sec).unwrap();
     // Owner zeroizes after the call.
     sec.zeroize();
     assert!(sec.as_bytes().iter().all(|b| *b == 0));

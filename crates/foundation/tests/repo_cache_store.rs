@@ -46,7 +46,12 @@ fn ops003_t01_inspect_mark_happy_path() {
     store.mark_fresh(&c, 0).unwrap();
     assert_eq!(store.inspect(&a), SlotState::Fresh);
     assert_eq!(store.inspect(&b), SlotState::Fresh);
-    assert_eq!(store.inspect(&c), SlotState::Stale { reason: "idle".to_string() });
+    assert_eq!(
+        store.inspect(&c),
+        SlotState::Stale {
+            reason: "idle".to_string()
+        }
+    );
     assert_eq!(store.inspect(&d), SlotState::Missing);
     store.mark_fresh(&c, 11).unwrap();
     assert_eq!(store.inspect(&c), SlotState::Fresh);
@@ -111,7 +116,11 @@ fn ops003_t03_caps_cancel() {
     let tmp = std::env::temp_dir().join(format!("ops003-t03-{}", std::process::id()));
     let _ = fs::remove_dir_all(&tmp);
     fs::create_dir_all(&tmp).unwrap();
-    let cfg = CacheCfg { max_slots: 2, max_bytes: 1_073_741_824, stale_after_idle: 1 };
+    let cfg = CacheCfg {
+        max_slots: 2,
+        max_bytes: 1_073_741_824,
+        stale_after_idle: 1,
+    };
     let store = CacheStore::open(&tmp, cfg).unwrap();
     for id in ["s0", "s1", "s2", "s3"] {
         store.mark_fresh(&slot(id, "main"), 0).unwrap();
@@ -125,11 +134,17 @@ fn ops003_t03_caps_cancel() {
     fs::create_dir_all(&big).unwrap();
     let bigstore = CacheStore::open(
         &big,
-        CacheCfg { max_slots: 2000, max_bytes: u64::MAX, stale_after_idle: 1 },
+        CacheCfg {
+            max_slots: 2000,
+            max_bytes: u64::MAX,
+            stale_after_idle: 1,
+        },
     )
     .unwrap();
     for i in 0..1000 {
-        bigstore.mark_fresh(&slot(&format!("k{i:04}"), "main"), 0).unwrap();
+        bigstore
+            .mark_fresh(&slot(&format!("k{i:04}"), "main"), 0)
+            .unwrap();
     }
     let cancel = Arc::new(AtomicBool::new(true));
     let t0 = std::time::Instant::now();
@@ -151,7 +166,10 @@ fn ops003_t04_contention_corrupt_never_deleted() {
     let before = fs::read(tmp.join("slots").join("victim").join("fresh.marker")).unwrap();
     let _guard = store.hold_lock(&v).unwrap();
     assert_eq!(store.mark_fresh(&v, 6).unwrap_err(), StoreError::SlotLocked);
-    assert_eq!(store.sweep_slot(&v, 10).unwrap_err(), StoreError::SlotLocked);
+    assert_eq!(
+        store.sweep_slot(&v, 10).unwrap_err(),
+        StoreError::SlotLocked
+    );
     let after = fs::read(tmp.join("slots").join("victim").join("fresh.marker")).unwrap();
     assert_eq!(before, after);
     drop(_guard);
@@ -184,7 +202,9 @@ fn ops003_t05_transport_refused_safety() {
     assert_eq!(t.reset("x"), Err(StoreError::TransportRefused));
     assert_eq!(t.invocations(), 3);
     // no writes outside fixture dir
-    let outside = tmp.join("..").join(format!("ops003-outside-{}", std::process::id()));
+    let outside = tmp
+        .join("..")
+        .join(format!("ops003-outside-{}", std::process::id()));
     assert!(!outside.exists());
     // logs carry basenames only
     let line = store.log_line(&a);

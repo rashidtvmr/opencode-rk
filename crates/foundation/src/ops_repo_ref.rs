@@ -129,7 +129,12 @@ fn normalize_inner(
         None => DEFAULT_BRANCH.to_string(),
     };
     let canonical = format!("{host}/{path}@{branch}");
-    Ok(NormalizedRef { canonical, host, path, branch })
+    Ok(NormalizedRef {
+        canonical,
+        host,
+        path,
+        branch,
+    })
 }
 
 fn parse_url_ref(rest: &str) -> Result<(String, String), RepoError> {
@@ -157,10 +162,7 @@ fn parse_bare_ref(trimmed: &str, default_host: &str) -> Result<(String, String),
         for s in &segments[1..] {
             validate_segment(s)?;
         }
-        Ok((
-            segments[0].to_ascii_lowercase(),
-            segments[1..].join("/"),
-        ))
+        Ok((segments[0].to_ascii_lowercase(), segments[1..].join("/")))
     } else {
         Err(RepoError::Malformed)
     }

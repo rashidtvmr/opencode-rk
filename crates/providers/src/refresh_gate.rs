@@ -13,8 +13,8 @@
 use std::collections::HashMap;
 use std::fmt;
 use std::sync::{
-    Arc, Mutex, Weak,
     atomic::{AtomicU64, Ordering},
+    Arc, Mutex, Weak,
 };
 
 use thiserror::Error;
@@ -233,7 +233,9 @@ impl RefreshGate {
             expires_at_ms: new_expiry_ms,
             refreshed_at_ms: now_ms,
         };
-        inner.records.insert(id.as_str().to_owned(), recorded.clone());
+        inner
+            .records
+            .insert(id.as_str().to_owned(), recorded.clone());
         Ok(recorded)
     }
 
@@ -317,9 +319,7 @@ impl RefreshGuard {
             expires_at_ms: new_expiry_ms,
             refreshed_at_ms: now_ms,
         };
-        inner
-            .records
-            .insert(self.cred.clone(), recorded.clone());
+        inner.records.insert(self.cred.clone(), recorded.clone());
         Ok(recorded)
     }
 

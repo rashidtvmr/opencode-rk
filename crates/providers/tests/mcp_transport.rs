@@ -101,9 +101,9 @@ fn int006_t02_transport_auth_matrix_and_scheme_reject() {
             );
             let mut t = LoopbackTransport::ok();
             let cancel = open_cancel();
-            let sess = att
-                .connect(&mut t, &known, &cancel)
-                .unwrap_or_else(|e| panic!("combo {want_transport:?}/{want_auth:?} connects: {e:?}"));
+            let sess = att.connect(&mut t, &known, &cancel).unwrap_or_else(|e| {
+                panic!("combo {want_transport:?}/{want_auth:?} connects: {e:?}")
+            });
             assert_eq!(sess.transport, *want_transport);
             assert_eq!(sess.auth_mode, *want_auth);
             sess.close();
@@ -166,10 +166,7 @@ fn int006_t03_bounds_hold() {
         },
         auth: McpAuth::None,
     };
-    assert_eq!(
-        att_argv.validate().unwrap_err(),
-        McpError::InvalidEndpoint
-    );
+    assert_eq!(att_argv.validate().unwrap_err(), McpError::InvalidEndpoint);
     let mut t = LoopbackTransport::ok();
     assert_eq!(
         att_argv.connect(&mut t, &[], &cancel).unwrap_err(),

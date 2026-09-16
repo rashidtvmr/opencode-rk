@@ -1,7 +1,7 @@
 #[path = "../src/terse_render.rs"]
 mod terse_render;
 
-use terse_render::{Intensity, TerseRenderer, MAX_INPUT_BYTES};
+use terse_render::{Intensity, MAX_INPUT_BYTES, TerseRenderer};
 
 // TOOL-022-T01 (lite compresses): Lite strips filler, keeps content.
 #[test]

@@ -2,9 +2,9 @@
 mod web_attachments;
 
 use web_attachments::{
-    AttachmentStore, AttachError, Source, MAX_ATTACHMENTS_PER_TURN, MAX_ATTACHMENT_BYTES,
     alt_text, chip_label, drop_control, library_control, picker_control, preview_control,
-    provider_reference, remove_control, validate_attachment,
+    provider_reference, remove_control, validate_attachment, AttachError, AttachmentStore, Source,
+    MAX_ATTACHMENTS_PER_TURN, MAX_ATTACHMENT_BYTES,
 };
 
 fn png_bytes() -> Vec<u8> {
@@ -17,9 +17,15 @@ fn web011_t01_ingest_send() {
     let rec = store
         .ingest("shot.png", "image/png", &png_bytes(), Source::Picker)
         .expect("allowed png ingests");
-    assert!(chip_label(&rec).contains("shot.png"), "composer chip names file");
+    assert!(
+        chip_label(&rec).contains("shot.png"),
+        "composer chip names file"
+    );
     let pref = provider_reference(&rec);
-    assert!(pref.starts_with("blob:"), "provider gets real blob ref, got {pref}");
+    assert!(
+        pref.starts_with("blob:"),
+        "provider gets real blob ref, got {pref}"
+    );
     assert!(pref.contains(&rec.digest), "ref carries digest");
     let again = store
         .ingest("copy.png", "image/png", &png_bytes(), Source::Paste)
@@ -71,7 +77,11 @@ fn web011_t03_accessible_picker_preview() {
         preview_control(),
         remove_control(),
     ] {
-        assert!(ctl.keyboard_operable, "control {} keyboard operable", ctl.id);
+        assert!(
+            ctl.keyboard_operable,
+            "control {} keyboard operable",
+            ctl.id
+        );
         assert!(!ctl.label.is_empty(), "control {} labelled", ctl.id);
         assert!(!ctl.role.is_empty(), "control {} roled", ctl.id);
     }
@@ -113,7 +123,10 @@ fn web011_t04_resource_lifecycle() {
         shared.resolve(&a.digest).is_some(),
         "shared blob survives one removal"
     );
-    assert!(!shared.remove_attachment("blob:missing"), "missing removal false");
+    assert!(
+        !shared.remove_attachment("blob:missing"),
+        "missing removal false"
+    );
 }
 
 #[test]
@@ -136,6 +149,9 @@ fn web011_t05_library_reload_fidelity() {
     let entry = fresh
         .library_resolve(&rec.digest)
         .expect("library entry resolvable");
-    assert_eq!(entry.origin, "screenshot:window-1", "source metadata survives");
+    assert_eq!(
+        entry.origin, "screenshot:window-1",
+        "source metadata survives"
+    );
     assert!(fresh.resolve(&rec.digest).is_some(), "blob resolvable");
 }

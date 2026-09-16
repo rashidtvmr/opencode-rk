@@ -44,6 +44,9 @@ pub mod ui_010;
 pub mod ui_011;
 pub mod ui_012;
 pub mod ui_013;
+pub mod part_events;
+pub mod runner;
+pub mod tui_info_panel;
 
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{

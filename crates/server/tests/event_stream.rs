@@ -7,7 +7,7 @@
 #[path = "../src/event_stream.rs"]
 mod event_stream;
 
-use event_stream::{FrameError, Hub, StreamConfig, encode_frame, keepalive_frame, sse_headers};
+use event_stream::{encode_frame, keepalive_frame, sse_headers, FrameError, Hub, StreamConfig};
 
 // WEB-005-T01 (framing happy path).
 #[test]
@@ -17,7 +17,11 @@ fn web005_t01_framing_happy_path() {
 
     let mut hub = Hub::new(StreamConfig::default());
     let id = hub.subscribe();
-    for payload in [b"{\"a\":1}".as_slice(), b"{\"b\":2}".as_slice(), b"{\"c\":3}".as_slice()] {
+    for payload in [
+        b"{\"a\":1}".as_slice(),
+        b"{\"b\":2}".as_slice(),
+        b"{\"c\":3}".as_slice(),
+    ] {
         let summary = hub.publish(payload);
         assert_eq!(summary.delivered, 1);
         assert_eq!(summary.dropped_oversize, 0);
@@ -138,7 +142,10 @@ fn web005_t04_disconnect_reclaims_state() {
     assert!(!hub.flushed_after_close());
     assert_eq!(hub.received(a).len(), 3);
     assert_eq!(hub.received(c).len(), 3);
-    assert_eq!(hub.publish_to(b, b"{\"n\":4}"), Err(event_stream::DeliverError::Closed));
+    assert_eq!(
+        hub.publish_to(b, b"{\"n\":4}"),
+        Err(event_stream::DeliverError::Closed)
+    );
 
     // Dropping the rest returns bytes and tasks to baseline: no leak.
     assert!(hub.unsubscribe(a));

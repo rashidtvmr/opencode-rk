@@ -123,8 +123,7 @@ impl InbuiltFeatures {
                 merge_layer(&mut merged, section.clone());
             }
         }
-        serde_json::from_value(merged)
-            .map_err(|error| ConfigError::InvalidValue(error.to_string()))
+        serde_json::from_value(merged).map_err(|error| ConfigError::InvalidValue(error.to_string()))
     }
 }
 

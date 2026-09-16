@@ -311,7 +311,13 @@ impl AttachmentStore {
         if let Some(n) = self.refs.get_mut(&key) {
             *n = n.saturating_sub(1);
         }
-        false_positive_cleanup(&mut self.refs, &mut self.blobs, &self.staged, &self.library, &key);
+        false_positive_cleanup(
+            &mut self.refs,
+            &mut self.blobs,
+            &self.staged,
+            &self.library,
+            &key,
+        );
         true
     }
 

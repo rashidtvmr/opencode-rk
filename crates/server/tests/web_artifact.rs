@@ -6,10 +6,10 @@
 mod web_artifact;
 
 use web_artifact::{
-    ArtifactKind, RunError, authorize_run, copy_text, edit_artifact, open_artifact,
-    open_code, preview_artifact, redo_edit, restore_snapshot, snapshot, toggle_preview,
-    undo_edit, MAX_ARTIFACT_BYTES, MAX_EXEC_OUTPUT_BYTES, MAX_PREVIEW_BYTES,
-    MAX_VERSIONS, artifact_controls,
+    artifact_controls, authorize_run, copy_text, edit_artifact, open_artifact, open_code,
+    preview_artifact, redo_edit, restore_snapshot, snapshot, toggle_preview, undo_edit,
+    ArtifactKind, RunError, MAX_ARTIFACT_BYTES, MAX_EXEC_OUTPUT_BYTES, MAX_PREVIEW_BYTES,
+    MAX_VERSIONS,
 };
 
 fn writing() -> web_artifact::Artifact {
@@ -30,7 +30,11 @@ fn artifact_t01_happy_path_edit_copy_preview_preserves_original() {
     let seq = edit_artifact(&mut a, "hello brave world").expect("edit");
     assert_eq!(seq, 2);
     assert_eq!(copy_text(&a), "hello brave world");
-    assert_eq!(a.original_body(), "hello world", "original message never mutates");
+    assert_eq!(
+        a.original_body(),
+        "hello world",
+        "original message never mutates"
+    );
     let p2 = preview_artifact(&a, false).expect("preview after edit");
     assert_eq!(p2.text, "hello brave world");
 }
@@ -50,20 +54,35 @@ fn artifact_t02_run_apply_disabled_without_executor_and_gated_when_enabled() {
     // Enabled + explicitly granted: permit carries bounded output.
     let permit = authorize_run(true, true).expect("granted run");
     let out = permit.execute("x".repeat(MAX_EXEC_OUTPUT_BYTES + 8));
-    assert!(out.text.len() <= MAX_EXEC_OUTPUT_BYTES, "exec output bounded");
+    assert!(
+        out.text.len() <= MAX_EXEC_OUTPUT_BYTES,
+        "exec output bounded"
+    );
     assert!(out.truncated);
-    assert_eq!(copy_text(&a), "print('hi')", "execution never rewrites artifact");
+    assert_eq!(
+        copy_text(&a),
+        "print('hi')",
+        "execution never rewrites artifact"
+    );
     // Impl must not hide a real executor: source scan.
-    let source = std::fs::read_to_string(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/src/web_artifact.rs"
-    ))
-    .expect("read artifact source");
+    let source =
+        std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/web_artifact.rs"))
+            .expect("read artifact source");
     for banned in [
-        "TcpListener", "UdpSocket", "tokio::spawn", "std::process", "Command",
-        "std::net", "std::fs", "listen(", "connect(",
+        "TcpListener",
+        "UdpSocket",
+        "tokio::spawn",
+        "std::process",
+        "Command",
+        "std::net",
+        "std::fs",
+        "listen(",
+        "connect(",
     ] {
-        assert!(!source.contains(banned), "no hidden executor: found {banned:?}");
+        assert!(
+            !source.contains(banned),
+            "no hidden executor: found {banned:?}"
+        );
     }
     for secret_word in ["secret", "token", "password"] {
         assert!(
@@ -76,11 +95,18 @@ fn artifact_t02_run_apply_disabled_without_executor_and_gated_when_enabled() {
 #[test]
 fn artifact_t03_controls_keyboard_operable_and_focus_preserved() {
     let ctrls = artifact_controls(ArtifactKind::Code);
-    assert!(ctrls.len() >= 5, "editor/preview/undo/redo/copy/run controls");
+    assert!(
+        ctrls.len() >= 5,
+        "editor/preview/undo/redo/copy/run controls"
+    );
     for c in &ctrls {
         assert!(!c.label.is_empty(), "screen-reader label required");
         assert!(!c.role.is_empty(), "ARIA role required");
-        assert!(!c.shortcut.is_empty(), "keyboard path required: {}", c.label);
+        assert!(
+            !c.shortcut.is_empty(),
+            "keyboard path required: {}",
+            c.label
+        );
     }
     let mut a = writing();
     a.set_selection(2, 5);
@@ -113,7 +139,10 @@ fn artifact_t04_bounds_history_preview_cancellable() {
     // Preview bounded + cancellable.
     let p = preview_artifact(&a, false).expect("preview");
     assert!(p.text.len() <= MAX_PREVIEW_BYTES);
-    assert!(preview_artifact(&a, true).is_err(), "cancel stops preview work");
+    assert!(
+        preview_artifact(&a, true).is_err(),
+        "cancel stops preview work"
+    );
     // Side-effect-free: sentinel untouched, no files created.
     let dir = tempfile::tempdir().expect("disposable fixture");
     let sentinel = dir.path().join("sentinel.txt");
@@ -137,8 +166,16 @@ fn artifact_t05_versions_explicit_and_reload_fidelity() {
     assert_eq!(a.original_body(), "hello world");
     let snap = snapshot(&a);
     let b = restore_snapshot(snap).expect("reload");
-    assert_eq!(copy_text(&b), "draft three", "reload restores current draft");
-    assert_eq!(b.original_body(), "hello world", "reload never rewrites history");
+    assert_eq!(
+        copy_text(&b),
+        "draft three",
+        "reload restores current draft"
+    );
+    assert_eq!(
+        b.original_body(),
+        "hello world",
+        "reload never rewrites history"
+    );
     assert_eq!(b.current_seq(), 3);
     assert_eq!(b.version_count(), a.version_count());
     // Reloaded artifact keeps editing as new versions, original intact.

@@ -106,10 +106,7 @@ fn web016_t04_bounds_and_lifecycle_release() {
     assert_eq!(s.utterance_count(), 2);
     s.mute().expect("mute pauses capture");
     assert_eq!(s.live_tracks(), 0);
-    assert_eq!(
-        s.push_utterance(9, "muted speech"),
-        Err(VoiceError::Muted)
-    );
+    assert_eq!(s.push_utterance(9, "muted speech"), Err(VoiceError::Muted));
     assert_eq!(s.utterance_count(), 2);
     s.unmute().expect("unmute resumes capture");
     assert_eq!(s.live_tracks(), 1);

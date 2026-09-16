@@ -6,7 +6,7 @@
 #[path = "../src/rtk_testfilter.rs"]
 mod rtk_testfilter;
 
-use rtk_testfilter::{FilterOpts, TestTool, filter_test_output, MAX_KEPT_BYTES};
+use rtk_testfilter::{FilterOpts, MAX_KEPT_BYTES, TestTool, filter_test_output};
 
 fn opts() -> FilterOpts {
     FilterOpts::default()
@@ -20,8 +20,16 @@ fn tool020_t01_allpass_verdict_only() {
     }
     log.push_str("5 passed in 1.23s\n");
     let out = filter_test_output(TestTool::Pytest, &log, 0, &opts());
-    assert!(out.text.contains("5 passed"), "missing verdict: {:?}", out.text);
-    assert!(out.verdict.contains("5 passed"), "verdict field empty: {:?}", out.verdict);
+    assert!(
+        out.text.contains("5 passed"),
+        "missing verdict: {:?}",
+        out.text
+    );
+    assert!(
+        out.verdict.contains("5 passed"),
+        "verdict field empty: {:?}",
+        out.verdict
+    );
     for line in out.text.lines() {
         assert!(!line.contains("PASSED"), "leaked passing line: {line}");
         assert!(
@@ -50,7 +58,11 @@ fn tool020_t02_failure_shows_failing_test_plus_diff() {
     .join("\n")
         + "\n";
     let out = filter_test_output(TestTool::Pytest, &log, 1, &opts());
-    assert!(out.text.contains("test_x"), "missing failing id: {:?}", out.text);
+    assert!(
+        out.text.contains("test_x"),
+        "missing failing id: {:?}",
+        out.text
+    );
     assert!(
         out.text.contains("assert 1 == 2"),
         "missing diff: {:?}",
@@ -68,7 +80,11 @@ fn tool020_t02_failure_shows_failing_test_plus_diff() {
 #[test]
 fn tool020_t03_exit_code_preserved() {
     let cases: &[(TestTool, &str, i32)] = &[
-        (TestTool::Pytest, "FAILED tests/test_a.py::test_x\n1 failed in 0.3s\n", 1),
+        (
+            TestTool::Pytest,
+            "FAILED tests/test_a.py::test_x\n1 failed in 0.3s\n",
+            1,
+        ),
         (
             TestTool::CargoTest,
             "test foo::bar FAILED\ntest result: FAILED. 0 passed; 1 failed;\n",
@@ -158,7 +174,11 @@ fn tool020_t05_overbudget_truncates_with_marker() {
         ));
     }
     log.push_str("1 failed in 12.30s\n");
-    assert!(log.len() > 500 * 1024, "fixture under 500 KiB: {}", log.len());
+    assert!(
+        log.len() > 500 * 1024,
+        "fixture under 500 KiB: {}",
+        log.len()
+    );
     let out = filter_test_output(TestTool::Pytest, &log, 1, &opts());
     assert!(
         out.text.len() <= MAX_KEPT_BYTES + 1024,

@@ -27,8 +27,5 @@ fn bak_t04_padding() {
 #[test]
 fn bak_t05_too_long() {
     let long = "a".repeat(129);
-    assert_eq!(
-        backup_name(&long, 1).unwrap_err(),
-        BackupError::BadName
-    );
+    assert_eq!(backup_name(&long, 1).unwrap_err(), BackupError::BadName);
 }

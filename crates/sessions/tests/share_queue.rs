@@ -162,8 +162,13 @@ fn share_queue_t05_safety_no_side_effects() {
     let mut logs: Vec<String> = Vec::new();
     {
         let mut q = CoalescingQueue::new(CAPS, accept_all);
-        q.push(ev("s1", "message", "m1", &format!(r#"{{"body":"{MARK}"}}"#)))
-            .unwrap();
+        q.push(ev(
+            "s1",
+            "message",
+            "m1",
+            &format!(r#"{{"body":"{MARK}"}}"#),
+        ))
+        .unwrap();
         q.push(ev("s1", "part", "p1", r#"{"v":1}"#)).unwrap();
         logs.push(format!(
             "len={} bytes={} filtered={} evicted={}",

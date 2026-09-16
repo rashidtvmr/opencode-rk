@@ -5,8 +5,8 @@
 mod share_merge;
 
 use share_merge::{
-    MAX_BATCHES, MAX_RECORDS_PER_BATCH, MAX_RECORD_BYTES, MergeOutput, RecordKind, ShareError,
-    ShareId, ShareRecord, ShareSecret, apply_sync, merge_share_records,
+    apply_sync, merge_share_records, MergeOutput, RecordKind, ShareError, ShareId, ShareRecord,
+    ShareSecret, MAX_BATCHES, MAX_RECORDS_PER_BATCH, MAX_RECORD_BYTES,
 };
 use std::sync::atomic::AtomicBool;
 
@@ -208,7 +208,8 @@ fn share_merge_t05_safety_purity_cancel() {
         &format!(r#"{{"body":"{BODY_MARK}"}}"#),
     )];
     let cancel = AtomicBool::new(true);
-    let err = merge_share_records(&[existing.as_slice(), incoming.as_slice()], &cancel).unwrap_err();
+    let err =
+        merge_share_records(&[existing.as_slice(), incoming.as_slice()], &cancel).unwrap_err();
     assert_eq!(err, ShareError::Cancelled);
     for rendered in [
         format!("{err}"),

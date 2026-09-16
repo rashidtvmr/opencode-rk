@@ -7,9 +7,9 @@
 mod web_tool_chooser;
 
 use web_tool_chooser::{
-    ApprovalQueue, Capability, CapabilityKind, CapabilityState, ChooserError, Decision,
-    Registry, Selection, MAX_SEARCH_RESULTS, MAX_SELECTION, MAX_SNAPSHOT_BYTES, rehydrate,
-    snapshot, turn_contract,
+    rehydrate, snapshot, turn_contract, ApprovalQueue, Capability, CapabilityKind, CapabilityState,
+    ChooserError, Decision, Registry, Selection, MAX_SEARCH_RESULTS, MAX_SELECTION,
+    MAX_SNAPSHOT_BYTES,
 };
 
 fn cap(
@@ -82,14 +82,20 @@ fn web012_t01_real_capability_selection_in_turn_contract() {
     let reg = registry();
     let mut sel = Selection::new();
     // Select in reverse registry order; contract must follow registry order.
-    sel.select(&reg, "shell-exec").expect("enabled tool selects");
-    sel.select(&reg, "web-search").expect("enabled tool selects");
+    sel.select(&reg, "shell-exec")
+        .expect("enabled tool selects");
+    sel.select(&reg, "web-search")
+        .expect("enabled tool selects");
     assert!(sel.contains("web-search"));
     assert!(sel.contains("shell-exec"));
     let contract = turn_contract(&reg, &sel);
-    assert_eq!(contract, vec!["web-search".to_string(), "shell-exec".to_string()]);
+    assert_eq!(
+        contract,
+        vec!["web-search".to_string(), "shell-exec".to_string()]
+    );
     // Idempotent reselect keeps one entry.
-    sel.select(&reg, "web-search").expect("reselect is idempotent");
+    sel.select(&reg, "web-search")
+        .expect("reselect is idempotent");
     assert_eq!(sel.len(), 2);
 }
 
@@ -106,7 +112,8 @@ fn web012_t02_unavailable_denied_never_substituted() {
     assert!(sel.is_empty(), "denied/disabled leave no selection behind");
     assert!(turn_contract(&reg, &sel).is_empty());
     // One enabled pick yields exactly itself: no fallback tool is injected.
-    sel.select(&reg, "web-search").expect("enabled tool selects");
+    sel.select(&reg, "web-search")
+        .expect("enabled tool selects");
     assert_eq!(turn_contract(&reg, &sel), vec!["web-search".to_string()]);
 }
 
@@ -235,10 +242,7 @@ fn web012_t05_persistence_audit_rehydrate_without_secrets() {
     let (sel3, audit3) = rehydrate(text, &reg).expect("unknown entries drop");
     assert_eq!(sel3.ids(), &["web-search".to_string()]);
     assert!(audit3.is_empty(), "unknown decision tools drop");
-    assert_eq!(
-        turn_contract(&reg, &sel3),
-        vec!["web-search".to_string()]
-    );
+    assert_eq!(turn_contract(&reg, &sel3), vec!["web-search".to_string()]);
 
     // Malformed input fails atomically; oversize fails before parsing.
     assert_eq!(

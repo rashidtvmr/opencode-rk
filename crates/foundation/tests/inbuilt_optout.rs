@@ -64,7 +64,8 @@ fn rel007_t03_env_layer_wins_over_file() {
     let cfg = InbuiltFeatures::resolve(&[file, env]).unwrap();
     assert!(!cfg.telemetry, "reverse polarity must also hold");
 
-    let env = Layer::from_env_vars([(String::from("UNRELATED_VAR"), String::from("true"))]).unwrap();
+    let env =
+        Layer::from_env_vars([(String::from("UNRELATED_VAR"), String::from("true"))]).unwrap();
     let cfg = InbuiltFeatures::resolve(&[env]).unwrap();
     assert!(cfg.telemetry, "unrelated env must be ignored");
 
@@ -79,10 +80,13 @@ fn rel007_t03_env_layer_wins_over_file() {
     assert!(!cfg.rtk_filter, "CLI must win over env");
     assert!(cfg.telemetry && cfg.codebase_index && cfg.terse_mode);
 
-    let unknown =
-        Layer::from_json_str(r#"{"inbuilt":{"future_flag":false},"other":{}}"#).unwrap();
+    let unknown = Layer::from_json_str(r#"{"inbuilt":{"future_flag":false},"other":{}}"#).unwrap();
     let cfg = InbuiltFeatures::resolve(&[unknown]).unwrap();
-    assert_eq!(cfg, InbuiltFeatures::default(), "unknown keys must be ignored");
+    assert_eq!(
+        cfg,
+        InbuiltFeatures::default(),
+        "unknown keys must be ignored"
+    );
 
     let wrong_type = Layer::from_json_str(r#"{"inbuilt":{"telemetry":42}}"#).unwrap();
     assert!(

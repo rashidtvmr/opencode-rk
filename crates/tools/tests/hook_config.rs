@@ -31,7 +31,10 @@ fn hkc_t04_overflow() {
     let items: Vec<(String, String)> = (0..MAX_HOOK_CONFIGS + 1)
         .map(|i| (format!("h{i}"), format!("cmd {i}")))
         .collect();
-    let refs: Vec<(&str, &str)> = items.iter().map(|(a, b)| (a.as_str(), b.as_str())).collect();
+    let refs: Vec<(&str, &str)> = items
+        .iter()
+        .map(|(a, b)| (a.as_str(), b.as_str()))
+        .collect();
     match qualify_hooks(&refs) {
         Err(HookConfigError::TooMany { max, actual }) => {
             assert_eq!(max, MAX_HOOK_CONFIGS);

@@ -314,7 +314,11 @@ impl TurnParts {
         let mut activity = String::new();
         for tool in &self.tools {
             let state = if tool.done {
-                if tool.ok { "ok" } else { "error" }
+                if tool.ok {
+                    "ok"
+                } else {
+                    "error"
+                }
             } else {
                 "running"
             };
@@ -433,7 +437,9 @@ impl TurnParts {
         let value: serde_json::Value =
             serde_json::from_str(snapshot).map_err(|_| ActivityError::Snapshot("invalid json"))?;
         let object = value.as_object().ok_or(ActivityError::Snapshot("object"))?;
-        if object.get("version").and_then(serde_json::Value::as_u64) != Some(u64::from(SNAPSHOT_VERSION)) {
+        if object.get("version").and_then(serde_json::Value::as_u64)
+            != Some(u64::from(SNAPSHOT_VERSION))
+        {
             return Err(ActivityError::Snapshot("version"));
         }
         // Reject any hidden-CoT shaped payload outright.
@@ -474,8 +480,14 @@ impl TurnParts {
                 .ok_or(ActivityError::Snapshot("call_id"))?;
             check_tool_id(name, MAX_TOOL_NAME_BYTES, "tool name")?;
             check_tool_id(call_id, MAX_CALL_ID_BYTES, "call_id")?;
-            let done = tool.get("done").and_then(serde_json::Value::as_bool).unwrap_or(false);
-            let ok = tool.get("ok").and_then(serde_json::Value::as_bool).unwrap_or(false);
+            let done = tool
+                .get("done")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
+            let ok = tool
+                .get("ok")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false);
             turn.tools.push(ToolCall {
                 name: name.to_owned(),
                 call_id: call_id.to_owned(),
@@ -502,10 +514,12 @@ impl TurnParts {
             }
             if let Some(url) = reference.get("url").and_then(serde_json::Value::as_str) {
                 check_tool_id(url, MAX_REFERENCE_BYTES, "reference target")?;
-                turn.references.push((label.to_owned(), RefTarget::Url(url.to_owned())));
+                turn.references
+                    .push((label.to_owned(), RefTarget::Url(url.to_owned())));
             } else if let Some(path) = reference.get("path").and_then(serde_json::Value::as_str) {
                 check_tool_id(path, MAX_REFERENCE_BYTES, "reference target")?;
-                turn.references.push((label.to_owned(), RefTarget::Path(path.to_owned())));
+                turn.references
+                    .push((label.to_owned(), RefTarget::Path(path.to_owned())));
             } else {
                 return Err(ActivityError::Snapshot("target"));
             }
@@ -513,7 +527,11 @@ impl TurnParts {
         if turn.references.len() > MAX_REFERENCES {
             return Err(ActivityError::Snapshot("too many references"));
         }
-        turn.events = turn.tools.len().saturating_add(turn.references.len()).min(MAX_EVENTS);
+        turn.events = turn
+            .tools
+            .len()
+            .saturating_add(turn.references.len())
+            .min(MAX_EVENTS);
         turn.finished = true;
         Ok(turn)
     }

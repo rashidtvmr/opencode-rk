@@ -1,4 +1,4 @@
-use opencode_rk_providers::int_backoff::{MAX_BACKOFF_MS, backoff_ms};
+use opencode_rk_providers::int_backoff::{backoff_ms, MAX_BACKOFF_MS};
 
 #[test]
 fn bof_t01_linear() {

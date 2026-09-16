@@ -6,9 +6,7 @@
 #[path = "../src/int_methods.rs"]
 mod int_methods;
 
-use int_methods::{
-    MethodError, MethodInput, MethodTable, MAX_METHODS_PER_PROVIDER, MAX_PROVIDERS,
-};
+use int_methods::{MethodError, MethodInput, MethodTable, MAX_METHODS_PER_PROVIDER, MAX_PROVIDERS};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -37,10 +35,14 @@ fn int_003_t01_register_dispatch_happy_path() {
     assert_eq!(table.list_methods("prov-a").len(), 2);
     assert_eq!(table.list_methods("prov-b").len(), 2);
 
-    let receipt = table.dispatch("prov-a", "key", &input("h1")).expect("dispatch");
+    let receipt = table
+        .dispatch("prov-a", "key", &input("h1"))
+        .expect("dispatch");
     assert_eq!(receipt.handler_id, 11);
     assert!(receipt.accepted);
-    let receipt = table.dispatch("prov-b", "sync-now", &input("h2")).expect("dispatch");
+    let receipt = table
+        .dispatch("prov-b", "sync-now", &input("h2"))
+        .expect("dispatch");
     assert_eq!(receipt.handler_id, 22);
     assert!(receipt.accepted);
 }
@@ -87,16 +89,24 @@ fn int_003_t03_caps_hold_and_bulk_dispatch_stable() {
     for i in 0..MAX_METHODS_PER_PROVIDER {
         reg(&mut per_provider, "solo", &format!("m-{i:02}"), i as u64);
     }
-    assert_eq!(per_provider.list_methods("solo").len(), MAX_METHODS_PER_PROVIDER);
+    assert_eq!(
+        per_provider.list_methods("solo").len(),
+        MAX_METHODS_PER_PROVIDER
+    );
     match per_provider.register("solo", "m-overflow", 999) {
         Err(MethodError::TableFull) => {}
         other => panic!("expected TableFull, got {other:?}"),
     }
-    assert_eq!(per_provider.list_methods("solo").len(), MAX_METHODS_PER_PROVIDER);
+    assert_eq!(
+        per_provider.list_methods("solo").len(),
+        MAX_METHODS_PER_PROVIDER
+    );
 
     let before = table.len();
     for _ in 0..10_000 {
-        let receipt = table.dispatch("prov-00", "key", &input("bulk")).expect("dispatch");
+        let receipt = table
+            .dispatch("prov-00", "key", &input("bulk"))
+            .expect("dispatch");
         assert_eq!(receipt.handler_id, 0);
     }
     assert_eq!(table.len(), before);
@@ -157,7 +167,9 @@ fn int_003_t05_no_io_no_secret_leak_no_exec_on_error() {
         handle: secret,
         bytes: secret.as_bytes(),
     };
-    let ok = table.dispatch("prov-a", "key", &secret_input).expect("dispatch");
+    let ok = table
+        .dispatch("prov-a", "key", &secret_input)
+        .expect("dispatch");
     assert!(ok.accepted);
 
     let err = table

@@ -29,7 +29,10 @@ pub fn qualify_routekey(k: &str) -> Result<String, RouteKeyError> {
         Some(c) if c.is_ascii_lowercase() || c.is_ascii_digit() => {}
         _ => return Err(RouteKeyError::BadKey),
     }
-    if !k.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-') {
+    if !k
+        .chars()
+        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+    {
         return Err(RouteKeyError::BadKey);
     }
     Ok(k.to_owned())

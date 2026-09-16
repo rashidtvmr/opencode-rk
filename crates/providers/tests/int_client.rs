@@ -32,10 +32,7 @@ fn intcl_t03_bad_chars() {
 
 #[test]
 fn intcl_t04_tag() {
-    assert_eq!(
-        client_tag("AbC-1").expect("valid tag"),
-        "client:abc-1"
-    );
+    assert_eq!(client_tag("AbC-1").expect("valid tag"), "client:abc-1");
 }
 
 #[test]

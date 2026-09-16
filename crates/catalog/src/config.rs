@@ -29,9 +29,7 @@ impl CatalogConfig {
     pub fn load(path: &std::path::Path) -> Self {
         if path.exists() {
             match fs::read_to_string(path) {
-                Ok(content) => {
-                    toml::from_str(&content).unwrap_or_default()
-                }
+                Ok(content) => toml::from_str(&content).unwrap_or_default(),
                 Err(_) => Self::default(),
             }
         } else {

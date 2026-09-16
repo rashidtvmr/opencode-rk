@@ -1,4 +1,4 @@
-use opencode_rk_providers::int_alias::{AliasError, resolve_alias};
+use opencode_rk_providers::int_alias::{resolve_alias, AliasError};
 
 #[test]
 fn als_t01_hit() {

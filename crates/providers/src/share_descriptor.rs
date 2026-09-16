@@ -138,9 +138,7 @@ impl ShareSync {
                 match self.shares.get(&desc.id) {
                     Some(stored) if desc.seq <= stored.seq => Ok(Some(stored.clone())),
                     _ => {
-                        if !self.shares.contains_key(&desc.id)
-                            && self.shares.len() >= MAX_SHARES
-                        {
+                        if !self.shares.contains_key(&desc.id) && self.shares.len() >= MAX_SHARES {
                             return Err(ShareError::Overflow);
                         }
                         // Digest bytes used for the retained copy only; never logged.

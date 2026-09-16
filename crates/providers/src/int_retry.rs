@@ -41,7 +41,9 @@ pub fn plan_retry(attempts: u32, base_ms: u64) -> Result<RetryPlan, RetryError> 
             asked: attempts,
         });
     }
-    let backoff_ms = base_ms.saturating_mul(u64::from(attempts)).min(MAX_BACKOFF_MS);
+    let backoff_ms = base_ms
+        .saturating_mul(u64::from(attempts))
+        .min(MAX_BACKOFF_MS);
     Ok(RetryPlan {
         attempts,
         backoff_ms,

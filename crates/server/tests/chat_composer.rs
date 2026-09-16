@@ -7,9 +7,9 @@
 mod chat_composer;
 
 use chat_composer::{
-    ComposerDoc, ComposerError, ComposerNode, DraftQueue, KeyAction, accessible_label,
-    decode_draft, doc_from_legacy_text, editor_help, encode_draft, key_command, lower_composer_doc,
-    sanitize_doc, MAX_COMPOSER_TEXT_BYTES, MAX_DOC_NODES, MAX_DRAFT_BYTES, MAX_QUEUE_DRAFTS,
+    accessible_label, decode_draft, doc_from_legacy_text, editor_help, encode_draft, key_command,
+    lower_composer_doc, sanitize_doc, ComposerDoc, ComposerError, ComposerNode, DraftQueue,
+    KeyAction, MAX_COMPOSER_TEXT_BYTES, MAX_DOC_NODES, MAX_DRAFT_BYTES, MAX_QUEUE_DRAFTS,
 };
 
 fn t01_doc() -> ComposerDoc {
@@ -157,10 +157,7 @@ fn web010_t02_paste_sanitizes_and_blocks_inactive_capabilities() {
 
 #[test]
 fn web010_t03_editor_keyboard_and_labels_have_no_traps() {
-    assert_eq!(
-        key_command("Enter", false, false),
-        KeyAction::InsertNewline
-    );
+    assert_eq!(key_command("Enter", false, false), KeyAction::InsertNewline);
     assert_eq!(key_command("Enter", true, false), KeyAction::Send);
     assert_eq!(key_command("z", true, false), KeyAction::Undo);
     assert_eq!(key_command("z", true, true), KeyAction::Redo);
@@ -250,8 +247,8 @@ fn web010_t05_draft_reload_and_legacy_compat() {
     let relowered = lower_composer_doc(&decoded.doc).expect("reloaded doc lowers");
     assert_eq!(relowered.text, lower_composer_doc(&doc).unwrap().text);
 
-    let legacy = doc_from_legacy_text("old plain", "openai/gpt-4o-mini", "low")
-        .expect("legacy text wraps");
+    let legacy =
+        doc_from_legacy_text("old plain", "openai/gpt-4o-mini", "low").expect("legacy text wraps");
     assert_eq!(legacy.nodes.len(), 1);
     let lowered = lower_composer_doc(&legacy).expect("legacy doc lowers");
     assert_eq!(lowered.text, "old plain");

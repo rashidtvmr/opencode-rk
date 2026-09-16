@@ -233,11 +233,7 @@ impl RiskIndex {
             .get(name)
             .cloned()
             .ok_or_else(|| RiskError::UnknownSymbol(name.to_owned()))?;
-        let mut dependents: Vec<String> = self
-            .fwd
-            .get(name)
-            .cloned()
-            .unwrap_or_default();
+        let mut dependents: Vec<String> = self.fwd.get(name).cloned().unwrap_or_default();
         dependents.sort();
         let dependents_truncated = dependents.len() > self.caps.max_nodes;
         dependents.truncate(self.caps.max_nodes);

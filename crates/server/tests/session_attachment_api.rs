@@ -42,7 +42,9 @@ async fn create_session(app: &axum::Router) -> String {
                 .method("POST")
                 .uri("/api/sessions")
                 .header("content-type", "application/json")
-                .body(Body::from(json!({"title":"WEB-011 attachments"}).to_string()))
+                .body(Body::from(
+                    json!({"title":"WEB-011 attachments"}).to_string(),
+                ))
                 .unwrap(),
         )
         .await
@@ -141,7 +143,10 @@ async fn web_011_t02_oversize_attachment_is_rejected_before_metadata_persistence
                     "/api/sessions/{session_id}/attachments?name=too-large.bin"
                 ))
                 .header("content-type", "application/octet-stream")
-                .body(Body::from(vec![0_u8; EXPECTED_MAX_DRAFT_ATTACHMENT_BYTES + 1]))
+                .body(Body::from(vec![
+                    0_u8;
+                    EXPECTED_MAX_DRAFT_ATTACHMENT_BYTES + 1
+                ]))
                 .unwrap(),
         )
         .await

@@ -125,7 +125,12 @@ pub fn normalize_ref(
         return Err(RefError::UnsafeBranch);
     }
     let cache_id = cache_identity(&canonical, &branch);
-    Ok(NormalizedRef { canonical, branch, cache_path, cache_id })
+    Ok(NormalizedRef {
+        canonical,
+        branch,
+        cache_path,
+        cache_id,
+    })
 }
 
 fn parse_host_path(rest: &str) -> Result<(String, String), RefError> {
@@ -279,7 +284,11 @@ fn sanitize_segment(segment: &str) -> String {
 fn cache_identity(canonical: &str, branch: &str) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
     let mut h: u64 = 0xcbf29ce484222325;
-    for b in canonical.bytes().chain(std::iter::once(0)).chain(branch.bytes()) {
+    for b in canonical
+        .bytes()
+        .chain(std::iter::once(0))
+        .chain(branch.bytes())
+    {
         h ^= u64::from(b);
         h = h.wrapping_mul(0x100000001b3);
     }

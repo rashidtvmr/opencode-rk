@@ -17,11 +17,7 @@ pub enum MetricError {
 
 pub const MAX_METRICS: usize = 512;
 
-pub fn push_metric(
-    buf: &mut Vec<MetricSample>,
-    name: &str,
-    value: u64,
-) -> Result<(), MetricError> {
+pub fn push_metric(buf: &mut Vec<MetricSample>, name: &str, value: u64) -> Result<(), MetricError> {
     if name.is_empty() {
         return Err(MetricError::EmptyName);
     }

@@ -35,7 +35,11 @@ async fn web_017_t01_artifact_versions_survive_reload_without_mutating_source_me
     let sessions = SessionService::new(Arc::new(storage));
     let session = sessions.create("Artifact chat").await.unwrap();
     let source = sessions
-        .append_text(session.id, MessageRole::Assistant, "original assistant output")
+        .append_text(
+            session.id,
+            MessageRole::Assistant,
+            "original assistant output",
+        )
         .await
         .unwrap();
     let app = router_for(sessions.clone());
@@ -66,7 +70,10 @@ async fn web_017_t01_artifact_versions_survive_reload_without_mutating_source_me
     assert_eq!(create.status(), StatusCode::CREATED);
     let created = body(create).await;
     let artifact_id = created["artifact"]["id"].as_str().unwrap().to_owned();
-    assert_eq!(created["artifact"]["source_message_id"], source.id.to_string());
+    assert_eq!(
+        created["artifact"]["source_message_id"],
+        source.id.to_string()
+    );
     assert_eq!(created["artifact"]["current_version"], 1);
     assert_eq!(created["artifact"]["content"], "first draft");
     assert_eq!(created["run_available"], false);
@@ -93,7 +100,10 @@ async fn web_017_t01_artifact_versions_survive_reload_without_mutating_source_me
     assert_eq!(saved["artifact"]["content"], "second draft");
 
     let messages = sessions.messages(session.id, 10).await.unwrap();
-    let unchanged = messages.iter().find(|message| message.id == source.id).unwrap();
+    let unchanged = messages
+        .iter()
+        .find(|message| message.id == source.id)
+        .unwrap();
     assert_eq!(
         unchanged.body,
         PayloadRef::Inline {
@@ -120,7 +130,10 @@ async fn web_017_t01_artifact_versions_survive_reload_without_mutating_source_me
     let reloaded = body(reloaded).await;
     assert_eq!(reloaded["artifact"]["current_version"], 2);
     assert_eq!(reloaded["artifact"]["content"], "second draft");
-    assert_eq!(reloaded["artifact"]["versions"].as_array().unwrap().len(), 2);
+    assert_eq!(
+        reloaded["artifact"]["versions"].as_array().unwrap().len(),
+        2
+    );
 }
 
 #[tokio::test]

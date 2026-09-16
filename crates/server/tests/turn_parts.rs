@@ -80,27 +80,36 @@ fn web009_t02_malformed_activity_never_becomes_answer() {
         .unwrap_err();
     assert!(matches!(err, ActivityError::Malformed(_)));
     let err = turn
-        .push(TurnEvent::AnswerDelta { text: String::new() })
+        .push(TurnEvent::AnswerDelta {
+            text: String::new(),
+        })
         .unwrap_err();
     assert!(matches!(err, ActivityError::Malformed(_)));
     assert_eq!(turn.answer(), before);
     assert!(turn.answer().is_empty());
-    assert!(turn.parts().iter().all(|p| p.kind != PartKind::Answer || p.text.is_empty()));
+    assert!(turn
+        .parts()
+        .iter()
+        .all(|p| p.kind != PartKind::Answer || p.text.is_empty()));
 }
 
 // WEB-009-T03: a11y projection (collapsed controls, live politeness, labels).
 #[test]
 fn web009_t03_accessibility_projection() {
     let mut turn = TurnParts::new("turn_03");
-    turn.push(TurnEvent::ReasoningDelta { text: "sum".to_owned() })
-        .expect("reasoning");
+    turn.push(TurnEvent::ReasoningDelta {
+        text: "sum".to_owned(),
+    })
+    .expect("reasoning");
     turn.push(TurnEvent::Activity(ActivityEvent::ToolStart {
         name: "read".to_owned(),
         call_id: "c1".to_owned(),
     }))
     .expect("tool");
-    turn.push(TurnEvent::AnswerDelta { text: "done".to_owned() })
-        .expect("answer");
+    turn.push(TurnEvent::AnswerDelta {
+        text: "done".to_owned(),
+    })
+    .expect("answer");
     turn.push(TurnEvent::Reference {
         label: "models.dev".to_owned(),
         target: RefTarget::Url("https://models.dev".to_owned()),
@@ -129,12 +138,16 @@ fn web009_t04_bounds_and_cancel_release_permit() {
     let err = turn.push(TurnEvent::AnswerDelta { text: big }).unwrap_err();
     assert!(matches!(err, ActivityError::TooLarge));
     for i in 0..MAX_EVENTS {
-        turn.push(TurnEvent::AnswerDelta { text: "a".to_owned() })
-            .expect("bounded event");
+        turn.push(TurnEvent::AnswerDelta {
+            text: "a".to_owned(),
+        })
+        .expect("bounded event");
         let _ = i;
     }
     let err = turn
-        .push(TurnEvent::AnswerDelta { text: "one too many".to_owned() })
+        .push(TurnEvent::AnswerDelta {
+            text: "one too many".to_owned(),
+        })
         .unwrap_err();
     assert!(matches!(err, ActivityError::TooManyEvents));
     // Oversize reasoning summaries are bounded, never unbounded retained.
@@ -183,8 +196,10 @@ fn web009_t04_bounds_and_cancel_release_permit() {
 #[test]
 fn web009_t05_persisted_fidelity_without_hidden_cot() {
     let mut turn = TurnParts::new("turn_05");
-    turn.push(TurnEvent::ReasoningDelta { text: "auditable summary".to_owned() })
-        .expect("reasoning");
+    turn.push(TurnEvent::ReasoningDelta {
+        text: "auditable summary".to_owned(),
+    })
+    .expect("reasoning");
     turn.push(TurnEvent::Activity(ActivityEvent::ToolStart {
         name: "read".to_owned(),
         call_id: "c9".to_owned(),
@@ -195,8 +210,10 @@ fn web009_t05_persisted_fidelity_without_hidden_cot() {
         ok: false,
     }))
     .expect("end");
-    turn.push(TurnEvent::AnswerDelta { text: "final text".to_owned() })
-        .expect("answer");
+    turn.push(TurnEvent::AnswerDelta {
+        text: "final text".to_owned(),
+    })
+    .expect("answer");
     turn.push(TurnEvent::Reference {
         label: "local file".to_owned(),
         target: RefTarget::Path("src/main.rs".to_owned()),
@@ -211,7 +228,10 @@ fn web009_t05_persisted_fidelity_without_hidden_cot() {
     assert_eq!(reloaded.reasoning_summary(), "auditable summary");
     assert_eq!(reloaded.references().len(), 1);
     assert_eq!(reloaded.references()[0].0, "local file");
-    assert_eq!(reloaded.tool_states(), vec![("read".to_owned(), "c9".to_owned(), false)]);
+    assert_eq!(
+        reloaded.tool_states(),
+        vec![("read".to_owned(), "c9".to_owned(), false)]
+    );
     // Corrupt snapshot fails explicitly, never fabricates content.
     let bad = snapshot.replace("final text", "");
     // Empty answer after tamper is still parseable but fidelity check catches it.

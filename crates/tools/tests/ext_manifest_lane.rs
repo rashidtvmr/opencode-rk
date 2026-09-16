@@ -11,9 +11,8 @@ mod ext_manifest_lane;
 use std::time::{Duration, Instant};
 
 use ext_manifest_lane::{
-    MAX_CAPABILITIES, MAX_CAP_LEN, MAX_MANIFEST_BYTES, MAX_NAME_LEN,
-    SUPPORTED_CONTRACT_VERSION, Manifest, ManifestError, validate_manifest,
-    validate_manifest_bytes,
+    MAX_CAP_LEN, MAX_CAPABILITIES, MAX_MANIFEST_BYTES, MAX_NAME_LEN, Manifest, ManifestError,
+    SUPPORTED_CONTRACT_VERSION, validate_manifest, validate_manifest_bytes,
 };
 
 fn children_count() -> usize {

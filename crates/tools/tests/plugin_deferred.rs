@@ -114,7 +114,10 @@ fn ext004_t02_watch_interest_only() {
     assert_eq!(log.add_watcher("-bad"), Err(BoundaryError::InvalidLabel));
     assert_eq!(log.add_watcher(".dot"), Err(BoundaryError::InvalidLabel));
     assert!(log.remove_watcher(1));
-    assert!(!log.remove_watcher(1), "second remove must be harmless false");
+    assert!(
+        !log.remove_watcher(1),
+        "second remove must be harmless false"
+    );
     // Duplicate consumed no id: next success is 3, not 4.
     assert_eq!(log.add_watcher("c"), Ok(3));
     // Upper length bound is inclusive: exactly 64 chars accepted.
@@ -144,16 +147,16 @@ fn ext004_t03_caps_and_drain() {
     assert_eq!(log.list_deferred().len(), EXT4_MAX_DEFERRED - 10);
     let rest = log.drain(usize::MAX);
     assert_eq!(rest.len(), EXT4_MAX_DEFERRED - 10);
-    assert!(log.list_deferred().is_empty(), "drain-all must empty the log");
+    assert!(
+        log.list_deferred().is_empty(),
+        "drain-all must empty the log"
+    );
     // Seq stays monotonic after drain: no reuse.
     assert_eq!(log.request_reload(None), Ok(129));
     // Watcher cap on a fresh log (watchers also record events; 32 < 128).
     let mut log2 = DeferredLog::new();
     for i in 0..EXT4_MAX_WATCHERS {
-        assert_eq!(
-            log2.add_watcher(&format!("w{i}")),
-            Ok((i as u32) + 1)
-        );
+        assert_eq!(log2.add_watcher(&format!("w{i}")), Ok((i as u32) + 1));
     }
     assert_eq!(log2.add_watcher("one-more"), Err(BoundaryError::Overflow));
     assert_eq!(
@@ -246,7 +249,11 @@ fn ext004_t05_zero_cost_when_off_and_safety() {
     let kids_before = children_count();
     // Disabled path: the log is never constructed; zero cost.
     let enabled = false;
-    let log: Option<DeferredLog> = if enabled { Some(DeferredLog::new()) } else { None };
+    let log: Option<DeferredLog> = if enabled {
+        Some(DeferredLog::new())
+    } else {
+        None
+    };
     assert!(log.is_none(), "disabled boundary must construct nothing");
     assert_no_os_watchers();
     assert_eq!(children_count(), kids_before);

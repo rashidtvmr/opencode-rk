@@ -459,7 +459,7 @@ pub fn begin_login(pkce_challenge: impl AsRef<str>) -> Result<ClaudeAuthState, C
     let pkce_challenge = pkce_challenge.as_ref();
     validate_pkce(pkce_challenge)?;
     let consent_url = format!(
-        "{CONSENT_ORIGIN}?redirect_uri=http%3A%2F%2F127.0.0.1%3A1455%2Foauth%2Fcallback&code_challenge={pkce_challenge}&code_challenge_method=S256"
+        "{CONSENT_ORIGIN}?redirect_uri={LOOPBACK_REDIRECT_URI}&code_challenge={pkce_challenge}&code_challenge_method=S256"
     );
     begin_login_with_url(pkce_challenge, consent_url)
 }

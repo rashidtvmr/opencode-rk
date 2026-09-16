@@ -1,30 +1,50 @@
 //! Small HTTP boundary over the native catalog and session services.
 #![forbid(unsafe_code)]
+pub mod acp_bridge;
+pub mod acp_files;
 pub mod app_client;
 pub mod auto_loop;
 pub mod auto_report;
 pub mod auto_window;
+pub mod chat_composer;
 pub mod clients;
 pub mod control_decode;
+pub mod control_plane_errors;
+pub mod control_plane_exposure;
+pub mod control_plane_inputs;
 pub mod daemon;
 pub mod desktop_bridge;
 pub mod enterprise_link;
 pub mod error_translate;
 pub mod event_bus;
+pub mod event_stream;
 pub mod origin_check;
+pub mod protocol_api;
 pub mod rel_stamp;
 pub mod rel_verify;
 pub mod remote_ledger;
+pub mod remote_sync;
 pub mod repo_ops;
 pub mod route_table;
+pub mod sdk_client;
+pub mod sdk_spawns;
+pub mod sync_log;
+pub mod transcript_lane;
+pub mod turn_parts;
+pub mod voice_capture;
+pub mod web_artifact;
 pub mod web_assets;
+pub mod web_attachments;
 pub mod web_config;
 pub mod web_cors;
+pub mod web_entry_probe;
 pub mod web_footer;
 pub mod web_headers;
 pub mod web_host;
 pub mod web_route;
 pub mod web_suffix;
+pub mod web_tool_chooser;
+pub mod workspace_proxy;
 use axum::{
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, Query, State},

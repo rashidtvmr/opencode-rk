@@ -129,7 +129,9 @@ pub struct EffectSink {
 
 impl EffectSink {
     pub fn new() -> Self {
-        Self { entries: Vec::new() }
+        Self {
+            entries: Vec::new(),
+        }
     }
 
     pub fn len(&self) -> usize {
@@ -141,16 +143,18 @@ impl EffectSink {
     }
 
     pub fn get(&self, key: &str) -> Option<&[u8]> {
-        self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_slice())
+        self.entries
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_slice())
     }
 
     /// Total retained bytes, saturating.
     pub fn retained_bytes(&self) -> u64 {
-        self.entries
-            .iter()
-            .fold(0u64, |acc, (k, v)| {
-                acc.saturating_add(k.len() as u64).saturating_add(v.len() as u64)
-            })
+        self.entries.iter().fold(0u64, |acc, (k, v)| {
+            acc.saturating_add(k.len() as u64)
+                .saturating_add(v.len() as u64)
+        })
     }
 
     /// Deterministic content hash for deny-no-side-effect assertions.
@@ -173,9 +177,8 @@ fn charset_ok(s: &str) -> bool {
         Some(b) if b.is_ascii_alphanumeric() => (),
         _ => return false,
     }
-    s.bytes().all(|b| {
-        b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-'
-    })
+    s.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
 }
 
 fn cap_ok(s: &str) -> bool {
@@ -257,7 +260,10 @@ pub fn execute(
         Some(i) => {
             let old =
                 (sink.entries[i].0.len() as u64).saturating_add(sink.entries[i].1.len() as u64);
-            let next = sink.retained_bytes().saturating_sub(old).saturating_add(entry_bytes);
+            let next = sink
+                .retained_bytes()
+                .saturating_sub(old)
+                .saturating_add(entry_bytes);
             if next > MAX_SINK_BYTES {
                 return Err(ExecError::Overflow);
             }
@@ -273,5 +279,8 @@ pub fn execute(
             sink.entries.push((key, value.clone()));
         }
     }
-    Ok(EffectOutcome { applied: true, bytes_out: value })
+    Ok(EffectOutcome {
+        applied: true,
+        bytes_out: value,
+    })
 }

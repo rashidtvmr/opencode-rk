@@ -6,9 +6,9 @@
 mod share_merge_lane;
 
 use share_merge_lane::{
-    LANE_MAX_BATCHES, LANE_MAX_RECORDS_PER_BATCH, LANE_MAX_RECORD_BYTES, LaneMergeOutput,
-    LaneRecordKind, LaneShareError, LaneShareId, LaneShareRecord, LaneShareSecret, apply_lane_sync,
-    merge_lane_records,
+    apply_lane_sync, merge_lane_records, LaneMergeOutput, LaneRecordKind, LaneShareError,
+    LaneShareId, LaneShareRecord, LaneShareSecret, LANE_MAX_BATCHES, LANE_MAX_RECORDS_PER_BATCH,
+    LANE_MAX_RECORD_BYTES,
 };
 use std::sync::atomic::AtomicBool;
 
@@ -41,8 +41,7 @@ fn share001_lane_t01_last_write_wins_sorted() {
         rec(LaneRecordKind::LaneSession, "s-1", r#"{"title":"new"}"#),
         rec(LaneRecordKind::LanePart, "p-1", r#"{"t":"x"}"#),
     ];
-    let out: LaneMergeOutput =
-        merge_lane_records(&[b1.as_slice(), b2.as_slice()], &idle).unwrap();
+    let out: LaneMergeOutput = merge_lane_records(&[b1.as_slice(), b2.as_slice()], &idle).unwrap();
     assert_eq!(out.records.len(), 4);
     assert_eq!(out.skipped, 0);
     let s1 = out
@@ -163,8 +162,7 @@ fn share001_lane_t04_caps_and_invalid_records() {
         .collect();
     let err = merge_lane_records(&[big.as_slice()], &idle).unwrap_err();
     assert_eq!(err, LaneShareError::TooLarge);
-    let many: Vec<Vec<LaneShareRecord>> =
-        (0..(LANE_MAX_BATCHES + 1)).map(|_| Vec::new()).collect();
+    let many: Vec<Vec<LaneShareRecord>> = (0..(LANE_MAX_BATCHES + 1)).map(|_| Vec::new()).collect();
     let refs: Vec<&[LaneShareRecord]> = many.iter().map(Vec::as_slice).collect();
     let err = merge_lane_records(refs.as_slice(), &idle).unwrap_err();
     assert_eq!(err, LaneShareError::TooLarge);
@@ -205,19 +203,14 @@ fn share001_lane_t05_safety_purity_cancel() {
     std::fs::write(&sentinel, "untouched").unwrap();
     let idle = idle();
     let stored = LaneShareSecret::from_str(SECRET);
-    let existing = vec![rec(
-        LaneRecordKind::LaneSession,
-        "s-1",
-        r#"{"title":"t"}"#,
-    )];
+    let existing = vec![rec(LaneRecordKind::LaneSession, "s-1", r#"{"title":"t"}"#)];
     let incoming = vec![rec(
         LaneRecordKind::LaneMessage,
         "m-1",
         &format!(r#"{{"body":"{BODY_MARK}"}}"#),
     )];
     let cancel = AtomicBool::new(true);
-    let err =
-        merge_lane_records(&[existing.as_slice(), incoming.as_slice()], &cancel).unwrap_err();
+    let err = merge_lane_records(&[existing.as_slice(), incoming.as_slice()], &cancel).unwrap_err();
     assert_eq!(err, LaneShareError::Cancelled);
     for rendered in [
         format!("{err}"),
@@ -234,7 +227,10 @@ fn share001_lane_t05_safety_purity_cancel() {
         &format!(r#"{{"body":"{BODY_MARK}"}}"#),
     );
     let rendered = format!("{:?}", probe);
-    assert!(rendered.contains("m-1"), "key must stay visible: {rendered}");
+    assert!(
+        rendered.contains("m-1"),
+        "key must stay visible: {rendered}"
+    );
     assert!(!rendered.contains(BODY_MARK), "payload leak: {rendered}");
     let out = merge_lane_records(&[existing.as_slice(), incoming.as_slice()], &idle).unwrap();
     assert_eq!(out.records.len(), 2);

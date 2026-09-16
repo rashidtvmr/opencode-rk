@@ -28,7 +28,10 @@ pub fn lookup(map: &[(&str, &str)], key: &str) -> Result<String, MappingError> {
         return Err(MappingError::EmptyKey);
     }
     if map.len() > MAX_MAPPINGS {
-        return Err(MappingError::TooMany { max: MAX_MAPPINGS, actual: map.len() });
+        return Err(MappingError::TooMany {
+            max: MAX_MAPPINGS,
+            actual: map.len(),
+        });
     }
     for (k, v) in map {
         if k.is_empty() {
@@ -39,5 +42,8 @@ pub fn lookup(map: &[(&str, &str)], key: &str) -> Result<String, MappingError> {
         }
     }
     // ponytail: skipped trimming/normalization; add when keys need canonical form.
-    map.iter().find(|(k, _)| *k == key).map(|(_, v)| v.to_string()).ok_or(MappingError::EmptyValue)
+    map.iter()
+        .find(|(k, _)| *k == key)
+        .map(|(_, v)| v.to_string())
+        .ok_or(MappingError::EmptyValue)
 }

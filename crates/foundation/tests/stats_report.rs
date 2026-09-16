@@ -8,7 +8,7 @@
 #[path = "../src/stats_report.rs"]
 mod stats_report;
 
-use stats_report::{ReportConfig, TelemetryEntry, TelemetrySnapshot, render};
+use stats_report::{render, ReportConfig, TelemetryEntry, TelemetrySnapshot};
 
 fn entry(label: &str, saved_tokens: u64) -> TelemetryEntry {
     TelemetryEntry {
@@ -47,7 +47,11 @@ fn rel006_t02_empty_message() {
 
 #[test]
 fn rel006_t03_secret_absence() {
-    let secrets = ["sk-live-abc123", "api_key=ZZZ", "-----BEGIN PRIVATE KEY-----"];
+    let secrets = [
+        "sk-live-abc123",
+        "api_key=ZZZ",
+        "-----BEGIN PRIVATE KEY-----",
+    ];
     let snap = TelemetrySnapshot {
         total: 3,
         saved_tokens: 30,

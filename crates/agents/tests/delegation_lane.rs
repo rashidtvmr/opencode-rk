@@ -3,9 +3,7 @@ mod delegation_lane;
 
 use std::time::{Duration, Instant};
 
-use delegation_lane::{
-    DelegError, DelegationController, DelegationId, Mode, OwnerToken, State,
-};
+use delegation_lane::{DelegError, DelegationController, DelegationId, Mode, OwnerToken, State};
 
 fn owner(n: u64) -> OwnerToken {
     OwnerToken::new(n)
@@ -74,8 +72,7 @@ fn auto_004_t03_status_queryable_without_logs_unknown_id() {
 
 #[test]
 fn auto_004_t04_owner_cancel_reclaims_within_bound() {
-    let mut ctl =
-        DelegationController::new(16, 4096, Duration::from_millis(1000));
+    let mut ctl = DelegationController::new(16, 4096, Duration::from_millis(1000));
     let owner_a = owner(1);
     let owner_b = owner(2);
     let victim = ctl
@@ -172,7 +169,9 @@ fn auto_004_t05_no_os_process_bounded_capacity_and_summary() {
     roomy.restart();
     assert_eq!(roomy.child_process_count(), 0);
     assert!(roomy.task_joined(live.id));
-    let dropped = roomy.status(live.id).expect("post-restart must be queryable");
+    let dropped = roomy
+        .status(live.id)
+        .expect("post-restart must be queryable");
     assert_eq!(dropped.state, State::Failed);
     assert!(roomy.status(hb.id).is_ok());
 }

@@ -8,8 +8,8 @@
 mod int_location_lane;
 
 use int_location_lane::{
-    CtxError, DirHint, IdentHints, Identity, RequestCtx, SessionPin, VcsInfo, WsHint,
-    resolve_request, resolve_session,
+    resolve_request, resolve_session, CtxError, DirHint, IdentHints, Identity, RequestCtx,
+    SessionPin, VcsInfo, WsHint,
 };
 
 fn req(dir: Option<&str>, ws: Option<&str>) -> RequestCtx {
@@ -75,7 +75,10 @@ fn int009_t01_request_happy_path_and_precedence() {
     let out = resolve_request(&ctx, "/fallback", vcs, &ids).expect("request resolves");
     assert_eq!(out.directory, "/a/b");
     assert_eq!(out.workspace_id.as_deref(), Some("wrk1"));
-    assert_eq!(out.identity, Identity::Remote("https://example/r".to_owned()));
+    assert_eq!(
+        out.identity,
+        Identity::Remote("https://example/r".to_owned())
+    );
     let vcs_file = Some(VcsInfo {
         remote: Some("file:///x".to_owned()),
         branch: None,
@@ -96,8 +99,7 @@ fn int009_t02_session_pinning_ignores_request() {
         workspace_id: Some("wrk9".to_owned()),
     };
     let evil = req(Some("/evil"), Some("wrkE"));
-    let out =
-        resolve_session(&pin, &evil, None, &IdentHints::default()).expect("session resolves");
+    let out = resolve_session(&pin, &evil, None, &IdentHints::default()).expect("session resolves");
     assert_eq!(out.directory, "/s");
     assert_eq!(out.workspace_id.as_deref(), Some("wrk9"));
     let bad = SessionPin {
@@ -118,16 +120,17 @@ fn int009_t03_fallback_rules_and_input_immutability() {
         resolve_request(&ctx, "/dflt", None, &IdentHints::default()).expect("fallback resolves");
     assert_eq!(out.directory, "/dflt");
     assert_eq!(out.workspace_id, None);
-    assert_eq!(ctx, before, "caller inputs must be byte-identical after call");
+    assert_eq!(
+        ctx, before,
+        "caller inputs must be byte-identical after call"
+    );
     let ctx2 = req(Some("/ok"), Some("nope!"));
-    let out2 =
-        resolve_request(&ctx2, "/dflt", None, &IdentHints::default()).expect("resolves");
+    let out2 = resolve_request(&ctx2, "/dflt", None, &IdentHints::default()).expect("resolves");
     assert_eq!(out2.directory, "/ok");
     assert_eq!(out2.workspace_id, None);
     let long = format!("/{}", "a".repeat(300));
     let ctx3 = req(Some(long.as_str()), None);
-    let out3 =
-        resolve_request(&ctx3, "/dflt", None, &IdentHints::default()).expect("resolves");
+    let out3 = resolve_request(&ctx3, "/dflt", None, &IdentHints::default()).expect("resolves");
     assert_eq!(out3.directory, "/dflt");
     match resolve_request(&ctx, "relative", None, &IdentHints::default()) {
         Err(CtxError::InvalidDefault) => {}
@@ -137,7 +140,10 @@ fn int009_t03_fallback_rules_and_input_immutability() {
 
 #[test]
 fn int009_t04_identity_precedence_order() {
-    let ctx = RequestCtx { dir: None, ws: None };
+    let ctx = RequestCtx {
+        dir: None,
+        ws: None,
+    };
     let all = IdentHints {
         common_dir: Some("c1".to_owned()),
         root_commit: Some("r1".to_owned()),
@@ -147,7 +153,10 @@ fn int009_t04_identity_precedence_order() {
         branch: Some("main".to_owned()),
     });
     let out = resolve_request(&ctx, "/d", vcs, &all).expect("resolves");
-    assert_eq!(out.identity, Identity::Remote("https://example/r".to_owned()));
+    assert_eq!(
+        out.identity,
+        Identity::Remote("https://example/r".to_owned())
+    );
     let file_vcs = Some(VcsInfo {
         remote: Some("file:///x".to_owned()),
         branch: None,
@@ -195,7 +204,11 @@ fn int009_t05_no_side_effects() {
     std::env::remove_var("INT009_SENTINEL_DIR");
     let without_env = resolve_request(&ctx, "/dflt", vcs, &ids).expect("resolves");
     assert_eq!(with_env, without_env, "resolution must not depend on env");
-    assert_eq!(snapshot(), before, "no files written outside disposable dir");
+    assert_eq!(
+        snapshot(),
+        before,
+        "no files written outside disposable dir"
+    );
     assert_eq!(child_pids(), before_children, "no child process");
     assert_eq!(socket_count(), before_sockets, "no sockets");
     let bad = SessionPin {

@@ -8,8 +8,8 @@
 mod handler_projection;
 
 use handler_projection::{
-    HandlerError, HandlerOp, HandlerResponse, MAX_ID_LEN, MAX_ITEMS, MAX_LABEL_LEN, Method,
-    NonSecretMeta,
+    HandlerError, HandlerOp, HandlerResponse, Method, NonSecretMeta, MAX_ID_LEN, MAX_ITEMS,
+    MAX_LABEL_LEN,
 };
 
 fn meta(id: &str, label: &str, method: Method) -> NonSecretMeta {
@@ -53,8 +53,7 @@ fn child_pids() -> Vec<u32> {
         fields.next();
         fields.next();
         fields.next(); // state
-        let is_child =
-            fields.next().and_then(|ppid| ppid.parse::<u32>().ok()) == Some(me);
+        let is_child = fields.next().and_then(|ppid| ppid.parse::<u32>().ok()) == Some(me);
         if !is_child {
             continue;
         }
@@ -172,10 +171,7 @@ fn int_007_t02_code_required_vs_auth_failed() {
         Some(&m),
         &items,
     );
-    assert_eq!(
-        auth_failed,
-        HandlerResponse::Err(HandlerError::AuthFailed)
-    );
+    assert_eq!(auth_failed, HandlerResponse::Err(HandlerError::AuthFailed));
     assert_ne!(
         HandlerError::CodeRequired,
         HandlerError::AuthFailed,
@@ -297,10 +293,7 @@ fn int_007_t05_no_authority_safety() {
         .collect();
     let before_children = child_pids();
     let before_sockets = socket_count();
-    assert!(
-        std::env::var(SENTINEL).is_err(),
-        "sentinel env stays unset"
-    );
+    assert!(std::env::var(SENTINEL).is_err(), "sentinel env stays unset");
 
     let probe_code = "code-PROBE-secret-77";
     let m = key("gh", "github");
@@ -356,14 +349,14 @@ fn int_007_t05_no_authority_safety() {
         .collect();
     assert_eq!(after_files, before_files, "no files written");
     assert!(
-        std::fs::read_dir(dir.path()).expect("dir").flatten().all(|entry| {
-            let name = entry.file_name().to_string_lossy().into_owned();
-            !name.ends_with(".db") && !name.ends_with(".sqlite")
-        }),
+        std::fs::read_dir(dir.path())
+            .expect("dir")
+            .flatten()
+            .all(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                !name.ends_with(".db") && !name.ends_with(".sqlite")
+            }),
         "no DB writes"
     );
-    assert!(
-        std::env::var(SENTINEL).is_err(),
-        "sentinel env still unset"
-    );
+    assert!(std::env::var(SENTINEL).is_err(), "sentinel env still unset");
 }

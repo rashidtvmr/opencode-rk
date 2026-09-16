@@ -14,7 +14,8 @@ use std::net::IpAddr;
 pub const GATED_PREFIXES: [&str; 1] = ["/control/"];
 
 /// Fixed deny template body (<= 512 bytes). No secrets, paths, or I/O text.
-pub const DENY_BODY: &str = "{\"error\":{\"code\":\"remote_denied\",\"message\":\"remote access denied\"}}";
+pub const DENY_BODY: &str =
+    "{\"error\":{\"code\":\"remote_denied\",\"message\":\"remote access denied\"}}";
 
 /// Bind address class. This slice asserts gate verdicts only; bind
 /// enforcement itself is daemon-config validation owned elsewhere.

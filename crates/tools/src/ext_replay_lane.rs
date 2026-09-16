@@ -101,7 +101,11 @@ impl TransformLog {
         if !value_valid(value) {
             return Err(TransformError::InvalidValue);
         }
-        if self.entries.iter().any(|t| t.scope == scope && t.key == key) {
+        if self
+            .entries
+            .iter()
+            .any(|t| t.scope == scope && t.key == key)
+        {
             return Err(TransformError::Duplicate);
         }
         if self.entries.len() >= EXT11_MAX_TRANSFORMS {
@@ -127,9 +131,7 @@ impl TransformLog {
     /// stays bounded by `EXT11_MAX_TRANSFORMS`).
     pub fn set_scope_disabled(&mut self, scope: u64, disabled: bool) {
         if disabled {
-            if !self.disabled.contains(&scope)
-                && self.entries.iter().any(|t| t.scope == scope)
-            {
+            if !self.disabled.contains(&scope) && self.entries.iter().any(|t| t.scope == scope) {
                 self.disabled.push(scope);
             }
         } else {

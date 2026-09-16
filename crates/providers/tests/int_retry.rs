@@ -1,4 +1,4 @@
-use opencode_rk_providers::int_retry::{MAX_ATTEMPTS, RetryError, plan_retry};
+use opencode_rk_providers::int_retry::{plan_retry, RetryError, MAX_ATTEMPTS};
 
 #[test]
 fn intret_t01_plan() {

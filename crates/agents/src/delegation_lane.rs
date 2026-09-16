@@ -110,6 +110,8 @@ pub enum DelegError {
     Terminal,
     #[error("delegation admission is at capacity")]
     AtCapacity,
+    #[error("permission broker denied lane admission")]
+    BrokerDenied,
 }
 
 struct Entry {
@@ -139,11 +141,7 @@ impl DelegationController {
     }
 
     #[must_use]
-    pub fn new(
-        max_live: usize,
-        max_summary_bytes: usize,
-        cancel_timeout: Duration,
-    ) -> Self {
+    pub fn new(max_live: usize, max_summary_bytes: usize, cancel_timeout: Duration) -> Self {
         Self {
             max_live,
             max_summary_bytes,
@@ -206,11 +204,7 @@ impl DelegationController {
         Ok(Handle { id, owner, mode })
     }
 
-    pub fn detach(
-        &mut self,
-        id: DelegationId,
-        owner: OwnerToken,
-    ) -> Result<Status, DelegError> {
+    pub fn detach(&mut self, id: DelegationId, owner: OwnerToken) -> Result<Status, DelegError> {
         let entry = self.entries.get_mut(&id.key()).ok_or(DelegError::Unknown)?;
         if entry.owner != owner {
             return Err(DelegError::NotOwner);
@@ -225,9 +219,7 @@ impl DelegationController {
                 entry.state = State::Detached;
                 Ok(Self::entry_status(id, entry))
             }
-            State::Complete | State::Cancelled | State::Failed => {
-                Err(DelegError::Terminal)
-            }
+            State::Complete | State::Cancelled | State::Failed => Err(DelegError::Terminal),
         }
     }
 
@@ -238,11 +230,7 @@ impl DelegationController {
             .ok_or(DelegError::Unknown)
     }
 
-    pub fn cancel(
-        &mut self,
-        id: DelegationId,
-        owner: OwnerToken,
-    ) -> Result<Status, DelegError> {
+    pub fn cancel(&mut self, id: DelegationId, owner: OwnerToken) -> Result<Status, DelegError> {
         let entry = self.entries.get_mut(&id.key()).ok_or(DelegError::Unknown)?;
         if entry.owner != owner {
             return Err(DelegError::NotOwner);
@@ -327,9 +315,84 @@ impl DelegationController {
             if entry.state.is_live() {
                 entry.state = State::Failed;
                 entry.live_task = false;
-                entry.summary =
-                    BoundedSummary("restart: process-local state dropped".to_owned());
+                entry.summary = BoundedSummary("restart: process-local state dropped".to_owned());
             }
         }
+    }
+
+    /// Broker-gated admission: deny/human blocks with no state; Allow submits.
+    pub fn submit_gated(
+        &mut self,
+        owner: OwnerToken,
+        mode: Mode,
+        work: impl Into<String>,
+        decision: BrokerDecision,
+    ) -> Result<Handle, DelegError> {
+        if !broker_allows(decision) {
+            return Err(DelegError::BrokerDenied);
+        }
+        self.submit(owner, mode, work)
+    }
+}
+
+/// Mirror of trusted PermissionBroker verdict (crates/security/src/lib.rs),
+/// dependency-free: only `Allow` admits lane work. Deny/human-gated blocks
+/// admission with no state created; `*` can never lift a mandatory gate.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum BrokerDecision {
+    Allow,
+    Deny,
+    RequireHuman,
+}
+
+/// True only for [`BrokerDecision::Allow`].
+///
+/// Send + Sync so lanes can share one pool across Tokio tasks on the single
+/// daemon runtime (PLAN.md ADR-001); no thread spawned here.
+#[must_use]
+pub const fn broker_allows(decision: BrokerDecision) -> bool {
+    matches!(decision, BrokerDecision::Allow)
+}
+
+/// Minimal bounded lane pool: broker check + admission cap, no queueing,
+/// no thread, no OS process. Runtime-neutral, Send + Sync.
+pub struct BoundedLanePool {
+    cap: usize,
+    live: std::sync::atomic::AtomicUsize,
+}
+
+impl BoundedLanePool {
+    #[must_use]
+    pub fn new(cap: usize) -> Self {
+        Self {
+            cap: cap.max(1),
+            live: std::sync::atomic::AtomicUsize::new(0),
+        }
+    }
+
+    /// Broker-gated acquire: deny/human or at-cap returns false, no mutation.
+    pub fn try_acquire(&self, decision: BrokerDecision) -> bool {
+        use std::sync::atomic::Ordering;
+        if !broker_allows(decision) {
+            return false;
+        }
+        self.live
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| {
+                (n < self.cap).then_some(n + 1)
+            })
+            .is_ok()
+    }
+
+    pub fn release(&self) {
+        use std::sync::atomic::Ordering;
+        let _ = self
+            .live
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |n| n.checked_sub(1));
+    }
+
+    #[must_use]
+    pub fn live(&self) -> usize {
+        use std::sync::atomic::Ordering;
+        self.live.load(Ordering::Acquire)
     }
 }

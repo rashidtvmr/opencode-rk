@@ -7,8 +7,8 @@
 mod refresh_gate;
 
 use refresh_gate::{
-    CredId, MAX_INFLIGHT, REFRESH_WINDOW_MS, RefreshError, RefreshFail, RefreshGate,
-    RefreshGuard, RefreshState, needs_refresh,
+    needs_refresh, CredId, RefreshError, RefreshFail, RefreshGate, RefreshGuard, RefreshState,
+    MAX_INFLIGHT, REFRESH_WINDOW_MS,
 };
 
 const NOW: u64 = 1_700_000_000_000;
@@ -87,10 +87,7 @@ fn int_005_t03_caps_hold() {
     assert_eq!(gate.max_inflight(), 4);
     let mut guards: Vec<RefreshGuard> = Vec::new();
     for i in 0..4 {
-        guards.push(
-            gate.try_begin(&format!("cred-{i}"))
-                .expect("fill to cap"),
-        );
+        guards.push(gate.try_begin(&format!("cred-{i}")).expect("fill to cap"));
     }
     assert_eq!(gate.inflight(), 4);
     assert_eq!(
@@ -147,9 +144,7 @@ fn int_005_t04_failure_states() {
     // Equal expiry (new_expiry <= now) is also invalid.
     let guard = gate.try_begin("cred-a").expect("begin cred-a again");
     assert_eq!(
-        guard
-            .complete(&gate, NOW, NOW)
-            .expect_err("equal expiry"),
+        guard.complete(&gate, NOW, NOW).expect_err("equal expiry"),
         RefreshError::InvalidExpiry
     );
     assert!(gate.last("cred-a").is_none());

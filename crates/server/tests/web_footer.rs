@@ -40,10 +40,7 @@ fn foot_t04_trims() {
 
 #[test]
 fn foot_t05_both_empty_text_first() {
-    assert!(matches!(
-        build_footer("", ""),
-        Err(FooterError::EmptyText)
-    ));
+    assert!(matches!(build_footer("", ""), Err(FooterError::EmptyText)));
     assert!(matches!(
         build_footer("   ", "   "),
         Err(FooterError::EmptyText)

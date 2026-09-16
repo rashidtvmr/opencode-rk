@@ -69,7 +69,10 @@ impl core::fmt::Display for ArtifactError {
             Self::EmptyLanguage => write!(f, "code artifact needs a language tag"),
             Self::DocumentEmpty => write!(f, "artifact document must not be empty"),
             Self::DocumentTooLarge { max, actual } => {
-                write!(f, "artifact document too large: max {max} bytes, got {actual}")
+                write!(
+                    f,
+                    "artifact document too large: max {max} bytes, got {actual}"
+                )
             }
             Self::PreviewCancelled => write!(f, "artifact preview cancelled"),
             Self::NoUndo => write!(f, "nothing to undo"),
@@ -223,17 +226,15 @@ impl Artifact {
 
 /// Edit the draft: pushes the prior draft to bounded history and mints a new
 /// explicit version sequence (T01/T05). Never touches `original`.
-pub fn edit_artifact(
-    artifact: &mut Artifact,
-    next_body: &str,
-) -> Result<u64, ArtifactError> {
+pub fn edit_artifact(artifact: &mut Artifact, next_body: &str) -> Result<u64, ArtifactError> {
     check_document(next_body)?;
     if artifact.history.len() >= MAX_VERSIONS.saturating_sub(1) {
         artifact.history.remove(0);
     }
-    artifact
-        .history
-        .push(core::mem::replace(&mut artifact.current, next_body.to_string()));
+    artifact.history.push(core::mem::replace(
+        &mut artifact.current,
+        next_body.to_string(),
+    ));
     artifact.redo.clear();
     artifact.current_seq = artifact.current_seq.saturating_add(1);
     Ok(artifact.current_seq)
@@ -276,10 +277,7 @@ pub struct Preview {
     pub truncated: bool,
 }
 
-pub fn preview_artifact(
-    artifact: &Artifact,
-    cancelled: bool,
-) -> Result<Preview, ArtifactError> {
+pub fn preview_artifact(artifact: &Artifact, cancelled: bool) -> Result<Preview, ArtifactError> {
     if cancelled {
         return Err(ArtifactError::PreviewCancelled);
     }

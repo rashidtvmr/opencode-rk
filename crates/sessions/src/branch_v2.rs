@@ -14,8 +14,8 @@ use opencode_rk_contracts::{
 };
 use opencode_rk_storage::{
     fork_v2::{ForkV2, MAX_FORK_COPY_MESSAGES, MAX_FORK_DEPTH},
-    writer_v2::MESSAGE_PART_REASONING_SUMMARY, NewMessage, NewSession, SchemaV2, StorageError,
-    V2Writer,
+    writer_v2::MESSAGE_PART_REASONING_SUMMARY,
+    NewMessage, NewSession, SchemaV2, StorageError, V2Writer,
 };
 use rusqlite::{params, OptionalExtension};
 use std::path::Path;
@@ -85,18 +85,19 @@ impl SessionManager {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent).map_err(StorageError::from)?;
         }
-        let connection = if path.exists() && std::fs::metadata(path).map_err(StorageError::from)?.len() > 0 {
-            SchemaV2::open_existing(path)?
-        } else {
-            let workspace_id = *SessionId::new().as_uuid().as_bytes();
-            let cursor_epoch = *SessionId::new().as_uuid().as_bytes();
-            SchemaV2::initialize_workspace(
-                path,
-                workspace_id,
-                cursor_epoch,
-                Utc::now().timestamp_micros(),
-            )?
-        };
+        let connection =
+            if path.exists() && std::fs::metadata(path).map_err(StorageError::from)?.len() > 0 {
+                SchemaV2::open_existing(path)?
+            } else {
+                let workspace_id = *SessionId::new().as_uuid().as_bytes();
+                let cursor_epoch = *SessionId::new().as_uuid().as_bytes();
+                SchemaV2::initialize_workspace(
+                    path,
+                    workspace_id,
+                    cursor_epoch,
+                    Utc::now().timestamp_micros(),
+                )?
+            };
         Ok(Self::new(connection))
     }
 
@@ -194,10 +195,10 @@ impl SessionManager {
                 "SELECT m.id,m.role FROM messages m JOIN sessions s ON s.pk=m.session_pk
                  WHERE s.id=?1 ORDER BY m.seq ASC",
             )?;
-            let rows = statement.query_map(
-                params![parent.id.as_uuid().as_bytes().as_slice()],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )?;
+            let rows = statement
+                .query_map(params![parent.id.as_uuid().as_bytes().as_slice()], |row| {
+                    Ok((row.get(0)?, row.get(1)?))
+                })?;
             rows.collect::<Result<Vec<_>, _>>()?
         };
         for (index, (id_bytes, role)) in existing.iter().take(source.len()).enumerate() {
@@ -239,8 +240,8 @@ impl SessionManager {
         role: MessageRole,
         text: String,
     ) -> Result<MessageRecord, SessionError> {
-        let body = PayloadRef::inline(text)
-            .map_err(|error| SessionError::Contract(error.to_string()))?;
+        let body =
+            PayloadRef::inline(text).map_err(|error| SessionError::Contract(error.to_string()))?;
         let message = MessageRecord {
             id: MessageId::new(),
             session_id,
@@ -268,8 +269,8 @@ impl SessionManager {
         text: String,
         reasoning_summary: Option<String>,
     ) -> Result<MessageRecord, SessionError> {
-        let body = PayloadRef::inline(text)
-            .map_err(|error| SessionError::Contract(error.to_string()))?;
+        let body =
+            PayloadRef::inline(text).map_err(|error| SessionError::Contract(error.to_string()))?;
         let message = MessageRecord {
             id: MessageId::new(),
             session_id,
@@ -330,7 +331,8 @@ impl SessionManager {
                 })
             },
         )?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(SessionError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(SessionError::from)
     }
 
     pub fn retry_request(
@@ -413,7 +415,10 @@ impl SessionManager {
         let in_range: i64 = conn.query_row(
             "SELECT COUNT(*) FROM messages m JOIN sessions s ON s.pk=m.session_pk
              WHERE s.id=?1 AND m.seq<=?2",
-            params![parent_session_id.as_uuid().as_bytes().as_slice(), through_seq],
+            params![
+                parent_session_id.as_uuid().as_bytes().as_slice(),
+                through_seq
+            ],
             |row| row.get(0),
         )?;
         if in_range as usize > MAX_FORK_COPY_MESSAGES {
@@ -474,7 +479,10 @@ impl SessionManager {
         let in_range: i64 = conn.query_row(
             "SELECT COUNT(*) FROM messages m JOIN sessions s ON s.pk=m.session_pk
              WHERE s.id=?1 AND m.seq<=?2",
-            params![parent_session_id.as_uuid().as_bytes().as_slice(), through_seq],
+            params![
+                parent_session_id.as_uuid().as_bytes().as_slice(),
+                through_seq
+            ],
             |row| row.get(0),
         )?;
         if in_range as usize > MAX_FORK_COPY_MESSAGES {
@@ -525,8 +533,8 @@ impl SessionManager {
         let Some((parent_bytes, sequence)) = raw else {
             return Ok(None);
         };
-        let parent_uuid = uuid::Uuid::from_slice(&parent_bytes)
-            .map_err(|_| rusqlite::Error::InvalidQuery)?;
+        let parent_uuid =
+            uuid::Uuid::from_slice(&parent_bytes).map_err(|_| rusqlite::Error::InvalidQuery)?;
         let parent_session_id = SessionId::from_uuid(parent_uuid);
         let boundary: Option<Vec<u8>> = conn
             .query_row(

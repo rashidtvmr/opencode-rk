@@ -1,4 +1,4 @@
-use opencode_rk_sessions::share_invite::{InviteError, make_invite};
+use opencode_rk_sessions::share_invite::{make_invite, InviteError};
 
 #[test]
 fn inv_t01_valid() {
@@ -9,7 +9,10 @@ fn inv_t01_valid() {
 
 #[test]
 fn inv_t02_empty() {
-    assert!(matches!(make_invite("", "editor"), Err(InviteError::EmptyEmail)));
+    assert!(matches!(
+        make_invite("", "editor"),
+        Err(InviteError::EmptyEmail)
+    ));
     assert!(matches!(
         make_invite("   ", "editor"),
         Err(InviteError::EmptyEmail)

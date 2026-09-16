@@ -6,8 +6,7 @@
 mod web_entry_probe;
 
 use web_entry_probe::{
-    MAX_HTTP_ORIGIN_LEN, WEB_ENTRY_PATH, DaemonEndpoint, WebEntry, WebEntryError,
-    resolve_web_entry,
+    resolve_web_entry, DaemonEndpoint, WebEntry, WebEntryError, MAX_HTTP_ORIGIN_LEN, WEB_ENTRY_PATH,
 };
 
 fn live_endpoint() -> DaemonEndpoint {
@@ -96,8 +95,8 @@ fn probe_t04_stale_and_schema_mismatch_recoverable_explicit() {
         http_origin: "http://127.0.0.1:41001".to_string(),
         schema_version: 2,
     };
-    let err = resolve_web_entry(Some(&mismatched), 1)
-        .expect_err("schema mismatch must fail explicitly");
+    let err =
+        resolve_web_entry(Some(&mismatched), 1).expect_err("schema mismatch must fail explicitly");
     assert!(
         matches!(
             err,
@@ -130,9 +129,7 @@ fn probe_t05_no_side_effects_and_bounds() {
         "probe must not touch files"
     );
     assert_eq!(
-        std::fs::read_dir(dir.path())
-            .expect("list fixture")
-            .count(),
+        std::fs::read_dir(dir.path()).expect("list fixture").count(),
         1,
         "probe must create no files"
     );

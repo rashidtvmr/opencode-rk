@@ -85,11 +85,7 @@ pub enum QueryError {
 /// `score = sum(tokens of PATH_BONUS if token in path + occurrences in text)`.
 /// Enforces `max_hits` then `max_bytes` (snippet byte sum); over budget sets
 /// `truncated` and appends a rendered [`TRUNC_MARKER`] to the tail snippet.
-pub fn query(
-    index: &[IndexedDoc],
-    q: &str,
-    cfg: &QueryConfig,
-) -> Result<Result_, QueryError> {
+pub fn query(index: &[IndexedDoc], q: &str, cfg: &QueryConfig) -> Result<Result_, QueryError> {
     if !cfg.enabled {
         return Ok(Result_ {
             hits: Vec::new(),

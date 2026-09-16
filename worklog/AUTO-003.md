@@ -11,6 +11,12 @@ Harden the existing parallel controller with durable owner-checked worktree leas
 - `prompts/START_HERE.md:18-30`.
 - `tools/ralph_loop.py:1-19,161-164,209-261,283-303,397-423`.
 
+## Observed scenario
+
+- Pre-change controller had no durable owner-checked worktree leases and no owned heartbeat lifecycle (`PLAN.md:202-220`; `tools/ralph_loop.py:1-19,161-164,209-261,283-303,397-423` — no `LeaseTable` symbol before slice).
+- Observed via independent frozen suite `tests/bootstrap/test_auto003_leases.py` (SHA `cbcd015b…`): authoring import of `tools.ralph_loop` errored on missing `LeaseTable` (authoring feedback, not RED); after permissive scaffold, behavioral RED ran `2 passed / 3 failed` (foreign-owner acquire, foreign heartbeat, TTL/capacity/owner-release policy missing), cmd `/usr/bin/python3 -m unittest tests.bootstrap.test_auto003_leases`.
+- Post-change GREEN same cmd => `5 passed / 0 failed`. Agents-crate 30-pass log `/tmp/opencode/auto-comply.log` is separate cross-lane scope, not AUTO-003 evidence (re-verified 2026-09-16, EXIT=0, 15+5+5+5=30).
+
 ## Target boundary
 
 - Product implementation: `tools/ralph_loop.py`.

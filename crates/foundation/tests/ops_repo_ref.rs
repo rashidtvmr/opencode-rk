@@ -3,9 +3,7 @@
 #[path = "../src/ops_repo_ref.rs"]
 mod ops_repo_ref;
 
-use ops_repo_ref::{
-    cache_identity, cache_path, normalize_ref, normalize_ref_with_base, RepoError,
-};
+use ops_repo_ref::{cache_identity, cache_path, normalize_ref, normalize_ref_with_base, RepoError};
 
 #[test]
 fn ops_repo_ref_t01_happy_path() {
@@ -99,9 +97,12 @@ fn ops_repo_ref_t05_env_isolation_safety() {
     assert_eq!(based.canonical, "ghe.example.com/owner/repo@main");
     let plain_equiv = normalize_ref_with_base("owner/repo", None, None).unwrap();
     assert_eq!(plain_equiv, before);
-    let explicit =
-        normalize_ref_with_base("https://example.com/a/b", Some("dev"), Some("ghe.example.com"))
-            .unwrap();
+    let explicit = normalize_ref_with_base(
+        "https://example.com/a/b",
+        Some("dev"),
+        Some("ghe.example.com"),
+    )
+    .unwrap();
     assert_eq!(explicit.host, "example.com");
     assert_eq!(explicit.branch, "dev");
     let secret = "s3cr3t-t0ken-xyz";

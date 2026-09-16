@@ -7,13 +7,19 @@ fn sbx_t01_add() {
     assert_eq!(flags.len(), 1);
     assert_eq!(
         flags[0],
-        SandboxFlag { tool: "exec".to_string(), sandboxed: true }
+        SandboxFlag {
+            tool: "exec".to_string(),
+            sandboxed: true
+        }
     );
 }
 
 #[test]
 fn sbx_t02_toggle() {
-    let mut flags = vec![SandboxFlag { tool: "exec".to_string(), sandboxed: true }];
+    let mut flags = vec![SandboxFlag {
+        tool: "exec".to_string(),
+        sandboxed: true,
+    }];
     assert_eq!(set_sandbox(&mut flags, "exec", false), Ok(false));
     assert_eq!(flags.len(), 1);
     assert!(!flags[0].sandboxed);
@@ -22,7 +28,10 @@ fn sbx_t02_toggle() {
 #[test]
 fn sbx_t03_empty() {
     let mut flags = Vec::new();
-    assert_eq!(set_sandbox(&mut flags, "", true), Err(SandboxError::EmptyTool));
+    assert_eq!(
+        set_sandbox(&mut flags, "", true),
+        Err(SandboxError::EmptyTool)
+    );
     assert!(flags.is_empty());
 }
 
@@ -33,7 +42,10 @@ fn sbx_t04_missing_adds() {
     assert_eq!(flags.len(), 1);
     assert_eq!(
         flags[0],
-        SandboxFlag { tool: "read".to_string(), sandboxed: false }
+        SandboxFlag {
+            tool: "read".to_string(),
+            sandboxed: false
+        }
     );
 }
 

@@ -116,7 +116,12 @@ pub fn derive_paths(meta: &VersionMeta, base: &BaseDirs) -> Result<DerivedPaths,
         config_dir: base.config_dir.clone(),
         version_file,
     };
-    for p in [&out.data_dir, &out.cache_dir, &out.config_dir, &out.version_file] {
+    for p in [
+        &out.data_dir,
+        &out.cache_dir,
+        &out.config_dir,
+        &out.version_file,
+    ] {
         if p.len() > MAX_DERIVED {
             return Err(VersionError::BadBaseDir);
         }

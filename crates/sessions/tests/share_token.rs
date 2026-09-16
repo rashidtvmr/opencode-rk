@@ -1,4 +1,4 @@
-use opencode_rk_sessions::share_token::{TokenError, qualify_token};
+use opencode_rk_sessions::share_token::{qualify_token, TokenError};
 
 #[test]
 fn tok_t01_valid() {
@@ -9,14 +9,8 @@ fn tok_t01_valid() {
 
 #[test]
 fn tok_t02_empty() {
-    assert!(matches!(
-        qualify_token(""),
-        Err(TokenError::EmptyToken)
-    ));
-    assert!(matches!(
-        qualify_token("   "),
-        Err(TokenError::EmptyToken)
-    ));
+    assert!(matches!(qualify_token(""), Err(TokenError::EmptyToken)));
+    assert!(matches!(qualify_token("   "), Err(TokenError::EmptyToken)));
 }
 
 #[test]
@@ -46,8 +40,5 @@ fn tok_t04_too_short() {
 #[test]
 fn tok_t05_too_long() {
     let long = "a".repeat(65);
-    assert!(matches!(
-        qualify_token(&long),
-        Err(TokenError::BadToken)
-    ));
+    assert!(matches!(qualify_token(&long), Err(TokenError::BadToken)));
 }

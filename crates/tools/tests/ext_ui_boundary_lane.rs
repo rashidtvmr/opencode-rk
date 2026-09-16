@@ -4,8 +4,8 @@
 mod ext_ui_boundary_lane;
 
 use ext_ui_boundary_lane::{
-    ActivationGate, UiBoundary, UiDecl, UiError, UiSurface, MAX_DETAIL_LEN, MAX_LABEL_LEN,
-    MAX_UI_DECLS,
+    ActivationGate, MAX_DETAIL_LEN, MAX_LABEL_LEN, MAX_UI_DECLS, UiBoundary, UiDecl, UiError,
+    UiSurface,
 };
 
 fn decl(surface: UiSurface, label: &str, detail: &str) -> UiDecl {
@@ -182,7 +182,11 @@ fn ext012_t04_deferred_presentation() {
         "still deferred while open: no renderer ships here"
     );
     assert_eq!(b.describe(known), Some(snapshot.clone()));
-    assert_eq!(b.list(), list_snapshot, "no presentation side channel while open");
+    assert_eq!(
+        b.list(),
+        list_snapshot,
+        "no presentation side channel while open"
+    );
     // Recording still works while open.
     b.declare(2, decl(UiSurface::Panel, "open-decl", "while open"))
         .expect("recording works while open");
@@ -195,7 +199,12 @@ fn ext012_t05_no_host_side_effects() {
     let dir = tempfile::tempdir().expect("disposable test dir");
     let entries_before: Vec<String> = std::fs::read_dir(dir.path())
         .expect("read disposable dir")
-        .map(|e| e.expect("dir entry").file_name().to_string_lossy().into_owned())
+        .map(|e| {
+            e.expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
 
     let mut render_invocations: usize = 0;
@@ -221,15 +230,21 @@ fn ext012_t05_no_host_side_effects() {
         assert_eq!(b.request_render(*id), Err(UiError::Deferred));
     }
     assert_eq!(b.request_render(u64::MAX), Err(UiError::Deferred));
-    assert!(b.describe(u64::MAX).is_none(), "unknown id describes to None");
+    assert!(
+        b.describe(u64::MAX).is_none(),
+        "unknown id describes to None"
+    );
     assert_eq!(b.revoke_scope(u64::MAX), 0);
     assert_eq!(b.revoke_scope(1), 3);
     b.open_gate();
     for id in &known {
         assert_eq!(b.request_render(*id), Err(UiError::Deferred));
     }
-    b.declare(3, decl(UiSurface::Command, "post-open", "declare while open"))
-        .expect("declare while open");
+    b.declare(
+        3,
+        decl(UiSurface::Command, "post-open", "declare while open"),
+    )
+    .expect("declare while open");
 
     // The absent renderer was never invoked; nothing ran.
     assert_eq!(render_invocations, 0, "zero render invocations");
@@ -241,7 +256,12 @@ fn ext012_t05_no_host_side_effects() {
 
     let mut entries_after: Vec<String> = std::fs::read_dir(dir.path())
         .expect("reread disposable dir")
-        .map(|e| e.expect("dir entry").file_name().to_string_lossy().into_owned())
+        .map(|e| {
+            e.expect("dir entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
         .collect();
     entries_after.sort();
     let mut expected = entries_before;

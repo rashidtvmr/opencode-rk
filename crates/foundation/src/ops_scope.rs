@@ -154,7 +154,12 @@ fn normalize_inner(
         None => DEFAULT_BRANCH.to_string(),
     };
     let canonical = format!("{host}/{path}@{branch}");
-    Ok(NormalizedRef { canonical, host, path, branch })
+    Ok(NormalizedRef {
+        canonical,
+        host,
+        path,
+        branch,
+    })
 }
 
 fn parse_url_ref(rest: &str) -> Result<(String, String), RepoError> {
@@ -182,10 +187,7 @@ fn parse_bare_ref(trimmed: &str, default_host: &str) -> Result<(String, String),
         for s in &segments[1..] {
             validate_segment(s)?;
         }
-        Ok((
-            segments[0].to_ascii_lowercase(),
-            segments[1..].join("/"),
-        ))
+        Ok((segments[0].to_ascii_lowercase(), segments[1..].join("/")))
     } else {
         Err(RepoError::Malformed)
     }
@@ -298,7 +300,10 @@ mod scope_ref_tests {
             Err(RepoError::UnsafeBranch)
         ));
         for bad in ["", "  ", "://bad", "a/"] {
-            assert!(matches!(normalize_ref(bad, None), Err(RepoError::Malformed)));
+            assert!(matches!(
+                normalize_ref(bad, None),
+                Err(RepoError::Malformed)
+            ));
         }
         for branch in ["../x", "-evil", "a b", "~h", "a*b"] {
             assert!(matches!(
@@ -306,12 +311,14 @@ mod scope_ref_tests {
                 Err(RepoError::UnsafeBranch)
             ));
         }
-        std::env::set_var("OPS_008_DECOY_GITHUB_BASE_URL", "https://decoy.example.invalid");
+        std::env::set_var(
+            "OPS_008_DECOY_GITHUB_BASE_URL",
+            "https://decoy.example.invalid",
+        );
         let after = normalize_ref("owner/repo", None).unwrap();
         std::env::remove_var("OPS_008_DECOY_GITHUB_BASE_URL");
         assert_eq!(after, n);
-        let based =
-            normalize_ref_with_base("owner/repo", None, Some("ghe.example.com")).unwrap();
+        let based = normalize_ref_with_base("owner/repo", None, Some("ghe.example.com")).unwrap();
         assert_eq!(based.canonical, "ghe.example.com/owner/repo@main");
     }
 }

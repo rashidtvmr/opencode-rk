@@ -87,7 +87,10 @@ fn read_request(stream: &mut std::net::TcpStream) -> Vec<u8> {
         if expected_len.is_some_and(|len| request.len() >= len) {
             return request;
         }
-        assert!(request.len() <= 128 * 1024, "provider request exceeded fixture bound");
+        assert!(
+            request.len() <= 128 * 1024,
+            "provider request exceeded fixture bound"
+        );
     }
 }
 
@@ -173,7 +176,9 @@ async fn stream_turn(app: &axum::Router, session_id: &str) -> Vec<Value> {
 
 #[tokio::test]
 async fn web_009_t01_provider_reasoning_summary_streams_and_survives_reload() {
-    let _env_guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _env_guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     const EVENTS: &[u8] = concat!(
         "event: response.reasoning_summary_part.added\n",
         "data: {\"type\":\"response.reasoning_summary_part.added\",\"item_id\":\"rs_1\",\"output_index\":0,\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
@@ -198,11 +203,20 @@ async fn web_009_t01_provider_reasoning_summary_streams_and_survives_reload() {
 
     let events = stream_turn(&app, &session_id).await;
     assert_eq!(events[0]["type"], "user_message");
-    assert_eq!(events[1], json!({"type":"reasoning_summary_delta","delta":"Checked the "}));
-    assert_eq!(events[2], json!({"type":"reasoning_summary_delta","delta":"relevant constraints."}));
+    assert_eq!(
+        events[1],
+        json!({"type":"reasoning_summary_delta","delta":"Checked the "})
+    );
+    assert_eq!(
+        events[2],
+        json!({"type":"reasoning_summary_delta","delta":"relevant constraints."})
+    );
     assert_eq!(events[3]["type"], "assistant_delta");
     assert_eq!(events[4]["type"], "assistant_message");
-    assert_eq!(events[4]["reasoning_summary"], "Checked the relevant constraints.");
+    assert_eq!(
+        events[4]["reasoning_summary"],
+        "Checked the relevant constraints."
+    );
     let assistant_id = events[4]["message"]["id"].as_str().expect("assistant id");
 
     let request = provider_request.join().expect("provider fixture completed");
@@ -236,7 +250,9 @@ async fn web_009_t01_provider_reasoning_summary_streams_and_survives_reload() {
 
 #[tokio::test]
 async fn web_009_t02_unsupported_structured_provider_activity_fails_closed() {
-    let _env_guard = env_lock().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _env_guard = env_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
     const EVENTS: &[u8] = concat!(
         "event: response.output_text.annotation.added\n",
         "data: {\"type\":\"response.output_text.annotation.added\",\"annotation_index\":0,\"annotation\":{\"type\":\"url_citation\",\"url\":\"https://example.test\",\"title\":\"Example\"}}\n\n",
@@ -261,7 +277,9 @@ async fn web_009_t02_unsupported_structured_provider_activity_fails_closed() {
         .as_str()
         .unwrap_or_default()
         .contains("unsupported provider stream event"));
-    assert!(events.iter().all(|event| event["type"] != "assistant_message"));
+    assert!(events
+        .iter()
+        .all(|event| event["type"] != "assistant_message"));
 
     let messages = app
         .clone()

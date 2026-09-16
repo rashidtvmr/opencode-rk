@@ -22,11 +22,22 @@ pub struct DataKey {
 }
 
 /// One shareable event. Full identity is `(session, kind, id)`.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Debug redacts the value (shows `value_len` only); log keys/counts, never values.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ShareEvent {
     pub session: String,
     pub key: DataKey,
     pub value: Vec<u8>,
+}
+
+impl fmt::Debug for ShareEvent {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ShareEvent")
+            .field("session", &self.session)
+            .field("key", &self.key)
+            .field("value_len", &self.value.len())
+            .finish_non_exhaustive()
+    }
 }
 
 /// Resource caps. All three bounds enforced simultaneously.
@@ -165,10 +176,7 @@ impl CoalescingQueue {
 
     fn insert_inner(&mut self, event: ShareEvent) {
         // Degenerate caps admit nothing: drop, count eviction, no loop.
-        if self.caps.max_items == 0
-            || self.caps.max_bytes == 0
-            || self.caps.max_sessions == 0
-        {
+        if self.caps.max_items == 0 || self.caps.max_bytes == 0 || self.caps.max_sessions == 0 {
             self.evicted = self.evicted.saturating_add(1);
             return;
         }

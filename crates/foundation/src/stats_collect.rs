@@ -132,8 +132,7 @@ impl Collector {
         while self.retained_bytes > self.cfg.max_bytes {
             match self.history.pop_front() {
                 Some(_) => {
-                    self.retained_bytes =
-                        self.retained_bytes.saturating_sub(ENTRY_BYTES);
+                    self.retained_bytes = self.retained_bytes.saturating_sub(ENTRY_BYTES);
                 }
                 None => {
                     self.retained_bytes = 0;

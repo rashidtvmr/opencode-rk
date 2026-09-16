@@ -1,4 +1,4 @@
-use opencode_rk_sessions::share_scope::{MAX_SCOPES, ScopeError, grant_scope, has_scope};
+use opencode_rk_sessions::share_scope::{grant_scope, has_scope, ScopeError, MAX_SCOPES};
 
 #[test]
 fn scp_t01_grant() {

@@ -4,8 +4,8 @@ mod driver_lane;
 use std::collections::HashSet;
 
 use driver_lane::{
-    Driver, GateVerdict, LaneStatus, LeaseError, LeaseTable, OwnerToken, Plan,
-    ReadyQueue, Stopped, TaskSpec,
+    Driver, GateVerdict, LaneStatus, LeaseError, LeaseTable, OwnerToken, Plan, ReadyQueue, Stopped,
+    TaskSpec,
 };
 
 fn set(ids: &[&str]) -> HashSet<String> {
@@ -117,7 +117,11 @@ fn auto_006_t04_commit_per_milestone() {
     let mut driver = Driver::new(4);
     for (i, task) in ["M-LOW", "M-MID", "M-HIGH"].iter().enumerate() {
         driver
-            .acquire(task, OwnerToken::new(10 + i as u64), &format!("lane/{task}.rs"))
+            .acquire(
+                task,
+                OwnerToken::new(10 + i as u64),
+                &format!("lane/{task}.rs"),
+            )
             .expect("lease must succeed");
         driver.stage(
             &format!("lane/{task}.rs"),
@@ -161,14 +165,15 @@ fn auto_006_t04_commit_per_milestone() {
         err.to_string().contains("accepted but not integrated"),
         "unexpected commit error: {err}"
     );
-    assert!(matches!(conflicted.status("M-FF"), LaneStatus::Accepted { .. }));
-    assert!(
-        conflicted
-            .status("M-FF")
-            .last_error()
-            .unwrap_or("")
-            .contains("accepted but not integrated")
-    );
+    assert!(matches!(
+        conflicted.status("M-FF"),
+        LaneStatus::Accepted { .. }
+    ));
+    assert!(conflicted
+        .status("M-FF")
+        .last_error()
+        .unwrap_or("")
+        .contains("accepted but not integrated"));
     assert!(!conflicted.committed("M-FF"));
     assert!(conflicted.branch_preserved("M-FF"));
 }

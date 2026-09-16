@@ -1,4 +1,4 @@
-use opencode_rk_tools::ext_perms::{MAX_EXT_PERMS, ExtPerm, PermError, grant_perm};
+use opencode_rk_tools::ext_perms::{ExtPerm, MAX_EXT_PERMS, PermError, grant_perm};
 
 #[test]
 fn exp_t01_grant() {

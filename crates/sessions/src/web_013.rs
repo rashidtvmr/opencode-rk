@@ -455,9 +455,17 @@ impl ResearchRun {
                 last.step,
                 self.events.len(),
                 MAX_PROGRESS_EVENTS,
-                if self.truncated { ", older dropped" } else { "" },
+                if self.truncated {
+                    ", older dropped"
+                } else {
+                    ""
+                },
             ),
-            None => format!("{phase}: {} sources, {} steps", self.sources.len(), self.plan.len()),
+            None => format!(
+                "{phase}: {} sources, {} steps",
+                self.sources.len(),
+                self.plan.len()
+            ),
         }
     }
 
@@ -494,14 +502,20 @@ impl ResearchRun {
     /// Reload a run from its durable record.
     pub fn rehydrate(snapshot: Snapshot) -> Result<Self, ResearchError> {
         if snapshot.sources.len() > MAX_SOURCES {
-            return Err(ResearchError::InvalidSnapshot("too many sources".to_owned()));
+            return Err(ResearchError::InvalidSnapshot(
+                "too many sources".to_owned(),
+            ));
         }
         if snapshot.plan.len() > MAX_PLAN_STEPS {
-            return Err(ResearchError::InvalidSnapshot("too many plan steps".to_owned()));
+            return Err(ResearchError::InvalidSnapshot(
+                "too many plan steps".to_owned(),
+            ));
         }
         if snapshot.events.len() > MAX_PROGRESS_EVENTS || snapshot.event_count > MAX_PROGRESS_EVENTS
         {
-            return Err(ResearchError::InvalidSnapshot("too many progress events".to_owned()));
+            return Err(ResearchError::InvalidSnapshot(
+                "too many progress events".to_owned(),
+            ));
         }
         if snapshot.event_count != snapshot.events.len() {
             return Err(ResearchError::InvalidSnapshot(
@@ -513,7 +527,9 @@ impl ResearchRun {
         }
         for citation in &snapshot.citations {
             if !snapshot.sources.iter().any(|s| s == &citation.source) {
-                return Err(ResearchError::InvalidSnapshot("dangling citation".to_owned()));
+                return Err(ResearchError::InvalidSnapshot(
+                    "dangling citation".to_owned(),
+                ));
             }
             if citation.claim >= snapshot.claims {
                 return Err(ResearchError::InvalidSnapshot(

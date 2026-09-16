@@ -5,9 +5,8 @@
 mod transcript_lane;
 
 use transcript_lane::{
-    ActionId, FocusTarget, MessageRole, PopoverState, animation_ms, geometry_for,
-    is_branch_boundary, normalize_persisted_role, popover_items, reading_order, row_actions,
-    trunc_preview,
+    animation_ms, geometry_for, is_branch_boundary, normalize_persisted_role, popover_items,
+    reading_order, row_actions, trunc_preview, ActionId, FocusTarget, MessageRole, PopoverState,
 };
 
 // WEB-007-T01: rows full-width, role alignment, below-message bar with Fork.
@@ -77,7 +76,11 @@ fn web007_t04_bounds_and_reduced_motion() {
 fn web007_t05_persistence_render_compat() {
     for legacy in ["user", "assistant"] {
         let role = normalize_persisted_role(legacy).expect("legacy role known");
-        let streamed = if legacy == "user" { MessageRole::User } else { MessageRole::Assistant };
+        let streamed = if legacy == "user" {
+            MessageRole::User
+        } else {
+            MessageRole::Assistant
+        };
         assert_eq!(geometry_for(role, 3), geometry_for(streamed, 9));
         assert!(is_branch_boundary(role));
     }

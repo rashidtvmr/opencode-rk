@@ -25,7 +25,10 @@ fn rch_t02_toggle() {
 #[test]
 fn rch_t03_empty() {
     let mut items = Vec::new();
-    assert_eq!(set_done(&mut items, "", true), Err(RelCheckError::EmptyItem));
+    assert_eq!(
+        set_done(&mut items, "", true),
+        Err(RelCheckError::EmptyItem)
+    );
     assert_eq!(
         set_done(&mut items, "   ", false),
         Err(RelCheckError::EmptyItem)

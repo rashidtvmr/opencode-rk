@@ -325,9 +325,7 @@ impl McpAttachment {
             (McpTransport::Stdio { .. }, McpAuth::BearerHandle { .. }) => {
                 ("Stdio", AuthMode::Bearer)
             }
-            (McpTransport::Stdio { .. }, McpAuth::OAuthHandle { .. }) => {
-                ("Stdio", AuthMode::OAuth)
-            }
+            (McpTransport::Stdio { .. }, McpAuth::OAuthHandle { .. }) => ("Stdio", AuthMode::OAuth),
         };
         format!(
             "mcp transport={transport} auth={auth_mode:?} endpoint={} handle=hdl-***",
@@ -392,7 +390,10 @@ impl McpAttachment {
             }
             let step = transport.script[index].clone();
             match step {
-                FakeStep::Bytes { data, elapsed_ms: dt } => {
+                FakeStep::Bytes {
+                    data,
+                    elapsed_ms: dt,
+                } => {
                     bytes = bytes.saturating_add(data.len());
                     if bytes > MAX_HANDSHAKE_BYTES {
                         return Err(fail(&guard, McpError::HandshakeTooLarge));

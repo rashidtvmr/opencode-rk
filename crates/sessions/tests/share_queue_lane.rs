@@ -5,7 +5,9 @@
 #[path = "../src/share_queue_lane.rs"]
 mod share_queue_lane;
 
-use share_queue_lane::{LaneCoalescingQueue, LaneDataKey, LaneQueueCaps, LaneQueueError, LaneShareEvent};
+use share_queue_lane::{
+    LaneCoalescingQueue, LaneDataKey, LaneQueueCaps, LaneQueueError, LaneShareEvent,
+};
 use std::collections::HashSet;
 
 const CAPS: LaneQueueCaps = LaneQueueCaps {
@@ -162,8 +164,13 @@ fn share002_lane_t05_safety_no_side_effects() {
     let mut logs: Vec<String> = Vec::new();
     {
         let mut q = LaneCoalescingQueue::new(CAPS, accept_all);
-        q.push(ev("s1", "message", "m1", &format!(r#"{{"body":"{MARK}"}}"#)))
-            .unwrap();
+        q.push(ev(
+            "s1",
+            "message",
+            "m1",
+            &format!(r#"{{"body":"{MARK}"}}"#),
+        ))
+        .unwrap();
         q.push(ev("s1", "part", "p1", r#"{"v":1}"#)).unwrap();
         logs.push(format!(
             "len={} bytes={} filtered={} evicted={}",

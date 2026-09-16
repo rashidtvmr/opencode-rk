@@ -73,7 +73,10 @@ fn ops002_t02_determinism_cache_identity() {
     assert_ne!(a.cache_path, c.cache_path);
     // frozen stable vector across restarts
     let frozen = normalize_ref("owner/repo", None, &r).unwrap();
-    assert_eq!(frozen.cache_id, normalize_ref("owner/repo", None, &r).unwrap().cache_id);
+    assert_eq!(
+        frozen.cache_id,
+        normalize_ref("owner/repo", None, &r).unwrap().cache_id
+    );
     assert!(is_hex(&frozen.cache_id));
 }
 
@@ -144,7 +147,10 @@ fn ops002_t05_no_side_effects_safety() {
     let dir = std::env::temp_dir().join("ops002-side-effect-probe-9f31");
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
-    let before: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    let before: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
     let refs = [
         "owner/repo",
         "https://github.com/owner/repo",
@@ -159,7 +165,10 @@ fn ops002_t05_no_side_effects_safety() {
     // overlong / bad inputs also side-effect free
     let _ = normalize_ref(&"x".repeat(8192), None, &dir);
     let _ = normalize_ref("::::", None, &dir);
-    let after: Vec<_> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name()).collect();
+    let after: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
     assert_eq!(before, after);
     let _ = std::fs::remove_dir_all(&dir);
     // zero DB writes: no sqlite file beside fixture-outside

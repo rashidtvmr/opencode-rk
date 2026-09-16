@@ -80,15 +80,9 @@ fn int_001_t02_override_and_reveal_on_close() {
     reg.register(s2, desc("x", vec![method(MethodKind::Key, "k", "v2")]))
         .expect("register v2");
 
-    assert_eq!(
-        reg.get("x").expect("x visible").methods[0].label,
-        "v2"
-    );
+    assert_eq!(reg.get("x").expect("x visible").methods[0].label, "v2");
     assert_eq!(reg.close_scope(s2).expect("close s2"), 1);
-    assert_eq!(
-        reg.get("x").expect("x revealed").methods[0].label,
-        "v1"
-    );
+    assert_eq!(reg.get("x").expect("x revealed").methods[0].label, "v1");
     assert_eq!(reg.close_scope(s1).expect("close s1"), 1);
     assert_eq!(reg.get("x"), None);
 }

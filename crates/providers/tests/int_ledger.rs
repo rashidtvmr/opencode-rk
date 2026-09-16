@@ -1,4 +1,4 @@
-use opencode_rk_providers::int_ledger::{MAX_LEDGER_KEYS, append_key};
+use opencode_rk_providers::int_ledger::{append_key, MAX_LEDGER_KEYS};
 
 #[test]
 fn le_t01_append() {
@@ -48,5 +48,8 @@ fn le_t05_order() {
     for k in ["a", "b", "c"] {
         append_key(&mut keys, k).expect("valid key appends");
     }
-    assert_eq!(keys, vec!["a".to_string(), "b".to_string(), "c".to_string()]);
+    assert_eq!(
+        keys,
+        vec!["a".to_string(), "b".to_string(), "c".to_string()]
+    );
 }

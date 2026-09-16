@@ -155,8 +155,14 @@ fn ext009_t04_determinism() {
     let mut y = Namespace::new();
     y.register(skill("race", 2)).unwrap();
     y.register(skill("race", 1)).unwrap();
-    assert_eq!(x.lookup(EntryKind::Skill, "race").map(|d| d.source), Some(2));
-    assert_eq!(y.lookup(EntryKind::Skill, "race").map(|d| d.source), Some(2));
+    assert_eq!(
+        x.lookup(EntryKind::Skill, "race").map(|d| d.source),
+        Some(2)
+    );
+    assert_eq!(
+        y.lookup(EntryKind::Skill, "race").map(|d| d.source),
+        Some(2)
+    );
     assert_eq!(snapshot(&x), snapshot(&y));
 }
 

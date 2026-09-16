@@ -9,7 +9,7 @@
 mod int_connect;
 
 use int_connect::{
-    ConnectError, ConnectInput, ConnectionInfo, ConnectionState, ConnectionTable, ConnId,
+    ConnId, ConnectError, ConnectInput, ConnectionInfo, ConnectionState, ConnectionTable,
     MethodKind, MAX_CODE_LEN, MAX_CONNECTIONS,
 };
 use std::cell::Cell;

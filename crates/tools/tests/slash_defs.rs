@@ -12,7 +12,10 @@ fn sld_t01_valid() {
 
 #[test]
 fn sld_t02_empty() {
-    assert_eq!(qualify_slash(&[("", "x")]).unwrap_err(), SlashError::EmptyName);
+    assert_eq!(
+        qualify_slash(&[("", "x")]).unwrap_err(),
+        SlashError::EmptyName
+    );
 }
 
 #[test]

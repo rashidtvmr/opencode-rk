@@ -48,7 +48,9 @@ impl OpsLaneRoot {
             return Err(OpsLaneError::BadCacheRoot);
         }
         ops_lane_validate_root(root).map_err(|_| OpsLaneError::BadCacheRoot)?;
-        Ok(Self { raw: root.to_string() })
+        Ok(Self {
+            raw: root.to_string(),
+        })
     }
 
     #[must_use]
@@ -110,7 +112,12 @@ pub fn ops_lane_normalize(
         return Err(OpsLaneError::Invalid);
     }
     let cache_id = ops_lane_identity(&canonical, &branch);
-    Ok(OpsLaneRef { canonical, branch, cache_path, cache_id })
+    Ok(OpsLaneRef {
+        canonical,
+        branch,
+        cache_path,
+        cache_id,
+    })
 }
 
 /// Failure hint carrying only the failure kind plus the ref basename.
@@ -139,7 +146,11 @@ pub fn ops_lane_basename(raw: &str) -> String {
         .filter(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
         .take(64)
         .collect();
-    if tail.is_empty() { "(empty)".to_string() } else { tail }
+    if tail.is_empty() {
+        "(empty)".to_string()
+    } else {
+        tail
+    }
 }
 
 fn ops_lane_canonicalize(raw: &str) -> Option<String> {
@@ -187,9 +198,9 @@ fn ops_lane_shorthand(s: &str) -> Option<String> {
     if s.starts_with('/') || s.ends_with('/') || s.contains("//") {
         return None;
     }
-    if s.bytes().any(|b| {
-        b == 0 || b == b'\\' || b == b' ' || b == b'\t' || b == b'\n' || b == b'\r'
-    }) {
+    if s.bytes()
+        .any(|b| b == 0 || b == b'\\' || b == b' ' || b == b'\t' || b == b'\n' || b == b'\r')
+    {
         return None;
     }
     if s.contains("..") {
@@ -234,7 +245,10 @@ fn ops_lane_validate_branch(branch: &str) -> Result<String, ()> {
     if branch.starts_with('.') || branch.ends_with('.') || branch.ends_with(".lock") {
         return Err(());
     }
-    if branch.bytes().any(|b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r') {
+    if branch
+        .bytes()
+        .any(|b| b == b' ' || b == b'\t' || b == b'\n' || b == b'\r')
+    {
         return Err(());
     }
     if branch.bytes().any(|b| {

@@ -69,10 +69,8 @@ pub static PROTOCOL_ROUTES: &[ProtocolRoute] = &[
 /// [`PROTOCOL_ROUTES`].
 #[must_use]
 pub fn served_routes() -> Vec<(Method, &'static str)> {
-    let mut routes: Vec<(Method, &'static str)> = PROTOCOL_ROUTES
-        .iter()
-        .map(|r| (r.method, r.path))
-        .collect();
+    let mut routes: Vec<(Method, &'static str)> =
+        PROTOCOL_ROUTES.iter().map(|r| (r.method, r.path)).collect();
     routes.sort();
     routes
 }

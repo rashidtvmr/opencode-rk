@@ -228,7 +228,11 @@ pub fn search_chats(
         let title_hit = entry.title.to_lowercase().contains(&needle);
         let body_hit = body.to_lowercase().contains(&needle);
         if title_hit || body_hit {
-            let source = if title_hit { entry.title.clone() } else { body.to_owned() };
+            let source = if title_hit {
+                entry.title.clone()
+            } else {
+                body.to_owned()
+            };
             out.push(SearchHit {
                 session_id: entry.id.clone(),
                 title: entry.title.clone(),
@@ -248,15 +252,14 @@ fn snippet_of(text: &str) -> String {
 /// to `1..=MAX_PAGE_ITEMS`. `next_cursor` is the last returned `seq` when
 /// more rows remain, else `None`.
 #[must_use]
-pub fn page_messages(
-    history: &[MessageRow],
-    cursor: Option<u64>,
-    limit: usize,
-) -> MessagePage {
+pub fn page_messages(history: &[MessageRow], cursor: Option<u64>, limit: usize) -> MessagePage {
     let limit = limit.clamp(1, MAX_PAGE_ITEMS);
     let start = match cursor {
         None => 0,
-        Some(seq) => history.iter().position(|m| m.seq > seq).unwrap_or(history.len()),
+        Some(seq) => history
+            .iter()
+            .position(|m| m.seq > seq)
+            .unwrap_or(history.len()),
     };
     let end = (start + limit).min(history.len());
     let items = history[start..end].to_vec();
@@ -331,7 +334,11 @@ pub fn decode_nav(text: &str) -> Result<Vec<ChatEntry>, ChatNavError> {
         if cols.len() != 4 {
             return Err(ChatNavError::BadEncoding);
         }
-        let updated_us: i64 = cols.pop().unwrap().parse().map_err(|_| ChatNavError::BadEncoding)?;
+        let updated_us: i64 = cols
+            .pop()
+            .unwrap()
+            .parse()
+            .map_err(|_| ChatNavError::BadEncoding)?;
         let flags = cols.pop().unwrap();
         let mut flag_chars = flags.chars();
         let bit = |c: Option<char>| match c {
@@ -339,7 +346,11 @@ pub fn decode_nav(text: &str) -> Result<Vec<ChatEntry>, ChatNavError> {
             Some('1') => Ok(true),
             _ => Err(ChatNavError::BadEncoding),
         };
-        let (pinned, archived, temporary) = (bit(flag_chars.next())?, bit(flag_chars.next())?, bit(flag_chars.next())?);
+        let (pinned, archived, temporary) = (
+            bit(flag_chars.next())?,
+            bit(flag_chars.next())?,
+            bit(flag_chars.next())?,
+        );
         if flag_chars.next().is_some() {
             return Err(ChatNavError::BadEncoding);
         }

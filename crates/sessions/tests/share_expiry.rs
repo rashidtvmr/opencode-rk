@@ -23,7 +23,10 @@ fn exp_t03_valid() {
 fn exp_t04_expired() {
     assert!(matches!(
         check_expiry(1061, 1060),
-        Err(ExpiryError::Expired { now: 1061, exp: 1060 })
+        Err(ExpiryError::Expired {
+            now: 1061,
+            exp: 1060
+        })
     ));
 }
 

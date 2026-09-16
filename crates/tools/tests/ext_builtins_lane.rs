@@ -64,7 +64,10 @@ fn ext002_t02_unregister_clean() {
     // register -> unregister -> register yields fresh larger ids in table order.
     let ids2 = register_builtins(&mut reg, SUPPORTED_CONTRACT_VERSION).unwrap();
     assert_eq!(ids2.len(), 2);
-    assert!(ids2[0].0 > ids[1].0, "ids must be fresh, got {ids2:?} after {ids:?}");
+    assert!(
+        ids2[0].0 > ids[1].0,
+        "ids must be fresh, got {ids2:?} after {ids:?}"
+    );
     let list = reg.list();
     assert_eq!(list[0].id, ids2[0]);
     assert_eq!(list[1].id, ids2[1]);
@@ -175,5 +178,8 @@ fn ext002_t05_zero_cost_when_off_and_safety() {
         .unwrap()
         .map(|e| e.unwrap().file_name())
         .collect();
-    assert_eq!(before, after, "no files may be created outside the test dir");
+    assert_eq!(
+        before, after,
+        "no files may be created outside the test dir"
+    );
 }

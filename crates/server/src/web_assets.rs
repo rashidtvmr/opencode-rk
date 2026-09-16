@@ -2,10 +2,10 @@
 
 use axum::{
     body::Body,
-    http::{header, StatusCode, Uri},
+    http::{StatusCode, Uri, header},
     response::{IntoResponse, Response},
 };
-use include_dir::{include_dir, Dir};
+use include_dir::{Dir, include_dir};
 
 static WEB_DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/web_dist");
 

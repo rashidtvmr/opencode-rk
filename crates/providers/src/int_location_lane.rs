@@ -105,9 +105,8 @@ fn valid_dir(s: &str) -> bool {
     if len == 0 || len > MAX_DIR_LEN || !s.starts_with('/') {
         return false;
     }
-    s.bytes().all(|b| {
-        b.is_ascii_alphanumeric() || b == b'/' || b == b'.' || b == b'_' || b == b'-'
-    })
+    s.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'/' || b == b'.' || b == b'_' || b == b'-')
 }
 
 /// Validate a workspace id: 1..=[`MAX_WS_LEN`] bytes, `wrk`-prefixed,

@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use axum::{body::{to_bytes, Body}, http::{Request, StatusCode}};
+use axum::{
+    body::{to_bytes, Body},
+    http::{Request, StatusCode},
+};
 use opencode_rk_catalog::Catalog;
 use opencode_rk_server::{router, AppState};
 use opencode_rk_sessions::SessionService;
