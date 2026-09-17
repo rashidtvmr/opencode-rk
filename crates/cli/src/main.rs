@@ -16,6 +16,8 @@ use opencode_rk_storage::{Storage, StoragePaths};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::Serialize;
 use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
+mod tui_entry;
+use tui_entry::TuiArgs;
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 #[derive(Debug, Parser)]
 #[command(
@@ -42,6 +44,7 @@ enum Command {
     },
     Serve(ServeArgs),
     Web(WebArgs),
+    Tui(TuiArgs),
 }
 #[derive(Debug, Args)]
 struct DoctorArgs {
@@ -171,6 +174,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         Command::Web(args) => {
             let data = resolve_data_dir(cli.data_dir)?;
             web(data, args).await?;
+        }
+        Command::Tui(args) => {
+            tui_entry::run(args)?;
         }
     }
     Ok(())
