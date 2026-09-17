@@ -1,0 +1,20 @@
+name: application-completion-contract
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  completion-specification:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+      - name: Validate full legacy and additive specification
+        run: python3 tools/completion_plan.py --check
+      - name: Test planning and scheduler primitives, not product completion
+        run: python3 -m unittest discover -s tests/completion -p 'test_*.py' -v

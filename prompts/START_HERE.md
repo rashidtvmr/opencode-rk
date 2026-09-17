@@ -1,36 +1,27 @@
-# Master handoff to the implementation harness
+# Master handoff: complete the actual application
 
-Build the project described in this kit. The working name is Lean Harness.
-Read PLAN.md, AGENTS.md, docs/SECURITY.md, docs/TDD.md and ralph.json. Preserve all
-explicit user requirements and the current source pins. Do not replace the task
-with a high-level proposal; produce code and independently verifiable evidence.
+Read and execute [COMPLETE_APP.md](COMPLETE_APP.md). It is the September 17, 2026
+completion addendum to PLAN.md and AGENTS.md, not a replacement for their original
+scope, source pins, security, resource or independent-test requirements.
 
-Start by running the bootstrap validators. Fetch and inventory the exact OpenCode
-and 9router commits without executing untrusted lifecycle scripts. Complete the
-DISC source/surface audit and expand the backlog whenever a previously unmapped
-feature is found. Never claim the seed list is exhaustive before this gate.
+The completion plan is the UNION of legacy `ralph.json` and its requirements with
+`ralph.completion.json` and all included task files. Existing accepted flags and
+`prd.json` alone are not completion evidence. Every original requirement remains
+mandatory; no new product task is certified accepted by this planning update.
 
-Use Rust + Tokio for the native application, SQLite plus bounded blob storage,
-and optional compatibility hosts. Implement behavior slices, not file-for-file
-translations. Native mode must not require JS, PostgreSQL or MongoDB. Every
-optional feature has measurable off-state resource behavior.
+Start the 20 audit roots; use actual harness-native delegation to target 20 safe
+ready one-file child workers with rolling replacement, independent verification,
+and serialized integration. Respect actual harness/provider/RAM limits. The new
+scheduler library is a tested primitive, not a configured native agent adapter;
+COORD tasks explicitly cover adapter, durable recovery and old-controller repairs.
 
-Use independent mapper/test-author/implementer/verifier/integrator roles. Give
-workers only ready tasks and owned files in isolated worktrees. Establish a
-compiling behavioral RED, freeze tests, implement GREEN, refactor, independently
-review, integrate and rerun the relevant suites. Only the trusted controller can
-accept a task. Strict policy, resource limits and source pins are not writable
-implementation targets.
+The required local journey is install -> type `opencode2` -> authenticated shared
+daemon starts/reuses automatically -> real native terminal UI -> coding turn with
+tools, permissions and durable resume. Optional remote mode adds the owned account,
+explicit PC/phone pairing, named-tunnel gateway and real iOS/Android control apps.
+Line echo, browser-only operation and disconnected modules do not satisfy it.
 
-Configure actual trusted adapters and an OS sandbox before running the included
-prototype loop. Do not invent an adapter that prints success. The prototype is
-serial; implement AUTO tasks for hardened leased parallel execution and safe
-scope expansion. Continue unattended through safe ready work within the approved
-budgets. Classify and record a blocker rather than bypassing authority, reducing
-scope, fabricating credentials, suppressing failures or spinning forever.
-
-Runtime human approvals are product behavior. Test them with isolated fake grant
-issuers, not the user's real secrets/files. Never modify the original OpenCode
-history database. Keep source notes with path/commit/symbol evidence and compact
-scratchpads. Finish only when all mandatory work and independent release gates
-pass on the exact integrated tree, or report the precise blocked state honestly.
+Run all existing guards plus the completion specification/tests. Missing network,
+credentials, signing, platform isolation or device evidence stays blocked. Finish
+only with independent exact-integrated-revision release proof for the full scope;
+otherwise report exact unresolved work without pretending the app is complete.

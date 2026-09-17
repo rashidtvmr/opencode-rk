@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "preparedOn": "2026-09-17",
+  "status": "implementation-required",
+  "legacyPlan": "ralph.json",
+  "legacyRequirements": "requirements/user-requirements.json",
+  "includes": ["tasks/completion/local.json", "tasks/completion/tui.json", "tasks/completion/parity.json", "tasks/completion/remote.json", "tasks/completion/delivery.json"],
+  "requirements": {
+    "COMP-001": "Installed opencode2 starts/reuses its authenticated daemon and opens the native TUI without manual serve, browser or session setup.",
+    "COMP-002": "Owned Rust bridge to the pinned OpenTUI Zig renderer, with required TypeScript orchestration reimplemented in Rust and no JS runtime in native mode.",
+    "COMP-003": "Every original requirement, accepted task, OpenCode V2 behavior, compatibility surface and observed upstream delta is reconciled and verified.",
+    "COMP-004": "Opt-in self-hosted account/device gateway published through named Cloudflare Tunnel; PCs connect outbound with explicit pairing and revocation.",
+    "COMP-005": "Real installed iOS and Android clients control authorized PC workspaces, sessions, tabs, prompts, tools and approvals.",
+    "COMP-006": "One main agent targets 20 rolling native workers with safe ownership, bounded resources, independent verification and serialized integration.",
+    "COMP-007": "Completion requires installed-product, platform, source-parity and device evidence on the exact integrated release revision."
+  },
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "contract": {
+    "mandatory": true,
+    "initialStatus": "not-started",
+    "legacyAcceptedIsReleaseEvidence": false,
+    "fullUpstreamAuditCertified": false,
+    "testCasesAreSpecificationsNotPassingTests": true,
+    "ownership": "Paths are proposed parent-slice locks, not multi-file worker grants. Reconcile actual modules, prewire shared contracts, then delegate one-file children under AGENTS.md. Only the integrator edits shared routes, schemas, migrations, Cargo manifests and lockfiles.",
+    "verticalSlice": "Each journey includes actual UI or CLI entrypoint, authenticated service, authorization, persistence, events, failure presentation and packaging as applicable. A helper, source file, fake success or disconnected test does not satisfy it.",
+    "tests": "T01..T05 are minimum explicit scenarios. Independent test author establishes executable behavioral RED, freezes test and command hashes, implementer supplies GREEN, independent verifier reruns after integration. Zero discovered tests, compile failure as RED and worker-edited tests are invalid.",
+    "fixtures": "Use disposable homes/workspaces and scripted external provider responses. The actual app, renderer, permission broker, database and tools must run. Never modify real OpenCode history or use user secrets as fixtures.",
+    "resources": "Keep queues, buffers, output, retries and retention bounded. Measure whole-process-tree memory. Preserve 8 GiB host budget, 2 GiB reserve and one heavy validation. Off features start no hidden services.",
+    "discovery": "Unmapped or partially implemented behaviors create mandatory child tasks with source evidence and concrete tests. Parent acceptance waits for all children. No silent exclusions or retrospective acceptance receipts.",
+    "externalAuthority": "Missing authorized provider access, account consent, Cloudflare credentials, signing identity, OS sandbox or physical devices is blocked, not passed. Do not invent credentials or increase provider budget."
+  },
+  "auditShards": [
+    {"id":"AUD-001","title":"CLI launch, daemon lifecycle and installed commands","legacyPrefixes":["BASE","HEAD"],"local":["crates/cli","crates/server/src/daemon.rs"],"upstream":["packages/cli/src","packages/opencode/src/cli"]},
+    {"id":"AUD-002","title":"Provider protocols, credentials and model ingestion","legacyPrefixes":["PROV","CAT"],"local":["crates/providers","crates/catalog"],"upstream":["packages/core/src/aisdk.ts","packages/core/src/credential","packages/core/src/catalog.ts"]},
+    {"id":"AUD-003","title":"Sessions, history, fork, rewind and compaction","legacyPrefixes":["SESS"],"local":["crates/sessions"],"upstream":["packages/core/src/session","packages/opencode/src/session"]},
+    {"id":"AUD-004","title":"Custom agents and complete subagent lifecycle","legacyPrefixes":["AGENT"],"local":["crates/agents"],"upstream":["packages/core/src/agent.ts","packages/core/src/background-job.ts"]},
+    {"id":"AUD-005","title":"Native tools and real execution wiring","legacyPrefixes":["TOOL"],"local":["crates/tools","crates/server/src/lib.rs"],"upstream":["packages/core/src/tool","packages/opencode/src/tool"]},
+    {"id":"AUD-006","title":"Security, policy broker, hooks and platform isolation","legacyPrefixes":["SEC"],"local":["crates/security","docs/SECURITY.md"],"upstream":["packages/core/src/permission","packages/opencode/src/permission"]},
+    {"id":"AUD-007","title":"Storage, migrations, import, retention and recovery","legacyPrefixes":["DB"],"local":["crates/storage"],"upstream":["packages/core/src/storage","packages/core/src/session"]},
+    {"id":"AUD-008","title":"Extra multi-account routing, quotas and accounting","legacyPrefixes":["ROUTE"],"local":["crates/providers","crates/catalog"],"upstream":["9router pinned repository routing/auth/account surfaces"]},
+    {"id":"AUD-009","title":"MCP, LSP, ACP, Git and workspace integration","legacyPrefixes":["INT","ACP"],"local":["crates/tools","crates/server/src/acp_bridge.rs"],"upstream":["packages/core/src","packages/opencode/src/mcp","packages/opencode/src/lsp","packages/opencode/src/acp"]},
+    {"id":"AUD-010","title":"Events, SDK, workspace proxy and headless behavior","legacyPrefixes":["SYNC","RUN","WSX","SDK"],"local":["crates/server/src","crates/cli/src/run_headless.rs"],"upstream":["packages/server","packages/schema","packages/sdk","packages/client"]},
+    {"id":"AUD-011","title":"OpenTUI fork ABI, native build and missing TS orchestration","legacyPrefixes":[],"local":["crates/cli/src/tui_entry.rs"],"upstream":["opentui/packages/native","opentui/packages/core/src/renderer.ts","opentui/packages/core/src/Renderable.ts"]},
+    {"id":"AUD-012","title":"Skills, commands, plugins and UI compatibility","legacyPrefixes":["EXT"],"local":["crates/tools","crates/sessions"],"upstream":["packages/core/src","packages/plugin","packages/opencode/src/plugin"]},
+    {"id":"AUD-013","title":"All terminal interactions and presentation","legacyPrefixes":["UI"],"local":["crates/cli/src/tui_entry.rs","crates/sessions/src/tui_state.rs"],"upstream":["packages/tui","packages/opencode/src/cli/cmd/tui"]},
+    {"id":"AUD-014","title":"Web app, attachments, artifacts, voice and research extras","legacyPrefixes":["WEB"],"local":["web","crates/server/src/lib.rs"],"upstream":["packages/app","packages/desktop"]},
+    {"id":"AUD-015","title":"Sharing, remote auth and identity gaps","legacyPrefixes":["SHARE"],"local":["crates/server/src"],"upstream":["packages/core/src/account.ts","packages/core/src/control-plane","packages/opencode/src/share"]},
+    {"id":"AUD-016","title":"iOS/Android product journeys and control threat model","legacyPrefixes":[],"local":["requirements/user-requirements.json","web"],"upstream":["new user requirement: installed iOS and Android control clients"]},
+    {"id":"AUD-017","title":"Controller acceptance, leases, TDD and worker ownership","legacyPrefixes":["AUTO"],"local":["tools/ralph_loop.py","tools/plan_model.py","tools/lane_gate.py"],"upstream":["new user requirement: rolling native 20-worker delegation"]},
+    {"id":"AUD-018","title":"Resources, packaging, platform and release evidence","legacyPrefixes":["OPS","REL"],"local":["config/resource-targets.json","Cargo.toml","tools/check_release_tdd.py"],"upstream":["packages/cli/script","packages/desktop","installation scripts"]},
+    {"id":"AUD-019","title":"Exhaustive source inventory, dynamic registrations and current-dev drift","legacyPrefixes":["DISC"],"local":["sources","tools/inventory.py","tools/reconcile_surfaces.py"],"upstream":["entire pinned OpenCode and 9router trees; observed OpenCode dev delta; complete OpenTUI fork tree"]},
+    {"id":"AUD-020","title":"Every legacy requirement and accepted-flag reconciliation","legacyPrefixes":[],"local":["ralph.json","FEATURES.md","prd.json","tasks","requirements"],"upstream":["all requirements and source-surface ledgers; catches every unmapped legacy prefix"]}
+  ],
+  "auditTests": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ]
+}
