@@ -148,7 +148,7 @@ function MessageActions({
           >
             <FileText aria-hidden="true" />
           </Button>
-          <DropdownMenu placement="bottom start">
+          <DropdownMenu placement="bottom start" isNonModal>
             <DropdownMenuItem onAction={() => onArtifact(message, 'writing')}>
               Open as writing artifact
             </DropdownMenuItem>
@@ -167,7 +167,7 @@ function MessageActions({
         >
           <GitFork aria-hidden="true" />
         </Button>
-        <DropdownMenu placement={role === 'user' ? 'bottom end' : 'bottom start'}>
+        <DropdownMenu placement={role === 'user' ? 'bottom end' : 'bottom start'} isNonModal>
           <DropdownMenuItem onAction={() => onBranch(message)} aria-label="Branch in new chat">
             <GitFork aria-hidden="true" />
             Branch in new chat
@@ -239,6 +239,11 @@ function App() {
   const [streamingReasoningSummary, setStreamingReasoningSummary] = useState('')
   const [activeTurnSessionId, setActiveTurnSessionId] = useState<string | null>(null)
   const activeTurnRef = useRef<{ sessionId: string; controller: AbortController } | null>(null)
+  // Set when a turn seeds the transcript for a session whose load effect has
+  // not run yet (branch-then-execute flow): the first effect run for that id
+  // is then a render-order replay, not a real selection change, and must not
+  // refetch and clobber the streamed turn output.
+  const turnSeededSessionRef = useRef<string | null>(null)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -295,6 +300,10 @@ function App() {
     if (activeTurnRef.current?.sessionId === selectedSessionId) {
       return
     }
+    if (turnSeededSessionRef.current === selectedSessionId) {
+      turnSeededSessionRef.current = null
+      return
+    }
 
     const controller = new AbortController()
     setMessages([])
@@ -325,6 +334,13 @@ function App() {
     ])
       .then(([history, activity, attachments, artifacts, provenance]) => {
         if (controller.signal.aborted) return
+        if (activeTurnRef.current?.sessionId === selectedSessionId) {
+          // An executing turn owns this session's transcript (it seeded state
+          // from the branch baseline and streams deltas); a late load result
+          // must not clobber the turn output.
+          setMessageLoadState('ready')
+          return
+        }
         setMessages(history.messages)
         setHistoryBefore(history.nextBefore)
         setAssistantActivity(
@@ -478,6 +494,7 @@ function App() {
     activeTurnRef.current?.controller.abort()
     const controller = new AbortController()
     activeTurnRef.current = { sessionId, controller }
+    turnSeededSessionRef.current = sessionId
     setActiveTurnSessionId(sessionId)
     setStreamingAssistantText('')
     setStreamingReasoningSummary('')
@@ -543,6 +560,7 @@ function App() {
     } catch (cause) {
       if (controller.signal.aborted) {
         if (activeTurnRef.current?.controller === controller) activeTurnRef.current = null
+        if (turnSeededSessionRef.current === sessionId) turnSeededSessionRef.current = null
         setActiveTurnSessionId((current) => (current === sessionId ? null : current))
         setStreamingAssistantText('')
         setStreamingReasoningSummary('')
@@ -550,6 +568,7 @@ function App() {
         return false
       }
       if (activeTurnRef.current?.controller === controller) activeTurnRef.current = null
+      if (turnSeededSessionRef.current === sessionId) turnSeededSessionRef.current = null
       setActiveTurnSessionId((current) => (current === sessionId ? null : current))
       setStreamingAssistantText('')
       setStreamingReasoningSummary('')
@@ -876,23 +895,15 @@ function App() {
       setEditingMessageText('')
       setSelectedSessionId(result.session.id)
 
-      const accepted = await executeTurnInSession(
+      // The turn executor owns the outcome notice (success and failure); a
+      // branch-scoped success line here would clobber a provider error.
+      return executeTurnInSession(
         result.session.id,
         requestText,
         selectedReasoningEffort,
         childMessages,
         childActivity,
       )
-      if (accepted) {
-        setNotice(
-          editedText == null
-            ? message.role === 'assistant'
-              ? 'Regenerated response in a new branch.'
-              : 'Retried request in a new branch.'
-            : 'Sent edited request in a new branch.',
-        )
-      }
-      return accepted
     } catch (cause) {
       setNotice(cause instanceof Error ? cause.message : 'Could not prepare retry branch')
       return false
@@ -906,6 +917,11 @@ function App() {
       <a className="skip-link" href="#main-content">
         Skip to main content
       </a>
+      {/* First live region in the tree so status announcements are the single
+          canonical polite channel for assistive tech and tests alike. */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {notice}
+      </div>
 
       <aside id="sessions" className="codex-sidebar" aria-label="Sessions" hidden={!sidebarOpen}>
         <div className="codex-sidebar-header">
@@ -1048,6 +1064,7 @@ function App() {
                   <button
                     type="button"
                     className={`codex-history-row ${session.id === selectedSessionId ? 'codex-history-row-active' : ''}`}
+                    aria-label={`Chat ${session.title}`}
                     onClick={() => {
                       setSelectedSessionId(session.id)
                       if (window.matchMedia('(max-width: 720px)').matches) setSidebarOpen(false)
@@ -1335,7 +1352,9 @@ function App() {
                               ) : null}
                               <div className="codex-message-content">
                                 <span className="sr-only">{message.role}: </span>
-                                {messageText(message)}
+                                {activeArtifact?.source_message_id === message.id
+                                  ? '(open in artifact editor)'
+                                  : messageText(message)}
                               </div>
                             </>
                           )}
@@ -1526,10 +1545,6 @@ function App() {
           </div>
         </footer>
       </main>
-
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {notice}
-      </div>
     </div>
   )
 }

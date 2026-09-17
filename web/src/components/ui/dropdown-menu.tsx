@@ -30,6 +30,7 @@ function DropdownMenu({
   placement = "bottom start",
   offset = 4,
   crossOffset = 0,
+  isNonModal,
   className,
   children,
   ...props
@@ -39,21 +40,43 @@ function DropdownMenu({
 > &
   Partial<Pick<
     React.ComponentProps<typeof PopoverPrimitive>,
-    "placement" | "offset" | "crossOffset"
+    "placement" | "offset" | "crossOffset" | "isNonModal"
   >> & {
     "data-slot"?: string
     className?: string
     children?: React.ReactNode
   }) {
+  // WAI-ARIA menu pattern: pressing Escape closes the menu and returns focus
+  // to the trigger. React Aria restores focus on a later animation frame,
+  // which loses the trigger in environments where the frame does not run
+  // before the next assertion (tests) or the user tabs away; restoring it
+  // synchronously on the menu element is deterministic and correct. Attached
+  // via the ref callback because the menu mounts only while the popover is
+  // open and the published MenuProps type does not expose keyboard props.
+  const menuRef = React.useCallback((element: HTMLDivElement | null) => {
+    if (!element) return
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return
+      const menu = event.currentTarget as HTMLElement
+      if (!menu.id) return
+      const trigger = element.ownerDocument.querySelector<HTMLElement>(
+        `button[aria-controls='${menu.id}']`,
+      )
+      trigger?.focus()
+    }
+    element.addEventListener("keydown", onKeyDown)
+  }, [])
   return (
     <PopoverPrimitive
       data-slot={dataSlot}
       placement={placement}
       offset={offset}
       crossOffset={crossOffset}
+      isNonModal={isNonModal}
       className={cn("z-50 w-(--trigger-width) min-w-32 origin-(--trigger-anchor-point) overflow-x-hidden overflow-y-auto rounded-lg bg-popover p-1 text-popover-foreground shadow-md ring-1 ring-foreground/10 duration-100 outline-none data-entering:animate-in data-entering:fade-in-0 data-entering:zoom-in-95 data-exiting:animate-out data-exiting:overflow-hidden data-exiting:fade-out-0 data-exiting:zoom-out-95 data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2 **:data-[slot$=-item]:data-focused:bg-foreground/10", className )}
     >
       <MenuPrimitive
+        ref={menuRef}
         className="max-h-[inherit] overflow-x-hidden overflow-y-auto outline-hidden"
         {...props}
       >

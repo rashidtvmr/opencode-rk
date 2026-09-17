@@ -5,7 +5,7 @@ import {
   OverlayArrow,
   Tooltip as TooltipPrimitive,
   TooltipTrigger as TooltipTriggerPrimitive,
-  type TooltipRenderProps,
+  type OverlayArrowRenderProps,
 } from "react-aria-components"
 
 function TooltipTrigger({
@@ -58,7 +58,7 @@ function Tooltip({
       {children}
       <OverlayArrow
         className="z-50 size-2.5 translate-y-[calc(-50%-2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground"
-        style={({ placement, defaultStyle }: TooltipRenderProps & { defaultStyle: React.CSSProperties }) => ({
+        style={({ placement, defaultStyle }: OverlayArrowRenderProps & { defaultStyle: React.CSSProperties }) => ({
           ...defaultStyle,
           rotate: "0deg",
           translate: "0 0",

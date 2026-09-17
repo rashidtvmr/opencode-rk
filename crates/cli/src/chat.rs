@@ -1,0 +1,503 @@
+#![forbid(unsafe_code)]
+//! Default chat TUI: `opencode-rk` with no subcommand.
+//!
+//! Attaches to the singleton daemon (auto-spawning one bound to this data
+//! directory when none is running) and drives the existing HTTP surface:
+//! sessions, models, and provider turns. Every line is bounded, degraded
+//! states are explicit (`[offline]`, `[error]`), and nothing buffers without
+//! a cap.
+//!
+//! Daemon ownership rule: a daemon this process spawned is terminated on
+//! exit; a pre-existing daemon is left running. The default listen address
+//! is `127.0.0.1:4096`, overridable with `OPENCODE_RK_DAEMON_ADDR`.
+
+use std::{
+    io::{BufRead, Read, Write},
+    net::{TcpStream, ToSocketAddrs},
+    path::{Path, PathBuf},
+    process::{Child, Command, Stdio},
+    time::Duration,
+};
+
+use serde_json::Value;
+
+const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:4096";
+const DEFAULT_MODEL: &str = "openai/gpt-5.6";
+/// Turn requests against real providers can be slow; reads are still bounded.
+const TURN_READ_TIMEOUT: Duration = Duration::from_secs(300);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
+const PROBE_TIMEOUT: Duration = Duration::from_millis(750);
+const MAX_BODY_BYTES: usize = 1024 * 1024;
+const HISTORY_LIMIT: usize = 20;
+
+fn daemon_addr() -> String {
+    std::env::var("OPENCODE_RK_DAEMON_ADDR")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| DEFAULT_DAEMON_ADDR.to_owned())
+}
+
+fn daemon_origin(addr: &str) -> String {
+    format!("http://{addr}")
+}
+
+/// Entry bound from `main.rs` when no subcommand is given.
+pub fn run(_data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let addr = daemon_addr();
+    let origin = daemon_origin(&addr);
+    let mut owned_daemon: Option<Child> = None;
+    if !probe_daemon(&origin) {
+        owned_daemon = spawn_daemon(&addr);
+    }
+    let attached = probe_daemon(&origin);
+    if !attached {
+        println!(
+            "[offline] daemon unavailable (port {addr} unwinnable); \
+             start it manually with: opencode-rk serve"
+        );
+    }
+    let mut chat = Chat {
+        origin: attached.then(|| origin.clone()),
+        session: None,
+        model: DEFAULT_MODEL.to_owned(),
+    };
+    chat.banner(&origin, attached);
+    chat.bind_recent_session();
+    let result = chat.loop_until_exit();
+    if let Some(mut child) = owned_daemon {
+        // Owned lifecycle: the auto-spawned daemon dies with this chat.
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+    result
+}
+
+struct Chat {
+    origin: Option<String>,
+    session: Option<String>,
+    model: String,
+}
+
+impl Chat {
+    fn banner(&self, origin: &str, attached: bool) {
+        println!("OpenCode RK");
+        if attached {
+            println!("daemon: {origin}");
+        }
+        println!(
+            "model: {} | type /help for commands; plain text sends a turn",
+            self.model
+        );
+    }
+
+    fn help(&self) {
+        println!(
+            "/new [title]  create a session\n\
+             /sessions     list sessions\n\
+             /open <id>    open a session (id prefix is enough)\n\
+             /models       list models\n\
+             /model <p/m>  switch model (provider/model)\n\
+             /exit         quit"
+        );
+    }
+
+    /// Bind the most recently updated session so returning users land in
+    /// their last conversation instead of an empty shell.
+    fn bind_recent_session(&mut self) {
+        let Some(origin) = &self.origin else { return };
+        let Ok((status, body)) = request(origin, "GET", "/api/sessions", None) else {
+            return;
+        };
+        if status != 200 {
+            return;
+        }
+        let Ok(value) = serde_json::from_str::<Value>(&body) else {
+            return;
+        };
+        let Some(sessions) = value.get("sessions").and_then(Value::as_array) else {
+            return;
+        };
+        let Some(first) = sessions.first() else {
+            println!("no sessions yet; type /new to start one");
+            return;
+        };
+        let id = first.get("id").and_then(Value::as_str).unwrap_or_default();
+        let title = first.get("title").and_then(Value::as_str).unwrap_or("?");
+        if id.is_empty() {
+            return;
+        }
+        self.session = Some(id.to_owned());
+        println!("session: {id} ({title})");
+        self.print_history();
+    }
+
+    fn print_history(&self) {
+        let Some(origin) = &self.origin else { return };
+        let Some(session) = &self.session else { return };
+        let path = format!("/api/sessions/{session}/messages?limit={HISTORY_LIMIT}");
+        let Ok((200, body)) = request(origin, "GET", &path, None) else {
+            return;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&body) else {
+            return;
+        };
+        let Some(messages) = value.get("messages").and_then(Value::as_array) else {
+            return;
+        };
+        for message in messages {
+            if let (Some(role), Some(text)) = (
+                message.get("role").and_then(Value::as_str),
+                message_text(message),
+            ) {
+                println!("{role}: {text}");
+            }
+        }
+    }
+
+    fn create_session(&mut self, title: Option<&str>) {
+        let Some(origin) = &self.origin else {
+            println!("[error] daemon offline; cannot create a session");
+            return;
+        };
+        let title = title.unwrap_or("Chat").trim();
+        let title = if title.is_empty() { "Chat" } else { title };
+        let body = serde_json::json!({ "title": title }).to_string();
+        match request(origin, "POST", "/api/sessions", Some(&body)) {
+            Ok((201, response)) => match serde_json::from_str::<Value>(&response) {
+                Ok(value) => {
+                    let id = value
+                        .pointer("/session/id")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_owned();
+                    if id.is_empty() {
+                        println!("[error] session create returned no id");
+                        return;
+                    }
+                    self.session = Some(id.clone());
+                    println!("created: {id} ({title})");
+                }
+                Err(error) => println!("[error] malformed session response: {error}"),
+            },
+            Ok((status, response)) => {
+                println!("[error] session create failed: {status} {response}")
+            }
+            Err(error) => println!("[error] {error}"),
+        }
+    }
+
+    fn list_sessions(&self) {
+        let Some(origin) = &self.origin else {
+            println!("[error] daemon offline; cannot list sessions");
+            return;
+        };
+        match request(origin, "GET", "/api/sessions", None) {
+            Ok((200, body)) => match serde_json::from_str::<Value>(&body) {
+                Ok(value) => {
+                    for session in value
+                        .get("sessions")
+                        .and_then(Value::as_array)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default()
+                    {
+                        let id = session.get("id").and_then(Value::as_str).unwrap_or("?");
+                        let title = session.get("title").and_then(Value::as_str).unwrap_or("?");
+                        println!("{id}  {title}");
+                    }
+                }
+                Err(error) => println!("[error] malformed session list: {error}"),
+            },
+            Ok((status, body)) => println!("[error] session list failed: {status} {body}"),
+            Err(error) => println!("[error] {error}"),
+        }
+    }
+
+    fn open_session(&mut self, prefix: &str) {
+        let Some(origin) = &self.origin else {
+            println!("[error] daemon offline; cannot open a session");
+            return;
+        };
+        let prefix = prefix.trim();
+        if prefix.is_empty() {
+            println!("[error] usage: /open <session-id>");
+            return;
+        }
+        let Ok((200, body)) = request(origin, "GET", "/api/sessions", None) else {
+            println!("[error] could not list sessions to resolve {prefix}");
+            return;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&body) else {
+            println!("[error] malformed session list");
+            return;
+        };
+        let sessions = value
+            .get("sessions")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or_default();
+        let matches: Vec<&Value> = sessions
+            .iter()
+            .filter(|session| {
+                session
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .is_some_and(|id| id.starts_with(prefix))
+            })
+            .collect();
+        match matches.as_slice() {
+            [session] => {
+                let id = session.get("id").and_then(Value::as_str).unwrap_or_default();
+                let title = session.get("title").and_then(Value::as_str).unwrap_or("?");
+                self.session = Some(id.to_owned());
+                println!("session: {id} ({title})");
+                self.print_history();
+            }
+            [] => println!("[error] no session matches {prefix}"),
+            _ => println!("[error] ambiguous prefix {prefix}; use /sessions"),
+        }
+    }
+
+    fn list_models(&self) {
+        let Some(origin) = &self.origin else {
+            println!("[error] daemon offline; cannot list models");
+            return;
+        };
+        match request(origin, "GET", "/api/models", None) {
+            Ok((200, body)) => match serde_json::from_str::<Value>(&body) {
+                Ok(value) => {
+                    let models = value
+                        .get("models")
+                        .and_then(Value::as_array)
+                        .map(Vec::as_slice)
+                        .unwrap_or_default();
+                    if models.is_empty() {
+                        println!(
+                            "no models cached; run: opencode-rk models sync && opencode-rk models search --limit 25"
+                        );
+                    }
+                    for model in models.iter().take(25) {
+                        let provider =
+                            model.get("provider").and_then(Value::as_str).unwrap_or("?");
+                        let id = model.get("id").and_then(Value::as_str).unwrap_or("?");
+                        let name = model.get("name").and_then(Value::as_str).unwrap_or("?");
+                        println!("{provider}/{id}  {name}");
+                    }
+                }
+                Err(error) => println!("[error] malformed model list: {error}"),
+            },
+            Ok((status, body)) => println!("[error] model list failed: {status} {body}"),
+            Err(error) => println!("[error] {error}"),
+        }
+    }
+
+    fn set_model(&mut self, model: &str) {
+        let model = model.trim();
+        if model
+            .split_once('/')
+            .map_or(true, |(provider, id)| provider.is_empty() || id.is_empty())
+        {
+            println!("[error] model must use provider/model format");
+            return;
+        }
+        self.model = model.to_owned();
+        println!("model: {}", self.model);
+    }
+
+    fn send_turn(&mut self, text: &str) {
+        let Some(origin) = &self.origin else {
+            println!("[error] daemon offline; start it with: opencode-rk serve");
+            return;
+        };
+        let Some(session) = &self.session else {
+            println!("[error] no session; run /new first");
+            return;
+        };
+        println!("you: {text}");
+        let body = serde_json::json!({
+            "text": text,
+            "model": self.model,
+            "reasoning_effort": "high",
+        })
+        .to_string();
+        let path = format!("/api/sessions/{session}/turns");
+        match request(origin, "POST", &path, Some(&body)) {
+            Ok((201, response)) => match serde_json::from_str::<Value>(&response) {
+                Ok(value) => {
+                    let assistant = value
+                        .get("assistant_message")
+                        .and_then(message_text)
+                        .unwrap_or_else(|| "(empty assistant reply)".to_owned());
+                    println!("assistant: {assistant}");
+                }
+                Err(error) => println!("[error] malformed turn response: {error}"),
+            },
+            Ok((status, response)) => {
+                let message = serde_json::from_str::<Value>(&response)
+                    .ok()
+                    .and_then(|value| {
+                        value
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .map(str::to_owned)
+                    })
+                    .unwrap_or_else(|| response.clone());
+                println!("[error] provider request failed ({status}): {message}");
+            }
+            Err(error) => println!("[error] provider request failed: {error}"),
+        }
+    }
+
+    fn loop_until_exit(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let stdin = std::io::stdin();
+        for line in stdin.lock().lines() {
+            let line = line?;
+            match line.trim() {
+                "/exit" | "/quit" | "/q" => break,
+                "/help" | "?" => self.help(),
+                "" => {}
+                rest if rest.starts_with("/new") => {
+                    self.create_session(rest.strip_prefix("/new").map(str::trim));
+                }
+                "/sessions" => self.list_sessions(),
+                rest if rest.starts_with("/open") => {
+                    let prefix = rest.strip_prefix("/open").unwrap_or("").trim();
+                    self.open_session(prefix);
+                }
+                "/models" => self.list_models(),
+                rest if rest.starts_with("/model") => {
+                    let arg = rest.strip_prefix("/model").unwrap_or("").trim();
+                    if arg.is_empty() {
+                        println!("model: {}", self.model);
+                    } else {
+                        self.set_model(arg);
+                    }
+                }
+                rest if rest.starts_with('/') => {
+                    println!("[error] unknown command {rest}; /help lists commands");
+                }
+                text => self.send_turn(text),
+            }
+        }
+        Ok(())
+    }
+}
+
+/// Assistant/user inline message text from the wire shape
+/// `{"role": ..., "body": {"storage": "inline", "text": ...}}`.
+fn message_text(message: &Value) -> Option<String> {
+    message
+        .get("body")
+        .and_then(|body| body.get("text"))
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+/// True only when a healthy daemon answers `GET /health` on the origin. A
+/// bare TCP connect is not enough: an unrelated listener on the port must not
+/// be mistaken for the daemon.
+fn probe_daemon(origin: &str) -> bool {
+    matches!(request(origin, "GET", "/health", None), Ok((200, _)))
+}
+
+/// Spawn `serve` from this same binary and wait for readiness. Returns the
+/// owned child process; the caller terminates it when the chat exits.
+fn spawn_daemon(addr: &str) -> Option<Child> {
+    let exe: PathBuf = std::env::current_exe().ok()?;
+    let mut child = Command::new(exe)
+        .arg("serve")
+        .arg("--listen")
+        .arg(addr)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    loop {
+        if probe_daemon(&daemon_origin(addr)) {
+            return Some(child);
+        }
+        if let Ok(Some(_status)) = child.try_wait() {
+            return None;
+        }
+        if std::time::Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
+/// Bounded std-only HTTP/1.1 request. Returns `(status, body)` with the body
+/// capped at [`MAX_BODY_BYTES`]; larger responses are an error, never a hang.
+fn request(
+    origin: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+) -> Result<(u16, String), String> {
+    let host = origin
+        .strip_prefix("http://")
+        .unwrap_or(origin)
+        .trim_end_matches('/');
+    let timeout = if path == "/health" {
+        PROBE_TIMEOUT
+    } else {
+        CONNECT_TIMEOUT
+    };
+    let address = host
+        .to_socket_addrs()
+        .map_err(|error| format!("resolve {host}: {error}"))?
+        .next()
+        .ok_or_else(|| format!("no address for {host}"))?;
+    let mut stream = TcpStream::connect_timeout(&address, timeout)
+        .map_err(|error| format!("connect {host}: {error}"))?;
+    let read_timeout = if path.ends_with("/turns") {
+        TURN_READ_TIMEOUT
+    } else {
+        CONNECT_TIMEOUT.max(Duration::from_secs(5))
+    };
+    stream
+        .set_read_timeout(Some(read_timeout))
+        .map_err(|error| error.to_string())?;
+    stream
+        .set_write_timeout(Some(Duration::from_secs(10)))
+        .map_err(|error| error.to_string())?;
+
+    let payload = body.unwrap_or("");
+    let wire = format!(
+        "{method} {path} HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
+        payload.len()
+    );
+    stream
+        .write_all(wire.as_bytes())
+        .map_err(|error| format!("write: {error}"))?;
+    stream.flush().ok();
+
+    let mut raw = Vec::new();
+    let mut chunk = [0_u8; 8192];
+    loop {
+        let read = stream
+            .read(&mut chunk)
+            .map_err(|error| format!("read: {error}"))?;
+        if read == 0 {
+            break;
+        }
+        if raw.len() + read > MAX_BODY_BYTES {
+            return Err(format!("response exceeds {MAX_BODY_BYTES} byte bound"));
+        }
+        raw.extend_from_slice(&chunk[..read]);
+    }
+    let text = String::from_utf8_lossy(&raw).into_owned();
+    let (head, payload) = text
+        .split_once("\r\n\r\n")
+        .ok_or_else(|| "malformed response: no header terminator".to_owned())?;
+    let status = head
+        .lines()
+        .next()
+        .and_then(|line| line.split_whitespace().nth(1))
+        .and_then(|code| code.parse::<u16>().ok())
+        .ok_or_else(|| "malformed response: no status line".to_owned())?;
+    Ok((status, payload.to_owned()))
+}

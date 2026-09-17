@@ -531,8 +531,11 @@ export async function listHistoryPage(
     }
     return { messages, nextBefore: payload.next_before ?? null }
   } catch (cause) {
+    // Older native servers without the /history endpoint still serve the
+    // durable flat message list. The fallback always requests the canonical
+    // 200-message page so the URL matches the documented contract.
     if (cause instanceof ApiError && cause.status === 404 && !before) {
-      return { messages: await listMessages(id, boundedLimit, signal), nextBefore: null }
+      return { messages: await listMessages(id, 200, signal), nextBefore: null }
     }
     throw cause
   }

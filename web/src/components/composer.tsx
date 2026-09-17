@@ -111,7 +111,8 @@ function editorBlocks(element: HTMLElement): ComposerBlock[] {
       continue
     }
     if (!(node instanceof HTMLElement)) continue
-    const text = node.innerText.replace(/\u200b/g, '')
+    // innerText requires layout; detached nodes (jsdom) do not have it.
+    const text = (node.innerText ?? node.textContent ?? '').replace(/\u200b/g, '')
     blocks.push({ type: node.tagName === 'PRE' ? 'code' : 'paragraph', text })
   }
   if (blocks.length === 0 && element.innerText) {
@@ -395,7 +396,7 @@ export function Composer({
             >
               <Plus aria-hidden="true" />
             </Button>
-            <DropdownMenu placement="top start" className="w-64">
+            <DropdownMenu placement="top start" className="w-64" isNonModal>
               <DropdownMenuLabel>Add to your message</DropdownMenuLabel>
               <DropdownMenuItem onAction={insertCodeBlock}>
                 <Code2 aria-hidden="true" />
@@ -426,7 +427,7 @@ export function Composer({
             >
               <Wrench aria-hidden="true" />
             </Button>
-            <DropdownMenu placement="top start" className="w-80">
+            <DropdownMenu placement="top start" className="w-80" isNonModal>
               <DropdownMenuLabel>Native tools</DropdownMenuLabel>
               {capabilities?.tools.length ? (
                 capabilities.tools.map((tool) => (
@@ -458,7 +459,7 @@ export function Composer({
             >
               <Command aria-hidden="true" />
             </Button>
-            <DropdownMenu placement="top start" className="w-72">
+            <DropdownMenu placement="top start" className="w-72" isNonModal>
               <DropdownMenuLabel>Structured capabilities</DropdownMenuLabel>
               <DropdownMenuItem isDisabled>Slash commands · native endpoint unavailable</DropdownMenuItem>
               <DropdownMenuItem isDisabled>Mentions · native endpoint unavailable</DropdownMenuItem>
@@ -508,7 +509,7 @@ export function Composer({
               <SlidersHorizontal aria-hidden="true" className="size-3.5" />
               {effortLevels.find((level) => level.value === effort)?.label}
             </Button>
-            <DropdownMenu placement="top start" selectionMode="single" selectedKeys={[effort]}>
+            <DropdownMenu placement="top start" selectionMode="single" selectedKeys={[effort]} isNonModal>
               <DropdownMenuLabel>Reasoning effort</DropdownMenuLabel>
               <DropdownMenuSeparator />
               {effortLevels.map((level) => (

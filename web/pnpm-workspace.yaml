@@ -1,0 +1,5 @@
+allowBuilds:
+  # pnpm 11 generated this placeholder to gate dependency build scripts.
+  # esbuild's postinstall links its platform binary, which the vite build
+  # requires; approved explicitly so installs are non-interactive.
+  esbuild: true

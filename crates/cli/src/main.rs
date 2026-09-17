@@ -18,6 +18,7 @@ use serde::Serialize;
 use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 mod tui_entry;
 use tui_entry::TuiArgs;
+mod chat;
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 #[derive(Debug, Parser)]
 #[command(
@@ -28,8 +29,9 @@ const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 struct Cli {
     #[arg(long, global = true, env = "OPENCODE_RK_HOME")]
     data_dir: Option<PathBuf>,
+    /// No subcommand opens the interactive chat TUI.
     #[command(subcommand)]
-    command: Command,
+    command: Option<Command>,
 }
 #[derive(Debug, Subcommand)]
 enum Command {
@@ -157,25 +159,29 @@ async fn main() {
 }
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
-        Command::Doctor(args) => doctor(args).await?,
-        Command::Session { command } => {
+        None => {
+            let data = resolve_data_dir(cli.data_dir)?;
+            chat::run(&data)?;
+        }
+        Some(Command::Doctor(args)) => doctor(args).await?,
+        Some(Command::Session { command }) => {
             let data = resolve_data_dir(cli.data_dir)?;
             let sessions = open_sessions(data)?;
             session_command(&sessions, command).await?;
         }
-        Command::Models { command } => {
+        Some(Command::Models { command }) => {
             let data = resolve_data_dir(cli.data_dir)?;
             model_command(data, command).await?;
         }
-        Command::Serve(args) => {
+        Some(Command::Serve(args)) => {
             let data = resolve_data_dir(cli.data_dir)?;
             serve(data, args, false).await?;
         }
-        Command::Web(args) => {
+        Some(Command::Web(args)) => {
             let data = resolve_data_dir(cli.data_dir)?;
             web(data, args).await?;
         }
-        Command::Tui(args) => {
+        Some(Command::Tui(args)) => {
             tui_entry::run(args)?;
         }
     }
@@ -186,6 +192,10 @@ struct DoctorCheck {
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<String>,
+    /// Concrete remediation hint for unconfigured/error checks: names the
+    /// env var to set or the command to run. Absent when healthy.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    next_step: Option<String>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     builtins: Vec<String>,
 }
@@ -233,6 +243,14 @@ async fn doctor(args: DoctorArgs) -> Result<(), Box<dyn std::error::Error>> {
         println!("connectivity: {}", output.checks.connectivity.status);
         println!("tools: {}", output.checks.tools.status);
         println!("mcp: {}", output.checks.mcp.status);
+        let hint = |label: &str, check: &DoctorCheck| {
+            if let Some(step) = &check.next_step {
+                println!("  {label} next step: {step}");
+            }
+        };
+        hint("auth", &output.checks.auth);
+        hint("connectivity", &output.checks.connectivity);
+        hint("mcp", &output.checks.mcp);
     }
     Ok(())
 }
@@ -247,6 +265,12 @@ fn doctor_auth_check() -> DoctorCheck {
     let configured = AUTH_ENV_KEYS
         .iter()
         .any(|key| env::var_os(key).is_some_and(|value| !value.is_empty()));
+    let next_step = (!configured).then(|| {
+        format!(
+            "set a provider key, e.g. export OPENAI_API_KEY=sk-... (also accepted: {})",
+            AUTH_ENV_KEYS[1..].join(", ")
+        )
+    });
     DoctorCheck {
         status: if configured {
             "configured"
@@ -254,6 +278,7 @@ fn doctor_auth_check() -> DoctorCheck {
             "unconfigured"
         },
         detail: None,
+        next_step,
         builtins: Vec::new(),
     }
 }
@@ -263,6 +288,10 @@ async fn doctor_connectivity_check() -> DoctorCheck {
         return DoctorCheck {
             status: "unconfigured",
             detail: None,
+            next_step: Some(
+                "set OPENCODE_RK_DOCTOR_ENDPOINT to an https URL to probe provider reachability"
+                    .to_owned(),
+            ),
             builtins: Vec::new(),
         };
     };
@@ -276,6 +305,7 @@ async fn doctor_connectivity_check() -> DoctorCheck {
             return DoctorCheck {
                 status: "error",
                 detail: Some(error.to_string()),
+                next_step: Some("check OPENCODE_RK_DOCTOR_ENDPOINT is a valid URL".to_owned()),
                 builtins: Vec::new(),
             };
         }
@@ -284,16 +314,19 @@ async fn doctor_connectivity_check() -> DoctorCheck {
         Ok(response) if response.status().is_success() => DoctorCheck {
             status: "ok",
             detail: Some(response.status().as_u16().to_string()),
+            next_step: None,
             builtins: Vec::new(),
         },
         Ok(response) => DoctorCheck {
             status: "error",
             detail: Some(format!("HTTP {}", response.status().as_u16())),
+            next_step: Some("verify the endpoint URL and your network".to_owned()),
             builtins: Vec::new(),
         },
         Err(error) => DoctorCheck {
             status: "error",
             detail: Some(error.to_string()),
+            next_step: Some("verify the endpoint URL and your network".to_owned()),
             builtins: Vec::new(),
         },
     }
@@ -309,6 +342,7 @@ fn doctor_tools_check() -> DoctorCheck {
     DoctorCheck {
         status: "ok",
         detail: None,
+        next_step: None,
         builtins,
     }
 }
@@ -318,6 +352,10 @@ fn doctor_mcp_check() -> DoctorCheck {
         return DoctorCheck {
             status: "unconfigured",
             detail: None,
+            next_step: Some(
+                "set OPENCODE_RK_MCP_CONFIG to a JSON document like {\"servers\":{\"name\":{\"command\":\"...\"}}} to attach MCP servers"
+                    .to_owned(),
+            ),
             builtins: Vec::new(),
         };
     };
@@ -335,6 +373,10 @@ fn doctor_mcp_check() -> DoctorCheck {
     DoctorCheck {
         status,
         detail: None,
+        next_step: (status == "error").then(
+            || "OPENCODE_RK_MCP_CONFIG must be JSON with a non-empty {\"servers\":{...}} object"
+                .to_owned(),
+        ),
         builtins: Vec::new(),
     }
 }

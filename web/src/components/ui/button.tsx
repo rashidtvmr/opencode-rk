@@ -56,6 +56,8 @@ function Button({
   React.RefAttributes<HTMLButtonElement> &
   VariantProps<typeof buttonVariants> & {
     className?: string
+    // Standard HTML attribute; react-aria forwards it to the rendered button.
+    title?: string
   }) {
   return (
     <ButtonPrimitive
