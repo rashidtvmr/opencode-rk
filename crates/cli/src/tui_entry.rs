@@ -421,7 +421,6 @@ fn interactive_loop(
 fn follow_loop(
     origin: &str,
     session: Option<&str>,
-    memory: &[MemoryFile],
     poll_ms: u64,
     follow_for_secs: Option<u64>,
 ) -> Result<(), Box<dyn std::error::Error>> {
@@ -473,7 +472,6 @@ pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
         return follow_loop(
             &origin,
             args.session.as_deref(),
-            &memory,
             args.poll_ms,
             args.follow_for,
         );
