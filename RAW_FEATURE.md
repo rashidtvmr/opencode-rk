@@ -187,6 +187,152 @@ The bar: every feature below is something OpenCode ships today. Status legend:
 
 ---
 
+## SECTION 3 — UPCOMING FEATURES (roadmap, not started unless noted)
+
+These are beyond-OpenCode capabilities we commit to building. Status is
+`PLANNED` — no lane claimed in `tasks/completion/claims.json` for any of them
+yet. Each lists the design sketch and what will count as done (all types of
+test code written, feature implemented, frozen tests green with zero test
+edits — per `.agents/WORKER.md`).
+
+### 3.1 LOOP — Claude-Code-style custom loop
+
+**What:** a first-class user-facing agentic loop mode: the model keeps a
+persistent goal list, plans → executes → verifies → re-plans across turns,
+with user-visible loop state (current goal, step budget, retries) and the
+ability to steer/interrupt/re-scope mid-loop. Distinct from today's single
+bounded tool loop (`agent_loop.rs`): LOOP is a multi-turn *task-level* driver
+with checkpoint/resume so a loop survives daemon restarts.
+
+**Design sketch:**
+- Build on `LoopController` (cap, `should_stop`) + turn submission state
+  machine (AUTO-007) — one loop task per session, `BusyError` semantics kept.
+- Loop state persisted via the sync event log (SYNC-001) so resume is
+  deterministic replay, not ad-hoc state.
+- Steer events (user message mid-loop) enqueue as loop-plan amendments;
+  cancel reclaims the runner (RUN-001 contract).
+
+**Done when:** loop start/steer/interrupt/resume scenarios have frozen tests;
+checkpoint replay after daemon restart passes; iteration cap + stop reasons
+surface in TUI status.
+
+### 3.2 ULTRA MODE — orchestrator-written raw Rust subagents
+
+**What:** our own ultra/ultracode-class mode: the user invokes an *ultra*
+skill, and the orchestrator agent is asked to **write raw, efficient Rust
+itself** — a custom subagent compiled and run natively for that task — instead
+of driving a generic model loop. Claude-ultracode-like power, but more
+efficient: the hot path is compiled Rust, not a JS/TS agent harness.
+
+**Design sketch:**
+- Ultra skill = orchestrator prompt contract: given a task, emit a typed
+  subagent crate/module implementing the existing subagent trait surface
+  (`crates/agents`), then build it with a bounded, sandboxed `cargo` invocation.
+- Generated code runs behind the **same permission broker, byte budgets and
+  policy engine** as every other tool (no broker bypass because it is Rust);
+  build sandbox uses the OS sandbox backend (DISC-106) with inherited
+  capabilities closed.
+- Compile cache: content-addressed (same approach as DB-018 dedupe) keyed on
+  generated source hash; build artifacts bounded and garbage-collected.
+- Safety: every generated crate must compile with `forbid(unsafe_code)` by
+  default; `unsafe` requires an explicit user approval prompt. Denylist of
+  forbidden APIs (network exfil, secret paths) enforced at codegen review +
+  execpolicy level.
+- Falls back to normal model subagent if build fails N times (typed reason).
+
+**Done when:** end-to-end frozen tests: task → generated Rust → compiled →
+executed → result merged into session transcript; denial paths (policy,
+build failure, unsafe without approval) verified; resource bounds measured
+within the 8 GiB envelope.
+
+### 3.3 `/CONTEXT` — context usage command
+
+**What:** TUI/web slash command rendering live context-window usage: tokens
+used vs model limit, breakdown by segment (system prompt, AGENTS/rules,
+history, tool results, current turn), and compaction headroom.
+
+**Design sketch:**
+- Server exposes a bounded `/context` snapshot on the session (token counts
+  per segment — provider tokenizer counts where available, else documented
+  estimator); UI-016 context-detail state module already has the display
+  shape.
+- Values must reflect what is *actually sent* to the provider (tap into the
+  provider request assembly), not an optimistic estimate.
+
+**Done when:** frozen tests for the snapshot computation (segment split,
+bounded size) and UI render; values reconciled against a real provider
+request fixture.
+
+**Status note:** display-side state exists (UI-016); the server-side token
+accounting + command surface are the new work.
+
+### 3.4 `/MEMORY` — memory files loaded command
+
+**What:** command showing every memory/rules file currently loaded into the
+system prompt, with source path, glob that matched, byte/token size, and load
+order — plus which files were *skipped* and why (glob miss, conditional rule,
+size cap).
+
+**Design sketch:**
+- Extends the UI-017 `/memory` viewer state module with live data from the
+  rules loader (3.5).
+- Reports are computed from the same immutable load record the server used,
+  so the TUI cannot show a different truth from what the provider received.
+
+**Done when:** frozen tests cover loaded/skipped classification, ordering,
+and bounded output; TUI + web render from the same snapshot.
+
+### 3.5 Rules folder + path globs — conditional memory loading/unloading
+
+**What:** a project rules folder (e.g. `rules/` or `.opencode/rules/`) where
+each memory file carries **path globs**; a file is loaded into context only
+when the current session's touched/queried paths match, and is **unloaded**
+(dropped from subsequent rounds) when no longer relevant — conditional,
+gitignored-style memory control.
+
+**Design sketch:**
+- Frontmatter schema: `globs:` (match patterns), optional `always: true`,
+  priority, size cap. Matching is evaluated against the session's file-touch
+  set (reads/writes/edits this session) + explicit @mentions.
+- Loader is pure-state and testable: given (file set, globs, touch set) →
+  ordered include/exclude list, with a stability rule (hysteresis: a file
+  stays loaded for N subsequent rounds after last match to avoid flapping).
+- Unloading = excluded from the *next* provider round's system segment; the
+  sync log records load/unload events for replay.
+- This is the generalization of the Section 1.7 "AGENTS.md/rules
+  system-prompt injection" parity gap — building 3.5 closes that gap too.
+
+**Done when:** frozen tests: glob matching, hysteresis, unload semantics,
+cap enforcement, interaction with /MEMORY (3.4) and /CONTEXT (3.3) snapshots;
+loaded set provably equals what the provider request carried.
+
+### 3.6 CI/CD-compatible non-interactive CLI
+
+**What:** every capability usable from CI: non-interactive, no-TTY, typed
+exit codes, machine-readable output (JSON/JSONL), explicit timeout/cancel,
+and no hidden TTY-only fallbacks.
+
+**Design sketch:**
+- Build on HEAD-001/002 (headless run + redacted export, typed exit codes
+  already exist): the gap is *coverage* — doctor, session management, approvals
+  policy (headless deny/allow matrix), and the agentic loop must all work
+  without a TTY.
+- `--output json|jsonl|text`, `--no-color`, strict exit-code contract
+  (documented table), `--max-steps`/`--timeout` overrides, and a
+  `--require-approval-policy` flag that **fails closed** in CI when a step
+  would need interactive approval (never auto-approves silently).
+- GitHub Actions/GitLab recipes in docs; canary job in our own CI (SHIP-003
+  pattern, budgeted).
+
+**Done when:** frozen tests run the full command surface under pipes (no
+TTY): deterministic exit codes, JSON schema stable, approval-required steps
+fail closed with typed reasons; docs include CI recipes.
+
+**Status note:** HEAD-001/002 headless core is ✅ verified — 3.6 is the
+completion of that lane into full CI parity, not a greenfield feature.
+
+---
+
 ## Honest bottom line
 
 - **Parity bar (Section 1):** core engine (daemon, sessions, storage, providers,
@@ -198,6 +344,11 @@ The bar: every feature below is something OpenCode ships today. Status legend:
   fleet-claim ledger, worker protocol, doctor, native lane set, remote device
   lanes) is completed and tested; remote/mobile/tunnel are the large
   unfinished fronts.
+- **Roadmap (Section 3):** six committed beyond-OpenCode features (LOOP,
+  ULTRA mode, /CONTEXT, /MEMORY, rules-folder globs, CI/CD non-interactive
+  CLI). None has a claimed lane yet; rules-folder globs (3.5) doubles as the
+  fix for the Section 1.7 rules-injection parity gap, and CI/CD (3.6)
+  completes the verified headless core.
 - This file is a raw inventory generated from repo evidence on 2026-09-18 at
   `17b15e6`. It is **not** the FEATURES.md acceptance record and must never be
   cited as acceptance evidence.
