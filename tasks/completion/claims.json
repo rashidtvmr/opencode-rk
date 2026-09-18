@@ -1,10 +1,197 @@
 {
   "claims": {
+    "AUD-001": {
+      "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; 3 mandatory repair children RC-01/02/03; validate_repository FAIL pre-existing backlog exhaustion out of shard",
+      "scratchpad": "worklog/AUD-001.md",
+      "session": "ses_orch_AUD001",
+      "status": "blocked"
+    },
+    "AUD-002": {
+      "completedNote": "audit-complete 31/31 PROV+CAT enumerated; trace cli-models-serve-turns; 70 suites 434 passed 0 failed @b0bed89; denial/cancel/bounds green; 3 repair children; no acceptance; zero test edits",
+      "scratchpad": "worklog/AUD-002.md",
+      "session": "ses_orch_AUD002",
+      "status": "completed"
+    },
+    "AUD-003": {
+      "blockedNote": "audit-blocked: 5 repair children R1-R5; cargo test -p opencode-rk-sessions 56 targets 300 pass 0 fail HEAD b0bed89; fork-denial/authz/restart untested, rewind+compact unwired, SESS-016 file missing",
+      "scratchpad": "worklog/AUD-003.md",
+      "session": "ses_orch_AUD003",
+      "status": "blocked"
+    },
+    "AUD-004": {
+      "blockedNote": "audit-complete; gaps: no CLI/server entrypoint wiring, AGENT-016..031 REQ-036 unimplemented, 0/155 AGENT obligations executable, background-job parity blocked on checkout; 44 existing tests green (other-lane names) at b0bed89",
+      "scratchpad": "worklog/AUD-004.md",
+      "session": "ses_orch_AUD004",
+      "status": "blocked"
+    },
+    "AUD-005": {
+      "completedNote": "audit-complete; tools lib 68 + integ 363 + agent_loop_turns 1 + webcap 9 + 11 lanes x5 green; zero test edits; repairs RC-AUD005-1..5",
+      "scratchpad": "worklog/AUD-005.md",
+      "session": "ses_orch_AUD005",
+      "status": "completed"
+    },
+    "AUD-006": {
+      "completedNote": "AUD-006 audit JSON: 142 tests green (137 unit +5 clarity, zero edits) at b0bed89; 19/19 SEC enumerated; gaps as RC-AUD006-01 wiring + RC-AUD006-02 OS backend with T-tests",
+      "scratchpad": "worklog/AUD-006.md",
+      "session": "ses_orch_AUD006",
+      "status": "completed"
+    },
+    "AUD-007": {
+      "completedNote": "audit green: b0bed89 storage 177/177 tests pass, zero test edits; 12 findings 7 repair children in owned JSON",
+      "scratchpad": "worklog/AUD-007.md",
+      "session": "ses_orch_AUD007",
+      "status": "completed"
+    },
+    "AUD-008": {
+      "blockedNote": "audit-complete no-acceptance: 65 provider ROUTE tests green (13 files x5), pure planners verified, no durable ledger/entrypoint wiring, 9router unmapped vendored:false, ROUTE-009/010 unowned per routing-ownership-gap; repair children in JSON+scratchpad",
+      "scratchpad": "worklog/AUD-008.md",
+      "session": "ses_orch_AUD008",
+      "status": "blocked"
+    },
+    "AUD-009": {
+      "completedNote": "AUD-009 audit green: 35 tests passed (mcp_lifecycle5+elicitation5+acp_bridge5+acp_files5+repo_ops5+workspace_proxy5, extra acp rerun5) @b0bed89, zero test edits; JSON+scratchpad only, no commit per lane bounds",
+      "scratchpad": "worklog/AUD-009.md",
+      "session": "ses_orch_AUD009",
+      "status": "completed"
+    },
+    "AUD-010": {
+      "completedNote": "audit-complete; server-lib 125 + sync5/proxy5/sdk12/spawns11/rsync5/estream5 + cli271 + headless8 green @7b2ba00; repair children proposed in JSON",
+      "scratchpad": "worklog/AUD-010.md",
+      "session": "ses_orch_AUD010",
+      "status": "completed"
+    },
+    "AUD-011": {
+      "completedNote": "audit-complete: b0bed89; opentui-sys 46 + cli-bin 271 + build.rs 6 green; nm 35/35; live disposable-daemon trace (live/persist/follow); 9 findings (4 verified-native/1 compat/2 unverified/2 missing); 13 repair children (TUI-001..011 + 2 NEW); no acceptance claimed",
+      "scratchpad": "worklog/AUD-011.md",
+      "session": "ses_orch_AUD011",
+      "status": "completed"
+    },
+    "AUD-012": {
+      "completedNote": "AUD-012 audit-complete; tools 363 pass/0 fail + 28-target shard subset ok + sessions bridge 5 pass @b0bed89; unwired registries, missing EXT-003/007 owners, 5 repair children; no acceptance claimed",
+      "scratchpad": "worklog/AUD-012.md",
+      "session": "ses_orch_AUD012",
+      "status": "completed"
+    },
+    "AUD-013": {
+      "completedNote": "audit-complete b0bed89: cli-tui_entry 4/4 + sessions-tui_state 5/5 + sessions-lib 42 green, zero test edits; live disposable runs 18; gaps RC-01..04",
+      "scratchpad": "worklog/AUD-013.md",
+      "session": "ses_orch_AUD013",
+      "status": "completed"
+    },
+    "AUD-014": {
+      "completedNote": "AUD-014 audit-complete; Rust 107 + vitest 25 green @b0bed89; 7 repair children; no acceptance claimed",
+      "scratchpad": "worklog/AUD-014.md",
+      "session": "ses_orch_AUD014",
+      "status": "completed"
+    },
+    "AUD-015": {
+      "completedNote": "AUD-015 audit green: 33 tests passed (exposure5+link5+ledger5+sync5+revocation6+connector7) @b0bed89, zero test edits; JSON+s scratchpad only, no commit per lane bounds",
+      "scratchpad": "worklog/AUD-015.md",
+      "session": "ses_orch_AUD015",
+      "status": "completed"
+    },
+    "AUD-016": {
+      "blockedNote": "audit JSON written; lane green but device-gated: MOB-006 needs real iOS/Android signing+devices, DISC-118 framework freeze not-started; no acceptance claimed",
+      "scratchpad": "worklog/AUD-016.md",
+      "session": "ses_orch_AUD016",
+      "status": "blocked"
+    },
+    "AUD-017": {
+      "blockedNote": "audit-complete; no acceptance claimed. 56 completion+leases tests green; validate_plan exit1 + 6 stale bootstrap controller tests are shard findings RC-6, not lane failure. JSON+sctachpad only, zero test edits.",
+      "scratchpad": "worklog/AUD-017.md",
+      "session": "ses_orch_AUD017",
+      "status": "blocked"
+    },
+    "AUD-018": {
+      "completedNote": "audit-complete b0bed89; 40 tests pass 0 fail zero edits; gate+doctor fixtures verified; 4 repair children proposed; no acceptance claimed",
+      "scratchpad": "worklog/AUD-018.md",
+      "session": "ses_orch_AUD018",
+      "status": "completed"
+    },
+    "AUD-019": {
+      "completedNote": "AUD-019.json audit-complete; pytest disc002+disc003+source_audit 27 passed 20 subtests; check-manifest FAIL drifted-at-inputs recorded as finding; validate_repository FAIL backlog-exhaustion pre-existing repo-wide; no test edits; manifest untouched",
+      "scratchpad": "worklog/AUD-019.md",
+      "session": "ses_orch_AUD019",
+      "status": "completed"
+    },
+    "AUD-020": {
+      "completedNote": "AUD-020.json audit-complete no-acceptance: union 258/258 zero-missing; TBD82 emptyDeps237; SEC-015 gap + 50 missing/8 extra task files; --check SPEC OK 109/258/545; exhaustion 51 errs; bootstrap 177-run 17-fail; reconcile exit0 79-unresolved; rev b0bed89",
+      "scratchpad": "worklog/AUD-020.md",
+      "session": "ses_orch_AUD020",
+      "status": "completed"
+    },
+    "DISC-103": {
+      "scratchpad": "worklog/DISC-103.md",
+      "session": "ses_orch_DISC103",
+      "status": "in-progress"
+    },
+    "DISC-104": {
+      "scratchpad": "worklog/DISC-104.md",
+      "session": "ses_orch_DISC104",
+      "status": "in-progress"
+    },
+    "DISC-105": {
+      "completedNote": "GREEN: 6/6 tool_authorize + 143/143 lib green; zero test edits post-freeze; frozen sha256 0e096292; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-security --lib (temp mod line, lib.rs reverted byte-identical)",
+      "scratchpad": "worklog/DISC-105.md",
+      "session": "ses_orch_DISC105",
+      "status": "completed"
+    },
+    "DISC-107": {
+      "scratchpad": "worklog/DISC-107.md",
+      "session": "ses_orch_DISC107",
+      "status": "in-progress"
+    },
+    "DISC-108": {
+      "scratchpad": "worklog/DISC-108.md",
+      "session": "ses_orch_DISC108",
+      "status": "in-progress"
+    },
+    "DISC-109": {
+      "scratchpad": "worklog/DISC-109.md",
+      "session": "ses_orch_DISC109",
+      "status": "in-progress"
+    },
+    "DISC-110": {
+      "scratchpad": "worklog/DISC-110.md",
+      "session": "ses_orch_DISC110b",
+      "status": "in-progress"
+    },
+    "DISC-111": {
+      "scratchpad": "worklog/DISC-111.md",
+      "session": "ses_orch_DISC111",
+      "status": "in-progress"
+    },
+    "DISC-112": {
+      "scratchpad": "worklog/DISC-112.md",
+      "session": "ses_orch_DISC112",
+      "status": "in-progress"
+    },
+    "DISC-113": {
+      "scratchpad": "worklog/DISC-113.md",
+      "session": "ses_orch_DISC113",
+      "status": "in-progress"
+    },
+    "DISC-114": {
+      "completedNote": "5/5 GREEN rustc --test ef4917c0; no-regress cargo test -p opencode-rk-server --lib turn_service 7 pass; no lib.rs touch, no commit/push per task",
+      "scratchpad": "worklog/DISC-114.md",
+      "session": "ses_orch_DISC114",
+      "status": "completed"
+    },
+    "DISC-116": {
+      "scratchpad": "worklog/DISC-116.md",
+      "session": "ses_orch_DISC116b",
+      "status": "in-progress"
+    },
     "TUI-010-CAPS": {
       "completedNote": "native_caps 742 lines 21/21 green md5 5f68f693",
       "scratchpad": "worklog/TUI-010-CAPS.md",
       "session": "ses_f4bfa76d5fferN59pVmS5TFYq8",
       "status": "completed"
+    },
+    "TUI-011": {
+      "scratchpad": "worklog/TUI-011-ZIG.md",
+      "session": "ses_orch_zigsetup1",
+      "status": "in-progress"
     }
   },
   "schemaVersion": 1

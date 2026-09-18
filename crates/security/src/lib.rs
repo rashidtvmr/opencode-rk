@@ -19,6 +19,7 @@ pub mod sql_classify;
 pub mod ssrf;
 pub mod star_proof;
 pub mod sysfiles;
+pub mod tool_authorize;
 pub mod trusted;
 use opencode_rk_contracts::ApprovalId;
 use serde::{Deserialize, Serialize};
