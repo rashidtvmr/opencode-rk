@@ -18,7 +18,7 @@
 //! policy-version bounds); prior art `crates/cli/src/native_composer.rs`
 //! (pure state, bounded queues, std only).
 //!
-//! Not wired into `main.rs` (integrator-owned); replay window bounded by
+//! Wired into `main.rs` as `crate::native_approvals`; replay window bounded by
 //! `MAX_HISTORY` eviction (ancient digests eventually forgotten).
 
 use std::collections::VecDeque;
