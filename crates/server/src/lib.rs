@@ -898,9 +898,25 @@ async fn create_turn_stream(
                                 state,
                             ));
                         }
-                        Ok(Some(ResponsesStreamEvent::Completed)) => {
+                        Ok(Some(ResponsesStreamEvent::FunctionCall {
+                            call_id,
+                            name,
+                            arguments,
+                        })) => {
+                            return Some((
+                                Ok::<Bytes, Infallible>(ndjson(json!({
+                                    "type": "tool_call",
+                                    "call_id": call_id,
+                                    "name": name,
+                                    "arguments": arguments,
+                                }))),
+                                state,
+                            ));
+                        }
+                        Ok(Some(ResponsesStreamEvent::Completed { stop_reason })) => {
                             let assistant_text = std::mem::take(&mut state.assistant_text);
                             let reasoning_summary = std::mem::take(&mut state.reasoning_summary);
+                            let stop_reason = format!("{stop_reason:?}").to_lowercase();
                             let persisted_summary = (!reasoning_summary.is_empty())
                                 .then_some(reasoning_summary);
                             match state
@@ -919,6 +935,7 @@ async fn create_turn_stream(
                                             "type": "assistant_message",
                                             "message": message,
                                             "reasoning_summary": persisted_summary,
+                                            "stop_reason": stop_reason,
                                         }))),
                                         state,
                                     ));

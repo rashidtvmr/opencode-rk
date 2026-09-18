@@ -41,7 +41,7 @@ impl ResponsesInput {
     }
 }
 
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq, Eq)]
 pub enum ResponsesError {
     #[error("provider configuration is invalid: {0}")]
     InvalidConfig(String),
@@ -78,10 +78,201 @@ pub enum ResponsesError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResponsesStopReason {
+    /// Model finished normally (`response.completed`).
+    Completed,
+    /// Model stopped early (`response.incomplete`), e.g. max_output_tokens
+    /// or content filter. Standard OpenAI Responses termination cause.
+    Incomplete { reason: Option<String> },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ResponsesStreamEvent {
     OutputTextDelta(String),
     ReasoningSummaryDelta(String),
-    Completed,
+    /// One provider-requested tool invocation (Responses `function_call` item).
+    FunctionCall {
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    /// Terminal event. Every well-formed stream ends here exactly once.
+    Completed { stop_reason: ResponsesStopReason },
+}
+
+/// Pure SSE event parser shared by the live stream and tests.
+///
+/// Extracted from `OpenAiResponsesStream` so terminal-event semantics
+/// (stop reasons, function-call items) are testable without a TCP peer.
+/// `event_name` is the SSE `event:` field when the peer sends one.
+#[derive(Debug, Default)]
+pub struct ResponsesStreamParser {
+    output_bytes: usize,
+    reasoning_summary_bytes: usize,
+    completed: bool,
+}
+
+impl ResponsesStreamParser {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn is_exhausted(&self) -> bool {
+        self.completed
+    }
+
+    pub fn parse_event(
+        &mut self,
+        event_name: Option<&str>,
+        event: &str,
+    ) -> Result<Option<ResponsesStreamEvent>, ResponsesError> {
+        self.parse_event_impl(event_name, event)
+    }
+
+    fn parse_event_impl(
+        &mut self,
+        event_name: Option<&str>,
+        event: &str,
+    ) -> Result<Option<ResponsesStreamEvent>, ResponsesError> {
+        if self.completed {
+            return Ok(None);
+        }
+        // Accept either raw SSE `data:` lines or a bare JSON payload.
+        let mut data = String::new();
+        let mut saw_data_prefix = false;
+        for line in event.lines() {
+            let line = line.trim_end_matches('\r');
+            if line.starts_with(':') {
+                continue;
+            }
+            if let Some(value) = line.strip_prefix("data:") {
+                saw_data_prefix = true;
+                if !data.is_empty() {
+                    data.push('\n');
+                }
+                data.push_str(value.trim_start());
+            }
+        }
+        if !saw_data_prefix {
+            data.push_str(event);
+        }
+        if data.is_empty() || data == "[DONE]" {
+            return Ok(None);
+        }
+
+        let value: Value = serde_json::from_str(&data)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        let event_type = value.get("type").and_then(Value::as_str).or(event_name);
+        match event_type {
+            Some("response.output_text.delta") => {
+                let delta = value.get("delta").and_then(Value::as_str).ok_or_else(|| {
+                    ResponsesError::InvalidJson("stream delta is missing text".into())
+                })?;
+                self.output_bytes = self.output_bytes.saturating_add(delta.len());
+                if self.output_bytes > MAX_INLINE_PAYLOAD_BYTES {
+                    return Err(ResponsesError::OutputTooLarge {
+                        max: MAX_INLINE_PAYLOAD_BYTES,
+                    });
+                }
+                Ok(Some(ResponsesStreamEvent::OutputTextDelta(
+                    delta.to_owned(),
+                )))
+            }
+            Some("response.reasoning_summary_text.delta") => {
+                let delta = value.get("delta").and_then(Value::as_str).ok_or_else(|| {
+                    ResponsesError::InvalidJson("reasoning summary delta is missing text".into())
+                })?;
+                self.reasoning_summary_bytes =
+                    self.reasoning_summary_bytes.saturating_add(delta.len());
+                if self.reasoning_summary_bytes > MAX_REASONING_SUMMARY_BYTES {
+                    return Err(ResponsesError::ReasoningSummaryTooLarge {
+                        max: MAX_REASONING_SUMMARY_BYTES,
+                    });
+                }
+                Ok(Some(ResponsesStreamEvent::ReasoningSummaryDelta(
+                    delta.to_owned(),
+                )))
+            }
+            Some("response.output_item.done") => {
+                let item_type = value
+                    .pointer("/item/type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if item_type != "function_call" {
+                    return Ok(None);
+                }
+                let call_id = value
+                    .pointer("/item/call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let name = value
+                    .pointer("/item/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let arguments = value
+                    .pointer("/item/arguments")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                if call_id.is_empty() || name.is_empty() {
+                    return Err(ResponsesError::InvalidJson(
+                        "function_call item is missing call_id or name".into(),
+                    ));
+                }
+                Ok(Some(ResponsesStreamEvent::FunctionCall {
+                    call_id,
+                    name,
+                    arguments,
+                }))
+            }
+            Some("response.completed") => {
+                self.completed = true;
+                Ok(Some(ResponsesStreamEvent::Completed {
+                    stop_reason: ResponsesStopReason::Completed,
+                }))
+            }
+            Some("response.incomplete") => {
+                self.completed = true;
+                let reason = value
+                    .pointer("/response/incomplete_details/reason")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                Ok(Some(ResponsesStreamEvent::Completed {
+                    stop_reason: ResponsesStopReason::Incomplete { reason },
+                }))
+            }
+            Some("response.failed") | Some("error") => {
+                let message = value
+                    .pointer("/response/error/message")
+                    .or_else(|| value.pointer("/error/message"))
+                    .or_else(|| value.get("message"))
+                    .and_then(Value::as_str)
+                    .unwrap_or("provider stream failed")
+                    .to_owned();
+                Err(ResponsesError::StreamFailed(message))
+            }
+            Some(
+                "response.created"
+                | "response.queued"
+                | "response.in_progress"
+                | "response.output_item.added"
+                | "response.content_part.added"
+                | "response.output_text.done"
+                | "response.content_part.done"
+                | "response.function_call_arguments.delta"
+                | "response.function_call_arguments.done"
+                | "response.reasoning_summary_part.added"
+                | "response.reasoning_summary_part.done"
+                | "response.reasoning_summary_text.done",
+            ) => Ok(None),
+            Some(other) => Err(ResponsesError::UnsupportedStreamEvent(other.to_owned())),
+            None => Err(ResponsesError::InvalidJson(
+                "provider stream event is missing type".to_owned(),
+            )),
+        }
+    }
 }
 
 pub struct OpenAiResponsesStream {
@@ -315,12 +506,55 @@ impl OpenAiResponsesStream {
                     delta.to_owned(),
                 )))
             }
-            Some("response.completed") => {
-                if self.output_bytes == 0 {
-                    return Err(ResponsesError::EmptyOutput);
+            Some("response.output_item.done") => {
+                let item_type = value
+                    .pointer("/item/type")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
+                if item_type != "function_call" {
+                    return Ok(None);
                 }
+                let call_id = value
+                    .pointer("/item/call_id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let name = value
+                    .pointer("/item/name")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                let arguments = value
+                    .pointer("/item/arguments")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_owned();
+                if call_id.is_empty() || name.is_empty() {
+                    return Err(ResponsesError::InvalidJson(
+                        "function_call item is missing call_id or name".into(),
+                    ));
+                }
+                Ok(Some(ResponsesStreamEvent::FunctionCall {
+                    call_id,
+                    name,
+                    arguments,
+                }))
+            }
+            Some("response.completed") => {
                 self.completed = true;
-                Ok(Some(ResponsesStreamEvent::Completed))
+                Ok(Some(ResponsesStreamEvent::Completed {
+                    stop_reason: ResponsesStopReason::Completed,
+                }))
+            }
+            Some("response.incomplete") => {
+                self.completed = true;
+                let reason = value
+                    .pointer("/response/incomplete_details/reason")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned);
+                Ok(Some(ResponsesStreamEvent::Completed {
+                    stop_reason: ResponsesStopReason::Incomplete { reason },
+                }))
             }
             Some("response.failed") | Some("error") => {
                 let message = value
@@ -340,7 +574,6 @@ impl OpenAiResponsesStream {
                 | "response.content_part.added"
                 | "response.output_text.done"
                 | "response.content_part.done"
-                | "response.output_item.done"
                 | "response.reasoning_summary_part.added"
                 | "response.reasoning_summary_part.done"
                 | "response.reasoning_summary_text.done",
