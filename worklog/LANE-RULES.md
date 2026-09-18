@@ -10,7 +10,8 @@ Pure-state + fs-read module. Parity gap: OpenCode rule loading.
 
 ## Evidence
 - File: crates/server/src/rules_loader.rs
-- Frozen sha256: (pending commit)
+- Frozen sha256: be2442cdf1c116a571dd6904860ea82a862472514314eb010ab9a92d91487e88
+- Commit: 26928c6 (pushed to origin/main)
 - Tests: 6/6 GREEN x3 stable
   - T01 AGENTS.md discovered
   - T02 frontmatter glob parsed
