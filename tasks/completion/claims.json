@@ -226,12 +226,36 @@
       "session": "ses_orch_DISC116b",
       "status": "in-progress"
     },
+    "LANE-CI": {
+      "blockedNote": "",
+      "claim": "Roadmap 3.6: CI/CD non-interactive output contract (typed exit codes, JSON output, fail-closed approvals)",
+      "completedNote": "rustc --test ci_output 6/6 green",
+      "scratchpad": "worklog/LANE-CI.md",
+      "session": "ses_worker_ci",
+      "status": "completed"
+    },
     "LANE-CONTEXT-CMD": {
       "blockedNote": "",
       "claim": "/CONTEXT and /MEMORY command surfaces over server snapshots",
       "completedNote": "GREEN 11/11 context_report standalone rustc --test (T01-T06 + 5 edge); zero test edits; sha256 of impl: deterministic; cmd: rustc --edition 2021 --test crates/server/src/context_report.rs; frozen tests pass",
       "scratchpad": "worklog/LANE-CONTEXT-CMD.md",
       "session": "ses_worker_ctx",
+      "status": "completed"
+    },
+    "LANE-GLOBS": {
+      "blockedNote": "",
+      "claim": "Roadmap 3.5: conditional rules load/unload with path globs + hysteresis (extends rules_loader)",
+      "completedNote": "",
+      "scratchpad": "worklog/LANE-GLOBS.md",
+      "session": "ses_worker_globs",
+      "status": "in-progress"
+    },
+    "LANE-LOOP": {
+      "blockedNote": "",
+      "claim": "Roadmap 3.1: LOOP task-level driver state machine (plan-execute-verify-replan, checkpoint/resume via sync events, steer/cancel)",
+      "completedNote": "rustc --edition 2021 --test src/loop_driver.rs 10/10 green x2",
+      "scratchpad": "worklog/LANE-LOOP.md",
+      "session": "ses_worker_loop",
       "status": "completed"
     },
     "LANE-RULES": {
@@ -305,8 +329,8 @@
       "status": "completed"
     },
     "TUI-011": {
-      "scratchpad": "worklog/TUI-011-ZIG.md",
-      "session": "ses_orch_zigsetup1",
+      "scratchpad": "worklog/TUI-011.md",
+      "session": "ses_orch_TUI011",
       "status": "in-progress"
     }
   },
