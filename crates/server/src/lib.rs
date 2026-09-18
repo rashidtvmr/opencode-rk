@@ -3,6 +3,12 @@
 pub mod acp_bridge;
 pub mod acp_files;
 pub mod app_client;
+pub mod agent_loop;
+pub use agent_loop::{
+    function_call_output as loop_function_call_output, truncate_tool_output, CallOutput,
+    LoopController, RequestedCall, TurnStop, MAX_CALLS_PER_ROUND, MAX_TOOL_OUTPUT_CHARS,
+    MAX_TURN_STEPS,
+};
 pub mod app_protocols;
 pub mod app_runtime;
 pub mod auto_loop;
@@ -74,10 +80,12 @@ use opencode_rk_contracts::{
     MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
-    OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesInput, ResponsesRole,
-    ResponsesStreamEvent, MAX_RESPONSES_INPUT_MESSAGES,
+    OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesInput, ResponsesItem,
+    ResponsesRole, ResponsesStopReason, ResponsesStreamEvent, ResponsesTool,
+    MAX_RESPONSES_INPUT_MESSAGES,
 };
 use opencode_rk_sessions::{SessionError, SessionService};
+use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -152,6 +160,9 @@ async fn web_capabilities() -> Json<Value> {
         .list()
         .into_iter()
         .map(|tool| {
+            // Honest capability report: a tool is turn-executable exactly when
+            // the operator's allowlist (OPENCODE_RK_TURN_TOOLS) admits it.
+            let turn_enabled = turn_tool_config().iter().any(|name| *name == tool.id);
             json!({
                 "id": tool.id,
                 "name": tool.name,
@@ -159,8 +170,15 @@ async fn web_capabilities() -> Json<Value> {
                 "enabled": tool.enabled,
                 "type": tool.tool_type,
                 "tags": tool.tags,
-                "available_for_web_turn": false,
-                "reason": "the current web Responses turn adapter does not execute native tools",
+                "available_for_web_turn": turn_enabled,
+                "reason": if turn_enabled {
+                    format!(
+                        "executable by the turn adapter; configured via OPENCODE_RK_TURN_TOOLS ({})",
+                        tool.id
+                    )
+                } else {
+                    "not executable by the turn adapter; add it to OPENCODE_RK_TURN_TOOLS to enable".to_owned()
+                },
             })
         })
         .collect::<Vec<_>>();
@@ -781,12 +799,50 @@ struct TurnStreamState {
     reasoning_summary: String,
     stage: TurnStreamStage,
     _permit: SemaphorePermit<'static>,
+    /// Agentic loop state: provider tool schema + step budget + typed history.
+    tools: Vec<ResponsesTool>,
+    enabled_tools: Vec<String>,
+    history_items: Vec<ResponsesItem>,
+    loop_control: LoopController,
+    pending_calls: Vec<RequestedCall>,
+    executed_outputs: Vec<CallOutputItem>,
+    emit_cursor: usize,
+    model: String,
+    reasoning_effort: String,
+    /// Set when the loop must finalize with this stop reason (step cap hit).
+    forced_stop: Option<TurnStop>,
 }
 
-#[derive(Clone, Copy)]
+/// Turn-tool allowlist from OPENCODE_RK_TURN_TOOLS (comma-separated tool ids).
+/// Empty by default: tool execution is opt-in, deny-by-default.
+fn turn_tool_config() -> Vec<String> {
+    std::env::var("OPENCODE_RK_TURN_TOOLS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+/// One executed (or explicitly denied) tool output awaiting persistence.
+#[derive(Clone)]
+struct CallOutputItem {
+    call_id: String,
+    name: String,
+    output: String,
+}
+
+#[derive(Clone, Copy, PartialEq)]
 enum TurnStreamStage {
     User,
     Provider,
+    /// Dispatch accumulated [`TurnStreamState::pending_calls`] now.
+    Executing,
+    /// Emit one `tool_output` NDJSON event per executed call.
+    EmitOutputs,
+    /// Persist round outputs and start the next provider round (or finalize).
+    NextRound,
     Done,
 }
 
@@ -844,8 +900,33 @@ async fn create_turn_stream(
         };
         input.push(ResponsesInput::new(ResponsesRole::User, text.clone()));
     }
+
+    // Agentic loop setup: advertise tools only when turn-tool execution is
+    // explicitly enabled (OPENCODE_RK_TURN_TOOLS). The list is deny-by-default:
+    // an advertised tool is executable, an unadvertised one is not.
+    let turn_tools = turn_tool_config();
+    let registry = ToolRegistry::new();
+    let tools: Vec<ResponsesTool> = registry
+        .list()
+        .into_iter()
+        .filter(|tool| turn_tools.iter().any(|name| *name == tool.id))
+        .map(|tool| {
+            ResponsesTool::function(
+                tool.id.clone(),
+                tool.description.clone(),
+                json!({ "type": "object", "properties": {} }),
+            )
+        })
+        .collect();
+    let max_steps = std::env::var("OPENCODE_RK_TURN_MAX_STEPS")
+        .ok()
+        .and_then(|value| value.parse::<u32>().ok())
+        .filter(|steps| *steps > 0)
+        .unwrap_or(MAX_TURN_STEPS);
+    let history_items: Vec<ResponsesItem> = input.into_iter().map(Into::into).collect();
+
     let provider = provider
-        .stream(model_id, &body.reasoning_effort, &input)
+        .stream_with_tools(model_id, &body.reasoning_effort, &history_items, &tools)
         .await
         .map_err(provider_failure)?;
 
@@ -859,6 +940,16 @@ async fn create_turn_stream(
             reasoning_summary: String::new(),
             stage: TurnStreamStage::User,
             _permit: permit,
+            tools,
+            enabled_tools: turn_tools,
+            history_items,
+            loop_control: LoopController::with_cap(max_steps),
+            pending_calls: Vec::new(),
+            executed_outputs: Vec::new(),
+            emit_cursor: 0,
+            model: model_id.to_owned(),
+            reasoning_effort: body.reasoning_effort.clone(),
+            forced_stop: None,
         },
         |mut state| async move {
             loop {
@@ -877,7 +968,9 @@ async fn create_turn_stream(
                             state,
                         ));
                     }
-                    TurnStreamStage::Provider => match state.provider.next_event().await {
+                    TurnStreamStage::Provider => {
+                        let event = state.provider.next_event().await;
+                        match event {
                         Ok(Some(ResponsesStreamEvent::OutputTextDelta(delta))) => {
                             state.assistant_text.push_str(&delta);
                             return Some((
@@ -903,6 +996,20 @@ async fn create_turn_stream(
                             name,
                             arguments,
                         })) => {
+                            state.pending_calls.push(RequestedCall {
+                                call_id: call_id.clone(),
+                                name: name.clone(),
+                                arguments: arguments.clone(),
+                            });
+                            // Replay rule: the next round's input must contain
+                            // the model's function_call before its output.
+                            state
+                                .history_items
+                                .push(ResponsesItem::FunctionCall {
+                                    call_id: call_id.clone(),
+                                    name: name.clone(),
+                                    arguments: arguments.clone(),
+                                });
                             return Some((
                                 Ok::<Bytes, Infallible>(ndjson(json!({
                                     "type": "tool_call",
@@ -914,9 +1021,30 @@ async fn create_turn_stream(
                             ));
                         }
                         Ok(Some(ResponsesStreamEvent::Completed { stop_reason })) => {
+                            // Terminal provider event: either the turn ends
+                            // here or the accumulated tool calls execute and
+                            // the loop continues with the next round.
+                            if !state.pending_calls.is_empty() {
+                                if !state.loop_control.can_start_next_round() {
+                                    let stop = TurnStop::MaxSteps {
+                                        steps: state.loop_control.max_steps(),
+                                    };
+                                    state.stage = TurnStreamStage::NextRound;
+                                    state.forced_stop = Some(stop);
+                                    continue;
+                                }
+                                state.stage = TurnStreamStage::Executing;
+                                continue;
+                            }
+                            let stop = match stop_reason {
+                                ResponsesStopReason::Completed => TurnStop::Completed,
+                                ResponsesStopReason::Incomplete { reason } => {
+                                    TurnStop::Incomplete { reason }
+                                }
+                            };
                             let assistant_text = std::mem::take(&mut state.assistant_text);
                             let reasoning_summary = std::mem::take(&mut state.reasoning_summary);
-                            let stop_reason = format!("{stop_reason:?}").to_lowercase();
+                            let stop_reason = stop.as_str();
                             let persisted_summary = (!reasoning_summary.is_empty())
                                 .then_some(reasoning_summary);
                             match state
@@ -973,7 +1101,182 @@ async fn create_turn_stream(
                                 state,
                             ));
                         }
-                    },
+                        }
+                    }                    TurnStreamStage::Executing => {
+                            // One round = one provider stream + at most one
+                            // tool dispatch batch. The budget was checked at
+                            // the completed event; consume it here.
+                            let _ = state.loop_control.begin_round();
+                            let executor = ToolExecutor::new();
+                        let mut round_outputs: Vec<CallOutputItem> = Vec::new();
+                        let mut batch = std::mem::take(&mut state.pending_calls);
+                        // Truncate oversized batches with explicit error outputs.
+                        let (kept, overflow) = state.loop_control.truncate_calls(&batch);
+                        batch = kept;
+                        for item in overflow {
+                            round_outputs.push(CallOutputItem {
+                                call_id: item.call_id,
+                                name: String::new(),
+                                output: item.output,
+                            });
+                        }
+                        for call in batch {
+                            let permitted = state
+                                .enabled_tools
+                                .iter()
+                                .any(|enabled| *enabled == call.name);
+                            let raw_output = if permitted {
+                                let arguments: Value = serde_json::from_str(&call.arguments)
+                                    .unwrap_or_else(|_| json!({}));
+                                let result = executor
+                                    .execute(opencode_rk_tools::executor::ToolCall::new(
+                                        call.call_id.clone(),
+                                        call.name.clone(),
+                                        arguments,
+                                    ))
+                                    .await;
+                                if result.success {
+                                    result.output
+                                } else {
+                                    result
+                                        .error
+                                        .unwrap_or_else(|| "tool failed".to_owned())
+                                }
+                            } else {
+                                format!(
+                                    "error: tool '{}' is not permitted by turn policy (enable via OPENCODE_RK_TURN_TOOLS)",
+                                    call.name
+                                )
+                            };
+                            let bounded = truncate_tool_output(&raw_output);
+                            round_outputs.push(CallOutputItem {
+                                call_id: call.call_id.clone(),
+                                name: call.name,
+                                output: bounded,
+                            });
+                        }
+                        state.executed_outputs = round_outputs;
+                        state.stage = TurnStreamStage::EmitOutputs;
+                        continue;
+                    }
+                    TurnStreamStage::EmitOutputs => {
+                            if state.emit_cursor < state.executed_outputs.len() {
+                                let item = state.executed_outputs[state.emit_cursor].clone();
+                                state.emit_cursor += 1;
+                                return Some((
+                                    Ok::<Bytes, Infallible>(ndjson(json!({
+                                        "type": "tool_output",
+                                        "call_id": item.call_id,
+                                        "name": item.name,
+                                        "output": item.output,
+                                    }))),
+                                    state,
+                                ));
+                            }
+                            state.emit_cursor = 0;
+                            state.stage = TurnStreamStage::NextRound;
+                            continue;
+                        }
+                    TurnStreamStage::NextRound => {
+                        // Persist round outputs (tool transcript rows) and
+                        // either start the next provider round or finalize
+                        // with the forced stop reason.
+                        let outputs = std::mem::take(&mut state.executed_outputs);
+                        for item in &outputs {
+                            let record = state
+                                .sessions
+                                .append_text(
+                                    state.session_id,
+                                    MessageRole::Tool,
+                                    format!("[{}] {}", item.name, item.output),
+                                )
+                                .await;
+                            if record.is_err() {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        "internal_error",
+                                        "failed to persist tool output",
+                                    )),
+                                    state,
+                                ));
+                            }
+                            state.history_items.push(ResponsesItem::FunctionCallOutput {
+                                call_id: item.call_id.clone(),
+                                output: item.output.clone(),
+                            });
+                        }
+                        if let Some(stop) = state.forced_stop.take() {
+                            let assistant_text = std::mem::take(&mut state.assistant_text);
+                            let reasoning_summary =
+                                std::mem::take(&mut state.reasoning_summary);
+                            let persisted_summary =
+                                (!reasoning_summary.is_empty()).then_some(reasoning_summary);
+                            match state
+                                .sessions
+                                .append_assistant_with_reasoning(
+                                    state.session_id,
+                                    assistant_text,
+                                    persisted_summary.clone(),
+                                )
+                                .await
+                            {
+                                Ok(message) => {
+                                    state.stage = TurnStreamStage::Done;
+                                    return Some((
+                                        Ok::<Bytes, Infallible>(ndjson(json!({
+                                            "type": "assistant_message",
+                                            "message": message,
+                                            "reasoning_summary": persisted_summary,
+                                            "stop_reason": stop.as_str(),
+                                        }))),
+                                        state,
+                                    ));
+                                }
+                                Err(error) => {
+                                    state.stage = TurnStreamStage::Done;
+                                    return Some((
+                                        Ok::<Bytes, Infallible>(stream_error(
+                                            "internal_error",
+                                            error.to_string(),
+                                        )),
+                                        state,
+                                    ));
+                                }
+                            }
+                        }
+                        // Next provider round with the grown typed history.
+                        let client = match OpenAiResponsesClient::from_env() {
+                            Ok(client) => client,
+                            Err(error) => {
+                                state.stage = TurnStreamStage::Done;
+                                let failure = provider_failure(error);
+                                return Some((Ok::<Bytes, Infallible>(stream_error(failure.code, failure.message)), state));
+                            }
+                        };
+                        match client
+                            .stream_with_tools(
+                                &state.model,
+                                &state.reasoning_effort,
+                                &state.history_items,
+                                &state.tools,
+                            )
+                            .await
+                        {
+                            Ok(next_stream) => {
+                                state.provider = next_stream;
+                                state.assistant_text.clear();
+                                state.reasoning_summary.clear();
+                                state.stage = TurnStreamStage::Provider;
+                                continue;
+                            }
+                            Err(error) => {
+                                state.stage = TurnStreamStage::Done;
+                                let failure = provider_failure(error);
+                                return Some((Ok::<Bytes, Infallible>(stream_error(failure.code, failure.message)), state));
+                            }
+                        }
+                    }
                     TurnStreamStage::Done => return None,
                 }
             }
