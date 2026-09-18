@@ -192,9 +192,10 @@
       "status": "completed"
     },
     "DISC-115": {
+      "completedNote": "GREEN 12/12 native_shell (7 existing+5 DISC115 T01-T05) zero test edits; RED 7pass/5fail frozen e0b53201; GREEN sha256 2bdcd87d; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 cargo test -p opencode-rk-cli --bin opencode-rk native_shell",
       "scratchpad": "worklog/DISC-115.md",
       "session": "ses_orch_DISC115",
-      "status": "in-progress"
+      "status": "completed"
     },
     "DISC-116": {
       "scratchpad": "worklog/DISC-116.md",
@@ -202,14 +203,16 @@
       "status": "in-progress"
     },
     "PAR-001": {
+      "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
       "session": "ses_orch_PAR001",
-      "status": "in-progress"
+      "status": "completed"
     },
     "RC-01": {
+      "completedNote": "GREEN server-lib 154/154 + daemon_auth_api 5/5 zero test edits; log rc01",
       "scratchpad": "worklog/RC-01.md",
-      "session": "ses_orch_RC01c",
-      "status": "in-progress"
+      "session": "ses_orch_RC01d",
+      "status": "completed"
     },
     "RC-02": {
       "completedNote": "GREEN 13/13 daemon + 149/149 server-lib @80b72462; RED 4fail+1invariant frozen 679d054a; log /tmp/opencode/rc02.log",

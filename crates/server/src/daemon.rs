@@ -109,6 +109,10 @@ pub struct BackendDescriptor {
     pub pid: u32,
     pub http_origin: String,
     pub schema_version: u16,
+    /// Bearer token the live daemon expects on `/api/*`. Empty means a
+    /// legacy descriptor: readers treat it as stale, never as authenticated.
+    #[serde(default)]
+    pub auth_token: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -153,6 +157,7 @@ pub fn read_backend_descriptor(data_dir: impl AsRef<Path>) -> Result<Option<Back
     if descriptor.schema_version != opencode_rk_contracts::WIRE_SCHEMA_VERSION
         || !pid_alive(descriptor.pid)
         || parse_loopback_port(&descriptor.http_origin).is_none()
+        || descriptor.auth_token.is_empty()
     {
         return Ok(None);
     }
@@ -243,6 +248,17 @@ pub fn publish_backend_descriptor(
     data_dir: impl AsRef<Path>,
     address: SocketAddr,
 ) -> Result<BackendDescriptor> {
+    publish_backend_descriptor_with_auth(data_dir, address, String::new())
+}
+
+/// Publish the descriptor with the daemon's bearer token. Empty token marks
+/// a legacy descriptor: `DaemonAuth::from_published` rejects it, so readers
+/// treat it as stale.
+pub fn publish_backend_descriptor_with_auth(
+    data_dir: impl AsRef<Path>,
+    address: SocketAddr,
+    auth_token: String,
+) -> Result<BackendDescriptor> {
     let paths = DaemonPaths::for_data_dir(data_dir);
     if let Some(parent) = paths.descriptor.parent() {
         std::fs::create_dir_all(parent)?;
@@ -251,6 +267,7 @@ pub fn publish_backend_descriptor(
         pid: std::process::id(),
         http_origin: format!("http://{address}"),
         schema_version: opencode_rk_contracts::WIRE_SCHEMA_VERSION,
+        auth_token,
     };
     let bytes = serde_json::to_vec(&descriptor)
         .map_err(|error| DaemonError::Descriptor(error.to_string()))?;

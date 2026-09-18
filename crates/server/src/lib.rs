@@ -23,6 +23,7 @@ pub mod control_plane_errors;
 pub mod control_plane_exposure;
 pub mod control_plane_inputs;
 pub mod daemon;
+pub mod daemon_auth;
 pub mod desktop_bridge;
 pub mod runtime_wiring;
 pub mod enterprise_link;
@@ -102,7 +103,14 @@ pub struct AppState {
     pub catalog: Arc<Catalog>,
 }
 pub fn router(state: AppState) -> Router {
-    Router::new()
+    router_with_auth(state, None)
+}
+
+/// Authenticated router: `Some(auth)` gates every `/api/*` route with the
+/// bearer middleware; `None` is the legacy unauthenticated router used by
+/// frozen tests. The serve path always passes `Some`.
+pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) -> Router {
+    let app = Router::new()
         .route("/health", get(health))
         .route("/api/capabilities", get(web_capabilities))
         .route("/api/workspaces", get(list_workspaces))
@@ -152,7 +160,14 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
         .fallback(web_assets::serve)
-        .with_state(state)
+        .with_state(state);
+    match auth {
+        Some(credential) => app.layer(axum::middleware::from_fn_with_state(
+            credential,
+            daemon_auth::require_bearer,
+        )),
+        None => app,
+    }
 }
 async fn health() -> Json<Value> {
     Json(json!({"schema_version":WIRE_SCHEMA_VERSION,"status":"ok","runtime":"native-rust"}))
