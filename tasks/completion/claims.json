@@ -286,6 +286,11 @@
       "session": "ses_orch_TUI002",
       "status": "completed"
     },
+    "TUI-003": {
+      "scratchpad": "worklog/TUI-003.md",
+      "session": "ses_orch_TUI003",
+      "status": "in-progress"
+    },
     "TUI-010-CAPS": {
       "completedNote": "native_caps 742 lines 21/21 green md5 5f68f693",
       "scratchpad": "worklog/TUI-010-CAPS.md",

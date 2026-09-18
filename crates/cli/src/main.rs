@@ -18,18 +18,28 @@ use serde::Serialize;
 use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 mod tui_entry;
 use tui_entry::TuiArgs;
-mod chat;
 mod app_start;
+mod chat;
 mod daemon_client;
 mod diagnostics;
 mod headless_engine;
 mod native_app;
 mod native_approvals;
+mod native_caps;
 mod native_composer;
+mod native_console;
+mod native_host;
+mod native_input;
+mod native_keys;
 mod native_layout;
+mod native_layout_engine;
+mod native_mouse;
 mod native_navigation;
 mod native_palette;
+mod native_shell;
 mod native_status;
+mod native_theme;
+mod native_timeline;
 mod native_transcript;
 mod onboarding;
 mod pair;
@@ -390,10 +400,10 @@ fn doctor_mcp_check() -> DoctorCheck {
     DoctorCheck {
         status,
         detail: None,
-        next_step: (status == "error").then(
-            || "OPENCODE_RK_MCP_CONFIG must be JSON with a non-empty {\"servers\":{...}} object"
-                .to_owned(),
-        ),
+        next_step: (status == "error").then(|| {
+            "OPENCODE_RK_MCP_CONFIG must be JSON with a non-empty {\"servers\":{...}} object"
+                .to_owned()
+        }),
         builtins: Vec::new(),
     }
 }
