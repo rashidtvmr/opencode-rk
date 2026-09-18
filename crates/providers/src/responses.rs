@@ -279,9 +279,7 @@ pub struct OpenAiResponsesStream {
     response: reqwest::Response,
     pending: Vec<u8>,
     received_bytes: usize,
-    output_bytes: usize,
-    reasoning_summary_bytes: usize,
-    completed: bool,
+    parser: ResponsesStreamParser,
 }
 
 /// One reusable, redirect-disabled OpenAI Responses client.
@@ -396,16 +394,14 @@ impl OpenAiResponsesClient {
             response,
             pending: Vec::new(),
             received_bytes: 0,
-            output_bytes: 0,
-            reasoning_summary_bytes: 0,
-            completed: false,
+            parser: ResponsesStreamParser::new(),
         })
     }
 }
 
 impl OpenAiResponsesStream {
     pub async fn next_event(&mut self) -> Result<Option<ResponsesStreamEvent>, ResponsesError> {
-        if self.completed {
+        if self.parser.is_exhausted() {
             return Ok(None);
         }
 
@@ -469,120 +465,7 @@ impl OpenAiResponsesStream {
         if data.is_empty() {
             return Ok(None);
         }
-        if data == "[DONE]" {
-            return Ok(None);
-        }
-
-        let value: Value = serde_json::from_str(&data)
-            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
-        let event_type = value.get("type").and_then(Value::as_str).or(event_name);
-        match event_type {
-            Some("response.output_text.delta") => {
-                let delta = value.get("delta").and_then(Value::as_str).ok_or_else(|| {
-                    ResponsesError::InvalidJson("stream delta is missing text".into())
-                })?;
-                self.output_bytes = self.output_bytes.saturating_add(delta.len());
-                if self.output_bytes > MAX_INLINE_PAYLOAD_BYTES {
-                    return Err(ResponsesError::OutputTooLarge {
-                        max: MAX_INLINE_PAYLOAD_BYTES,
-                    });
-                }
-                Ok(Some(ResponsesStreamEvent::OutputTextDelta(
-                    delta.to_owned(),
-                )))
-            }
-            Some("response.reasoning_summary_text.delta") => {
-                let delta = value.get("delta").and_then(Value::as_str).ok_or_else(|| {
-                    ResponsesError::InvalidJson("reasoning summary delta is missing text".into())
-                })?;
-                self.reasoning_summary_bytes =
-                    self.reasoning_summary_bytes.saturating_add(delta.len());
-                if self.reasoning_summary_bytes > MAX_REASONING_SUMMARY_BYTES {
-                    return Err(ResponsesError::ReasoningSummaryTooLarge {
-                        max: MAX_REASONING_SUMMARY_BYTES,
-                    });
-                }
-                Ok(Some(ResponsesStreamEvent::ReasoningSummaryDelta(
-                    delta.to_owned(),
-                )))
-            }
-            Some("response.output_item.done") => {
-                let item_type = value
-                    .pointer("/item/type")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default();
-                if item_type != "function_call" {
-                    return Ok(None);
-                }
-                let call_id = value
-                    .pointer("/item/call_id")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                let name = value
-                    .pointer("/item/name")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                let arguments = value
-                    .pointer("/item/arguments")
-                    .and_then(Value::as_str)
-                    .unwrap_or_default()
-                    .to_owned();
-                if call_id.is_empty() || name.is_empty() {
-                    return Err(ResponsesError::InvalidJson(
-                        "function_call item is missing call_id or name".into(),
-                    ));
-                }
-                Ok(Some(ResponsesStreamEvent::FunctionCall {
-                    call_id,
-                    name,
-                    arguments,
-                }))
-            }
-            Some("response.completed") => {
-                self.completed = true;
-                Ok(Some(ResponsesStreamEvent::Completed {
-                    stop_reason: ResponsesStopReason::Completed,
-                }))
-            }
-            Some("response.incomplete") => {
-                self.completed = true;
-                let reason = value
-                    .pointer("/response/incomplete_details/reason")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned);
-                Ok(Some(ResponsesStreamEvent::Completed {
-                    stop_reason: ResponsesStopReason::Incomplete { reason },
-                }))
-            }
-            Some("response.failed") | Some("error") => {
-                let message = value
-                    .pointer("/response/error/message")
-                    .or_else(|| value.pointer("/error/message"))
-                    .or_else(|| value.get("message"))
-                    .and_then(Value::as_str)
-                    .unwrap_or("provider stream failed")
-                    .to_owned();
-                Err(ResponsesError::StreamFailed(message))
-            }
-            Some(
-                "response.created"
-                | "response.queued"
-                | "response.in_progress"
-                | "response.output_item.added"
-                | "response.content_part.added"
-                | "response.output_text.done"
-                | "response.content_part.done"
-                | "response.reasoning_summary_part.added"
-                | "response.reasoning_summary_part.done"
-                | "response.reasoning_summary_text.done",
-            ) => Ok(None),
-            Some(other) => Err(ResponsesError::UnsupportedStreamEvent(other.to_owned())),
-            None => Err(ResponsesError::InvalidJson(
-                "provider stream event is missing type".to_owned(),
-            )),
-        }
+        self.parser.parse_event_impl(event_name, data.as_str())
     }
 }
 
