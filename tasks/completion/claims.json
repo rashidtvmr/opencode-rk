@@ -121,14 +121,16 @@
       "status": "completed"
     },
     "DISC-103": {
+      "completedNote": "7/7 GREEN in isolated rustc-test harness (bit-identical copy of owned file); frozen sha256 2f460c4da68b9b992301363ed0a3ad5ffca563352cc7025e845e5ce02c3123e2; zero warnings; in-crate runner N/A until integrator prewires pub mod registry_dispatch",
       "scratchpad": "worklog/DISC-103.md",
-      "session": "ses_orch_DISC103",
-      "status": "in-progress"
+      "session": "ses_orch_DISC103b",
+      "status": "completed"
     },
     "DISC-104": {
+      "completedNote": "GREEN 10/10 frozen sha256:49f06794 standalone rustc --test (RED stub 1pass/9fail); heavy: cargo test -p opencode-rk-tools --lib shell_tool 7/7; integrator must add pub mod shell_bounds to lib.rs",
       "scratchpad": "worklog/DISC-104.md",
       "session": "ses_orch_DISC104",
-      "status": "in-progress"
+      "status": "completed"
     },
     "DISC-105": {
       "completedNote": "GREEN: 6/6 tool_authorize + 143/143 lib green; zero test edits post-freeze; frozen sha256 0e096292; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-security --lib (temp mod line, lib.rs reverted byte-identical)",
@@ -136,15 +138,21 @@
       "session": "ses_orch_DISC105",
       "status": "completed"
     },
+    "DISC-106": {
+      "scratchpad": "worklog/DISC-106.md",
+      "session": "ses_orch_DISC106",
+      "status": "in-progress"
+    },
     "DISC-107": {
       "scratchpad": "worklog/DISC-107.md",
       "session": "ses_orch_DISC107",
       "status": "in-progress"
     },
     "DISC-108": {
+      "completedNote": "DISC-108 GREEN: disposable copy /tmp/opencode/disc108 (repo lib.rs untouched, one-line prewire in copy only) cargo test -p opencode-rk-storage --lib = 117 passed 0 failed (112 existing + 5 new import_blobs T01-T05); RED stub 4 failed as expected; frozen sha256 17917df1 761 lines; zero test edits post-freeze; needs integrator one-line pub mod import_blobs prewire",
       "scratchpad": "worklog/DISC-108.md",
       "session": "ses_orch_DISC108",
-      "status": "in-progress"
+      "status": "completed"
     },
     "DISC-109": {
       "scratchpad": "worklog/DISC-109.md",
@@ -152,24 +160,28 @@
       "status": "in-progress"
     },
     "DISC-110": {
+      "completedNote": "GREEN 7/7 frozen sha256:2108bb3c standalone rustc --test (RED stub 0pass/7fail); heavy: temp lib.rs prewire reverted (lib.rs untouched by lane; HEAD diff pre-existing other-lane mods) cargo test -p opencode-rk-tools --lib git_lane 7/7; integrator adds pub mod git_lane",
       "scratchpad": "worklog/DISC-110.md",
-      "session": "ses_orch_DISC110b",
-      "status": "in-progress"
+      "session": "ses_orch_DISC110c",
+      "status": "completed"
     },
     "DISC-111": {
+      "completedNote": "GREEN 8/8 harness cargo test --offline (T01..T06 in-file); RED 0/8 frozen; sha256 311abc319cfd14064715c11cda52580f74fa145ede973ce96e9c417d5340ba91; owned crates/tools/src/mcp_spawn.rs; needs integrator mod line; no commit per lane bounds",
       "scratchpad": "worklog/DISC-111.md",
       "session": "ses_orch_DISC111",
-      "status": "in-progress"
+      "status": "completed"
     },
     "DISC-112": {
+      "completedNote": "GREEN 6/6 zero test edits. acp_session.rs 795L sha58e19ca2 std-only. rustc --test + run => 6 passed 0 failed (T01 roundtrip+reclaim T02 stream-match T03 auth-noleak T04 restart T05 bounds+slow T06 cap). mod-line left to integrator. No commit/push per orders.",
       "scratchpad": "worklog/DISC-112.md",
       "session": "ses_orch_DISC112",
-      "status": "in-progress"
+      "status": "completed"
     },
     "DISC-113": {
+      "completedNote": "GREEN 6/6 runtime_wiring lib tests (T01-T06), zero test edits; temp lib.rs wire reverted, lib.rs clean; owned file + scratchpad untracked for integrator",
       "scratchpad": "worklog/DISC-113.md",
       "session": "ses_orch_DISC113",
-      "status": "in-progress"
+      "status": "completed"
     },
     "DISC-114": {
       "completedNote": "5/5 GREEN rustc --test ef4917c0; no-regress cargo test -p opencode-rk-server --lib turn_service 7 pass; no lib.rs touch, no commit/push per task",
@@ -181,6 +193,28 @@
       "scratchpad": "worklog/DISC-116.md",
       "session": "ses_orch_DISC116b",
       "status": "in-progress"
+    },
+    "RC-01": {
+      "scratchpad": "worklog/RC-01.md",
+      "session": "ses_orch_RC01",
+      "status": "in-progress"
+    },
+    "RC-02": {
+      "scratchpad": "worklog/RC-02.md",
+      "session": "ses_orch_RC02",
+      "status": "in-progress"
+    },
+    "RC-03": {
+      "completedNote": "GREEN: standalone rustc harness RED 3-fail then 5/5 green; in-crate service_commands 14/14 (9 existing + 5 rc03 new) via cargo test -p opencode-rk-cli --bin opencode-rk service_commands; logs /tmp/opencode/rc03-red.log + /tmp/opencode/rc03.log; zero test edits post-freeze",
+      "scratchpad": "worklog/RC-03.md",
+      "session": "ses_orch_RC03",
+      "status": "completed"
+    },
+    "TUI-001": {
+      "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
+      "scratchpad": "worklog/TUI-001.md",
+      "session": "ses_orch_TUI001",
+      "status": "completed"
     },
     "TUI-010-CAPS": {
       "completedNote": "native_caps 742 lines 21/21 green md5 5f68f693",

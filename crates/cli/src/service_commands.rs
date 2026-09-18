@@ -358,6 +358,46 @@ impl ResourceLedger {
     }
 }
 
+/// Singleton launch decision for the serve/web AlreadyRunning path
+/// (`main.rs:540-549`, `daemon.rs:54-78`).
+///
+/// Pure decision only: the caller supplies the two observations it already
+/// owns (flock held by another live holder? readable descriptor with a live
+/// pid + loopback origin?) and this helper maps them to the launch action.
+/// No syscalls, no IO, no clock.
+///
+/// - `(true, true)` → [`SingletonLaunch::ReuseLive`]: second serve for the
+///   same data-dir exits 0 printing the existing origin; first server
+///   undisturbed (`ServiceController::start` stays `Err(AlreadyRunning)`).
+/// - `(false, _)` → [`SingletonLaunch::RebindStale`]: lock free (previous
+///   holder dead, e.g. kill -9 released the flock) so the caller rebinds
+///   and republishes a fresh pid, whatever the old descriptor says.
+/// - `(true, false)` → `Err(AlreadyRunning)`: a live holder owns the lock
+///   but its descriptor is unusable; caller surfaces the
+///   descriptor-unavailable error (exit 1), never a second listener.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SingletonLaunch {
+    /// Reuse the live backend; print its origin and exit 0.
+    ReuseLive,
+    /// Prior holder dead; rebind socket + republish descriptor.
+    RebindStale,
+}
+
+/// Decide reuse vs reclaim vs fail for a singleton launch attempt.
+pub fn decide_singleton_launch(
+    lock_held_by_other: bool,
+    origin_usable: bool,
+) -> Result<SingletonLaunch, ServiceError> {
+    // ponytail: flock ownership is the only liveness signal here; pid-file
+    // contents are advisory (a dead pid reuses fast) and stay unread.
+    // Upgrade path: pass the observed pid through for diagnostics only.
+    match (lock_held_by_other, origin_usable) {
+        (true, true) => Ok(SingletonLaunch::ReuseLive),
+        (false, _) => Ok(SingletonLaunch::RebindStale),
+        (true, false) => Err(ServiceError::AlreadyRunning),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,6 +558,81 @@ mod tests {
         }
         assert!(!svc.is_running());
         assert_eq!(svc.pending(), 0);
+        let now = ledger.snapshot();
+        assert_eq!(now, baseline);
+        assert!(assert_no_leak(&baseline, &now).is_ok());
+        assert!(ledger.assert_balanced().is_ok());
+    }
+
+    #[test]
+    fn rc03_second_launch_reuses_live_origin() {
+        let mut svc = ServiceController::new();
+        svc.start().unwrap();
+        let decision = decide_singleton_launch(true, true).unwrap();
+        assert_eq!(decision, SingletonLaunch::ReuseLive);
+        assert_eq!(svc.start(), Err(ServiceError::AlreadyRunning));
+        assert!(svc.is_running());
+    }
+
+    #[test]
+    fn rc03_second_launch_without_descriptor_errors() {
+        let mut svc = ServiceController::new();
+        svc.start().unwrap();
+        assert_eq!(
+            decide_singleton_launch(true, false),
+            Err(ServiceError::AlreadyRunning)
+        );
+        assert!(svc.is_running());
+    }
+
+    #[test]
+    fn rc03_stale_pid_reclaims_fresh() {
+        let mut svc = ServiceController::new();
+        let decision = decide_singleton_launch(false, false).unwrap();
+        assert_eq!(decision, SingletonLaunch::RebindStale);
+        svc.start().unwrap();
+        assert!(svc.is_running());
+    }
+
+    #[test]
+    fn rc03_rebind_after_stop_restarts_clean() {
+        let mut svc = ServiceController::new();
+        svc.start().unwrap();
+        svc.stop(StopPolicy::Cancel);
+        let decision = decide_singleton_launch(false, true).unwrap();
+        assert_eq!(decision, SingletonLaunch::RebindStale);
+        svc.start().unwrap();
+        assert!(svc.is_running());
+        assert_eq!(svc.pending(), 0);
+        assert!(svc.completed().is_empty());
+    }
+
+    #[test]
+    fn rc03_restart_cycle_returns_to_baseline() {
+        let mut svc = ServiceController::new();
+        let mut reg = ClientRegistry::new();
+        let mut ledger = ResourceLedger::new();
+        let baseline = ledger.snapshot();
+        svc.start().unwrap();
+        ledger.acquire_fd();
+        ledger.acquire_watchdog();
+        ledger.acquire_port();
+        reg.attach(1);
+        reg.attach(2);
+        assert_eq!(decide_singleton_launch(true, true).unwrap(), SingletonLaunch::ReuseLive);
+        assert_eq!(svc.start(), Err(ServiceError::AlreadyRunning));
+        let first = reg.detach(1).unwrap();
+        assert!(first.daemon_running);
+        let last = reg.detach(2).unwrap();
+        assert_eq!(last.remaining_clients, 0);
+        assert!(last.daemon_running);
+        assert!(last.session_preserved);
+        svc.stop(StopPolicy::drain_all());
+        ledger.release_fd();
+        ledger.release_watchdog();
+        ledger.release_port();
+        assert!(!svc.is_running());
+        assert_eq!(reg.remaining(), 0);
         let now = ledger.snapshot();
         assert_eq!(now, baseline);
         assert!(assert_no_leak(&baseline, &now).is_ok());
