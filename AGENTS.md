@@ -148,3 +148,38 @@ These apply to the main agent AND every delegated subagent.
   `FAIL` to an allowed worker from the subagent policy, then re-run the gate.
 - Do not poll or sleep-wait on background subagents; the harness notifies on
   completion. Track lane status in the gate output, not in chat.
+
+### Task-claim ledger and scratchpads (mandatory for every delegated lane)
+- Every subagent reads `.agents/WORKER.md` FIRST and follows it: claim the task
+  in the ledger BEFORE touching any file, keep `worklog/<TASK-ID>.md` as its
+  session-persistence scratchpad, move status `not-started -> in-progress ->
+  completed` through `tools/completion_claims.py`, and hand the scratchpad path
+  back to the orchestrator in its completion message.
+- The ledger is `tasks/completion/claims.json`, written only through
+  `tools/completion_claims.py` (`claim` / `update` / `release`). It is
+  fail-closed on collision: once a session holds a task `in-progress`, no other
+  agent may claim or touch that task or its files until the orchestrator proves
+  the prior owner stopped and releases/re-claims.
+- `completed` is legal ONLY when all test code for the lane is written, the
+  feature is implemented, and the frozen tests pass with ZERO test edits. A
+  false `completed` is a failed lane: the verifier re-runs frozen tests and
+  re-delegates. Use `blocked` with an exact blocker note instead.
+- The orchestrator re-evaluates pickable tasks before EACH delegation
+  (`before-each` policy), collects worker scratchpad paths via
+  `cc.scratchpad_report(document, session)`, and consults them before
+  re-delegating or integrating a lane. The orchestrator `release()`s claims on
+  integration/abandonment; reclaiming a foreign claim requires recorded
+  evidence via `cc.reclaim(root, tid, session, evidence)`.
+
+### Landing work: commit and push per feature (mandatory)
+- Every completed lane is LANDED, not left green in a working tree: commit the
+  lane's files (owned file, scratchpad, `tasks/completion/claims.json`,
+  authored RED tests) and push. If `main` advanced, rebase, re-run the frozen
+  tests on the integrated tree, then push. Never force-push.
+- Larger or race-prone lanes use a git worktree on a branch `lane/<TASK-ID>`:
+  push the branch to the remote FIRST (it must persist as a reference), merge
+  into `main`, re-run frozen tests on the merged tree, push, then remove the
+  WORKTREE only. Remote lane branches are never deleted by workers; branch
+  deletion on the remote is an orchestrator/human decision.
+- A lane is not integrated until its commit/merge hash is on `origin/main` and
+  the frozen tests pass on that exact integrated revision.

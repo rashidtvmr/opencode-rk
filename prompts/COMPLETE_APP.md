@@ -60,6 +60,71 @@ audit findings are repaired. Increasing its old concurrency number alone is not
 a solution. Do not create echo/sleep/PASS adapters or claim unit fixtures are real
 subagents, real phones, real OS isolation or live provider executions.
 
+## Task-claim ledger and scratchpads (mandatory before fan-out)
+
+Coordination state lives OUTSIDE the plan files: `tasks/completion/claims.json`,
+owned by `tools/completion_claims.py` (stdlib, write-through, fail-closed on
+collision). `completion_plan.py --check` deliberately forces story statuses back
+to `not-started` at load, so never record progress in `ralph.json`,
+`ralph.completion.json` or story rows. Worker prompts instruct subagents to read
+`.agents/WORKER.md` first; it carries the same protocol in worker-facing form.
+
+The session pick policy is `before-each`: the persistent agent re-evaluates the
+backlog before every delegation. For each candidate child:
+
+1. Compute the pickable set: tasks whose plan dependencies are completed in the
+   ledger and that no session currently holds (`cc.ready_tasks(root,
+   cc.plan_stories(root))` — see `tools/completion_claims.py` `__main__` for a
+   ready-made status summary).
+2. **Claim atomically, before any file is created or edited:**
+   `cc.claim(root, 'TASK-ID', '<session-id>', 'worklog/<TASK-ID>.md')`.
+   `claim` writes through immediately, fails closed on an existing
+   `in-progress`/`blocked` claim, and only permits legal transitions
+   (`not-started -> in-progress -> completed`, plus `-> blocked` from either,
+   with `blocked` recoverable). Two workers racing for one task cannot both
+   win; the loser MUST pick a different task.
+3. Create the worker's scratchpad `worklog/<TASK-ID>.md` only after the claim
+   succeeded, and pass its path to the subagent.
+
+A subagent MUST NOT touch any task file until its claim succeeded, and MUST NOT
+edit any file outside its one owned file plus its scratchpad. On completion the
+worker sets `cc.update(root, 'TASK-ID', '<session-id>', 'completed')` — which is
+only legitimate when its frozen tests are green with zero test edits — or
+`update(..., 'blocked', note)` with the exact blocker in the bounded note.
+Never set `completed` to dodge verification; the independent verifier still
+re-runs the frozen tests, and a false `completed` is a failed lane. In its
+completion message the worker reports its scratchpad path; the orchestrator
+collects scratchpad paths with `cc.scratchpad_report(document, session)` and
+consults them before re-delegating or integrating that lane. After a worker
+stops, the orchestrator `cc.release(...)`s the claim when integrating or
+abandoning; recovery of a foreign task requires proof the prior owner stopped
+plus re-claim under a fresh session id (orchestrator-only
+`cc.reclaim(root, tid, session, evidence)` records the proof).
+
+## Landing work: commit and push per feature
+
+A completed feature must be LANDED, not just left green in a worktree:
+
+- Small lanes commit their lane files (owned file, scratchpad,
+  `tasks/completion/claims.json`, authored RED tests) and push to `main`
+  immediately; if `main` advanced, rebase, re-run frozen tests on the
+  integrated tree, then push. Never force-push.
+- Larger or race-prone lanes work in a dedicated git worktree on a named
+  branch `lane/<TASK-ID>`. The worker pushes the BRANCH to the remote first so
+  it exists as a permanent reference, then merges into `main` (rebase onto
+  fresh `main`, merge, re-run frozen tests on the merged tree, push).
+- After the merge is confirmed on the remote, the WORKTREE is deleted
+  (`git worktree remove`), but the remote branch is NEVER deleted — it remains
+  as the lane's history for future reference. Branch deletion on the remote is
+  an orchestrator/human decision only, never part of lane completion.
+- The orchestrator verifies each landing by hash (commit/merge present on
+  `origin/main`, frozen tests re-run on the integrated revision) before
+  treating the lane as integrated. The independent verifier repeats the
+  frozen tests on the exact integrated revision per the ownership pipeline.
+
+Worker-facing instructions for all of the above live in `.agents/WORKER.md`;
+every delegated subagent reads it first.
+
 ## Ownership and trusted implementation pipeline
 
 Parent tasks are vertical outcomes and can span UI, API, storage and packaging.
