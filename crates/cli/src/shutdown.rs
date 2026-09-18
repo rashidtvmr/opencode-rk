@@ -279,4 +279,47 @@ mod tests {
         assert_eq!(ShutdownReason::Sigint.as_str(), "sigint");
         assert_eq!(format!("{}", ShutdownReason::Panic), "panic");
     }
+
+    #[test]
+    fn sigint_drop_restores() {
+        let (count, restore) = counter();
+        {
+            let guard = RestoreGuard::new(ShutdownReason::Sigint, restore);
+            assert!(guard.is_armed());
+            assert_eq!(guard.reason(), ShutdownReason::Sigint);
+        }
+        assert_eq!(count.get(), 1, "SIGINT path must restore exactly once");
+    }
+
+    #[test]
+    fn sigterm_drop_restores_after_suspend() {
+        let (count, restore) = counter();
+        {
+            let mut guard = RestoreGuard::new(ShutdownReason::Sigterm, restore);
+            guard.suspend();
+            assert_eq!(guard.suspend_count(), 1);
+        }
+        assert_eq!(
+            count.get(),
+            1,
+            "SIGTERM path restores after suspend/resume marker"
+        );
+    }
+
+    #[test]
+    fn repeated_arm_drop_cycles_restore_exactly_once() {
+        let (count, restore) = counter();
+        drop(restore); // per-cycle closures below own their counter clone.
+        for _ in 0..50u32 {
+            let c = Rc::clone(&count);
+            let _guard = RestoreGuard::new(ShutdownReason::Explicit, move || {
+                c.set(c.get() + 1)
+            });
+        }
+        assert_eq!(
+            count.get(),
+            50,
+            "50 startup/shutdown cycles must restore exactly once each"
+        );
+    }
 }
