@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-019",
+  "title": "Exhaustive source inventory, dynamic registrations and current-dev drift",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "sources",
+      "tools/inventory.py",
+      "tools/reconcile_surfaces.py"
+    ],
+    "upstream": [
+      "entire pinned OpenCode and 9router trees; observed OpenCode dev delta; complete OpenTUI fork tree"
+    ],
+    "legacyPrefixes": [
+      "DISC"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "DISC-001",
+    "DISC-008",
+    "DISC-010"
+  ],
+  "trace": "sources/inventory/manifest.json opencode 6626 entries + 9router 1570 hash-pinned; tools/inventory.py:306-384 tools/reconcile_surfaces.py:53-102 fail-closed; upstream.lock.json:12,24 vendored:false; :41-46 fullCheckoutObtainedHere:false everyFileReviewed:false; opentuiFork c01292f absent from lock+manifest repos opencode/9router only; dev-delta 5a83358 absent from lock",
+  "findings": [
+    {
+      "behavior": "inventory tooling + hash-pinned opencode/9router entries",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "vendored checkout / exhaustive review",
+      "evidence": "fullCheckoutObtainedHere:false",
+      "class": "missing"
+    },
+    {
+      "behavior": "OpenTUI fork tree + dev delta reconcile",
+      "evidence": "absent",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "DISC-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "DISC-001-T01",
+        "DISC-001-T02",
+        "DISC-001-T03"
+      ]
+    },
+    {
+      "id": "DISC-008",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "DISC-008-T01",
+        "DISC-008-T02",
+        "DISC-008-T03"
+      ]
+    },
+    {
+      "id": "DISC-010",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "DISC-010-T01",
+        "DISC-010-T02",
+        "DISC-010-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "vendor/pin OpenTUI tree inventory",
+    "full-checkout DISC rerun",
+    "dev-delta 5a83358 reconcile"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

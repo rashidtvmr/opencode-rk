@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-009",
+  "title": "MCP, LSP, ACP, Git and workspace integration",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/tools",
+      "crates/server/src/acp_bridge.rs"
+    ],
+    "upstream": [
+      "packages/core/src",
+      "packages/opencode/src/mcp",
+      "packages/opencode/src/lsp",
+      "packages/opencode/src/acp"
+    ],
+    "legacyPrefixes": [
+      "INT",
+      "ACP"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "INT-001",
+    "INT-002",
+    "INT-003",
+    "INT-004",
+    "INT-005",
+    "INT-006",
+    "INT-007",
+    "INT-008",
+    "INT-009",
+    "INT-010",
+    "ACP-001",
+    "ACP-002"
+  ],
+  "trace": "server/src/acp_bridge.rs:1-11,151-285 bounded codec; :14-24 caps; :130-144 modes/models fixture-only; tools/src/mcp.rs:1-24 spawn config, :100 McpPolicy; glob tools/src/lsp*.rs, git*.rs none; executor.rs:130/shell_tool.rs:148 bypass broker",
+  "findings": [
+    {
+      "behavior": "ACP codec+sessions bounded",
+      "evidence": "acp_bridge.rs",
+      "class": "verified"
+    },
+    {
+      "behavior": "MCP live spawn/auth",
+      "evidence": "types only",
+      "class": "unverified"
+    },
+    {
+      "behavior": "LSP/Git lanes",
+      "evidence": "files absent",
+      "class": "missing"
+    },
+    {
+      "behavior": "tool subprocess behind broker",
+      "evidence": "bypass above",
+      "class": "unwired"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "INT-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "INT-001-T01",
+        "INT-001-T02",
+        "INT-001-T03"
+      ]
+    },
+    {
+      "id": "INT-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "INT-002-T01",
+        "INT-002-T02",
+        "INT-002-T03"
+      ]
+    },
+    {
+      "id": "INT-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "INT-003-T01",
+        "INT-003-T02",
+        "INT-003-T03"
+      ]
+    },
+    {
+      "id": "INT-004",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "INT-004-T01",
+        "INT-004-T02",
+        "INT-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "LSP client lane or explicit scope-cut",
+    "Git lane behind broker",
+    "MCP spawn behind broker+SSRF+cap test",
+    "ACP live session wiring"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

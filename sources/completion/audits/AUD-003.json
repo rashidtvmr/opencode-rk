@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-003",
+  "title": "Sessions, history, fork, rewind and compaction",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/sessions"
+    ],
+    "upstream": [
+      "packages/core/src/session",
+      "packages/opencode/src/session"
+    ],
+    "legacyPrefixes": [
+      "SESS"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "SESS-001",
+    "SESS-002",
+    "SESS-003",
+    "SESS-004",
+    "SESS-005",
+    "SESS-006",
+    "SESS-007",
+    "SESS-008",
+    "SESS-009",
+    "SESS-010",
+    "SESS-011",
+    "SESS-012",
+    "SESS-013",
+    "SESS-014",
+    "SESS-015",
+    "SESS-016",
+    "SESS-017",
+    "SESS-018",
+    "SESS-019",
+    "SESS-020"
+  ],
+  "trace": "crates/sessions/src/lib.rs:69 SessionManager, :79 create_session, :154 append_message, :142 archive_session; manager.rs:27 second SessionManager (legacy dual-manager risk); branch_v2.rs:455 fork_from_message, :395 fork_before_user_message, :520 fork_provenance; web_008_lane.rs:140 fork duplicate; state.rs:1 typed rewind contract; auto_compact.rs:1,56 policy, :76 record result; persist.rs:90 compact; server/src/lib.rs:86-93 session/history routes",
+  "findings": [
+    {
+      "behavior": "session CRUD + fork/rewind/compact types exist",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "rewind/compact -> durable v2 writer + observable API",
+      "evidence": "not traced",
+      "class": "unwired"
+    },
+    {
+      "behavior": "fork shadow-sync branch_v2.rs:6-8 never-listed shadow",
+      "evidence": "unproven end-to-end",
+      "class": "unverified"
+    },
+    {
+      "behavior": "LLM summarization wiring",
+      "evidence": "none found",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "SESS-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "SESS-001-T01",
+        "SESS-001-T02",
+        "SESS-001-T03"
+      ]
+    },
+    {
+      "id": "SESS-002",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "SESS-002-T01",
+        "SESS-002-T02",
+        "SESS-002-T03"
+      ]
+    },
+    {
+      "id": "SESS-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "SESS-003-T01",
+        "SESS-003-T02",
+        "SESS-003-T03"
+      ]
+    },
+    {
+      "id": "SESS-004",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "SESS-004-T01",
+        "SESS-004-T02",
+        "SESS-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "fork ancestry observable test",
+    "rewind cursor error test",
+    "auto-compact trigger/persist test"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

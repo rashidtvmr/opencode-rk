@@ -1,0 +1,106 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-015",
+  "title": "Sharing, remote auth and identity gaps",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/server/src"
+    ],
+    "upstream": [
+      "packages/core/src/account.ts",
+      "packages/core/src/control-plane",
+      "packages/opencode/src/share"
+    ],
+    "legacyPrefixes": [
+      "SHARE"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "SHARE-001",
+    "SHARE-002",
+    "SHARE-003",
+    "SHARE-004",
+    "SHARE-005"
+  ],
+  "trace": "router lib.rs:79-131 no /share|account|publish; grep share|tunnel|pairing|revok nil in server; enterprise_link.rs:28-42 https host+slot builder only; control_plane_exposure.rs:28-42 default deny loopback; :102-107 gates only POST /control/*; remote_ledger.rs:1 pushed-refs ledger (git, not sharing); web/src/App.tsx:1105-1107 Pin/Share/Temporary isDisabled",
+  "findings": [
+    {
+      "behavior": "local-only deny + share UI disabled",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "share/publish+revoke service; account/device pairing; tunnel opt-in",
+      "evidence": "absent",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "SHARE-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "SHARE-001-T01",
+        "SHARE-001-T02",
+        "SHARE-001-T03"
+      ]
+    },
+    {
+      "id": "SHARE-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "SHARE-002-T01",
+        "SHARE-002-T02",
+        "SHARE-002-T03"
+      ]
+    },
+    {
+      "id": "SHARE-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "SHARE-003-T01",
+        "SHARE-003-T02",
+        "SHARE-003-T03"
+      ]
+    },
+    {
+      "id": "SHARE-004",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "SHARE-004-T01",
+        "SHARE-004-T02",
+        "SHARE-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "share/publish+revoke service",
+    "account/device pairing + tunnel opt-in",
+    "authZ denial/cancel/bounds tests"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

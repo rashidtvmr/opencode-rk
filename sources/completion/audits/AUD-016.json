@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-016",
+  "title": "iOS/Android product journeys and control threat model",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "requirements/user-requirements.json",
+      "web"
+    ],
+    "upstream": [
+      "new user requirement: installed iOS and Android control clients"
+    ],
+    "legacyPrefixes": []
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [],
+  "trace": "requirements/user-requirements.json 47 reqs REQ-001..048 grep mobile/iOS/Android nil; web/src/App.tsx local web client verified; glob apps/** nil; scope only in tasks/completion/remote.json:19-24 MOB-001..006 paths apps/ios apps/android; COMPLETION_REMOTE.md:52 AUD-016 freezes framework choice",
+  "findings": [
+    {
+      "behavior": "no canonical mobile requirement; no apps/ios|android",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "mobile scope exists only as completion spec",
+      "evidence": "remote.json MOB-001..006",
+      "class": "unwired"
+    },
+    {
+      "behavior": "framework/build/test choice",
+      "evidence": "not frozen",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [],
+  "repairChildren": [
+    "MOB-001 iOS install/login/Keychain",
+    "MOB-002 Android/Keystore",
+    "MOB-003 tabs",
+    "MOB-004 prompt/approvals",
+    "MOB-005 lifecycle/notify",
+    "MOB-006 real-device journey; add mobile req or keep COMP-005 sole authority"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

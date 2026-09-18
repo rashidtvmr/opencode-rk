@@ -1,0 +1,147 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-002",
+  "title": "Provider protocols, credentials and model ingestion",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/providers",
+      "crates/catalog"
+    ],
+    "upstream": [
+      "packages/core/src/aisdk.ts",
+      "packages/core/src/credential",
+      "packages/core/src/catalog.ts"
+    ],
+    "legacyPrefixes": [
+      "PROV",
+      "CAT"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "CAT-001",
+    "CAT-002",
+    "CAT-003",
+    "CAT-004",
+    "CAT-005",
+    "CAT-006",
+    "CAT-007",
+    "PROV-001",
+    "PROV-002",
+    "PROV-003",
+    "PROV-004",
+    "PROV-005",
+    "PROV-006",
+    "PROV-007",
+    "PROV-008",
+    "PROV-009",
+    "PROV-010",
+    "PROV-011",
+    "PROV-012",
+    "PROV-013",
+    "PROV-014",
+    "PROV-015",
+    "PROV-016",
+    "PROV-017",
+    "PROV-018",
+    "PROV-019",
+    "PROV-020",
+    "PROV-021",
+    "PROV-022",
+    "PROV-023",
+    "PROV-024"
+  ],
+  "trace": "crates/providers/src/registry.rs:7 Provider, :45 ProviderRegistry; auth.rs:8 AuthMethod, :42 AuthHandler, :78 refresh; auth_commands.rs:41 AuthCommand, :585 dispatch, :454 complete_login; provider_dispatch.rs:38 ProviderMethodKind receipt-only no I/O; claude_oauth.rs:485 complete_login/:506 refresh; codex_oauth.rs:326,373; crates/catalog/src/lib.rs:134 search; registry.rs:63 search; config.rs:29 load; main.rs:22 MODELS_DEV_URL; server/src/lib.rs:688-711 create_turn/stream only openai/* else 400",
+  "findings": [
+    {
+      "behavior": "provider registry/auth/oauth dispatch surface exists",
+      "evidence": "above paths",
+      "class": "verified"
+    },
+    {
+      "behavior": "real stream_chat/complete network path + credential persist/ingest",
+      "evidence": "only integration.rs:398 complete_code found; no turn-path streaming",
+      "class": "unwired"
+    },
+    {
+      "behavior": "models.dev snapshot pinned",
+      "evidence": "upstream.lock.json snapshotSha256:null",
+      "class": "missing"
+    },
+    {
+      "behavior": "aisdk/credential/catalog.ts symbol mapping",
+      "evidence": "PROV/CAT stories mostly TBD/DISC-002, no vendored tree",
+      "class": "unverified"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "CAT-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "CAT-001-T01",
+        "CAT-001-T02",
+        "CAT-001-T03"
+      ]
+    },
+    {
+      "id": "CAT-002",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "CAT-002-T01",
+        "CAT-002-T02",
+        "CAT-002-T03"
+      ]
+    },
+    {
+      "id": "CAT-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "CAT-003-T01",
+        "CAT-003-T02",
+        "CAT-003-T03"
+      ]
+    },
+    {
+      "id": "CAT-004",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "CAT-004-T01",
+        "CAT-004-T02",
+        "CAT-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "credential save/load round-trip",
+    "hash-locked model ingest fixture",
+    "streaming/error/cancel bounded test"
+  ],
+  "commands": [
+    "grep -rn stream_chat crates/providers/src | head -> no network path"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

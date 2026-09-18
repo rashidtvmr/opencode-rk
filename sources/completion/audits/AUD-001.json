@@ -1,0 +1,137 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-001",
+  "title": "CLI launch, daemon lifecycle and installed commands",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/cli",
+      "crates/server/src/daemon.rs"
+    ],
+    "upstream": [
+      "packages/cli/src",
+      "packages/opencode/src/cli"
+    ],
+    "legacyPrefixes": [
+      "BASE",
+      "HEAD"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "BASE-001",
+    "BASE-002",
+    "BASE-003",
+    "BASE-004",
+    "BASE-005",
+    "BASE-006",
+    "BASE-007",
+    "BASE-008",
+    "HEAD-001",
+    "HEAD-002"
+  ],
+  "trace": "crates/cli/src/main.rs:149 main -> :160 run -> :161-165 None=>chat::run(&data); crates/cli/src/chat.rs:24 DEFAULT_DAEMON_ADDR 127.0.0.1:4096; :398-400 GET /health==200 probe; :404-430 spawn same-exe serve + 10s ready wait, kill owned on exit :67-71; crates/server/src/daemon.rs:54-78 PidLock::acquire flock+pid; :191-214 SingletonDaemon::bind; :215-219 accept loop; :133-149 read_backend_descriptor schema/pid_alive/http-origin check; :151-171 publish atomic rename; main.rs:512-526 AlreadyRunning=>read descriptor; :536-552 serve binds TcpListener, publishes descriptor, axum::serve router(AppState)",
+  "findings": [
+    {
+      "behavior": "no-subcommand opens chat TUI path",
+      "evidence": "main.rs:161-165",
+      "class": "verified"
+    },
+    {
+      "behavior": "daemon singleton bind + descriptor publish/read",
+      "evidence": "daemon.rs:54-78,133-171,191-214; main.rs:512-526",
+      "class": "verified"
+    },
+    {
+      "behavior": "per-user/data-dir singleton + authenticated health/version negotiation",
+      "evidence": "chat.rs:45 run(_data_dir) ignores data_dir; daemon.rs grep auth/token/secret zero hits",
+      "class": "missing"
+    },
+    {
+      "behavior": "crates/cli/src/daemon_client.rs, app_start.rs, service_commands.rs, shutdown.rs",
+      "evidence": "glob cli/src/*.rs = main,tui_entry,chat,run_headless,session_export only",
+      "class": "missing"
+    },
+    {
+      "behavior": "opencode2 binary name + install scripts",
+      "evidence": "main.rs:25 name opencode-rk; scripts/install-opencode2.* absent",
+      "class": "missing"
+    },
+    {
+      "behavior": "upstream default.ts daemon.transport()->runTui parity",
+      "evidence": "unmapped; no vendored checkout",
+      "class": "unverified"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "BASE-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "BASE-001-T01",
+        "BASE-001-T02",
+        "BASE-001-T03"
+      ]
+    },
+    {
+      "id": "BASE-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "BASE-002-T01",
+        "BASE-002-T02",
+        "BASE-002-T03"
+      ]
+    },
+    {
+      "id": "BASE-003",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "BASE-003-T01",
+        "BASE-003-T02",
+        "BASE-003-T03"
+      ]
+    },
+    {
+      "id": "BASE-004",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "BASE-004-T01",
+        "BASE-004-T02",
+        "BASE-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "authenticated discovery/startup/recovery w/ version negotiation",
+    "concurrent-launch singleton test",
+    "descriptor forgery/stale-PID/occupied-port denial",
+    "install-path command inventory vs packages/cli"
+  ],
+  "commands": [
+    "python3 tools/completion_plan.py --check -> SPEC OK additions=90 legacy=258 scenarios=450",
+    "python3 tools/completion_plan.py --audit-legacy -> legacyCount=258 all accepted"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

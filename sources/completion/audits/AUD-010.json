@@ -1,0 +1,121 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-010",
+  "title": "Events, SDK, workspace proxy and headless behavior",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/server/src",
+      "crates/cli/src/run_headless.rs"
+    ],
+    "upstream": [
+      "packages/server",
+      "packages/schema",
+      "packages/sdk",
+      "packages/client"
+    ],
+    "legacyPrefixes": [
+      "SYNC",
+      "RUN",
+      "WSX",
+      "SDK"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "SYNC-001",
+    "SYNC-002",
+    "RUN-001",
+    "WSX-001",
+    "WSX-002",
+    "SDK-001",
+    "SDK-002"
+  ],
+  "trace": "server/src/event_bus.rs:1-30 bounded fan-out SessionCreated/MessageAppended/ToolExecuted/PermissionRequested/Shutdown; workspace_proxy.rs:1-6,104-188 caps; sdk_client.rs:1-13 'no socket I/O\u2026caller port'; cli/src/run_headless.rs:1-19 'no FS except spill, no net'; main.rs:37-50 Command Doctor/Session/Models/Serve/Web/Tui only - run_headless/session_export unwired; lib.rs:79-131 routes but no /api/events; app_protocols.rs absent",
+  "findings": [
+    {
+      "behavior": "event bus/proxy/sdk/headless pure bounded units",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "live daemon/socket/auth wiring + headless->daemon->events->proxy e2e",
+      "evidence": "modules self-declare no I/O; missing",
+      "class": "unwired"
+    },
+    {
+      "behavior": "app_protocols.rs",
+      "evidence": "glob nil",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "SYNC-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [
+        "DB-017"
+      ],
+      "obligations": [
+        "SYNC-001-T01",
+        "SYNC-001-T02",
+        "SYNC-001-T03"
+      ]
+    },
+    {
+      "id": "SYNC-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [
+        "SYNC-001"
+      ],
+      "obligations": [
+        "SYNC-002-T01",
+        "SYNC-002-T02",
+        "SYNC-002-T03"
+      ]
+    },
+    {
+      "id": "RUN-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "RUN-001-T01",
+        "RUN-001-T02",
+        "RUN-001-T03"
+      ]
+    },
+    {
+      "id": "WSX-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "WSX-001-T01",
+        "WSX-001-T02",
+        "WSX-001-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "app_protocols/runtime wiring daemon+events+sdk+proxy+headless e2e",
+    "auth-denial-no-side-effect + cancel/restart + queue-bound test"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

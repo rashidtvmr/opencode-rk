@@ -1,0 +1,116 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-008",
+  "title": "Extra multi-account routing, quotas and accounting",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/providers",
+      "crates/catalog"
+    ],
+    "upstream": [
+      "9router pinned repository routing/auth/account surfaces"
+    ],
+    "legacyPrefixes": [
+      "ROUTE"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "ROUTE-001",
+    "ROUTE-002",
+    "ROUTE-003",
+    "ROUTE-004",
+    "ROUTE-005",
+    "ROUTE-006",
+    "ROUTE-007",
+    "ROUTE-008",
+    "ROUTE-009",
+    "ROUTE-010",
+    "ROUTE-011",
+    "ROUTE-012"
+  ],
+  "trace": "crates/providers/src/router.rs:232-243 select_account; route_compose.rs:38; model_route.rs:49,94; budget.rs:1-50 BudgetTier/BudgetError; account_sync.rs:1,61-93 deterministic plan no I/O; select_account doc 'caller owns persistence\u2026no wall-clock'; no ledger write path; 9router surfaces unmapped",
+  "findings": [
+    {
+      "behavior": "strategy select + budget types + sync plan (pure)",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "persisted routing/usage accounting ledger + sticky/recency",
+      "evidence": "no write path found",
+      "class": "unwired"
+    },
+    {
+      "behavior": "9router full-tree parity",
+      "evidence": "no vendored mapping",
+      "class": "unverified"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "ROUTE-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "ROUTE-001-T01",
+        "ROUTE-001-T02",
+        "ROUTE-001-T03"
+      ]
+    },
+    {
+      "id": "ROUTE-002",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "ROUTE-002-T01",
+        "ROUTE-002-T02",
+        "ROUTE-002-T03"
+      ]
+    },
+    {
+      "id": "ROUTE-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "ROUTE-003-T01",
+        "ROUTE-003-T02",
+        "ROUTE-003-T03"
+      ]
+    },
+    {
+      "id": "ROUTE-004",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "ROUTE-004-T01",
+        "ROUTE-004-T02",
+        "ROUTE-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "persisted account/usage ledger",
+    "quota-exhaustion failover e2e with fixture provider"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

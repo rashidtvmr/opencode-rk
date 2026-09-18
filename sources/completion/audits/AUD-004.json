@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-004",
+  "title": "Custom agents and complete subagent lifecycle",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/agents"
+    ],
+    "upstream": [
+      "packages/core/src/agent.ts",
+      "packages/core/src/background-job.ts"
+    ],
+    "legacyPrefixes": [
+      "AGENT"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "AGENT-001",
+    "AGENT-002",
+    "AGENT-003",
+    "AGENT-004",
+    "AGENT-005",
+    "AGENT-006",
+    "AGENT-007",
+    "AGENT-008",
+    "AGENT-009",
+    "AGENT-010",
+    "AGENT-011",
+    "AGENT-012",
+    "AGENT-013",
+    "AGENT-014",
+    "AGENT-015",
+    "AGENT-016",
+    "AGENT-017",
+    "AGENT-018",
+    "AGENT-019",
+    "AGENT-020",
+    "AGENT-021",
+    "AGENT-022",
+    "AGENT-023",
+    "AGENT-024",
+    "AGENT-025",
+    "AGENT-026",
+    "AGENT-027",
+    "AGENT-028",
+    "AGENT-029",
+    "AGENT-030",
+    "AGENT-031"
+  ],
+  "trace": "crates/agents/src/lib.rs:39 AgentManager, :51 register; session.rs:42 AgentSession, :103 SessionManager (third manager), :118 create; executor.rs:83 ExecutionManager, :95 execute returns Ok String no real run, :110 cancel; turn_state.rs:62 TurnSubmissionState, :92 submit, :103 start, :128 interrupt; delegation_lane.rs:125 DelegationController, :181 submit, :324 submit_gated, :359 BoundedLanePool; driver_lane.rs:29 TaskSpec, :152 LeaseTable",
+  "findings": [
+    {
+      "behavior": "registry/session/turn/delegation/lease types exist",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "executor performs agent->provider->tool loop",
+      "evidence": "executor.rs:95 stub Ok String",
+      "class": "missing"
+    },
+    {
+      "behavior": "background-job.ts parity + 20-worker bound",
+      "evidence": "unmapped/unproven",
+      "class": "unverified"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "AGENT-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "AGENT-001-T01",
+        "AGENT-001-T02",
+        "AGENT-001-T03"
+      ]
+    },
+    {
+      "id": "AGENT-002",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "AGENT-002-T01",
+        "AGENT-002-T02",
+        "AGENT-002-T03"
+      ]
+    },
+    {
+      "id": "AGENT-003",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "AGENT-003-T01",
+        "AGENT-003-T02",
+        "AGENT-003-T03"
+      ]
+    },
+    {
+      "id": "AGENT-004",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "AGENT-004-T01",
+        "AGENT-004-T02",
+        "AGENT-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "real delegation submit/cancel/status test",
+    "lease ownership denial test",
+    "custom-agent config->execution wiring"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-007",
+  "title": "Storage, migrations, import, retention and recovery",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/storage"
+    ],
+    "upstream": [
+      "packages/core/src/storage",
+      "packages/core/src/session"
+    ],
+    "legacyPrefixes": [
+      "DB"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "DB-001",
+    "DB-002",
+    "DB-003",
+    "DB-004",
+    "DB-005",
+    "DB-006",
+    "DB-007",
+    "DB-008",
+    "DB-009",
+    "DB-010",
+    "DB-011",
+    "DB-012",
+    "DB-013",
+    "DB-014",
+    "DB-015",
+    "DB-016",
+    "DB-017",
+    "DB-018"
+  ],
+  "trace": "crates/storage/src/lib.rs:636-680 configure/migrate; :619-630 event cap; retention_v2.rs:1-60; gc_v2.rs:103-189; quota_v2.rs:1,182-220; import_v2.rs:33-60 PAGE_BUDGET=500, :9-14 ponytail fail-closed blob-backed/>8KiB; rollout_v2.rs:4,216 JSONL replay; facade.rs:177,241 _migrations vs schema_migrations divergence; glob storage/src/backup*.rs none",
+  "findings": [
+    {
+      "behavior": "migrate/WAL/event-cap/retention/GC/quota",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "import large/blob path",
+      "evidence": "import_v2.rs:9-14 ponytail fail-closed",
+      "class": "unwired"
+    },
+    {
+      "behavior": "backup/restore module",
+      "evidence": "src/backup*.rs absent; tests/backup_v2.rs without src",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "DB-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "DB-001-T01",
+        "DB-001-T02",
+        "DB-001-T03"
+      ]
+    },
+    {
+      "id": "DB-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "DB-002-T01",
+        "DB-002-T02",
+        "DB-002-T03"
+      ]
+    },
+    {
+      "id": "DB-003",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "DB-003-T01",
+        "DB-003-T02",
+        "DB-003-T03"
+      ]
+    },
+    {
+      "id": "DB-004",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "DB-004-T01",
+        "DB-004-T02",
+        "DB-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "src/backup_v2.rs real backup+restore+corruption test",
+    "blob-copy lane lifting import ponytail",
+    "facade migrations-table divergence fix"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

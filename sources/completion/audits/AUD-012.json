@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-012",
+  "title": "Skills, commands, plugins and UI compatibility",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/tools",
+      "crates/sessions"
+    ],
+    "upstream": [
+      "packages/core/src",
+      "packages/plugin",
+      "packages/opencode/src/plugin"
+    ],
+    "legacyPrefixes": [
+      "EXT"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "EXT-001",
+    "EXT-002",
+    "EXT-003",
+    "EXT-004",
+    "EXT-005",
+    "EXT-006",
+    "EXT-007",
+    "EXT-008",
+    "EXT-009",
+    "EXT-010",
+    "EXT-011",
+    "EXT-012",
+    "EXT-013"
+  ],
+  "trace": "tools/src/skill_defs.rs:23, skill_commands.rs:33-45, skill_gate.rs:28 materialize only; compat_commands.rs:21 alias only; plugin_lifecycle.rs:85 in-mem only; plugin_deferred.rs:27-32 ExternalActivationDeferred zero launch; plugin_scoped_exec.rs:197-198 gate only; plugin_ui_boundary.rs:188-190 request_render always Deferred; server lib.rs:162-169 plugins+approvals available_for_web_turn:false; web/src/components/composer.tsx:432-448 tools/plugins/approvals isDisabled; :464-466 slash/mentions/steer unavailable",
+  "findings": [
+    {
+      "behavior": "skill/command registry inert; plugin UI deferred; web compat disabled",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "native plugin host + approval turn adapter",
+      "evidence": "no exec path",
+      "class": "missing"
+    },
+    {
+      "behavior": "slash/mention/queue endpoints",
+      "evidence": "unavailable per composer",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "EXT-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "EXT-001-T01",
+        "EXT-001-T02",
+        "EXT-001-T03"
+      ]
+    },
+    {
+      "id": "EXT-002",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "EXT-002-T01",
+        "EXT-002-T02",
+        "EXT-002-T03"
+      ]
+    },
+    {
+      "id": "EXT-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "EXT-003-T01",
+        "EXT-003-T02",
+        "EXT-003-T03"
+      ]
+    },
+    {
+      "id": "EXT-004",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "EXT-004-T01",
+        "EXT-004-T02",
+        "EXT-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "native plugin host+approval turn adapter",
+    "slash/mention/queue endpoints",
+    "UI-decl to renderer binding"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

@@ -1,0 +1,123 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-018",
+  "title": "Resources, packaging, platform and release evidence",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "config/resource-targets.json",
+      "Cargo.toml",
+      "tools/check_release_tdd.py"
+    ],
+    "upstream": [
+      "packages/cli/script",
+      "packages/desktop",
+      "installation scripts"
+    ],
+    "legacyPrefixes": [
+      "OPS",
+      "REL"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "OPS-001",
+    "OPS-002",
+    "OPS-003",
+    "OPS-004",
+    "OPS-005",
+    "OPS-006",
+    "OPS-007",
+    "OPS-008",
+    "OPS-009",
+    "REL-001",
+    "REL-002",
+    "REL-003",
+    "OPS-010",
+    "REL-004"
+  ],
+  "trace": "config/resource-targets.json:1-2 initial-engineering-targets-not-measurements; :6-18 idle 64/96MiB slots 4/4; Cargo.toml:1-14 11 members; :44-48 release lto-thin/codegen-1/strip; tools/check_release_tdd.py:1-30 bounded gate; glob tools/package* scripts/* packaging/** nil; upstream packages/cli/script packages/desktop unmapped",
+  "findings": [
+    {
+      "behavior": "targets are estimates; workspace+release profile+gate exist",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "packaging/signing/install lanes",
+      "evidence": "scripts absent",
+      "class": "missing"
+    },
+    {
+      "behavior": "measured whole-tree RSS harness",
+      "evidence": "absent",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "OPS-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "OPS-001-T01",
+        "OPS-001-T02",
+        "OPS-001-T03"
+      ]
+    },
+    {
+      "id": "OPS-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "OPS-002-T01",
+        "OPS-002-T02",
+        "OPS-002-T03"
+      ]
+    },
+    {
+      "id": "OPS-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "OPS-003-T01",
+        "OPS-003-T02",
+        "OPS-003-T03"
+      ]
+    },
+    {
+      "id": "OPS-004",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "OPS-004-T01",
+        "OPS-004-T02",
+        "OPS-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "SHIP packaging/signing/install lanes",
+    "measured whole-tree RSS harness",
+    "disk quota for tool artifacts"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

@@ -1,0 +1,126 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-005",
+  "title": "Native tools and real execution wiring",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/tools",
+      "crates/server/src/lib.rs"
+    ],
+    "upstream": [
+      "packages/core/src/tool",
+      "packages/opencode/src/tool"
+    ],
+    "legacyPrefixes": [
+      "TOOL"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "TOOL-001",
+    "TOOL-002",
+    "TOOL-003",
+    "TOOL-004",
+    "TOOL-005",
+    "TOOL-006",
+    "TOOL-007",
+    "TOOL-008",
+    "TOOL-009",
+    "TOOL-010",
+    "TOOL-011",
+    "TOOL-012",
+    "TOOL-013",
+    "TOOL-014",
+    "TOOL-015",
+    "TOOL-016",
+    "TOOL-017",
+    "TOOL-018",
+    "TOOL-019",
+    "TOOL-020"
+  ],
+  "trace": "crates/tools/src/registry.rs:60 ToolRegistry, :133 register (no execute/dispatch); executor.rs:79 ToolExecutor, :84 new, :130 Command::new(bash -c) no broker; file_ops.rs:149,161 execute; shell_tool.rs:74 ShellTool, :148 tokio Command no broker; diff_tool.rs:89 execute; permission.rs:1 stub; mcp.rs:100 McpPolicy; ext_scoped_exec_lane.rs:116,225 broker-owned execute; server/src/lib.rs:67 ToolRegistry import, :135-194 web_capabilities tools available_for_web_turn:false",
+  "findings": [
+    {
+      "behavior": "registry + tool impls exist",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "registry->executor->policy->state->output chain",
+      "evidence": "register without dispatch; permission stub",
+      "class": "unwired"
+    },
+    {
+      "behavior": "shell/file authorization/cancellation/bounds",
+      "evidence": "executor.rs:130 bypass, unverified",
+      "class": "unwired"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "TOOL-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "TOOL-001-T01",
+        "TOOL-001-T02",
+        "TOOL-001-T03"
+      ]
+    },
+    {
+      "id": "TOOL-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "TOOL-002-T01",
+        "TOOL-002-T02",
+        "TOOL-002-T03"
+      ]
+    },
+    {
+      "id": "TOOL-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "TOOL-003-T01",
+        "TOOL-003-T02",
+        "TOOL-003-T03"
+      ]
+    },
+    {
+      "id": "TOOL-004",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "TOOL-004-T01",
+        "TOOL-004-T02",
+        "TOOL-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "registry dispatch wiring",
+    "permission deny-no-side-effect test",
+    "shell timeout/cancel/bounds"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

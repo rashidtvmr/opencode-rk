@@ -1,0 +1,128 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-014",
+  "title": "Web app, attachments, artifacts, voice and research extras",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "web",
+      "crates/server/src/lib.rs"
+    ],
+    "upstream": [
+      "packages/app",
+      "packages/desktop"
+    ],
+    "legacyPrefixes": [
+      "WEB"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "WEB-001",
+    "WEB-002",
+    "WEB-003",
+    "WEB-004",
+    "WEB-005",
+    "WEB-006",
+    "WEB-007",
+    "WEB-008",
+    "WEB-009",
+    "WEB-010",
+    "WEB-011",
+    "WEB-012",
+    "WEB-013",
+    "WEB-014",
+    "WEB-015",
+    "WEB-016",
+    "WEB-017"
+  ],
+  "trace": "server/src/lib.rs:148-150 available_for_web_turn:false; :707-711,:798-802 only openai/* else 400; :988-998 tool/blob->400; :170-174 draft true turn false; composer.tsx:254-255,381-383 App.tsx:604-607 submit blocked; lib.rs:175-186 search/research/voice false; voice_capture.rs:230-238 NoAdapter; composer.tsx:540-549,468-475 disabled; lib.rs:187-193 edit true run/apply false; web_artifact.rs:400-411 NoExecutor/Denied; App.tsx:1506,1514 disabled",
+  "findings": [
+    {
+      "behavior": "web limits (tools/attachments/search/voice/run-apply) explicitly disabled",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "Responses tool+attachment adapter",
+      "evidence": "absent",
+      "class": "missing"
+    },
+    {
+      "behavior": "search/research/voice adapters",
+      "evidence": "absent",
+      "class": "missing"
+    },
+    {
+      "behavior": "artifact run/apply executor+approval",
+      "evidence": "NoExecutor/Denied",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "WEB-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "WEB-001-T01",
+        "WEB-001-T02",
+        "WEB-001-T03"
+      ]
+    },
+    {
+      "id": "WEB-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "WEB-002-T01",
+        "WEB-002-T02",
+        "WEB-002-T03"
+      ]
+    },
+    {
+      "id": "WEB-003",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "WEB-003-T01",
+        "WEB-003-T02",
+        "WEB-003-T03"
+      ]
+    },
+    {
+      "id": "WEB-004",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "WEB-004-T01",
+        "WEB-004-T02",
+        "WEB-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "Responses tool+attachment adapter",
+    "search/research/voice adapters or scope-cut",
+    "artifact run/apply executor+approval bridge"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-011",
+  "title": "OpenTUI fork ABI, native build and missing TS orchestration",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/cli/src/tui_entry.rs"
+    ],
+    "upstream": [
+      "opentui/packages/native",
+      "opentui/packages/core/src/renderer.ts",
+      "opentui/packages/core/src/Renderable.ts"
+    ],
+    "legacyPrefixes": []
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [],
+  "trace": "cli/src/tui_entry.rs:4-9 line stdio no TTY/render dep; :173-233 live path only GET /api/sessions|messages; :291-318 render_frame string; :365-415 line loop; :421-460 poll loop; :1 forbid(unsafe_code) forbids Zig FFI; cli Cargo.toml + root: no opentui/ratatui/crossterm/zig; glob **/opentui* nil; fork tree absent locally",
+  "findings": [
+    {
+      "behavior": "line UI behavior",
+      "evidence": "tui_entry.rs above",
+      "class": "verified"
+    },
+    {
+      "behavior": "native renderer / Zig FFI bridge",
+      "evidence": "absent",
+      "class": "missing"
+    },
+    {
+      "behavior": "renderer.ts/Renderable.ts orchestration port",
+      "evidence": "none",
+      "class": "missing"
+    },
+    {
+      "behavior": "fork packages/native lib.zig/build.zig claims",
+      "evidence": "no local fork tree",
+      "class": "unverified"
+    }
+  ],
+  "legacySample": [],
+  "repairChildren": [
+    "owned Zig ABI bridge + build (TUI-001)",
+    "renderer orchestration in Rust no-JS (TUI-001..002)"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

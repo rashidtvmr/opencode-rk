@@ -1,0 +1,119 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-017",
+  "title": "Controller acceptance, leases, TDD and worker ownership",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "tools/ralph_loop.py",
+      "tools/plan_model.py",
+      "tools/lane_gate.py"
+    ],
+    "upstream": [
+      "new user requirement: rolling native 20-worker delegation"
+    ],
+    "legacyPrefixes": [
+      "AUTO"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "AUTO-001",
+    "AUTO-002",
+    "AUTO-003",
+    "AUTO-004",
+    "AUTO-005",
+    "AUTO-006",
+    "AUTO-007"
+  ],
+  "trace": "tools/ralph_loop.py:601-608 status=accepted :602 before finalize_worktree :604, fail keeps accepted; :738-754 serial record_result+heartbeat/release; :421-448 finalize_worktree ff-only; plan_model.py:193-205 rank-gate synthesis; :88-104 ready() all-deps-accepted; ralph_loop.py:347-351,675 batch; :95-96 ownership_lock feature:<id>; :324-344 claim() same-id only; lane_gate.py:31-44 hardcoded storage v2 lanes; new tools/completion_scheduler.py:158-260 rolling refill :211-235, one verify/integrate pipeline, overlaps :105-106, validate_candidate :136-140, validate_proof :143-156, post-integrate rerun :189-203, caps :169-175 20/20/3, cancel/join :253-260",
+  "findings": [
+    {
+      "behavior": "accepted-before-integrated bug",
+      "evidence": "ralph_loop.py:601-608",
+      "class": "verified"
+    },
+    {
+      "behavior": "batch barrier + weak ownership + narrow lane gate",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "new rolling primitive",
+      "evidence": "completion_scheduler.py (38 completion tests OK)",
+      "class": "verified"
+    },
+    {
+      "behavior": "real harness adapter/roles bound",
+      "evidence": "TrustedAdapter protocol only; launches no agents",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "AUTO-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "AUTO-001-T01",
+        "AUTO-001-T02",
+        "AUTO-001-T03"
+      ]
+    },
+    {
+      "id": "AUTO-002",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "AUTO-002-T01",
+        "AUTO-002-T02",
+        "AUTO-002-T03"
+      ]
+    },
+    {
+      "id": "AUTO-003",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "AUTO-003-T01",
+        "AUTO-003-T02",
+        "AUTO-003-T03"
+      ]
+    },
+    {
+      "id": "AUTO-004",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "AUTO-004-T01",
+        "AUTO-004-T02",
+        "AUTO-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "fix record_result pending-integrated, no accept on ff-fail",
+    "real shared-path lock table",
+    "generalize lane_gate.py or scope doc",
+    "COORD-001..008 bind real adapter"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

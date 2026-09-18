@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-013",
+  "title": "All terminal interactions and presentation",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/cli/src/tui_entry.rs",
+      "crates/sessions/src/tui_state.rs"
+    ],
+    "upstream": [
+      "packages/tui",
+      "packages/opencode/src/cli/cmd/tui"
+    ],
+    "legacyPrefixes": [
+      "UI"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "UI-001",
+    "UI-002",
+    "UI-003",
+    "UI-004",
+    "UI-005",
+    "UI-006",
+    "UI-007",
+    "UI-008",
+    "UI-009",
+    "UI-010",
+    "UI-011",
+    "UI-012",
+    "UI-013",
+    "UI-014",
+    "UI-015",
+    "UI-016",
+    "UI-017",
+    "UI-018",
+    "UI-019"
+  ],
+  "trace": "sessions/src/tui_state.rs:1-3 no rendering/IO/clock; :69-400 composer/status/context/memory/hints machines; tui_entry.rs:276-287 text frames; :340-345 status_hint; main.rs:49,184-185 Tui(TuiArgs) only; no widgets/mouse/alt-screen/images/themes",
+  "findings": [
+    {
+      "behavior": "state machines pure; presentation line-only",
+      "evidence": "above",
+      "class": "verified"
+    },
+    {
+      "behavior": "native frame parity with packages/tui",
+      "evidence": "no widgets/mouse/alt-screen",
+      "class": "missing"
+    },
+    {
+      "behavior": "status/model/context/memory live daemon wiring",
+      "evidence": "not traced",
+      "class": "unwired"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "UI-001",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "UI-001-T01",
+        "UI-001-T02",
+        "UI-001-T03"
+      ]
+    },
+    {
+      "id": "UI-002",
+      "status": "accepted",
+      "tbd": false,
+      "deps": [],
+      "obligations": [
+        "UI-002-T01",
+        "UI-002-T02",
+        "UI-002-T03"
+      ]
+    },
+    {
+      "id": "UI-003",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "UI-003-T01",
+        "UI-003-T02",
+        "UI-003-T03"
+      ]
+    },
+    {
+      "id": "UI-004",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "UI-004-T01",
+        "UI-004-T02",
+        "UI-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "native frame parity matrix + tests",
+    "wire status/model/context/memory to live daemon"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}

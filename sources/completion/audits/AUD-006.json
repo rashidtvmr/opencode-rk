@@ -1,0 +1,130 @@
+{
+  "schemaVersion": 1,
+  "id": "AUD-006",
+  "title": "Security, policy broker, hooks and platform isolation",
+  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "planDigestNote": "union ralph.json + ralph.completion.json",
+  "pins": {
+    "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
+    "opencodeBaseline": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencodeDevObserved": "5a8335857b0ebec44ef6aa1d52b339cf25c329ca",
+    "opentuiFork": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "upstreamLock": "sources/upstream.lock.json vendored:false both repos; fullCheckoutObtainedHere:false",
+  "selectors": {
+    "local": [
+      "crates/security",
+      "docs/SECURITY.md"
+    ],
+    "upstream": [
+      "packages/core/src/permission",
+      "packages/opencode/src/permission"
+    ],
+    "legacyPrefixes": [
+      "SEC"
+    ]
+  },
+  "method": [
+    "Enumerate every assigned legacy story including accepted ones; assert no unclassified task or source surface in the shard.",
+    "Trace installed UI/CLI/API entrypoint through actual services, policy, durable state and observable output; demonstrate disconnected code as a gap.",
+    "Run existing relevant tests and record actual counts, revisions and command evidence; a named obligation or source grep is not a passing test.",
+    "Exercise shard-specific errors, authorization denial without side effects, cancellation/restart and bounded resources in disposable fixtures.",
+    "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
+  ],
+  "assignedLegacy": [
+    "SEC-001",
+    "SEC-002",
+    "SEC-003",
+    "SEC-004",
+    "SEC-005",
+    "SEC-006",
+    "SEC-007",
+    "SEC-008",
+    "SEC-009",
+    "SEC-010",
+    "SEC-011",
+    "SEC-012",
+    "SEC-013",
+    "SEC-014",
+    "SEC-016",
+    "SEC-017",
+    "SEC-018",
+    "SEC-019",
+    "SEC-020"
+  ],
+  "trace": "crates/security/src/lib.rs:202-250 authorize baseline-first; :252-335,:396-537 destructive argv/file/SQL gates; star_proof.rs:212-234; hooks.rs:1,86,117-165 max-100 pre-can-block; hook_bus_v2.rs:1,34 SSRF guard; sandbox.rs:1 'Policy only, no Landlock syscalls'; docs/SECURITY.md:38-53 mandates real backend; grep PermissionBroker|authorize( only in security/; server/src/*.rs 0 hits; tools use local trait plugin_scoped_exec.rs:119, ext_scoped_exec_lane.rs:119 not security broker",
+  "findings": [
+    {
+      "behavior": "broker deterministic enforcement incl * cannot lift mandatory",
+      "evidence": "lib.rs:202-250; lib.rs:688-772 tests",
+      "class": "verified"
+    },
+    {
+      "behavior": "OS sandbox backend closing inherited caps",
+      "evidence": "sandbox.rs:1 disclaimer; landlock/seccomp only disclaimer",
+      "class": "missing"
+    },
+    {
+      "behavior": "broker wired into tools/server tool path",
+      "evidence": "server 0 hits; executor.rs:130 bash -c bypass",
+      "class": "unwired"
+    },
+    {
+      "behavior": "crates/security/src/app_policy.rs",
+      "evidence": "glob **/app_policy.rs nil",
+      "class": "missing"
+    }
+  ],
+  "legacySample": [
+    {
+      "id": "SEC-001",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "SEC-001-T01",
+        "SEC-001-T02",
+        "SEC-001-T03"
+      ]
+    },
+    {
+      "id": "SEC-002",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "SEC-002-T01",
+        "SEC-002-T02",
+        "SEC-002-T03"
+      ]
+    },
+    {
+      "id": "SEC-003",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "SEC-003-T01",
+        "SEC-003-T02",
+        "SEC-003-T03"
+      ]
+    },
+    {
+      "id": "SEC-004",
+      "status": "accepted",
+      "tbd": true,
+      "deps": [],
+      "obligations": [
+        "SEC-004-T01",
+        "SEC-004-T02",
+        "SEC-004-T03"
+      ]
+    }
+  ],
+  "repairChildren": [
+    "real OS backend + inherited-cap-close platform test",
+    "wire authorize into tools/executor+shell_tool+server tool path",
+    "unify tools trait brokers on security broker"
+  ],
+  "verdict": "audit-complete; no acceptance claimed"
+}
