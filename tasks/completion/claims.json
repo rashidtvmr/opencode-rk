@@ -18,6 +18,11 @@
       "session": "ses_orch_APP003",
       "status": "completed"
     },
+    "APP-007": {
+      "scratchpad": "worklog/APP-007.md",
+      "session": "ses_orch_APP007",
+      "status": "in-progress"
+    },
     "APP-009": {
       "completedNote": "GREEN 9/9 shutdown (6 existing + 3 APP-009: sigint_drop_restores, sigterm_drop_restores_after_suspend, repeated_arm_drop_cycles_restore_exactly_once); frozen sha256 08eb082d; zero test edits post-add; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin opencode-rk shutdown; log /tmp/opencode/app009.log",
       "scratchpad": "worklog/APP-009.md",
@@ -226,6 +231,11 @@
       "session": "ses_orch_DISC116b",
       "status": "in-progress"
     },
+    "DISC-117": {
+      "scratchpad": "worklog/DISC-117.md",
+      "session": "ses_orch_DISC117",
+      "status": "in-progress"
+    },
     "LANE-CI": {
       "blockedNote": "",
       "claim": "Roadmap 3.6: CI/CD non-interactive output contract (typed exit codes, JSON output, fail-closed approvals)",
@@ -245,10 +255,10 @@
     "LANE-GLOBS": {
       "blockedNote": "",
       "claim": "Roadmap 3.5: conditional rules load/unload with path globs + hysteresis (extends rules_loader)",
-      "completedNote": "",
+      "completedNote": "integrator fixed evict_if_full (always-rule queue deadlock); rustc --test rules_globs 8/8 green",
       "scratchpad": "worklog/LANE-GLOBS.md",
       "session": "ses_worker_globs",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-LOOP": {
       "blockedNote": "",
@@ -321,6 +331,11 @@
       "scratchpad": "worklog/TUI-003.md",
       "session": "ses_orch_TUI003",
       "status": "completed"
+    },
+    "TUI-004": {
+      "scratchpad": "worklog/TUI-004.md",
+      "session": "ses_orch_TUI004",
+      "status": "in-progress"
     },
     "TUI-010-CAPS": {
       "completedNote": "native_caps 742 lines 21/21 green md5 5f68f693",

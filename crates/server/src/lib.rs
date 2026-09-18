@@ -25,6 +25,8 @@ pub mod control_plane_inputs;
 pub mod daemon;
 pub mod daemon_auth;
 pub mod desktop_bridge;
+pub mod loop_driver;
+pub mod rules_globs;
 pub mod rules_loader;
 pub mod context_report;
 pub mod runtime_wiring;
