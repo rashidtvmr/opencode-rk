@@ -132,13 +132,28 @@ impl Rect {
         self.w as u32 * self.h as u32
     }
 
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.w == 0 || self.h == 0
+    }
+
     /// True when interiors intersect (touching edges are fine).
+    /// Zero-area rects never overlap.
     #[must_use]
     pub const fn overlaps(self, other: Rect) -> bool {
+        if self.is_empty() || other.is_empty() {
+            return false;
+        }
         self.x < other.x.saturating_add(other.w)
             && other.x < self.x.saturating_add(self.w)
             && self.y < other.y.saturating_add(other.h)
             && other.y < self.y.saturating_add(self.h)
+    }
+
+    /// True when the region actually draws at least one cell.
+    #[must_use]
+    pub const fn is_visible(self) -> bool {
+        !self.is_empty()
     }
 }
 
@@ -214,6 +229,34 @@ impl ShellLayout {
             sidebar,
             status,
             compact: false,
+        }
+    }
+
+    /// Region rectangle for a focus target.
+    #[must_use]
+    pub const fn rect_of(self, focus: Focus) -> Rect {
+        match focus {
+            Focus::Composer => self.composer,
+            Focus::Transcript => self.transcript,
+            Focus::Sidebar => self.sidebar,
+            Focus::Status => self.status,
+        }
+    }
+
+    /// True when the focused region draws at least one cell.
+    #[must_use]
+    pub const fn focus_visible(self, focus: Focus) -> bool {
+        !self.rect_of(focus).is_empty()
+    }
+
+    /// Remap a focus request onto a drawn region: sidebar on a
+    /// compact/hidden sidebar falls back to transcript so keyboard focus
+    /// can never strand on a zero-area rect.
+    #[must_use]
+    pub const fn resolve_focus(self, requested: Focus) -> Focus {
+        match requested {
+            Focus::Sidebar if self.sidebar.is_empty() => Focus::Transcript,
+            other => other,
         }
     }
 
@@ -304,6 +347,10 @@ impl Default for FrameScheduler {
 pub struct NativeApp {
     focus: Focus,
     view: AppView,
+    /// Failure view held while Loading (debounce); applied via
+    /// [`NativeApp::flush_pending_view`] so an instant Error cannot
+    /// overwrite the connecting spinner.
+    pending_view: Option<AppView>,
     freshness: Freshness,
     scheduler: FrameScheduler,
     layout: ShellLayout,
@@ -317,6 +364,7 @@ impl NativeApp {
         NativeApp {
             focus: Focus::Composer,
             view: AppView::Loading,
+            pending_view: None,
             freshness: Freshness::Stale,
             scheduler: FrameScheduler::new(),
             layout: ShellLayout::compute(width, height, true),
@@ -363,15 +411,30 @@ impl NativeApp {
     }
 
     pub fn set_focus(&mut self, focus: Focus) {
-        if self.focus != focus {
-            self.focus = focus;
+        let resolved = self.layout.resolve_focus(focus);
+        if self.focus != resolved {
+            self.focus = resolved;
             self.scheduler.mark_dirty();
         }
     }
 
+    /// Tab cycle that skips the zero-area sidebar on compact layouts so
+    /// focus can never hide on tiny terminals.
     pub fn cycle_focus(&mut self) {
-        let next = self.focus.next();
+        let mut next = self.focus.next();
+        if next == Focus::Sidebar && self.layout.rect_of(next).is_empty() {
+            next = Focus::Status;
+        }
         self.set_focus(next);
+    }
+
+    /// Shift-Tab cycle; same compact skip as [`cycle_focus`](Self::cycle_focus).
+    pub fn cycle_focus_prev(&mut self) {
+        let mut prev = self.focus.prev();
+        if prev == Focus::Sidebar && self.layout.rect_of(prev).is_empty() {
+            prev = Focus::Transcript;
+        }
+        self.set_focus(prev);
     }
 
     /// Apply a view transition; records bounded history, dirties a frame,
@@ -394,6 +457,7 @@ impl NativeApp {
 
     /// Authenticated live daemon payload arrived: actionable + live.
     pub fn mark_live_data(&mut self) {
+        self.pending_view = None;
         self.freshness = Freshness::Live;
         self.set_view(AppView::Actionable);
         self.scheduler.mark_dirty();
@@ -402,9 +466,111 @@ impl NativeApp {
     /// Transport dropped: offline + stale. Never presents fake live data:
     /// [`shows_live_data`](Self::shows_live_data) flips false here.
     pub fn mark_disconnected(&mut self) {
+        self.pending_view = None;
         self.freshness = Freshness::Stale;
         self.set_view(AppView::Offline);
         self.scheduler.mark_dirty();
+    }
+
+    /// Reach Empty explicitly (create/open actions). Forces stale via
+    /// [`set_view`](Self::set_view).
+    pub fn mark_empty(&mut self) {
+        self.set_view(AppView::Empty);
+    }
+
+    /// Enter Loading explicitly (waiting on daemon; input held).
+    pub fn mark_loading(&mut self) {
+        self.pending_view = None;
+        self.set_view(AppView::Loading);
+    }
+
+    /// Enter Error explicitly (retry/dismiss actions, never live transcript).
+    pub fn mark_error(&mut self) {
+        // Debounce: hold the failure while Loading so an instant Error
+        // cannot overwrite the connecting spinner; host applies it via
+        // `flush_pending_view`.
+        if self.view == AppView::Loading {
+            self.pending_view = Some(AppView::Error);
+            self.scheduler.mark_dirty();
+            return;
+        }
+        self.set_view(AppView::Error);
+    }
+
+    /// Retry from Error back to Loading. True when a transition happened.
+    pub fn retry(&mut self) -> bool {
+        if self.view == AppView::Error {
+            self.pending_view = None;
+            self.set_view(AppView::Loading);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Dismiss from Error back to Empty. True when a transition happened.
+    pub fn dismiss(&mut self) -> bool {
+        if self.view == AppView::Error {
+            self.set_view(AppView::Empty);
+            true
+        } else {
+            false
+        }
+    }
+
+    /// View-level input gate: only the actionable view accepts session input.
+    pub const fn accepts_input(&self) -> bool {
+        self.view.is_actionable()
+    }
+
+    /// Composer typing/submit gate: actionable view AND composer focus.
+    pub const fn can_edit_composer(&self) -> bool {
+        self.view.is_actionable() && matches!(self.focus, Focus::Composer)
+    }
+
+    /// Paint flag: true whenever cached rows must be badged stale/offline.
+    pub const fn must_badge_stale(&self) -> bool {
+        !self.shows_live_data()
+    }
+
+    /// Paint label derived from [`shows_live_data`](Self::shows_live_data).
+    pub const fn data_badge(&self) -> &'static str {
+        if self.shows_live_data() {
+            "live"
+        } else {
+            "stale"
+        }
+    }
+
+    /// False only when focus sits on a zero-area (compact-collapsed) region.
+    pub const fn is_focus_visible(&self) -> bool {
+        !self.layout.rect_of(self.focus).is_empty()
+    }
+
+    /// Host hook: true when the coalesced scheduler owes a frame.
+    pub const fn needs_render(&self) -> bool {
+        self.scheduler.pending > 0
+    }
+
+    /// Host hook: coalesced pending count for the render loop.
+    pub const fn pending_frames(&self) -> u32 {
+        self.scheduler.pending
+    }
+
+    /// Debounced failure view held while Loading (None when no debounce).
+    pub const fn pending_view(&self) -> Option<AppView> {
+        self.pending_view
+    }
+
+    /// Apply a debounced failure view held while Loading. True on transition.
+    pub fn flush_pending_view(&mut self) -> bool {
+        if let Some(view) = self.pending_view {
+            self.pending_view = None;
+            self.set_view(view);
+            true
+        } else {
+            false
+        }
     }
 
     pub fn mark_dirty(&mut self) {
@@ -416,9 +582,11 @@ impl NativeApp {
         self.scheduler.take_frame()
     }
 
-    /// Resize viewport; recomputes compact/no-overlap layout, dirties frame.
+    /// Resize viewport; recomputes compact/no-overlap layout, redirects a
+    /// focus stranded on a collapsed region, dirties frame.
     pub fn resize(&mut self, width: u16, height: u16, sidebar_visible: bool) {
         self.layout = ShellLayout::compute(width, height, sidebar_visible);
+        self.focus = self.layout.resolve_focus(self.focus);
         self.scheduler.mark_dirty();
     }
 }
@@ -523,5 +691,76 @@ mod tests {
             app.set_view(AppView::Error);
         }
         assert!(app.history().len() <= MAX_HISTORY, "history stays bounded");
+    }
+
+    // TUI-003 RED (frozen before GREEN): compile on HEAD API, fail on the
+    // missing remainder behavior. T1 input->focus + frames, T2 state
+    // actionability, T3 tiny focus, T3/T5 no-overlap guard.
+    #[test]
+    fn zero_area_rects_never_overlap() {
+        let point = Rect {
+            x: 5,
+            y: 5,
+            w: 0,
+            h: 0,
+        };
+        let big = Rect {
+            x: 0,
+            y: 0,
+            w: 10,
+            h: 10,
+        };
+        assert!(!point.overlaps(big), "zero-area rect must never overlap");
+        assert!(!big.overlaps(point), "empty overlap must be symmetric");
+    }
+
+    #[test]
+    fn resize_redirects_stranded_sidebar_focus() {
+        let mut app = NativeApp::new(120, 40);
+        app.set_focus(Focus::Sidebar);
+        assert_eq!(app.focus(), Focus::Sidebar);
+        app.resize(40, 10, true);
+        assert!(app.layout().compact);
+        assert_eq!(
+            app.focus(),
+            Focus::Transcript,
+            "resize must redirect stranded sidebar focus"
+        );
+    }
+
+    #[test]
+    fn compact_tab_cycle_skips_hidden_sidebar() {
+        let mut app = NativeApp::new(120, 40);
+        app.resize(40, 10, true);
+        app.set_focus(Focus::Transcript);
+        app.cycle_focus();
+        assert_eq!(
+            app.focus(),
+            Focus::Status,
+            "compact Tab must skip Sidebar"
+        );
+    }
+
+    #[test]
+    fn non_live_views_gate_session_input() {
+        let mut app = NativeApp::new(120, 40);
+        for view in [
+            AppView::Empty,
+            AppView::Loading,
+            AppView::Offline,
+            AppView::Error,
+        ] {
+            app.set_view(view);
+            assert!(!app.shows_live_data(), "{view:?} must never read as live");
+        }
+    }
+
+    #[test]
+    fn focused_control_never_stranded_on_tiny() {
+        let layout = ShellLayout::compute(40, 10, true);
+        assert!(layout.compact);
+        let transcript = layout.transcript;
+        assert!(transcript.w > 0 && transcript.h > 0);
+        assert_eq!(layout.sidebar.area(), 0);
     }
 }

@@ -287,9 +287,10 @@
       "status": "completed"
     },
     "TUI-003": {
+      "completedNote": "GREEN 11/11 native_app (6 HEAD+5 RED T01-T05) rustc --test + 22/22 in-crate native_app filter; frozen sha256 0430e086; zero test edits; log /tmp/opencode/tui003.log",
       "scratchpad": "worklog/TUI-003.md",
       "session": "ses_orch_TUI003",
-      "status": "in-progress"
+      "status": "completed"
     },
     "TUI-010-CAPS": {
       "completedNote": "native_caps 742 lines 21/21 green md5 5f68f693",
