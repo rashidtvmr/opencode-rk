@@ -1,5 +1,10 @@
 {
   "claims": {
+    "APP-002": {
+      "scratchpad": "worklog/APP-002.md",
+      "session": "ses_orch_APP002",
+      "status": "in-progress"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; 3 mandatory repair children RC-01/02/03; validate_repository FAIL pre-existing backlog exhaustion out of shard",
       "scratchpad": "worklog/AUD-001.md",
@@ -230,6 +235,12 @@
       "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
       "scratchpad": "worklog/TUI-001.md",
       "session": "ses_orch_TUI001",
+      "status": "completed"
+    },
+    "TUI-002": {
+      "completedNote": "17/17 terminal_host green; sha 93c3216a; log /tmp/opencode/tui002.log",
+      "scratchpad": "worklog/TUI-002.md",
+      "session": "ses_orch_TUI002",
       "status": "completed"
     },
     "TUI-010-CAPS": {
