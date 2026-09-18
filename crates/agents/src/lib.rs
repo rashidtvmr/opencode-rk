@@ -4,8 +4,10 @@
 
 pub mod agent_executor;
 pub mod app_delegation;
+pub mod context;
 pub mod executor;
 pub mod message;
+pub mod session;
 pub mod turn_state;
 
 use std::collections::HashMap;

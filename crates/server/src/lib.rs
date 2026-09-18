@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 pub mod acp_bridge;
 pub mod acp_files;
+pub mod acp_session;
+pub mod admission_bounds;
 pub mod app_client;
 pub mod agent_loop;
 pub use agent_loop::{
@@ -22,6 +24,7 @@ pub mod control_plane_exposure;
 pub mod control_plane_inputs;
 pub mod daemon;
 pub mod desktop_bridge;
+pub mod runtime_wiring;
 pub mod enterprise_link;
 pub mod error_translate;
 pub mod event_bus;

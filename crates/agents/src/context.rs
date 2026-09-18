@@ -60,9 +60,11 @@ pub struct ContextManager {
 }
 
 impl ContextManager {
-    /// Create a new empty manager.
+    /// Create a new empty manager with a root scope.
     pub fn new() -> Self {
-        Self::default()
+        let mut m = Self::default();
+        m.push_scope();
+        m
     }
 
     /// Push a new scope onto the stack.
@@ -104,6 +106,13 @@ impl ContextManager {
         if let Some(scope) = self.secrets.last_mut() {
             scope.insert(key.into());
         }
+    }
+
+    /// Mutable limits of the current (innermost) scope.
+    pub fn limits_mut(&mut self) -> &mut ContextLimits {
+        self.limits
+            .last_mut()
+            .expect("ContextManager always has a root scope")
     }
 
     /// Check if a key is a secret name in any scope.
@@ -167,11 +176,7 @@ mod tests {
 
     #[test]
     fn limit_defined() {
-        let limits = ContextLimits {
-            max_tokens: Some(1000),
-            max_duration_secs: Some(30),
-            max_tool_calls: Some(5),
-        };
+        let mut cm = ContextManager::new();
         cm.push_scope();
         cm.limits_mut().max_tokens = Some(1000);
         cm.limits_mut().max_duration_secs = Some(30);

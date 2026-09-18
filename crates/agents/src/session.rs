@@ -189,11 +189,11 @@ mod tests {
         assert_eq!(session.agent_id, "agent-a");
         assert_eq!(session.state, SessionState::Active);
 
-        let fetched = mgr.get("sess-1").unwrap();
+        let fetched = mgr.get(&"sess-1".to_string()).unwrap();
         assert_eq!(fetched.id, "sess-1");
         assert_eq!(fetched.state, SessionState::Active);
 
-        assert!(mgr.get("nonexistent").is_none());
+        assert!(mgr.get(&"nonexistent".to_string()).is_none());
 
         // Duplicate creation should fail
         assert!(matches!(
@@ -207,17 +207,17 @@ mod tests {
         let mut mgr = SessionManager::new();
         mgr.create("sess-1".to_string(), "agent-a".to_string()).unwrap();
 
-        let before = mgr.get("sess-1").unwrap().last_activity;
+        let before = mgr.get(&"sess-1".to_string()).unwrap().last_activity;
         thread::sleep(Duration::from_millis(20));
 
-        mgr.activity("sess-1").unwrap();
-        let after = mgr.get("sess-1").unwrap().last_activity;
+        mgr.activity(&"sess-1".to_string()).unwrap();
+        let after = mgr.get(&"sess-1".to_string()).unwrap().last_activity;
         assert!(after > before);
-        assert_eq!(mgr.get("sess-1").unwrap().state, SessionState::Active);
+        assert_eq!(mgr.get(&"sess-1".to_string()).unwrap().state, SessionState::Active);
 
         // Activity on nonexistent session should error
         assert!(matches!(
-            mgr.activity("nope"),
+            mgr.activity(&"nope".to_string()),
             Err(SessionError::NotFound(_))
         ));
     }
@@ -227,14 +227,14 @@ mod tests {
         let mut mgr = SessionManager::new();
         mgr.create("sess-1".to_string(), "agent-a".to_string()).unwrap();
 
-        assert_eq!(mgr.get("sess-1").unwrap().state, SessionState::Active);
+        assert_eq!(mgr.get(&"sess-1".to_string()).unwrap().state, SessionState::Active);
 
-        mgr.terminate("sess-1").unwrap();
-        assert_eq!(mgr.get("sess-1").unwrap().state, SessionState::Terminated);
+        mgr.terminate(&"sess-1".to_string()).unwrap();
+        assert_eq!(mgr.get(&"sess-1".to_string()).unwrap().state, SessionState::Terminated);
 
         // Terminate nonexistent session should error
         assert!(matches!(
-            mgr.terminate("nope"),
+            mgr.terminate(&"nope".to_string()),
             Err(SessionError::NotFound(_))
         ));
     }
@@ -245,10 +245,10 @@ mod tests {
         mgr.create("sess-1".to_string(), "agent-a".to_string()).unwrap();
 
         // Terminate the session so cleanup removes it
-        mgr.terminate("sess-1").unwrap();
+        mgr.terminate(&"sess-1".to_string()).unwrap();
         let removed = mgr.cleanup_idle(Duration::from_secs(60));
         assert_eq!(removed, 1);
-        assert!(mgr.get("sess-1").is_none());
+        assert!(mgr.get(&"sess-1".to_string()).is_none());
 
         // Nothing to clean when empty
         let removed = mgr.cleanup_idle(Duration::from_secs(60));
@@ -262,25 +262,25 @@ mod tests {
         mgr.create("sess-2".to_string(), "agent-b".to_string()).unwrap();
         mgr.create("sess-3".to_string(), "agent-c".to_string()).unwrap();
 
-        assert_eq!(mgr.get("sess-1").unwrap().agent_id, "agent-a");
-        assert_eq!(mgr.get("sess-2").unwrap().agent_id, "agent-b");
-        assert_eq!(mgr.get("sess-3").unwrap().agent_id, "agent-c");
+        assert_eq!(mgr.get(&"sess-1".to_string()).unwrap().agent_id, "agent-a");
+        assert_eq!(mgr.get(&"sess-2".to_string()).unwrap().agent_id, "agent-b");
+        assert_eq!(mgr.get(&"sess-3".to_string()).unwrap().agent_id, "agent-c");
 
-        mgr.activity("sess-2").unwrap();
-        mgr.terminate("sess-1").unwrap();
+        mgr.activity(&"sess-2".to_string()).unwrap();
+        mgr.terminate(&"sess-1".to_string()).unwrap();
 
-        let s2 = mgr.get("sess-2").unwrap();
+        let s2 = mgr.get(&"sess-2".to_string()).unwrap();
         assert_eq!(s2.state, SessionState::Active);
         assert_eq!(s2.agent_id, "agent-b");
 
-        let s1 = mgr.get("sess-1").unwrap();
+        let s1 = mgr.get(&"sess-1".to_string()).unwrap();
         assert_eq!(s1.state, SessionState::Terminated);
 
         // Cleanup should remove the terminated session
         let removed = mgr.cleanup_idle(Duration::from_secs(60));
         assert_eq!(removed, 1);
-        assert!(mgr.get("sess-1").is_none());
-        assert!(mgr.get("sess-2").is_some());
-        assert!(mgr.get("sess-3").is_some());
+        assert!(mgr.get(&"sess-1".to_string()).is_none());
+        assert!(mgr.get(&"sess-2".to_string()).is_some());
+        assert!(mgr.get(&"sess-3".to_string()).is_some());
     }
 }
