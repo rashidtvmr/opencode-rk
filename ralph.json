@@ -289,7 +289,7 @@
       "requirementIds": [
         "REQ-002"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -306,7 +306,7 @@
         "REQ-002",
         "REQ-004"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -322,7 +322,7 @@
       "requirementIds": [
         "REQ-002"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -852,7 +852,7 @@
       "requirementIds": [
         "REQ-017"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -868,7 +868,7 @@
       "requirementIds": [
         "REQ-017"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -896,7 +896,7 @@
     {
       "id": "EXT-004",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -912,7 +912,7 @@
       "requirementIds": [
         "REQ-005"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -926,7 +926,7 @@
     {
       "id": "EXT-006",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -956,7 +956,7 @@
       "requirementIds": [
         "REQ-020"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -972,7 +972,7 @@
       "requirementIds": [
         "REQ-005"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -986,7 +986,7 @@
     {
       "id": "EXT-010",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1000,7 +1000,7 @@
     {
       "id": "EXT-011",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1016,7 +1016,7 @@
       "requirementIds": [
         "REQ-005"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1030,7 +1030,7 @@
     {
       "id": "INT-001",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1044,7 +1044,7 @@
     {
       "id": "INT-002",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1058,7 +1058,7 @@
     {
       "id": "INT-003",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1086,7 +1086,7 @@
     {
       "id": "INT-005",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1100,7 +1100,7 @@
     {
       "id": "INT-006",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1114,7 +1114,7 @@
     {
       "id": "INT-007",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1142,7 +1142,7 @@
     {
       "id": "INT-009",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1156,7 +1156,7 @@
     {
       "id": "INT-010",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1174,7 +1174,7 @@
         "REQ-024",
         "REQ-032"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1188,7 +1188,7 @@
     {
       "id": "OPS-002",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1202,7 +1202,7 @@
     {
       "id": "OPS-003",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1216,7 +1216,7 @@
     {
       "id": "OPS-004",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1230,7 +1230,7 @@
     {
       "id": "OPS-005",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1244,7 +1244,7 @@
     {
       "id": "OPS-006",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1261,7 +1261,7 @@
         "REQ-001",
         "REQ-024"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1275,7 +1275,7 @@
     {
       "id": "OPS-008",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1289,7 +1289,7 @@
     {
       "id": "OPS-009",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -1475,7 +1475,7 @@
       "requirementIds": [
         "REQ-003"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1492,7 +1492,7 @@
         "REQ-004",
         "REQ-035"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -1508,7 +1508,7 @@
       "requirementIds": [
         "REQ-035"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2191,7 +2191,7 @@
       "requirementIds": [
         "REQ-007"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2205,7 +2205,7 @@
     {
       "id": "SHARE-002",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2219,7 +2219,7 @@
     {
       "id": "SHARE-003",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2235,7 +2235,7 @@
       "requirementIds": [
         "REQ-007"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2251,7 +2251,7 @@
       "requirementIds": [
         "REQ-007"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "TBD - see source audit",
       "dependencyIds": [],
       "testObligations": [
@@ -2689,7 +2689,7 @@
     {
       "id": "WEB-001",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2703,7 +2703,7 @@
     {
       "id": "WEB-002",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2717,7 +2717,7 @@
     {
       "id": "WEB-003",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2731,7 +2731,7 @@
     {
       "id": "WEB-004",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -2745,7 +2745,7 @@
     {
       "id": "WEB-005",
       "requirementIds": [],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "dependencyIds": [],
       "testObligations": [
@@ -3343,7 +3343,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "in-progress",
+      "status": "accepted",
       "userStory": "Shared singleton daemon and embedded web host - web, future TUI and CLI use one per-user/data-dir native backend authority without a separate web-only serve process",
       "dependencyIds": [],
       "testObligations": [
@@ -3359,7 +3359,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Full-width role-aligned transcript rows with request/response action bars below each message and honest capability-gated actions",
       "dependencyIds": [],
       "testObligations": [
@@ -3375,7 +3375,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Real edit, retry, regenerate and branch/fork actions preserve original conversation history and expose branch navigation",
       "dependencyIds": [],
       "testObligations": [
@@ -3391,7 +3391,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Structured assistant turns render collapsed provider reasoning summaries and tool activity separately from final answer text with a dedicated references section; raw hidden chain-of-thought is never exposed",
       "dependencyIds": [],
       "testObligations": [
@@ -3407,7 +3407,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Accessible WYSIWYG structured chat composer with model and effort controls, slash commands, mentions, attachment/tool/plugin affordances, drafts and stop/queue/steer state",
       "dependencyIds": [],
       "testObligations": [
@@ -3423,7 +3423,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Real bounded files, images and screenshots through picker, paste, drag/drop and a searchable local Library with native attachment-provider mapping",
       "dependencyIds": [],
       "testObligations": [
@@ -3439,7 +3439,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Composer plugin, app and tool discovery/selection backed by real native capabilities with permission approvals and durable tool-call results",
       "dependencyIds": [],
       "testObligations": [
@@ -3455,7 +3455,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Search and deep-research mode with real source/tool selection, reviewable plan, progress, steering, cancellation and cited final results",
       "dependencyIds": [],
       "testObligations": [
@@ -3471,7 +3471,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Chat navigation parity with pins, unified history search, archive/share, temporary chat, progressive long-history paging and keyboard navigation",
       "dependencyIds": [],
       "testObligations": [
@@ -3487,7 +3487,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Projects and workspaces group chats, files and reusable context with memory/context inspection and disclosure of sources used",
       "dependencyIds": [],
       "testObligations": [
@@ -3503,7 +3503,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Voice and dictation with explicit microphone state, visible transcript and a real native audio/realtime adapter",
       "dependencyIds": [],
       "testObligations": [
@@ -3519,7 +3519,7 @@
       "requirementIds": [
         "REQ-040"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Editable writing and code artifacts with copy/edit/undo/preview and explicitly authorized safe run/apply actions",
       "dependencyIds": [],
       "testObligations": [
@@ -3535,7 +3535,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Provider auth profile model with explicit auth provenance - API key, official OAuth, imported local credential, and keyring-backed states; never log or serialize token material",
       "dependencyIds": [
         "PROV-001",
@@ -3554,7 +3554,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Official OpenAI Codex OAuth connector - browser/device login, refresh lifecycle, logout, account status, and provider-native model routing without impersonation headers",
       "dependencyIds": [
         "PROV-015",
@@ -3573,7 +3573,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Official Anthropic Claude Code OAuth connector - PKCE/loopback consent flow, refresh lifecycle, logout, account status, and provider-native model routing without impersonation headers",
       "dependencyIds": [
         "PROV-015",
@@ -3592,7 +3592,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Consent-based local credential import - read Codex ~/.codex/auth.json and Claude Code ~/.claude/.credentials.json or configured directories, validate schema and permissions, copy into protected storage without exposing tokens",
       "dependencyIds": [
         "PROV-015",
@@ -3612,7 +3612,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Provider request profiles - use documented API authentication and required headers, explicit provider identity, bounded retries/timeouts, and redacted wire diagnostics; prohibit CLI impersonation and detection-evasion headers",
       "dependencyIds": [
         "PROV-015",
@@ -3632,7 +3632,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Auth connector commands and status surface - connect/login, import, list, inspect, refresh, logout; show provider, account, auth mode, expiry, and actionable errors without secret material",
       "dependencyIds": [
         "PROV-016",
@@ -3652,7 +3652,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Provider usage and limits telemetry - current model/provider, auth source, request count, input/output tokens, cost when available, rate-limit/reset metadata, and bounded status-panel snapshots",
       "dependencyIds": [
         "PROV-019",
@@ -3671,7 +3671,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Auth storage hardening - OS keyring when available, 0600 file fallback, atomic refresh persistence, path allowlist, no inherited secrets, and deterministic redacted diagnostics",
       "dependencyIds": [
         "PROV-018"
@@ -3689,7 +3689,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Provider compatibility catalog - versioned documentation-backed records for supported official auth flows, endpoints, required headers, model aliases, refresh behavior, and known limitations with source dates",
       "dependencyIds": [
         "PROV-016",
@@ -3709,7 +3709,7 @@
       "requirementIds": [
         "REQ-041"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Differential provider contract fixtures - offline request-shape and auth-state tests for OpenAI, Anthropic, and other supported providers, with secret redaction and no live credential use",
       "dependencyIds": [
         "PROV-019",
@@ -3728,7 +3728,7 @@
       "requirementIds": [
         "REQ-042"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Right-side TUI information panel with bounded live metadata: current directory, workspace/session, provider/model/auth mode, context usage, tokens, cost, MCP counts, active tools, queue state, timestamps and warnings; redact secrets and support narrow terminals",
       "dependencyIds": [
         "UI-013",
@@ -3747,7 +3747,7 @@
       "requirementIds": [
         "REQ-042"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "MCP catalog search at top of MCP list using a versioned source-attributed popular-library index; search names, descriptions and tags with bounded results and safe install metadata",
       "dependencyIds": [
         "TOOL-009",
@@ -3766,7 +3766,7 @@
       "requirementIds": [
         "REQ-042"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "MCP selection and bulk actions with keyboard/mouse selection, select-all/clear/invert, enable/disable/remove/refresh/install, bounded selection and confirmations for destructive actions",
       "dependencyIds": [
         "TOOL-016"
@@ -3784,7 +3784,7 @@
       "requirementIds": [
         "REQ-042"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Per-MCP power toggle and lifecycle state with enabled/disabled/starting/ready/error, persistence, reconnect and refresh; off means no tool registration or invocation",
       "dependencyIds": [
         "TOOL-017"
@@ -3802,7 +3802,7 @@
       "requirementIds": [
         "REQ-042"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "MCP payload filtering excludes disabled MCP servers and tools from message payloads and execution lookup, with deterministic snapshots and no stale enabled state",
       "dependencyIds": [
         "TOOL-018"
@@ -3820,7 +3820,7 @@
       "requirementIds": [
         "REQ-042"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "MCP state integration into the right-side info panel and status events with bounded updates, counts, active tools, last error and latency, without blocking agent turns",
       "dependencyIds": [
         "TOOL-019",
@@ -3839,7 +3839,7 @@
       "requirementIds": [
         "REQ-043"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Versioned sync log with monotonic sequence allocation per aggregate, idempotent apply, projector registry, post-freeze definition rejection, deterministic replay.",
       "dependencyIds": [
         "DB-017"
@@ -3857,7 +3857,7 @@
       "requirementIds": [
         "REQ-043"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Persisted message/part create-update-remove events versus ephemeral part-deltas; deltas never persist/replay; late foreign-key update warns without duplicating.",
       "dependencyIds": [
         "SYNC-001"
@@ -3875,7 +3875,7 @@
       "requirementIds": [
         "REQ-044"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Per-session single normal runner: second prompt gets typed BusyError with zero side effects; shell lane runs concurrently; cancel reclaims task and removes idle runner.",
       "dependencyIds": [],
       "testObligations": [
@@ -3891,7 +3891,7 @@
       "requirementIds": [
         "REQ-045"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "ACP v1 JSONL framing over caller-supplied byte streams: initialize, session new/load/prompt, modes/models/variants; malformed frame rejected without state change.",
       "dependencyIds": [],
       "testObligations": [
@@ -3907,7 +3907,7 @@
       "requirementIds": [
         "REQ-045"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "ACP text-file read/write with byte caps; unsupported full update stream, tool-call reporting, mode switch, auth, real terminal, full history restore return typed Unsupported.",
       "dependencyIds": [
         "ACP-001"
@@ -3925,7 +3925,7 @@
       "requirementIds": [
         "REQ-046"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Workspace HTTP/WS proxy strips hop/routing headers, bounded queue-until-open, bridges /__workspace_ws, routes local versus remote by directory.",
       "dependencyIds": [],
       "testObligations": [
@@ -3941,7 +3941,7 @@
       "requirementIds": [
         "REQ-046"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Remote workspace SSE sync loop with connected/connecting/disconnected/error statuses, bounded reconnect backoff, disposal closes queue/socket.",
       "dependencyIds": [
         "WSX-001"
@@ -3959,7 +3959,7 @@
       "requirementIds": [
         "REQ-047"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Typed SDK client with directory header/query rewriting, abort/timeout propagation, typed decode errors, no process spawn.",
       "dependencyIds": [],
       "testObligations": [
@@ -3975,7 +3975,7 @@
       "requirementIds": [
         "REQ-047"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "SDK server/process/TUI spawners with owned child lifecycle, single owner, kill-on-drop, no detached tasks, bounded startup timeout.",
       "dependencyIds": [
         "SDK-001"
@@ -3993,7 +3993,7 @@
       "requirementIds": [
         "REQ-048"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Headless run execution with inline/block renderers, attachment conversion, bounded output, typed exit codes, uncompressed prompt streaming.",
       "dependencyIds": [],
       "testObligations": [
@@ -4009,7 +4009,7 @@
       "requirementIds": [
         "REQ-048"
       ],
-      "status": "not-started",
+      "status": "accepted",
       "userStory": "Session export to caller-supplied writer as redacted JSON with explicit session id, no interactive picker in non-TTY, byte cap, no secret bytes.",
       "dependencyIds": [],
       "testObligations": [
