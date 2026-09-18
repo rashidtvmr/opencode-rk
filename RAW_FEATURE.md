@@ -331,6 +331,50 @@ fail closed with typed reasons; docs include CI recipes.
 **Status note:** HEAD-001/002 headless core is ✅ verified — 3.6 is the
 completion of that lane into full CI parity, not a greenfield feature.
 
+### ⚠️ 3.7 WORKFLOW VIEWS — timeline, infinite canvas, custom workflow creation (HIGH-VISIBILITY GAP)
+
+**What we committed to:** view the agent's work (1) as a **timeline** (the
+default view: messages, tool activity, streaming), (2) on an **infinite
+canvas** of interactive nodes and edges (sessions/subagents as nodes,
+delegation/fork relationships as edges), and (3) **custom workflow creation**
+(user-authored multi-step agent workflows).
+
+**Current state (evidence-cited, 2026-09-18 @ `7b2ba00`):**
+
+| Piece | State | Evidence / gap |
+|---|---|---|
+| Timeline view (default) | 🟡 ~60% — data model DONE, native render MISSING | `crates/cli/src/native_transcript.rs` (TUI-005 lane, 476L, 7/7 tests): streaming token deltas, tool states, hostile-output sanitization, bounded virtualized window, scrollback-stable marker. `native_status.rs` (TUI-009) + `native_navigation.rs` (TUI-007) give surrounding surfaces. **Nothing renders it in the native shell yet** — TUI-003 (shell on daemon state) and the headless native snapshot are open repair children (AUD-011) |
+| Infinite canvas (nodes+edges) | 🔴 NOT TOUCHED as a view — but the data substrate exists | No task card, module, or worklog mentions a canvas/graph view (repo grep: zero hits). The data layer is ~40% there: `crates/agents/src/app_delegation.rs` persisted parent→child edge, fork provenance (`native_navigation.rs` `Tab.parent`), sync event log replay (SYNC-001). The VIEW is 0% |
+| Custom workflow creation | 🟡 substrate partial, editor absent | OpenCode V2 semantics (recorded in `sources/req017-extensibility-ownership-gap.json`) fold named reusable workflows under skills; our EXT-001/002/013 skill lanes landed as modules but are not reachable end-to-end. No workflow editor/creator UI exists in any form |
+
+**How the OpenTUI + Rust port changes this:**
+
+- The timeline is no longer a web DOM surface: it renders through the **owned
+  Zig fork's renderer via the 35-symbol C-ABI bridge** (AUD-011 verified:
+  `libopentui.so` resolves all required symbols; flex/clip/mouse/color subset
+  ported in `native_layout_engine.rs`). Remaining work is one integration
+  lane: paint `native_transcript` state through the native shell's paint loop
+  (TUI-003 + TUI-005 integration).
+- The "infinite canvas" splits honestly per client — same daemon event stream
+  feeds all three, one source of truth:
+  - **Web client owns the true interactive canvas** (pointer drag, zoom,
+    pan — React `web/` app on the shared daemon).
+  - **TUI owns a bounded keyboard-navigable graph view** (braille/box-drawing
+    nodes, edge lines, viewport panning) — terminal-constrained but native.
+  - **Mobile owns read-only** (MOB-003 tabs pattern).
+- Custom workflow creation follows the skills substrate: a workflow is a
+  named skill with typed step edges; the TUI palette (`native_palette.rs`)
+  and web composer are the creation surfaces.
+
+**Needed lanes (none claimed in the ledger yet):**
+1. `WF-TUI-TIMELINE` — native shell renders transcript/timeline state
+   (closes TUI-003+TUI-005 integration gap).
+2. `WF-TUI-GRAPH` — bounded TUI nodes/edges graph view over the
+   delegation/fork graph.
+3. `WF-WEB-CANVAS` — React interactive canvas on daemon events
+   (nodes = sessions/subagents, edges = parent→child).
+4. `WF-CREATE` — workflow-as-skill schema + TUI/web creation surface.
+
 ---
 
 ## Honest bottom line
@@ -344,11 +388,14 @@ completion of that lane into full CI parity, not a greenfield feature.
   fleet-claim ledger, worker protocol, doctor, native lane set, remote device
   lanes) is completed and tested; remote/mobile/tunnel are the large
   unfinished fronts.
-- **Roadmap (Section 3):** six committed beyond-OpenCode features (LOOP,
+- **Roadmap (Section 3):** seven committed beyond-OpenCode features (LOOP,
   ULTRA mode, /CONTEXT, /MEMORY, rules-folder globs, CI/CD non-interactive
-  CLI). None has a claimed lane yet; rules-folder globs (3.5) doubles as the
-  fix for the Section 1.7 rules-injection parity gap, and CI/CD (3.6)
-  completes the verified headless core.
+  CLI, and the workflow views 3.7). None has a claimed lane yet;
+  rules-folder globs (3.5) doubles as the fix for the Section 1.7
+  rules-injection parity gap, CI/CD (3.6) completes the verified headless
+  core, and **workflow views (3.7) are the highest-visibility UX gap —
+  timeline data model is done and needs the native render, canvas and
+  workflow-creation need new lanes**.
 - This file is a raw inventory generated from repo evidence on 2026-09-18 at
   `17b15e6`. It is **not** the FEATURES.md acceptance record and must never be
   cited as acceptance evidence.
