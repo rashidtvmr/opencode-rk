@@ -16,7 +16,7 @@ use tokio::{
     net::{UnixListener, UnixStream},
     sync::Notify,
 };
-#[derive(Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DaemonError {
     AlreadyRunning(PathBuf),
     Io(String),
@@ -132,20 +132,111 @@ impl DaemonPaths {
 
 pub fn read_backend_descriptor(data_dir: impl AsRef<Path>) -> Result<Option<BackendDescriptor>> {
     let path = DaemonPaths::for_data_dir(data_dir).descriptor;
-    let bytes = match std::fs::read(&path) {
-        Ok(bytes) => bytes,
+    // RC-02: bound resources and refuse path-swap/redirect attacks BEFORE
+    // reading. symlink_metadata never follows links, so a symlink (even
+    // dangling, which plain read maps to Ok(None)) is observable here.
+    let meta = match std::fs::symlink_metadata(&path) {
+        Ok(meta) => meta,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
         Err(error) => return Err(error.into()),
     };
+    validate_descriptor_file(&meta, &path)?;
+    let bytes = std::fs::read(&path)?;
+    if bytes.len() > MAX_DESCRIPTOR_BYTES {
+        return Err(DaemonError::Descriptor(format!(
+            "descriptor too large: {} bytes (max {MAX_DESCRIPTOR_BYTES})",
+            bytes.len()
+        )));
+    }
     let descriptor: BackendDescriptor = serde_json::from_slice(&bytes)
         .map_err(|error| DaemonError::Descriptor(error.to_string()))?;
     if descriptor.schema_version != opencode_rk_contracts::WIRE_SCHEMA_VERSION
         || !pid_alive(descriptor.pid)
-        || !descriptor.http_origin.starts_with("http://127.0.0.1:")
+        || parse_loopback_port(&descriptor.http_origin).is_none()
     {
         return Ok(None);
     }
     Ok(Some(descriptor))
+}
+
+/// Byte budget for `backend.json`. Anything larger is forged/broken and is
+/// refused before (and after) the read, never buffered unbounded.
+pub const MAX_DESCRIPTOR_BYTES: usize = 8 * 1024;
+
+/// Fail-closed pre-read gate for the descriptor file: size cap, symlink
+/// refusal, and owner check against the caller's euid.
+fn validate_descriptor_file(meta: &std::fs::Metadata, path: &Path) -> Result<()> {    if meta.len() > MAX_DESCRIPTOR_BYTES as u64 {
+        return Err(DaemonError::Descriptor(format!(
+            "descriptor too large: {} bytes (max {MAX_DESCRIPTOR_BYTES})",
+            meta.len()
+        )));
+    }
+    if meta.file_type().is_symlink() {
+        return Err(DaemonError::Descriptor(
+            "descriptor is a symlink; refusing to follow".to_owned(),
+        ));
+    }
+    check_owner_uid(owner_uid(meta), current_uid()?, path)
+}
+
+/// Owner of the descriptor file (Unix UID). std-only via MetadataExt.
+#[cfg(unix)]
+fn owner_uid(meta: &std::fs::Metadata) -> u32 {
+    use std::os::unix::fs::MetadataExt;
+    meta.uid()
+}
+
+/// Effective UID of this process, parsed std-only from /proc/self/status
+/// (`Uid: real effective saved fs`). Unparseable means fail-closed Err.
+#[cfg(unix)]
+fn current_uid() -> Result<u32> {
+    let status = std::fs::read_to_string("/proc/self/status").map_err(DaemonError::from)?;
+    for line in status.lines() {
+        if let Some(rest) = line.strip_prefix("Uid:") {
+            return rest
+                .split_whitespace()
+                .nth(1)
+                .and_then(|field| field.parse::<u32>().ok())
+                .ok_or_else(|| {
+                    DaemonError::Descriptor(
+                        "cannot parse euid from /proc/self/status".to_owned(),
+                    )
+                });
+        }
+    }
+    Err(DaemonError::Descriptor(
+        "no Uid line in /proc/self/status".to_owned(),
+    ))
+}
+
+/// Pure owner comparison, unit-testable without filesystem privileges.
+fn check_owner_uid(owner: u32, caller: u32, path: &Path) -> Result<()> {
+    if owner != caller {
+        return Err(DaemonError::Descriptor(format!(
+            "descriptor {} owned by uid {owner}, caller is uid {caller}; refusing",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+/// Accept exactly `http://127.0.0.1:<port>` with numeric port 1..=65535.
+/// Rejects prefix-smuggled hosts (`...:4096.evil.com`), trailing paths,
+/// `localhost`/`0.0.0.0`/LAN IPs, `https`, missing/zero/out-of-range ports,
+/// and leading-zero padding.
+fn parse_loopback_port(origin: &str) -> Option<u16> {
+    let rest = origin.strip_prefix("http://127.0.0.1:")?;
+    if rest.is_empty() || rest.len() > 5 || !rest.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    if rest.len() > 1 && rest.starts_with('0') {
+        return None;
+    }
+    let port: u32 = rest.parse().ok()?;
+    if port == 0 || port > u16::MAX as u32 {
+        return None;
+    }
+    Some(port as u16)
 }
 
 pub fn publish_backend_descriptor(
@@ -311,6 +402,121 @@ mod tests {
         assert!(PidLock::is_held(&p));
         drop(lock);
         assert!(!PidLock::is_held(&p));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    // --- RC-02 hardened descriptor validation (frozen RED) ---
+    fn rc02_write(name: &str, bytes: &[u8]) -> PathBuf {
+        let d = test_dir(name);
+        let runtime = d.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::fs::write(runtime.join("backend.json"), bytes).unwrap();
+        d
+    }
+    fn rc02_valid_json(pid: u32, origin: &str) -> Vec<u8> {
+        format!(r#"{{"pid":{pid},"http_origin":{origin:?},"schema_version":1}}"#).into_bytes()
+    }
+    #[test]
+    fn rc02_spoofed_origin_ignored() {
+        let pid = std::process::id();
+        for origin in [
+            "http://127.0.0.1:4096.evil.example",
+            "http://127.0.0.1:4096/health",
+            "http://127.0.0.1:4096/",
+            "http://127.0.0.1:0",
+            "http://127.0.0.1:99999",
+            "http://127.0.0.1:04096",
+            "http://localhost:4096",
+            "https://127.0.0.1:4096",
+        ] {
+            let d = rc02_write("spoof", &rc02_valid_json(pid, origin));
+            let got = read_backend_descriptor(&d);
+            assert!(
+                matches!(got, Ok(None)),
+                "spoofed origin must be ignored: {origin:?} got {got:?}"
+            );
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
+    #[test]
+    fn rc02_symlink_refused() {
+        let pid = std::process::id();
+        let d = test_dir("symlink");
+        let runtime = d.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let target = runtime.join("real.json");
+        std::fs::write(&target, rc02_valid_json(pid, "http://127.0.0.1:4096")).unwrap();
+        std::os::unix::fs::symlink(&target, runtime.join("backend.json")).unwrap();
+        let got = read_backend_descriptor(&d);
+        assert!(
+            matches!(got, Err(DaemonError::Descriptor(_))),
+            "symlink descriptor must be refused pre-read, got {got:?}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn rc02_dangling_symlink_refused() {
+        let d = test_dir("dangling");
+        let runtime = d.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        std::os::unix::fs::symlink(runtime.join("nope.json"), runtime.join("backend.json"))
+            .unwrap();
+        let got = read_backend_descriptor(&d);
+        assert!(
+            matches!(got, Err(DaemonError::Descriptor(_))),
+            "dangling symlink must be refused pre-read, got {got:?}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn rc02_oversized_refused() {
+        let pid = std::process::id();
+        let mut bytes = rc02_valid_json(pid, "http://127.0.0.1:4096");
+        bytes.resize(8 * 1024 + 1, b' ');
+        let d = rc02_write("oversize", &bytes);
+        let got = read_backend_descriptor(&d);
+        assert!(
+            matches!(got, Err(DaemonError::Descriptor(_))),
+            "oversized descriptor must be refused pre-read, got {got:?}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn rc02_occupied_port_never_kills() {        use std::process::Command;
+        let mut child = Command::new("sleep").arg("30").spawn().unwrap();
+        let pid = child.id();
+        let d = rc02_write("occupied", &rc02_valid_json(pid, "http://10.0.0.9:4096"));
+        let got = read_backend_descriptor(&d);
+        assert!(
+            matches!(got, Ok(None)),
+            "forged descriptor must be ignored, got {got:?}"
+        );
+        assert!(
+            child.try_wait().unwrap().is_none(),
+            "reader must never kill the described process"
+        );
+        child.kill().unwrap();
+        let _ = child.wait();
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn rc02_foreign_owner_refused() {
+        let d = test_dir("owner");
+        assert_eq!(
+            check_owner_uid(0, 1000, &d),
+            Err(DaemonError::Descriptor(format!(
+                "descriptor {} owned by uid 0, caller is uid 1000; refusing",
+                d.display()
+            ))),
+        );
+        assert_eq!(check_owner_uid(1000, 1000, &d), Ok(()));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn rc02_current_uid_matches_filesystem() {
+        let d = test_dir("selfuid");
+        std::fs::write(d.join("probe"), b"x").unwrap();
+        let meta = std::fs::symlink_metadata(d.join("probe")).unwrap();
+        assert_eq!(owner_uid(&meta), current_uid().unwrap());
         let _ = std::fs::remove_dir_all(&d);
     }
     #[tokio::test]

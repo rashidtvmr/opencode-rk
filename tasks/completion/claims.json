@@ -200,9 +200,10 @@
       "status": "in-progress"
     },
     "RC-02": {
+      "completedNote": "GREEN 13/13 daemon + 149/149 server-lib @80b72462; RED 4fail+1invariant frozen 679d054a; log /tmp/opencode/rc02.log",
       "scratchpad": "worklog/RC-02.md",
       "session": "ses_orch_RC02",
-      "status": "in-progress"
+      "status": "completed"
     },
     "RC-03": {
       "completedNote": "GREEN: standalone rustc harness RED 3-fail then 5/5 green; in-crate service_commands 14/14 (9 existing + 5 rc03 new) via cargo test -p opencode-rk-cli --bin opencode-rk service_commands; logs /tmp/opencode/rc03-red.log + /tmp/opencode/rc03.log; zero test edits post-freeze",
