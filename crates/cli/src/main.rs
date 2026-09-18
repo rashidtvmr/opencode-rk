@@ -19,6 +19,21 @@ use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 mod tui_entry;
 use tui_entry::TuiArgs;
 mod chat;
+mod app_start;
+mod daemon_client;
+mod diagnostics;
+mod headless_engine;
+mod native_app;
+mod native_composer;
+mod native_layout;
+mod native_palette;
+mod native_status;
+mod native_transcript;
+mod onboarding;
+mod pair;
+mod service_commands;
+mod shutdown;
+mod terminal_host;
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 #[derive(Debug, Parser)]
 #[command(

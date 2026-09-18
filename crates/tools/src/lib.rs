@@ -1,6 +1,8 @@
 //! Tool abstractions and built-in tool implementations.
 #![forbid(unsafe_code)]
 
+pub mod app_extensions;
+pub mod app_services;
 pub mod auto_policy;
 pub mod auto_steps;
 pub mod backup_seq;

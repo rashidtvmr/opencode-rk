@@ -2,6 +2,8 @@
 #![forbid(unsafe_code)]
 #![allow(clippy::module_name_repetitions, clippy::missing_errors_doc)]
 
+pub mod agent_executor;
+pub mod app_delegation;
 pub mod executor;
 pub mod message;
 pub mod turn_state;

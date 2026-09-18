@@ -3,6 +3,8 @@
 pub mod acp_bridge;
 pub mod acp_files;
 pub mod app_client;
+pub mod app_protocols;
+pub mod app_runtime;
 pub mod auto_loop;
 pub mod auto_report;
 pub mod auto_window;
@@ -17,6 +19,7 @@ pub mod desktop_bridge;
 pub mod enterprise_link;
 pub mod error_translate;
 pub mod event_bus;
+pub mod event_cursor;
 pub mod event_stream;
 pub mod origin_check;
 pub mod protocol_api;
@@ -31,6 +34,7 @@ pub mod sdk_spawns;
 pub mod sync_log;
 pub mod transcript_lane;
 pub mod turn_parts;
+pub mod turn_service;
 pub mod voice_capture;
 pub mod web_artifact;
 pub mod web_assets;
@@ -45,6 +49,16 @@ pub mod web_route;
 pub mod web_suffix;
 pub mod web_tool_chooser;
 pub mod workspace_proxy;
+pub mod remote_approvals;
+pub mod remote_connector;
+pub mod remote_files;
+pub mod remote_pty;
+pub mod remote_recovery;
+pub mod remote_revocation;
+pub mod remote_sessions;
+pub mod remote_turns;
+pub mod web_turn_adapter;
+pub mod workspace_sessions;
 use axum::{
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, Query, State},

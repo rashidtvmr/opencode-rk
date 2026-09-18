@@ -47,6 +47,8 @@ pub mod ui_013;
 pub mod part_events;
 pub mod runner;
 pub mod tui_info_panel;
+pub mod app_history;
+pub mod session_membership;
 
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{

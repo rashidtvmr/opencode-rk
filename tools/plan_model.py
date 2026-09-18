@@ -43,6 +43,14 @@ PHASE_RANK = {
     "OPS": 6,
     "AUTO": 6,
     "REL": 6,
+    # Legacy reconciliation families (DISC-003 manifest / COORD-008
+    # tools/completion_reconcile.py mirrors this table as its local copy).
+    "SYNC": 2,
+    "RUN": 2,
+    "ACP": 2,
+    "WSX": 5,
+    "SDK": 5,
+    "HEAD": 1,
 }
 
 # AUTO-001/002 are M0 (reference and trusted pipeline) despite the AUTO prefix.

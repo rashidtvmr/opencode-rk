@@ -1,5 +1,7 @@
 //! Deterministic authorization and destructive-operation classification.
 #![forbid(unsafe_code)]
+pub mod app_policy;
+pub mod platform_matrix;
 pub mod clarity_guard;
 pub mod cmd_patterns;
 pub mod credentials;

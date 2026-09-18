@@ -37,6 +37,8 @@ pub mod local_credential_import;
 pub mod location_ctx;
 pub mod mcp_transport;
 pub mod metrics;
+pub mod account_setup;
+pub mod app_routing;
 pub mod model_route;
 pub mod oauth_flow;
 pub mod provider_dispatch;

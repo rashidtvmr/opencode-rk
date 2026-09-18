@@ -4,7 +4,7 @@
   "status": "implementation-required",
   "legacyPlan": "ralph.json",
   "legacyRequirements": "requirements/user-requirements.json",
-  "includes": ["tasks/completion/local.json", "tasks/completion/tui.json", "tasks/completion/parity.json", "tasks/completion/remote.json", "tasks/completion/delivery.json"],
+  "includes": ["tasks/completion/local.json", "tasks/completion/tui.json", "tasks/completion/parity.json", "tasks/completion/remote.json", "tasks/completion/delivery.json", "tasks/completion/discovered.json"],
   "requirements": {
     "COMP-001": "Installed opencode2 starts/reuses its authenticated daemon and opens the native TUI without manual serve, browser or session setup.",
     "COMP-002": "Owned Rust bridge to the pinned OpenTUI Zig renderer, with required TypeScript orchestration reimplemented in Rust and no JS runtime in native mode.",
