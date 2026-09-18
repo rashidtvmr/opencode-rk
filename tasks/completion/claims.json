@@ -1,9 +1,10 @@
 {
   "claims": {
     "APP-002": {
+      "completedNote": "GREEN 20/20 daemon_client (13 existing + 7 APP-002) rustc --test + cargo test -p opencode-rk-cli --bin opencode-rk daemon_client; zero test edits post-freeze; log /tmp/opencode/app002.log",
       "scratchpad": "worklog/APP-002.md",
       "session": "ses_orch_APP002",
-      "status": "in-progress"
+      "status": "completed"
     },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; 3 mandatory repair children RC-01/02/03; validate_repository FAIL pre-existing backlog exhaustion out of shard",

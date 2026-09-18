@@ -215,9 +215,15 @@ pub struct VersionNegotiation {
 pub enum VersionDecision {
     Compatible,
     /// Server is newer: upgrade the client. Version fields aid the message.
-    ServerNewer { client: u16, server: u16 },
+    ServerNewer {
+        client: u16,
+        server: u16,
+    },
     /// Client is newer: upgrade the server / restart a stale daemon.
-    ClientNewer { client: u16, server: u16 },
+    ClientNewer {
+        client: u16,
+        server: u16,
+    },
 }
 
 impl VersionNegotiation {
@@ -299,6 +305,63 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
+    fn parse_authed_descriptor(
+        &mut self,
+    ) -> Result<(BackendDescriptor, String), DescriptorReject> {
+        const MALFORMED: fn(String) -> DescriptorReject = DescriptorReject::Malformed;
+        self.skip_ws();
+        if !self.eat(b'{') {
+            return Err(MALFORMED("top level must be an object".into()));
+        }
+        let mut pid: Option<u32> = None;
+        let mut http_origin: Option<String> = None;
+        let mut schema_version: Option<u16> = None;
+        let mut auth_token: Option<String> = None;
+        self.skip_ws();
+        if self.eat(b'}') {
+            return Err(MALFORMED("empty object".into()));
+        }
+        loop {
+            self.skip_ws();
+            let key = self.parse_string()?;
+            self.skip_ws();
+            if !self.eat(b':') {
+                return Err(MALFORMED("expected ':' after key".into()));
+            }
+            self.skip_ws();
+            match key.as_str() {
+                "pid" => pid = Some(self.parse_u32("pid")?),
+                "schema_version" => schema_version = Some(self.parse_u16("schema_version")?),
+                "http_origin" => http_origin = Some(self.parse_string()?),
+                "auth_token" => auth_token = Some(self.parse_string()?),
+                _ => self.skip_value()?,
+            }
+            self.skip_ws();
+            if self.eat(b',') {
+                continue;
+            }
+            if self.eat(b'}') {
+                break;
+            }
+            return Err(MALFORMED("expected ',' or '}'".into()));
+        }
+        self.skip_ws();
+        if self.pos != self.bytes.len() {
+            return Err(MALFORMED("trailing bytes after object".into()));
+        }
+        Ok((
+            BackendDescriptor {
+                pid: pid.ok_or_else(|| MALFORMED("missing field 'pid'".into()))?,
+                http_origin: http_origin
+                    .ok_or_else(|| MALFORMED("missing field 'http_origin'".into()))?,
+                schema_version: schema_version
+                    .ok_or_else(|| MALFORMED("missing field 'schema_version'".into()))?,
+            },
+            auth_token
+                .ok_or_else(|| MALFORMED("missing field 'auth_token'".into()))?,
+        ))
+    }
+
     fn parse_descriptor(&mut self) -> Result<BackendDescriptor, DescriptorReject> {
         const MALFORMED: fn(String) -> DescriptorReject = DescriptorReject::Malformed;
         self.skip_ws();
@@ -491,7 +554,10 @@ impl<'a> Parser<'a> {
             b'n' => self.expect_lit("null")?,
             b'-' | b'0'..=b'9' => {
                 while self.pos < self.bytes.len()
-                    && matches!(self.bytes[self.pos], b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-')
+                    && matches!(
+                        self.bytes[self.pos],
+                        b'0'..=b'9' | b'.' | b'e' | b'E' | b'+' | b'-'
+                    )
                 {
                     self.pos += 1;
                 }
@@ -527,6 +593,179 @@ impl<'a> Parser<'a> {
         } else {
             false
         }
+    }
+}
+
+/// Length of the hex-encoded daemon bearer token. Mirrors
+/// `daemon_auth::TOKEN_HEX_LEN` (`daemon_auth.rs:33-34`): 32 random bytes,
+/// hex-encoded. Duplicated (not imported) to keep this file dependency-free.
+pub const TOKEN_HEX_LEN: usize = 64;
+
+/// Credential attached to a validated descriptor: the loopback origin plus
+/// the bearer the live daemon expects. The token never travels without a
+/// validated descriptor, and a validated descriptor without a token never
+/// authorizes contact.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AuthenticatedDescriptor {
+    pub descriptor: BackendDescriptor,
+    pub auth_token: String,
+}
+
+/// Startup role across concurrent launches: exactly one caller becomes
+/// [`StartupRole::Owner`] (starts the daemon and mints the credential), the
+/// rest become [`StartupRole::Attacher`] (reuse the published descriptor).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum StartupRole {
+    Owner,
+    Attacher,
+}
+
+/// Stop/restart credential policy. `Rotate` mints a fresh bearer on every
+/// (re)start so a restarted daemon sheds old clients; `Preserve` keeps a
+/// wellformed published bearer so existing clients reconnect safely.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CredentialPolicy {
+    Rotate,
+    Preserve,
+}
+
+/// True only for a 64-char hex bearer (mirrors
+/// `daemon_auth::from_published`: empty/short/non-hex never authenticates).
+#[must_use]
+pub fn is_wellformed_token(token: &str) -> bool {
+    token.len() == TOKEN_HEX_LEN && token.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Send-side `Authorization` header value for a validated token. The caller
+/// must pass a token from [`parse_authenticated_descriptor`]/[`discover`];
+/// this function formats, it does not validate.
+#[must_use]
+pub fn authorization_header(token: &str) -> String {
+    let mut out = String::with_capacity("Bearer ".len() + token.len());
+    out.push_str("Bearer ");
+    out.push_str(token);
+    out
+}
+
+/// Parse and fully validate credentialed descriptor bytes: shape, schema,
+/// PID liveness, loopback origin, plus a required wellformed `auth_token`.
+/// Legacy 3-field descriptors (no token) are refused: there is no
+/// credential to send, so reuse would be unauthenticated.
+pub fn parse_authenticated_descriptor(
+    bytes: &[u8],
+    is_alive: impl Fn(u32) -> bool,
+) -> Result<AuthenticatedDescriptor, DescriptorReject> {
+    if bytes.is_empty() {
+        return Err(DescriptorReject::Malformed("empty descriptor".into()));
+    }
+    if bytes.len() > MAX_DESCRIPTOR_BYTES {
+        return Err(DescriptorReject::TooLarge {
+            len: bytes.len() as u64,
+            max: MAX_DESCRIPTOR_BYTES as u64,
+        });
+    }
+    let text = std::str::from_utf8(bytes)
+        .map_err(|_| DescriptorReject::Malformed("descriptor is not UTF-8".into()))?;
+    let mut parser = Parser {
+        bytes: text.as_bytes(),
+        pos: 0,
+    };
+    let (descriptor, auth_token) = parser.parse_authed_descriptor()?;
+    if !is_wellformed_token(&auth_token) {
+        // Legacy/blank/forged bearer: nothing to send, refuse loudly. The
+        // loopback/schema/pid checks below still run so the message names
+        // the real defect, but none of them can produce contact without a
+        // wellformed credential.
+        return Err(DescriptorReject::Malformed(
+            "missing or malformed auth_token: descriptor predates bearer auth or is forged".into(),
+        ));
+    }
+    let port = validate_descriptor(&descriptor, is_alive)?;
+    let _ = port;
+    Ok(AuthenticatedDescriptor {
+        descriptor,
+        auth_token,
+    })
+}
+
+/// Full discovery pipeline: file gate first (size/symlink/owner on
+/// caller-supplied metadata), then credentialed parse. Any refusal means
+/// the caller must not contact any origin.
+pub fn discover(
+    bytes: &[u8],
+    meta: &DescriptorFileMeta,
+    is_alive: impl Fn(u32) -> bool,
+) -> Result<AuthenticatedDescriptor, DescriptorReject> {
+    validate_file_meta(meta)?;
+    parse_authenticated_descriptor(bytes, is_alive)
+}
+
+/// One-shot startup election across concurrent launches. The first caller
+/// to flip `claimed` false->true owns the start; every other caller
+/// attaches. Deterministic under contention (atomic compare-exchange).
+pub fn try_become_owner(claimed: &std::sync::atomic::AtomicBool) -> StartupRole {
+    match claimed.compare_exchange(
+        false,
+        true,
+        std::sync::atomic::Ordering::SeqCst,
+        std::sync::atomic::Ordering::SeqCst,
+    ) {
+        Ok(false) => StartupRole::Owner,
+        _ => StartupRole::Attacher,
+    }
+}
+
+/// Credential-bound lifecycle: same decision as [`decide_lifecycle`], plus
+/// the `Authorization` header value exactly when reusing (a validated
+/// descriptor AND a healthy probe). Every other outcome carries no
+/// credential: nothing is sent anywhere.
+pub fn decide_lifecycle_authed(
+    valid_descriptor: Option<AuthenticatedDescriptor>,
+    health_status: Option<u16>,
+) -> (LifecycleAction, Option<String>) {
+    let inner = valid_descriptor.as_ref().map(|authed| authed.descriptor.clone());
+    let action = decide_lifecycle(inner, health_status);
+    let credential = match &action {
+        LifecycleAction::Reuse(_) => {
+            valid_descriptor.map(|authed| authorization_header(&authed.auth_token))
+        }
+        LifecycleAction::StartNew { .. } | LifecycleAction::RefuseOccupiedPort { .. } => None,
+    };
+    (action, credential)
+}
+
+/// Actionable version error text. `Compatible` needs no error (`None`);
+/// any mismatch names both versions and the single corrective action.
+/// Never `None` on mismatch: silent retry/loop is forbidden.
+#[must_use]
+pub fn version_action(decision: &VersionDecision) -> Option<String> {
+    match *decision {
+        VersionDecision::Compatible => None,
+        VersionDecision::ServerNewer { client, server } => Some(format!(
+            "daemon schema v{server} is newer than client v{client}; \
+             upgrade the client to v{server} and retry (no automatic retry attempted)"
+        )),
+        VersionDecision::ClientNewer { client, server } => Some(format!(
+            "client schema v{client} is newer than daemon v{server}; \
+             stop the stale daemon and restart it to v{client}, then reconnect"
+        )),
+    }
+}
+
+/// Resolve the bearer for (re)start under the credential policy. `Rotate`
+/// always mints; `Preserve` keeps a wellformed published token and mints
+/// otherwise (malformed/blank/missing can never authenticate).
+pub fn resolve_credential(
+    policy: &CredentialPolicy,
+    existing: Option<&str>,
+    mint: impl Fn() -> String,
+) -> String {
+    match policy {
+        CredentialPolicy::Rotate => mint(),
+        CredentialPolicy::Preserve => match existing {
+            Some(token) if is_wellformed_token(token) => token.to_owned(),
+            _ => mint(),
+        },
     }
 }
 
@@ -740,10 +979,7 @@ mod tests {
         // Healthy probe but no valid descriptor: foreign listener.
         let action = decide_lifecycle(None, Some(200));
         assert!(
-            matches!(
-                action,
-                LifecycleAction::RefuseOccupiedPort { .. }
-            ),
+            matches!(action, LifecycleAction::RefuseOccupiedPort { .. }),
             "occupied port must be a safe error, got: {action:?}"
         );
         // Exhaustive match proves no kill/signal path exists in the decision.
@@ -760,7 +996,10 @@ mod tests {
     #[test]
     fn only_http_200_counts_as_healthy() {
         for status in [0, 201, 301, 400, 404, 500] {
-            assert!(!health_ok(status), "status {status} must not count as daemon");
+            assert!(
+                !health_ok(status),
+                "status {status} must not count as daemon"
+            );
             assert!(
                 matches!(
                     decide_lifecycle(None, Some(status)),
@@ -804,5 +1043,174 @@ mod tests {
         .into_bytes();
         let descriptor = parse_backend_descriptor(&bytes).unwrap();
         assert_eq!(validate_descriptor(&descriptor, alive).unwrap(), 4096);
+    }
+
+    // --- APP-002 RED: credential-bound discovery/startup/recovery (frozen) ---
+
+    fn hex_token(seed: u8) -> String {
+        let mut out = String::with_capacity(64);
+        for i in 0..64u8 {
+            out.push(char::from_digit(u32::from((seed.wrapping_add(i)) % 16), 16).unwrap());
+        }
+        out
+    }
+
+    fn authed_json(pid: u32, origin: &str, token: &str) -> Vec<u8> {
+        format!(
+            r#"{{"pid":{pid},"http_origin":{origin:?},"schema_version":{EXPECTED_SCHEMA_VERSION},"auth_token":{token:?}}}"#
+        )
+        .into_bytes()
+    }
+
+    fn authed(pid: u32) -> AuthenticatedDescriptor {
+        parse_authenticated_descriptor(&authed_json(pid, "http://127.0.0.1:4096", &hex_token(1)), alive)
+            .expect("fixture must validate")
+    }
+
+    #[test]
+    fn app002_t01_twenty_concurrent_launches_one_owner() {
+        use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+        let claimed = Arc::new(AtomicBool::new(false));
+        let mut handles = Vec::new();
+        for _ in 0..20 {
+            let flag = Arc::clone(&claimed);
+            handles.push(std::thread::spawn(move || try_become_owner(&flag)));
+        }
+        let mut owners = 0;
+        let mut attachers = 0;
+        for handle in handles {
+            match handle.join().expect("worker panicked") {
+                StartupRole::Owner => owners += 1,
+                StartupRole::Attacher => attachers += 1,
+            }
+        }
+        assert_eq!(owners, 1, "exactly one launch must own the start");
+        assert_eq!(attachers, 19, "the rest must attach");
+        assert!(claimed.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn app002_t02_forged_stale_legacy_descriptor_never_authorizes() {
+        for bytes in [
+            b"not json".to_vec(),
+            vec![],
+            authed_json(4242, "http://127.0.0.1:4096", ""),
+            authed_json(4242, "http://127.0.0.1:4096", "short"),
+            authed_json(4242, "http://127.0.0.1:4096", &"zz".repeat(32)),
+            authed_json(4242, "http://localhost:4096", &hex_token(2)),
+            authed_json(0, "http://127.0.0.1:4096", &hex_token(3)),
+            authed_json(9999, "http://127.0.0.1:4096", &hex_token(4)),
+            format!(
+                r#"{{"pid":4242,"http_origin":"http://127.0.0.1:4096","schema_version":999,"auth_token":{:?}}}"#,
+                hex_token(5)
+            )
+            .into_bytes(),
+            format!(
+                r#"{{"pid":4242,"http_origin":"http://127.0.0.1:4096","schema_version":{EXPECTED_SCHEMA_VERSION}}}"#
+            )
+            .into_bytes(),
+        ] {
+            let parsed = parse_authenticated_descriptor(&bytes, alive);
+            assert!(parsed.is_err(), "bytes must not authorize: {bytes:?}");
+            assert!(
+                decide_lifecycle_authed(parsed.ok(), Some(200)).1.is_none(),
+                "refused descriptor must yield no credential to send"
+            );
+        }
+        assert!(!is_wellformed_token(""));
+        assert!(!is_wellformed_token("short"));
+        assert!(!is_wellformed_token(&"zz".repeat(32)));
+        assert!(is_wellformed_token(&hex_token(7)));
+    }
+
+    #[test]
+    fn app002_t03_file_gate_runs_before_credential() {
+        let bytes = authed_json(4242, "http://127.0.0.1:4096", &hex_token(1));
+        for meta in [
+            DescriptorFileMeta { is_symlink: true, owner_uid: 1000, caller_uid: 1000, len_bytes: 64 },
+            DescriptorFileMeta { is_symlink: false, owner_uid: 0, caller_uid: 1000, len_bytes: 64 },
+            DescriptorFileMeta {
+                is_symlink: false,
+                owner_uid: 1000,
+                caller_uid: 1000,
+                len_bytes: (MAX_DESCRIPTOR_BYTES + 1) as u64,
+            },
+        ] {
+            assert!(discover(&bytes, &meta, alive).is_err(), "bad meta must refuse: {meta:?}");
+        }
+        let own = DescriptorFileMeta { is_symlink: false, owner_uid: 1000, caller_uid: 1000, len_bytes: 200 };
+        let found = discover(&bytes, &own, alive).expect("own+valid must discover");
+        assert_eq!(found.auth_token, hex_token(1));
+    }
+
+    #[test]
+    fn app002_t04_occupied_port_never_kills_never_sends() {
+        let (action, credential) = decide_lifecycle_authed(None, Some(200));
+        assert!(
+            matches!(action, LifecycleAction::RefuseOccupiedPort { .. }),
+            "occupied port must be a safe error, got: {action:?}"
+        );
+        assert_eq!(credential, None, "foreign listener must receive no credential");
+        match &action {
+            LifecycleAction::Reuse(_) | LifecycleAction::StartNew { .. } => {
+                panic!("occupied port must not reuse or start over a foreign listener")
+            }
+            LifecycleAction::RefuseOccupiedPort { detail } => assert!(detail.contains("refusing")),
+        }
+    }
+
+    #[test]
+    fn app002_t05_version_mismatch_actionable_never_silent() {
+        assert_eq!(
+            version_action(&VersionDecision::Compatible),
+            None,
+            "compatible needs no error"
+        );
+        for decision in [
+            VersionDecision::ServerNewer { client: 1, server: 2 },
+            VersionDecision::ClientNewer { client: 3, server: 1 },
+        ] {
+            let text = version_action(&decision).expect("mismatch must explain itself");
+            match decision {
+                VersionDecision::ServerNewer { client, server } => {
+                    assert!(text.contains(&client.to_string()) && text.contains(&server.to_string()));
+                    assert!(text.contains("upgrade"), "server-newer must say to upgrade: {text}");
+                }
+                VersionDecision::ClientNewer { client, server } => {
+                    assert!(text.contains(&client.to_string()) && text.contains(&server.to_string()));
+                    assert!(text.contains("restart") || text.contains("upgrade"));
+                }
+                VersionDecision::Compatible => unreachable!(),
+            }
+        }
+    }
+
+    #[test]
+    fn app002_t06_credential_policy_stop_restart() {
+        assert_eq!(resolve_credential(&CredentialPolicy::Rotate, Some(&hex_token(1)), || hex_token(9)), hex_token(9));
+        assert_eq!(
+            resolve_credential(&CredentialPolicy::Preserve, Some(&hex_token(1)), || hex_token(9)),
+            hex_token(1),
+            "preserve keeps a wellformed bearer so clients reconnect"
+        );
+        for existing in [None, Some(""), Some("short"), Some(&"zz".repeat(32))] {
+            assert_eq!(
+                resolve_credential(&CredentialPolicy::Preserve, existing, || hex_token(9)),
+                hex_token(9),
+                "preserve with malformed/missing bearer must mint, never authenticate blank"
+            );
+        }
+    }
+
+    #[test]
+    fn app002_t07_bearer_send_side_exact() {
+        let token = hex_token(1);
+        assert_eq!(authorization_header(&token), format!("Bearer {token}"));
+        let (action, credential) = decide_lifecycle_authed(Some(authed(4242)), Some(200));
+        assert!(matches!(action, LifecycleAction::Reuse(_)));
+        assert_eq!(credential, Some(format!("Bearer {token}")));
+        let (_, dead) = decide_lifecycle_authed(Some(authed(4242)), Some(500));
+        assert_eq!(dead, None, "dead daemon gets no credential");
+        assert_eq!(decide_lifecycle_authed(None, None).1, None);
     }
 }
