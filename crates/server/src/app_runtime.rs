@@ -28,13 +28,16 @@ use std::{
     },
 };
 
-use opencode_rk_contracts::{AgentId, SessionId};
+use opencode_rk_contracts::{
+    AgentId, MessageRecord, MessageRole, SessionId, MAX_INLINE_PAYLOAD_BYTES,
+};
 use opencode_rk_providers::registry::ProviderRegistry;
 use opencode_rk_sessions::SessionService;
 use opencode_rk_tools::registry::ToolRegistry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::{clients::ClientId, event_bus::EventBus};
+use crate::{clients::ClientId, event_bus::EventBus, turn_service::CancelToken};
+use crate::event_bus::ServerEvent;
 
 /// Concurrent turns admitted by the engine. Matches `TURN_PERMITS` in
 /// `crates/server/src/lib.rs:73` (`Semaphore::const_new(2)`).
@@ -432,9 +435,111 @@ pub fn event_bus() -> EventBus {
 /// Turn permits shared by every client path (HTTP turns, streaming turns,
 /// headless runs). Cap equals [`MAX_CONCURRENT_TURNS`]; acquisition is
 /// synchronous and never blocks a Tokio worker.
+///
+/// [`TurnPermits::acquire`] hands out [`TurnLease`] values: an owned permit
+/// plus a cooperative [`CancelToken`]. Dropping the lease frees the permit;
+/// firing [`TurnLease::cancel`] stops drivers dispatching new work.
 #[derive(Clone, Debug)]
 pub struct TurnPermits {
     permits: Arc<Semaphore>,
+}
+
+/// One admitted turn: an owned semaphore permit plus a cooperative
+/// cancellation token. Dropping the lease frees the permit (reclaim); firing
+/// [`TurnLease::cancel`] tells drivers to stop dispatching new work. Cancel is
+/// idempotent; a cancelled lease makes [`EngineHandles::run_prompt_turn`]
+/// settle nothing and return [`TurnError::Cancelled`].
+pub struct TurnLease {
+    /// Held while the turn runs; released on drop.
+    pub permit: Option<OwnedSemaphorePermit>,
+    /// Cooperative token shared with drivers.
+    pub token: CancelToken,
+}
+
+impl TurnLease {
+    fn new(permit: OwnedSemaphorePermit) -> Self {
+        Self {
+            permit: Some(permit),
+            token: CancelToken::new(),
+        }
+    }
+
+    /// Fire the cooperative token. Idempotent; also fires the driver's clone.
+    pub fn cancel(&self) {
+        self.token.cancel();
+    }
+
+    /// Whether cancellation was requested.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        self.token.is_cancelled()
+    }
+
+    /// Reclaim: fire the token and release the permit early.
+    pub fn reclaim(mut self) {
+        self.token.cancel();
+        self.permit.take();
+    }
+}
+
+impl fmt::Debug for TurnLease {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TurnLease")
+            .field("permit_held", &self.permit.is_some())
+            .field("cancelled", &self.token.is_cancelled())
+            .finish()
+    }
+}
+
+/// Turn-level failures for [`EngineHandles`] behavior. Deny is NOT an error:
+/// [`EngineHandles::dispatch_tool`] returns `Ok(denied)` with a durable `Tool`
+/// message, so denials persist as data. These variants fail closed and mutate
+/// nothing: invalid input before any write, cancel before settle, unknown
+/// tool before any spawn, store errors surfacing the durable write failure.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TurnError {
+    /// Turn text is empty or over [`MAX_INLINE_PAYLOAD_BYTES`].
+    InvalidPrompt,
+    /// Lease was cancelled before the turn settled; nothing persisted.
+    Cancelled,
+    /// Tool has no registered entry in the engine snapshot.
+    UnknownTool(String),
+    /// Durable store rejected the write.
+    Store(String),
+}
+
+impl std::fmt::Display for TurnError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidPrompt => write!(f, "turn text is empty or too large"),
+            Self::Cancelled => write!(f, "turn cancelled before it settled"),
+            Self::UnknownTool(name) => write!(f, "unknown tool: {name}"),
+            Self::Store(detail) => write!(f, "turn store failed: {detail}"),
+        }
+    }
+}
+
+impl std::error::Error for TurnError {}
+
+/// Settled turn receipt: one shared turn ID observed by every client instead
+/// of duplicate private runtimes.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TurnReceipt {
+    pub session: SessionId,
+    pub turn: AgentId,
+}
+
+/// One executed (or denied) tool request: durable outcome, never an error
+/// string alone. Denials persist a [`MessageRole::Tool`] message and emit a
+/// [`ServerEvent::ToolExecuted`] event so the failure is durable; they spawn
+/// nothing and touch no files.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolOutcome {
+    pub session: SessionId,
+    pub turn: AgentId,
+    pub name: String,
+    pub output: String,
+    pub allowed: bool,
 }
 
 impl TurnPermits {
@@ -452,6 +557,14 @@ impl TurnPermits {
         Arc::clone(&self.permits)
             .try_acquire_owned()
             .map_err(|_| EngineError::NoTurnPermit)
+    }
+
+    /// Admit one turn: take a permit and bind a fresh [`CancelToken`].
+    /// Cancellation owns no task or process itself; drivers poll
+    /// [`TurnLease::is_cancelled`] and the engine reclaims the permit on
+    /// [`TurnLease`] drop.
+    pub fn acquire(&self) -> Result<TurnLease, EngineError> {
+        self.try_acquire().map(TurnLease::new)
     }
 
     #[must_use]
@@ -564,6 +677,123 @@ impl EngineHandles {
     #[must_use]
     pub const fn turn_history_limit(&self) -> usize {
         MAX_TURN_HISTORY
+    }
+
+    /// Check one tool call against the engine policy before any process
+    /// starts or file is touched. Deny (or unknown tool) returns
+    /// `Ok(denied)` with a durable `Tool` message persisted and a
+    /// [`ServerEvent::ToolExecuted`] event emitted; the denial spawns
+    /// nothing. The caller supplies `execute` so tests inject an in-memory
+    /// effect while production passes the sandboxed `ToolExecutor` call.
+    pub async fn dispatch_tool<F, Fut>(
+        &self,
+        session: SessionId,
+        turn: AgentId,
+        name: &str,
+        execute: F,
+    ) -> Result<ToolOutcome, TurnError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: std::future::Future<Output = ToolOutcome>,
+    {
+        let known = self.tools.iter().any(|tool| tool.id == name);
+        if !known {
+            return Err(TurnError::UnknownTool(name.to_owned()));
+        }
+        if self.policy.decision(name) == PolicyDecision::Deny {
+            let outcome = ToolOutcome {
+                session,
+                turn,
+                name: name.to_owned(),
+                output: format!("denied by engine policy: {name}"),
+                allowed: false,
+            };
+            self.persist_tool_outcome(&outcome).await?;
+            self.events
+                .publish(ServerEvent::ToolExecuted {
+                    name: name.to_owned(),
+                    duration_ms: 0,
+                })
+                .ok();
+            return Ok(outcome);
+        }
+        let mut outcome = execute().await;
+        outcome.session = session;
+        outcome.turn = turn;
+        outcome.name = name.to_owned();
+        outcome.allowed = true;
+        outcome.output = crate::agent_loop::truncate_tool_output(&outcome.output);
+        self.persist_tool_outcome(&outcome).await?;
+        self.events
+            .publish(ServerEvent::ToolExecuted {
+                name: name.to_owned(),
+                duration_ms: 0,
+            })
+            .ok();
+        Ok(outcome)
+    }
+
+    async fn persist_tool_outcome(&self, outcome: &ToolOutcome) -> Result<(), TurnError> {
+        self.sessions
+            .append_text(
+                outcome.session,
+                MessageRole::Tool,
+                format!("[{}] {}", outcome.name, outcome.output),
+            )
+            .await
+            .map_err(|error| TurnError::Store(error.to_string()))?;
+        Ok(())
+    }
+
+    /// Run one prompt turn on the shared engine: persist the user message,
+    /// invoke `provider` (an injected async closure so tests stay
+    /// deterministic; production passes an `OpenAiResponsesClient` call),
+    /// persist the settled assistant turn, and emit
+    /// [`ServerEvent::MessageAppended`]. A cancelled lease settles nothing
+    /// and returns [`EngineError::Cancelled`]. History is windowed to
+    /// [`MAX_TURN_HISTORY`]; empty/oversize prompts fail closed with
+    /// [`EngineError::InvalidPrompt`] before any write.
+    pub async fn run_prompt_turn<F, Fut>(
+        &self,
+        session: SessionId,
+        lease: &TurnLease,
+        prompt: &str,
+        provider: F,
+    ) -> Result<TurnReceipt, TurnError>
+    where
+        F: FnOnce(Vec<MessageRecord>) -> Fut,
+        Fut: std::future::Future<Output = Result<String, String>>,
+    {
+        if prompt.is_empty() || prompt.len() > MAX_INLINE_PAYLOAD_BYTES {
+            return Err(TurnError::InvalidPrompt);
+        }
+        if lease.is_cancelled() {
+            return Err(TurnError::Cancelled);
+        }
+        let history = self
+            .sessions
+            .messages(session, MAX_TURN_HISTORY)
+            .await
+            .map_err(|error| TurnError::Store(error.to_string()))?;
+        self.sessions
+            .append_text(session, MessageRole::User, prompt)
+            .await
+            .map_err(|error| TurnError::Store(error.to_string()))?;
+        let assistant_text = provider(history).await.map_err(TurnError::Store)?;
+        if lease.is_cancelled() {
+            return Err(TurnError::Cancelled);
+        }
+        self.sessions
+            .append_text(session, MessageRole::Assistant, assistant_text)
+            .await
+            .map_err(|error| TurnError::Store(error.to_string()))?;
+        self.events
+            .publish(ServerEvent::MessageAppended { session, seq: 0 })
+            .ok();
+        Ok(TurnReceipt {
+            session,
+            turn: AgentId::new(),
+        })
     }
 }
 
@@ -784,5 +1014,164 @@ mod tests {
         assert_eq!(permits.available_permits(), 1);
         let _third = permits.try_acquire().expect("permit after release");
         drop(second);
+    }
+
+    // ---- APP-003 remainder RED probes (frozen; must FAIL pre-implementation) ----
+
+    fn red_engine() -> EngineHandles {
+        let dir = tempfile::tempdir().expect("disposable fixture dir");
+        let blob_root = dir.path().join("blobs");
+        std::mem::forget(dir);
+        let storage = Arc::new(
+            opencode_rk_storage::Storage::open_in_memory(blob_root).expect("in-memory store"),
+        );
+        let sessions = SessionService::new(storage);
+        EngineHandles::new(
+            ProviderRegistry::new(),
+            sessions.clone(),
+            ToolRegistry::new(),
+            EnginePolicy::default_deny(),
+            sessions,
+            event_bus(),
+        )
+    }
+
+    async fn red_session(engine: &EngineHandles) -> SessionId {
+        engine
+            .sessions
+            .create("red")
+            .await
+            .expect("fixture session")
+            .id
+    }
+
+    #[tokio::test]
+    async fn red_prompt_turn_persists_settled_turn() {
+        let engine = red_engine();
+        let session = red_session(&engine).await;
+        let lease = engine.turn_permits.acquire().expect("permit");
+        let receipt = engine
+            .run_prompt_turn(session, &lease, "hello engine", |_history| async {
+                Ok::<_, String>("settled answer".to_owned())
+            })
+            .await
+            .expect("prompt turn settles");
+        assert_eq!(receipt.session, session);
+        let transcript = engine
+            .sessions
+            .messages(session, MAX_TURN_HISTORY)
+            .await
+            .expect("transcript");
+        assert_eq!(transcript.len(), 2);
+        assert_eq!(transcript[0].role, MessageRole::User);
+        assert_eq!(transcript[1].role, MessageRole::Assistant);
+    }
+
+    #[tokio::test]
+    async fn red_allowed_tool_executes_via_policy() {
+        // RED probe: `read` is a registered builtin but `default_deny`
+        // policy denies it, so dispatch must return a durable denied
+        // outcome WITHOUT invoking the effect closure. GREEN allowlists
+        // `read`, reruns, and asserts the executed output persisted.
+        let engine = red_engine();
+        let session = red_session(&engine).await;
+        let outcome = engine
+            .dispatch_tool(session, AgentId::new(), "read", || async {
+                panic!("denied tool must not execute its effect");
+                #[allow(unreachable_code)]
+                ToolOutcome {
+                    session,
+                    turn: AgentId::new(),
+                    name: String::new(),
+                    output: "hi".to_owned(),
+                    allowed: false,
+                }
+            })
+            .await
+            .expect("deny is durable outcome, not error");
+        assert!(!outcome.allowed);
+        let transcript = engine
+            .sessions
+            .messages(session, MAX_TURN_HISTORY)
+            .await
+            .expect("transcript");
+        assert!(transcript.iter().any(|m| m.role == MessageRole::Tool));
+    }
+
+    #[tokio::test]
+    async fn red_denied_tool_no_side_effects_durable_failure() {
+        let mut engine = red_engine();
+        engine.policy.allow_tool("echo").expect("allow echo");
+        engine.policy.deny_tool("bash").expect("deny bash");
+        let session = red_session(&engine).await;
+        let probe = tempfile::tempdir().expect("probe dir");
+        let marker = probe.path().join("must-not-exist");
+        let outcome = engine
+            .dispatch_tool(session, AgentId::new(), "bash", || async {
+                std::fs::write(&marker, b"side effect").ok();
+                ToolOutcome {
+                    session,
+                    turn: AgentId::new(),
+                    name: String::new(),
+                    output: "spawned".to_owned(),
+                    allowed: true,
+                }
+            })
+            .await
+            .expect("deny is durable outcome, not error");
+        assert!(!outcome.allowed);
+        assert!(!marker.exists(), "denied tool must not touch the filesystem");
+        let transcript = engine
+            .sessions
+            .messages(session, MAX_TURN_HISTORY)
+            .await
+            .expect("transcript");
+        assert!(transcript.iter().any(|m| m.role == MessageRole::Tool));
+    }
+
+    #[tokio::test]
+    async fn red_cancel_reclaims_permit_and_fires_token() {
+        let engine = red_engine();
+        let lease = engine.turn_permits.acquire().expect("permit");
+        assert_eq!(engine.turn_permits.available_permits(), MAX_CONCURRENT_TURNS - 1);
+        lease.cancel();
+        assert!(lease.is_cancelled());
+        let session = red_session(&engine).await;
+        let err = engine
+            .run_prompt_turn(session, &lease, "late prompt", |_history| async {
+                Ok::<_, String>("never".to_owned())
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err, TurnError::Cancelled);
+        drop(lease);
+        assert_eq!(
+            engine.turn_permits.available_permits(),
+            MAX_CONCURRENT_TURNS
+        );
+    }
+
+    #[tokio::test]
+    async fn red_two_clients_observe_settled_turn() {
+        let engine = red_engine();
+        let session = red_session(&engine).await;
+        let lease = engine.turn_permits.acquire().expect("permit");
+        let receipt = engine
+            .run_prompt_turn(session, &lease, "shared?", |_history| async {
+                Ok::<_, String>("shared answer".to_owned())
+            })
+            .await
+            .expect("prompt turn settles");
+        let first = TurnObservation {
+            client: ClientId(1),
+            session,
+            turn: receipt.turn,
+        };
+        let second = TurnObservation {
+            client: ClientId(2),
+            session,
+            turn: receipt.turn,
+        };
+        assert_eq!(assert_same_turn(&first, &second).expect("shared turn"), receipt.turn);
     }
 }

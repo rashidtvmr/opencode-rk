@@ -7,9 +7,10 @@
       "status": "completed"
     },
     "APP-003": {
+      "completedNote": "GREEN 15/15 app_runtime (10 existing + 5 APP-003 probes) + 159/159 server lib; zero test edits post-freeze; log /tmp/opencode/app003.log",
       "scratchpad": "worklog/APP-003.md",
       "session": "ses_orch_APP003",
-      "status": "in-progress"
+      "status": "completed"
     },
     "APP-009": {
       "completedNote": "GREEN 9/9 shutdown (6 existing + 3 APP-009: sigint_drop_restores, sigterm_drop_restores_after_suspend, repeated_arm_drop_cycles_restore_exactly_once); frozen sha256 08eb082d; zero test edits post-add; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin opencode-rk shutdown; log /tmp/opencode/app009.log",
