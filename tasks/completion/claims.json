@@ -1,5 +1,11 @@
 {
   "claims": {
+    "APP-001": {
+      "completedNote": "GREEN 13/13 app_start (8 existing + 5 APP-001 T1-T05); RED sha256 6f41ab6f, GREEN sha256 38454ed3; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin opencode-rk app_start; log /tmp/opencode/app001.log",
+      "scratchpad": "worklog/APP-001.md",
+      "session": "ses_orch_APP001",
+      "status": "completed"
+    },
     "APP-002": {
       "completedNote": "GREEN 20/20 daemon_client (13 existing + 7 APP-002) rustc --test + cargo test -p opencode-rk-cli --bin opencode-rk daemon_client; zero test edits post-freeze; log /tmp/opencode/app002.log",
       "scratchpad": "worklog/APP-002.md",
