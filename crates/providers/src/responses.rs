@@ -41,6 +41,166 @@ impl ResponsesInput {
     }
 }
 
+/// One transcript item in a Responses request.
+///
+/// Text items serialize exactly like the legacy [`ResponsesInput`]
+/// (`{role, content}`) so existing turns keep an identical wire shape; tool
+/// items use the Responses function-call format.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ResponsesItem {
+    Text {
+        role: ResponsesRole,
+        content: String,
+    },
+    FunctionCall {
+        call_id: String,
+        name: String,
+        arguments: String,
+    },
+    FunctionCallOutput {
+        call_id: String,
+        output: String,
+    },
+}
+
+impl From<ResponsesInput> for ResponsesItem {
+    fn from(value: ResponsesInput) -> Self {
+        ResponsesItem::Text {
+            role: value.role,
+            content: value.content,
+        }
+    }
+}
+
+impl Serialize for ResponsesItem {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        match self {
+            ResponsesItem::Text { role, content } => {
+                let mut map = serializer.serialize_map(Some(2))?;
+                map.serialize_entry("role", role)?;
+                map.serialize_entry("content", content)?;
+                map.end()
+            }
+            ResponsesItem::FunctionCall {
+                call_id,
+                name,
+                arguments,
+            } => {
+                let mut map = serializer.serialize_map(Some(4))?;
+                map.serialize_entry("type", "function_call")?;
+                map.serialize_entry("call_id", call_id)?;
+                map.serialize_entry("name", name)?;
+                map.serialize_entry("arguments", arguments)?;
+                map.end()
+            }
+            ResponsesItem::FunctionCallOutput { call_id, output } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("type", "function_call_output")?;
+                map.serialize_entry("call_id", call_id)?;
+                map.serialize_entry("output", output)?;
+                map.end()
+            }
+        }
+    }
+}
+
+/// One `function` tool advertised to the provider.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResponsesTool {
+    pub name: String,
+    pub description: String,
+    pub parameters: serde_json::Value,
+}
+
+impl ResponsesTool {
+    #[must_use]
+    pub fn function(
+        name: impl Into<String>,
+        description: impl Into<String>,
+        parameters: serde_json::Value,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            description: description.into(),
+            parameters,
+        }
+    }
+}
+
+impl Serialize for ResponsesTool {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        use serde::ser::SerializeMap;
+        let mut map = serializer.serialize_map(Some(4))?;
+        map.serialize_entry("type", "function")?;
+        map.serialize_entry("name", &self.name)?;
+        map.serialize_entry("description", &self.description)?;
+        map.serialize_entry("parameters", &self.parameters)?;
+        map.end()
+    }
+}
+
+/// Build a Responses request payload from typed transcript items.
+///
+/// Shared by the legacy text clients and the agentic tool loop so request
+/// shapes cannot drift. `tools` is omitted entirely when empty; `stream` is
+/// omitted when false (matching the historical payloads). Callers add
+/// client-specific extras (e.g. `max_output_tokens`) afterwards.
+pub fn responses_request_payload<I: Serialize>(
+    model: &str,
+    reasoning_effort: &str,
+    input: &[I],
+    tools: &[ResponsesTool],
+    stream: bool,
+) -> Result<serde_json::Value, ResponsesError> {
+    if model.trim().is_empty() {
+        return Err(ResponsesError::EmptyModel);
+    }
+    if !matches!(
+        reasoning_effort,
+        "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+    ) {
+        return Err(ResponsesError::UnsupportedReasoningEffort(
+            reasoning_effort.to_owned(),
+        ));
+    }
+    if input.len() > MAX_RESPONSES_INPUT_MESSAGES {
+        return Err(ResponsesError::TooManyMessages {
+            max: MAX_RESPONSES_INPUT_MESSAGES,
+            actual: input.len(),
+        });
+    }
+    let bytes = input
+        .iter()
+        .try_fold(0_usize, |total, item| {
+            let len = serde_json::to_vec(item)
+                .map(|value| value.len())
+                .unwrap_or(usize::MAX);
+            total.checked_add(len)
+        })
+        .unwrap_or(usize::MAX);
+    if bytes > MAX_RESPONSES_INPUT_BYTES {
+        return Err(ResponsesError::InputTooLarge {
+            max: MAX_RESPONSES_INPUT_BYTES,
+            actual: bytes,
+        });
+    }
+
+    let mut payload = serde_json::json!({
+        "model": model,
+        "input": input,
+        "reasoning": { "effort": reasoning_effort },
+    });
+    if !tools.is_empty() {
+        payload["tools"] = serde_json::to_value(tools)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+    }
+    if stream {
+        payload["stream"] = serde_json::Value::Bool(true);
+    }
+    Ok(payload)
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ResponsesError {
     #[error("provider configuration is invalid: {0}")]
@@ -319,14 +479,9 @@ impl OpenAiResponsesClient {
         reasoning_effort: &str,
         input: &[ResponsesInput],
     ) -> Result<String, ResponsesError> {
-        validate_request(model, reasoning_effort, input)?;
-
-        let payload = json!({
-            "model": model,
-            "input": input,
-            "reasoning": { "effort": reasoning_effort },
-            "max_output_tokens": self.max_output_tokens,
-        });
+        let items: Vec<ResponsesItem> = input.iter().cloned().map(Into::into).collect();
+        let mut payload = responses_request_payload(model, reasoning_effort, &items, &[], false)?;
+        payload["max_output_tokens"] = json!(self.max_output_tokens);
         let mut response = self
             .http
             .post(format!("{}/responses", self.base_url))
@@ -356,15 +511,12 @@ impl OpenAiResponsesClient {
         reasoning_effort: &str,
         input: &[ResponsesInput],
     ) -> Result<OpenAiResponsesStream, ResponsesError> {
-        validate_request(model, reasoning_effort, input)?;
-
-        let payload = json!({
-            "model": model,
-            "input": input,
-            "reasoning": { "effort": reasoning_effort, "summary": "auto" },
-            "max_output_tokens": self.max_output_tokens,
-            "stream": true,
-        });
+        let items: Vec<ResponsesItem> = input.iter().cloned().map(Into::into).collect();
+        let mut payload =
+            responses_request_payload(model, reasoning_effort, &items, &[], true)
+                .map_err(|error| error)?;
+        payload["max_output_tokens"] = json!(self.max_output_tokens);
+        payload["reasoning"]["summary"] = json!("auto");
         let mut response = self
             .http
             .post(format!("{}/responses", self.base_url))
@@ -493,43 +645,6 @@ fn take_sse_event(buffer: &mut Vec<u8>) -> Option<Vec<u8>> {
     let event = buffer[..index].to_vec();
     buffer.drain(..index + delimiter_len);
     Some(event)
-}
-
-fn validate_request(
-    model: &str,
-    reasoning_effort: &str,
-    input: &[ResponsesInput],
-) -> Result<(), ResponsesError> {
-    if model.trim().is_empty() {
-        return Err(ResponsesError::EmptyModel);
-    }
-    if !matches!(
-        reasoning_effort,
-        "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
-    ) {
-        return Err(ResponsesError::UnsupportedReasoningEffort(
-            reasoning_effort.to_owned(),
-        ));
-    }
-    if input.len() > MAX_RESPONSES_INPUT_MESSAGES {
-        return Err(ResponsesError::TooManyMessages {
-            max: MAX_RESPONSES_INPUT_MESSAGES,
-            actual: input.len(),
-        });
-    }
-    let bytes = input
-        .iter()
-        .try_fold(0_usize, |total, message| {
-            total.checked_add(message.content.len())
-        })
-        .unwrap_or(usize::MAX);
-    if bytes > MAX_RESPONSES_INPUT_BYTES {
-        return Err(ResponsesError::InputTooLarge {
-            max: MAX_RESPONSES_INPUT_BYTES,
-            actual: bytes,
-        });
-    }
-    Ok(())
 }
 
 async fn read_bounded_body(response: &mut reqwest::Response) -> Result<Vec<u8>, ResponsesError> {
