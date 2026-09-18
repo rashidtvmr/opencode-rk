@@ -512,9 +512,20 @@ impl OpenAiResponsesClient {
         input: &[ResponsesInput],
     ) -> Result<OpenAiResponsesStream, ResponsesError> {
         let items: Vec<ResponsesItem> = input.iter().cloned().map(Into::into).collect();
-        let mut payload =
-            responses_request_payload(model, reasoning_effort, &items, &[], true)
-                .map_err(|error| error)?;
+        self.stream_with_tools(model, reasoning_effort, &items, &[])
+            .await
+    }
+
+    /// Stream a turn that may advertise tools and carry typed transcript
+    /// items (function calls and their outputs from earlier rounds).
+    pub async fn stream_with_tools(
+        &self,
+        model: &str,
+        reasoning_effort: &str,
+        items: &[ResponsesItem],
+        tools: &[ResponsesTool],
+    ) -> Result<OpenAiResponsesStream, ResponsesError> {
+        let mut payload = responses_request_payload(model, reasoning_effort, items, tools, true)?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
         payload["reasoning"]["summary"] = json!("auto");
         let mut response = self
