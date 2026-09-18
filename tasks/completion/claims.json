@@ -222,10 +222,10 @@
     "LANE-CONTEXT-CMD": {
       "blockedNote": "",
       "claim": "/CONTEXT and /MEMORY command surfaces over server snapshots",
-      "completedNote": "",
+      "completedNote": "GREEN 11/11 context_report standalone rustc --test (T01-T06 + 5 edge); zero test edits; sha256 of impl: deterministic; cmd: rustc --edition 2021 --test crates/server/src/context_report.rs; frozen tests pass",
       "scratchpad": "worklog/LANE-CONTEXT-CMD.md",
       "session": "ses_worker_ctx",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-RULES": {
       "blockedNote": "",
@@ -236,9 +236,10 @@
       "status": "completed"
     },
     "LANE-THEMES": {
+      "completedNote": "GREEN 16/16 rustc --edition 2021 --test src/native_theme.rs (T01-T06: hex parse, registry bounds, apply completeness, unknown error, memory regression, builtins present); zero test edits post-freeze; zero warnings",
       "scratchpad": "worklog/LANE-THEMES.md",
       "session": "ses_worker_themes",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-WF-TIMELINE": {
       "blockedNote": "",
