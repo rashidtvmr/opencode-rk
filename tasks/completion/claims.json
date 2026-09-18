@@ -219,6 +219,35 @@
       "session": "ses_orch_DISC116b",
       "status": "in-progress"
     },
+    "LANE-CONTEXT-CMD": {
+      "blockedNote": "",
+      "claim": "/CONTEXT and /MEMORY command surfaces over server snapshots",
+      "completedNote": "",
+      "scratchpad": "worklog/LANE-CONTEXT-CMD.md",
+      "session": "ses_worker_ctx",
+      "status": "in-progress"
+    },
+    "LANE-RULES": {
+      "blockedNote": "",
+      "claim": "AGENTS.md/rules auto-load into system prompt (closes 1.7 parity gap + enables roadmap 3.5)",
+      "completedNote": "GREEN 6/6 rustc --test rules_loader.rs x3 stable; sha256 be2442cdf1c116a571dd6904860ea82a862472514314eb010ab9a92d91487e88; T01-T06 pass; zero test edits",
+      "scratchpad": "worklog/LANE-RULES.md",
+      "session": "ses_worker_rules",
+      "status": "completed"
+    },
+    "LANE-THEMES": {
+      "scratchpad": "worklog/LANE-THEMES.md",
+      "session": "ses_worker_themes",
+      "status": "in-progress"
+    },
+    "LANE-WF-TIMELINE": {
+      "blockedNote": "",
+      "claim": "WF-TUI-TIMELINE: native transcript render state wiring (RAW_FEATURE 3.7)",
+      "completedNote": "",
+      "scratchpad": "worklog/LANE-WF-TIMELINE.md",
+      "session": "ses_worker_wf",
+      "status": "in-progress"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
