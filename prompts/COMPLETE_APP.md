@@ -5,6 +5,34 @@ Read AGENTS.md, PLAN.md, docs/SECURITY.md, docs/TDD.md and
 preserves every original requirement and all existing safety/verification gates.
 Do not substitute another plan or disconnected helpers for a usable application.
 
+## CONVERGENCE MODE — mandatory before breadth
+
+Read `docs/CONVERGENCE.md` and run `python3 tools/convergence_gate.py` FIRST.
+The repository has already demonstrated a failure mode where isolated state-machine
+or helper modules pass unit tests while the installed application remains unwired.
+
+While that gate fails, prioritize its executable-spine findings over new leaf tasks.
+Do not mark a parent complete when its own evidence says repair child, follow-up,
+unwired, unproven, state-only, partial, missing, or no acceptance. A parent remains
+open until its full integrated journey passes.
+
+Use worker capacity by role: reserve at least four safe lanes for integration-spine
+implementation and two for independent RED/verifier work; use the remaining safe
+capacity for parallel feature/audit work. With a 20-worker harness this means up to
+14 breadth lanes, not twenty disconnected leaf lanes. With fewer workers, preserve
+integration and verification capacity first.
+
+The first hard boundary is the installed local journey:
+`opencode2` -> authenticated daemon start/reuse -> in-app provider setup -> real
+OpenTUI-backed UI -> provider/tool turn through the security broker -> persistence ->
+restart/resume -> second-client consistency. This boundary must become GREEN before
+the project spends the majority of capacity on web/mobile breadth.
+
+`tasks/completion/claims.json` is coordination state only. A `completed` row does
+not make a dependency or parent accepted unless independent verification,
+integration, and post-integration GREEN on the exact revision exist. Off-plan lane
+IDs never satisfy plan dependencies.
+
 ## Scope and initial actions
 
 The full completion scope is the UNION of legacy `ralph.json`, its requirements,
