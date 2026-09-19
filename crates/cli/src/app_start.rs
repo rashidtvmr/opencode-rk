@@ -592,4 +592,39 @@ mod tests {
         pending_pair(&kept).commit();
         assert_eq!(kept.load(Ordering::SeqCst), 0);
     }
+
+    #[test]
+    fn none_arm_headless_both_non_tty_carries_no_role_or_view() {
+        let plan = plan_default_launch(
+            &probe(Some(false), Some(false)),
+            DaemonPresence::Absent,
+            Some(true),
+        );
+        assert_eq!(plan.mode, LaunchMode::Headless(HeadlessReason::BothRedirected));
+        assert!(!enters_raw_mode(&plan.mode));
+        assert_eq!(plan.role, None);
+        assert_eq!(plan.view, None);
+        assert_eq!(HEADLESS_EXIT_CODE, 2);
+        assert!(headless_message(HeadlessReason::BothRedirected).contains("raw mode is refused"));
+    }
+
+    #[test]
+    fn none_arm_error_probe_passes_through_with_no_role_or_view() {
+        for p in [probe(None, None), probe(None, Some(true)), probe(Some(true), None)] {
+            let plan = plan_default_launch(&p, DaemonPresence::Reusable, Some(true));
+            assert_eq!(plan.mode, LaunchMode::Error(LaunchError::TerminalProbeFailed), "{p:?}");
+            assert!(!enters_raw_mode(&plan.mode), "{p:?}");
+            assert_eq!(plan.role, None, "{p:?}");
+            assert_eq!(plan.view, None, "{p:?}");
+        }
+    }
+
+    #[test]
+    fn none_arm_native_tty_routes_owner_main() {
+        let plan = plan_default_launch(&tty(), DaemonPresence::Absent, Some(true));
+        assert_eq!(plan.mode, LaunchMode::NativeTui);
+        assert!(enters_raw_mode(&plan.mode));
+        assert_eq!(plan.role, Some(LaunchRole::Owner));
+        assert_eq!(plan.view, Some(StartupView::Main));
+    }
 }

@@ -197,6 +197,83 @@ pub fn on_disconnect(policy: DisconnectPolicy) -> DisconnectOutcome {
     }
 }
 
+/// Default daemon host for headless wire building (same as TUI/CI default).
+pub const DEFAULT_DAEMON_HOST: &str = "127.0.0.1:4096";
+/// Fixed headless turn path: an `/api/*` route so the bearer gate applies.
+pub const HEADLESS_TURN_PATH: &str = "/api/sessions/turns";
+
+/// Pure wire builder sharing the TUI (`chat.rs`) / CI (`ci_run.rs`) execution
+/// service contract: every `/api/*` path requires `Some("Bearer <token>")`
+/// and fails closed otherwise; non-`/api/*` paths (e.g. `/health`) never
+/// carry a credential. No socket I/O; returns raw HTTP/1.1 bytes.
+pub fn build_api_wire(
+    method: &str,
+    host: &str,
+    path: &str,
+    body: &str,
+    bearer: Option<&str>,
+) -> Result<Vec<u8>, &'static str> {
+    if path.starts_with("/api/") {
+        let credential = bearer.unwrap_or("").trim();
+        if credential.is_empty() {
+            return Err("missing daemon credential: refusing unauthenticated /api/* request");
+        }
+        return Ok(format!(
+            "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: {credential}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes());
+    }
+    Ok(format!(
+        "{method} {path} HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes())
+}
+
+fn json_escape(input: &str) -> String {
+    let mut out = String::with_capacity(input.len() + 2);
+    for c in input.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Headless single-turn over the same daemon execution service as the TUI:
+/// builds the authenticated `POST /api/sessions/turns` wire for `prompt`.
+/// Pure (no I/O): the caller sends the returned bytes. Fail-closed: empty
+/// prompt -> `Err(Usage)`; missing/blank bearer -> `Err(Unauthorized)` with
+/// zero wire bytes built.
+pub fn run_headless(prompt: &str, bearer: Option<&str>) -> Result<Vec<u8>, ExitCode> {
+    if prompt.is_empty() {
+        return Err(ExitCode::Usage);
+    }
+    if prompt.len() > MAX_TRANSCRIPT_BYTES {
+        return Err(ExitCode::Internal);
+    }
+    let credential = bearer.unwrap_or("").trim();
+    if credential.is_empty() {
+        return Err(ExitCode::Unauthorized);
+    }
+    let body = format!("{{\"text\":\"{}\"}}", json_escape(prompt));
+    build_api_wire(
+        "POST",
+        DEFAULT_DAEMON_HOST,
+        HEADLESS_TURN_PATH,
+        &body,
+        Some(credential),
+    )
+    .map_err(|_| ExitCode::Unauthorized)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +349,54 @@ mod tests {
             on_disconnect(DisconnectPolicy::Detach),
             DisconnectOutcome::Detached
         );
+    }
+
+    #[test]
+    fn api_wire_carries_bearer() {
+        let wire = String::from_utf8(
+            build_api_wire(
+                "POST",
+                "127.0.0.1:4096",
+                "/api/sessions/turns",
+                "{}",
+                Some("Bearer abc"),
+            )
+            .expect("credentialed /api/* must build"),
+        )
+        .unwrap();
+        assert!(wire.contains("authorization: Bearer abc"));
+        assert!(wire.contains("content-length: 2"));
+        assert!(wire.starts_with("POST /api/sessions/turns HTTP/1.1\r\n"));
+    }
+
+    #[test]
+    fn api_wire_missing_bearer_fails_closed() {
+        for bearer in [None, Some(""), Some("   ")] {
+            let err = build_api_wire("POST", "127.0.0.1:4096", "/api/sessions/turns", "{}", bearer)
+                .expect_err("credential-less /api/* must refuse");
+            assert!(err.contains("refusing unauthenticated"));
+        }
+    }
+
+    #[test]
+    fn health_probe_carries_no_bearer() {
+        let wire = String::from_utf8(
+            build_api_wire("GET", "127.0.0.1:4096", "/health", "", None)
+                .expect("public /health must build"),
+        )
+        .unwrap();
+        assert!(!wire.to_ascii_lowercase().contains("authorization:"));
+        assert!(wire.starts_with("GET /health HTTP/1.1\r\n"));
+    }
+
+    #[test]
+    fn run_headless_threads_bearer_fail_closed() {
+        let wire = run_headless("hello", Some("Bearer tok")).expect("must build");
+        let text = String::from_utf8(wire).unwrap();
+        assert!(text.contains("authorization: Bearer tok"));
+        assert!(text.contains(HEADLESS_TURN_PATH));
+        assert_eq!(run_headless("hello", None), Err(ExitCode::Unauthorized));
+        assert_eq!(run_headless("hello", Some("  ")), Err(ExitCode::Unauthorized));
+        assert_eq!(run_headless("", Some("Bearer tok")), Err(ExitCode::Usage));
     }
 }

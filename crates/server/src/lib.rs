@@ -92,12 +92,13 @@ use opencode_rk_providers::responses::{
     ResponsesRole, ResponsesStopReason, ResponsesStreamEvent, ResponsesTool,
     MAX_RESPONSES_INPUT_MESSAGES,
 };
+use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{SessionError, SessionService};
 use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{convert::Infallible, str::FromStr, sync::Arc};
+use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
 static TURN_PERMITS: Semaphore = Semaphore::const_new(2);
@@ -824,6 +825,8 @@ struct TurnStreamState {
     /// Agentic loop state: provider tool schema + step budget + typed history.
     tools: Vec<ResponsesTool>,
     enabled_tools: Vec<String>,
+    /// Permission broker consulted before every tool execution.
+    broker: PermissionBroker,
     history_items: Vec<ResponsesItem>,
     loop_control: LoopController,
     pending_calls: Vec<RequestedCall>,
@@ -964,6 +967,9 @@ async fn create_turn_stream(
             _permit: permit,
             tools,
             enabled_tools: turn_tools,
+            broker: PermissionBroker::new(SecurityPolicy::lean_default(
+                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+            )),
             history_items,
             loop_control: LoopController::with_cap(max_steps),
             pending_calls: Vec::new(),
@@ -1148,21 +1154,41 @@ async fn create_turn_stream(
                                 .iter()
                                 .any(|enabled| *enabled == call.name);
                             let raw_output = if permitted {
-                                let arguments: Value = serde_json::from_str(&call.arguments)
-                                    .unwrap_or_else(|_| json!({}));
-                                let result = executor
-                                    .execute(opencode_rk_tools::executor::ToolCall::new(
-                                        call.call_id.clone(),
-                                        call.name.clone(),
-                                        arguments,
-                                    ))
-                                    .await;
-                                if result.success {
-                                    result.output
-                                } else {
-                                    result
-                                        .error
-                                        .unwrap_or_else(|| "tool failed".to_owned())
+                                match state.broker.authorize(&OperationIntent::Tool {
+                                    name: call.name.clone(),
+                                    description: "turn tool call".to_owned(),
+                                }) {
+                                    Decision::Allow => {
+                                        let arguments: Value =
+                                            serde_json::from_str(&call.arguments)
+                                                .unwrap_or_else(|_| json!({}));
+                                        let result = executor
+                                            .execute(opencode_rk_tools::executor::ToolCall::new(
+                                                call.call_id.clone(),
+                                                call.name.clone(),
+                                                arguments,
+                                            ))
+                                            .await;
+                                        if result.success {
+                                            result.output
+                                        } else {
+                                            result
+                                                .error
+                                                .unwrap_or_else(|| "tool failed".to_owned())
+                                        }
+                                    }
+                                    Decision::Deny { reason } => {
+                                        format!(
+                                            "error: tool '{}' denied: {}",
+                                            call.name, reason
+                                        )
+                                    }
+                                    Decision::RequireHuman { reason, .. } => {
+                                        format!(
+                                            "error: tool '{}' requires human approval: {}",
+                                            call.name, reason
+                                        )
+                                    }
                                 }
                             } else {
                                 format!(
@@ -1493,5 +1519,28 @@ impl IntoResponse for ApiFailure {
             message: &self.message,
         };
         (self.status, Json(body)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod broker_gate_tests {
+    use super::*;
+
+    #[test]
+    fn tool_intent_deny_produces_denial_output_without_execute() {
+        let broker = PermissionBroker::new(SecurityPolicy::lean_default("/work/project"))
+            .with_permissions(opencode_rk_security::PermissionSet::new(vec![
+                opencode_rk_security::PermissionRule::new("blocked-tool", opencode_rk_security::RuleEffect::Deny),
+            ]));
+        let allowed = broker.authorize(&OperationIntent::Tool {
+            name: "allowed-tool".to_owned(),
+            description: "turn tool call".to_owned(),
+        });
+        assert_eq!(allowed, Decision::Allow);
+        let denied = broker.authorize(&OperationIntent::Tool {
+            name: "blocked-tool".to_owned(),
+            description: "turn tool call".to_owned(),
+        });
+        assert!(matches!(denied, Decision::Deny { .. }));
     }
 }

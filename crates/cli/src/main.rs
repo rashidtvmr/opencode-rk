@@ -10,7 +10,7 @@ use opencode_rk_server::{
         SingletonDaemon,
     },
     daemon_auth::DaemonAuth,
-    router, AppState,
+    router_with_auth, AppState,
 };
 use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
@@ -19,14 +19,18 @@ use serde::Serialize;
 use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 mod ci_output;
 mod ci_run;
+mod composer;
 mod tui_entry;
 use tui_entry::TuiArgs;
 mod app_start;
 mod chat;
 mod daemon_client;
 mod diagnostics;
+mod graph;
 mod headless_engine;
 mod install_commands;
+mod medown;
+mod modals;
 mod native_app;
 mod native_approvals;
 mod native_composer;
@@ -37,11 +41,16 @@ mod native_status;
 mod native_theme;
 mod native_timeline;
 mod native_transcript;
+mod native_shell;
 mod onboarding;
 mod pair;
 mod service_commands;
 mod shutdown;
 mod terminal_host;
+mod themes;
+mod title;
+mod transcript;
+mod tui_paint;
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 #[derive(Debug, Parser)]
 #[command(
@@ -641,11 +650,6 @@ async fn serve(
     // ("backend is already running but its endpoint descriptor is
     // unavailable"). Mint the real daemon credential and publish it.
     //
-    // Recorded gap (NOT silently accepted): the served router below is still
-    // the legacy unauthenticated `router()` — browser token delivery is a
-    // WEB-lane design decision, so bearer ENFORCEMENT on `/api/*` is not yet
-    // installed here. Publishing the token keeps discovery/reuse correct and
-    // does not weaken anything that was previously enforced.
     let credential = DaemonAuth::mint().map_err(|error| error.to_string())?;
     let descriptor = publish_backend_descriptor_with_auth(&data, listen, credential.token().to_owned())?;
     println!("{}", descriptor.http_origin);
@@ -657,7 +661,7 @@ async fn serve(
     let control = tokio::spawn(async move {
         daemon_accept.accept_clients().await;
     });
-    let result = axum::serve(listener, router(AppState { sessions, catalog })).await;
+    let result = axum::serve(listener, router_with_auth(AppState { sessions, catalog }, Some(credential))).await;
     daemon.shutdown();
     let _ = control.await;
     result?;

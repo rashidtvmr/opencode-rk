@@ -700,6 +700,37 @@ pub fn discover(
     parse_authenticated_descriptor(bytes, is_alive)
 }
 
+/// Path-based discovery for TUI/chat reuse: file gate first
+/// (`symlink_metadata`, never following links), then a bounded read capped
+/// at `MAX_DESCRIPTOR_BYTES + 1` (oversize detected without buffering the
+/// whole file), then [`discover`]. Any refusal means the caller must not
+/// contact any origin. `caller_uid` is caller-supplied (production: euid);
+/// this function opens no sockets.
+pub fn discover_from_path(
+    path: &std::path::Path,
+    caller_uid: u32,
+    is_alive: impl Fn(u32) -> bool,
+) -> Result<AuthenticatedDescriptor, DescriptorReject> {
+    use std::os::unix::fs::MetadataExt;
+    let stat = std::fs::symlink_metadata(path)
+        .map_err(|e| DescriptorReject::Malformed(format!("cannot stat descriptor: {e}")))?;
+    let meta = DescriptorFileMeta {
+        is_symlink: stat.file_type().is_symlink(),
+        owner_uid: stat.uid(),
+        caller_uid,
+        len_bytes: stat.len(),
+    };
+    validate_file_meta(&meta)?;
+    use std::io::Read;
+    let file = std::fs::File::open(path)
+        .map_err(|e| DescriptorReject::Malformed(format!("cannot open descriptor: {e}")))?;
+    let mut bytes = Vec::new();
+    file.take(MAX_DESCRIPTOR_BYTES as u64 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|e| DescriptorReject::Malformed(format!("cannot read descriptor: {e}")))?;
+    discover(&bytes, &meta, is_alive)
+}
+
 /// One-shot startup election across concurrent launches. The first caller
 /// to flip `claimed` false->true owns the start; every other caller
 /// attaches. Deterministic under contention (atomic compare-exchange).
@@ -1212,5 +1243,59 @@ mod tests {
         let (_, dead) = decide_lifecycle_authed(Some(authed(4242)), Some(500));
         assert_eq!(dead, None, "dead daemon gets no credential");
         assert_eq!(decide_lifecycle_authed(None, None).1, None);
+    }
+
+    #[test]
+    fn discover_from_path_roundtrip_and_refusals() {
+        let dir = std::env::temp_dir().join(format!(
+            "daemon_client_discover_{}",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("backend.json");
+        std::fs::write(
+            &path,
+            authed_json(4242, "http://127.0.0.1:4096", &hex_token(1)),
+        )
+        .unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::MetadataExt;
+            let uid = std::fs::symlink_metadata(&path).unwrap().uid();
+            let found = discover_from_path(&path, uid, alive).expect("own+valid must discover");
+            assert_eq!(found.auth_token, hex_token(1));
+            assert_eq!(found.descriptor.http_origin, "http://127.0.0.1:4096");
+            // Wrong caller UID refuses before any contact.
+            assert!(matches!(
+                discover_from_path(&path, uid.wrapping_add(1), alive),
+                Err(DescriptorReject::WrongOwner { .. })
+            ));
+            // Stale PID refuses.
+            let stale = dir.join("stale.json");
+            std::fs::write(
+                &stale,
+                authed_json(9999, "http://127.0.0.1:4096", &hex_token(2)),
+            )
+            .unwrap();
+            assert!(matches!(
+                discover_from_path(&stale, uid, alive),
+                Err(DescriptorReject::StalePid(9999))
+            ));
+            // Symlink refuses.
+            let link = dir.join("link.json");
+            #[allow(clippy::redundant_clone)]
+            std::os::unix::fs::symlink(&path, &link).unwrap();
+            assert_eq!(
+                discover_from_path(&link, uid, alive),
+                Err(DescriptorReject::Symlink)
+            );
+        }
+        // Missing file is a fail-closed refusal, never contact.
+        assert!(
+            discover_from_path(&dir.join("missing.json"), 0, alive).is_err(),
+            "missing descriptor must refuse"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

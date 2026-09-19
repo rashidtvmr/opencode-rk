@@ -21,6 +21,9 @@ use std::{
 
 use serde_json::Value;
 
+use crate::daemon_client;
+use opencode_rk_server::daemon as server_daemon;
+
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:4096";
 const DEFAULT_MODEL: &str = "openai/gpt-5.6";
 /// Turn requests against real providers can be slow; reads are still bounded.
@@ -42,7 +45,7 @@ fn daemon_origin(addr: &str) -> String {
 }
 
 /// Entry bound from `main.rs` when no subcommand is given.
-pub fn run(_data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let addr = daemon_addr();
     let origin = daemon_origin(&addr);
     let mut owned_daemon: Option<Child> = None;
@@ -50,6 +53,15 @@ pub fn run(_data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         owned_daemon = spawn_daemon(&addr);
     }
     let attached = probe_daemon(&origin);
+    // Credential-bound reuse (`daemon_client.rs:722-735`
+    // `decide_lifecycle_authed`): a validated descriptor plus a healthy
+    // probe yields the bearer; every other outcome carries no credential and
+    // every `/api/*` call below then fails closed without sending.
+    // Reload after spawn: an owned daemon mints its token at startup.
+    let mut credential = reuse_credential(data_dir, attached);
+    if attached && credential.is_none() && owned_daemon.is_some() {
+        credential = reuse_credential(data_dir, true);
+    }
     if !attached {
         println!(
             "[offline] daemon unavailable (port {addr} unwinnable); \
@@ -58,6 +70,7 @@ pub fn run(_data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     }
     let mut chat = Chat {
         origin: attached.then(|| origin.clone()),
+        auth: credential,
         session: None,
         model: DEFAULT_MODEL.to_owned(),
     };
@@ -74,6 +87,10 @@ pub fn run(_data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
 
 struct Chat {
     origin: Option<String>,
+    /// Bearer for `/api/*` (`"Bearer <64-hex>"`), threaded from
+    /// [`daemon_client::decide_lifecycle_authed`] via [`reuse_credential`].
+    /// `None` means fail-closed: every `/api/*` call errors, nothing sends.
+    auth: Option<String>,
     session: Option<String>,
     model: String,
 }
@@ -105,7 +122,10 @@ impl Chat {
     /// their last conversation instead of an empty shell.
     fn bind_recent_session(&mut self) {
         let Some(origin) = &self.origin else { return };
-        let Ok((status, body)) = request(origin, "GET", "/api/sessions", None) else {
+        let auth = self.auth.clone();
+        let Ok((status, body)) =
+            request(origin, "GET", "/api/sessions", None, auth.as_deref())
+        else {
             return;
         };
         if status != 200 {
@@ -134,8 +154,9 @@ impl Chat {
     fn print_history(&self) {
         let Some(origin) = &self.origin else { return };
         let Some(session) = &self.session else { return };
+        let auth = self.auth.clone();
         let path = format!("/api/sessions/{session}/messages?limit={HISTORY_LIMIT}");
-        let Ok((200, body)) = request(origin, "GET", &path, None) else {
+        let Ok((200, body)) = request(origin, "GET", &path, None, auth.as_deref()) else {
             return;
         };
         let Ok(value) = serde_json::from_str::<Value>(&body) else {
@@ -162,7 +183,8 @@ impl Chat {
         let title = title.unwrap_or("Chat").trim();
         let title = if title.is_empty() { "Chat" } else { title };
         let body = serde_json::json!({ "title": title }).to_string();
-        match request(origin, "POST", "/api/sessions", Some(&body)) {
+        let auth = self.auth.clone();
+        match request(origin, "POST", "/api/sessions", Some(&body), auth.as_deref()) {
             Ok((201, response)) => match serde_json::from_str::<Value>(&response) {
                 Ok(value) => {
                     let id = value
@@ -191,7 +213,8 @@ impl Chat {
             println!("[error] daemon offline; cannot list sessions");
             return;
         };
-        match request(origin, "GET", "/api/sessions", None) {
+        let auth = self.auth.clone();
+        match request(origin, "GET", "/api/sessions", None, auth.as_deref()) {
             Ok((200, body)) => match serde_json::from_str::<Value>(&body) {
                 Ok(value) => {
                     for session in value
@@ -222,7 +245,10 @@ impl Chat {
             println!("[error] usage: /open <session-id>");
             return;
         }
-        let Ok((200, body)) = request(origin, "GET", "/api/sessions", None) else {
+        let auth = self.auth.clone();
+        let Ok((200, body)) =
+            request(origin, "GET", "/api/sessions", None, auth.as_deref())
+        else {
             println!("[error] could not list sessions to resolve {prefix}");
             return;
         };
@@ -262,7 +288,8 @@ impl Chat {
             println!("[error] daemon offline; cannot list models");
             return;
         };
-        match request(origin, "GET", "/api/models", None) {
+        let auth = self.auth.clone();
+        match request(origin, "GET", "/api/models", None, auth.as_deref()) {
             Ok((200, body)) => match serde_json::from_str::<Value>(&body) {
                 Ok(value) => {
                     let models = value
@@ -320,7 +347,8 @@ impl Chat {
         })
         .to_string();
         let path = format!("/api/sessions/{session}/turns");
-        match request(origin, "POST", &path, Some(&body)) {
+        let auth = self.auth.clone();
+        match request(origin, "POST", &path, Some(&body), auth.as_deref()) {
             Ok((201, response)) => match serde_json::from_str::<Value>(&response) {
                 Ok(value) => {
                     let assistant = value
@@ -394,9 +422,40 @@ fn message_text(message: &Value) -> Option<String> {
 
 /// True only when a healthy daemon answers `GET /health` on the origin. A
 /// bare TCP connect is not enough: an unrelated listener on the port must not
-/// be mistaken for the daemon.
+/// be mistaken for the daemon. `/health` stays public (`daemon_auth.rs:1-7`):
+/// no bearer is sent here.
 fn probe_daemon(origin: &str) -> bool {
-    matches!(request(origin, "GET", "/health", None), Ok((200, _)))
+    matches!(
+        request(origin, "GET", "/health", None, None),
+        Ok((200, _))
+    )
+}
+
+/// Bearer for `/api/*` reuse, threaded from
+/// [`daemon_client::decide_lifecycle_authed`] (`daemon_client.rs:722-735`).
+/// `healthy` is the `/health` probe outcome (`true` == HTTP 200). Any
+/// outcome but validated-descriptor-plus-healthy-probe yields `None`: the
+/// `/api/*` calls below then fail closed without sending. Reads the
+/// published descriptor via `server::daemon::read_backend_descriptor`
+/// (`daemon.rs:137`), which already gates schema/PID/loopback/non-empty
+/// token; the bearer shape is re-checked with
+/// [`daemon_client::is_wellformed_token`] before it becomes a credential.
+fn reuse_credential(data_dir: &Path, healthy: bool) -> Option<String> {
+    let published = server_daemon::read_backend_descriptor(data_dir).ok()??;
+    if !daemon_client::is_wellformed_token(&published.auth_token) {
+        return None;
+    }
+    let authed = daemon_client::AuthenticatedDescriptor {
+        descriptor: daemon_client::BackendDescriptor {
+            pid: published.pid,
+            http_origin: published.http_origin,
+            schema_version: published.schema_version,
+        },
+        auth_token: published.auth_token,
+    };
+    let (_, credential) =
+        daemon_client::decide_lifecycle_authed(Some(authed), healthy.then_some(200));
+    credential
 }
 
 /// Spawn `serve` from this same binary and wait for readiness. Returns the
@@ -431,12 +490,20 @@ fn spawn_daemon(addr: &str) -> Option<Child> {
 
 /// Bounded std-only HTTP/1.1 request. Returns `(status, body)` with the body
 /// capped at [`MAX_BODY_BYTES`]; larger responses are an error, never a hang.
+///
+/// `auth` is the `Authorization` header value (`"Bearer <64-hex>"`) threaded
+/// from [`daemon_client::decide_lifecycle_authed`] via [`reuse_credential`].
+/// Every `/api/*` path requires it: `None`/empty fails closed with `Err`
+/// before any byte is sent, per the server gate (`daemon_auth.rs:1-7`).
+/// `/health` stays public (liveness only) and never takes a credential.
 fn request(
     origin: &str,
     method: &str,
     path: &str,
     body: Option<&str>,
+    auth: Option<&str>,
 ) -> Result<(u16, String), String> {
+    let wire = build_request_wire(origin, method, path, body, auth)?;
     let host = origin
         .strip_prefix("http://")
         .unwrap_or(origin)
@@ -465,11 +532,6 @@ fn request(
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|error| error.to_string())?;
 
-    let payload = body.unwrap_or("");
-    let wire = format!(
-        "{method} {path} HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
-        payload.len()
-    );
     stream
         .write_all(wire.as_bytes())
         .map_err(|error| format!("write: {error}"))?;
@@ -500,4 +562,114 @@ fn request(
         .and_then(|code| code.parse::<u16>().ok())
         .ok_or_else(|| "malformed response: no status line".to_owned())?;
     Ok((status, payload.to_owned()))
+}
+
+/// Pure wire builder for [`request`]: fail-closed bearer gate plus the
+/// HTTP/1.1 bytes. `/health` never carries a credential; every `/api/*`
+/// path requires `Some("Bearer <token>")` and errors otherwise. No socket
+/// I/O here, so tests assert the gate without a network.
+fn build_request_wire(
+    origin: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    auth: Option<&str>,
+) -> Result<String, String> {
+    let host = origin
+        .strip_prefix("http://")
+        .unwrap_or(origin)
+        .trim_end_matches('/');
+    let payload = body.unwrap_or("");
+    if path.starts_with("/api/") {
+        let credential = auth.unwrap_or("").trim();
+        if credential.is_empty() {
+            return Err("missing daemon credential: refusing unauthenticated /api/* request".to_owned());
+        }
+        return Ok(format!(
+            "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: {credential}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
+            payload.len()
+        ));
+    }
+    Ok(format!(
+        "{method} {path} HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
+        payload.len()
+    ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const BEARER: &str = "Bearer abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+
+    #[test]
+    fn api_wire_carries_bearer() {
+        let wire = build_request_wire(
+            "http://127.0.0.1:4096",
+            "GET",
+            "/api/sessions",
+            None,
+            Some(BEARER),
+        )
+        .expect("credentialed /api/* must build");
+        assert!(
+            wire.contains("authorization: Bearer "),
+            "wire must carry the bearer: {wire:?}"
+        );
+        // Token bytes travel exactly once: in the header, never in the body.
+        let body = wire.split("\r\n\r\n").nth(1).unwrap_or("");
+        assert!(!body.contains("Bearer"), "bearer must not leak into body");
+        assert_eq!(
+            wire.matches("abcdef0123456789").count(),
+            4,
+            "token must appear once (4 x 16-hex chunks): {wire:?}"
+        );
+    }
+
+    #[test]
+    fn api_wire_missing_credential_fails_closed() {
+        for auth in [None, Some(""), Some("   ")] {
+            let error =
+                build_request_wire("http://127.0.0.1:4096", "GET", "/api/sessions", None, auth)
+                    .expect_err("credential-less /api/* must refuse");
+            assert!(
+                error.contains("refusing unauthenticated"),
+                "fail-closed message expected, got: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn health_probe_stays_unauthenticated() {
+        let wire = build_request_wire("http://127.0.0.1:4096", "GET", "/health", None, None)
+            .expect("public /health must build without a credential");
+        assert!(
+            !wire.to_ascii_lowercase().contains("authorization:"),
+            "probe must not carry a bearer: {wire:?}"
+        );
+        assert!(
+            wire.starts_with("GET /health HTTP/1.1\r\n"),
+            "probe request line intact: {wire:?}"
+        );
+    }
+
+    #[test]
+    fn post_wire_bounds_body_without_credential_leak() {
+        let wire = build_request_wire(
+            "http://127.0.0.1:4096",
+            "POST",
+            "/api/sessions",
+            Some(r#"{"title":"Chat"}"#),
+            Some(BEARER),
+        )
+        .expect("credentialed POST must build");
+        assert!(
+            wire.contains("content-length: 16\r\n"),
+            "content-length must bound the body: {wire:?}"
+        );
+        assert!(
+            wire.ends_with(r#"{"title":"Chat"}"#),
+            "body bytes intact: {wire:?}"
+        );
+    }
 }

@@ -228,5 +228,51 @@ class GraphTests(unittest.TestCase):
                 validate_tasks([task("A", path)])
 
 
+class RollingTwentyTests(unittest.IsolatedAsyncioTestCase):
+    async def test_twenty_ready_workers_start_without_batch_barrier(self):
+        adapter = Adapter()
+        jobs = [task(f"R{i:02}") for i in range(25)]
+        adapter.releases = {t.id: asyncio.Event() for t in jobs}
+        controller = asyncio.create_task(run_rolling(jobs, adapter, capacity=20))
+        try:
+            await asyncio.wait_for(adapter.started_twenty.wait(), 2)
+            self.assertEqual(len(adapter.started), 20)
+            self.assertLessEqual(adapter.peak, 20)
+        finally:
+            for event in adapter.releases.values():
+                event.set()
+            report = await asyncio.wait_for(controller, 5)
+        self.assertTrue(report.complete)
+        # Missing: scheduler exposes no occupancy proof of 20-wide start.
+        self.assertEqual(report.peak_occupancy, 20)
+
+    async def test_lane_completion_triggers_next_without_waiting_for_batch(self):
+        adapter = Adapter()
+        jobs = [task(f"W{i:02}") for i in range(21)]
+        adapter.releases = {t.id: asyncio.Event() for t in jobs}
+        controller = asyncio.create_task(run_rolling(jobs, adapter, capacity=20))
+        try:
+            await asyncio.wait_for(adapter.started_twenty.wait(), 2)
+            adapter.releases["W00"].set()
+            await asyncio.wait_for(adapter.started_next.wait(), 2)
+            self.assertFalse(adapter.releases["W19"].is_set())
+        finally:
+            for event in adapter.releases.values():
+                event.set()
+            report = await asyncio.wait_for(controller, 5)
+        self.assertTrue(report.complete)
+        # Missing: scheduler records no per-lane refill proof.
+        self.assertGreater(report.refills, 0)
+
+    async def test_ram_budget_blocks_oversubscribe(self):
+        adapter = Adapter()
+        jobs = [task(f"M{i:02}") for i in range(10)]
+        report = await run_rolling(
+            jobs, adapter, capacity=20, ram_budget_mb=5 * 512, worker_ram_mb=512
+        )
+        self.assertTrue(report.complete)
+        self.assertLessEqual(adapter.peak, 5)
+
+
 if __name__ == "__main__":
     unittest.main()

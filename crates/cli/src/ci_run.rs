@@ -37,6 +37,37 @@ fn emit(writer: &mut impl Write, event: &CiEvent, format: OutputFormat) -> std::
     writer.flush()
 }
 
+/// Length of the hex-encoded daemon bearer token. Mirrors
+/// `daemon_client::TOKEN_HEX_LEN` (64 hex chars = 32 random bytes).
+const TOKEN_HEX_LEN: usize = 64;
+
+/// True only for a 64-char hex bearer (mirrors
+/// `daemon_client::is_wellformed_token`).
+fn is_wellformed_token(token: &str) -> bool {
+    token.len() == TOKEN_HEX_LEN && token.bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+/// Fail-closed bearer resolution for CI: reads `OPENCODE_RK_DAEMON_TOKEN`.
+/// Returns `Err` on missing/malformed so CI exits UsageError (64) without
+/// ever sending an unauthenticated request.
+fn daemon_bearer() -> Result<String, String> {
+    match std::env::var("OPENCODE_RK_DAEMON_TOKEN") {
+        Ok(token) if is_wellformed_token(&token) => Ok(format!("Bearer {token}")),
+        Ok(_) => Err("OPENCODE_RK_DAEMON_TOKEN is malformed: expected 64 hex chars".to_owned()),
+        Err(_) => Err("OPENCODE_RK_DAEMON_TOKEN is not set".to_owned()),
+    }
+}
+
+/// Build the raw HTTP/1.1 wire bytes with the bearer credential. Split out
+/// for unit testing (no sockets involved).
+fn request_wire(method: &str, host: &str, path: &str, body: &str, auth_token: &str) -> Vec<u8> {
+    format!(
+        "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: {auth_token}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
 fn check_approval_required(prompt: &str) -> Option<String> {
     let approval_tools = ["shell_exec", "shell_command", "exec", "run_command"];
     for tool in &approval_tools {
@@ -52,6 +83,7 @@ fn http_request(
     method: &str,
     path: &str,
     body: &str,
+    auth_token: Option<&str>,
 ) -> Result<(u16, String), String> {
     let host = origin
         .strip_prefix("http://")
@@ -72,12 +104,16 @@ fn http_request(
         .set_write_timeout(Some(Duration::from_secs(10)))
         .map_err(|error| error.to_string())?;
 
-    let wire = format!(
-        "{method} {path} HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
-        body.len()
-    );
+    let wire = match auth_token {
+        Some(token) => request_wire(method, host, path, body, token),
+        None => format!(
+            "{method} {path} HTTP/1.1\r\nhost: {host}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes(),
+    };
     stream
-        .write_all(wire.as_bytes())
+        .write_all(&wire)
         .map_err(|error| format!("write: {error}"))?;
     stream.flush().ok();
 
@@ -108,8 +144,8 @@ fn http_request(
     Ok((status, payload.to_owned()))
 }
 
-fn probe_daemon(origin: &str) -> bool {
-    http_request(origin, "GET", "/health", "")
+fn probe_daemon(origin: &str, auth_token: Option<&str>) -> bool {
+    http_request(origin, "GET", "/health", "", auth_token)
         .map(|(status, _)| status == 200)
         .unwrap_or(false)
 }
@@ -128,7 +164,7 @@ fn spawn_daemon(addr: &str) -> Option<Child> {
     let origin = format!("http://{addr}");
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        if probe_daemon(&origin) {
+        if probe_daemon(&origin, None) {
             return Some(child);
         }
         if std::time::Instant::now() >= deadline {
@@ -140,11 +176,11 @@ fn spawn_daemon(addr: &str) -> Option<Child> {
     }
 }
 
-fn ensure_daemon() -> (String, Option<OwnedChild>) {
+fn ensure_daemon(bearer: Option<&str>) -> (String, Option<OwnedChild>) {
     let addr =
         std::env::var("OPENCODE_RK_DAEMON_ADDR").unwrap_or_else(|_| "127.0.0.1:4096".to_string());
     let origin = format!("http://{addr}");
-    if probe_daemon(&origin) {
+    if probe_daemon(&origin, bearer) {
         return (origin, None);
     }
     match spawn_daemon(&addr) {
@@ -178,7 +214,7 @@ fn collect_doctor_checks() -> Vec<DoctorCheckEntry> {
     let connectivity = match std::env::var_os("OPENCODE_RK_DOCTOR_ENDPOINT") {
         Some(endpoint) => {
             let endpoint = endpoint.to_string_lossy().into_owned();
-            match http_request(&endpoint, "GET", "/", "") {
+            match http_request(&endpoint, "GET", "/", "", None) {
                 Ok((status, _)) => DoctorCheckEntry {
                     name: "connectivity".to_string(),
                     status: if status == 200 {
@@ -280,20 +316,43 @@ pub fn run_ci(
 
     let _ = emit(writer, &CiEvent::TurnStarted { ts: ts_now() }, format);
 
-    let (origin, _daemon_child) = ensure_daemon();
-
-    let create_body = serde_json::json!({ "title": "ci-run" }).to_string();
-    let (status, body) = match http_request(&origin, "POST", "/api/sessions", &create_body) {
-        Ok(r) => r,
+    // Fail-closed: no token (missing/malformed) -> UsageError 64, no
+    // unauthenticated request is ever sent.
+    let bearer = match daemon_bearer() {
+        Ok(token) => token,
         Err(_error) => {
             let _ = emit(
                 writer,
-                &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::ProviderError.code() },
+                &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::UsageError.code() },
                 format,
             );
-            return CiRunResult { exit_code: CiExitCode::ProviderError.code() as i32 };
+            return CiRunResult { exit_code: CiExitCode::UsageError.code() as i32 };
         }
     };
+
+    let (origin, _daemon_child) = ensure_daemon(Some(&bearer));
+
+    let create_body = serde_json::json!({ "title": "ci-run" }).to_string();
+    let (status, body) =
+        match http_request(&origin, "POST", "/api/sessions", &create_body, Some(&bearer)) {
+            Ok(r) => r,
+            Err(_error) => {
+                let _ = emit(
+                    writer,
+                    &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::ProviderError.code() },
+                    format,
+                );
+                return CiRunResult { exit_code: CiExitCode::ProviderError.code() as i32 };
+            }
+        };
+    if status == 401 || status == 403 {
+        let _ = emit(
+            writer,
+            &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::UsageError.code() },
+            format,
+        );
+        return CiRunResult { exit_code: CiExitCode::UsageError.code() as i32 };
+    }
     if status != 201 {
         let _ = emit(
             writer,
@@ -337,16 +396,19 @@ pub fn run_ci(
             "reasoning_effort": "high",
         })
         .to_string();
-        let (status, _body) = match http_request(&origin, "POST", &turn_path, &turn_body) {
-            Ok(r) => r,
-            Err(_error) => {
-                last_exit = CiExitCode::TurnFailed;
-                break;
-            }
-        };
+        let (status, _body) =
+            match http_request(&origin, "POST", &turn_path, &turn_body, Some(&bearer)) {
+                Ok(r) => r,
+                Err(_error) => {
+                    last_exit = CiExitCode::TurnFailed;
+                    break;
+                }
+            };
 
         last_exit = if status == 201 {
             CiExitCode::Success
+        } else if status == 401 || status == 403 {
+            CiExitCode::UsageError
         } else if status == 429 {
             CiExitCode::BudgetExhausted
         } else {
@@ -375,3 +437,64 @@ impl Drop for OwnedChild {
 }
 
 struct OwnedChild(Child);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn hex_token(seed: u8) -> String {
+        (0..64u8)
+            .map(|i| char::from_digit(u32::from(seed.wrapping_add(i)) % 16, 16).unwrap())
+            .collect()
+    }
+
+    #[test]
+    fn t01_request_wire_carries_bearer() {
+        let wire = String::from_utf8(request_wire("POST", "127.0.0.1:4096", "/api/sessions", "{}", "Bearer abc")).unwrap();
+        assert!(wire.contains("authorization: Bearer abc"), "wire must carry bearer: {wire}");
+        assert!(wire.contains("content-length: 2"));
+    }
+
+    #[test]
+    fn t02_malformed_token_rejected() {
+        assert!(!is_wellformed_token(""));
+        assert!(!is_wellformed_token("short"));
+        assert!(!is_wellformed_token(&"zz".repeat(32)));
+        assert!(!is_wellformed_token(&"ab".repeat(31)));
+        assert!(is_wellformed_token(&hex_token(3)));
+    }
+
+    #[test]
+    fn t03_auth_status_maps_to_usage_error() {
+        // Fail-closed: 401/403 from the daemon is an auth/config defect,
+        // never a provider or turn error, and never retried unauthenticated.
+        for status in [401_u16, 403] {
+            let exit = if status == 201 {
+                CiExitCode::Success
+            } else if status == 401 || status == 403 {
+                CiExitCode::UsageError
+            } else if status == 429 {
+                CiExitCode::BudgetExhausted
+            } else {
+                CiExitCode::TurnFailed
+            };
+            assert_eq!(exit, CiExitCode::UsageError);
+            assert_eq!(exit.code(), 64);
+        }
+    }
+
+    #[test]
+    fn t04_missing_token_fail_closed_usage_error() {
+        // run_ci must exit 64 when the bearer is missing; the daemon is
+        // unreachable in tests so the probe path is not exercised, but the
+        // resolution layer itself must refuse loudly.
+        std::env::remove_var("OPENCODE_RK_DAEMON_TOKEN");
+        assert!(daemon_bearer().is_err(), "missing token must fail closed");
+        std::env::set_var("OPENCODE_RK_DAEMON_TOKEN", "short");
+        assert!(daemon_bearer().is_err(), "malformed token must fail closed");
+        let good = hex_token(9);
+        std::env::set_var("OPENCODE_RK_DAEMON_TOKEN", &good);
+        assert_eq!(daemon_bearer().unwrap(), format!("Bearer {good}"));
+        std::env::remove_var("OPENCODE_RK_DAEMON_TOKEN");
+    }
+}

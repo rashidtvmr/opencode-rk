@@ -30,6 +30,33 @@ impl CellBuffer {
     pub const fn new(cols: u32, rows: u32) -> Self {
         Self { cols, rows }
     }
+
+    /// Copy `src` cells into `self` at `(dx, dy)`, clipped to dst bounds.
+    /// Pure memory geometry, no FFI/unsafe.
+    /// ponytail: no cell store yet (`size_of==8` stable, backing native);
+    /// upgrade path: add `cells: Vec<Cell>`, `copy_within`/row loop here.
+    /// Self-blit safe: geometry only, aliasing is no-op safe.
+    pub fn blit(&mut self, src: &CellBuffer, dx: u32, dy: u32) {
+        if self.blit_region(src, dx, dy).is_none() {
+            return;
+        }
+        // No store to copy yet; region math above is the contract.
+    }
+
+    /// Clipped copy region `(w, h)` for [`CellBuffer::blit`].
+    /// `None` when fully outside bounds or either side empty.
+    #[must_use]
+    pub fn blit_region(&self, src: &CellBuffer, dx: u32, dy: u32) -> Option<(u32, u32)> {
+        if src.cols == 0 || src.rows == 0 || self.cols == 0 || self.rows == 0 {
+            return None;
+        }
+        if dx >= self.cols || dy >= self.rows {
+            return None;
+        }
+        let w = src.cols.min(self.cols - dx);
+        let h = src.rows.min(self.rows - dy);
+        if w == 0 || h == 0 { None } else { Some((w, h)) }
+    }
 }
 
 /// Raw C-ABI buffer entry points. Every declaration matches an
@@ -279,5 +306,31 @@ mod tests {
             &border_chars(BorderStyle::Rounded)[4..],
             &border_chars(BorderStyle::Single)[4..]
         );
+    }
+
+    #[test]
+    fn blit_region_clip_offset() {
+        let dst = CellBuffer::new(10, 5);
+        let src = CellBuffer::new(4, 3);
+        assert_eq!(dst.blit_region(&src, 0, 0), Some((4, 3))); // full fit
+        assert_eq!(dst.blit_region(&src, 2, 1), Some((4, 3))); // offset fit
+        assert_eq!(dst.blit_region(&src, 8, 4), Some((2, 1))); // clip right/bottom
+        assert_eq!(dst.blit_region(&src, 10, 0), None); // dx outside
+        assert_eq!(dst.blit_region(&src, 0, 5), None); // dy outside
+        assert_eq!(dst.blit_region(&CellBuffer::new(0, 3), 0, 0), None); // empty src
+        assert_eq!(CellBuffer::new(0, 0).blit_region(&src, 0, 0), None); // empty dst
+    }
+
+    #[test]
+    fn blit_no_panic_self_blit() {
+        let mut dst = CellBuffer::new(10, 5);
+        let src = CellBuffer::new(4, 3);
+        dst.blit(&src, 8, 4); // clipped, no panic
+        dst.blit(&src, 20, 20); // fully outside, no-op
+        assert_eq!((dst.cols, dst.rows), (10, 5)); // dims unchanged
+        let mut same = CellBuffer::new(6, 4);
+        let copy = same; // CellBuffer: Copy, models alias-safe self-blit
+        same.blit(&copy, 1, 1);
+        assert_eq!((same.cols, same.rows), (6, 4));
     }
 }

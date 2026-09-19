@@ -400,6 +400,33 @@ impl Renderer {
             }
         }
     }
+
+    /// One-shot headless render: create a memory renderer, draw each line
+    /// clipped to `(cols, rows)`, snapshot, then drop (releasing `CLAIMED`).
+    ///
+    /// Rows beyond `rows` are skipped; lines longer than `cols` are
+    /// truncated by `char` count. Lines over [`MAX_TEXT_BYTES`] fail with
+    /// [`BridgeError::TextTooLarge`] before any draw (validation precedes
+    /// handle errors, matching `draw_text`/`set_title`).
+    /// ponytail: char-count clip, not display width; upgrade: unicode-width.
+    pub fn render_once(cols: u32, rows: u32, lines: &[String]) -> Result<String, BridgeError> {
+        if cols == 0 || rows == 0 {
+            return Err(BridgeError::ZeroSize);
+        }
+        if lines.iter().any(|l| l.len() > MAX_TEXT_BYTES) {
+            return Err(BridgeError::TextTooLarge);
+        }
+        let renderer = Self::create_memory(cols, rows)?;
+        let max_cols = cols as usize;
+        for (y, line) in lines.iter().enumerate().take(rows as usize) {
+            let clipped: String = line.chars().take(max_cols).collect();
+            if clipped.is_empty() {
+                continue;
+            }
+            renderer.draw_text(0, y as u32, &clipped)?;
+        }
+        renderer.snapshot_text()
+    }
 }
 
 impl Drop for Renderer {
@@ -481,6 +508,39 @@ mod tests {
             r.draw_text(0, 0, &big).unwrap_err(),
             BridgeError::TextTooLarge
         );
+    }
+
+    #[test]
+    fn render_once_zero_size_rejected() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        assert_eq!(
+            Renderer::render_once(0, 24, &["hi".to_owned()]).unwrap_err(),
+            BridgeError::ZeroSize
+        );
+        assert_eq!(
+            Renderer::render_once(80, 0, &["hi".to_owned()]).unwrap_err(),
+            BridgeError::ZeroSize
+        );
+    }
+
+    #[test]
+    fn render_once_oversize_rejected() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let big = "x".repeat(MAX_TEXT_BYTES + 1);
+        assert_eq!(
+            Renderer::render_once(80, 24, &[big]).unwrap_err(),
+            BridgeError::TextTooLarge
+        );
+    }
+
+    #[cfg(feature = "native")]
+    #[test]
+    fn render_once_content_present() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let out = Renderer::render_once(80, 24, &["hello".to_owned(), "world".to_owned()])
+            .expect("memory render");
+        assert!(out.contains("hello"), "snapshot missing row 0");
+        assert!(out.contains("world"), "snapshot missing row 1");
     }
 
     #[test]
