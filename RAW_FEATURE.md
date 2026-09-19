@@ -6,7 +6,9 @@ frozen tests were observed in this repo; anything less is called out as such.
 Baseline: OpenCode (sst/opencode) public feature surface as of 2026-09-18
 (docs: opencode.ai/docs — intro, agents, commands, config, plugins, tools,
 permissions, themes, keybinds, LSP, MCP, share, desktop/IDE).
-This repo: `opencode-rk` (Rust/Tokio native rewrite) @ `17b15e6`.
+This repo: `opencode-rk` (Rust/Tokio native rewrite) @ `58b8e7c`.
+Status refresh: 2026-09-19, after subagent waves 1–3 (themes/rules/context/timeline,
+LOOP/globs/CI, sandbox/CI-flag/native-TUI/loop-live/globs-live).
 
 ---
 
@@ -41,7 +43,7 @@ The bar: every feature below is something OpenCode ships today. Status legend:
 
 | OpenCode feature | Status | Evidence / gap |
 |---|---|---|
-| Native, responsive, themeable TUI (OpenTUI-grade: real renderer, not line-echo) | 🟡 PARTIAL | `crates/opentui-sys` + `native/opentui-fork` wrapper (TUI-001/002 spike modules), 13 native_* pure-state modules (palette, navigation, approvals, status, layout, composer, console, host, input, keys, mouse, shell, caps) all wired + tested; **full Zig-renderer-backed shell render (TUI-003) and platform acceptance (TUI-010) not complete** |
+| Native, responsive, themeable TUI (OpenTUI-grade: real renderer, not line-echo) | 🟡 PARTIAL | `crates/opentui-sys` + `native/opentui-fork` wrapper, 13 native_* pure-state modules all wired + tested, **plus wave-3 landing (LANE-TUI-LAND `741e8c9`): `--native` flag reachable from main.rs, vendored `native/lib/x86_64-linux/libopentui.so` (25.4M), opentui-sys behind cargo feature with honest missing-artifact fallback, 2/2 `native_launch.rs`**; default (no-flag) path remains line-mode; renderer-backed paint of transcript state is the remaining frontier |
 | Streaming transcript, markdown/code/diff rendering | 🟡 PARTIAL | TUI-005 lane + `tui_entry` line-mode renders; native renderer integration incomplete |
 | Composer with @file fuzzy mention, paste, images drag-drop | 🟡 PARTIAL | Composer state + input modules (UI-014, `native_composer.rs`); image paste/drop not evidenced |
 | Plan mode ↔ Build mode switch (Tab) | 🟡 PARTIAL | AGENT-031 plan-mode + structured review child module; TUI toggle not wired end-to-end |
@@ -51,7 +53,7 @@ The bar: every feature below is something OpenCode ships today. Status legend:
 | Keybindings help (/keys) + custom keybinds | ✅ VERIFIED (state) | UI-018 `footer_hints`/`keybinding_help`; custom keybind config file parsing not evidenced |
 | Command palette (/ commands) | ✅ VERIFIED (state) | `native_palette.rs` (TUI-006) |
 | Session tabs / child-session navigation (subagent inspection) | 🟡 PARTIAL | `native_navigation.rs` (TUI-007) + session tree in storage; live subagent tab flow unproven |
-| Themes | 🔴 GAP | Theme system (UI-009 story) — no theme engine wired into native shell |
+| Themes | 🟡 PARTIAL | Theme engine landed: `crates/cli/src/native_theme.rs` (LANE-THEMES, 16/16 — ThemeRegistry, opencode dark/light builtins, bounded color maps), wired into cli (wave-1 `832ab7a`); render-side palette application through the Zig renderer pending the native paint lane |
 
 ### 1.3 Agents
 
@@ -90,7 +92,7 @@ The bar: every feature below is something OpenCode ships today. Status legend:
 | Permission system: allow/ask/deny per tool, per bash pattern (globs) | ✅ VERIFIED | SEC-001/003 + execpolicy prefix rules + wildcard matching (492 tests) |
 | `*` wildcard cannot bypass mandatory controls | ✅ VERIFIED | REQ-030 SEC-017 explicit anti-bypass tests |
 | Pre/post tool hooks (plugin hooks) | ✅ VERIFIED (bus) | SEC-010/011/020 bounded hook bus + EXT-008; JS plugin runtime NOT included (native mode, by contract) |
-| OS-enforced .env / sensitive-file restrictions | 🟡 PARTIAL | SEC-004/005/014 policy modules; Landlock/sandbox backend must be proven on actual platform (DISC-106) — **real OS sandbox not verified** |
+| OS-enforced .env / sensitive-file restrictions | 🟡 PARTIAL | SEC-004/005/014 policy modules + `crates/security/src/sandbox.rs` policy engine — **wave-3 (LANE-SANDBOX `e8d5fe0`) added real enforcement tests (allow / deny / deny-by-default on the live filesystem, sandbox_real Landlock capability detection, doctor no longer prints "os sandbox: not yet implemented"), 160/160 security**; kernel-level Landlock confinement of live tool processes is still the frontier |
 | System files readable, not agent-editable | ✅ VERIFIED (policy) | SEC-006 |
 | Approval dialog mid-turn (request_permissions) | 🟡 PARTIAL | TOOL-010 module + approvals state; live human-in-the-loop round-trip unproven |
 
@@ -111,7 +113,7 @@ The bar: every feature below is something OpenCode ships today. Status legend:
 | OpenCode feature | Status | Evidence / gap |
 |---|---|---|
 | Config file (opencode.json), global + per-project | 🟡 PARTIAL | BASE-006 config module; full config surface parity (formatAgents, instructions globs, etc.) not complete |
-| AGENTS.md / CLAUDE.md / rules auto-load into system prompt | 🔴 GAP | SystemPrompt.custom() equivalent not implemented |
+| AGENTS.md / CLAUDE.md / rules auto-load into system prompt | 🟡 PARTIAL | Loader landed: `crates/server/src/rules_loader.rs` (LANE-RULES, 6/6 — AGENTS.md/CLAUDE.md/rules-dir discovery, frontmatter globs, bounds, traversal rejection) + conditional load/unload engine `rules_globs.rs` (LANE-GLOBS 8/8) + live pipeline tests (LANE-GLOBS-LIVE `e19d1ea`); **remaining: provable injection of the loaded set into the live provider system prompt round** |
 | Custom slash commands (markdown, $ARGUMENTS, !shell, @file) | 🔴 LANDED-UNWIRED | EXT-001/002 skill/command modules + UI-010 — command template engine not reachable in TUI |
 | Skills (SKILL.md load/invoke, safe extraction) | 🟡 PARTIAL | EXT-013 safe-extraction + EXT-001/002 modules |
 | Plugins (TS in Bun for OpenCode) → here: native hooks + config plugins | 🟡 PARTIAL | EXT-005/009/012 manifest/hook lanes; UI plugin behavior story (UI-012); **no JS plugin runtime by design (native mode)** — Solid/TS UI plugins are a separate compat product |
@@ -135,7 +137,7 @@ The bar: every feature below is something OpenCode ships today. Status legend:
 | Typed SDK client + spawners (server/process/TUI) | ✅ VERIFIED | SDK-001/002 |
 | ACP v1 JSONL bridge (stdio) with typed Unsupported | ✅ VERIFIED (framing) | ACP-001/002; live session wiring to daemon events = DISC-112 lane |
 | Workspace HTTP/WS proxy + remote sync loop | ✅ VERIFIED | WSX-001/002 |
-| Web client (ChatGPT-class local web UI on same daemon) | 🟡 PARTIAL | `web/` React client + server web host (WEB-006..017); prior audits flagged single-page/limited actions; E2E-APP lane repaired server+web; **full parity journey not browser-evidenced** |
+| Web client (ChatGPT-class local web UI on same daemon) | 🟡 PARTIAL | `web/` React client + server web host (WEB-006..017); E2E-APP lane repaired server+web; wave-3 fixed singleton web-reuse discovery (`58b8e7c`: serve() now publishes a real DaemonAuth token in backend.json instead of the legacy empty token RC-01's reader rejects); **full parity journey not browser-evidenced; served router bearer-enforcement pending WEB-lane token delivery** |
 | Desktop app / IDE extension | ⬜ NOT TOUCHED | Not in plan |
 | Voice/dictation | 🔴 LANDED-UNWIRED | WEB-016 lane; native audio adapter absent |
 
@@ -154,19 +156,28 @@ The bar: every feature below is something OpenCode ships today. Status legend:
 | **Default-to-TUI bare launch with auto daemon spawn** (OpenCode requires manual serve; ours self-spawns) | `crates/cli/src/chat.rs`, `crates/cli/tests/default_tui.rs` 4/4 |
 | **Native TUI pure-state lane set** — palette, navigation, approvals, status, layout engine, caps, console, host, input, keys, mouse, shell (13 modules, all wired, in-file frozen tests) | `crates/cli/src/native_*.rs`, commit `aea6210` |
 | **Remote device lanes (NET-005..013)** — outbound connector, device inventory, tab routing, remote prompt/approvals, file/diff workflows, PTY control, replay/reconnect, revocation (state + protocol modules, wired + tested) | `crates/server/src/remote_*.rs`, commit `aea6210` |
-| **Serial-mandate turn stream API** with TURN-STREAM-GATE determinism | `crates/server/tests/session_turn_stream_api.rs` (documented serial contract, 2/2) |
+| **Serial-mandate turn stream API** with TURN-STREAM-GATE determinism | `crates/server/tests/session_turn_stream_api.rs` (documented serial contract) — ⚠️ **2/2 REGRESSED at HEAD `58b8e7c`** (fails at every commit since `421d0fd`; pre-wave-3 committed regression, bisect-proven; claimed LANE-STREAM-FIX, blocked with full repro in `worklog/LANE-STREAM-FIX.md`) |
 | **Provider-boundary tap with redaction + offline debug export** (adopted from harness mining; not an OpenCode feature) | PROV-013/014 lanes |
 | **Content-addressed transcript dedupe** | DB-018 |
 | **Headless run + redacted session export renderers** | HEAD-001/002 |
 | **Turn submission state machine** (StartOrSteer/StartIfIdle, typed busy reasons — adopted from codex mining) | AUTO-007 lane |
 | **Dangerous-pattern denylist + execpolicy prefix rules + permission-`*` anti-bypass** (hardened beyond OpenCode's ask/allow/deny) | SEC-018/019/017 |
+| **LOOP task-level driver (roadmap 3.1)** — plan→execute→verify→replan state machine with checkpoint/resume, steer amendments, 256-step budget (`loop_driver.rs` 10/10, `0cbe50d`) + live-path integration tests through the public server API: multi-goal trajectory, checkpoint/resume without repeating goals, mid-loop steer, budget StopReason (LANE-LOOP-LIVE 16 tests, `13a57a4`) | `crates/server/src/loop_driver.rs`, `crates/server/tests/loop_driver_live.rs` |
+| **Conditional rules globs — hysteresis load/unload (roadmap 3.5)** — glob matcher (`*`/`**`/`?`, bounded backtracking, no regex), hysteresis grace window, cap eviction incl. the always-rule deadlock fix, + live loader→evaluate→record pipeline tests | `crates/server/src/rules_globs.rs` (8/8, `0cbe50d`), `crates/server/tests/rules_globs_live.rs` (`e19d1ea`) |
+| **CI/CD non-interactive mode (roadmap 3.6)** — `opencode-rk run --ci --output jsonl\|text` reachable from the CLI: JSONL event stream, typed exit codes, **fail-closed approval (exit 20, never auto-approves)** — E2E 9/9 incl. binary-driven ci_mode scenarios | `crates/cli/src/ci_output.rs`, `crates/cli/src/ci_run.rs`, `crates/cli/tests/ci_mode.rs` (`b10b563`) |
+| **Sandbox enforcement + honest doctor (roadmap 1.5/DISC-106)** — real-FS allow/deny/deny-by-default tests, Landlock capability detection, doctor reports the live answer | `crates/security/src/sandbox_real.rs`, `crates/security/tests/sandbox_enforcement.rs`, `crates/cli/src/diagnostics.rs` (`e8d5fe0`) |
+| **`--native` launch path with vendored OpenTUI renderer** — `--native` flag dispatch, vendored `libopentui.so` (25.4M), opentui-sys feature-gated with explicit missing-artifact failure (no panic, no hang) | `crates/cli/src/native_shell.rs` (751L), `crates/opentui-sys/`, `crates/cli/tests/native_launch.rs` (`741e8c9`) |
+| **`/CONTEXT` + `/MEMORY` snapshot service (roadmap 3.3/3.4)** — segment breakdown + loaded/skipped memory reports from the server's immutable load record | `crates/cli/src/context_report.rs` (11/11, `ee32e73`) |
+| **Timeline view model (roadmap 3.7 piece 1)** — TimelineItem/TimelineBuilder bounded view over transcript state | `crates/cli/src/native_timeline.rs` (6/6, `ee7575e`) |
+| **Theme engine (parity 1.2)** — ThemeRegistry + opencode dark/light builtins + bounded maps | `crates/cli/src/native_theme.rs` (16/16, wave-1) |
 
 ### 2.2 IN PROGRESS (lanes claimed/landed but not complete)
 
 | Feature | State |
 |---|---|
-| **Native OpenTUI Zig-renderer shell** (real native TUI beyond line mode) | TUI-003/004/010 lanes partially landed (`crates/opentui-sys`, `native/opentui-fork`); TUI-010-CAPS currently claimed in the ledger (in progress) |
-| **Web client full parity** (ChatGPT-class: edit/retry/regenerate, attachments, deep research, pins/search, projects/memory, artifacts) | E2E-APP lane landed server + web repairs; WEB-013/015 card contracts still need future lanes |
+| **Native OpenTUI Zig-renderer shell** (real native TUI beyond line mode) | ⬆️ Landed behind a flag: TUI-003/011 completed in ledger; `--native` dispatch + vendored `libopentui.so` + feature-gated opentui-sys (LANE-TUI-LAND). Remaining: default-path switch + full renderer paint of transcript/theme state |
+| **Web client full parity** (ChatGPT-class: edit/retry/regenerate, attachments, deep research, pins/search, projects/memory, artifacts) | E2E-APP lane landed server + web repairs; WEB-013/015 card contracts still need future lanes; WEB-GAPS survey (`worklog/WEB-GAPS.md`) enumerates per-gap owned lanes |
+| **Turn stream API green again** | LANE-STREAM-FIX blocked with exact repro (`worklog/LANE-STREAM-FIX.md`) — pre-wave-3 committed regression in session_turn_stream_api, needs owner-lane fix |
 | **Remote mobile clients** (iOS/Android apps, pairing, tabs, notifications) | MOB-001..006 planned; framework freeze DISC-118; nothing installable yet |
 | **Cloudflare Tunnel gateway (self-hosted remote mode)** | NET-004 lane + COMPLETION_REMOTE.md design; no deployed gateway evidence |
 | **Auth connectors live (Codex/Claude Code OAuth, credential import)** | PROV-016..018 modules + bounds fixtures; live flow blocked on credentials/consent |
@@ -189,11 +200,13 @@ The bar: every feature below is something OpenCode ships today. Status legend:
 
 ## SECTION 3 — UPCOMING FEATURES (roadmap, not started unless noted)
 
-These are beyond-OpenCode capabilities we commit to building. Status is
-`PLANNED` — no lane claimed in `tasks/completion/claims.json` for any of them
-yet. Each lists the design sketch and what will count as done (all types of
-test code written, feature implemented, frozen tests green with zero test
-edits — per `.agents/WORKER.md`).
+These are beyond-OpenCode capabilities we commit to building. Status refresh
+2026-09-19 (waves 1–3): **3.1, 3.3, 3.4, 3.5 and 3.6 have landed slices with
+frozen tests green and zero test edits** (see per-section status notes);
+**3.2 ULTRA MODE and the remaining 3.7 pieces (canvas, workflow creation) are
+still PLANNED — no lane claimed**. Each section lists the design sketch and
+what counts as done (all types of test code written, feature implemented,
+frozen tests green with zero test edits — per `.agents/WORKER.md`).
 
 ### 3.1 LOOP — Claude-Code-style custom loop
 
@@ -215,6 +228,12 @@ with checkpoint/resume so a loop survives daemon restarts.
 **Done when:** loop start/steer/interrupt/resume scenarios have frozen tests;
 checkpoint replay after daemon restart passes; iteration cap + stop reasons
 surface in TUI status.
+
+**Status (2026-09-19): LANDED (state machine + live-path).**
+`loop_driver.rs` (10/10, `0cbe50d`) + `loop_driver_live.rs` (16 tests through
+the public server API: multi-goal trajectory, checkpoint/resume, steer,
+budget StopReason — `13a57a4`). Remaining: surfacing loop state in TUI
+status + daemon-restart replay across the real session path.
 
 ### 3.2 ULTRA MODE — orchestrator-written raw Rust subagents
 
@@ -263,8 +282,10 @@ history, tool results, current turn), and compaction headroom.
 bounded size) and UI render; values reconciled against a real provider
 request fixture.
 
-**Status note:** display-side state exists (UI-016); the server-side token
-accounting + command surface are the new work.
+**Status note (2026-09-19): snapshot service LANDED** —
+`context_report.rs` (11/11, `ee32e73`, wave-1): segment breakdown + /CONTEXT
+and /MEMORY report shape. Remaining: reconciling counts against what the
+live provider request actually carried (real-request fixture).
 
 ### 3.4 `/MEMORY` — memory files loaded command
 
@@ -281,6 +302,10 @@ size cap).
 
 **Done when:** frozen tests cover loaded/skipped classification, ordering,
 and bounded output; TUI + web render from the same snapshot.
+
+**Status (2026-09-19): report service LANDED** (`context_report.rs` 11/11,
+`ee32e73`) — loaded/skipped-with-reason shape exists. Remaining: feeding it
+live from the rules loader (3.5) and rendering in TUI/web from one snapshot.
 
 ### 3.5 Rules folder + path globs — conditional memory loading/unloading
 
@@ -306,6 +331,12 @@ gitignored-style memory control.
 cap enforcement, interaction with /MEMORY (3.4) and /CONTEXT (3.3) snapshots;
 loaded set provably equals what the provider request carried.
 
+**Status (2026-09-19): engine + live pipeline LANDED** —
+`rules_globs.rs` (8/8: matcher, hysteresis, cap eviction incl. the
+always-rule deadlock fix, `0cbe50d`) + `rules_globs_live.rs` (loader→evaluate
+→record pipeline, `e19d1ea`). Remaining: injecting the loaded set into the
+actual provider system-prompt round — which closes the Section 1.7 gap.
+
 ### 3.6 CI/CD-compatible non-interactive CLI
 
 **What:** every capability usable from CI: non-interactive, no-TTY, typed
@@ -328,8 +359,11 @@ and no hidden TTY-only fallbacks.
 TTY): deterministic exit codes, JSON schema stable, approval-required steps
 fail closed with typed reasons; docs include CI recipes.
 
-**Status note:** HEAD-001/002 headless core is ✅ verified — 3.6 is the
-completion of that lane into full CI parity, not a greenfield feature.
+**Status note (2026-09-19): `run --ci` mode LANDED** — `ci_run.rs` +
+`ci_output.rs` reachable from the CLI (`b10b563`, 9/9 E2E incl.
+binary-driven scenarios): JSONL event stream, typed exit codes, fail-closed
+approval (exit 20, never auto-approves). Remaining: doctor/session surface
+under CI, `--max-steps`/`--timeout` overrides, docs recipes.
 
 ### ⚠️ 3.7 WORKFLOW VIEWS — timeline, infinite canvas, custom workflow creation (HIGH-VISIBILITY GAP)
 
@@ -366,36 +400,42 @@ delegation/fork relationships as edges), and (3) **custom workflow creation**
   named skill with typed step edges; the TUI palette (`native_palette.rs`)
   and web composer are the creation surfaces.
 
-**Needed lanes (none claimed in the ledger yet):**
-1. `WF-TUI-TIMELINE` — native shell renders transcript/timeline state
-   (closes TUI-003+TUI-005 integration gap).
+**Needed lanes (updated 2026-09-19):**
+1. `WF-TUI-TIMELINE` — 🟡 view model LANDED (`native_timeline.rs` 6/6,
+   `ee7575e`); **renderer paint through the native shell still open**
+   (TUI-003+TUI-005 integration).
 2. `WF-TUI-GRAPH` — bounded TUI nodes/edges graph view over the
-   delegation/fork graph.
+   delegation/fork graph. 🔴 unclaimed.
 3. `WF-WEB-CANVAS` — React interactive canvas on daemon events
-   (nodes = sessions/subagents, edges = parent→child).
+   (nodes = sessions/subagents, edges = parent→child). 🔴 unclaimed.
 4. `WF-CREATE` — workflow-as-skill schema + TUI/web creation surface.
+   🔴 unclaimed.
 
 ---
 
 ## Honest bottom line
 
 - **Parity bar (Section 1):** core engine (daemon, sessions, storage, providers,
-  tools, security, sync, protocols) is strong and test-backed; the **biggest
-  remaining parity gaps are the fully native TUI render, live subagent/LSP/MCP
-  wiring, themes, AGENTS.md/rules system-prompt injection, custom
-  agents/commands loading, and the installed-app golden journey**.
-- **Extras (Section 2):** our genuinely-new work (agentic loop hardening,
-  fleet-claim ledger, worker protocol, doctor, native lane set, remote device
-  lanes) is completed and tested; remote/mobile/tunnel are the large
-  unfinished fronts.
-- **Roadmap (Section 3):** seven committed beyond-OpenCode features (LOOP,
-  ULTRA mode, /CONTEXT, /MEMORY, rules-folder globs, CI/CD non-interactive
-  CLI, and the workflow views 3.7). None has a claimed lane yet;
-  rules-folder globs (3.5) doubles as the fix for the Section 1.7
-  rules-injection parity gap, CI/CD (3.6) completes the verified headless
-  core, and **workflow views (3.7) are the highest-visibility UX gap —
-  timeline data model is done and needs the native render, canvas and
-  workflow-creation need new lanes**.
-- This file is a raw inventory generated from repo evidence on 2026-09-18 at
-  `17b15e6`. It is **not** the FEATURES.md acceptance record and must never be
-  cited as acceptance evidence.
+  tools, security, sync, protocols) is strong and test-backed. After waves 1–3
+  the former hard gaps **themes (engine) and rules/AGENTS.md loading are
+  closed to 🟡**, the **native TUI is real but flag-gated** (`--native` with
+  vendored `libopentui.so`), and the **OS sandbox has real enforcement tests +
+  honest doctor**. The remaining parity gaps: **default-path renderer paint
+  (native shell on transcript/theme state), live subagent/LSP/MCP wiring,
+  provider-round injection of loaded rules, custom agents/commands loading,
+  and the installed-app golden journey**.
+- **Extras (Section 2):** the genuinely-new work now includes the LOOP
+  task-level driver, conditional rules globs, CI `run --ci` mode, sandbox
+  enforcement, the `--native` launch path, /CONTEXT + /MEMORY snapshot
+  service, and the timeline view model — all landed waves 1–3 with frozen
+  tests green and zero test edits. Known regression: `session_turn_stream_api`
+  2/2 red (pre-wave-3, bisect-proven, claimed LANE-STREAM-FIX with repro).
+  Remote/mobile/tunnel remain the large unfinished fronts.
+- **Roadmap (Section 3):** 3.1 LOOP, 3.3 /CONTEXT, 3.4 /MEMORY, 3.5 rules
+  globs and 3.6 CI mode have **landed slices** (state machines + live-path
+  integration tests); their remaining work is provider-round injection and
+  client-surface rendering. **3.2 ULTRA MODE and 3.7's canvas +
+  workflow-creation lanes are the untouched roadmap.**
+- This file is a raw inventory generated from repo evidence (refreshed
+  2026-09-19 at `58b8e7c`). It is **not** the FEATURES.md acceptance record
+  and must never be cited as acceptance evidence.
