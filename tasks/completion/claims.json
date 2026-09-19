@@ -325,9 +325,10 @@
       "status": "completed"
     },
     "LANE-CI-EXT": {
+      "completedNote": "worker WIP + orchestrator main.rs wiring (optional prompt/--prompt, typed 64 pre-clap exits); 11/12 green, t03 gated on pre-existing session_turn_stream 201 regression (LANE-STREAM-FIX in flight); ci_mode 9/9 + default_tui 4/4 preserved; zero test edits; commit 61ae4b2",
       "scratchpad": "worklog/LANE-CI-EXT.md",
       "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-CI-FLAG": {
       "completedNote": "GREEN 9/9 (3 ci_mode + 6 ci_output); RED sha e8d5fe0c; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-cli --test ci_mode; pre-existing default_tui port-4096 flake unrelated",
