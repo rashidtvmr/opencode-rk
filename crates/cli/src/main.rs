@@ -6,9 +6,10 @@ use opencode_rk_contracts::{
 };
 use opencode_rk_server::{
     daemon::{
-        publish_backend_descriptor, read_backend_descriptor, DaemonError, DaemonPaths,
+        publish_backend_descriptor_with_auth, read_backend_descriptor, DaemonError, DaemonPaths,
         SingletonDaemon,
     },
+    daemon_auth::DaemonAuth,
     router, AppState,
 };
 use opencode_rk_sessions::{SessionManager, SessionService};
@@ -610,7 +611,19 @@ async fn serve(
     };
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
     let listen = listener.local_addr()?;
-    let descriptor = publish_backend_descriptor(&data, listen)?;
+    // Integration fix (wave-3): the RC-01-hardened `read_backend_descriptor`
+    // treats an empty `auth_token` as a stale/legacy descriptor, so a serve
+    // published via the no-auth variant was invisible to its own reuse path
+    // ("backend is already running but its endpoint descriptor is
+    // unavailable"). Mint the real daemon credential and publish it.
+    //
+    // Recorded gap (NOT silently accepted): the served router below is still
+    // the legacy unauthenticated `router()` — browser token delivery is a
+    // WEB-lane design decision, so bearer ENFORCEMENT on `/api/*` is not yet
+    // installed here. Publishing the token keeps discovery/reuse correct and
+    // does not weaken anything that was previously enforced.
+    let credential = DaemonAuth::mint().map_err(|error| error.to_string())?;
+    let descriptor = publish_backend_descriptor_with_auth(&data, listen, credential.token().to_owned())?;
     println!("{}", descriptor.http_origin);
     if open_browser {
         open_web_browser(&descriptor.http_origin)?;

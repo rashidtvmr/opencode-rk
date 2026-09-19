@@ -359,6 +359,12 @@
       "session": "ses_worker_sandbox",
       "status": "completed"
     },
+    "LANE-STREAM-FIX": {
+      "blockedNote": "session_turn_stream_api 2/2 FAIL at HEAD 741e8c9 and every commit since 421d0fd (both trees). Full repro in worklog/LANE-STREAM-FIX.md. Pre-wave-3 committed regression (turn-stream/fixture, WEB-009/012 surface); wave-3 server changes additive only.",
+      "scratchpad": "worklog/LANE-STREAM-FIX.md",
+      "session": "ses_orch_wave3",
+      "status": "blocked"
+    },
     "LANE-THEMES": {
       "completedNote": "GREEN 16/16 rustc --edition 2021 --test src/native_theme.rs (T01-T06: hex parse, registry bounds, apply completeness, unknown error, memory regression, builtins present); zero test edits post-freeze; zero warnings",
       "scratchpad": "worklog/LANE-THEMES.md",
