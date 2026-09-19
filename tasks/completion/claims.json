@@ -319,9 +319,10 @@
       "status": "completed"
     },
     "LANE-COMMANDS-LIVE": {
+      "completedNote": "GREEN 14/14 command_templates standalone; RED sha ffaab087/bd94a443 GREEN sha fe89476b/bd94a443; zero test edits; no-regress agents lib 34/34; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-agents --test command_templates",
       "scratchpad": "worklog/LANE-COMMANDS-LIVE.md",
       "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-CONTEXT-ACCOUNT": {
       "completedNote": "GREEN 12/12 context_accounting (T01-T12); RED sha dac665e8 GREEN sha 3be71e98; zero test edits; saturating fold fix; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-server --test context_accounting",
@@ -433,9 +434,10 @@
       "status": "completed"
     },
     "LANE-WF-CREATE": {
+      "completedNote": "GREEN 13/13 workflow_schema; RED sha cf9cf30c; GREEN sha 696d1871; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-agents --test workflow_schema",
       "scratchpad": "worklog/LANE-WF-CREATE.md",
       "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-WF-TIMELINE": {
       "blockedNote": "",
