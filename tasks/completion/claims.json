@@ -365,9 +365,10 @@
       "status": "completed"
     },
     "LANE-MCP-LIVE": {
+      "completedNote": "GREEN 15/15 mcp_session tests; RED sha c0670fd3 impl sha 0b6eda38; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-tools --test mcp_session",
       "scratchpad": "worklog/LANE-MCP-LIVE.md",
       "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-RULES": {
       "blockedNote": "",
@@ -378,9 +379,10 @@
       "status": "completed"
     },
     "LANE-RULES-INJECT": {
+      "completedNote": "GREEN 11/11 rules_inject (assemble_prompt: empty passthrough, markers, sorted order, conditional load/skip, byte cap, determinism, glob preserved, base-after-rules, budget skip reason, record bound); RED sha 728d4ea5 (tests) c457bf2b (impl); GREEN sha d74015c3 (tests) e29026f0 (impl); zero test edits post-freeze; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-server --test rules_inject; no-regress 194/194 lib",
       "scratchpad": "worklog/LANE-RULES-INJECT.md",
-      "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "session": "ses_worker_rules_inject",
+      "status": "completed"
     },
     "LANE-SANDBOX": {
       "completedNote": "GREEN 12/12 sandbox_enforcement + 160/160 security lib + 7/7 cli diagnostics + 5/5 cli doctor; sha256 58bffede (tests) e0841ad (sandbox_real) 18cea4ae (diagnostics); zero test edits; gate: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-security + cargo test -p opencode-rk-cli diagnostics; forbid(unsafe_code) in lib.rs blocks Landlock syscalls \u2014 detection pure safe Rust, enforcement documented for separate crate",
