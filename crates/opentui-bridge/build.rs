@@ -5,10 +5,14 @@ fn main() {
         let manifest = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
         let libdir = manifest.join("native").join("lib").join(&triple);
         println!("cargo:rustc-link-search=native={}", libdir.display());
-        println!("cargo:rustc-link-lib=static=opentui");
-        println!("cargo:rerun-if-changed={}", libdir.display());
         let a = libdir.join("libopentui.a");
         let so = libdir.join("libopentui.so");
+        if a.exists() {
+            println!("cargo:rustc-link-lib=static=opentui");
+        } else {
+            println!("cargo:rustc-link-lib=dylib=opentui");
+        }
+        println!("cargo:rerun-if-changed={}", libdir.display());
         if !a.exists() && !so.exists() {
             panic!(
                 "native libopentui artifact missing for triple '{triple}'.\n\
