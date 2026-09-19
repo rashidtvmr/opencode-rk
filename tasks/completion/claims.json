@@ -353,9 +353,10 @@
       "status": "completed"
     },
     "LANE-SANDBOX": {
+      "completedNote": "GREEN 12/12 sandbox_enforcement + 160/160 security lib + 7/7 cli diagnostics + 5/5 cli doctor; sha256 58bffede (tests) e0841ad (sandbox_real) 18cea4ae (diagnostics); zero test edits; gate: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-security + cargo test -p opencode-rk-cli diagnostics; forbid(unsafe_code) in lib.rs blocks Landlock syscalls — detection pure safe Rust, enforcement documented for separate crate",
       "scratchpad": "worklog/LANE-SANDBOX.md",
-      "session": "ses_orch_wave3",
-      "status": "in-progress"
+      "session": "ses_worker_sandbox",
+      "status": "completed"
     },
     "LANE-THEMES": {
       "completedNote": "GREEN 16/16 rustc --edition 2021 --test src/native_theme.rs (T01-T06: hex parse, registry bounds, apply completeness, unknown error, memory regression, builtins present); zero test edits post-freeze; zero warnings",

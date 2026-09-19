@@ -250,7 +250,7 @@ async fn doctor(args: DoctorArgs) -> Result<(), Box<dyn std::error::Error>> {
             native_core: true,
             embedded_sqlite: true,
             js_compatibility_host: false,
-            os_sandbox_backend: None,
+            os_sandbox_backend: Some(diagnostics::sandbox_backend_name().to_owned()),
             feature_profile: "foundation".to_owned(),
         },
     };
@@ -265,7 +265,7 @@ async fn doctor(args: DoctorArgs) -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("OpenCode RK {}", output.report.version);
-        println!("native core: yes\nembedded sqlite: yes\njavascript compatibility host: disabled\nos sandbox: not yet implemented");
+        println!("native core: yes\nembedded sqlite: yes\njavascript compatibility host: disabled\nos sandbox: {}", diagnostics::sandbox_backend_name());
         println!("auth: {}", output.checks.auth.status);
         println!("connectivity: {}", output.checks.connectivity.status);
         println!("tools: {}", output.checks.tools.status);

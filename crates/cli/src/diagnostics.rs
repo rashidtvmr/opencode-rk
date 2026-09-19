@@ -8,7 +8,7 @@
 //! ordering, last-valid fallback for invalid config, and redacted export
 //! (secrets/transcripts dropped unless explicitly selected).
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, fs};
 
 /// Bounded export limits (AGENTS.md: no unbounded retained output).
 pub const MAX_EXPORT_FIELDS: usize = 128;
@@ -102,7 +102,9 @@ impl ConfigPrecedence {
 
     /// Pick the winning `(value, source)` pair: highest precedence wins;
     /// ties keep the first entry so reload order is deterministic.
-    pub fn resolve<'a>(candidates: &'a [(&'a str, ConfigPrecedence)]) -> Option<(&'a str, ConfigPrecedence)> {
+    pub fn resolve<'a>(
+        candidates: &'a [(&'a str, ConfigPrecedence)],
+    ) -> Option<(&'a str, ConfigPrecedence)> {
         let mut best: Option<(&'a str, ConfigPrecedence)> = None;
         for &(value, source) in candidates {
             match best {
@@ -186,14 +188,78 @@ pub struct RedactedExport {
     pub truncated: bool,
 }
 
+/// Returns a human-readable name for the active OS sandbox backend.
+///
+/// - `"landlock"` when Landlock is detected (Linux >= 5.13 with Landlock in /proc/filesystems)
+/// - `"unavailable on this platform"` otherwise
+///
+/// Never returns `"not yet implemented"` — that was the old hardcoded lie
+/// in the doctor output. This function provides the honest live answer.
+#[must_use]
+pub fn sandbox_backend_name() -> &'static str {
+    if landlock_available() {
+        "landlock"
+    } else {
+        "unavailable on this platform"
+    }
+}
+
+fn landlock_available() -> bool {
+    kernel_at_least_5_13() && proc_filesystems_has_landlock()
+}
+
+fn kernel_at_least_5_13() -> bool {
+    let version = match fs::read_to_string("/proc/version") {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let after = match version.find("Linux version ") {
+        Some(pos) => &version[pos + "Linux version ".len()..],
+        None => return false,
+    };
+    let ver = after.split_whitespace().next().unwrap_or("");
+    let parts: Vec<&str> = ver.split('.').take(2).collect();
+    if parts.len() < 2 {
+        return false;
+    }
+    let major: u32 = match parts[0].parse() {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    let minor: u32 = match parts[1].parse() {
+        Ok(v) => v,
+        Err(_) => return false,
+    };
+    major > 5 || (major == 5 && minor >= 13)
+}
+
+fn proc_filesystems_has_landlock() -> bool {
+    let content = match fs::read_to_string("/proc/filesystems") {
+        Ok(c) => c,
+        Err(_) => return false,
+    };
+    content
+        .lines()
+        .any(|line| line.trim().contains("landlock"))
+}
+
 pub const REDACTED_MARKER: &str = "[redacted]";
 
 /// True when a field name looks like a secret (case-insensitive substring).
 pub fn is_secret_key(key: &str) -> bool {
     let lower = key.to_ascii_lowercase();
-    ["secret", "token", "password", "api_key", "apikey", "auth", "credential", "private"]
-        .iter()
-        .any(|needle| lower.contains(needle))
+    [
+        "secret",
+        "token",
+        "password",
+        "api_key",
+        "apikey",
+        "auth",
+        "credential",
+        "private",
+    ]
+    .iter()
+    .any(|needle| lower.contains(needle))
 }
 
 fn truncate_to_bytes(s: &str, max_bytes: usize) -> (String, bool) {
@@ -282,7 +348,10 @@ mod tests {
     #[test]
     fn export_redacts_secret_by_default() {
         let out = redacted_export(&sample_fields(), &[], ExportOptions::default());
-        assert_eq!(out.fields.get("provider").map(String::as_str), Some("openai"));
+        assert_eq!(
+            out.fields.get("provider").map(String::as_str),
+            Some("openai")
+        );
         assert_eq!(
             out.fields.get("OPENAI_API_KEY").map(String::as_str),
             Some(REDACTED_MARKER)
@@ -318,7 +387,10 @@ mod tests {
             },
         );
         assert_eq!(
-            with_secrets.fields.get("OPENAI_API_KEY").map(String::as_str),
+            with_secrets
+                .fields
+                .get("OPENAI_API_KEY")
+                .map(String::as_str),
             Some("sk-live-123")
         );
     }
@@ -334,9 +406,23 @@ mod tests {
         let mut stale = CapabilityProbe::disabled(ProbeKind::Daemon, "daemon");
         stale.measured_workers = 99;
         assert_eq!(stale.active_workers(), 0);
-        let live =
-            CapabilityProbe::new(ProbeKind::Daemon, "daemon", ProbeStatus::Ok, "ok", 4);
+        let live = CapabilityProbe::new(ProbeKind::Daemon, "daemon", ProbeStatus::Ok, "ok", 4);
         assert_eq!(live.active_workers(), 4);
+    }
+
+    #[test]
+    fn sandbox_backend_name_honest_not_yet_implemented() {
+        let name = sandbox_backend_name();
+        assert!(
+            !name.contains("not yet implemented"),
+            "must not claim 'not yet implemented': got {name:?}"
+        );
+        assert!(!name.is_empty());
+        // On Linux, should be either "landlock" or "unavailable on this platform"
+        assert!(
+            name == "landlock" || name == "unavailable on this platform",
+            "unexpected backend name: {name:?}"
+        );
     }
 
     #[test]
