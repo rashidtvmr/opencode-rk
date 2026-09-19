@@ -324,9 +324,10 @@
       "status": "in-progress"
     },
     "LANE-CONTEXT-ACCOUNT": {
+      "completedNote": "GREEN 12/12 context_accounting (T01-T12); RED sha dac665e8 GREEN sha 3be71e98; zero test edits; saturating fold fix; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-server --test context_accounting",
       "scratchpad": "worklog/LANE-CONTEXT-ACCOUNT.md",
-      "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "session": "ses_worker_ctx_account",
+      "status": "completed"
     },
     "LANE-CONTEXT-CMD": {
       "blockedNote": "",
@@ -397,9 +398,10 @@
       "status": "not-started"
     },
     "LANE-SUBAGENT-LIVE": {
+      "completedNote": "GREEN 11/11 delegation_live (10 tests + 1 module); RED sha f2abcd19/0fa8db9e; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 400 rtk cargo test -p opencode-rk-agents --test delegation_live; full crate 79/79; self-contained types avoid crate:: import issues in standalone harness",
       "scratchpad": "worklog/LANE-SUBAGENT-LIVE.md",
       "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-THEMES": {
       "completedNote": "GREEN 16/16 rustc --edition 2021 --test src/native_theme.rs (T01-T06: hex parse, registry bounds, apply completeness, unknown error, memory regression, builtins present); zero test edits post-freeze; zero warnings",
