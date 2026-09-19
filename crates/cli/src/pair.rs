@@ -1,4 +1,4 @@
-//! PC pairing types for `opencode2 pair` (NET-002).
+//! PC pairing types for `oc2 pair` (NET-002).
 //!
 //! Commit: 5af7884. Design source: docs/architecture/COMPLETION_REMOTE.md
 //! ("Identity and pairing"): short-lived single-use account-bound challenge,
@@ -16,7 +16,7 @@ use std::fmt;
 pub const MAX_OPAQUE_LEN: usize = 256;
 pub const MAX_ACCOUNT_LEN: usize = 128;
 pub const MAX_FINGERPRINT_LEN: usize = 64;
-pub const QR_SCHEME_PREFIX: &str = "opencode2://pair?";
+pub const QR_SCHEME_PREFIX: &str = "oc2://pair?";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PairError {

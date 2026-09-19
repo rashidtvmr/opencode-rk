@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-//! Installed opencode2 command inventory and binary identity (DISC-102/APP-010).
+//! Installed oc2 command inventory and binary identity (DISC-102/APP-010).
 //!
 //! Pure, std-only inventory boundary over the CLI surface declared in
 //! `crates/cli/src/main.rs` (`Command`: Doctor/Session/Models/Serve/Web/Tui/Run;
@@ -8,14 +8,14 @@
 //! owns process install, checksum verification, and help rendering.
 //!
 //! Contract:
-//! - [`BINARY_NAME`] is the installed artifact identity (`opencode2`).
+//! - [`BINARY_NAME`] is the installed artifact identity (`oc2`).
 //! - [`command_inventory`] is the exact shippable surface; unknown names are
 //!   rejected by [`unknown_subcommand_exit`] with nonzero exit and no daemon.
 //! - [`release_artifact_ok`] fail-closes on unknown platform/checksum state.
 //! - Bounded: command tables are fixed-size; inputs length-capped.
 
 /// Installed binary identity. Packaged output must never say `opencode-rk`.
-pub const BINARY_NAME: &str = "opencode2";
+pub const BINARY_NAME: &str = "oc2";
 /// Legacy development binary name; must not appear in packaged output.
 pub const LEGACY_BINARY_NAME: &str = "opencode-rk";
 /// Maximum accepted command-name length, in bytes.
@@ -159,10 +159,10 @@ pub fn release_artifact_ok(platform: Option<InstallPlatform>, checksum_ok: bool)
     platform.is_some() && checksum_ok
 }
 
-/// Packaged-output identity check: artifact text must name opencode2 and
+/// Packaged-output identity check: artifact text must name oc2 and
 /// never contain the legacy development binary name.
 #[must_use]
-pub fn packaged_output_names_opencode2(text: &str) -> bool {
+pub fn packaged_output_names_oc2(text: &str) -> bool {
     text.contains(BINARY_NAME) && !text.contains(LEGACY_BINARY_NAME)
 }
 
@@ -191,10 +191,10 @@ mod tests {
     }
 
     #[test]
-    fn disc102_t03_artifacts_identify_as_opencode2() {
-        assert_eq!(BINARY_NAME, "opencode2");
-        assert!(packaged_output_names_opencode2("opencode2 v1.0 linux-x64"));
-        assert!(!packaged_output_names_opencode2("opencode-rk v1.0 linux-x64"));
+    fn disc102_t03_artifacts_identify_as_oc2() {
+        assert_eq!(BINARY_NAME, "oc2");
+        assert!(packaged_output_names_oc2("oc2 v1.0 linux-x64"));
+        assert!(!packaged_output_names_oc2("opencode-rk v1.0 linux-x64"));
     }
 
     #[test]
