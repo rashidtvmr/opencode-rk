@@ -304,9 +304,10 @@
       "status": "completed"
     },
     "LANE-CI-FLAG": {
+      "completedNote": "GREEN 9/9 (3 ci_mode + 6 ci_output); RED sha e8d5fe0c; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-cli --test ci_mode; pre-existing default_tui port-4096 flake unrelated",
       "scratchpad": "worklog/LANE-CI-FLAG.md",
-      "session": "ses_orch_wave3",
-      "status": "in-progress"
+      "session": "ses_worker_ci_flag",
+      "status": "completed"
     },
     "LANE-CONTEXT-CMD": {
       "blockedNote": "",
@@ -353,7 +354,7 @@
       "status": "completed"
     },
     "LANE-SANDBOX": {
-      "completedNote": "GREEN 12/12 sandbox_enforcement + 160/160 security lib + 7/7 cli diagnostics + 5/5 cli doctor; sha256 58bffede (tests) e0841ad (sandbox_real) 18cea4ae (diagnostics); zero test edits; gate: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-security + cargo test -p opencode-rk-cli diagnostics; forbid(unsafe_code) in lib.rs blocks Landlock syscalls — detection pure safe Rust, enforcement documented for separate crate",
+      "completedNote": "GREEN 12/12 sandbox_enforcement + 160/160 security lib + 7/7 cli diagnostics + 5/5 cli doctor; sha256 58bffede (tests) e0841ad (sandbox_real) 18cea4ae (diagnostics); zero test edits; gate: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-security + cargo test -p opencode-rk-cli diagnostics; forbid(unsafe_code) in lib.rs blocks Landlock syscalls \u2014 detection pure safe Rust, enforcement documented for separate crate",
       "scratchpad": "worklog/LANE-SANDBOX.md",
       "session": "ses_worker_sandbox",
       "status": "completed"
@@ -365,9 +366,10 @@
       "status": "completed"
     },
     "LANE-TUI-LAND": {
+      "reclaimedBy": "ses_orch_wave3",
       "scratchpad": "worklog/LANE-TUI-LAND.md",
-      "session": "ses_orch_wave3",
-      "status": "in-progress"
+      "session": "",
+      "status": "not-started"
     },
     "LANE-WF-TIMELINE": {
       "blockedNote": "",

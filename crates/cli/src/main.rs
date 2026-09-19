@@ -16,6 +16,8 @@ use opencode_rk_storage::{Storage, StoragePaths};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::Serialize;
 use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
+mod ci_output;
+mod ci_run;
 mod tui_entry;
 use tui_entry::TuiArgs;
 mod app_start;
@@ -74,6 +76,18 @@ enum Command {
     Serve(ServeArgs),
     Web(WebArgs),
     Tui(TuiArgs),
+    Run(RunArgs),
+}
+#[derive(Debug, Args)]
+struct RunArgs {
+    /// Enable CI non-interactive mode with JSONL event output.
+    #[arg(long)]
+    ci: bool,
+    /// Output format for CI mode.
+    #[arg(long, default_value = "jsonl")]
+    output: String,
+    /// The prompt to execute.
+    prompt: String,
 }
 #[derive(Debug, Args)]
 struct DoctorArgs {
@@ -210,6 +224,22 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         }
         Some(Command::Tui(args)) => {
             tui_entry::run(args)?;
+        }
+        Some(Command::Run(args)) => {
+            if !args.ci {
+                eprintln!("error: --ci flag is required for non-interactive CI mode");
+                std::process::exit(ci_output::CiExitCode::UsageError as i32);
+            }
+            let format = match args.output.as_str() {
+                "json" | "jsonl" => ci_output::OutputFormat::Jsonl,
+                "text" => ci_output::OutputFormat::Text,
+                _ => ci_output::OutputFormat::Jsonl,
+            };
+            let mut stdout = std::io::stdout();
+            let result = ci_run::run_ci(&args.prompt, format, &mut stdout);
+            if result.exit_code != 0 {
+                std::process::exit(result.exit_code as i32);
+            }
         }
     }
     Ok(())
