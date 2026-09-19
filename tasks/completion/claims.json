@@ -203,9 +203,10 @@
       "status": "in-progress"
     },
     "DISC-103": {
+      "completedNote": "GREEN 7/7 registry_dispatch + 99/99 tools lib; frozen sha 7a996099; zero test edits post-freeze; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-tools --lib",
       "scratchpad": "worklog/DISC-103.md",
       "session": "ses_main_gap2",
-      "status": "in-progress"
+      "status": "completed"
     },
     "DISC-104": {
       "completedNote": "GREEN 10/10 shell_bounds + 92/92 tools lib; frozen sha256 49f06794; zero test edits; logs /tmp/opencode/disc104-green.log + /tmp/opencode/disc104-fulllib2.log; no code change (impl pre-complete), wiring already at lib.rs:59",

@@ -48,6 +48,7 @@ pub mod plugin_scoped_exec;
 pub mod plugin_transform;
 pub mod plugin_ui_boundary;
 pub mod registry;
+pub mod registry_dispatch;
 pub mod rel_notes;
 pub mod rel_tag;
 pub mod request_perms;
