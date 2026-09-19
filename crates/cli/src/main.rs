@@ -26,6 +26,7 @@ mod chat;
 mod daemon_client;
 mod diagnostics;
 mod headless_engine;
+mod install_commands;
 mod native_app;
 mod native_approvals;
 mod native_composer;

@@ -11,6 +11,7 @@ members = [
   "crates/cli",
   "crates/providers",
   "crates/tools",
+  "crates/opentui-bridge",
 ]
 resolver = "2"
 

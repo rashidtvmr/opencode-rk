@@ -901,6 +901,7 @@ dependencies = [
  "chrono",
  "opencode-rk-contracts",
  "serde",
+ "serde_json",
  "thiserror",
  "uuid",
 ]
@@ -960,6 +961,10 @@ dependencies = [
  "toml",
  "tracing",
 ]
+
+[[package]]
+name = "opencode-rk-opentui-bridge"
+version = "0.1.0-alpha.1"
 
 [[package]]
 name = "opencode-rk-providers"

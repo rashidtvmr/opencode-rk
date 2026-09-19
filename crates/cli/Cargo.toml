@@ -7,6 +7,13 @@ license.workspace = true
 rust-version.workspace = true
 
 [[bin]]
+name = "opencode2"
+path = "src/main.rs"
+
+# Compat alias: existing test harnesses and dev workflows invoke
+# `CARGO_BIN_EXE_opencode-rk`. Same source, same behavior; release
+# artifacts ship only `opencode2` (see scripts/install-opencode2.*).
+[[bin]]
 name = "opencode-rk"
 path = "src/main.rs"
 
