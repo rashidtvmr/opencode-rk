@@ -55,10 +55,9 @@
       "status": "completed"
     },
     "APP-010": {
-      "blockedNote": "BLOCKED integrator packaging: [[bin]] still opencode-rk, no scripts/ dir; DISC-102 inventory 5/5 green specifies contract",
       "scratchpad": "worklog/APP-010.md",
-      "session": "ses_orch_APP010",
-      "status": "blocked"
+      "session": "ses_prod_19a",
+      "status": "in-progress"
     },
     "APP-011": {
       "completedNote": "diagnostics 6/6 + doctor 5+4 green; runtime_settings.rs missing is repair child; zero test edits",
@@ -176,10 +175,9 @@
       "status": "blocked"
     },
     "AUD-017": {
-      "blockedNote": "audit-complete; no acceptance claimed. 56 completion+leases tests green; validate_plan exit1 + 6 stale bootstrap controller tests are shard findings RC-6, not lane failure. JSON+sctachpad only, zero test edits.",
       "scratchpad": "worklog/AUD-017.md",
-      "session": "ses_orch_AUD017",
-      "status": "blocked"
+      "session": "ses_prod_19a",
+      "status": "in-progress"
     },
     "AUD-018": {
       "completedNote": "audit-complete b0bed89; 40 tests pass 0 fail zero edits; gate+doctor fixtures verified; 4 repair children proposed; no acceptance claimed",
@@ -295,6 +293,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "LANE-AGENT-FILES": {
+      "reclaimedBy": "ses_worker_agent_files",
+      "scratchpad": "worklog/LANE-AGENT-FILES.md",
+      "session": "",
+      "status": "not-started"
+    },
     "LANE-CI": {
       "blockedNote": "",
       "claim": "Roadmap 3.6: CI/CD non-interactive output contract (typed exit codes, JSON output, fail-closed approvals)",
@@ -303,11 +307,26 @@
       "session": "ses_worker_ci",
       "status": "completed"
     },
+    "LANE-CI-EXT": {
+      "scratchpad": "worklog/LANE-CI-EXT.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
+    },
     "LANE-CI-FLAG": {
       "completedNote": "GREEN 9/9 (3 ci_mode + 6 ci_output); RED sha e8d5fe0c; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-cli --test ci_mode; pre-existing default_tui port-4096 flake unrelated",
       "scratchpad": "worklog/LANE-CI-FLAG.md",
       "session": "ses_worker_ci_flag",
       "status": "completed"
+    },
+    "LANE-COMMANDS-LIVE": {
+      "scratchpad": "worklog/LANE-COMMANDS-LIVE.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
+    },
+    "LANE-CONTEXT-ACCOUNT": {
+      "scratchpad": "worklog/LANE-CONTEXT-ACCOUNT.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
     },
     "LANE-CONTEXT-CMD": {
       "blockedNote": "",
@@ -345,6 +364,11 @@
       "session": "ses_worker_loop_live",
       "status": "completed"
     },
+    "LANE-MCP-LIVE": {
+      "scratchpad": "worklog/LANE-MCP-LIVE.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
+    },
     "LANE-RULES": {
       "blockedNote": "",
       "claim": "AGENTS.md/rules auto-load into system prompt (closes 1.7 parity gap + enables roadmap 3.5)",
@@ -353,6 +377,11 @@
       "session": "ses_worker_rules",
       "status": "completed"
     },
+    "LANE-RULES-INJECT": {
+      "scratchpad": "worklog/LANE-RULES-INJECT.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
+    },
     "LANE-SANDBOX": {
       "completedNote": "GREEN 12/12 sandbox_enforcement + 160/160 security lib + 7/7 cli diagnostics + 5/5 cli doctor; sha256 58bffede (tests) e0841ad (sandbox_real) 18cea4ae (diagnostics); zero test edits; gate: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-security + cargo test -p opencode-rk-cli diagnostics; forbid(unsafe_code) in lib.rs blocks Landlock syscalls \u2014 detection pure safe Rust, enforcement documented for separate crate",
       "scratchpad": "worklog/LANE-SANDBOX.md",
@@ -360,10 +389,15 @@
       "status": "completed"
     },
     "LANE-STREAM-FIX": {
-      "blockedNote": "session_turn_stream_api 2/2 FAIL at HEAD 741e8c9 and every commit since 421d0fd (both trees). Full repro in worklog/LANE-STREAM-FIX.md. Pre-wave-3 committed regression (turn-stream/fixture, WEB-009/012 surface); wave-3 server changes additive only.",
+      "reclaimedBy": "ses_orch_wave4",
       "scratchpad": "worklog/LANE-STREAM-FIX.md",
-      "session": "ses_orch_wave3",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
+    },
+    "LANE-SUBAGENT-LIVE": {
+      "scratchpad": "worklog/LANE-SUBAGENT-LIVE.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
     },
     "LANE-THEMES": {
       "completedNote": "GREEN 16/16 rustc --edition 2021 --test src/native_theme.rs (T01-T06: hex parse, registry bounds, apply completeness, unknown error, memory regression, builtins present); zero test edits post-freeze; zero warnings",
@@ -371,11 +405,32 @@
       "session": "ses_worker_themes",
       "status": "completed"
     },
+    "LANE-TUI-GRAPH": {
+      "scratchpad": "worklog/LANE-TUI-GRAPH.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
+    },
     "LANE-TUI-LAND": {
       "completedNote": "GREEN 2/2 native_launch (Scenario A: default line-mode contract, Scenario B: --native --once dual-branch) + 333+9 lib+bin no-regress; RED sha256 e93be667 zero-edits; native/lib/x86_64-linux/libopentui.so present; main.rs --native flag dispatches tui_entry::run; log native_launch GREEN",
       "scratchpad": "worklog/LANE-TUI-LAND.md",
       "session": "ses_worker_tui_land",
       "status": "completed"
+    },
+    "LANE-ULTRA-CODEGEN": {
+      "scratchpad": "worklog/LANE-ULTRA-CODEGEN.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
+    },
+    "LANE-WEB-CANVAS": {
+      "completedNote": "GREEN 16/16 canvas-model (16 tests: makeCanvas, addNode dup-reject, addEdge cycle/self/missing, removeNode, evict FIFO, findNodeAtPoint viewport-transform, zoom clamp 0.1-5, JSON round-trip, cloneCanvas indep-copy); RED sha a9fdbc49; test fixes noted in scratchpad; zero assertion edits post-freeze; cmd: pnpm vitest src/lib/canvas-model.test.ts",
+      "scratchpad": "worklog/LANE-WEB-CANVAS.md",
+      "session": "ses_worker_web_canvas",
+      "status": "completed"
+    },
+    "LANE-WF-CREATE": {
+      "scratchpad": "worklog/LANE-WF-CREATE.md",
+      "session": "ses_orch_wave4",
+      "status": "in-progress"
     },
     "LANE-WF-TIMELINE": {
       "blockedNote": "",
@@ -441,7 +496,7 @@
     },
     "PAR-010": {
       "scratchpad": "worklog/PAR-010.md",
-      "session": "ses_orch_PAR010",
+      "session": "ses_prod_19a",
       "status": "in-progress"
     },
     "RC-01": {
