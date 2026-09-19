@@ -20,5 +20,13 @@
   "allowBudgetIncrease": false,
   "respectHarnessConcurrencyLimit": true,
   "legacyAutomaticAcceptanceApproved": false,
-  "note": "Targets are not proof of running workers. Use actual harness-native APIs and complete COORD adapter/lease/sandbox tasks. Never emulate unavailable native delegation with twenty heavy CLI processes or bypass provider limits."
+  "note": "Target 20 native workers, useful minimum 15 when the harness/provider/resource budget supports it. Preserve at least 4 integration-spine and 2 independent test/verifier lanes before breadth. claims.json completion is coordination only; parent acceptance requires independent verification, successful integration, post-integration GREEN, and convergence gate.",
+  "schedulingMode": "convergence-first",
+  "minimumUsefulWorkersWhenSupported": 15,
+  "reservedIntegrationWorkers": 4,
+  "reservedIndependentTestVerifierWorkers": 2,
+  "maxBreadthWorkersBeforeLocalE2eGreen": 14,
+  "requireConvergenceGateBeforeParentCompletion": true,
+  "claimsCompletedIsAcceptance": false,
+  "requireIntegratedParentJourney": true
 }
