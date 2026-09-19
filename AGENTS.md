@@ -20,6 +20,28 @@ paths require the canonical repository guard and the ownership/review process in
 `docs/REPOSITORY_PROTECTION.md`; source-controlled policy is not proof that the
 hosting platform has enabled the desired branch/ruleset settings.
 
+## Convergence and parent-completion boundary
+
+Read `docs/CONVERGENCE.md`. Before choosing more leaf work, run
+`python3 tools/convergence_gate.py`. A worker's isolated GREEN is only a candidate;
+it is not permission to call an application parent complete.
+
+A parent task MUST remain open when its own notes admit a repair child, follow-up,
+unwired/unproven path, partial/state-only implementation, missing caller, or lack of
+acceptance. The implementation must be wired into the real caller and the frozen
+parent journey must pass on the integrated revision.
+
+Existing and frozen tests are immutable to implementers and orchestrators: no edit,
+delete, rename, move, skip/ignore, expected-output regeneration, assertion weakening,
+or selector narrowing to obtain GREEN. A disputed frozen test is a blocked contract
+review, never an implementation edit.
+
+Parallelism is convergence-first: preserve integration and verifier capacity before
+filling all slots with leaf lanes. On a 20-worker harness reserve at least four
+integration-spine lanes and two independent test/verifier lanes; use at most fourteen
+for independent breadth. A wave containing only isolated modules is not a successful
+application-building wave.
+
 ## Required workflow
 
 1. Cite exact repository commit, path and line/symbol for each discovered
