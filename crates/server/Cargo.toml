@@ -13,6 +13,7 @@ fs2.workspace = true
 include_dir.workspace = true
 opencode-rk-catalog = { path = "../catalog" }
 opencode-rk-contracts = { path = "../contracts" }
+opencode-rk-agents = { path = "../agents" }
 opencode-rk-providers = { path = "../providers" }
 opencode-rk-security = { path = "../security" }
 opencode-rk-sessions = { path = "../sessions" }

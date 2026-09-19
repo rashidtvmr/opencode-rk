@@ -96,6 +96,7 @@ use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, Security
 use opencode_rk_sessions::{SessionError, SessionService};
 use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::registry::ToolRegistry;
+use opencode_rk_agents::agent_executor::AgentExecutor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
@@ -836,6 +837,8 @@ struct TurnStreamState {
     reasoning_effort: String,
     /// Set when the loop must finalize with this stop reason (step cap hit).
     forced_stop: Option<TurnStop>,
+    /// Agents-crate executor: mirror of the real agent loop plan (CONVERGENCE AGENTS).
+    agent_plan: AgentExecutor,
 }
 
 /// Turn-tool allowlist from OPENCODE_RK_TURN_TOOLS (comma-separated tool ids).
@@ -978,6 +981,12 @@ async fn create_turn_stream(
             model: model_id.to_owned(),
             reasoning_effort: body.reasoning_effort.clone(),
             forced_stop: None,
+            agent_plan: AgentExecutor::new(vec![
+                opencode_rk_agents::agent_executor::LoopStep::ProviderCall,
+                opencode_rk_agents::agent_executor::LoopStep::ToolDispatch,
+                opencode_rk_agents::agent_executor::LoopStep::PolicyCheck,
+                opencode_rk_agents::agent_executor::LoopStep::Settle,
+            ]).expect("fixed 4-step turn plan fits agent executor capacity"),
         },
         |mut state| async move {
             loop {

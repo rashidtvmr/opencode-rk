@@ -731,6 +731,54 @@ pub fn discover_from_path(
     discover(&bytes, &meta, is_alive)
 }
 
+/// Map backend.json state to [`app_start::DaemonPresence`]: validated descriptor
+/// + live pid + loopback origin = Reusable; stale/missing = Stale/Absent.
+/// Never contacts any origin; refusal or unreadable descriptor means Absent/Stale.
+pub fn discover_presence(data_dir: &std::path::Path) -> crate::app_start::DaemonPresence {
+    use opencode_rk_server::daemon::DaemonPaths;
+    let paths = DaemonPaths::for_data_dir(data_dir);
+    let uid = std::fs::symlink_metadata(&paths.descriptor)
+        .map(|m| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::MetadataExt;
+                m.uid()
+            }
+            #[cfg(not(unix))]
+            {
+                let _ = m;
+                0
+            }
+        })
+        .unwrap_or(0);
+    let live = |pid: u32| std::path::Path::new(&format!("/proc/{pid}")).exists();
+    match discover_from_path(&paths.descriptor, uid, live).ok() {
+        Some(_) => crate::app_start::DaemonPresence::Reusable,
+        None => match std::fs::symlink_metadata(&paths.descriptor) {
+            Ok(_) => crate::app_start::DaemonPresence::Stale,
+            Err(_) => crate::app_start::DaemonPresence::Absent,
+        },
+    }
+}
+
+/// Provider credential check: any non-empty provider env var counts as configured.
+pub fn creds_configured(_data_dir: &std::path::Path) -> Option<bool> {
+    const KEYS: &[&str] = &[
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+    ];
+    if KEYS
+        .iter()
+        .any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()))
+    {
+        Some(true)
+    } else {
+        Some(false)
+    }
+}
+
 /// One-shot startup election across concurrent launches. The first caller
 /// to flip `claimed` false->true owns the start; every other caller
 /// attaches. Deterministic under contention (atomic compare-exchange).

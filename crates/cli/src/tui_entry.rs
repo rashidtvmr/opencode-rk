@@ -21,6 +21,7 @@ use opencode_rk_sessions::tui_state::{
     MemoryViewer, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES,
     MAX_SOURCES,
 };
+use crate::daemon_client;
 use std::{
     env, fs,
     io::{BufRead, Read, Write},
@@ -116,12 +117,26 @@ struct LiveSnapshot {
 }
 
 /// Minimal bounded HTTP/1.1 client for the daemon API (std-only, http scheme).
+/// `auth` carries the `Bearer <token>` header value; `/api/*` refuses to
+/// send without one (fail-closed), `/health` stays public.
 fn http_request(
     origin: &str,
     method: &str,
     path: &str,
     body: Option<&str>,
+    auth: Option<&str>,
 ) -> Result<String, String> {
+    if path.starts_with("/api/") {
+        match auth {
+            Some(token) if crate::daemon_client::is_wellformed_token(token) => {}
+            _ => {
+                return Err(
+                    "refusing unauthenticated /api/* request: no validated backend descriptor"
+                        .to_string(),
+                )
+            }
+        }
+    }
     let rest = origin
         .strip_prefix("http://")
         .ok_or_else(|| format!("only http origins are supported, got {origin:?}"))?;
@@ -139,8 +154,11 @@ fn http_request(
         .set_write_timeout(Some(LIVE_TIMEOUT))
         .map_err(|e| format!("daemon unreachable at {origin}: {e}"))?;
     let payload = body.unwrap_or("");
+    let auth_line = auth
+        .map(|token| format!("Authorization: {}\r\n", crate::daemon_client::authorization_header(token)))
+        .unwrap_or_default();
     let request = format!(
-        "{method} {path} HTTP/1.1\r\nHost: {origin}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
+        "{method} {path} HTTP/1.1\r\nHost: {origin}\r\n{auth_line}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
         payload.len()
     );
     stream
@@ -169,9 +187,14 @@ fn http_request(
 }
 
 /// Fetch the live session snapshot: target session (explicit id or most
-/// recently updated) plus its bounded message list.
-fn fetch_snapshot(origin: &str, session: Option<&str>) -> Result<LiveSnapshot, String> {
-    let sessions_body = http_request(origin, "GET", "/api/sessions", None)?;
+/// recently updated) plus its bounded message list. `auth` is the raw bearer
+/// token from the validated backend descriptor.
+fn fetch_snapshot(
+    origin: &str,
+    session: Option<&str>,
+    auth: Option<&str>,
+) -> Result<LiveSnapshot, String> {
+    let sessions_body = http_request(origin, "GET", "/api/sessions", None, auth)?;
     let value: serde_json::Value = serde_json::from_str(&sessions_body)
         .map_err(|e| format!("daemon session list is not valid JSON: {e}"))?;
     let sessions = value["sessions"]
@@ -205,6 +228,7 @@ fn fetch_snapshot(origin: &str, session: Option<&str>) -> Result<LiveSnapshot, S
         "GET",
         &format!("/api/sessions/{id}/messages?limit=200"),
         None,
+        auth,
     )?;
     let messages_value: serde_json::Value = serde_json::from_str(&messages_body)
         .map_err(|e| format!("daemon message list is not valid JSON: {e}"))?;
@@ -228,7 +252,7 @@ fn fetch_snapshot(origin: &str, session: Option<&str>) -> Result<LiveSnapshot, S
         state: target["state"].as_str().unwrap_or_default().to_owned(),
         updated_at: target["updated_at"].as_str().unwrap_or_default().to_owned(),
         message_count: messages.len(),
-        last_text,
+        last_text: last_text,
     })
 }
 
@@ -346,13 +370,18 @@ fn status_hint(action: StatusAction) -> &'static str {
 
 /// Persist a submitted draft through the daemon. Returns the typed failure on
 /// any non-2xx/transport error; the caller keeps the local state machine.
-fn persist_submit(snapshot: &LiveSnapshot, text: &str) -> Result<(), String> {
+fn persist_submit(
+    snapshot: &LiveSnapshot,
+    text: &str,
+    auth: Option<&str>,
+) -> Result<(), String> {
     let payload = serde_json::json!({ "text": text }).to_string();
     http_request(
         &snapshot.origin,
         "POST",
         &format!("/api/sessions/{}/messages", snapshot.session_id),
         Some(&payload),
+        auth,
     )
     .map(|_| ())
 }
@@ -366,6 +395,7 @@ fn interactive_loop(
     keymap: SubmitKeymap,
     memory: &[MemoryFile],
     live: Option<&LiveSnapshot>,
+    auth: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
@@ -391,7 +421,7 @@ fn interactive_loop(
                     Ok(opencode_rk_sessions::tui_state::SubmitOutcome::Sent(sent)) => {
                         println!("you: {sent}");
                         match live {
-                            Some(snapshot) => match persist_submit(snapshot, &sent) {
+                            Some(snapshot) => match persist_submit(snapshot, &sent, auth) {
                                 Ok(()) => println!("[persisted]"),
                                 Err(error) => println!("[error] not persisted: {error}"),
                             },
@@ -423,12 +453,13 @@ fn follow_loop(
     session: Option<&str>,
     poll_ms: u64,
     follow_for_secs: Option<u64>,
+    auth: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let poll = Duration::from_millis(poll_ms.max(50));
     let deadline = follow_for_secs.map(|secs| Instant::now() + Duration::from_secs(secs));
     let mut fingerprint = String::new();
     loop {
-        match fetch_snapshot(origin, session) {
+        match fetch_snapshot(origin, session, auth) {
             Ok(snapshot) => {
                 let mark = format!(
                     "{}|{}|{}|{}|{}",
@@ -461,10 +492,15 @@ fn follow_loop(
 
 /// Entry bound from `main.rs`. Bounded output: one frame in `--once`, line-
 /// echoed interaction otherwise; live fetches are capped in bytes and time.
+/// Bearer comes from the validated backend descriptor when `--origin` names
+/// the daemon's own origin; otherwise requests fail closed (offline banner
+/// interactively, error in `--once`/`--follow`).
 pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
     let keymap = resolve_keymap(args.submit_keymap)
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let memory = load_memory(&args.memory);
+    let auth_owned = resolve_origin_bearer(args.origin.as_deref());
+    let auth = auth_owned.as_deref();
     if args.follow {
         let Some(origin) = args.origin else {
             return Err("--follow requires --origin".into());
@@ -474,19 +510,18 @@ pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
             args.session.as_deref(),
             args.poll_ms,
             args.follow_for,
+            auth,
         );
     }
     if let Some(origin) = &args.origin {
-        match fetch_snapshot(origin, args.session.as_deref()) {
+        match fetch_snapshot(origin, args.session.as_deref(), auth) {
             Ok(snapshot) => {
                 if args.once {
-                    print!(
-                        "{}",
-                        render_frame(keymap, &memory, "unset", Some(&snapshot))
-                    );
+                    let frame = render_frame(keymap, &memory, "unset", Some(&snapshot));
+                    print!("{}", print_native_or_legacy(&frame));
                     return Ok(());
                 }
-                return interactive_loop(keymap, &memory, Some(&snapshot));
+                return interactive_loop(keymap, &memory, Some(&snapshot), auth);
             }
             Err(error) => {
                 // Fail closed in snapshot mode; degrade explicitly offline.
@@ -497,8 +532,56 @@ pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     } else if args.once {
-        print!("{}", render_frame(keymap, &memory, "unset", None));
+        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, "unset", None)));
         return Ok(());
     }
-    interactive_loop(keymap, &memory, None)
+    interactive_loop(keymap, &memory, None, auth)
+}
+
+/// Resolve the raw bearer token for `--origin` from the validated backend
+/// descriptor. Returns None when no descriptor/origin (fail-closed downstream).
+fn resolve_origin_bearer(origin: Option<&str>) -> Option<String> {
+    let origin = origin?;
+    let data = resolve_cli_data_dir()?;
+    let descriptor =
+        opencode_rk_server::daemon::read_backend_descriptor(&data).ok()??;
+    if descriptor.http_origin != origin {
+        return None;
+    }
+    if !daemon_client::is_wellformed_token(&descriptor.auth_token) {
+        return None;
+    }
+    Some(descriptor.auth_token)
+}
+
+/// CLI data dir default (mirrors main.rs resolve_data_dir, no clap here).
+fn resolve_cli_data_dir() -> Option<std::path::PathBuf> {
+    if let Some(home) = std::env::var_os("OPENCODE_RK_HOME") {
+        return Some(std::path::PathBuf::from(home));
+    }
+    if let Some(home) = std::env::var_os("HOME") {
+        return Some(std::path::PathBuf::from(home).join(".local/share/opencode-rk"));
+    }
+    if let Some(home) = std::env::var_os("USERPROFILE") {
+        return Some(std::path::PathBuf::from(home).join(".opencode-rk"));
+    }
+    None
+}
+
+/// Print a frame through the native OpenTUI memory renderer when available:
+/// [`render_once`] snapshot on success, legacy text on validation failure.
+/// Real Rust caller for the opentui bridge (CONVERGENCE NATIVE_TUI).
+fn print_native_or_legacy(frame: &str) -> String {
+    #[cfg(feature = "native")]
+    {
+        let lines: Vec<String> = frame.lines().map(str::to_owned).collect();
+        match opencode_rk_opentui_bridge::Renderer::render_once(80, 24, &lines) {
+            Ok(snapshot) => snapshot,
+            Err(_) => frame.to_owned(),
+        }
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        frame.to_owned()
+    }
 }

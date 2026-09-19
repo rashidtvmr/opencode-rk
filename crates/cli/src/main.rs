@@ -216,21 +216,41 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         None => {
-            if cli.native {
-                let args = TuiArgs {
-                    once: false,
-                    origin: None,
-                    session: None,
-                    follow: false,
-                    follow_for: None,
-                    poll_ms: 1000,
-                    submit_keymap: None,
-                    memory: vec![],
-                };
-                tui_entry::run(args)?;
-            } else {
-                let data = resolve_data_dir(cli.data_dir)?;
-                chat::run(&data)?;
+            use std::io::IsTerminal as _;
+            let probe = app_start::TtyProbe {
+                stdin_is_tty: Some(std::io::stdin().is_terminal()),
+                stdout_is_tty: Some(std::io::stdout().is_terminal()),
+            };
+            let data = resolve_data_dir(cli.data_dir)?;
+            let presence = daemon_client::discover_presence(&data);
+            let creds = daemon_client::creds_configured(&data);
+            let plan = app_start::plan_default_launch(&probe, presence, creds);
+            match plan.mode {
+                app_start::LaunchMode::NativeTui => {
+                    if cli.native {
+                        let args = TuiArgs {
+                            once: false,
+                            origin: None,
+                            session: None,
+                            follow: false,
+                            follow_for: None,
+                            poll_ms: 1000,
+                            submit_keymap: None,
+                            memory: vec![],
+                        };
+                        tui_entry::run(args)?;
+                    } else {
+                        chat::run(&data)?;
+                    }
+                }
+                app_start::LaunchMode::Headless(reason) => {
+                    eprintln!("error: {}", app_start::headless_message(reason));
+                    std::process::exit(app_start::HEADLESS_EXIT_CODE);
+                }
+                app_start::LaunchMode::Error(error) => {
+                    eprintln!("error: {error}");
+                    std::process::exit(2);
+                }
             }
         }
         Some(Command::Doctor(args)) => doctor(args).await?,

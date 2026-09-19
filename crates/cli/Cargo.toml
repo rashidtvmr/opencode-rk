@@ -36,3 +36,7 @@ tracing-subscriber.workspace = true
 
 [features]
 native = ["opencode-rk-opentui-bridge/native"]
+
+[dev-dependencies]
+opencode-rk-opentui-bridge = { path = "../opentui-bridge", features = ["native"] }
+serde_json = "1"

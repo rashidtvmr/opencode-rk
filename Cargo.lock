@@ -999,6 +999,7 @@ dependencies = [
  "fs2",
  "futures-util",
  "include_dir",
+ "opencode-rk-agents",
  "opencode-rk-catalog",
  "opencode-rk-contracts",
  "opencode-rk-providers",
