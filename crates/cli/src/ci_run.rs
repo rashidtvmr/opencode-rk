@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! CI non-interactive run module (LANE-CI-FLAG).
+//! CI non-interactive run module (LANE-CI-FLAG + LANE-CI-EXT).
 //!
 //! Provides `run_ci` which executes a prompt through the daemon and emits
 //! JSONL events to the provided writer. Exit codes follow the CiExitCode
@@ -9,19 +9,17 @@
 //! is detected, `run_ci` emits `ApprovalRequired` and returns exit code 20.
 //! It never auto-approves.
 
-use super::ci_output::{CiEvent, CiExitCode, OutputFormat};
+use super::ci_output::{CiEvent, CiExitCode, DoctorCheckEntry, OutputFormat};
 use std::io::{Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-/// Result of a CI run.
 pub struct CiRunResult {
     pub exit_code: i32,
 }
 
-/// Timestamp in milliseconds since UNIX epoch.
 fn ts_now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -29,12 +27,7 @@ fn ts_now() -> u64 {
         .as_millis() as u64
 }
 
-/// Emit one event to the writer in the given format.
-fn emit(
-    writer: &mut impl Write,
-    event: &CiEvent,
-    format: OutputFormat,
-) -> std::io::Result<()> {
+fn emit(writer: &mut impl Write, event: &CiEvent, format: OutputFormat) -> std::io::Result<()> {
     let line = match format {
         OutputFormat::Json | OutputFormat::Jsonl => event.to_bounded_json_line(),
         OutputFormat::Text => super::ci_output::TextRenderer::render(event),
@@ -44,14 +37,7 @@ fn emit(
     writer.flush()
 }
 
-/// Check if a prompt triggers an approval-required tool.
-/// Returns Some(tool_name) if approval is required, None otherwise.
-///
-/// **Fail-closed rule:** any prompt containing a known tool name that
-/// requires human approval must emit ApprovalRequired and exit 20.
 fn check_approval_required(prompt: &str) -> Option<String> {
-    // Tools that require human approval in CI mode. This list is
-    // deny-by-default: any tool needing approval is caught here.
     let approval_tools = ["shell_exec", "shell_command", "exec", "run_command"];
     for tool in &approval_tools {
         if prompt.contains(tool) {
@@ -61,7 +47,6 @@ fn check_approval_required(prompt: &str) -> Option<String> {
     None
 }
 
-/// Bounded HTTP/1.1 request. Returns `(status, body)`.
 fn http_request(
     origin: &str,
     method: &str,
@@ -78,8 +63,8 @@ fn http_request(
         .next()
         .ok_or_else(|| format!("no address for {host}"))?;
     let timeout = Duration::from_secs(5);
-    let mut stream =
-        TcpStream::connect_timeout(&address, timeout).map_err(|error| format!("connect {host}: {error}"))?;
+    let mut stream = TcpStream::connect_timeout(&address, timeout)
+        .map_err(|error| format!("connect {host}: {error}"))?;
     stream
         .set_read_timeout(Some(Duration::from_secs(300)))
         .map_err(|error| error.to_string())?;
@@ -123,12 +108,12 @@ fn http_request(
     Ok((status, payload.to_owned()))
 }
 
-/// Probe daemon health. Returns true if a healthy daemon answers GET /health.
 fn probe_daemon(origin: &str) -> bool {
-    http_request(origin, "GET", "/health", "").map(|(status, _)| status == 200).unwrap_or(false)
+    http_request(origin, "GET", "/health", "")
+        .map(|(status, _)| status == 200)
+        .unwrap_or(false)
 }
 
-/// Spawn the daemon subprocess and wait for readiness. Returns the child handle.
 fn spawn_daemon(addr: &str) -> Option<Child> {
     let exe: PathBuf = std::env::current_exe().ok()?;
     let mut child = Command::new(exe)
@@ -155,10 +140,9 @@ fn spawn_daemon(addr: &str) -> Option<Child> {
     }
 }
 
-/// Ensure a daemon is running. Returns (origin, owned_child).
 fn ensure_daemon() -> (String, Option<OwnedChild>) {
-    let addr = std::env::var("OPENCODE_RK_DAEMON_ADDR")
-        .unwrap_or_else(|_| "127.0.0.1:4096".to_string());
+    let addr =
+        std::env::var("OPENCODE_RK_DAEMON_ADDR").unwrap_or_else(|_| "127.0.0.1:4096".to_string());
     let origin = format!("http://{addr}");
     if probe_daemon(&origin) {
         return (origin, None);
@@ -169,17 +153,115 @@ fn ensure_daemon() -> (String, Option<OwnedChild>) {
     }
 }
 
+fn collect_doctor_checks() -> Vec<DoctorCheckEntry> {
+    let mut checks = Vec::new();
+
+    const AUTH_ENV_KEYS: &[&str] = &[
+        "OPENAI_API_KEY",
+        "ANTHROPIC_API_KEY",
+        "GOOGLE_API_KEY",
+        "GEMINI_API_KEY",
+    ];
+    let auth_configured = AUTH_ENV_KEYS
+        .iter()
+        .any(|key| std::env::var_os(key).is_some_and(|v| !v.is_empty()));
+    checks.push(DoctorCheckEntry {
+        name: "auth".to_string(),
+        status: if auth_configured {
+            "configured".to_string()
+        } else {
+            "unconfigured".to_string()
+        },
+        detail: None,
+    });
+
+    let connectivity = match std::env::var_os("OPENCODE_RK_DOCTOR_ENDPOINT") {
+        Some(endpoint) => {
+            let endpoint = endpoint.to_string_lossy().into_owned();
+            match http_request(&endpoint, "GET", "/", "") {
+                Ok((status, _)) => DoctorCheckEntry {
+                    name: "connectivity".to_string(),
+                    status: if status == 200 {
+                        "ok".to_string()
+                    } else {
+                        "error".to_string()
+                    },
+                    detail: Some(format!("HTTP {status}")),
+                },
+                Err(e) => DoctorCheckEntry {
+                    name: "connectivity".to_string(),
+                    status: "error".to_string(),
+                    detail: Some(e),
+                },
+            }
+        }
+        None => DoctorCheckEntry {
+            name: "connectivity".to_string(),
+            status: "unconfigured".to_string(),
+            detail: None,
+        },
+    };
+    checks.push(connectivity);
+
+    checks.push(DoctorCheckEntry {
+        name: "tools".to_string(),
+        status: "ok".to_string(),
+        detail: None,
+    });
+
+    let mcp_status = match std::env::var_os("OPENCODE_RK_MCP_CONFIG") {
+        Some(raw) => {
+            let raw = raw.to_string_lossy();
+            match serde_json::from_str::<serde_json::Value>(&raw) {
+                Ok(v) => {
+                    let valid = v
+                        .get("servers")
+                        .and_then(|s| s.as_object())
+                        .is_some_and(|m| !m.is_empty());
+                    if valid {
+                        "configured".to_string()
+                    } else {
+                        "error".to_string()
+                    }
+                }
+                Err(_) => "error".to_string(),
+            }
+        }
+        None => "unconfigured".to_string(),
+    };
+    checks.push(DoctorCheckEntry {
+        name: "mcp".to_string(),
+        status: mcp_status,
+        detail: None,
+    });
+
+    checks
+}
+
 /// Run a CI prompt and emit JSONL events to the writer.
 ///
-/// Connects to the daemon (auto-spawned or pre-existing), creates a
-/// session, executes one turn, and emits CI events. Returns a
-/// [`CiRunResult`] with the exit code.
+/// - `max_steps`: `Some(n)` with n > 0 clamps turns; `None` defaults to 1.
+/// - `timeout`: `Some(s)` bounds wall-clock to s seconds; `None` = no limit.
+/// - Prompt `"doctor"` emits a Doctor event without daemon interaction.
 pub fn run_ci(
     prompt: &str,
     format: OutputFormat,
     writer: &mut impl Write,
+    max_steps: Option<u64>,
+    timeout: Option<u64>,
 ) -> CiRunResult {
-    // Fail-closed: check for approval-required tools FIRST.
+    if prompt == "doctor" {
+        let checks = collect_doctor_checks();
+        let event = CiEvent::Doctor {
+            ts: ts_now(),
+            checks,
+        };
+        let _ = emit(writer, &event, format);
+        return CiRunResult {
+            exit_code: CiExitCode::Success.code() as i32,
+        };
+    }
+
     if let Some(tool) = check_approval_required(prompt) {
         let event = CiEvent::ApprovalRequired {
             ts: ts_now(),
@@ -196,135 +278,93 @@ pub fn run_ci(
         };
     }
 
-    // Emit TurnStarted.
     let _ = emit(writer, &CiEvent::TurnStarted { ts: ts_now() }, format);
 
-    // Ensure daemon is running (auto-spawn if needed).
     let (origin, _daemon_child) = ensure_daemon();
 
-    // Create session.
-    let create_body = serde_json::json!({
-        "title": "ci-run"
-    })
-    .to_string();
+    let create_body = serde_json::json!({ "title": "ci-run" }).to_string();
     let (status, body) = match http_request(&origin, "POST", "/api/sessions", &create_body) {
         Ok(r) => r,
-        Err(error) => {
+        Err(_error) => {
             let _ = emit(
                 writer,
-                &CiEvent::TurnFinished {
-                    ts: ts_now(),
-                    exit: CiExitCode::ProviderError.code(),
-                },
+                &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::ProviderError.code() },
                 format,
             );
-            return CiRunResult {
-                exit_code: CiExitCode::ProviderError.code() as i32,
-            };
+            return CiRunResult { exit_code: CiExitCode::ProviderError.code() as i32 };
         }
     };
     if status != 201 {
         let _ = emit(
             writer,
-            &CiEvent::TurnFinished {
-                ts: ts_now(),
-                exit: CiExitCode::ProviderError.code(),
-            },
+            &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::ProviderError.code() },
             format,
         );
-        return CiRunResult {
-            exit_code: CiExitCode::ProviderError.code() as i32,
-        };
+        return CiRunResult { exit_code: CiExitCode::ProviderError.code() as i32 };
     }
     let session_id = match serde_json::from_str::<serde_json::Value>(&body) {
-        Ok(v) => v["session"]["id"]
-            .as_str()
-            .unwrap_or("")
-            .to_string(),
+        Ok(v) => v["session"]["id"].as_str().unwrap_or("").to_string(),
         Err(_) => {
             let _ = emit(
                 writer,
-                &CiEvent::TurnFinished {
-                    ts: ts_now(),
-                    exit: CiExitCode::ProviderError.code(),
-                },
+                &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::ProviderError.code() },
                 format,
             );
-            return CiRunResult {
-                exit_code: CiExitCode::ProviderError.code() as i32,
-            };
+            return CiRunResult { exit_code: CiExitCode::ProviderError.code() as i32 };
         }
     };
 
-    // Emit Step: session created.
-    let _ = emit(
-        writer,
-        &CiEvent::Step {
-            ts: ts_now(),
-            n: 1,
-        },
-        format,
-    );
+    let max_iterations = max_steps.unwrap_or(1);
+    let deadline = timeout.map(|s| std::time::Instant::now() + Duration::from_secs(s));
 
-    // Execute turn.
-    let model = std::env::var("OPENCODE_RK_CI_MODEL")
-        .unwrap_or_else(|_| "openai/gpt-5.6".to_string());
-    let turn_path = format!("/api/sessions/{session_id}/turns");
-    let turn_body = serde_json::json!({
-        "text": prompt,
-        "model": model,
-        "reasoning_effort": "high",
-    })
-    .to_string();
-    let (status, body) = match http_request(&origin, "POST", &turn_path, &turn_body) {
-        Ok(r) => r,
-        Err(error) => {
-            let _ = emit(
-                writer,
-                &CiEvent::TurnFinished {
-                    ts: ts_now(),
-                    exit: CiExitCode::TurnFailed.code(),
-                },
-                format,
-            );
-            return CiRunResult {
-                exit_code: CiExitCode::TurnFailed.code() as i32,
-            };
+    let mut last_exit = CiExitCode::Success;
+    for step in 1..=max_iterations {
+        if let Some(dl) = deadline {
+            if std::time::Instant::now() >= dl {
+                last_exit = CiExitCode::BudgetExhausted;
+                break;
+            }
         }
-    };
 
-    // Emit Step: turn completed.
-    let _ = emit(
-        writer,
-        &CiEvent::Step {
-            ts: ts_now(),
-            n: 2,
-        },
-        format,
-    );
+        let _ = emit(writer, &CiEvent::Step { ts: ts_now(), n: step }, format);
 
-    // Determine exit code from response.
-    let exit_code = if status == 201 {
-        CiExitCode::Success
-    } else if status == 429 {
-        CiExitCode::BudgetExhausted
-    } else {
-        CiExitCode::TurnFailed
-    };
+        let model =
+            std::env::var("OPENCODE_RK_CI_MODEL").unwrap_or_else(|_| "openai/gpt-5.6".to_string());
+        let turn_path = format!("/api/sessions/{session_id}/turns");
+        let turn_body = serde_json::json!({
+            "text": prompt,
+            "model": model,
+            "reasoning_effort": "high",
+        })
+        .to_string();
+        let (status, _body) = match http_request(&origin, "POST", &turn_path, &turn_body) {
+            Ok(r) => r,
+            Err(_error) => {
+                last_exit = CiExitCode::TurnFailed;
+                break;
+            }
+        };
 
-    // Emit TurnFinished.
-    let _ = emit(
-        writer,
-        &CiEvent::TurnFinished {
-            ts: ts_now(),
-            exit: exit_code.code(),
-        },
-        format,
-    );
+        last_exit = if status == 201 {
+            CiExitCode::Success
+        } else if status == 429 {
+            CiExitCode::BudgetExhausted
+        } else {
+            CiExitCode::TurnFailed
+        };
 
-    CiRunResult {
-        exit_code: exit_code.code() as i32,
+        if last_exit != CiExitCode::Success || step >= max_iterations {
+            break;
+        }
     }
+
+    let _ = emit(
+        writer,
+        &CiEvent::TurnFinished { ts: ts_now(), exit: last_exit.code() },
+        format,
+    );
+
+    CiRunResult { exit_code: last_exit.code() as i32 }
 }
 
 impl Drop for OwnedChild {

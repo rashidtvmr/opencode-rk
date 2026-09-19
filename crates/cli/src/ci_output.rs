@@ -49,6 +49,14 @@ impl CiExitCode {
     }
 }
 
+/// A single doctor check entry in the Doctor event.
+#[derive(Debug, Clone)]
+pub struct DoctorCheckEntry {
+    pub name: String,
+    pub status: String,
+    pub detail: Option<String>,
+}
+
 /// JSONL event emitted during CI runs.
 #[derive(Debug, Clone)]
 pub enum CiEvent {
@@ -56,6 +64,7 @@ pub enum CiEvent {
     TurnFinished { ts: u64, exit: u8 },
     ApprovalRequired { ts: u64, tool: String },
     Step { ts: u64, n: u64 },
+    Doctor { ts: u64, checks: Vec<DoctorCheckEntry> },
 }
 
 const MAX_LINE_BYTES: usize = 8 * 1024;
@@ -101,6 +110,29 @@ impl CiEvent {
             }
             CiEvent::Step { ts, n } => {
                 format!(r#"{{"ts_kind":"Step","ts":{},"n":{}}}"#, ts, n)
+            }
+            CiEvent::Doctor { ts, checks } => {
+                let checks_json: Vec<String> = checks
+                    .iter()
+                    .map(|c| {
+                        let mut parts = vec![
+                            format!(r#""name":"{}""#, json_escape(&c.name)),
+                            format!(r#""status":"{}""#, json_escape(&c.status)),
+                        ];
+                        if let Some(ref detail) = c.detail {
+                            parts.push(format!(
+                                r#""detail":"{}""#,
+                                json_escape(detail)
+                            ));
+                        }
+                        format!("{{{}}}", parts.join(","))
+                    })
+                    .collect();
+                format!(
+                    r#"{{"ts_kind":"Doctor","ts":{},"checks":[{}]}}"#,
+                    ts,
+                    checks_json.join(",")
+                )
             }
         }
     }
@@ -154,6 +186,13 @@ impl TextRenderer {
             }
             CiEvent::Step { ts, n } => {
                 format!("step ts={} n={}", ts, n)
+            }
+            CiEvent::Doctor { ts, checks } => {
+                let summary: Vec<String> = checks
+                    .iter()
+                    .map(|c| format!("{}={}", c.name, c.status))
+                    .collect();
+                format!("doctor ts={} checks={}", ts, summary.join(","))
             }
         }
     }

@@ -458,9 +458,10 @@
       "status": "in-progress"
     },
     "LANE-ULTRA-CODEGEN": {
+      "completedNote": "work committed 35bdaf3 (ultra_codegen 287L + workflow_schema 310L + tests 649L); worker process zombie-cleaned by orchestrator",
       "scratchpad": "worklog/LANE-ULTRA-CODEGEN.md",
       "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-ULTRA-LIVE": {
       "scratchpad": "worklog/W5-LANE-ULTRA-LIVE.md",

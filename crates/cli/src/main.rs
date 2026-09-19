@@ -28,18 +28,10 @@ mod diagnostics;
 mod headless_engine;
 mod native_app;
 mod native_approvals;
-mod native_caps;
 mod native_composer;
-mod native_console;
-mod native_host;
-mod native_input;
-mod native_keys;
 mod native_layout;
-mod native_layout_engine;
-mod native_mouse;
 mod native_navigation;
 mod native_palette;
-mod native_shell;
 mod native_status;
 mod native_theme;
 mod native_timeline;
@@ -90,8 +82,17 @@ struct RunArgs {
     /// Output format for CI mode.
     #[arg(long, default_value = "jsonl")]
     output: String,
-    /// The prompt to execute.
-    prompt: String,
+    /// Maximum number of turn iterations (0 = usage error).
+    #[arg(long)]
+    max_steps: Option<u64>,
+    /// Wall-clock timeout in seconds for the entire CI run (0 = usage error).
+    #[arg(long)]
+    timeout: Option<u64>,
+    /// The prompt to execute (use "doctor" for machine-readable health checks).
+    #[arg(long)]
+    prompt: Option<String>,
+    /// The prompt to execute as a positional (use "doctor" for health checks).
+    prompt_pos: Option<String>,
 }
 #[derive(Debug, Args)]
 struct DoctorArgs {
@@ -207,7 +208,6 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
         None => {
             if cli.native {
                 let args = TuiArgs {
-                    native: true,
                     once: false,
                     origin: None,
                     session: None,
@@ -245,8 +245,30 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             tui_entry::run(args)?;
         }
         Some(Command::Run(args)) => {
+            // Prompt via positional or --prompt; absent only matters for usage
+            // validation below (ci_run treats a missing prompt as an error).
+            let prompt = args
+                .prompt
+                .clone()
+                .or_else(|| args.prompt_pos.clone())
+                .unwrap_or_default();
             if !args.ci {
                 eprintln!("error: --ci flag is required for non-interactive CI mode");
+                std::process::exit(ci_output::CiExitCode::UsageError as i32);
+            }
+            // Validate max-steps and timeout: 0 is a typed usage error. These
+            // exit before clap finalizes so `run --ci --max-steps 0` (no
+            // prompt) is a typed 64 rather than a clap 2.
+            if args.max_steps == Some(0) {
+                eprintln!("error: --max-steps must be > 0");
+                std::process::exit(ci_output::CiExitCode::UsageError as i32);
+            }
+            if args.timeout == Some(0) {
+                eprintln!("error: --timeout must be > 0");
+                std::process::exit(ci_output::CiExitCode::UsageError as i32);
+            }
+            if prompt.is_empty() {
+                eprintln!("error: a prompt is required (positional or --prompt)");
                 std::process::exit(ci_output::CiExitCode::UsageError as i32);
             }
             let format = match args.output.as_str() {
@@ -255,7 +277,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 _ => ci_output::OutputFormat::Jsonl,
             };
             let mut stdout = std::io::stdout();
-            let result = ci_run::run_ci(&args.prompt, format, &mut stdout);
+            let result =
+                ci_run::run_ci(&prompt, format, &mut stdout, args.max_steps, args.timeout);
             if result.exit_code != 0 {
                 std::process::exit(result.exit_code as i32);
             }
