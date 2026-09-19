@@ -1,6 +1,6 @@
 # Master handoff: complete the actual application
 
-Read and execute [COMPLETE_APP.md](COMPLETE_APP.md). It is the September 17, 2026
+Read `docs/CONVERGENCE.md`, run `python3 tools/convergence_gate.py`, then execute [COMPLETE_APP.md](COMPLETE_APP.md). It is the September 17, 2026
 completion addendum to PLAN.md and AGENTS.md, not a replacement for their original
 scope, source pins, security, resource or independent-test requirements.
 
@@ -9,7 +9,7 @@ The completion plan is the UNION of legacy `ralph.json` and its requirements wit
 `prd.json` alone are not completion evidence. Every original requirement remains
 mandatory; no new product task is certified accepted by this planning update.
 
-Start the 20 audit roots; use actual harness-native delegation to target 20 safe
+Do not restart broad auditing merely because capacity exists: current implementation already has many isolated GREEN lanes. While the convergence gate is red, reserve integration/test lanes and repair the executable spine first. After it is green, continue the remaining audit/parity backlog.\n\nUse actual harness-native delegation to target 20 safe
 ready one-file child workers with rolling replacement, independent verification,
 and serialized integration. Respect actual harness/provider/RAM limits. The new
 scheduler library is a tested primitive, not a configured native agent adapter;
