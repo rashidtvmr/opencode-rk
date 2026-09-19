@@ -58,6 +58,9 @@ const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 struct Cli {
     #[arg(long, global = true, env = "OPENCODE_RK_HOME")]
     data_dir: Option<PathBuf>,
+    /// Run the native OpenTUI renderer (requires vendored libopentui).
+    #[arg(long, global = true)]
+    native: bool,
     /// No subcommand opens the interactive chat TUI.
     #[command(subcommand)]
     command: Option<Command>,
@@ -201,8 +204,23 @@ async fn main() {
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {
         None => {
-            let data = resolve_data_dir(cli.data_dir)?;
-            chat::run(&data)?;
+            if cli.native {
+                let args = TuiArgs {
+                    native: true,
+                    once: false,
+                    origin: None,
+                    session: None,
+                    follow: false,
+                    follow_for: None,
+                    poll_ms: 1000,
+                    submit_keymap: None,
+                    memory: vec![],
+                };
+                tui_entry::run(args)?;
+            } else {
+                let data = resolve_data_dir(cli.data_dir)?;
+                chat::run(&data)?;
+            }
         }
         Some(Command::Doctor(args)) => doctor(args).await?,
         Some(Command::Session { command }) => {

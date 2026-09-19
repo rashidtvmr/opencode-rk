@@ -366,10 +366,10 @@
       "status": "completed"
     },
     "LANE-TUI-LAND": {
-      "reclaimedBy": "ses_orch_wave3",
+      "completedNote": "GREEN 2/2 native_launch (Scenario A: default line-mode contract, Scenario B: --native --once dual-branch) + 333+9 lib+bin no-regress; RED sha256 e93be667 zero-edits; native/lib/x86_64-linux/libopentui.so present; main.rs --native flag dispatches tui_entry::run; log native_launch GREEN",
       "scratchpad": "worklog/LANE-TUI-LAND.md",
-      "session": "",
-      "status": "not-started"
+      "session": "ses_worker_tui_land",
+      "status": "completed"
     },
     "LANE-WF-TIMELINE": {
       "blockedNote": "",
