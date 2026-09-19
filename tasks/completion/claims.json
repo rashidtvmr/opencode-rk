@@ -339,9 +339,10 @@
       "status": "completed"
     },
     "LANE-LOOP-LIVE": {
+      "completedNote": "GREEN 16/16 loop_driver_live (Scenario A-D + contract tests); RED sha 7ca6a1c1 GREEN sha a60cf68c; zero test edits; wiring gap documented: live turn uses agent_loop::LoopController at lib.rs:968 not loop_driver::LoopDriver; pre-existing 2 session_turn_stream failures verified",
       "scratchpad": "worklog/LANE-LOOP-LIVE.md",
-      "session": "ses_orch_wave3",
-      "status": "in-progress"
+      "session": "ses_worker_loop_live",
+      "status": "completed"
     },
     "LANE-RULES": {
       "blockedNote": "",
