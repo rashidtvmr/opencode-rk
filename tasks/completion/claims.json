@@ -406,9 +406,10 @@
       "status": "completed"
     },
     "LANE-TUI-GRAPH": {
+      "completedNote": "GREEN 11/11 native_graph rustc --test; RED sha 5ba153fa frozen; GREEN sha ab53af69; impl sha a3bfd676; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rustc --edition 2021 --test crates/cli/tests/native_graph.rs",
       "scratchpad": "worklog/LANE-TUI-GRAPH.md",
       "session": "ses_orch_wave4",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-TUI-LAND": {
       "completedNote": "GREEN 2/2 native_launch (Scenario A: default line-mode contract, Scenario B: --native --once dual-branch) + 333+9 lib+bin no-regress; RED sha256 e93be667 zero-edits; native/lib/x86_64-linux/libopentui.so present; main.rs --native flag dispatches tui_entry::run; log native_launch GREEN",
