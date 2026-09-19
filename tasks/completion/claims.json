@@ -198,21 +198,19 @@
       "status": "completed"
     },
     "DISC-102": {
-      "completedNote": "GREEN 5/5 standalone rustc --test install_commands (RED file-absent); test-sha d9ebf1f4 impl-sha 32a0d468; zero test edits; integrator prewires mod",
       "scratchpad": "worklog/DISC-102.md",
-      "session": "ses_orch_DISC102",
-      "status": "completed"
+      "session": "ses_main_gap1",
+      "status": "in-progress"
     },
     "DISC-103": {
-      "completedNote": "7/7 GREEN in isolated rustc-test harness (bit-identical copy of owned file); frozen sha256 2f460c4da68b9b992301363ed0a3ad5ffca563352cc7025e845e5ce02c3123e2; zero warnings; in-crate runner N/A until integrator prewires pub mod registry_dispatch",
       "scratchpad": "worklog/DISC-103.md",
-      "session": "ses_orch_DISC103b",
-      "status": "completed"
+      "session": "ses_main_gap2",
+      "status": "in-progress"
     },
     "DISC-104": {
-      "completedNote": "GREEN 10/10 frozen sha256:49f06794 standalone rustc --test (RED stub 1pass/9fail); heavy: cargo test -p opencode-rk-tools --lib shell_tool 7/7; integrator must add pub mod shell_bounds to lib.rs | INTEGRATED: pub mod shell_bounds in tools/lib.rs; cargo test -p opencode-rk-tools --lib 92 passed 0 failed (incl. shell_bounds 5+2)",
+      "completedNote": "GREEN 10/10 shell_bounds + 92/92 tools lib; frozen sha256 49f06794; zero test edits; logs /tmp/opencode/disc104-green.log + /tmp/opencode/disc104-fulllib2.log; no code change (impl pre-complete), wiring already at lib.rs:59",
       "scratchpad": "worklog/DISC-104.md",
-      "session": "ses_orch_DISC104",
+      "session": "ses_main_gap3",
       "status": "completed"
     },
     "DISC-105": {
@@ -299,6 +297,26 @@
       "session": "ses_worker_agent_files",
       "status": "completed"
     },
+    "LANE-AGENTS-LOAD": {
+      "scratchpad": "worklog/W5-LANE-AGENTS-LOAD.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-AUTH-SETUP": {
+      "scratchpad": "worklog/W5-LANE-AUTH-SETUP.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-BOOTSTRAP": {
+      "scratchpad": "worklog/W5-LANE-BOOTSTRAP.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-CANVAS-RENDER": {
+      "scratchpad": "worklog/W5-LANE-CANVAS-RENDER.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
     "LANE-CI": {
       "blockedNote": "",
       "claim": "Roadmap 3.6: CI/CD non-interactive output contract (typed exit codes, JSON output, fail-closed approvals)",
@@ -317,6 +335,11 @@
       "scratchpad": "worklog/LANE-CI-FLAG.md",
       "session": "ses_worker_ci_flag",
       "status": "completed"
+    },
+    "LANE-CMD-LOAD": {
+      "scratchpad": "worklog/W5-LANE-CMD-LOAD.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
     },
     "LANE-COMMANDS-LIVE": {
       "completedNote": "GREEN 14/14 command_templates standalone; RED sha ffaab087/bd94a443 GREEN sha fe89476b/bd94a443; zero test edits; no-regress agents lib 34/34; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-agents --test command_templates",
@@ -366,6 +389,11 @@
       "session": "ses_worker_loop_live",
       "status": "completed"
     },
+    "LANE-MCP-CONFIG": {
+      "scratchpad": "worklog/W5-LANE-MCP-CONFIG.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
     "LANE-MCP-LIVE": {
       "completedNote": "GREEN 15/15 mcp_session tests; RED sha c0670fd3 impl sha 0b6eda38; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-tools --test mcp_session",
       "scratchpad": "worklog/LANE-MCP-LIVE.md",
@@ -381,10 +409,9 @@
       "status": "completed"
     },
     "LANE-RULES-INJECT": {
-      "completedNote": "GREEN 11/11 rules_inject (assemble_prompt: empty passthrough, markers, sorted order, conditional load/skip, byte cap, determinism, glob preserved, base-after-rules, budget skip reason, record bound); RED sha 728d4ea5 (tests) c457bf2b (impl); GREEN sha d74015c3 (tests) e29026f0 (impl); zero test edits post-freeze; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-server --test rules_inject; no-regress 194/194 lib",
-      "scratchpad": "worklog/LANE-RULES-INJECT.md",
-      "session": "ses_worker_rules_inject",
-      "status": "completed"
+      "scratchpad": "worklog/W5-LANE-RULES-INJECT.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
     },
     "LANE-SANDBOX": {
       "completedNote": "GREEN 12/12 sandbox_enforcement + 160/160 security lib + 7/7 cli diagnostics + 5/5 cli doctor; sha256 58bffede (tests) e0841ad (sandbox_real) 18cea4ae (diagnostics); zero test edits; gate: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-security + cargo test -p opencode-rk-cli diagnostics; forbid(unsafe_code) in lib.rs blocks Landlock syscalls \u2014 detection pure safe Rust, enforcement documented for separate crate",
@@ -393,16 +420,20 @@
       "status": "completed"
     },
     "LANE-STREAM-FIX": {
-      "reclaimedBy": "ses_orch_wave4",
-      "scratchpad": "worklog/LANE-STREAM-FIX.md",
-      "session": "",
-      "status": "not-started"
+      "scratchpad": "worklog/W5-LANE-STREAM-FIX.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
     },
     "LANE-SUBAGENT-LIVE": {
       "completedNote": "GREEN 11/11 delegation_live (10 tests + 1 module); RED sha f2abcd19/0fa8db9e; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 400 rtk cargo test -p opencode-rk-agents --test delegation_live; full crate 79/79; self-contained types avoid crate:: import issues in standalone harness",
       "scratchpad": "worklog/LANE-SUBAGENT-LIVE.md",
       "session": "ses_orch_wave4",
       "status": "completed"
+    },
+    "LANE-THEME-RENDER": {
+      "scratchpad": "worklog/W5-LANE-THEME-RENDER.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
     },
     "LANE-THEMES": {
       "completedNote": "GREEN 16/16 rustc --edition 2021 --test src/native_theme.rs (T01-T06: hex parse, registry bounds, apply completeness, unknown error, memory regression, builtins present); zero test edits post-freeze; zero warnings",
@@ -422,9 +453,39 @@
       "session": "ses_worker_tui_land",
       "status": "completed"
     },
+    "LANE-TUI-PAINT": {
+      "scratchpad": "worklog/W5-LANE-TUI-PAINT.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
     "LANE-ULTRA-CODEGEN": {
       "scratchpad": "worklog/LANE-ULTRA-CODEGEN.md",
       "session": "ses_orch_wave4",
+      "status": "in-progress"
+    },
+    "LANE-ULTRA-LIVE": {
+      "scratchpad": "worklog/W5-LANE-ULTRA-LIVE.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-VALIDATE": {
+      "scratchpad": "worklog/W5-LANE-VALIDATE.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-VERSION": {
+      "scratchpad": "worklog/W5-LANE-VERSION.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-WEB-ACTIONS": {
+      "scratchpad": "worklog/W5-LANE-WEB-ACTIONS.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-WEB-BEARER": {
+      "scratchpad": "worklog/W5-LANE-WEB-BEARER.md",
+      "session": "ses_orch_wave5",
       "status": "in-progress"
     },
     "LANE-WEB-CANVAS": {
@@ -438,6 +499,11 @@
       "scratchpad": "worklog/LANE-WF-CREATE.md",
       "session": "ses_orch_wave4",
       "status": "completed"
+    },
+    "LANE-WF-LIVE": {
+      "scratchpad": "worklog/W5-LANE-WF-LIVE.md",
+      "session": "ses_orch_wave5",
+      "status": "in-progress"
     },
     "LANE-WF-TIMELINE": {
       "blockedNote": "",
