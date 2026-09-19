@@ -1,0 +1,13 @@
+# DISC-107: backup/restore + corruption detection — scratchpad
+- Claim: DISC-107 via ses_main_gap6, scratchpad worklog/DISC-107.md. Owned file: crates/storage/src/backup_v2.rs (one file only).
+- Source evidence: crates/storage/src/backup_v2.rs:1-374 (BackupV2 create/encode/decode/verify/verify_for_restore, VerifiedRestore token, quotas MAX_BACKUP_BYTES=64MiB MAX_BACKUP_ITEMS=4M, std-only SHA-256, 7 tests); wired at crates/storage/src/lib.rs:16 `pub mod backup_v2;`.
+- Observed: file clean in git (committed), impl complete, 7 in-file tests cover roundtrip / manifest tamper / data tamper / quota / verify-gate / version gate / sha256 vector.
+- Target boundary: byte-supplied manifest, no FS IO, fail-closed Corrupt, VerifiedRestore only via verify_for_restore. No changes to lib.rs/tests needed.
+- Tests: RED via disposable stub copy (expect fail), GREEN in-crate backup_v2 filter.
+- Decisions: no impl edit needed; TDD evidence via stub-copy RED + in-crate GREEN; freeze test-section hash.
+- Unknowns: none.
+- RED: stub copy /tmp/opencode/disc107-red.rs (create→QuotaExceeded, tag zeroed): rustc --test => 2 passed 5 failed (over_quota, restore_requires_verify, round_trip, tampered_data, tampered_manifest_bytes). Tests compile + fail for missing behavior. Frozen test-section sha256 47d8c0e83facd80d92844a5377341ef12eb4f5ecbaf5fc3527b2bd7fd340f391 (RED 5-fail run proves sensitivity; sha256_vector+unsupported_version pass on stub as expected since untouched paths).
+- GREEN: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-storage --lib backup_v2 => 7/7 pass 0 fail. Full crate --lib => 122/122 pass 0 fail.
+- Zero test edits: real file untouched (sha256 b1b8872442055014eb509f58f98ce7500f4940900b239f34a5a7558783ea7825); RED ran on /tmp copy only.
+- No-stub check: impl is real functional code (FIPS 180-4 SHA-256, 112-byte BKP2 wire format with integrity tag, quota gates, VerifiedRestore token with private fields). No todo!/unimplemented.
+- Bounded: single cargo test at a time, JOBS=2 THREADS=2, timeout 120. No commit needed for owned file (byte-identical); landing scratchpad+ledger only.

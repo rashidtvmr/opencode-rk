@@ -221,15 +221,14 @@
       "status": "completed"
     },
     "DISC-106": {
-      "completedNote": "GREEN 5/5 os_backend --lib (RED frozen 4641caa5, GREEN 514424d1); bwrap backend, BLOCKED non-Linux, no lib.rs touch, no commit per lane orders",
       "scratchpad": "worklog/DISC-106.md",
-      "session": "ses_orch_DISC106",
-      "status": "completed"
+      "session": "ses_main_gap5",
+      "status": "in-progress"
     },
     "DISC-107": {
-      "completedNote": "GREEN 6/6 backup_v2 (T01-T06) + 121/121 storage lib zero warnings; frozen sha256 b41f8c2e3bb1de2eebf3a4c95b77b03d7b172b500680c2edcd9f9442aeed7adc; zero test edits post-freeze; cmds: cargo test -p opencode-rk-storage --lib backup_v2 + cargo test -p opencode-rk-storage --lib; logs /tmp/opencode/disc107-green.log + /tmp/opencode/disc107-fulllib.log",
+      "completedNote": "GREEN 7/7 backup_v2 + 122/122 storage lib; RED stub-copy 5fail frozen-test-sha 47d8c0e8; zero test edits; impl pre-complete b1b88724",
       "scratchpad": "worklog/DISC-107.md",
-      "session": "ses_orch_DISC107b",
+      "session": "ses_main_gap6",
       "status": "completed"
     },
     "DISC-108": {
@@ -245,10 +244,9 @@
       "status": "completed"
     },
     "DISC-110": {
-      "completedNote": "GREEN 7/7 frozen sha256:2108bb3c standalone rustc --test (RED stub 0pass/7fail); heavy: temp lib.rs prewire reverted (lib.rs untouched by lane; HEAD diff pre-existing other-lane mods) cargo test -p opencode-rk-tools --lib git_lane 7/7; integrator adds pub mod git_lane",
       "scratchpad": "worklog/DISC-110.md",
-      "session": "ses_orch_DISC110c",
-      "status": "completed"
+      "session": "ses_main_gap8",
+      "status": "in-progress"
     },
     "DISC-111": {
       "completedNote": "GREEN 8/8 harness cargo test --offline (T01..T06 in-file); RED 0/8 frozen; sha256 311abc319cfd14064715c11cda52580f74fa145ede973ce96e9c417d5340ba91; owned crates/tools/src/mcp_spawn.rs; needs integrator mod line; no commit per lane bounds | INTEGRATED by orchestrator: pub mod mcp_spawn in tools/lib.rs; mcp_spawn tests green in tools --lib 92",
