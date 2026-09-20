@@ -751,14 +751,16 @@
       "status": "in-progress"
     },
     "PAR-003": {
+      "completedNote": "GREEN 5/5 app_history lib unittests (42 total, 37 filtered); zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-sessions app_history",
       "scratchpad": "worklog/PAR-003.md",
       "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PAR-004": {
+      "completedNote": "GREEN 4/4 app_delegation lib unittests (34 total, 30 filtered); zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-agents app_delegation",
       "scratchpad": "worklog/PAR-004.md",
       "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PAR-005": {
       "scratchpad": "worklog/PAR-005.md",
@@ -777,14 +779,16 @@
       "status": "in-progress"
     },
     "PAR-008": {
+      "completedNote": "GREEN 5/5 web_turn_adapter lib tests, zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-server --lib web_turn_adapter",
       "scratchpad": "worklog/PAR-008.md",
       "session": "ses_f41fada5cffeTIgTRJIerEKVPs",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PAR-009": {
+      "completedNote": "GREEN 16/16 app_protocols lib tests, zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-server --lib app_protocols",
       "scratchpad": "worklog/PAR-009.md",
       "session": "ses_f41fada5cffeTIgTRJIerEKVPs",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PAR-010": {
       "scratchpad": "worklog/PAR-010.md",
@@ -851,9 +855,10 @@
       "status": "completed"
     },
     "TUI-008": {
+      "completedNote": "GREEN 10/10 native_approvals via CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 native_approvals; exit 0; zero test edits; owned sha256 1076589993d3; log /tmp/opencode/tui008.log",
       "scratchpad": "worklog/TUI-008.md",
       "session": "ses_f41fada5affetzDNrbwZm4HSRt",
-      "status": "in-progress"
+      "status": "completed"
     },
     "TUI-009": {
       "completedNote": "GREEN 8/8 native_status (6 existing + 2 TUI-009 T06 stale/offline/live + T07 model/cost/denied-path) via CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-cli --bin opencode-rk native_status; RED stub 6pass/2fail frozen 38dafcab; GREEN frozen a8d94fb4; zero test edits post-freeze; std-only forbid(unsafe_code); no commit/push per lane orders",
