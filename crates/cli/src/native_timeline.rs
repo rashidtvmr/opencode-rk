@@ -127,16 +127,23 @@ impl TimelineBuilder {
     }
 
     /// Pinned-to-bottom window: last `height` items offset by `page` scroll.
-    /// `height` hard-capped to `MAX_PAGE`. Scrolled-up view stable across
-    /// pushes; [`TimelinePage::reset`] re-pins to bottom. Empty when
-    /// `height == 0` or no items. Mirrors `native_transcript::Transcript::page`.
+    /// `height` hard-capped to `MAX_PAGE`. A scrolled-up view is frozen at
+    /// the anchor recorded when leaving the pinned state, so pushes do not
+    /// move it; [`TimelinePage::reset`] (or scrolling to `0`) re-pins to
+    /// bottom. Empty when `height == 0` or no items. Mirrors
+    /// `native_transcript::Transcript::page`.
     pub fn page(&self, page: &TimelinePage, height: usize) -> Vec<&TimelineItem> {
         let height = height.min(MAX_PAGE);
         if height == 0 {
             return Vec::new();
         }
         let len = self.items.len();
-        let end = len.saturating_sub(page.scroll.min(len));
+        let frozen = page.anchor.min(len);
+        let end = if page.scroll == 0 {
+            len
+        } else {
+            frozen.saturating_sub(page.scroll.min(frozen))
+        };
         let start = end.saturating_sub(height);
         self.items.iter().skip(start).take(end - start).collect()
     }
@@ -159,11 +166,15 @@ impl TimelineBuilder {
 /// Pinned-to-bottom scroll state for [`TimelineBuilder::page`].
 ///
 /// `scroll == 0` follows the latest item; scrolling up freezes the view so
-/// arriving streams do not move it. Pure state: caller supplies lengths.
-/// Mirrors `native_transcript::TranscriptPage`.
+/// arriving streams do not move it. The freeze is positional: leaving the
+/// pinned state records `anchor` (absolute end index at that moment) and
+/// [`TimelineBuilder::page`] renders `anchor - scroll`, so pushes that grow
+/// the deque do not shift the visible window. Pure state: caller supplies
+/// lengths. Mirrors `native_transcript::TranscriptPage`.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TimelinePage {
     scroll: usize,
+    anchor: usize,
 }
 
 impl TimelinePage {
@@ -173,18 +184,28 @@ impl TimelinePage {
     }
 
     /// Scroll up (away from latest) by `delta`, clamped to `len`.
+    /// Leaving the pinned state records the absolute end index so the
+    /// frozen view stays stable across pushes.
     pub fn scroll_up(&mut self, delta: usize, len: usize) {
-        self.scroll = self.scroll.saturating_add(delta).min(len);
+        if self.scroll == 0 {
+            self.anchor = len;
+        }
+        let cap = self.anchor.min(len).max(self.scroll);
+        self.scroll = self.scroll.saturating_add(delta).min(cap);
     }
 
-    /// Scroll down (toward latest) by `delta`.
+    /// Scroll down (toward latest) by `delta`. Reaching `0` re-pins.
     pub fn scroll_down(&mut self, delta: usize) {
         self.scroll = self.scroll.saturating_sub(delta);
+        if self.scroll == 0 {
+            self.anchor = 0;
+        }
     }
 
     /// Re-pin to the latest item.
     pub fn reset(&mut self) {
         self.scroll = 0;
+        self.anchor = 0;
     }
 
     #[must_use]

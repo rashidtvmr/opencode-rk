@@ -296,34 +296,40 @@
       "status": "completed"
     },
     "FIX-CI-APPROVAL": {
+      "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_f40414a28ffeRtlI7oA8bqfQwM",
+      "status": "blocked"
     },
     "FIX-LOGROTATE": {
+      "completedNote": "VERIFY-ONLY 7/7 diagnostics GREEN oc2 bin @62f7eb1; transcript-entry 8KiB cap + 128/256 bounds confirmed in code; zero test edits; no commit per lane bounds",
       "scratchpad": "worklog/FIX-LOGROTATE.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_f40e83c32ffeYf1LA0bmr0DLkp",
+      "status": "completed"
     },
     "FIX-LOOP-RULES": {
+      "completedNote": "GREEN 8/8 rules_globs t01-t08; zero frozen-test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-server --lib rules_globs",
       "scratchpad": "worklog/FIX-LOOP-RULES.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_fix_looprules",
+      "status": "completed"
     },
     "FIX-MCP-STUBS": {
+      "blockedNote": "frozen tests/mcp_config.rs:76,87 json-repeat uncompilable + :95,109 missing HashMap; impl src/mcp_config.rs complete, standalone smoke 1/1 ok; unapplied test-owner proposal in worklog/FIX-MCP-STUBS.md",
       "scratchpad": "worklog/FIX-MCP-STUBS.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_f40414a26ffeBvlJ2vsm5EL207",
+      "status": "blocked"
     },
     "FIX-NATIVE-DAEMON": {
+      "completedNote": "VERIFY-ONLY zero-diff: run_with_dir+stdin guard+resolve_origin_bearer already at HEAD 62f7eb1 tui_entry.rs:498-583; cargo check -p opencode-rk-cli --bins GREEN 8.73s; piped tui exit1 guidance, --once exit0",
       "scratchpad": "worklog/FIX-NATIVE-DAEMON.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_fix_natdaemon",
+      "status": "completed"
     },
     "FIX-PACKAGING": {
+      "completedNote": "--help identity gate: bash-n OK, install_commands 5/5 GREEN, zero test edits",
       "scratchpad": "worklog/FIX-PACKAGING.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_fix_pkg",
+      "status": "completed"
     },
     "FIX-SANDBOX": {
       "completedNote": "covered by external DISC-106 b688c56 (detection+confinement+cap close); raw Landlock attach = policy-gated, recorded in worklog/FIX-SANDBOX.md",
@@ -332,24 +338,28 @@
       "status": "completed"
     },
     "FIX-SESSIONS-STUBS": {
+      "completedNote": "snapshot.rs build_snapshot real fold 3/3 green (temp mod wire, reverted byte-identical); lib 42/42 green; zero test edits; integrator: add pub mod snapshot to lib.rs + call from lifecycle snapshot() after id/title added; lib.rs untouched",
       "scratchpad": "worklog/FIX-SESSIONS-STUBS.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_f40b69bc1ffeFIMSlnp8tT1VwE",
+      "status": "completed"
     },
     "FIX-SQLITE-GATE": {
+      "completedNote": "Backports rejected without audited sqlite_source_id allowlist; cargo test -p opencode-rk-storage --lib passed",
       "scratchpad": "worklog/FIX-SQLITE-GATE.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_fix_sqlite",
+      "status": "completed"
     },
     "FIX-STREAM": {
+      "blockedNote": "parallel flake persists: serial 2/2 GREEN, parallel 0/2+1/2; entry from_env :908 races unlocked EnvGuard; capture-once reverted, zero test edits",
       "scratchpad": "worklog/FIX-STREAM.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_f40414a24ffebu5vbL7mjjf5j6",
+      "status": "blocked"
     },
     "FIX-TIMELINE": {
+      "completedNote": "GREEN 11/11 native_timeline + 9/9 native_shell oc2 bin; zero test edits; no commit per lane bounds",
       "scratchpad": "worklog/FIX-TIMELINE.md",
-      "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "session": "ses_f40321fd7ffeHN2p2HkWBucRbO",
+      "status": "completed"
     },
     "G6-CHAT-DATADIR": {
       "completedNote": "chat.rs spawn forwards --data-dir; cargo check -p opencode-rk-cli --bins GREEN (Finished dev, 441 pre-existing warnings); zero test edits",
