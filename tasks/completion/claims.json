@@ -403,9 +403,10 @@
       "status": "in-progress"
     },
     "LANE-CI-TOKEN": {
+      "blockedNote": "bins-check blocked: pre-existing errors in shell_tool (PermissionBroker/Decision), zero errors in ci_run; workspace dirty with other lanes, commit unsafe without force-touch risk",
       "scratchpad": "worklog/LANE-CI-TOKEN.md",
       "session": "ses_f423cd0e3ffe1siD409EuLQ1Sr",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "LANE-CLI-ONCE": {
       "scratchpad": "worklog/LANE-CLI-ONCE.md",
@@ -518,9 +519,10 @@
       "status": "in-progress"
     },
     "LANE-PROV-FALLBACK": {
+      "completedNote": "fallback 6/6 green (5 new + 1 existing); CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-providers --lib fallback; zero test edits frozen",
       "scratchpad": "worklog/LANE-PROV-FALLBACK.md",
       "session": "ses_f423cd0daffezwT8o66LUJl0eU",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-RALPH-MAX2": {
       "completedNote": "py_compile OK; default=2, effective-with-config6=2; hard cap min(limit,2) in main(); cmd: timeout 60 python3 -m py_compile tools/ralph_loop.py",
