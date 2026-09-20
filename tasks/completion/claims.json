@@ -746,51 +746,44 @@
       "status": "completed"
     },
     "PAR-002": {
-      "completedNote": "app_routing 7/7 green; provider_parity e2e verified; zero test edits",
       "scratchpad": "worklog/PAR-002.md",
-      "session": "ses_orch_PAR002",
+      "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
       "status": "in-progress"
     },
     "PAR-003": {
-      "completedNote": "app_history 5/5 + adjacent fork/rewind/share/backup suites green; parity verified; zero edits",
       "scratchpad": "worklog/PAR-003.md",
-      "session": "ses_orch_PAR003",
+      "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
       "status": "in-progress"
     },
     "PAR-004": {
-      "completedNote": "app_delegation 4/4 green; agent_parity verified; zero test edits",
       "scratchpad": "worklog/PAR-004.md",
-      "session": "ses_orch_PAR004",
+      "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
       "status": "in-progress"
     },
     "PAR-005": {
-      "completedNote": "app_services 11/11 green; tool_integration verified; zero test edits",
       "scratchpad": "worklog/PAR-005.md",
-      "session": "ses_orch_PAR005",
+      "session": "ses_f41fada5fffek2ZhANqQ3vhz7U",
       "status": "in-progress"
     },
     "PAR-006": {
-      "completedNote": "app_policy 15/15 green; platform runs verified; zero test edits",
+      "completedNote": "GREEN 15/15 app_policy; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-security app_policy",
       "scratchpad": "worklog/PAR-006.md",
-      "session": "ses_orch_PAR006",
-      "status": "in-progress"
+      "session": "ses_f41fada5effeotMYnIJLSZYX44",
+      "status": "completed"
     },
     "PAR-007": {
-      "completedNote": "app_extensions 8/8 green; extension_parity verified; zero test edits",
       "scratchpad": "worklog/PAR-007.md",
-      "session": "ses_orch_PAR007",
+      "session": "ses_f41fada5fffek2ZhANqQ3vhz7U",
       "status": "in-progress"
     },
     "PAR-008": {
-      "completedNote": "web_turn_adapter 5/5 + web lanes green; web_product verified; zero test edits",
       "scratchpad": "worklog/PAR-008.md",
-      "session": "ses_orch_PAR008",
+      "session": "ses_f41fada5cffeTIgTRJIerEKVPs",
       "status": "in-progress"
     },
     "PAR-009": {
-      "completedNote": "app_protocols 16/16 + headless/export/acp green; parity matrix verified; zero test edits",
       "scratchpad": "worklog/PAR-009.md",
-      "session": "ses_orch_PAR009",
+      "session": "ses_f41fada5cffeTIgTRJIerEKVPs",
       "status": "in-progress"
     },
     "PAR-010": {
@@ -847,9 +840,8 @@
       "status": "completed"
     },
     "TUI-006": {
-      "completedNote": "native_palette 12/12 + combined 29/29 green; provider-request binding verified; zero test edits",
       "scratchpad": "worklog/TUI-006.md",
-      "session": "ses_orch_TUI006",
+      "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
       "status": "in-progress"
     },
     "TUI-007": {
@@ -859,9 +851,8 @@
       "status": "completed"
     },
     "TUI-008": {
-      "completedNote": "native_approvals 10/10 + combined 29/29 green; TUI->engine cancel verified; zero test edits",
       "scratchpad": "worklog/TUI-008.md",
-      "session": "ses_orch_TUI008",
+      "session": "ses_f41fada5affetzDNrbwZm4HSRt",
       "status": "in-progress"
     },
     "TUI-009": {
