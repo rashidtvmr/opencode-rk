@@ -13,6 +13,17 @@
 //!   rejected by [`unknown_subcommand_exit`] with nonzero exit and no daemon.
 //! - [`release_artifact_ok`] fail-closes on unknown platform/checksum state.
 //! - Bounded: command tables are fixed-size; inputs length-capped.
+//!
+//! Caller wiring contract (integrator-owned, `crates/cli/src/main.rs`):
+//! - No-subcommand arm (`run`, `None` branch): must resolve through
+//!   [`no_subcommand_entry`] (pins `OpenNativeTui`); the daemon/TUI behavior
+//!   itself stays owned by `app_start` + `daemon_client` + `tui_entry`.
+//! - Unknown-subcommand path (`main`, clap error): must route through
+//!   [`unknown_subcommand_exit`] (exit [`UNKNOWN_COMMAND_EXIT`], no daemon).
+//! - Clap `name` literal must read `oc2` (mirrors [`BINARY_NAME`]; clap
+//!   derive needs a string literal, so this cannot reference the const).
+//!   Deviation: `main.rs` still says `name = "opencode-rk"` (legacy dev
+//!   alias); packaged `--help` must say `oc2`.
 
 /// Installed binary identity. Packaged output must never say `opencode-rk`.
 pub const BINARY_NAME: &str = "oc2";
