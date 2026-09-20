@@ -102,8 +102,9 @@ pub struct Decision {
     pub expired: bool,
 }
 
-/// Why a decision attempt was refused. Refusals mutate nothing except the
-/// broadcast generation counter.
+/// Why a decision attempt was refused. Stale/replay refusals mutate
+/// nothing; confirmation-required refusals bump only the broadcast
+/// generation counter.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Refusal {
     /// No pending request carries this digest+scope (stale, replayed, or
@@ -247,12 +248,14 @@ impl ApprovalBoard {
         now: u64,
     ) -> Outcome {
         let Some(idx) = self.pending.iter().position(|p| &p.digest == digest) else {
+            // Unknown digest (T02): pure refusal, zero mutation.
             return Outcome::Refused(Refusal::StaleOrReplayed);
         };
         if approved {
             let matches = self.pending[idx].scope == *scope.expect("approve binds scope");
             if !matches {
                 // Scope mismatch: bound exactly like a stale digest, no mutation.
+                // N.B. also covers digest reuse under a different scope (replay).
                 return Outcome::Refused(Refusal::StaleOrReplayed);
             }
         }

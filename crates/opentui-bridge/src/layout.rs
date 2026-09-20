@@ -20,6 +20,126 @@ impl Rect {
     pub const fn new(x: u32, y: u32, w: u32, h: u32) -> Self {
         Self { x, y, w, h }
     }
+
+    #[must_use]
+    pub const fn area(self) -> u64 {
+        self.w as u64 * self.h as u64
+    }
+
+    #[must_use]
+    pub const fn is_empty(self) -> bool {
+        self.w == 0 || self.h == 0
+    }
+
+    /// True when interiors intersect (touching edges fine).
+    /// Zero-area rects never overlap.
+    #[must_use]
+    pub const fn overlaps(self, other: Rect) -> bool {
+        if self.is_empty() || other.is_empty() {
+            return false;
+        }
+        self.x < other.x.saturating_add(other.w)
+            && other.x < self.x.saturating_add(self.w)
+            && self.y < other.y.saturating_add(other.h)
+            && other.y < self.y.saturating_add(self.h)
+    }
+}
+
+/// Minimum viewport for full multi-column shell (mirrors
+/// `crates/cli/src/native_layout.rs:12-13,89`).
+pub const MIN_FULL_WIDTH: u32 = 80;
+/// Minimum viewport height for full shell.
+pub const MIN_FULL_HEIGHT: u32 = 24;
+/// Preferred sidebar width on full viewports.
+pub const SIDEBAR_WIDTH: u32 = 30;
+/// Minimum sidebar width clamped into narrow full viewports.
+pub const SIDEBAR_MIN_WIDTH: u32 = 20;
+
+/// Sidebar width for full (non-compact) viewport `width` cells.
+/// Clamped to `[SIDEBAR_MIN_WIDTH, SIDEBAR_WIDTH]`, never above `width`.
+/// Mirrors `crates/cli/src/native_layout.rs:59-69`.
+#[must_use]
+pub const fn sidebar_width(width: u32) -> u32 {
+    let third = width / 3;
+    let capped = if third < SIDEBAR_WIDTH { third } else { SIDEBAR_WIDTH };
+    let floor = if SIDEBAR_MIN_WIDTH < width { SIDEBAR_MIN_WIDTH } else { width };
+    let floored = if capped < floor { floor } else { capped };
+    if floored > width { width } else { floored }
+}
+
+/// Shell regions in paint order (mirrors CLI `ShellLayout`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ShellRegions {
+    pub transcript: Rect,
+    pub composer: Rect,
+    pub sidebar: Rect,
+    pub status: Rect,
+    /// True on tiny viewports: single column, sidebar collapsed to zero.
+    pub compact: bool,
+}
+
+impl ShellRegions {
+    /// Stacked non-overlapping layout. `sidebar_visible` honored only when
+    /// viewport fits full shell; tiny terminals force compact.
+    /// Mirrors `crates/cli/src/native_layout.rs:88-142`.
+    #[must_use]
+    pub const fn compute(width: u32, height: u32, sidebar_visible: bool) -> ShellRegions {
+        let compact = width < MIN_FULL_WIDTH || height < MIN_FULL_HEIGHT;
+        let status_h: u32 = 1;
+        let composer_h: u32 = if compact { 3 } else { 5 };
+        let body_h = height.saturating_sub(status_h + composer_h);
+        let status = Rect {
+            x: 0,
+            y: height.saturating_sub(status_h),
+            w: width,
+            h: if status_h < height { status_h } else { height },
+        };
+        let sub = height.saturating_sub(status_h);
+        let composer = Rect {
+            x: 0,
+            y: height.saturating_sub(status_h + composer_h),
+            w: width,
+            h: if composer_h < sub { composer_h } else { sub },
+        };
+        if compact || !sidebar_visible {
+            return ShellRegions {
+                transcript: Rect { x: 0, y: 0, w: width, h: body_h },
+                composer,
+                sidebar: Rect { x: 0, y: 0, w: 0, h: 0 },
+                status,
+                compact: true,
+            };
+        }
+        let side_w = sidebar_width(width);
+        let side_w = if side_w < width { side_w } else { width };
+        ShellRegions {
+            transcript: Rect { x: 0, y: 0, w: width.saturating_sub(side_w), h: body_h },
+            composer,
+            sidebar: Rect { x: width.saturating_sub(side_w), y: 0, w: side_w, h: body_h },
+            status,
+            compact: false,
+        }
+    }
+
+    /// True when any two non-empty regions intersect.
+    #[must_use]
+    pub const fn has_overlap(self) -> bool {
+        let rs = [self.transcript, self.composer, self.sidebar, self.status];
+        let mut i = 0;
+        while i < rs.len() {
+            if !rs[i].is_empty() {
+                let mut j = i + 1;
+                while j < rs.len() {
+                    if !rs[j].is_empty() && rs[i].overlaps(rs[j]) {
+                        return true;
+                    }
+                    j += 1;
+                }
+            }
+            i += 1;
+        }
+        false
+    }
 }
 
 /// Width/height demand per segment.
@@ -220,5 +340,53 @@ mod tests {
         assert_eq!(out[1].w, 0);
         // Zero constraints: empty split.
         assert!(split_row(area, &[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn shell_tiny_forces_compact_zero_sidebar() {
+        let l = ShellRegions::compute(40, 10, true);
+        assert!(l.compact);
+        assert!(l.sidebar.is_empty());
+        assert!(!l.has_overlap());
+    }
+
+    #[test]
+    fn shell_full_no_overlap_widths_stack() {
+        let l = ShellRegions::compute(120, 40, true);
+        assert!(!l.compact);
+        assert_eq!(l.sidebar.w, 30);
+        assert_eq!(l.transcript.w + l.sidebar.w, 120);
+        assert_eq!(l.status.h, 1);
+        assert_eq!(l.composer.h, 5);
+        assert_eq!(l.transcript.h, 34);
+        assert_eq!(l.status.y, 39);
+        assert_eq!(l.composer.y, 34);
+        assert!(!l.has_overlap());
+    }
+
+    #[test]
+    fn shell_hidden_sidebar_collapses() {
+        let l = ShellRegions::compute(120, 40, false);
+        assert!(l.compact);
+        assert!(l.sidebar.is_empty());
+        assert_eq!(l.transcript.w, 120);
+        assert!(!l.has_overlap());
+    }
+
+    #[test]
+    fn shell_compact_thresholds() {
+        assert!(!ShellRegions::compute(80, 24, true).compact);
+        assert!(ShellRegions::compute(79, 24, true).compact);
+        assert!(ShellRegions::compute(80, 23, true).compact);
+        let tiny = ShellRegions::compute(100, 2, true);
+        assert!(tiny.compact);
+        assert!(!tiny.has_overlap());
+    }
+
+    #[test]
+    fn shell_sidebar_width_clamp() {
+        assert_eq!(sidebar_width(120), 30);
+        assert_eq!(sidebar_width(80), 26);
+        assert_eq!(sidebar_width(10), 10);
     }
 }

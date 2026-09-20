@@ -22,8 +22,153 @@
 //! does not kill daemon-owned work); prior art
 //! `crates/cli/src/native_app.rs` (focus/view enums, bounded history).
 
+use crate::native_app::Focus;
+
 /// Upper bound on open tabs, retained titles, work entries and tombstones.
 pub const MAX_TABS: usize = 32;
+
+/// Upper bound on navigable sidebar entries (mirrors the tab bound).
+pub const MAX_SIDEBAR: usize = MAX_TABS;
+
+/// Advance keyboard focus, skipping a collapsed/hidden sidebar so focus
+/// never strands on a zero-area region. Pure mirror of
+/// `crate::native_app::NativeApp::cycle_focus`: the caller passes whether
+/// the sidebar rect is empty.
+#[must_use]
+pub fn focus_next(current: Focus, sidebar_empty: bool) -> Focus {
+    let mut next = current.next();
+    if next == Focus::Sidebar && sidebar_empty {
+        next = Focus::Status;
+    }
+    next
+}
+
+/// Reverse of [`focus_next`]; pure mirror of `NativeApp::cycle_focus_prev`.
+#[must_use]
+pub fn focus_prev(current: Focus, sidebar_empty: bool) -> Focus {
+    let mut prev = current.prev();
+    if prev == Focus::Sidebar && sidebar_empty {
+        prev = Focus::Transcript;
+    }
+    prev
+}
+
+/// Remap a sidebar focus request onto the transcript when the sidebar rect
+/// is empty. Pure mirror of `ShellLayout::resolve_focus`.
+#[must_use]
+pub fn resolve_sidebar_focus(requested: Focus, sidebar_empty: bool) -> Focus {
+    match requested {
+        Focus::Sidebar if sidebar_empty => Focus::Transcript,
+        other => other,
+    }
+}
+
+/// A navigable sidebar roster: ordered session entries with a bounded
+/// selection cursor. Pure state, no rendering; the caller sizes the visible
+/// window from the sidebar rect.
+#[derive(Clone, Debug, Default)]
+pub struct SidebarNav {
+    entries: Vec<SessionRef>,
+    selected: usize,
+}
+
+impl SidebarNav {
+    /// Empty roster.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Roster length.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// True when the roster holds no entry.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    /// Selected entry, `None` when empty.
+    #[must_use]
+    pub fn selected(&self) -> Option<&SessionRef> {
+        self.entries.get(self.selected)
+    }
+
+    /// Selection index (0 while empty).
+    #[must_use]
+    pub fn selected_index(&self) -> usize {
+        self.selected
+    }
+
+    /// Entries oldest first.
+    #[must_use]
+    pub fn entries(&self) -> &[SessionRef] {
+        &self.entries
+    }
+
+    /// Replace the roster, keeping the selection on the same session when
+    /// it survives and clamping otherwise. Bounded at [`MAX_SIDEBAR`]:
+    /// overlong input keeps the first entries and drops the rest.
+    pub fn set_entries(&mut self, entries: Vec<SessionRef>) {
+        let current = self.entries.get(self.selected).cloned();
+        self.entries = entries.into_iter().take(MAX_SIDEBAR).collect();
+        self.selected = current
+            .as_ref()
+            .and_then(|s| self.entries.iter().position(|e| e == s))
+            .unwrap_or(0);
+        if self.selected >= self.entries.len() {
+            self.selected = 0;
+        }
+    }
+
+    /// Select an entry by session. `false` (selection untouched) when
+    /// unknown or empty.
+    pub fn select(&mut self, session: &SessionRef) -> bool {
+        match self.entries.iter().position(|e| e == session) {
+            Some(idx) => {
+                self.selected = idx;
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Move selection down one; clamps at the last entry. `false` when empty.
+    pub fn select_next(&mut self) -> bool {
+        if self.entries.is_empty() {
+            return false;
+        }
+        self.selected = (self.selected + 1).min(self.entries.len() - 1);
+        true
+    }
+
+    /// Move selection up one; clamps at the first entry. `false` when empty.
+    pub fn select_prev(&mut self) -> bool {
+        if self.entries.is_empty() {
+            return false;
+        }
+        self.selected = self.selected.saturating_sub(1);
+        true
+    }
+
+    /// One page of the bounded roster, oldest first. Empty when `page` is
+    /// out of range or `per_page` is zero (mirrors `tab_page` bounds).
+    #[must_use]
+    pub fn page(&self, page: usize, per_page: usize) -> &[SessionRef] {
+        if per_page == 0 {
+            return &[];
+        }
+        let start = page.saturating_mul(per_page);
+        if start >= self.entries.len() {
+            return &[];
+        }
+        let end = (start + per_page).min(self.entries.len());
+        &self.entries[start..end]
+    }
+}
 
 /// Opaque caller-supplied session identity.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -543,5 +688,109 @@ mod tests {
         assert_eq!(nav.switch(&s("x")), Err(NavRefusal::NoSuchTab));
         nav.close(&s("a")).unwrap();
         assert_eq!(nav.switch(&s("a")), Err(NavRefusal::NoTabOpen));
+    }
+
+    // RED (compile, fail on missing behavior): focus cycling must match
+    // `NativeApp::cycle_focus` / `cycle_focus_prev` incl. the collapsed
+    // sidebar skip, and the sidebar roster must keep a bounded selection.
+
+    #[test]
+    fn focus_next_cycles_order_and_skips_collapsed_sidebar() {
+        // Tab order, full sidebar.
+        assert_eq!(focus_next(Focus::Composer, false), Focus::Transcript);
+        assert_eq!(focus_next(Focus::Transcript, false), Focus::Sidebar);
+        assert_eq!(focus_next(Focus::Sidebar, false), Focus::Status);
+        assert_eq!(focus_next(Focus::Status, false), Focus::Composer);
+        // Collapsed sidebar: Transcript jumps straight to Status.
+        assert_eq!(focus_next(Focus::Transcript, true), Focus::Status);
+        assert_eq!(focus_next(Focus::Composer, true), Focus::Transcript);
+        assert_eq!(focus_next(Focus::Status, true), Focus::Composer);
+    }
+
+    #[test]
+    fn focus_prev_cycles_order_and_skips_collapsed_sidebar() {
+        assert_eq!(focus_prev(Focus::Composer, false), Focus::Status);
+        assert_eq!(focus_prev(Focus::Status, false), Focus::Sidebar);
+        assert_eq!(focus_prev(Focus::Sidebar, false), Focus::Transcript);
+        assert_eq!(focus_prev(Focus::Transcript, false), Focus::Composer);
+        // Collapsed sidebar: Status jumps straight to Transcript.
+        assert_eq!(focus_prev(Focus::Status, true), Focus::Transcript);
+        assert_eq!(focus_prev(Focus::Composer, true), Focus::Status);
+        assert_eq!(focus_prev(Focus::Transcript, true), Focus::Composer);
+    }
+
+    #[test]
+    fn focus_round_trips_and_sidebar_fallback() {
+        for focus in Focus::ORDER {
+            assert_eq!(focus_next(focus, false).prev(), focus);
+            assert_eq!(focus_prev(focus, false).next(), focus);
+        }
+        // Stranded sidebar request falls back to transcript.
+        assert_eq!(
+            resolve_sidebar_focus(Focus::Sidebar, true),
+            Focus::Transcript
+        );
+        assert_eq!(
+            resolve_sidebar_focus(Focus::Sidebar, false),
+            Focus::Sidebar
+        );
+        assert_eq!(
+            resolve_sidebar_focus(Focus::Composer, true),
+            Focus::Composer
+        );
+    }
+
+    #[test]
+    fn sidebar_selection_moves_and_clamps() {
+        let mut bar = SidebarNav::new();
+        assert!(bar.is_empty());
+        assert_eq!(bar.len(), 0);
+        assert_eq!(bar.selected(), None);
+        assert!(!bar.select_next());
+        assert!(!bar.select_prev());
+        assert!(!bar.select(&s("x")));
+        bar.set_entries(vec![s("a"), s("b"), s("c")]);
+        assert_eq!(bar.len(), 3);
+        assert_eq!(bar.selected(), Some(&s("a")));
+        assert_eq!(bar.selected_index(), 0);
+        assert!(bar.select(&s("c")));
+        assert_eq!(bar.selected_index(), 2);
+        // Clamp at the ends.
+        assert!(bar.select_next());
+        assert_eq!(bar.selected(), Some(&s("c")));
+        assert!(bar.select_prev());
+        assert!(bar.select_prev());
+        assert_eq!(bar.selected(), Some(&s("a")));
+        assert!(bar.select_prev());
+        assert_eq!(bar.selected(), Some(&s("a")));
+        // Unknown session leaves the selection untouched.
+        assert!(!bar.select(&s("ghost")));
+        assert_eq!(bar.selected(), Some(&s("a")));
+    }
+
+    #[test]
+    fn sidebar_roster_is_bounded_and_paginates() {
+        let mut bar = SidebarNav::new();
+        let many: Vec<SessionRef> = (0..(MAX_SIDEBAR + 8)).map(|i| s(&format!("s{i}"))).collect();
+        bar.set_entries(many);
+        assert_eq!(MAX_SIDEBAR, 32);
+        assert_eq!(bar.len(), MAX_SIDEBAR);
+        assert_eq!(bar.entries().first(), Some(&s("s0")));
+        assert_eq!(bar.entries().last(), Some(&s("s31")));
+        assert_eq!(bar.page(0, 16).len(), 16);
+        assert_eq!(bar.page(0, 16)[0], s("s0"));
+        assert_eq!(bar.page(1, 16).len(), 16);
+        assert!(bar.page(2, 16).is_empty());
+        assert!(bar.page(0, 0).is_empty());
+        // Replacing the roster keeps the selection when it survives ...
+        assert!(bar.select(&s("s5")));
+        bar.set_entries(vec![s("s5"), s("s6")]);
+        assert_eq!(bar.selected(), Some(&s("s5")));
+        // ... and clamps to a valid entry when it does not.
+        bar.set_entries(vec![s("x"), s("y"), s("z")]);
+        assert_eq!(bar.selected(), Some(&s("x")));
+        bar.set_entries(vec![]);
+        assert_eq!(bar.selected(), None);
+        assert_eq!(bar.selected_index(), 0);
     }
 }

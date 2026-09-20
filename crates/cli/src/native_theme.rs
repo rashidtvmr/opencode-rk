@@ -287,11 +287,11 @@ impl ThemeEngine {
             ("warning".to_string(), theme.warning),
             ("error".to_string(), theme.error),
             ("muted".to_string(), theme.muted),
-            // border defaults to a muted variant of fg
+            // border defaults to the fg/bg midpoint (readable on both)
             ("border".to_string(), Rgba::rgb(
-                (theme.fg.r as u16 * 2 + theme.bg.r as u16 * 3 / 4) as u8,
-                (theme.fg.g as u16 * 2 + theme.bg.g as u16 * 3 / 4) as u8,
-                (theme.fg.b as u16 * 2 + theme.bg.b as u16 * 3 / 4) as u8,
+                ((u16::from(theme.fg.r) + u16::from(theme.bg.r)) / 2) as u8,
+                ((u16::from(theme.fg.g) + u16::from(theme.bg.g)) / 2) as u8,
+                ((u16::from(theme.fg.b) + u16::from(theme.bg.b)) / 2) as u8,
             )),
         ])
     }
@@ -326,6 +326,37 @@ pub fn opencode_light() -> ThemeDef {
         warning: Rgba::rgb(0xC4, 0x7B, 0x1E),
         error: Rgba::rgb(0xC4, 0x3B, 0x46),
         muted: Rgba::rgb(0x9C, 0xA0, 0xAB),
+    }
+}
+
+/// High-contrast theme matching `AppTheme::HighContrast`.
+#[must_use]
+pub fn opencode_high_contrast() -> ThemeDef {
+    ThemeDef {
+        name: "opencode-high-contrast".to_string(),
+        fg: Rgba::rgb(0xFF, 0xFF, 0xFF),
+        bg: Rgba::rgb(0x00, 0x00, 0x00),
+        accent: Rgba::rgb(0xFF, 0xFF, 0x00),
+        success: Rgba::rgb(0x00, 0xFF, 0x00),
+        warning: Rgba::rgb(0xFF, 0xA5, 0x00),
+        error: Rgba::rgb(0xFF, 0x00, 0x00),
+        muted: Rgba::rgb(0xC8, 0xC8, 0xC8),
+    }
+}
+
+/// Resolve a persisted theme marker to its builtin definition.
+///
+/// Accepts `native_palette::Theme::as_str` markers (`"dark"`, `"light"`,
+/// `"nocolor"`) plus `"high-contrast"` for `AppTheme::HighContrast`.
+/// Returns `None` for `"nocolor"` (no palette by construction) and for
+/// unknown markers — fail-closed, no fallback guess.
+#[must_use]
+pub fn builtin_for_marker(marker: &str) -> Option<ThemeDef> {
+    match marker {
+        "dark" => Some(opencode_dark()),
+        "light" => Some(opencode_light()),
+        "high-contrast" => Some(opencode_high_contrast()),
+        _ => None,
     }
 }
 
@@ -568,5 +599,57 @@ mod tests {
                 "theme {name} must produce {COLOR_SLOTS} color slots"
             );
         }
+    }
+
+    // ── T07 (new, unfrozen): high-contrast builtin + midpoint border ──
+
+    #[test]
+    fn high_contrast_builtin_values() {
+        let hc = opencode_high_contrast();
+        assert_eq!(hc.name, "opencode-high-contrast");
+        assert_eq!((hc.fg.r, hc.fg.g, hc.fg.b), (0xFF, 0xFF, 0xFF));
+        assert_eq!((hc.bg.r, hc.bg.g, hc.bg.b), (0x00, 0x00, 0x00));
+        assert_ne!(hc.fg, hc.bg);
+        assert!(hc.is_valid());
+        let map = ThemeEngine::apply(&hc);
+        assert_eq!(map.keys().len(), COLOR_SLOTS);
+    }
+
+    #[test]
+    fn border_is_fg_bg_midpoint() {
+        for theme in [opencode_dark(), opencode_light(), opencode_high_contrast()] {
+            let map = ThemeEngine::apply(&theme);
+            let mid = |a: u8, b: u8| ((u16::from(a) + u16::from(b)) / 2) as u8;
+            assert_eq!(
+                map.get("border"),
+                Some(Rgba::rgb(
+                    mid(theme.fg.r, theme.bg.r),
+                    mid(theme.fg.g, theme.bg.g),
+                    mid(theme.fg.b, theme.bg.b),
+                )),
+                "border must be fg/bg midpoint for {}",
+                theme.name
+            );
+        }
+    }
+
+    #[test]
+    fn marker_resolves_to_builtin_or_none() {
+        assert_eq!(
+            builtin_for_marker("dark").map(|t| t.name),
+            Some("opencode-dark".to_string())
+        );
+        assert_eq!(
+            builtin_for_marker("light").map(|t| t.name),
+            Some("opencode-light".to_string())
+        );
+        assert_eq!(
+            builtin_for_marker("high-contrast").map(|t| t.name),
+            Some("opencode-high-contrast".to_string())
+        );
+        // NoColor has no palette; unknown markers fail closed.
+        assert!(builtin_for_marker("nocolor").is_none());
+        assert!(builtin_for_marker("neon").is_none());
+        assert!(builtin_for_marker("").is_none());
     }
 }

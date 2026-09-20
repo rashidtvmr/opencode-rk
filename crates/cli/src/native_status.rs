@@ -292,6 +292,75 @@ fn event_value(event: &UsageEvent) -> u64 {
     }
 }
 
+/// Max chars kept per label inside a status-line item; longer labels are
+/// truncated (never silently — the item keeps its brackets/badges).
+pub const MAX_STATUS_LABEL: usize = 48;
+
+fn truncate_label(s: &str) -> String {
+    if s.chars().count() <= MAX_STATUS_LABEL {
+        s.to_string()
+    } else {
+        // ponytail: char-boundary cut; upgrade to word-boundary when TUI needs it.
+        s.chars().take(MAX_STATUS_LABEL).collect()
+    }
+}
+
+/// Total measured input+output tokens, or `None` when neither was observed.
+#[must_use]
+pub fn context_tokens(board: &StatusBoard) -> Option<u64> {
+    let mut total: Option<u64> = None;
+    for idx in [0usize, 1] {
+        if let Counter::Measured(v) = board.counter(idx) {
+            total = Some(total.unwrap_or(0).saturating_add(v));
+        }
+    }
+    total
+}
+
+/// Freshness badge: offline wins over stale; live only when the caller
+/// confirms live data AND connectivity is not offline.
+#[must_use]
+pub fn freshness_badge(live: bool, connectivity: Option<Connectivity>) -> &'static str {
+    if connectivity == Some(Connectivity::Offline) {
+        "offline"
+    } else if live {
+        "live"
+    } else {
+        "stale"
+    }
+}
+
+/// One-line status bar: model / context / session items plus freshness,
+/// fallback, and quota badges. Every item is badged `(stale)` unless `live`;
+/// offline connectivity adds `[offline]`. Pure string building, no IO.
+#[must_use]
+pub fn status_line(
+    board: &StatusBoard,
+    model: Option<&str>,
+    session: Option<&str>,
+    live: bool,
+) -> String {
+    let stale_suffix = if live { "" } else { " (stale)" };
+    let model_label = truncate_label(model.unwrap_or("(none)"));
+    let context_label = match context_tokens(board) {
+        Some(n) => format!("{n} tokens"),
+        None => "n/a".to_string(),
+    };
+    let session_label = truncate_label(session.unwrap_or("(none)"));
+    let mut out = format!(
+        "[model: {model_label}{stale_suffix}] [context: {context_label}{stale_suffix}] [session: {session_label}{stale_suffix}]"
+    );
+    let badge = freshness_badge(live, board.connectivity());
+    out.push_str(&format!(" [{badge}]"));
+    if board.fallback_active() {
+        out.push_str(" [fallback]");
+    }
+    if let Some(msg) = board.quota_message() {
+        out.push_str(&format!(" [quota: {}]", truncate_label(msg)));
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -408,5 +477,51 @@ mod tests {
             });
         }
         assert_eq!(board.servers().len(), MAX_MCP_SERVERS);
+    }
+
+    #[test]
+    fn live_status_line_has_no_stale_markers() {
+        let mut board = StatusBoard::new();
+        board.apply_usage(UsageEvent::Input { tokens: 120 });
+        board.apply_usage(UsageEvent::Output { tokens: 30 });
+        let line = status_line(&board, Some("gpt-4"), Some("sess-1"), true);
+        assert!(line.contains("[model: gpt-4]"), "{line}");
+        assert!(line.contains("[context: 150 tokens]"), "{line}");
+        assert!(line.contains("[session: sess-1]"), "{line}");
+        assert!(line.contains("[live]"), "{line}");
+        assert!(!line.contains("stale"), "{line}");
+        assert!(!line.contains("offline"), "{line}");
+    }
+
+    #[test]
+    fn stale_status_line_badges_every_item() {
+        let board = StatusBoard::new();
+        let line = status_line(&board, Some("gpt-4"), Some("sess-1"), false);
+        assert!(line.contains("[model: gpt-4 (stale)]"), "{line}");
+        assert!(line.contains("[context: n/a (stale)]"), "{line}");
+        assert!(line.contains("[session: sess-1 (stale)]"), "{line}");
+        assert!(line.contains("[stale]"), "{line}");
+    }
+
+    #[test]
+    fn offline_connectivity_badges_offline() {
+        let mut board = StatusBoard::new();
+        board.set_connectivity(Connectivity::Offline);
+        assert_eq!(freshness_badge(false, board.connectivity()), "offline");
+        let line = status_line(&board, None, None, false);
+        assert!(line.contains("[offline]"), "{line}");
+        assert!(line.contains("[model: (none) (stale)]"), "{line}");
+        assert_eq!(freshness_badge(true, board.connectivity()), "offline");
+    }
+
+    #[test]
+    fn quota_fallback_and_long_labels_render_bounded() {
+        let mut board = StatusBoard::new();
+        board.set_quota("rate limited; retrying on fallback".into(), true);
+        let line = status_line(&board, Some(&"m".repeat(100)), Some("s"), true);
+        assert!(line.contains("[fallback]"), "{line}");
+        assert!(line.contains("[quota: rate limited; retrying on fallback]"), "{line}");
+        assert!(line.chars().count() <= 3 * (MAX_STATUS_LABEL + 20) + 64 + 32, "{line}");
+        assert!(!line.contains(&"m".repeat(100)), "{line}");
     }
 }

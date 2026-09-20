@@ -621,6 +621,154 @@ impl Default for Composer {
     }
 }
 
+/// Max lines returned by [`ComposerPage::render_lines`].
+pub const MAX_PAGE_LINES: usize = 64;
+/// Max columns a page line is wrapped to (chars, char-boundary safe).
+pub const MAX_PAGE_COLS: usize = 256;
+
+/// Composer page: draft/queue/interrupt state bound to the sessions
+/// `tui_state` journey (submit/queue/interrupt), plus bounded render lines.
+/// Pure state only: no rendering backend, no IO. `tui_entry` wires this to
+/// real session state later.
+#[derive(Clone, Debug, Default)]
+pub struct ComposerPage {
+    composer: Composer,
+}
+
+impl ComposerPage {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            composer: Composer::new(),
+        }
+    }
+
+    #[must_use]
+    pub fn composer(&self) -> &Composer {
+        &self.composer
+    }
+
+    pub fn composer_mut(&mut self) -> &mut Composer {
+        &mut self.composer
+    }
+
+    #[must_use]
+    pub fn draft(&self) -> &str {
+        self.composer.draft()
+    }
+
+    #[must_use]
+    pub const fn is_busy(&self) -> bool {
+        self.composer.busy
+    }
+
+    #[must_use]
+    pub fn queue_len(&self) -> usize {
+        self.composer.queue.len()
+    }
+
+    /// Atomically adopt `(draft, busy, queue)` observed from sessions
+    /// `tui_state`. Validates bounds first; on `Err` the page is untouched.
+    pub fn set_from_session(
+        &mut self,
+        draft: &str,
+        busy: bool,
+        queue: &[String],
+    ) -> Result<(), ComposerError> {
+        if queue.len() > BUSY_QUEUE_CAP {
+            return Err(ComposerError::QueueFull { limit: BUSY_QUEUE_CAP });
+        }
+        if draft.len() > MAX_DRAFT_BYTES {
+            return Err(ComposerError::DraftTooLong {
+                bytes: draft.len(),
+                limit: MAX_DRAFT_BYTES,
+            });
+        }
+        for q in queue {
+            if q.len() > MAX_DRAFT_BYTES {
+                return Err(ComposerError::DraftTooLong {
+                    bytes: q.len(),
+                    limit: MAX_DRAFT_BYTES,
+                });
+            }
+        }
+        self.composer.set_draft(draft)?;
+        self.composer.busy = busy;
+        self.composer.queue.clear();
+        self.composer.queue.extend(queue.iter().cloned());
+        Ok(())
+    }
+
+    /// Bounded render lines for the native shell: status header (idle/busy
+    /// + queue depth), wrapped draft lines, queued previews. Every line is
+    /// wrapped to `width` chars (clamped to `1..=MAX_PAGE_COLS`, char-wise
+    /// so no code point splits); total lines capped at [`MAX_PAGE_LINES`]
+    /// with an explicit truncation marker.
+    #[must_use]
+    pub fn render_lines(&self, width: usize) -> Vec<String> {
+        let w = width.clamp(1, MAX_PAGE_COLS);
+        let mut lines: Vec<String> = Vec::new();
+        let state = if self.composer.busy { "busy" } else { "idle" };
+        let header = format!(
+            "composer [{}] queue {}/{}",
+            state,
+            self.composer.queue.len(),
+            BUSY_QUEUE_CAP
+        );
+        push_wrapped(&mut lines, &header, w);
+        if self.composer.draft().is_empty() {
+            push_wrapped(&mut lines, "(empty)", w);
+        } else {
+            for segment in self.composer.draft().split('\n') {
+                if segment.is_empty() {
+                    lines.push(String::new());
+                } else {
+                    push_wrapped(&mut lines, segment, w);
+                }
+                if lines.len() >= MAX_PAGE_LINES {
+                    break;
+                }
+            }
+        }
+        for (i, q) in self.composer.queue.iter().enumerate() {
+            if lines.len() >= MAX_PAGE_LINES {
+                break;
+            }
+            let first = q.split('\n').next().unwrap_or("");
+            push_wrapped(&mut lines, &format!("queued[{i}]: {first}"), w);
+        }
+        lines.truncate(MAX_PAGE_LINES);
+        if self.composer.queue.len() + draft_line_count(self.composer.draft()) + 1
+            > MAX_PAGE_LINES
+        {
+            if let Some(last) = lines.last_mut() {
+                *last = "... (truncated)".to_string();
+            }
+        }
+        lines
+    }
+}
+
+/// Wrap `s` char-wise into chunks of `w` chars.
+fn push_wrapped(out: &mut Vec<String>, s: &str, w: usize) {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.is_empty() {
+        out.push(String::new());
+        return;
+    }
+    for chunk in chars.chunks(w) {
+        out.push(chunk.iter().collect());
+    }
+}
+
+/// Draft segments (`\n`-split) for the truncation estimate.
+fn draft_line_count(draft: &str) -> usize {
+    if draft.is_empty() {
+        return 1;
+    }
+    draft.split('\n').count()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -899,5 +1047,67 @@ mod tests {
         let big = "x".repeat(MAX_DRAFT_BYTES + 1);
         assert!(c.set_draft(&big).is_err());
         assert_eq!(c.draft(), "   ");
+    }
+
+    #[test]
+    fn page_renders_draft_queue_and_interrupt_state() {
+        let mut page = ComposerPage::new();
+        page.composer_mut().set_draft("hello\nworld").unwrap();
+        let idle = page.render_lines(80);
+        assert!(idle.iter().any(|l| l.contains("idle")), "idle badged");
+        assert!(idle.iter().any(|l| l.contains("hello")), "draft shown");
+        assert!(idle.iter().any(|l| l.contains("queue 0/")), "queue shown");
+        page.composer_mut().submit().unwrap();
+        page.composer_mut().set_draft("waiting").unwrap();
+        page.composer_mut().submit().unwrap();
+        let busy = page.render_lines(80);
+        assert!(busy.iter().any(|l| l.contains("busy")), "busy badged");
+        assert!(busy.iter().any(|l| l.contains("queue 1/")), "queued count shown");
+        page.composer_mut().interrupt();
+        let back = page.render_lines(80);
+        assert!(back.iter().any(|l| l.contains("idle")), "interrupt back to idle");
+        assert!(back.iter().any(|l| l.contains("waiting")), "draft preserved");
+    }
+
+    #[test]
+    fn page_adopts_sessions_snapshot_atomically() {
+        let mut page = ComposerPage::new();
+        page.composer_mut().set_draft("local").unwrap();
+        page
+            .set_from_session("remote", true, &["q0".to_owned()])
+            .unwrap();
+        assert_eq!(page.draft(), "remote");
+        assert!(page.is_busy());
+        assert_eq!(page.queue_len(), 1);
+        // Oversize queue rejected, prior state untouched.
+        let big: Vec<String> = (0..=BUSY_QUEUE_CAP).map(|i| format!("q{i}")).collect();
+        assert_eq!(
+            page.set_from_session("other", false, &big),
+            Err(ComposerError::QueueFull { limit: BUSY_QUEUE_CAP })
+        );
+        assert_eq!(page.draft(), "remote");
+        assert!(page.is_busy());
+        // Oversize draft rejected, prior state untouched.
+        let huge = "x".repeat(MAX_DRAFT_BYTES + 1);
+        assert!(page.set_from_session(&huge, false, &[]).is_err());
+        assert_eq!(page.draft(), "remote");
+    }
+
+    #[test]
+    fn page_lines_bounded_and_char_safe() {
+        let mut page = ComposerPage::new();
+        page.composer_mut().set_draft("日本語🦀\n第二行").unwrap();
+        let lines = page.render_lines(6);
+        assert!(lines.len() <= MAX_PAGE_LINES, "line count bounded");
+        for l in &lines {
+            assert!(l.chars().count() <= 6 + 2, "line {l:?} exceeds width");
+        }
+        assert!(lines.iter().any(|l| l.contains('日')), "CJK kept");
+        let empty = ComposerPage::new().render_lines(80);
+        assert!(empty.iter().any(|l| l.contains("(empty)")));
+        let wide = page.render_lines(10_000);
+        for l in &wide {
+            assert!(l.chars().count() <= MAX_PAGE_COLS + 2);
+        }
     }
 }

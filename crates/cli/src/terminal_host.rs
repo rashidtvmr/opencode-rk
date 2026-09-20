@@ -406,6 +406,148 @@ impl BridgeReceiver {
     }
 }
 
+/// Upper bound on coalesced pending frame requests. Mirrors
+/// `native_app::MAX_PENDING_FRAMES`; re-exported so the host loop and the app
+/// shell share one bound.
+pub use crate::native_app::MAX_PENDING_FRAMES;
+
+/// Key dispatch outcome for the interactive host loop.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum KeyAction {
+    /// Quit the loop (`q`, Ctrl-C, Ctrl-D).
+    Quit,
+    /// Cycle focus region (Tab).
+    CycleFocus,
+    /// Event consumed; a frame is owed.
+    RequestFrame,
+    /// No binding; event still queued.
+    Ignored,
+}
+
+/// Pure key dispatch: `q`/Ctrl-C/Ctrl-D quit, Tab cycles focus.
+#[must_use]
+pub const fn dispatch_key(key: char) -> KeyAction {
+    match key {
+        'q' | '\x03' | '\x04' => KeyAction::Quit,
+        '\t' => KeyAction::CycleFocus,
+        _ => KeyAction::Ignored,
+    }
+}
+
+/// Pure interactive host-loop state: alt-screen obligation, bounded event
+/// queue ([`EventCoalescer`]), and coalesced frame counter saturating at
+/// [`MAX_PENDING_FRAMES`]. No syscalls, no IO: the native host owns terminal
+/// enter/exit; [`RawModeGuard`]/[`RendererOwner`] record those obligations.
+#[derive(Debug, Default)]
+pub struct HostLoop {
+    alt_screen: bool,
+    events: EventCoalescer,
+    pending_frames: u32,
+    quit: bool,
+}
+
+impl HostLoop {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// True while the loop holds the alt-screen obligation.
+    #[must_use]
+    pub const fn is_alt_screen(&self) -> bool {
+        self.alt_screen
+    }
+
+    /// Enter the alt screen. True on transition; false when already inside.
+    pub fn enter_alt_screen(&mut self) -> bool {
+        if self.alt_screen {
+            return false;
+        }
+        self.alt_screen = true;
+        self.mark_frame();
+        true
+    }
+
+    /// Leave the alt screen. True on transition; false when already outside.
+    pub fn exit_alt_screen(&mut self) -> bool {
+        if !self.alt_screen {
+            return false;
+        }
+        self.alt_screen = false;
+        self.mark_frame();
+        true
+    }
+
+    /// Queue length (bounded by [`MAX_QUEUED_EVENTS`]).
+    #[must_use]
+    pub fn queued(&self) -> usize {
+        self.events.len()
+    }
+
+    /// Coalesced pending frame count (`0..=MAX_PENDING_FRAMES`).
+    #[must_use]
+    pub const fn pending_frames(&self) -> u32 {
+        self.pending_frames
+    }
+
+    /// True when a render is owed.
+    #[must_use]
+    pub const fn needs_render(&self) -> bool {
+        self.pending_frames > 0
+    }
+
+    /// True once a quit key has been stepped.
+    #[must_use]
+    pub const fn should_quit(&self) -> bool {
+        self.quit
+    }
+
+    /// Admit one event; each admitted/coalesced event dirties one
+    /// coalesced frame. Denials ([`HostError`]) leave state unchanged.
+    pub fn push(&mut self, event: TerminalEvent) -> Result<PushOutcome, HostError> {
+        let outcome = self.events.push(event)?;
+        self.mark_frame();
+        Ok(outcome)
+    }
+
+    /// Drain queued events in order; queue is empty afterwards.
+    #[must_use]
+    pub fn drain(&mut self) -> Vec<TerminalEvent> {
+        self.events.drain()
+    }
+
+    /// Consume pending marks as a single frame. False when idle.
+    pub fn take_frame(&mut self) -> bool {
+        if self.pending_frames == 0 {
+            return false;
+        }
+        self.pending_frames = 0;
+        true
+    }
+
+    /// Route one event: quit keys latch [`should_quit`](Self::should_quit),
+    /// Tab maps to [`KeyAction::CycleFocus`], everything else to
+    /// [`KeyAction::RequestFrame`]. The event is queued first (QueueFull
+    /// still returns the dispatch action without dirtying a frame).
+    pub fn step(&mut self, event: TerminalEvent) -> KeyAction {
+        let action = match &event {
+            TerminalEvent::Key(key) => dispatch_key(*key),
+            _ => KeyAction::RequestFrame,
+        };
+        if action == KeyAction::Quit {
+            self.quit = true;
+        }
+        if self.events.push(event).is_ok() {
+            self.mark_frame();
+        }
+        action
+    }
+
+    fn mark_frame(&mut self) {
+        self.pending_frames = self.pending_frames.saturating_add(1).min(MAX_PENDING_FRAMES);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -696,5 +838,69 @@ mod tests {
         assert!(flag.was_restored(), "drop after explicit restore stays restored");
         flag.mark_restored();
         assert!(flag.was_restored(), "restore marking is idempotent");
+    }
+
+    #[test]
+    fn host_loop_max_pending_frames_matches_native_app() {
+        assert_eq!(MAX_PENDING_FRAMES, 16);
+        assert_eq!(
+            MAX_PENDING_FRAMES,
+            crate::native_app::MAX_PENDING_FRAMES
+        );
+    }
+
+    #[test]
+    fn host_loop_alt_screen_enter_exit_idempotent() {
+        let mut host = HostLoop::new();
+        assert!(!host.is_alt_screen());
+        assert!(host.enter_alt_screen(), "first enter transitions");
+        assert!(!host.enter_alt_screen(), "second enter is idempotent");
+        assert!(host.is_alt_screen());
+        assert!(host.exit_alt_screen(), "first exit transitions");
+        assert!(!host.exit_alt_screen(), "second exit is idempotent");
+        assert!(!host.is_alt_screen());
+    }
+
+    #[test]
+    fn host_loop_quit_keys_dispatch() {
+        for key in ['q', '\x03', '\x04'] {
+            assert_eq!(dispatch_key(key), KeyAction::Quit, "key {key:?} must quit");
+        }
+        assert_eq!(dispatch_key('\t'), KeyAction::CycleFocus);
+        assert_eq!(dispatch_key('a'), KeyAction::Ignored);
+    }
+
+    #[test]
+    fn host_loop_frames_coalesce_at_bound() {
+        let mut host = HostLoop::new();
+        assert!(!host.needs_render());
+        for _ in 0..5 {
+            host.push(TerminalEvent::Tick).unwrap();
+        }
+        assert_eq!(host.pending_frames(), 5);
+        for _ in 0..(MAX_PENDING_FRAMES + 10) {
+            host.push(TerminalEvent::Tick).unwrap();
+        }
+        assert_eq!(host.pending_frames(), MAX_PENDING_FRAMES);
+        assert!(host.take_frame());
+        assert!(!host.needs_render());
+        assert!(!host.take_frame());
+    }
+
+    #[test]
+    fn host_loop_step_routes_quit_resize_tick() {        let mut host = HostLoop::new();
+        assert_eq!(host.step(TerminalEvent::Key('q')), KeyAction::Quit);
+        assert!(host.should_quit());
+        let mut host = HostLoop::new();
+        assert_eq!(
+            host.step(TerminalEvent::Resize { cols: 100, rows: 30 }),
+            KeyAction::RequestFrame
+        );
+        assert_eq!(host.pending_frames(), 1);
+        assert_eq!(host.step(TerminalEvent::Tick), KeyAction::RequestFrame);
+        assert_eq!(
+            host.step(TerminalEvent::Key('\t')),
+            KeyAction::CycleFocus
+        );
     }
 }
