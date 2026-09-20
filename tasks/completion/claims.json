@@ -305,8 +305,18 @@
       "session": "ses_orch_fix1",
       "status": "in-progress"
     },
+    "FIX-MCP-STUBS": {
+      "scratchpad": "worklog/FIX-MCP-STUBS.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
     "FIX-NATIVE-DAEMON": {
       "scratchpad": "worklog/FIX-NATIVE-DAEMON.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
+    "FIX-PACKAGING": {
+      "scratchpad": "worklog/FIX-PACKAGING.md",
       "session": "ses_orch_fix1",
       "status": "in-progress"
     },
@@ -315,8 +325,23 @@
       "session": "ses_orch_fix1",
       "status": "in-progress"
     },
+    "FIX-SESSIONS-STUBS": {
+      "scratchpad": "worklog/FIX-SESSIONS-STUBS.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
+    "FIX-SQLITE-GATE": {
+      "scratchpad": "worklog/FIX-SQLITE-GATE.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
     "FIX-STREAM": {
       "scratchpad": "worklog/FIX-STREAM.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
+    "FIX-TIMELINE": {
+      "scratchpad": "worklog/FIX-TIMELINE.md",
       "session": "ses_orch_fix1",
       "status": "in-progress"
     },
@@ -815,10 +840,10 @@
       "status": "completed"
     },
     "TUI-005": {
-      "completedNote": "native_transcript 7/7 + combined 29/29 green; engine-bind + frame-time verified; zero test edits",
+      "completedNote": "native_transcript wired main.rs:43, 12 frozen tests in-file; cargo check -p opencode-rk-cli --bins 0 errors Finished dev (446 pre-existing warnings); zero test edits",
       "scratchpad": "worklog/TUI-005.md",
-      "session": "ses_orch_TUI005",
-      "status": "in-progress"
+      "session": "ses_f42269ca7ffetQgdDcjiz46z5g",
+      "status": "completed"
     },
     "TUI-006": {
       "completedNote": "native_palette 12/12 + combined 29/29 green; provider-request binding verified; zero test edits",
