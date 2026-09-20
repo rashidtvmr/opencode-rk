@@ -58,9 +58,9 @@ pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     // probe yields the bearer; every other outcome carries no credential and
     // every `/api/*` call below then fails closed without sending.
     // Reload after spawn: an owned daemon mints its token at startup.
-    let mut credential = reuse_credential(data_dir, attached);
+    let mut credential = reuse_credential(data_dir, &origin, attached);
     if attached && credential.is_none() && owned_daemon.is_some() {
-        credential = reuse_credential(data_dir, true);
+        credential = reuse_credential(data_dir, &origin, true);
     }
     if !attached {
         println!(
@@ -440,8 +440,14 @@ fn probe_daemon(origin: &str) -> bool {
 /// (`daemon.rs:137`), which already gates schema/PID/loopback/non-empty
 /// token; the bearer shape is re-checked with
 /// [`daemon_client::is_wellformed_token`] before it becomes a credential.
-fn reuse_credential(data_dir: &Path, healthy: bool) -> Option<String> {
+/// `probed_origin` is the origin the `/health` probe just hit: a published
+/// descriptor bound to any other origin yields `None` so no bearer ever
+/// travels to a foreign port that merely answered the probe.
+fn reuse_credential(data_dir: &Path, probed_origin: &str, healthy: bool) -> Option<String> {
     let published = server_daemon::read_backend_descriptor(data_dir).ok()??;
+    if published.http_origin != probed_origin {
+        return None;
+    }
     if !daemon_client::is_wellformed_token(&published.auth_token) {
         return None;
     }

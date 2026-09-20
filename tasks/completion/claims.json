@@ -290,6 +290,36 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "FIX-CI-APPROVAL": {
+      "scratchpad": "worklog/FIX-CI-APPROVAL.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
+    "FIX-LOGROTATE": {
+      "scratchpad": "worklog/FIX-LOGROTATE.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
+    "FIX-LOOP-RULES": {
+      "scratchpad": "worklog/FIX-LOOP-RULES.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
+    "FIX-NATIVE-DAEMON": {
+      "scratchpad": "worklog/FIX-NATIVE-DAEMON.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
+    "FIX-SANDBOX": {
+      "scratchpad": "worklog/FIX-SANDBOX.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
+    "FIX-STREAM": {
+      "scratchpad": "worklog/FIX-STREAM.md",
+      "session": "ses_orch_fix1",
+      "status": "in-progress"
+    },
     "G6-CHAT-DATADIR": {
       "completedNote": "chat.rs spawn forwards --data-dir; cargo check -p opencode-rk-cli --bins GREEN (Finished dev, 441 pre-existing warnings); zero test edits",
       "scratchpad": "worklog/G6-CHAT-DATADIR.md",
@@ -307,9 +337,24 @@
       "session": "ses_orch_wave5",
       "status": "in-progress"
     },
+    "LANE-APPSTART-VIEW": {
+      "scratchpad": "worklog/LANE-APPSTART-VIEW.md",
+      "session": "ses_f423ccf75ffe72BSE5xLbs3Rf5",
+      "status": "in-progress"
+    },
+    "LANE-AUTH-401": {
+      "scratchpad": "worklog/LANE-AUTH-401.md",
+      "session": "ses_f423cd0afffeIbW7EsUV3TUvIA",
+      "status": "in-progress"
+    },
     "LANE-AUTH-SETUP": {
       "scratchpad": "worklog/W5-LANE-AUTH-SETUP.md",
       "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-AUTODRIVE-CLAMP": {
+      "scratchpad": "worklog/LANE-AUTODRIVE-CLAMP.md",
+      "session": "ses_f423ccebbffe34G50hL9WgxgWo",
       "status": "in-progress"
     },
     "LANE-BOOTSTRAP": {
@@ -322,12 +367,23 @@
       "session": "ses_orch_wave5",
       "status": "in-progress"
     },
+    "LANE-CHAT-ORIGIN": {
+      "completedNote": "cargo check bins GREEN Finished dev 441 pre-existing warnings; origin-bind exact compare; zero test edits",
+      "scratchpad": "worklog/LANE-CHAT-ORIGIN.md",
+      "session": "ses_f423cd0e6ffeUlSuxlJpbTBk5Y",
+      "status": "completed"
+    },
     "LANE-CI": {
       "blockedNote": "",
       "claim": "Roadmap 3.6: CI/CD non-interactive output contract (typed exit codes, JSON output, fail-closed approvals)",
       "completedNote": "rustc --test ci_output 6/6 green",
       "scratchpad": "worklog/LANE-CI.md",
       "session": "ses_worker_ci",
+      "status": "in-progress"
+    },
+    "LANE-CI-CAPS": {
+      "scratchpad": "worklog/LANE-CI-CAPS.md",
+      "session": "ses_f423ccebdffemjzOag67siYSxl",
       "status": "in-progress"
     },
     "LANE-CI-EXT": {
@@ -340,6 +396,11 @@
       "completedNote": "GREEN 9/9 (3 ci_mode + 6 ci_output); RED sha e8d5fe0c; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-cli --test ci_mode; pre-existing default_tui port-4096 flake unrelated",
       "scratchpad": "worklog/LANE-CI-FLAG.md",
       "session": "ses_worker_ci_flag",
+      "status": "in-progress"
+    },
+    "LANE-CI-TOKEN": {
+      "scratchpad": "worklog/LANE-CI-TOKEN.md",
+      "session": "ses_f423cd0e3ffe1siD409EuLQ1Sr",
       "status": "in-progress"
     },
     "LANE-CLI-ONCE": {
@@ -372,6 +433,21 @@
       "session": "ses_worker_ctx",
       "status": "in-progress"
     },
+    "LANE-DEFAULTTUI-FIX": {
+      "scratchpad": "worklog/LANE-DEFAULTTUI-FIX.md",
+      "session": "ses_f423ccebfffeIe1a310sv3QDnH",
+      "status": "in-progress"
+    },
+    "LANE-DESC-STALE": {
+      "scratchpad": "worklog/LANE-DESC-STALE.md",
+      "session": "ses_f423cd0adffe1mKflQIPCPcvT5",
+      "status": "in-progress"
+    },
+    "LANE-FILE-AUTHZ": {
+      "scratchpad": "worklog/LANE-FILE-AUTHZ.md",
+      "session": "ses_f423cd0dcffeKV0Mtlfh4TMwp2",
+      "status": "in-progress"
+    },
     "LANE-GLOBS": {
       "blockedNote": "",
       "claim": "Roadmap 3.5: conditional rules load/unload with path globs + hysteresis (extends rules_loader)",
@@ -394,10 +470,20 @@
       "session": "ses_worker_loop",
       "status": "in-progress"
     },
+    "LANE-LOOP-CAP": {
+      "scratchpad": "worklog/LANE-LOOP-CAP.md",
+      "session": "ses_f423cceb3ffe8DP2G3ZFzAOT5p",
+      "status": "in-progress"
+    },
     "LANE-LOOP-LIVE": {
       "completedNote": "GREEN 16/16 loop_driver_live (Scenario A-D + contract tests); RED sha 7ca6a1c1 GREEN sha a60cf68c; zero test edits; wiring gap documented: live turn uses agent_loop::LoopController at lib.rs:968 not loop_driver::LoopDriver; pre-existing 2 session_turn_stream failures verified",
       "scratchpad": "worklog/LANE-LOOP-LIVE.md",
       "session": "ses_worker_loop_live",
+      "status": "in-progress"
+    },
+    "LANE-MAIN-ONCE2": {
+      "scratchpad": "worklog/LANE-MAIN-ONCE2.md",
+      "session": "ses_f423cd0e9ffeB95oRHX3HpaS0Y",
       "status": "in-progress"
     },
     "LANE-MCP-CONFIG": {
@@ -409,6 +495,21 @@
       "completedNote": "GREEN 15/15 mcp_session tests; RED sha c0670fd3 impl sha 0b6eda38; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-tools --test mcp_session",
       "scratchpad": "worklog/LANE-MCP-LIVE.md",
       "session": "ses_orch_wave4",
+      "status": "in-progress"
+    },
+    "LANE-ONBOARD-SETUP": {
+      "scratchpad": "worklog/LANE-ONBOARD-SETUP.md",
+      "session": "ses_f423cd0e5ffeeHMozSNUJfQ3zq",
+      "status": "in-progress"
+    },
+    "LANE-PROV-FALLBACK": {
+      "scratchpad": "worklog/LANE-PROV-FALLBACK.md",
+      "session": "ses_f423cd0daffezwT8o66LUJl0eU",
+      "status": "in-progress"
+    },
+    "LANE-RALPH-MAX2": {
+      "scratchpad": "worklog/LANE-RALPH-MAX2.md",
+      "session": "ses_f423cceb8ffeWknMXoafTgKEZd",
       "status": "in-progress"
     },
     "LANE-RULES": {
@@ -436,6 +537,16 @@
       "session": "ses_lane_shapes",
       "status": "blocked"
     },
+    "LANE-SHELL-AUTHZ": {
+      "scratchpad": "worklog/LANE-SHELL-AUTHZ.md",
+      "session": "ses_f423cd0dfffenzXnM7HZSns8eh",
+      "status": "in-progress"
+    },
+    "LANE-SRV-ROUTER": {
+      "scratchpad": "worklog/LANE-SRV-ROUTER.md",
+      "session": "ses_f423cd0e2ffejOqhPZZSuaZbMD",
+      "status": "in-progress"
+    },
     "LANE-STREAM-FIX": {
       "scratchpad": "worklog/W5-LANE-STREAM-FIX.md",
       "session": "ses_orch_wave5",
@@ -456,6 +567,16 @@
       "completedNote": "GREEN 16/16 rustc --edition 2021 --test src/native_theme.rs (T01-T06: hex parse, registry bounds, apply completeness, unknown error, memory regression, builtins present); zero test edits post-freeze; zero warnings",
       "scratchpad": "worklog/LANE-THEMES.md",
       "session": "ses_worker_themes",
+      "status": "in-progress"
+    },
+    "LANE-TIMELINE-LAND": {
+      "scratchpad": "worklog/LANE-TIMELINE-LAND.md",
+      "session": "ses_f423ccec1ffeAs18vWOX0n8DYQ",
+      "status": "in-progress"
+    },
+    "LANE-TUI-BEARER2": {
+      "scratchpad": "worklog/LANE-TUI-BEARER2.md",
+      "session": "ses_f423cd0e8ffeYr0NjW0YK3ytqh",
       "status": "in-progress"
     },
     "LANE-TUI-GRAPH": {
@@ -479,6 +600,11 @@
     "LANE-TUI-PAINT": {
       "scratchpad": "worklog/W5-LANE-TUI-PAINT.md",
       "session": "ses_orch_wave5",
+      "status": "in-progress"
+    },
+    "LANE-TURN-SETTLE": {
+      "scratchpad": "worklog/LANE-TURN-SETTLE.md",
+      "session": "ses_f423cceb6ffeLkm86YxBA2Z5YW",
       "status": "in-progress"
     },
     "LANE-ULTRA-CODEGEN": {
@@ -516,6 +642,11 @@
       "completedNote": "GREEN 16/16 canvas-model (16 tests: makeCanvas, addNode dup-reject, addEdge cycle/self/missing, removeNode, evict FIFO, findNodeAtPoint viewport-transform, zoom clamp 0.1-5, JSON round-trip, cloneCanvas indep-copy); RED sha a9fdbc49; test fixes noted in scratchpad; zero assertion edits post-freeze; cmd: pnpm vitest src/lib/canvas-model.test.ts",
       "scratchpad": "worklog/LANE-WEB-CANVAS.md",
       "session": "ses_worker_web_canvas",
+      "status": "in-progress"
+    },
+    "LANE-WEB-HONEST": {
+      "scratchpad": "worklog/LANE-WEB-HONEST.md",
+      "session": "ses_f423cceb0ffeKndZg63lApY3Fy",
       "status": "in-progress"
     },
     "LANE-WF-CREATE": {
