@@ -461,9 +461,10 @@
       "status": "in-progress"
     },
     "LANE-FILE-AUTHZ": {
+      "completedNote": "GREEN tools file_ops 5/5 zero test edits; impl execute_authorized@file_ops.rs landed in ancestor 36ae2db; frozen tests untouched",
       "scratchpad": "worklog/LANE-FILE-AUTHZ.md",
       "session": "ses_f423cd0dcffeKV0Mtlfh4TMwp2",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-GLOBS": {
       "blockedNote": "",
