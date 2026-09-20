@@ -6,6 +6,9 @@
 
 use std::collections::VecDeque;
 
+/// Max lines retained in the virtualized activity page window.
+pub const MAX_PAGE: usize = 200;
+
 /// Max items retained in the timeline window.
 pub const MAX_ITEMS: usize = 512;
 /// Max bytes in one preview string (char-boundary safe).
@@ -123,6 +126,27 @@ impl TimelineBuilder {
         self.items.iter().any(|i| i.stream_id == stream_id)
     }
 
+    /// Pinned-to-bottom window: last `height` items offset by `page` scroll.
+    /// `height` hard-capped to `MAX_PAGE`. Scrolled-up view stable across
+    /// pushes; [`TimelinePage::reset`] re-pins to bottom. Empty when
+    /// `height == 0` or no items. Mirrors `native_transcript::Transcript::page`.
+    pub fn page(&self, page: &TimelinePage, height: usize) -> Vec<&TimelineItem> {
+        let height = height.min(MAX_PAGE);
+        if height == 0 {
+            return Vec::new();
+        }
+        let len = self.items.len();
+        let end = len.saturating_sub(page.scroll.min(len));
+        let start = end.saturating_sub(height);
+        self.items.iter().skip(start).take(end - start).collect()
+    }
+
+    /// [`page`](Self::page) rendered to wrapped rows at `width` chars.
+    pub fn render_page(&self, page: &TimelinePage, height: usize, width: usize) -> Vec<String> {
+        let owned: Vec<TimelineItem> = self.page(page, height).into_iter().cloned().collect();
+        render_lines(&owned, width)
+    }
+
     pub fn len(&self) -> usize {
         self.items.len()
     }
@@ -130,6 +154,144 @@ impl TimelineBuilder {
     pub fn is_empty(&self) -> bool {
         self.items.is_empty()
     }
+}
+
+/// Pinned-to-bottom scroll state for [`TimelineBuilder::page`].
+///
+/// `scroll == 0` follows the latest item; scrolling up freezes the view so
+/// arriving streams do not move it. Pure state: caller supplies lengths.
+/// Mirrors `native_transcript::TranscriptPage`.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TimelinePage {
+    scroll: usize,
+}
+
+impl TimelinePage {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Scroll up (away from latest) by `delta`, clamped to `len`.
+    pub fn scroll_up(&mut self, delta: usize, len: usize) {
+        self.scroll = self.scroll.saturating_add(delta).min(len);
+    }
+
+    /// Scroll down (toward latest) by `delta`.
+    pub fn scroll_down(&mut self, delta: usize) {
+        self.scroll = self.scroll.saturating_sub(delta);
+    }
+
+    /// Re-pin to the latest item.
+    pub fn reset(&mut self) {
+        self.scroll = 0;
+    }
+
+    #[must_use]
+    pub fn scroll(&self) -> usize {
+        self.scroll
+    }
+}
+
+/// Label prefix for one timeline item kind (sidebar/activity paint).
+fn kind_label(kind: ItemKind) -> &'static str {
+    match kind {
+        ItemKind::Message => "message",
+        ItemKind::Tool => "tool",
+        ItemKind::Reasoning => "reasoning",
+    }
+}
+
+/// Render timeline items to wrapped rows, at most `width` chars per row.
+///
+/// Splits on `\n`, word-wraps (oversize words chunked), `width == 0`
+/// disables wrapping (one row per source line, kind-prefixed).
+/// Pure/bounded: input capped to `MAX_PAGE` items, output capped to
+/// `MAX_PAGE` rows (tail kept). Mirrors `native_transcript::render_lines`.
+#[must_use]
+pub fn render_lines(items: &[TimelineItem], width: usize) -> Vec<String> {
+    fn push_wrapped(out: &mut Vec<String>, paragraph: &str, width: usize) {
+        if out.len() >= MAX_PAGE {
+            return;
+        }
+        if paragraph.chars().count() <= width {
+            out.push(paragraph.to_owned());
+            return;
+        }
+        let mut line = String::new();
+        let mut line_len = 0usize;
+        for word in paragraph.split_whitespace() {
+            if out.len() >= MAX_PAGE {
+                return;
+            }
+            let wlen = word.chars().count();
+            if wlen > width {
+                if !line.is_empty() {
+                    out.push(std::mem::take(&mut line));
+                    line_len = 0;
+                    if out.len() >= MAX_PAGE {
+                        return;
+                    }
+                }
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(width) {
+                    out.push(chunk.iter().collect());
+                    if out.len() >= MAX_PAGE {
+                        return;
+                    }
+                }
+                continue;
+            }
+            if line.is_empty() {
+                line.push_str(word);
+                line_len = wlen;
+            } else if line_len + 1 + wlen <= width {
+                line.push(' ');
+                line.push_str(word);
+                line_len += 1 + wlen;
+            } else {
+                out.push(std::mem::take(&mut line));
+                if out.len() >= MAX_PAGE {
+                    line.push_str(word);
+                    line_len = wlen;
+                    return;
+                }
+                line.push_str(word);
+                line_len = wlen;
+            }
+        }
+        if !line.is_empty() && out.len() < MAX_PAGE {
+            out.push(line);
+        }
+    }
+    let items = if items.len() > MAX_PAGE {
+        &items[items.len() - MAX_PAGE..]
+    } else {
+        items
+    };
+    let mut out = Vec::new();
+    for item in items {
+        let base = format!("{}: {}", kind_label(item.kind), item.preview);
+        if width == 0 {
+            for row in base.split('\n') {
+                if out.len() >= MAX_PAGE {
+                    break;
+                }
+                out.push(row.to_owned());
+            }
+        } else {
+            for para in base.split('\n') {
+                push_wrapped(&mut out, para, width);
+                if out.len() >= MAX_PAGE {
+                    break;
+                }
+            }
+        }
+        if out.len() >= MAX_PAGE {
+            break;
+        }
+    }
+    out
 }
 
 /// Classify a stream into an `ItemKind`.
@@ -307,5 +469,129 @@ mod tests {
         assert!(builder.snapshot().is_empty());
         assert!(builder.render_slice(10).is_empty());
         assert!(!builder.marker_stable(0));
+    }
+
+    /// T07: activity page pins to bottom; scrolled-up view stable across pushes.
+    #[test]
+    fn t07_page_pins_to_bottom_and_scrolls() {
+        let mut builder = TimelineBuilder::new();
+        for i in 0..5 {
+            builder.push_back(TimelineItem {
+                kind: ItemKind::Message,
+                stream_id: i,
+                preview: format!("line {i}"),
+            });
+        }
+        let vis: Vec<u64> = builder
+            .page(&TimelinePage::new(), 2)
+            .iter()
+            .map(|l| l.stream_id)
+            .collect();
+        assert_eq!(vis, vec![3, 4]);
+        let mut page = TimelinePage::new();
+        page.scroll_up(2, builder.len());
+        assert_eq!(page.scroll(), 2);
+        let vis: Vec<u64> = builder
+            .page(&page, 2)
+            .iter()
+            .map(|l| l.stream_id)
+            .collect();
+        assert_eq!(vis, vec![1, 2]);
+        // New arrivals must not move a scrolled-up view.
+        builder.push_back(TimelineItem {
+            kind: ItemKind::Message,
+            stream_id: 5,
+            preview: "line 5".into(),
+        });
+        let vis: Vec<u64> = builder
+            .page(&page, 2)
+            .iter()
+            .map(|l| l.stream_id)
+            .collect();
+        assert_eq!(vis, vec![1, 2]);
+        page.scroll_down(10);
+        assert_eq!(page.scroll(), 0);
+    }
+
+    /// T08: page height capped and empty safe.
+    #[test]
+    fn t08_page_height_capped_and_empty_safe() {
+        let builder = TimelineBuilder::new();
+        let page = TimelinePage::new();
+        assert!(builder.page(&page, 10).is_empty());
+        assert!(builder.page(&page, 0).is_empty());
+        let mut builder = TimelineBuilder::new();
+        for i in 0..(MAX_PAGE + 50) {
+            builder.push_back(TimelineItem {
+                kind: ItemKind::Message,
+                stream_id: i as u64,
+                preview: format!("l{i}"),
+            });
+        }
+        assert_eq!(builder.page(&TimelinePage::new(), 10_000).len(), MAX_PAGE);
+    }
+
+    /// T09: scroll clamps to len.
+    #[test]
+    fn t09_scroll_clamps_to_len() {
+        let mut p = TimelinePage::new();
+        p.scroll_up(100, 3);
+        assert_eq!(p.scroll(), 3);
+        p.scroll_up(10, 3);
+        assert_eq!(p.scroll(), 3);
+        p.reset();
+        assert_eq!(p.scroll(), 0);
+    }
+
+    /// T10: render lines wraps and bounds.
+    #[test]
+    fn t10_render_lines_wraps_and_bounds() {
+        let items = vec![TimelineItem {
+            kind: ItemKind::Message,
+            stream_id: 0,
+            preview: "hello world foo".into(),
+        }];
+        let rows = render_lines(&items, 5);
+        assert!(rows.join("|").contains("hello"));
+        for r in &rows {
+            assert!(r.chars().count() <= 5, "row overflow: {r:?}");
+        }
+        assert_eq!(
+            render_lines(&items, 0),
+            vec!["message: hello world foo".to_owned()]
+        );
+        let items = vec![TimelineItem {
+            kind: ItemKind::Tool,
+            stream_id: 1,
+            preview: "a\nb".into(),
+        }];
+        assert_eq!(
+            render_lines(&items, 0),
+            vec!["tool: a".to_owned(), "b".to_owned()]
+        );
+        let big: Vec<TimelineItem> = (0..500)
+            .map(|i| TimelineItem {
+                kind: ItemKind::Message,
+                stream_id: i,
+                preview: "x".repeat(100),
+            })
+            .collect();
+        assert!(render_lines(&big, 10).len() <= MAX_PAGE);
+    }
+
+    /// T11: render page end to end.
+    #[test]
+    fn t11_render_page_end_to_end() {
+        let builder = TimelineBuilder::from_streams(vec![StreamState {
+            stream_id: 1,
+            text: "alpha beta gamma".into(),
+            tool_state: None,
+            is_reasoning: false,
+        }]);
+        let rows = builder.render_page(&TimelinePage::new(), 10, 5);
+        assert!(!rows.is_empty());
+        for r in &rows {
+            assert!(r.chars().count() <= 5, "row overflow: {r:?}");
+        }
     }
 }

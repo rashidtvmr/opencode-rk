@@ -570,9 +570,10 @@
       "status": "in-progress"
     },
     "LANE-TIMELINE-LAND": {
+      "completedNote": "bins check 0 errors (441 pre-existing warnings); additive +286 reconciled vs HEAD ee7575e; zero test edits",
       "scratchpad": "worklog/LANE-TIMELINE-LAND.md",
       "session": "ses_f423ccec1ffeAs18vWOX0n8DYQ",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-TUI-BEARER2": {
       "scratchpad": "worklog/LANE-TUI-BEARER2.md",
