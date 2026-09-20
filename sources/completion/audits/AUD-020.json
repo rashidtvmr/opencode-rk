@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "AUD-020",
   "title": "Every legacy requirement and accepted-flag reconciliation",
-  "inspectedCommit": "1128738b45e8d196426c546521a9373789ba6297",
+  "inspectedCommit": "1614754a76648011761893b013ae08b4f5fad33d",
   "planDigestNote": "union ralph.json + ralph.completion.json",
   "pins": {
     "projectAudit": "165b076c91ac6f2fd71e23f01d9fd7d3054c121d",
@@ -32,7 +32,7 @@
     "Classify native V2, legacy compatibility, planned upstream and new scope; attach exact pin/path/symbol evidence and mandatory repair children for every gap."
   ],
   "assignedLegacy": [],
-  "trace": "ralph.json 258 stories / 258 accepted / 237 empty dependencyIds / 82 'TBD - see source audit'; ralph.json:4 'TBD gaps remain'; plan_model.py:8,193-205 empty-deps synthesis from PLAN.md s4; ralph.completion.json:29 legacyAcceptedIsReleaseEvidence:false; prd.json:4 'not an acceptance authority'; FEATURES.md:7 258 stories/47 reqs/1290 obligations; tasks/ 217 files; completion --audit-legacy requiresRevalidation=all 258",
+  "trace": "HEAD 1614754: ralph.json export legacyStories 258, status accepted 258/258, empty dependencyIds 237, userStory TBD 82; ralph.completion.json:29 legacyAcceptedIsReleaseEvidence:false; prd.json:4 'not an acceptance authority'; completionStories 109; --check SPEC OK additions=109 legacy=258 scenarios=545 NOT product acceptance; --audit-legacy legacyCount 258 recordedStatusesNotEvidence accepted=258 requiresRevalidation=all 258 (AUD-020 shard mapping empty: catch-all, no assigned prefixes)",
   "findings": [
     {
       "behavior": "258/258 accepted with hollow TBD/empty-deps content; accepted != release evidence",

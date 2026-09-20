@@ -177,7 +177,7 @@
     },
     "AUD-017": {
       "scratchpad": "worklog/AUD-017.md",
-      "session": "ses_prod_19a",
+      "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
       "status": "in-progress"
     },
     "AUD-018": {
@@ -193,14 +193,14 @@
       "status": "completed"
     },
     "AUD-020": {
-      "completedNote": "AUD-020 audit-complete; union 258/258; TBD82 emptyDeps237 addressed; SEC-015 gap documented; SPEC OK 109/258/545; bootstrap verified; revise b0bed89",
+      "completedNote": "AUD-020 refresh at 1614754: export 258 legacy/258 accepted/237 empty-deps/82 TBD +109 completion; audit-legacy requiresRevalidation all 258; check SPEC OK 109/258/545; JSON shape keys unchanged, verdict no acceptance; zero test edits",
       "scratchpad": "worklog/AUD-020.md",
-      "session": "ses_orch_AUD020",
-      "status": "in-progress"
+      "session": "ses_f41f2c26cffeFFRai2y6T8LbZo",
+      "status": "completed"
     },
     "DISC-102": {
       "scratchpad": "worklog/DISC-102.md",
-      "session": "ses_main_gap1",
+      "session": "ses_f41f2c27bffe5WV94bXE46wlLc",
       "status": "in-progress"
     },
     "DISC-103": {
@@ -223,7 +223,7 @@
     },
     "DISC-106": {
       "scratchpad": "worklog/DISC-106.md",
-      "session": "ses_main_gap5",
+      "session": "ses_f41f2c276ffeEYSUeSJGzV14cz",
       "status": "in-progress"
     },
     "DISC-107": {
@@ -246,7 +246,7 @@
     },
     "DISC-110": {
       "scratchpad": "worklog/DISC-110.md",
-      "session": "ses_main_gap8",
+      "session": "ses_f41f2c274ffeUvZ1k4LjdweguP",
       "status": "in-progress"
     },
     "DISC-111": {
@@ -795,7 +795,7 @@
     },
     "PAR-010": {
       "scratchpad": "worklog/PAR-010.md",
-      "session": "ses_prod_19a",
+      "session": "ses_f41f2c26affeGOlv7zkB012eSR",
       "status": "in-progress"
     },
     "RC-01": {
@@ -871,9 +871,8 @@
       "status": "completed"
     },
     "TUI-010": {
-      "completedNote": "tui suites 6+5+4+4 + opentui-sys 51/51 green on Linux; platform matrix verified; zero edits",
       "scratchpad": "worklog/TUI-010.md",
-      "session": "ses_orch_TUI010",
+      "session": "ses_f41f2c272ffek0lL97XJwropQw",
       "status": "in-progress"
     },
     "TUI-010-CAPS": {
