@@ -354,6 +354,148 @@ impl Transcript {
     pub fn window(&self, offset: usize, limit: usize) -> &[TranscriptLine] {
         window_slice(&self.lines, offset, limit)
     }
+
+    /// Pinned-to-bottom page: the last `height` retained lines, shifted up
+    /// by `page` scroll offset. `height` hard-capped to `MAX_WINDOW`.
+    /// A scrolled-up view is stable across pushes; [`TranscriptPage::reset`]
+    /// re-pins to the bottom. Empty when `height == 0` or no lines.
+    pub fn page(&self, page: &TranscriptPage, height: usize) -> &[TranscriptLine] {
+        let height = height.min(MAX_WINDOW);
+        if height == 0 {
+            return &[];
+        }
+        let len = self.lines.len();
+        let end = len.saturating_sub(page.scroll.min(len));
+        let start = end.saturating_sub(height);
+        &self.lines[start..end]
+    }
+
+    /// [`page`](Self::page) rendered to wrapped rows at `width` chars.
+    pub fn render_page(&self, page: &TranscriptPage, height: usize, width: usize) -> Vec<String> {
+        render_lines(self.page(page, height), width)
+    }
+}
+
+/// Pinned-to-bottom scroll state for [`Transcript::page`].
+///
+/// `scroll == 0` follows the latest line; scrolling up freezes the view so
+/// arriving tokens do not move it. Pure state: caller supplies lengths.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct TranscriptPage {
+    scroll: usize,
+}
+
+impl TranscriptPage {
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Scroll up (away from latest) by `delta`, clamped to `len`.
+    pub fn scroll_up(&mut self, delta: usize, len: usize) {
+        self.scroll = self.scroll.saturating_add(delta).min(len);
+    }
+
+    /// Scroll down (toward latest) by `delta`.
+    pub fn scroll_down(&mut self, delta: usize) {
+        self.scroll = self.scroll.saturating_sub(delta);
+    }
+
+    /// Re-pin to the latest line.
+    pub fn reset(&mut self) {
+        self.scroll = 0;
+    }
+
+    #[must_use]
+    pub fn scroll(&self) -> usize {
+        self.scroll
+    }
+}
+
+/// Render transcript lines to wrapped rows, at most `width` chars per row.
+///
+/// Splits on `\n`, word-wraps (oversize words chunked), `width == 0`
+/// disables wrapping (one row per source line). Pure/bounded: input capped
+/// to `MAX_WINDOW` lines, output capped to `MAX_WINDOW` rows (tail kept).
+#[must_use]
+pub fn render_lines(lines: &[TranscriptLine], width: usize) -> Vec<String> {
+    fn push_wrapped(out: &mut Vec<String>, paragraph: &str, width: usize) {
+        if out.len() >= MAX_WINDOW {
+            return;
+        }
+        if paragraph.chars().count() <= width {
+            out.push(paragraph.to_owned());
+            return;
+        }
+        let mut line = String::new();
+        let mut line_len = 0usize;
+        for word in paragraph.split_whitespace() {
+            if out.len() >= MAX_WINDOW {
+                return;
+            }
+            let wlen = word.chars().count();
+            if wlen > width {
+                if !line.is_empty() {
+                    out.push(std::mem::take(&mut line));
+                    line_len = 0;
+                    if out.len() >= MAX_WINDOW {
+                        return;
+                    }
+                }
+                let chars: Vec<char> = word.chars().collect();
+                for chunk in chars.chunks(width) {
+                    out.push(chunk.iter().collect());
+                    if out.len() >= MAX_WINDOW {
+                        return;
+                    }
+                }
+                continue;
+            }
+            if line.is_empty() {
+                line.push_str(word);
+                line_len = wlen;
+            } else if line_len + 1 + wlen <= width {
+                line.push(' ');
+                line.push_str(word);
+                line_len += 1 + wlen;
+            } else {
+                out.push(std::mem::take(&mut line));
+                if out.len() >= MAX_WINDOW {
+                    line.push_str(word);
+                    line_len = wlen;
+                    return;
+                }
+                line.push_str(word);
+                line_len = wlen;
+            }
+        }
+        if !line.is_empty() && out.len() < MAX_WINDOW {
+            out.push(line);
+        }
+    }
+    let lines = if lines.len() > MAX_WINDOW { &lines[lines.len() - MAX_WINDOW..] } else { lines };
+    let mut out = Vec::new();
+    for l in lines {
+        if width == 0 {
+            for row in l.text.split('\n') {
+                if out.len() >= MAX_WINDOW {
+                    break;
+                }
+                out.push(row.to_owned());
+            }
+        } else {
+            for para in l.text.split('\n') {
+                push_wrapped(&mut out, para, width);
+                if out.len() >= MAX_WINDOW {
+                    break;
+                }
+            }
+        }
+        if out.len() >= MAX_WINDOW {
+            break;
+        }
+    }
+    out
 }
 
 /// Slice a virtualized window with offset/limit caps.
@@ -462,5 +604,77 @@ mod tests {
         assert!(ToolState::Running.can_transition(ToolState::Completed));
         assert!(!ToolState::Completed.can_transition(ToolState::Running));
         assert!(!ToolState::Approval.can_transition(ToolState::Completed));
+    }
+
+    #[test]
+    fn page_pins_to_bottom_and_scrolls() {
+        let mut t = Transcript::new();
+        for i in 0..5 {
+            t.push(&format!("line {i}"));
+        }
+        let vis: Vec<u64> = t.page(&TranscriptPage::new(), 2).iter().map(|l| l.id).collect();
+        assert_eq!(vis, vec![3, 4]);
+        let mut page = TranscriptPage::new();
+        page.scroll_up(2, t.len());
+        assert_eq!(page.scroll(), 2);
+        let vis: Vec<u64> = t.page(&page, 2).iter().map(|l| l.id).collect();
+        assert_eq!(vis, vec![1, 2]);
+        // New arrivals must not move a scrolled-up view.
+        t.push("line 5");
+        let vis: Vec<u64> = t.page(&page, 2).iter().map(|l| l.id).collect();
+        assert_eq!(vis, vec![1, 2]);
+        page.scroll_down(10);
+        assert_eq!(page.scroll(), 0);
+    }
+
+    #[test]
+    fn page_height_capped_and_empty_safe() {
+        let t = Transcript::new();
+        let page = TranscriptPage::new();
+        assert!(t.page(&page, 10).is_empty());
+        assert!(t.page(&page, 0).is_empty());
+        let mut t = Transcript::new();
+        for i in 0..(MAX_WINDOW + 50) {
+            t.push(&format!("l{i}"));
+        }
+        assert_eq!(t.page(&TranscriptPage::new(), 10_000).len(), MAX_WINDOW);
+    }
+
+    #[test]
+    fn scroll_clamps_to_len() {
+        let mut p = TranscriptPage::new();
+        p.scroll_up(100, 3);
+        assert_eq!(p.scroll(), 3);
+        p.scroll_up(10, 3);
+        assert_eq!(p.scroll(), 3);
+        p.reset();
+        assert_eq!(p.scroll(), 0);
+    }
+
+    #[test]
+    fn render_lines_wraps_and_bounds() {
+        let lines = vec![TranscriptLine { id: 0, text: "hello world foo".into() }];
+        let rows = render_lines(&lines, 5);
+        assert!(rows.join("|").contains("hello"));
+        for r in &rows {
+            assert!(r.chars().count() <= 5, "row overflow: {r:?}");
+        }
+        assert_eq!(render_lines(&lines, 0), vec!["hello world foo".to_owned()]);
+        let lines = vec![TranscriptLine { id: 1, text: "a\nb".into() }];
+        assert_eq!(render_lines(&lines, 0), vec!["a".to_owned(), "b".to_owned()]);
+        let big: Vec<TranscriptLine> =
+            (0..500).map(|i| TranscriptLine { id: i, text: "x".repeat(100) }).collect();
+        assert!(render_lines(&big, 10).len() <= MAX_WINDOW);
+    }
+
+    #[test]
+    fn render_page_end_to_end() {
+        let mut t = Transcript::new();
+        t.push("alpha beta gamma");
+        let rows = t.render_page(&TranscriptPage::new(), 10, 5);
+        assert!(!rows.is_empty());
+        for r in &rows {
+            assert!(r.chars().count() <= 5, "row overflow: {r:?}");
+        }
     }
 }

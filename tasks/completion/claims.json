@@ -586,9 +586,10 @@
       "status": "in-progress"
     },
     "LANE-TRANSCRIPT-LAND": {
+      "completedNote": "bins check 0 errors (445 pre-existing warnings); TranscriptPage+page+render_page+render_lines compile; additive +214 vs HEAD; zero test edits",
       "scratchpad": "worklog/LANE-TRANSCRIPT-LAND.md",
       "session": "ses_f423ccf72ffeIVRuzGDXMAMDAX",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-TUI-BEARER2": {
       "scratchpad": "worklog/LANE-TUI-BEARER2.md",
