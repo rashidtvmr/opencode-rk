@@ -746,9 +746,10 @@
       "status": "completed"
     },
     "PAR-002": {
+      "completedNote": "GREEN 7/7 app_routing lib tests; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-providers app_routing; HEAD f231a37; log tail verified",
       "scratchpad": "worklog/PAR-002.md",
       "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PAR-003": {
       "completedNote": "GREEN 5/5 app_history lib unittests (42 total, 37 filtered); zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-sessions app_history",
@@ -844,9 +845,10 @@
       "status": "completed"
     },
     "TUI-006": {
+      "completedNote": "GREEN 9/9 native_palette bin oc2 tests; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 native_palette; HEAD f231a37; log /tmp/opencode/tui006.log",
       "scratchpad": "worklog/TUI-006.md",
       "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
-      "status": "in-progress"
+      "status": "completed"
     },
     "TUI-007": {
       "completedNote": "native_navigation 8/8 green; service binding via APP-006 evidence; zero test edits",
