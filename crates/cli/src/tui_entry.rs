@@ -24,9 +24,9 @@ use opencode_rk_sessions::tui_state::{
 use crate::daemon_client;
 use std::{
     env, fs,
-    io::{BufRead, Read, Write},
+    io::{BufRead, IsTerminal as _, Read, Write},
     net::{TcpStream, ToSocketAddrs},
-    path::PathBuf,
+    path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 
@@ -496,10 +496,20 @@ fn follow_loop(
 /// the daemon's own origin; otherwise requests fail closed (offline banner
 /// interactively, error in `--once`/`--follow`).
 pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
+    run_with_dir(args, None)
+}
+
+/// Same as [`run`] but honors an explicit data-dir from the caller (e.g. the
+/// global `--data-dir` resolved in `main.rs`). `None` falls back to
+/// [`resolve_cli_data_dir`] exactly as before.
+pub fn run_with_dir(
+    args: TuiArgs,
+    data_dir: Option<&Path>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let keymap = resolve_keymap(args.submit_keymap)
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let memory = load_memory(&args.memory);
-    let auth_owned = resolve_origin_bearer(args.origin.as_deref());
+    let auth_owned = resolve_origin_bearer(args.origin.as_deref(), data_dir);
     let auth = auth_owned.as_deref();
     if args.follow {
         let Some(origin) = args.origin else {
@@ -535,16 +545,34 @@ pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
         print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, "unset", None)));
         return Ok(());
     }
+    if !std::io::stdin().is_terminal() {
+        // Fail closed on piped stdin: the line loop would block on
+        // `lines.next()` forever with `Stdio::null` (immediate-EOF reads as
+        // empty only after poll) or hang scripts. `--once`/`--follow` are the
+        // scriptable paths.
+        return Err(
+            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY".into(),
+        );
+    }
     interactive_loop(keymap, &memory, None, auth)
 }
 
 /// Resolve the raw bearer token for `--origin` from the validated backend
 /// descriptor. Returns None when no descriptor/origin (fail-closed downstream).
-fn resolve_origin_bearer(origin: Option<&str>) -> Option<String> {
+/// An explicit `data_dir` from the caller (global `--data-dir`) wins over the
+/// env/home default so `tui --origin` reads the same descriptor as `serve`.
+fn resolve_origin_bearer(origin: Option<&str>, data_dir: Option<&Path>) -> Option<String> {
     let origin = origin?;
-    let data = resolve_cli_data_dir()?;
+    let owned;
+    let data: &Path = match data_dir {
+        Some(dir) => dir,
+        None => {
+            owned = resolve_cli_data_dir()?;
+            &owned
+        }
+    };
     let descriptor =
-        opencode_rk_server::daemon::read_backend_descriptor(&data).ok()??;
+        opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
     if descriptor.http_origin != origin {
         return None;
     }

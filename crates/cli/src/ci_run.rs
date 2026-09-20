@@ -150,12 +150,19 @@ fn probe_daemon(origin: &str, auth_token: Option<&str>) -> bool {
         .unwrap_or(false)
 }
 
-fn spawn_daemon(addr: &str) -> Option<Child> {
+fn spawn_daemon(addr: &str, bearer: Option<&str>) -> Option<Child> {
     let exe: PathBuf = std::env::current_exe().ok()?;
-    let mut child = Command::new(exe)
-        .arg("serve")
-        .arg("--listen")
-        .arg(addr)
+    let mut cmd = Command::new(exe);
+    cmd.arg("serve").arg("--listen").arg(addr);
+    // Forward CI bearer to the child env (raw hex) so `serve` can mint /
+    // restore the same credential instead of a fresh token the parent
+    // could never present. No-op until `serve` honors the env.
+    if let Some(auth) = bearer.and_then(|b| b.strip_prefix("Bearer ")) {
+        if is_wellformed_token(auth) {
+            cmd.env("OPENCODE_RK_DAEMON_TOKEN", auth);
+        }
+    }
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -164,7 +171,7 @@ fn spawn_daemon(addr: &str) -> Option<Child> {
     let origin = format!("http://{addr}");
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
     loop {
-        if probe_daemon(&origin, None) {
+        if probe_daemon(&origin, bearer) {
             return Some(child);
         }
         if std::time::Instant::now() >= deadline {
@@ -183,7 +190,7 @@ fn ensure_daemon(bearer: Option<&str>) -> (String, Option<OwnedChild>) {
     if probe_daemon(&origin, bearer) {
         return (origin, None);
     }
-    match spawn_daemon(&addr) {
+    match spawn_daemon(&addr, bearer) {
         Some(child) => (origin, Some(OwnedChild(child))),
         None => (origin, None),
     }
