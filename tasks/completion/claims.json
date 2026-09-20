@@ -558,9 +558,10 @@
       "status": "in-progress"
     },
     "LANE-SRV-ROUTER": {
+      "completedNote": "GREEN server --lib 205/205; alias router() deleted, router_with_auth(state,Option) kept; zero test edits",
       "scratchpad": "worklog/LANE-SRV-ROUTER.md",
       "session": "ses_f423cd0e2ffejOqhPZZSuaZbMD",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-STREAM-FIX": {
       "scratchpad": "worklog/W5-LANE-STREAM-FIX.md",

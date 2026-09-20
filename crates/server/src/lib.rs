@@ -108,10 +108,6 @@ pub struct AppState {
     pub sessions: SessionService,
     pub catalog: Arc<Catalog>,
 }
-pub fn router(state: AppState) -> Router {
-    router_with_auth(state, None)
-}
-
 /// Authenticated router: `Some(auth)` gates every `/api/*` route with the
 /// bearer middleware; `None` is the legacy unauthenticated router used by
 /// frozen tests. The serve path always passes `Some`.
