@@ -799,9 +799,10 @@
       "status": "completed"
     },
     "PAR-010": {
+      "completedNote": "gate differential_gate 5/5 GREEN; plan --check SPEC OK; evidence bumped to 1f7640a, certified false honest; zero test edits",
       "scratchpad": "worklog/PAR-010.md",
-      "session": "ses_redo_par010",
-      "status": "in-progress"
+      "session": "ses_take_par010",
+      "status": "completed"
     },
     "RC-01": {
       "completedNote": "GREEN server-lib 154/154 + daemon_auth_api 5/5 zero test edits; log rc01",
