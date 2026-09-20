@@ -5,6 +5,8 @@ use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Instant;
 
+use opencode_rk_security::{Decision, OperationIntent, PermissionBroker};
+
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::process::Child;
@@ -39,6 +41,9 @@ pub enum ShellError {
 
     #[error("timed out after {0} seconds")]
     Timeout(u64),
+
+    #[error("denied by broker: {0}")]
+    Denied(String),
 
     #[error("killed by cancellation")]
     Cancelled,
@@ -77,6 +82,10 @@ pub struct ShellTool {
     pub env: HashMap<String, String>,
     pub timeout_secs: u64,
     pub cwd: Option<String>,
+    /// Injected permission broker consulted before spawn. `None` preserves
+    /// legacy allowlist-only gating (ponytail: broker wiring mandatory for
+    /// new callers; deny of a missing broker is a future upgrade).
+    pub authz: Option<PermissionBroker>,
     child: Option<Child>,
 }
 
@@ -89,6 +98,7 @@ impl ShellTool {
             env: HashMap::new(),
             timeout_secs: 30,
             cwd: None,
+            authz: None,
             child: None,
         }
     }
@@ -123,6 +133,12 @@ impl ShellTool {
         self
     }
 
+    /// Builder: permission broker consulted before spawn (mcp_spawn.rs:379).
+    pub fn broker(mut self, broker: PermissionBroker) -> Self {
+        self.authz = Some(broker);
+        self
+    }
+
     fn is_allowed(&self, cfg: &ShellConfig) -> bool {
         if cfg.allowed_commands.is_empty() {
             return false;
@@ -142,6 +158,29 @@ impl ShellTool {
         }
         if !self.is_allowed(&config) {
             return Err(ShellError::CommandNotAllowed);
+        }
+        // Broker approval gates spawn (mcp_spawn.rs:379): intent built from
+        // the exact argv that would exec. Deny/RequireHuman fail closed and
+        // spawn no process. `None` broker = legacy allowlist-only.
+        if let Some(broker) = &self.authz {
+            let intent = OperationIntent::Process {
+                program: self.command.clone(),
+                args: self.args.clone(),
+                cwd: self
+                    .cwd
+                    .as_ref()
+                    .map(PathBuf::from)
+                    .unwrap_or_else(|| PathBuf::from("/tmp")),
+            };
+            match broker.authorize(&intent) {
+                Decision::Allow => (),
+                Decision::Deny { reason } => return Err(ShellError::Denied(reason)),
+                Decision::RequireHuman { reason, .. } => {
+                    return Err(ShellError::Denied(format!(
+                        "requires human approval: {reason}"
+                    )));
+                }
+            }
         }
 
         let limit = self.max_bytes(&config);
@@ -354,5 +393,45 @@ mod tests {
         let bytes = b"hello".to_vec();
         let out = truncate_to_limit(bytes, 50);
         assert_eq!(out, "hello");
+    }
+
+    fn deny_all_broker() -> opencode_rk_security::PermissionBroker {
+        opencode_rk_security::PermissionBroker::new(
+            opencode_rk_security::SecurityPolicy::lean_default("/work/project"),
+        )
+        .with_permissions(opencode_rk_security::PermissionSet::new(vec![
+            opencode_rk_security::PermissionRule::new(
+                "*",
+                opencode_rk_security::RuleEffect::Deny,
+            ),
+        ]))
+    }
+
+    fn allow_all_broker() -> opencode_rk_security::PermissionBroker {
+        opencode_rk_security::PermissionBroker::new(
+            opencode_rk_security::SecurityPolicy::lean_default("/work/project"),
+        )
+        .with_permissions(opencode_rk_security::PermissionSet::star())
+    }
+
+    #[tokio::test]
+    async fn broker_deny_spawns_no_process() {
+        // Allowlisted but broker-denied: fail closed, no process runs.
+        let tool = ShellTool::new("echo".to_string(), vec!["hello".to_string()])
+            .broker(deny_all_broker());
+        let res = tool.execute(cfg(&["echo"])).await;
+        assert!(
+            matches!(res, Err(ShellError::Denied(_))),
+            "broker deny must fail closed, got {res:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn broker_allow_runs_command() {
+        let tool = ShellTool::new("echo".to_string(), vec!["hello".to_string()])
+            .broker(allow_all_broker());
+        let res = tool.execute(cfg(&["echo"])).await.expect("allowed");
+        assert!(res.success);
+        assert!(res.stdout.trim().ends_with("hello"));
     }
 }

@@ -561,9 +561,10 @@
       "status": "blocked"
     },
     "LANE-SHELL-AUTHZ": {
+      "completedNote": "GREEN 9/9 shell_tool (7 existing + 2 new broker gate); zero test edits to frozen tests; log /tmp/opencode/shellauthz3.log",
       "scratchpad": "worklog/LANE-SHELL-AUTHZ.md",
       "session": "ses_f423cd0dfffenzXnM7HZSns8eh",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-SRV-ROUTER": {
       "completedNote": "GREEN server --lib 205/205; alias router() deleted, router_with_auth(state,Option) kept; zero test edits",
