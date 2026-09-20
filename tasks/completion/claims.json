@@ -682,9 +682,10 @@
       "status": "in-progress"
     },
     "LANE-WEB-HONEST": {
+      "completedNote": "GREEN lib web_assets 5/5 + web_assets/web_cap_api/web_cap_reason/web_cap_full 10/10 zero test edits; branch lane/LANE-WEB-HONEST 43172b5",
       "scratchpad": "worklog/LANE-WEB-HONEST.md",
       "session": "ses_f423cceb0ffeKndZg63lApY3Fy",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-WF-CREATE": {
       "completedNote": "GREEN 13/13 workflow_schema; RED sha cf9cf30c; GREEN sha 696d1871; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-agents --test workflow_schema",
