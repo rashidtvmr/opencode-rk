@@ -343,9 +343,10 @@
       "status": "in-progress"
     },
     "LANE-AUTH-401": {
+      "completedNote": "GREEN daemon_auth_api 5/5 zero test edits; impl already 401/403 correct",
       "scratchpad": "worklog/LANE-AUTH-401.md",
       "session": "ses_f423cd0afffeIbW7EsUV3TUvIA",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-AUTH-SETUP": {
       "scratchpad": "worklog/W5-LANE-AUTH-SETUP.md",
