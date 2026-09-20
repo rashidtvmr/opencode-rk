@@ -436,6 +436,11 @@
       "session": "ses_worker_ctx",
       "status": "in-progress"
     },
+    "LANE-DCLIENT-DOCS": {
+      "scratchpad": "worklog/LANE-DCLIENT-DOCS.md",
+      "session": "ses_f423ccf74ffe1u4LHvsjdW2Vst",
+      "status": "in-progress"
+    },
     "LANE-DEFAULTTUI-FIX": {
       "scratchpad": "worklog/LANE-DEFAULTTUI-FIX.md",
       "session": "ses_f423ccebfffeIe1a310sv3QDnH",
@@ -444,6 +449,11 @@
     "LANE-DESC-STALE": {
       "scratchpad": "worklog/LANE-DESC-STALE.md",
       "session": "ses_f423cd0adffe1mKflQIPCPcvT5",
+      "status": "in-progress"
+    },
+    "LANE-DISPATCH-DENY": {
+      "scratchpad": "worklog/LANE-DISPATCH-DENY.md",
+      "session": "ses_f423cd0e1ffeTaoE4E1BlpxgdB",
       "status": "in-progress"
     },
     "LANE-FILE-AUTHZ": {
@@ -620,9 +630,10 @@
       "status": "in-progress"
     },
     "LANE-TURN-SETTLE": {
+      "completedNote": "GREEN 9/9 turn_service standalone rustc --test (7 frozen + 2 finish_and_settle); zero test edits post-freeze; sha256 b1996c1b; full-crate cargo test blocked by pre-existing shell_tool.rs breakage (other lane, untouched)",
       "scratchpad": "worklog/LANE-TURN-SETTLE.md",
       "session": "ses_f423cceb6ffeLkm86YxBA2Z5YW",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-ULTRA-CODEGEN": {
       "completedNote": "work committed 35bdaf3 (ultra_codegen 287L + workflow_schema 310L + tests 649L); worker process zombie-cleaned by orchestrator",

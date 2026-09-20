@@ -370,6 +370,24 @@ impl Turn {
         self.set_phase(TurnPhase::Streaming, "tool_finished")
     }
 
+    /// Tool finished cleanly AND the clean turn settles, atomically:
+    /// Executing -> Streaming -> Settled in one call. This is the turn-path
+    /// closer: `settle` alone refuses Executing while a possible unconfirmed
+    /// effect is outstanding, so a caller that stops after `approve` leaves
+    /// the turn in Executing forever (non-terminal, never Settled). Routing
+    /// the finished tool through this method guarantees the turn reaches
+    /// Settled instead of pending indefinitely.
+    ///
+    /// Consumes two event-log slots (one per leg); if the `settle` leg hits
+    /// [`TurnError::EventLogFull`] the tool leg already applied and the turn
+    /// rests clean in Streaming (no possible effect), so a later `settle`
+    /// succeeds. Wrong-phase calls fail with the `tool_finished` leg's
+    /// [`TurnError::InvalidTransition`] and mutate nothing.
+    pub fn finish_and_settle(&mut self, requested: TurnId) -> Result<(), TurnError> {
+        self.tool_finished(requested)?;
+        self.settle(requested)
+    }
+
     /// Settle a clean turn: Streaming or Executing (clean finish) -> Settled.
     /// Refuses to settle while a possible unconfirmed effect is outstanding;
     /// call `tool_finished` first or route through uncertain recovery.
@@ -716,6 +734,35 @@ mod tests {
                 .unwrap_err(),
             TurnError::EventLogFull
         );
+    }
+
+    #[test]
+    fn finish_and_settle_reaches_settled_from_executing() {
+        let id = TurnId::new(10);
+        let mut t = Turn::start(id);
+        t.request_approval(id).unwrap();
+        t.approve(id).unwrap();
+        assert!(t.possible_effect());
+        t.finish_and_settle(id).unwrap();
+        assert_eq!(t.phase(), TurnPhase::Settled);
+        assert!(!t.possible_effect());
+        assert!(t.is_terminal());
+    }
+
+    #[test]
+    fn finish_and_settle_rejects_outside_executing() {
+        let id = TurnId::new(11);
+        let mut t = Turn::start(id);
+        // Streaming is not Executing: tool_finished leg rejects, turn unchanged.
+        assert_eq!(
+            t.finish_and_settle(id),
+            Err(TurnError::InvalidTransition {
+                from: TurnPhase::Streaming,
+                operation: "tool_finished",
+            })
+        );
+        assert_eq!(t.phase(), TurnPhase::Streaming);
+        assert!(!t.is_terminal());
     }
 
     #[test]
