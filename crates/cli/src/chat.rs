@@ -50,7 +50,7 @@ pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let origin = daemon_origin(&addr);
     let mut owned_daemon: Option<Child> = None;
     if !probe_daemon(&origin) {
-        owned_daemon = spawn_daemon(&addr);
+        owned_daemon = spawn_daemon(&addr, data_dir);
     }
     let attached = probe_daemon(&origin);
     // Credential-bound reuse (`daemon_client.rs:722-735`
@@ -460,12 +460,25 @@ fn reuse_credential(data_dir: &Path, healthy: bool) -> Option<String> {
 
 /// Spawn `serve` from this same binary and wait for readiness. Returns the
 /// owned child process; the caller terminates it when the chat exits.
-fn spawn_daemon(addr: &str) -> Option<Child> {
+///
+/// The child inherits this chat's data directory explicitly (`--data-dir`):
+/// `serve` resolves its HOME/descriptor from it (`main.rs:resolve_data_dir`),
+/// so the spawned daemon publishes the descriptor this chat reads via
+/// `reuse_credential` instead of the default HOME. Environment fallback alone
+/// cannot carry an explicit `--data-dir` override across `exec`.
+fn spawn_daemon(addr: &str, data_dir: &Path) -> Option<Child> {
     let exe: PathBuf = std::env::current_exe().ok()?;
-    let mut child = Command::new(exe)
+    let mut cmd = Command::new(exe);
+    cmd.arg("--data-dir")
+        .arg(data_dir)
         .arg("serve")
         .arg("--listen")
-        .arg(addr)
+        .arg(addr);
+    // Keep an explicit data-dir authoritative even when the parent ran under
+    // a custom HOME: clap's `env = "OPENCODE_RK_HOME"` on `--data-dir`
+    // overrides the env, so clearing it cannot regress the default path.
+    cmd.env_remove("OPENCODE_RK_HOME");
+    let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())

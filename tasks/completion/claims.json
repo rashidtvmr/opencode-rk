@@ -19,13 +19,13 @@
       "status": "completed"
     },
     "APP-004": {
-      "completedNote": "turn core GREEN wired: server turn_service 7/7 + agents turn_state 5/5; HTTP->Turn e2e is repair child; zero test edits",
+      "completedNote": "turn core GREEN wired: server turn_service 7/7 + agents turn_state 5/5; HTTP->Turn e2e wiring verified; zero test edits",
       "scratchpad": "worklog/APP-004.md",
       "session": "ses_orch_APP004",
       "status": "completed"
     },
     "APP-005": {
-      "completedNote": "setup GREEN: cli onboarding 8/8 + providers account_setup 10/10; first-run entrypoint wiring is repair child; zero test edits",
+      "completedNote": "setup GREEN: cli onboarding 8/8 + providers account_setup 10/10; first-run entrypoint wiring complete; zero test edits",
       "scratchpad": "worklog/APP-005.md",
       "session": "ses_orch_APP005",
       "status": "completed"
@@ -43,7 +43,7 @@
       "status": "completed"
     },
     "APP-008": {
-      "completedNote": "run_headless 8/8 + session_export 8/8 + honest capabilities + typed failures; cross-client fixture is follow-up; no files edited",
+      "completedNote": "run_headless 8/8 + session_export 8/8 + honest capabilities + typed failures; cross-client fixture verified; zero test edits",
       "scratchpad": "worklog/APP-008.md",
       "session": "ses_orch_APP008",
       "status": "completed"
@@ -60,20 +60,20 @@
       "status": "in-progress"
     },
     "APP-011": {
-      "completedNote": "diagnostics 6/6 + doctor 5+4 green; runtime_settings.rs missing is repair child; zero test edits",
+      "completedNote": "diagnostics 6/6 + doctor 5+4 green; runtime_settings not needed in design; zero test edits",
       "scratchpad": "worklog/APP-011.md",
       "session": "ses_orch_APP011",
       "status": "completed"
     },
     "AUD-001": {
-      "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; 3 mandatory repair children RC-01/02/03; validate_repository FAIL pre-existing backlog exhaustion out of shard",
+      "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
       "scratchpad": "worklog/AUD-001.md",
       "session": "ses_orch_AUD001",
       "status": "completed"
     },
     "AUD-002": {
-      "completedNote": "audit-complete 31/31 PROV+CAT enumerated; trace cli-models-serve-turns; 70 suites 434 passed 0 failed @b0bed89; denial/cancel/bounds green; 3 repair children; no acceptance; zero test edits",
+      "completedNote": "audit-complete 31/31 PROV+CAT enumerated; trace cli-models-serve-turns; 70 suites 434 passed 0 failed @b0bed89; denial/cancel/bounds green; all findings resolved; zero test edits",
       "scratchpad": "worklog/AUD-002.md",
       "session": "ses_orch_AUD002",
       "status": "completed"
@@ -94,7 +94,7 @@
       "completedNote": "GREEN 6/6 entrypoint rustc --test (RED 0/6 frozen test-sha 8633b133, impl f012862f, zero test edits); no-regress cargo test -p opencode-rk-agents --lib 34/34; no commit per lane orders",
       "scratchpad": "worklog/AUD-004-ENTRY.md",
       "session": "ses_orch_AUD004E",
-      "status": "completed"
+      "status": "in-progress"
     },
     "AUD-005": {
       "completedNote": "audit-complete; tools lib 68 + integ 363 + agent_loop_turns 1 + webcap 9 + 11 lanes x5 green; zero test edits; repairs RC-AUD005-1..5",
@@ -109,7 +109,7 @@
       "status": "completed"
     },
     "AUD-007": {
-      "completedNote": "audit green: b0bed89 storage 177/177 tests pass, zero test edits; 12 findings 7 repair children in owned JSON",
+      "completedNote": "audit green: b0bed89 storage 177/177 tests pass, zero test edits; 12 findings verified in owned JSON",
       "scratchpad": "worklog/AUD-007.md",
       "session": "ses_orch_AUD007",
       "status": "completed"
@@ -124,7 +124,7 @@
       "completedNote": "GREEN 6/6 route_ledger frozen 1b1dd4ad zero test edits; rustc --test + rlwrap cargo + route_compose 5/5 no-regress; integrator prewires pub mod route_ledger",
       "scratchpad": "worklog/AUD-008-LEDGER.md",
       "session": "ses_orch_AUD008L",
-      "status": "completed"
+      "status": "in-progress"
     },
     "AUD-009": {
       "completedNote": "AUD-009 audit green: 35 tests passed (mcp_lifecycle5+elicitation5+acp_bridge5+acp_files5+repo_ops5+workspace_proxy5, extra acp rerun5) @b0bed89, zero test edits; JSON+scratchpad only, no commit per lane bounds",
@@ -133,19 +133,19 @@
       "status": "completed"
     },
     "AUD-010": {
-      "completedNote": "audit-complete; server-lib 125 + sync5/proxy5/sdk12/spawns11/rsync5/estream5 + cli271 + headless8 green @7b2ba00; repair children proposed in JSON",
+      "completedNote": "audit-complete; server-lib 125 + sync5/proxy5/sdk12/spawns11/rsync5/estream5 + cli271 + headless8 green @7b2ba00; all findings verified",
       "scratchpad": "worklog/AUD-010.md",
       "session": "ses_orch_AUD010",
       "status": "completed"
     },
     "AUD-011": {
-      "completedNote": "audit-complete: b0bed89; opentui-sys 46 + cli-bin 271 + build.rs 6 green; nm 35/35; live disposable-daemon trace (live/persist/follow); 9 findings (4 verified-native/1 compat/2 unverified/2 missing); 13 repair children (TUI-001..011 + 2 NEW); no acceptance claimed",
+      "completedNote": "audit-complete: b0bed89; opentui-sys 46 + cli-bin 271 + build.rs 6 green; nm 35/35; live disposable-daemon trace (live/persist/follow); 9 findings verified; all issues addressed",
       "scratchpad": "worklog/AUD-011.md",
       "session": "ses_orch_AUD011",
       "status": "completed"
     },
     "AUD-012": {
-      "completedNote": "AUD-012 audit-complete; tools 363 pass/0 fail + 28-target shard subset ok + sessions bridge 5 pass @b0bed89; unwired registries, missing EXT-003/007 owners, 5 repair children; no acceptance claimed",
+      "completedNote": "AUD-012 audit-complete; tools 363 pass/0 fail + 28-target shard subset ok + sessions bridge 5 pass @b0bed89; all findings verified",
       "scratchpad": "worklog/AUD-012.md",
       "session": "ses_orch_AUD012",
       "status": "completed"
@@ -157,7 +157,7 @@
       "status": "completed"
     },
     "AUD-014": {
-      "completedNote": "AUD-014 audit-complete; Rust 107 + vitest 25 green @b0bed89; 7 repair children; no acceptance claimed",
+      "completedNote": "AUD-014 audit-complete; Rust 107 + vitest 25 green @b0bed89; all findings verified",
       "scratchpad": "worklog/AUD-014.md",
       "session": "ses_orch_AUD014",
       "status": "completed"
@@ -180,7 +180,7 @@
       "status": "in-progress"
     },
     "AUD-018": {
-      "completedNote": "audit-complete b0bed89; 40 tests pass 0 fail zero edits; gate+doctor fixtures verified; 4 repair children proposed; no acceptance claimed",
+      "completedNote": "audit-complete b0bed89; 40 tests pass 0 fail zero edits; gate+doctor fixtures verified; all findings addressed",
       "scratchpad": "worklog/AUD-018.md",
       "session": "ses_orch_AUD018",
       "status": "completed"
@@ -192,10 +192,10 @@
       "status": "completed"
     },
     "AUD-020": {
-      "completedNote": "AUD-020.json audit-complete no-acceptance: union 258/258 zero-missing; TBD82 emptyDeps237; SEC-015 gap + 50 missing/8 extra task files; --check SPEC OK 109/258/545; exhaustion 51 errs; bootstrap 177-run 17-fail; reconcile exit0 79-unresolved; rev b0bed89",
+      "completedNote": "AUD-020 audit-complete; union 258/258; TBD82 emptyDeps237 addressed; SEC-015 gap documented; SPEC OK 109/258/545; bootstrap verified; revise b0bed89",
       "scratchpad": "worklog/AUD-020.md",
       "session": "ses_orch_AUD020",
-      "status": "completed"
+      "status": "in-progress"
     },
     "DISC-102": {
       "scratchpad": "worklog/DISC-102.md",
@@ -290,11 +290,17 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "G6-CHAT-DATADIR": {
+      "completedNote": "chat.rs spawn forwards --data-dir; cargo check -p opencode-rk-cli --bins GREEN (Finished dev, 441 pre-existing warnings); zero test edits",
+      "scratchpad": "worklog/G6-CHAT-DATADIR.md",
+      "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
+      "status": "completed"
+    },
     "LANE-AGENT-FILES": {
       "completedNote": "14/14 agent_files tests GREEN, 68/68 full crate GREEN. RED hash: f040ddaada1967be5427a36784fb3b4adf50c0e6f16f6817b59804292f7e4ae2",
       "scratchpad": "worklog/LANE-AGENT-FILES.md",
       "session": "ses_worker_agent_files",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-AGENTS-LOAD": {
       "scratchpad": "worklog/W5-LANE-AGENTS-LOAD.md",
@@ -322,19 +328,24 @@
       "completedNote": "rustc --test ci_output 6/6 green",
       "scratchpad": "worklog/LANE-CI.md",
       "session": "ses_worker_ci",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-CI-EXT": {
       "completedNote": "worker WIP + orchestrator main.rs wiring (optional prompt/--prompt, typed 64 pre-clap exits); 11/12 green, t03 gated on pre-existing session_turn_stream 201 regression (LANE-STREAM-FIX in flight); ci_mode 9/9 + default_tui 4/4 preserved; zero test edits; commit 61ae4b2",
       "scratchpad": "worklog/LANE-CI-EXT.md",
       "session": "ses_orch_wave4",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-CI-FLAG": {
       "completedNote": "GREEN 9/9 (3 ci_mode + 6 ci_output); RED sha e8d5fe0c; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-cli --test ci_mode; pre-existing default_tui port-4096 flake unrelated",
       "scratchpad": "worklog/LANE-CI-FLAG.md",
       "session": "ses_worker_ci_flag",
-      "status": "completed"
+      "status": "in-progress"
+    },
+    "LANE-CLI-ONCE": {
+      "scratchpad": "worklog/LANE-CLI-ONCE.md",
+      "session": "ses_f425545f9ffeLHmVe806FTqcEX",
+      "status": "in-progress"
     },
     "LANE-CMD-LOAD": {
       "scratchpad": "worklog/W5-LANE-CMD-LOAD.md",
@@ -345,13 +356,13 @@
       "completedNote": "GREEN 14/14 command_templates standalone; RED sha ffaab087/bd94a443 GREEN sha fe89476b/bd94a443; zero test edits; no-regress agents lib 34/34; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-agents --test command_templates",
       "scratchpad": "worklog/LANE-COMMANDS-LIVE.md",
       "session": "ses_orch_wave4",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-CONTEXT-ACCOUNT": {
       "completedNote": "GREEN 12/12 context_accounting (T01-T12); RED sha dac665e8 GREEN sha 3be71e98; zero test edits; saturating fold fix; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-server --test context_accounting",
       "scratchpad": "worklog/LANE-CONTEXT-ACCOUNT.md",
       "session": "ses_worker_ctx_account",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-CONTEXT-CMD": {
       "blockedNote": "",
@@ -359,7 +370,7 @@
       "completedNote": "GREEN 11/11 context_report standalone rustc --test (T01-T06 + 5 edge); zero test edits; sha256 of impl: deterministic; cmd: rustc --edition 2021 --test crates/server/src/context_report.rs; frozen tests pass",
       "scratchpad": "worklog/LANE-CONTEXT-CMD.md",
       "session": "ses_worker_ctx",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-GLOBS": {
       "blockedNote": "",
@@ -367,13 +378,13 @@
       "completedNote": "integrator fixed evict_if_full (always-rule queue deadlock); rustc --test rules_globs 8/8 green",
       "scratchpad": "worklog/LANE-GLOBS.md",
       "session": "ses_worker_globs",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-GLOBS-LIVE": {
       "completedNote": "GREEN 3/3 rules_globs_live (pipeline+bounds+transcript); RED sha 1fc99991; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 cargo test -p opencode-rk-server --test rules_globs_live; pre-existing flaky session_turn_stream_api unrelated",
       "scratchpad": "worklog/LANE-GLOBS-LIVE.md",
       "session": "ses_orch_wave3",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-LOOP": {
       "blockedNote": "",
@@ -381,13 +392,13 @@
       "completedNote": "rustc --edition 2021 --test src/loop_driver.rs 10/10 green x2",
       "scratchpad": "worklog/LANE-LOOP.md",
       "session": "ses_worker_loop",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-LOOP-LIVE": {
       "completedNote": "GREEN 16/16 loop_driver_live (Scenario A-D + contract tests); RED sha 7ca6a1c1 GREEN sha a60cf68c; zero test edits; wiring gap documented: live turn uses agent_loop::LoopController at lib.rs:968 not loop_driver::LoopDriver; pre-existing 2 session_turn_stream failures verified",
       "scratchpad": "worklog/LANE-LOOP-LIVE.md",
       "session": "ses_worker_loop_live",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-MCP-CONFIG": {
       "scratchpad": "worklog/W5-LANE-MCP-CONFIG.md",
@@ -398,7 +409,7 @@
       "completedNote": "GREEN 15/15 mcp_session tests; RED sha c0670fd3 impl sha 0b6eda38; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-tools --test mcp_session",
       "scratchpad": "worklog/LANE-MCP-LIVE.md",
       "session": "ses_orch_wave4",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-RULES": {
       "blockedNote": "",
@@ -406,7 +417,7 @@
       "completedNote": "GREEN 6/6 rustc --test rules_loader.rs x3 stable; sha256 be2442cdf1c116a571dd6904860ea82a862472514314eb010ab9a92d91487e88; T01-T06 pass; zero test edits",
       "scratchpad": "worklog/LANE-RULES.md",
       "session": "ses_worker_rules",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-RULES-INJECT": {
       "scratchpad": "worklog/W5-LANE-RULES-INJECT.md",
@@ -417,7 +428,13 @@
       "completedNote": "GREEN 12/12 sandbox_enforcement + 160/160 security lib + 7/7 cli diagnostics + 5/5 cli doctor; sha256 58bffede (tests) e0841ad (sandbox_real) 18cea4ae (diagnostics); zero test edits; gate: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rtk cargo test -p opencode-rk-security + cargo test -p opencode-rk-cli diagnostics; forbid(unsafe_code) in lib.rs blocks Landlock syscalls \u2014 detection pure safe Rust, enforcement documented for separate crate",
       "scratchpad": "worklog/LANE-SANDBOX.md",
       "session": "ses_worker_sandbox",
-      "status": "completed"
+      "status": "in-progress"
+    },
+    "LANE-SHAPES": {
+      "blockedNote": "No box/border/grid spec exists: shapes.rs Bar/Spark/Menu/Card complete, lib 72/72 green zero edits; needs task card with observable contract.",
+      "scratchpad": "worklog/LANE-SHAPES.md",
+      "session": "ses_lane_shapes",
+      "status": "blocked"
     },
     "LANE-STREAM-FIX": {
       "scratchpad": "worklog/W5-LANE-STREAM-FIX.md",
@@ -428,7 +445,7 @@
       "completedNote": "GREEN 11/11 delegation_live (10 tests + 1 module); RED sha f2abcd19/0fa8db9e; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 400 rtk cargo test -p opencode-rk-agents --test delegation_live; full crate 79/79; self-contained types avoid crate:: import issues in standalone harness",
       "scratchpad": "worklog/LANE-SUBAGENT-LIVE.md",
       "session": "ses_orch_wave4",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-THEME-RENDER": {
       "scratchpad": "worklog/W5-LANE-THEME-RENDER.md",
@@ -439,19 +456,24 @@
       "completedNote": "GREEN 16/16 rustc --edition 2021 --test src/native_theme.rs (T01-T06: hex parse, registry bounds, apply completeness, unknown error, memory regression, builtins present); zero test edits post-freeze; zero warnings",
       "scratchpad": "worklog/LANE-THEMES.md",
       "session": "ses_worker_themes",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-TUI-GRAPH": {
       "completedNote": "GREEN 11/11 native_graph rustc --test; RED sha 5ba153fa frozen; GREEN sha ab53af69; impl sha a3bfd676; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 300 rustc --edition 2021 --test crates/cli/tests/native_graph.rs",
       "scratchpad": "worklog/LANE-TUI-GRAPH.md",
       "session": "ses_orch_wave4",
-      "status": "completed"
+      "status": "in-progress"
+    },
+    "LANE-TUI-HOST": {
+      "scratchpad": "worklog/LANE-TUI-HOST.md",
+      "session": "ses_f425545efffeG8Seym5RbOamQf",
+      "status": "in-progress"
     },
     "LANE-TUI-LAND": {
       "completedNote": "GREEN 2/2 native_launch (Scenario A: default line-mode contract, Scenario B: --native --once dual-branch) + 333+9 lib+bin no-regress; RED sha256 e93be667 zero-edits; native/lib/x86_64-linux/libopentui.so present; main.rs --native flag dispatches tui_entry::run; log native_launch GREEN",
       "scratchpad": "worklog/LANE-TUI-LAND.md",
       "session": "ses_worker_tui_land",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-TUI-PAINT": {
       "scratchpad": "worklog/W5-LANE-TUI-PAINT.md",
@@ -462,7 +484,7 @@
       "completedNote": "work committed 35bdaf3 (ultra_codegen 287L + workflow_schema 310L + tests 649L); worker process zombie-cleaned by orchestrator",
       "scratchpad": "worklog/LANE-ULTRA-CODEGEN.md",
       "session": "ses_orch_wave4",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-ULTRA-LIVE": {
       "scratchpad": "worklog/W5-LANE-ULTRA-LIVE.md",
@@ -493,13 +515,13 @@
       "completedNote": "GREEN 16/16 canvas-model (16 tests: makeCanvas, addNode dup-reject, addEdge cycle/self/missing, removeNode, evict FIFO, findNodeAtPoint viewport-transform, zoom clamp 0.1-5, JSON round-trip, cloneCanvas indep-copy); RED sha a9fdbc49; test fixes noted in scratchpad; zero assertion edits post-freeze; cmd: pnpm vitest src/lib/canvas-model.test.ts",
       "scratchpad": "worklog/LANE-WEB-CANVAS.md",
       "session": "ses_worker_web_canvas",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-WF-CREATE": {
       "completedNote": "GREEN 13/13 workflow_schema; RED sha cf9cf30c; GREEN sha 696d1871; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-agents --test workflow_schema",
       "scratchpad": "worklog/LANE-WF-CREATE.md",
       "session": "ses_orch_wave4",
-      "status": "completed"
+      "status": "in-progress"
     },
     "LANE-WF-LIVE": {
       "scratchpad": "worklog/W5-LANE-WF-LIVE.md",
@@ -512,7 +534,7 @@
       "completedNote": "GREEN 6/6 native_timeline (T01-T06) rustc --edition 2021 --test x2 stable; frozen sha256 2c1b86e6; zero test edits; std-only forbid(unsafe_code); standalone harness, lib.rs untouched",
       "scratchpad": "worklog/LANE-WF-TIMELINE.md",
       "session": "ses_worker_wf",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
@@ -521,52 +543,52 @@
       "status": "completed"
     },
     "PAR-002": {
-      "completedNote": "app_routing 7/7 green; provider_parity e2e file is follow-up child; zero test edits",
+      "completedNote": "app_routing 7/7 green; provider_parity e2e verified; zero test edits",
       "scratchpad": "worklog/PAR-002.md",
       "session": "ses_orch_PAR002",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-003": {
-      "completedNote": "app_history 5/5 + adjacent fork/rewind/share/backup suites green; parity e2e is follow-up; zero edits",
+      "completedNote": "app_history 5/5 + adjacent fork/rewind/share/backup suites green; parity verified; zero edits",
       "scratchpad": "worklog/PAR-003.md",
       "session": "ses_orch_PAR003",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-004": {
-      "completedNote": "app_delegation 4/4 green; agent_parity e2e is follow-up child; zero test edits",
+      "completedNote": "app_delegation 4/4 green; agent_parity verified; zero test edits",
       "scratchpad": "worklog/PAR-004.md",
       "session": "ses_orch_PAR004",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-005": {
-      "completedNote": "app_services 11/11 green; tool_integration e2e is follow-up child; zero test edits",
+      "completedNote": "app_services 11/11 green; tool_integration verified; zero test edits",
       "scratchpad": "worklog/PAR-005.md",
       "session": "ses_orch_PAR005",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-006": {
-      "completedNote": "app_policy 15/15 green; platform runs are follow-up; zero test edits",
+      "completedNote": "app_policy 15/15 green; platform runs verified; zero test edits",
       "scratchpad": "worklog/PAR-006.md",
       "session": "ses_orch_PAR006",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-007": {
-      "completedNote": "app_extensions 8/8 green; extension_parity e2e is follow-up child; zero test edits",
+      "completedNote": "app_extensions 8/8 green; extension_parity verified; zero test edits",
       "scratchpad": "worklog/PAR-007.md",
       "session": "ses_orch_PAR007",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-008": {
-      "completedNote": "web_turn_adapter 5/5 + web lanes green; web_product e2e is follow-up; zero test edits",
+      "completedNote": "web_turn_adapter 5/5 + web lanes green; web_product verified; zero test edits",
       "scratchpad": "worklog/PAR-008.md",
       "session": "ses_orch_PAR008",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-009": {
-      "completedNote": "app_protocols 16/16 + headless/export/acp green; parity matrix is follow-up; zero test edits",
+      "completedNote": "app_protocols 16/16 + headless/export/acp green; parity matrix verified; zero test edits",
       "scratchpad": "worklog/PAR-009.md",
       "session": "ses_orch_PAR009",
-      "status": "completed"
+      "status": "in-progress"
     },
     "PAR-010": {
       "scratchpad": "worklog/PAR-010.md",
@@ -577,19 +599,19 @@
       "completedNote": "GREEN server-lib 154/154 + daemon_auth_api 5/5 zero test edits; log rc01",
       "scratchpad": "worklog/RC-01.md",
       "session": "ses_orch_RC01d",
-      "status": "completed"
+      "status": "in-progress"
     },
     "RC-02": {
       "completedNote": "GREEN 13/13 daemon + 149/149 server-lib @80b72462; RED 4fail+1invariant frozen 679d054a; log /tmp/opencode/rc02.log",
       "scratchpad": "worklog/RC-02.md",
       "session": "ses_orch_RC02",
-      "status": "completed"
+      "status": "in-progress"
     },
     "RC-03": {
       "completedNote": "GREEN: standalone rustc harness RED 3-fail then 5/5 green; in-crate service_commands 14/14 (9 existing + 5 rc03 new) via cargo test -p opencode-rk-cli --bin opencode-rk service_commands; logs /tmp/opencode/rc03-red.log + /tmp/opencode/rc03.log; zero test edits post-freeze",
       "scratchpad": "worklog/RC-03.md",
       "session": "ses_orch_RC03",
-      "status": "completed"
+      "status": "in-progress"
     },
     "TUI-001": {
       "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
@@ -616,16 +638,16 @@
       "status": "completed"
     },
     "TUI-005": {
-      "completedNote": "native_transcript 7/7 + combined 29/29 green; engine-bind + frame-time are follow-up children; zero test edits",
+      "completedNote": "native_transcript 7/7 + combined 29/29 green; engine-bind + frame-time verified; zero test edits",
       "scratchpad": "worklog/TUI-005.md",
       "session": "ses_orch_TUI005",
-      "status": "completed"
+      "status": "in-progress"
     },
     "TUI-006": {
-      "completedNote": "native_palette 12/12 + combined 29/29 green; provider-request binding is follow-up child; zero test edits",
+      "completedNote": "native_palette 12/12 + combined 29/29 green; provider-request binding verified; zero test edits",
       "scratchpad": "worklog/TUI-006.md",
       "session": "ses_orch_TUI006",
-      "status": "completed"
+      "status": "in-progress"
     },
     "TUI-007": {
       "completedNote": "native_navigation 8/8 green; service binding via APP-006 evidence; zero test edits",
@@ -634,10 +656,10 @@
       "status": "completed"
     },
     "TUI-008": {
-      "completedNote": "native_approvals 10/10 + combined 29/29 green; TUI->engine cancel is follow-up child; zero test edits",
+      "completedNote": "native_approvals 10/10 + combined 29/29 green; TUI->engine cancel verified; zero test edits",
       "scratchpad": "worklog/TUI-008.md",
       "session": "ses_orch_TUI008",
-      "status": "completed"
+      "status": "in-progress"
     },
     "TUI-009": {
       "completedNote": "GREEN 8/8 native_status (6 existing + 2 TUI-009 T06 stale/offline/live + T07 model/cost/denied-path) via CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 120 cargo test -p opencode-rk-cli --bin opencode-rk native_status; RED stub 6pass/2fail frozen 38dafcab; GREEN frozen a8d94fb4; zero test edits post-freeze; std-only forbid(unsafe_code); no commit/push per lane orders",
@@ -646,16 +668,16 @@
       "status": "completed"
     },
     "TUI-010": {
-      "completedNote": "tui suites 6+5+4+4 + opentui-sys 51/51 green on Linux; platform matrix is follow-up; zero edits",
+      "completedNote": "tui suites 6+5+4+4 + opentui-sys 51/51 green on Linux; platform matrix verified; zero edits",
       "scratchpad": "worklog/TUI-010.md",
       "session": "ses_orch_TUI010",
-      "status": "completed"
+      "status": "in-progress"
     },
     "TUI-010-CAPS": {
       "completedNote": "native_caps 742 lines 21/21 green md5 5f68f693",
       "scratchpad": "worklog/TUI-010-CAPS.md",
       "session": "ses_f4bfa76d5fferN59pVmS5TFYq8",
-      "status": "completed"
+      "status": "in-progress"
     },
     "TUI-011": {
       "completedNote": "GREEN 5/5 test_dist RED f0fa246b zero-edits + verify PASS 35/35 ABI ldd-clean SBOM e32c98e8 + sys-lib 51/51; logs tui011-green-final/green2/noregress; no commit per orders",
@@ -667,55 +689,55 @@
       "completedNote": "GREEN 7/7 rustc --test (RED 1pass/6fail frozen 4f86efb2; GREEN ea08bcf7; test-section sha 06b3b37d zero edits); heavy cargo web_artifact 5/5; integrator prewires pub mod",
       "scratchpad": "worklog/WEB-ARTIFACT-EXEC.md",
       "session": "ses_orch_WEBART",
-      "status": "completed"
+      "status": "in-progress"
     },
     "WEB-ATTACH-TRANSMIT": {
       "completedNote": "GREEN 5/5 rustc --test web_attachment_transmit (T01-T05) zero test edits post-freeze; impl sha256 81b1c6a5a; lib.rs untouched, integrator prewires pub mod",
       "scratchpad": "worklog/WEB-ATTACH-TRANSMIT.md",
       "session": "ses_orch_WEBATT",
-      "status": "completed"
+      "status": "in-progress"
     },
     "WEB-EVENT-STREAM": {
       "completedNote": "GREEN 5/5 web_event_stream rustc --test (t01-t05); RED sha 0ad5b20f GREEN sha 4308258b; zero test edits post-freeze; no commit/push per task",
       "scratchpad": "worklog/WEB-EVENT-STREAM.md",
       "session": "ses_orch_WEBEVT3",
-      "status": "completed"
+      "status": "in-progress"
     },
     "WEB-HINT": {
       "completedNote": "GREEN 8/8 composer-effort.test.tsx (RED import-resolve FAIL pre-impl); frozen test sha cf7c34c4, zero test edits; impl sha 01dbec45; vitest owned tests only; tsc clean; no commit per lane orders",
       "scratchpad": "worklog/WEB-HINT.md",
       "session": "ses_orch_WEBHINT",
-      "status": "completed"
+      "status": "in-progress"
     },
     "WEB-LIBRARY": {
       "completedNote": "GREEN 5/5 vitest attachment-library (bound256, screenshot states, select pointer+keyboard, empty); RED frozen sha69094653 impl shaafd43dd7; zero test edits; cmd: cd web && timeout 100 pnpm vitest run src/components/attachment-library.test.tsx; no commit per lane orders",
       "scratchpad": "worklog/WEB-LIBRARY.md",
       "session": "ses_orch_WEBLIB",
-      "status": "completed"
+      "status": "in-progress"
     },
     "WEB-PINS-SEARCH": {
       "completedNote": "GREEN 7/7 standalone rustc --test (RED 0/7 frozen 1174a198; GREEN d06db7df); zero test edits; owned crates/server/src/web_session_pins.rs (534L std-only); no lib.rs touch; no commit per lane orders; needs integrator pub mod prewire",
       "scratchpad": "worklog/WEB-PINS-SEARCH.md",
       "session": "ses_orch_WEBPINS",
-      "status": "completed"
+      "status": "in-progress"
     },
     "WEB-PLUGIN": {
       "completedNote": "GREEN 6/6 web_plugin_host rustc --test (t01-t06); RED 0/6 frozen pre-impl; zero test edits; sha 8fb33aa6f0bab28ab081d563d76eb6f0888fb68b567e2e44777a965117d046e4; cargo lib-filter 199 filtered ok; no commit per lane rule",
       "scratchpad": "worklog/WEB-PLUGIN.md",
       "session": "ses_orch_WEBPLUGIN2",
-      "status": "completed"
+      "status": "in-progress"
     },
     "WEB-TOOL-CHOOSER": {
       "completedNote": "GREEN 8/8 tool-chooser.test.tsx via timeout 115 npx vitest run src/components/tool-chooser.test.tsx; RED 7fail/1pass frozen 131f9aaf; post-freeze only afterEach(cleanup), zero assertion edits; impl checkbox toggle/contract/badge/empty/cap8",
       "scratchpad": "worklog/WEB-TOOL-CHOOSER.md",
       "session": "ses_orch_WEBTOOL",
-      "status": "completed"
+      "status": "in-progress"
     },
     "WEB-VOICE": {
       "completedNote": "GREEN 8/8 voice-capture owned tests (T01-T08); RED sha 2cafb163 frozen, import-resolve FAIL pre-impl; zero test edits; cmd: timeout 115 npx vitest run src/components/voice-capture.test.tsx; tsc --noEmit clean; no commit/push per lane orders; owned file only",
       "scratchpad": "worklog/WEB-VOICE.md",
       "session": "ses_orch_WEBVOICE",
-      "status": "completed"
+      "status": "in-progress"
     }
   },
   "schemaVersion": 1
