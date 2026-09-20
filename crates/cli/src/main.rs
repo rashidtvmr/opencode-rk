@@ -64,6 +64,10 @@ struct Cli {
     /// Run the native OpenTUI renderer (requires vendored libopentui).
     #[arg(long, global = true)]
     native: bool,
+    /// Render one bounded frame and exit (top-level alias for `tui --once`).
+    /// Non-global: the `tui` subcommand keeps its own `--once`.
+    #[arg(long)]
+    once: bool,
     /// No subcommand opens the interactive chat TUI.
     #[command(subcommand)]
     command: Option<Command>,
@@ -229,7 +233,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 app_start::LaunchMode::NativeTui => {
                     if cli.native {
                         let args = TuiArgs {
-                            once: false,
+                            once: cli.once,
                             origin: None,
                             session: None,
                             follow: false,
@@ -272,6 +276,11 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             web(data, args).await?;
         }
         Some(Command::Tui(args)) => {
+            let data = resolve_data_dir(cli.data_dir)?;
+            // Forward the resolved dir until the tui_entry lane lands its
+            // typed data-dir channel: its descriptor lookup honors
+            // OPENCODE_RK_HOME first, so an explicit --data-dir applies.
+            std::env::set_var("OPENCODE_RK_HOME", &data);
             tui_entry::run(args)?;
         }
         Some(Command::Run(args)) => {
