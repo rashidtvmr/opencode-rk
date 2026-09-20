@@ -147,12 +147,14 @@ impl LoopController {
     }
 
     /// Classify the end of a round. A tool round exceeding the per-round call
-    /// cap is truncated to the cap (the overflow calls are answered with a
-    /// truncation notice) rather than silently dropped or unbounded.
-    pub fn end_round(&self, calls: Vec<RequestedCall>) -> RoundEnd {
+    /// cap is truncated to [`MAX_CALLS_PER_ROUND`] in place (overflow call
+    /// notices stay in [`Self::truncate_calls`], which the dispatch stage
+    /// uses); pending batches are never unbounded past this point.
+    pub fn end_round(&self, mut calls: Vec<RequestedCall>) -> RoundEnd {
         if calls.is_empty() {
             return RoundEnd::Terminal(TurnStop::Completed);
         }
+        calls.truncate(MAX_CALLS_PER_ROUND);
         RoundEnd::ToolRound(calls)
     }
 
