@@ -21,6 +21,7 @@ pub mod ext_perms;
 pub mod ext_rate;
 pub mod ext_secure;
 pub mod file_ops;
+pub mod git_lane;
 pub mod hook_config;
 pub mod hooks_bridge;
 pub mod lsp_client;

@@ -248,9 +248,10 @@
       "status": "completed"
     },
     "DISC-110": {
+      "completedNote": "git_lane.rs 5 tests pass (--lib): root-denied, push-grant, timeout-kill, dirty/detached, truncation",
       "scratchpad": "worklog/DISC-110.md",
-      "session": "ses_f41f2c274ffeUvZ1k4LjdweguP",
-      "status": "in-progress"
+      "session": "ses_take_disc110",
+      "status": "completed"
     },
     "DISC-111": {
       "completedNote": "GREEN 8/8 harness cargo test --offline (T01..T06 in-file); RED 0/8 frozen; sha256 311abc319cfd14064715c11cda52580f74fa145ede973ce96e9c417d5340ba91; owned crates/tools/src/mcp_spawn.rs; needs integrator mod line; no commit per lane bounds | INTEGRATED by orchestrator: pub mod mcp_spawn in tools/lib.rs; mcp_spawn tests green in tools --lib 92",
@@ -325,9 +326,10 @@
       "status": "in-progress"
     },
     "FIX-SANDBOX": {
+      "completedNote": "covered by external DISC-106 b688c56 (detection+confinement+cap close); raw Landlock attach = policy-gated, recorded in worklog/FIX-SANDBOX.md",
       "scratchpad": "worklog/FIX-SANDBOX.md",
       "session": "ses_orch_fix1",
-      "status": "in-progress"
+      "status": "completed"
     },
     "FIX-SESSIONS-STUBS": {
       "scratchpad": "worklog/FIX-SESSIONS-STUBS.md",
@@ -798,7 +800,7 @@
     },
     "PAR-010": {
       "scratchpad": "worklog/PAR-010.md",
-      "session": "ses_f41f2c26affeGOlv7zkB012eSR",
+      "session": "ses_redo_par010",
       "status": "in-progress"
     },
     "RC-01": {
