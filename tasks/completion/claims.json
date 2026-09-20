@@ -444,9 +444,10 @@
       "status": "in-progress"
     },
     "LANE-DEFAULTTUI-FIX": {
+      "blockedNote": "tree src broken by other lanes: tui_entry.rs stdin_tty undefined + opentui-bridge build fail; cargo test default_tui unbuildable; test-only edit complete, needs rebase+verify",
       "scratchpad": "worklog/LANE-DEFAULTTUI-FIX.md",
       "session": "ses_f423ccebfffeIe1a310sv3QDnH",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "LANE-DESC-STALE": {
       "scratchpad": "worklog/LANE-DESC-STALE.md",

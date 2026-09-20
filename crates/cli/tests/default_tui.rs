@@ -244,9 +244,7 @@ fn bare_launch_opens_chat_tui_and_completes_a_provider_turn() {
     stdout.wait_for("Fixture assistant reply", Duration::from_secs(60));
 
     send_line(&mut chat, "/exit");
-    let status = chat
-        .wait()
-        .expect("chat exits cleanly after /exit");
+    let status = chat.wait().expect("chat exits cleanly after /exit");
     let _ = provider_task.join();
     assert!(
         status.success(),
@@ -362,7 +360,10 @@ fn native_render_once_snapshot_contains_frame_content() {
         "> ".to_string(),
     ];
     let snapshot = Renderer::render_once(80, 24, &frame_lines);
-    assert!(snapshot.is_ok(), "render_once should succeed with valid input");
+    assert!(
+        snapshot.is_ok(),
+        "render_once should succeed with valid input"
+    );
     let output = snapshot.unwrap();
     assert!(
         !output.trim().is_empty(),
@@ -400,31 +401,40 @@ fn once_mode_with_bearer_auth_shows_native_or_fallback() {
     // Wait for daemon to initialize (write descriptor file)
     thread::sleep(Duration::from_secs(2));
 
-    // Create a test descriptor file
+    // Create a test descriptor file (64-hex bearer per is_wellformed_token)
     let descriptor_path = home.path().join("runtime/backend.json");
+    fs::create_dir_all(descriptor_path.parent().unwrap()).expect("runtime dir");
+    let token: String = "ab".repeat(32);
     let descriptor_content = serde_json::json!({
         "pid": daemon.id(),
         "http_origin": format!("http://127.0.0.1:{}", port),
         "schema_version": 1,
-        "auth_token": "test-bearer-token-12345"
+        "auth_token": token
     });
-    fs::write(&descriptor_path, serde_json::to_string(&descriptor_content).unwrap())
-        .expect("write descriptor");
+    fs::write(
+        &descriptor_path,
+        serde_json::to_string(&descriptor_content).unwrap(),
+    )
+    .expect("write descriptor");
 
-    // Run --once --native and verify output contains frame content
+    // Run tui --once via the subcommand path and verify frame content
     let result = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
         .env_clear()
         .env("OPENCODE_RK_HOME", home.path())
-        .args(["--once", "--native"])
+        .args(["tui", "--once"])
         .output()
-        .expect("run --once --native");
+        .expect("run tui --once");
 
     let stdout = String::from_utf8_lossy(&result.stdout);
+    let stderr = String::from_utf8_lossy(&result.stderr);
 
-    // Should contain frame content (native render) or graceful fallback
     assert!(
-        stdout.contains("OpenCode RK") || stdout.is_empty(),
-        "--once --native output should contain frame or be graceful empty: {stdout}"
+        result.status.success(),
+        "tui --once should exit successfully: stderr={stderr}"
+    );
+    assert!(
+        stdout.contains("OpenCode RK TUI"),
+        "tui --once must render frame content: stdout={stdout} stderr={stderr}"
     );
 
     // Cleanup: kill daemon
