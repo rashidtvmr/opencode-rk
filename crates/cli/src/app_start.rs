@@ -320,6 +320,24 @@ pub fn plan_default_launch(
     }
 }
 
+/// True when the plan is an interactive owner startup: the native TUI mode
+/// with [`LaunchRole::Owner`]. Testable branch predicate so the no-subcommand
+/// call site can route Owner vs Attacher without re-matching `plan.role`.
+/// Fails closed: any non-native plan (even a hand-built struct) is false.
+#[must_use]
+pub fn is_owner_startup(plan: &DefaultLaunch) -> bool {
+    plan.mode == LaunchMode::NativeTui && plan.role == Some(LaunchRole::Owner)
+}
+
+/// True when the plan is an interactive launch that must open the in-app
+/// provider setup flow: the native TUI mode with [`StartupView::Setup`].
+/// Covers missing (`Some(false)`) and unknown (`None`) credentials, which
+/// [`plan_default_launch`] both route to `Setup`. Fails closed off-TTY.
+#[must_use]
+pub fn needs_setup(plan: &DefaultLaunch) -> bool {
+    plan.mode == LaunchMode::NativeTui && plan.view == Some(StartupView::Setup)
+}
+
 /// Documented message for the in-app setup view. Static text: no secrets,
 /// no terminal control sequences, no manual server instructions.
 #[must_use]
