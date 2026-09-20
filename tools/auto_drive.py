@@ -2,7 +2,7 @@
 """Autonomous loop driver: maintains N parallel subagent lanes until ralph.json is drained.
 
 Usage:
-    nohup python3 tools/auto_drive.py --lanes 15 >> state/auto_drive.log 2>&1 &
+    nohup python3 tools/auto_drive.py --lanes 2 >> state/auto_drive.log 2>&1 &
 
 What it does:
 1. Reads ralph.json via plan_model to find ready tasks.
@@ -25,6 +25,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
@@ -47,6 +48,11 @@ WORKERS = [
 
 TASK_TIMEOUT = 1800  # 30 min per task
 MAX_ATTEMPTS = 3
+
+# 8GB host budget: default 2 lanes, hard cap 4, serialized verify.
+DEFAULT_LANES = 2
+MAX_LANES = 4
+_VERIFY_LOCK = threading.Lock()
 
 
 def log(msg: str) -> None:
@@ -160,14 +166,15 @@ def run_one_task(task_id: str, worker: str) -> dict:
         code = -1
         tail = str(exc)
 
-    # Verify
+    # Verify (serialized: one heavy verify at a time)
     verify_ok = False
     verify_log = ""
     try:
-        vp = subprocess.run(
-            [sys.executable, "tools/validate_repository.py"],
-            cwd=ROOT, capture_output=True, text=True, timeout=60,
-        )
+        with _VERIFY_LOCK:
+            vp = subprocess.run(
+                [sys.executable, "tools/validate_repository.py"],
+                cwd=ROOT, capture_output=True, text=True, timeout=60,
+            )
         verify_log = vp.stdout + vp.stderr
         verify_ok = vp.returncode == 0
     except Exception as exc:
@@ -198,9 +205,12 @@ def update_ralph_status(task_id: str, status: str) -> None:
 def main() -> int:
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument("--lanes", type=int, default=15)
+    parser.add_argument("--lanes", type=int, default=DEFAULT_LANES)
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
+    if args.lanes > MAX_LANES:
+        log(f"lanes {args.lanes} exceeds cap {MAX_LANES}, clamping")
+        args.lanes = MAX_LANES
 
     # Singleton lock
     STATE_DIR.mkdir(parents=True, exist_ok=True)
