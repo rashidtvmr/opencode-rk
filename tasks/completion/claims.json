@@ -382,9 +382,10 @@
       "status": "in-progress"
     },
     "LANE-CI-CAPS": {
+      "completedNote": "CI caps per-step env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 on check/test/clippy; prefix intact; validate tail: FAIL backlog exhaustion (pre-existing repo-wide), 0 CI errors",
       "scratchpad": "worklog/LANE-CI-CAPS.md",
       "session": "ses_f423ccebdffemjzOag67siYSxl",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-CI-EXT": {
       "completedNote": "worker WIP + orchestrator main.rs wiring (optional prompt/--prompt, typed 64 pre-clap exits); 11/12 green, t03 gated on pre-existing session_turn_stream 201 regression (LANE-STREAM-FIX in flight); ci_mode 9/9 + default_tui 4/4 preserved; zero test edits; commit 61ae4b2",
