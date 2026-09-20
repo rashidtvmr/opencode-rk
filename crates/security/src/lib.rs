@@ -10,6 +10,7 @@ pub mod exec_policy;
 pub mod hook_bus_v2;
 pub mod hooks;
 pub mod manual_only;
+pub mod os_backend;
 pub mod project_boundary;
 pub mod sandbox;
 pub mod sensitive;

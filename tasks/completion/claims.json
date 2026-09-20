@@ -224,9 +224,10 @@
       "status": "completed"
     },
     "DISC-106": {
+      "completedNote": "GREEN 5/5 os_backend (t01-t05) + 148/148 security lib no-regress; T05 compile-only fix (unsafe->safe probe), zero test-assertion edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 180 cargo test -p opencode-rk-security os_backend",
       "scratchpad": "worklog/DISC-106.md",
-      "session": "ses_f41f2c276ffeEYSUeSJGzV14cz",
-      "status": "in-progress"
+      "session": "ses_land_disc106",
+      "status": "completed"
     },
     "DISC-107": {
       "completedNote": "GREEN 7/7 backup_v2 + 122/122 storage lib; RED stub-copy 5fail frozen-test-sha 47d8c0e8; zero test edits; impl pre-complete b1b88724",
