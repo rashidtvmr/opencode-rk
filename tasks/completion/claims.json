@@ -764,9 +764,10 @@
       "status": "completed"
     },
     "PAR-005": {
+      "completedNote": "GREEN 11/11 app_services lib tests; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 170 cargo test -p opencode-rk-tools --lib app_services",
       "scratchpad": "worklog/PAR-005.md",
       "session": "ses_f41fada5fffek2ZhANqQ3vhz7U",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PAR-006": {
       "completedNote": "GREEN 15/15 app_policy; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-security app_policy",
@@ -775,9 +776,10 @@
       "status": "completed"
     },
     "PAR-007": {
+      "completedNote": "GREEN 8/8 app_extensions lib tests; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 170 cargo test -p opencode-rk-tools --lib app_extensions",
       "scratchpad": "worklog/PAR-007.md",
       "session": "ses_f41fada5fffek2ZhANqQ3vhz7U",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PAR-008": {
       "completedNote": "GREEN 5/5 web_turn_adapter lib tests, zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-server --lib web_turn_adapter",
