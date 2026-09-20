@@ -3,6 +3,7 @@
 //! Provides FileTool for file system operations including read, write,
 //! list directory, and create directory.
 
+use opencode_rk_security::{Decision, FileAction, OperationIntent, PermissionBroker};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::{fs, io::Write};
@@ -149,12 +150,53 @@ impl FileTool {
     pub fn execute(&self, op: FileOperation) -> Result<FileResult, ToolError> {
         execute(op)
     }
+
+    /// Executes a file operation after broker authorization.
+    ///
+    /// Write ops authorize `OperationIntent::File { Write, path }` first;
+    /// denial (or human-gate) returns `Ok(failure)` with zero filesystem I/O.
+    pub fn execute_authorized(
+        &self,
+        op: FileOperation,
+        broker: &PermissionBroker,
+    ) -> Result<FileResult, ToolError> {
+        execute_authorized(op, broker)
+    }
 }
 
 impl Default for FileTool {
     fn default() -> Self {
         Self::new()
     }
+}
+
+/// Executes a file operation after broker authorization.
+///
+/// Write ops authorize before any filesystem I/O: `Deny` and `RequireHuman`
+/// return `Ok(FileResult::failure(..))` without creating, truncating, or
+/// making parent directories. Non-write ops pass through to [`execute`].
+pub fn execute_authorized(
+    op: FileOperation,
+    broker: &PermissionBroker,
+) -> Result<FileResult, ToolError> {
+    if let FileOperation::Write { ref path, .. } = op {
+        let intent = OperationIntent::File {
+            action: FileAction::Write,
+            path: path.clone(),
+        };
+        match broker.authorize(&intent) {
+            Decision::Allow => (),
+            Decision::Deny { reason } => {
+                return Ok(FileResult::failure(format!("write denied: {reason}")));
+            }
+            Decision::RequireHuman { reason, .. } => {
+                return Ok(FileResult::failure(format!(
+                    "write requires human approval: {reason}"
+                )));
+            }
+        }
+    }
+    execute(op)
 }
 
 /// Executes a file operation and returns the result.

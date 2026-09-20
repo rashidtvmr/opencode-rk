@@ -338,9 +338,10 @@
       "status": "in-progress"
     },
     "LANE-APPSTART-VIEW": {
+      "completedNote": "GREEN 16/16 standalone rustc --test app_start (13+3 APP-001); probe PROBE OK owner/setup distinct fail-closed; commit 3a099cc; cargo bin blocked by pre-existing tools/shell_tool breakage + opentui native link (not this lane)",
       "scratchpad": "worklog/LANE-APPSTART-VIEW.md",
       "session": "ses_f423ccf75ffe72BSE5xLbs3Rf5",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-AUTH-401": {
       "completedNote": "GREEN daemon_auth_api 5/5 zero test edits; impl already 401/403 correct",
