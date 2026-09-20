@@ -873,9 +873,10 @@
       "status": "completed"
     },
     "TUI-010": {
+      "completedNote": "GREEN 13/13 native_tui_parity zero skips; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 timeout 170 cargo test -p opencode-rk-cli --test native_tui_parity -- --test-threads=1; logs /tmp/opencode/tui010-green3.log; zero test edits",
       "scratchpad": "worklog/TUI-010.md",
       "session": "ses_f41f2c272ffek0lL97XJwropQw",
-      "status": "in-progress"
+      "status": "completed"
     },
     "TUI-010-CAPS": {
       "completedNote": "native_caps 742 lines 21/21 green md5 5f68f693",
