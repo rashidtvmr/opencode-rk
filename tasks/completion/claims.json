@@ -176,9 +176,10 @@
       "status": "blocked"
     },
     "AUD-017": {
+      "completedNote": "audit-complete refresh at 1614754: SHAPE OK 8 findings/5 repairs; test_auto* 16run/6fail + leases_validate 18run/2fail (frozen drift, pre-existing); plan-check SPEC OK 109/258/545; zero test edits, no acceptance",
       "scratchpad": "worklog/AUD-017.md",
       "session": "ses_f420f8732ffe5Rv2Nxle3iSLgV",
-      "status": "in-progress"
+      "status": "completed"
     },
     "AUD-018": {
       "completedNote": "audit-complete b0bed89; 40 tests pass 0 fail zero edits; gate+doctor fixtures verified; all findings addressed",
