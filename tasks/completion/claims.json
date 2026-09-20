@@ -600,9 +600,10 @@
       "status": "completed"
     },
     "LANE-TOOL-PERM": {
+      "completedNote": "GREEN 5/5 permission (t01-t05) + 99 pre-existing no-regress; zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 110 cargo test -p opencode-rk-tools --lib permission",
       "scratchpad": "worklog/LANE-TOOL-PERM.md",
       "session": "ses_f423cd0b1ffevAoq08DEYzAc6W",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-TRANSCRIPT-LAND": {
       "completedNote": "bins check 0 errors (445 pre-existing warnings); TranscriptPage+page+render_page+render_lines compile; additive +214 vs HEAD; zero test edits",
