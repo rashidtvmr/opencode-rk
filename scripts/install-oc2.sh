@@ -96,6 +96,29 @@ if [ -e "$INSTALL_DIR/$BIN" ]; then
 fi
 cp -f "$src" "$INSTALL_DIR/$BIN"
 chmod 755 "$INSTALL_DIR/$BIN"
+# Packaged-output identity check (APP-010): the installed binary must
+# identify as oc2 and never as the legacy dev name. Mirrors
+# packaged_output_names_oc2 in crates/cli/src/install_commands.rs.
+identity_out="$("$INSTALL_DIR/$BIN" --version 2>&1)" || {
+  echo "FAIL: installed binary --version failed; removing $INSTALL_DIR/$BIN" >&2
+  rm -f "$INSTALL_DIR/$BIN"
+  exit 74
+}
+case "$identity_out" in
+  *opencode-rk*)
+    echo "FAIL: installed binary identifies as legacy name; removing $INSTALL_DIR/$BIN" >&2
+    rm -f "$INSTALL_DIR/$BIN"
+    exit 74
+    ;;
+esac
+case "$identity_out" in
+  *oc2*) ;;
+  *)
+    echo "FAIL: installed binary identity mismatch (no oc2 in --version); removing $INSTALL_DIR/$BIN" >&2
+    rm -f "$INSTALL_DIR/$BIN"
+    exit 74
+    ;;
+esac
 rm -rf "$stage"; trap - EXIT INT TERM
 echo "installed $INSTALL_DIR/$BIN ($PLATFORM)" >&2
-"$INSTALL_DIR/$BIN" --version
+printf '%s\n' "$identity_out"

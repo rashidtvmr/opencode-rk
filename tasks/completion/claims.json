@@ -55,9 +55,10 @@
       "status": "completed"
     },
     "APP-010": {
+      "completedNote": "GREEN: install-oc2.sh identity gate exit74+rm bad bin; T1 good exit0 T2 bad exit74 T3 legacy exit73 T4 spaces exit0 T5 cksum exit65; sh-n OK; cargo check bins 0 errors; zero test edits; logs /tmp/opencode/app010/t2-t5",
       "scratchpad": "worklog/APP-010.md",
-      "session": "ses_prod_19a",
-      "status": "in-progress"
+      "session": "ses_f42269ebaffejbo6GG4ng10o5V",
+      "status": "completed"
     },
     "APP-011": {
       "completedNote": "diagnostics 6/6 + doctor 5+4 green; runtime_settings not needed in design; zero test edits",
