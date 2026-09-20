@@ -450,9 +450,10 @@
       "status": "blocked"
     },
     "LANE-DESC-STALE": {
+      "completedNote": "GREEN daemon::tests 15/15 + daemon_auth 5/5 (filter daemon 18/18); zero frozen-test edits; impl+3 new tests in daemon.rs",
       "scratchpad": "worklog/LANE-DESC-STALE.md",
       "session": "ses_f423cd0adffe1mKflQIPCPcvT5",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-DISPATCH-DENY": {
       "scratchpad": "worklog/LANE-DISPATCH-DENY.md",
@@ -499,9 +500,10 @@
       "status": "in-progress"
     },
     "LANE-MAIN-ONCE2": {
+      "completedNote": "cargo check -p opencode-rk-cli --bin opencode-rk GREEN; tui --once + --data-dir tui --once frame exit 0; zero test edits",
       "scratchpad": "worklog/LANE-MAIN-ONCE2.md",
       "session": "ses_f423cd0e9ffeB95oRHX3HpaS0Y",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-MCP-CONFIG": {
       "scratchpad": "worklog/W5-LANE-MCP-CONFIG.md",

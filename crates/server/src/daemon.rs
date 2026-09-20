@@ -8,8 +8,8 @@ use std::{
     net::SocketAddr,
     path::{Path, PathBuf},
     sync::{
-        Arc,
         atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+        Arc,
     },
 };
 use tokio::{
@@ -110,7 +110,8 @@ pub struct BackendDescriptor {
     pub http_origin: String,
     pub schema_version: u16,
     /// Bearer token the live daemon expects on `/api/*`. Empty means a
-    /// legacy descriptor: readers treat it as stale, never as authenticated.
+    /// legacy descriptor: readers refuse it with an error, never as
+    /// authenticated and never as silently absent.
     #[serde(default)]
     pub auth_token: String,
 }
@@ -157,11 +158,31 @@ pub fn read_backend_descriptor(data_dir: impl AsRef<Path>) -> Result<Option<Back
     if descriptor.schema_version != opencode_rk_contracts::WIRE_SCHEMA_VERSION
         || !pid_alive(descriptor.pid)
         || parse_loopback_port(&descriptor.http_origin).is_none()
-        || descriptor.auth_token.is_empty()
     {
         return Ok(None);
     }
+    // A live, well-formed endpoint without a usable bearer must never look
+    // absent: Ok(None) would let callers spawn a second daemon or report no
+    // daemon while a live one runs. It must not look ready either: a bad
+    // bearer would attach then fail at `/api/*`. Refuse loudly instead.
+    if descriptor.auth_token.is_empty() {
+        return Err(DaemonError::Descriptor(
+            "descriptor predates bearer auth (empty auth_token); refusing to attach".to_owned(),
+        ));
+    }
+    if !is_wellformed_token(&descriptor.auth_token) {
+        return Err(DaemonError::Descriptor(
+            "descriptor auth_token is malformed (want 64 hex chars); refusing to attach".to_owned(),
+        ));
+    }
     Ok(Some(descriptor))
+}
+
+/// True only for a 64-char hex bearer (mirrors
+/// `daemon_auth::from_published`: empty/short/non-hex never authenticates).
+fn is_wellformed_token(token: &str) -> bool {
+    token.len() == crate::daemon_auth::TOKEN_HEX_LEN
+        && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Byte budget for `backend.json`. Anything larger is forged/broken and is
@@ -170,7 +191,8 @@ pub const MAX_DESCRIPTOR_BYTES: usize = 8 * 1024;
 
 /// Fail-closed pre-read gate for the descriptor file: size cap, symlink
 /// refusal, and owner check against the caller's euid.
-fn validate_descriptor_file(meta: &std::fs::Metadata, path: &Path) -> Result<()> {    if meta.len() > MAX_DESCRIPTOR_BYTES as u64 {
+fn validate_descriptor_file(meta: &std::fs::Metadata, path: &Path) -> Result<()> {
+    if meta.len() > MAX_DESCRIPTOR_BYTES as u64 {
         return Err(DaemonError::Descriptor(format!(
             "descriptor too large: {} bytes (max {MAX_DESCRIPTOR_BYTES})",
             meta.len()
@@ -203,9 +225,7 @@ fn current_uid() -> Result<u32> {
                 .nth(1)
                 .and_then(|field| field.parse::<u32>().ok())
                 .ok_or_else(|| {
-                    DaemonError::Descriptor(
-                        "cannot parse euid from /proc/self/status".to_owned(),
-                    )
+                    DaemonError::Descriptor("cannot parse euid from /proc/self/status".to_owned())
                 });
         }
     }
@@ -498,7 +518,8 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
     #[test]
-    fn rc02_occupied_port_never_kills() {        use std::process::Command;
+    fn rc02_occupied_port_never_kills() {
+        use std::process::Command;
         let mut child = Command::new("sleep").arg("30").spawn().unwrap();
         let pid = child.id();
         let d = rc02_write("occupied", &rc02_valid_json(pid, "http://10.0.0.9:4096"));
@@ -526,6 +547,58 @@ mod tests {
             ))),
         );
         assert_eq!(check_owner_uid(1000, 1000, &d), Ok(()));
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    // --- LANE-DESC-STALE: live descriptor without a usable bearer is Err ---
+    fn stale_write_token(name: &str, pid: u32, origin: &str, token: &str) -> PathBuf {
+        let d = test_dir(name);
+        let runtime = d.join("runtime");
+        std::fs::create_dir_all(&runtime).unwrap();
+        let body = format!(
+            r#"{{"pid":{pid},"http_origin":{origin:?},"schema_version":{},"auth_token":{token:?}}}"#,
+            opencode_rk_contracts::WIRE_SCHEMA_VERSION
+        );
+        std::fs::write(runtime.join("backend.json"), body).unwrap();
+        d
+    }
+    #[test]
+    fn desc_stale_empty_token_errors() {
+        let d = stale_write_token("emptytok", std::process::id(), "http://127.0.0.1:4096", "");
+        let got = read_backend_descriptor(&d);
+        assert!(
+            matches!(got, Err(DaemonError::Descriptor(_))),
+            "live descriptor with empty token must error, got {got:?}"
+        );
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test]
+    fn desc_stale_malformed_token_errors() {
+        for token in [String::from("short"), "zz".repeat(32), "0".repeat(63)] {
+            let d = stale_write_token(
+                "badtok",
+                std::process::id(),
+                "http://127.0.0.1:4096",
+                &token,
+            );
+            let got = read_backend_descriptor(&d);
+            assert!(
+                matches!(got, Err(DaemonError::Descriptor(_))),
+                "malformed token must error, got {got:?}"
+            );
+            let _ = std::fs::remove_dir_all(&d);
+        }
+    }
+    #[test]
+    fn desc_stale_valid_token_attaches() {
+        let token = "ab".repeat(32);
+        let d = stale_write_token(
+            "goodtok",
+            std::process::id(),
+            "http://127.0.0.1:4096",
+            &token,
+        );
+        let got = read_backend_descriptor(&d).expect("read");
+        assert_eq!(got.map(|desc| desc.auth_token), Some(token));
         let _ = std::fs::remove_dir_all(&d);
     }
     #[test]
