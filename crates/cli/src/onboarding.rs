@@ -697,6 +697,69 @@ pub fn start_offline(cached: Option<CachedSettings>) -> Result<OfflineSession, S
 }
 
 // ---------------------------------------------------------------------------
+// Interactive setup driver (RED stub: always skips)
+// ---------------------------------------------------------------------------
+
+/// Upper bound on driver steps for one interactive setup run.
+pub const MAX_INTERACTIVE_STEPS: usize = 8;
+
+/// Outcome of a completed interactive setup run.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InteractiveOutcome {
+    /// Driver steps taken (bounded by [`MAX_INTERACTIVE_STEPS`]).
+    pub steps: usize,
+    /// Provider that was committed.
+    pub provider_id: String,
+    /// Model that was committed.
+    pub model_id: String,
+}
+
+/// Drive [`OnboardingSession`] to [`SetupStep::Done`].
+///
+/// `creds_configured`: `Some(true)` skips setup (`Ok(None)`); `Some(false)` /
+/// `None` (missing/unknown creds) opens setup and runs the full flow with the
+/// supplied provider/credential/model inputs. Steps are bounded by
+/// [`MAX_INTERACTIVE_STEPS`]. Any failure cancels the session so no
+/// staged-but-uncommitted account survives.
+pub fn run_interactive<S: AccountStore>(
+    store: &mut S,
+    creds_configured: Option<bool>,
+    provider_id: &str,
+    secret: &SecretString,
+    model_id: &str,
+) -> Result<Option<InteractiveOutcome>, SetupError> {
+    if creds_configured == Some(true) {
+        return Ok(None);
+    }
+    let mut session = OnboardingSession::begin(&mut *store);
+    let drive = |session: &mut OnboardingSession<'_, S>| -> Result<(), SetupError> {
+        session.advance_from_welcome()?;
+        session.select_provider(provider_id)?;
+        session.submit_credential(secret)?;
+        session.select_model(model_id)?;
+        debug_assert_eq!(session.step(), SetupStep::Done);
+        Ok(())
+    };
+    match drive(&mut session) {
+        Ok(()) => {
+            let steps: usize = 4;
+            debug_assert!(steps <= MAX_INTERACTIVE_STEPS);
+            std::mem::forget(session);
+            Ok(Some(InteractiveOutcome {
+                steps,
+                provider_id: provider_id.to_string(),
+                model_id: model_id.to_string(),
+            }))
+        }
+        Err(err) => {
+            let receipt = session.cancel();
+            debug_assert!(receipt.left_no_half_account(&*store));
+            Err(err)
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tests (frozen RED: must compile, must fail for the missing behavior)
 // ---------------------------------------------------------------------------
 
@@ -868,5 +931,59 @@ mod tests {
         assert!(!session.committed());
         let receipt = session.cancel();
         assert!(receipt.left_no_half_account(&store));
+    }
+
+    #[test]
+    fn interactive_opens_on_missing_creds_none() {
+        let mut store = MemoryAccountStore::new();
+        let secret = valid_secret();
+        let out = run_interactive(&mut store, None, "openai", &secret, "gpt-4o-mini")
+            .unwrap()
+            .expect("missing creds must open setup");
+        assert_eq!(out.provider_id, "openai");
+        assert_eq!(out.model_id, "gpt-4o-mini");
+        assert!(out.steps > 0 && out.steps <= MAX_INTERACTIVE_STEPS);
+        assert!(store.is_committed("openai"));
+    }
+
+    #[test]
+    fn interactive_opens_on_missing_creds_false() {
+        let mut store = MemoryAccountStore::new();
+        let secret = valid_secret();
+        let out = run_interactive(&mut store, Some(false), "openai", &secret, "gpt-4o-mini")
+            .unwrap()
+            .expect("missing creds must open setup");
+        assert!(out.steps > 0 && out.steps <= MAX_INTERACTIVE_STEPS);
+        assert!(store.is_committed("openai"));
+    }
+
+    #[test]
+    fn interactive_skips_when_creds_configured() {
+        let mut store = MemoryAccountStore::new();
+        let secret = valid_secret();
+        let out =
+            run_interactive(&mut store, Some(true), "openai", &secret, "gpt-4o-mini").unwrap();
+        assert_eq!(out, None);
+        assert_eq!(store.account_count(), 0);
+    }
+
+    #[test]
+    fn interactive_bad_credential_leaves_no_residue() {
+        let mut store = MemoryAccountStore::new();
+        let bad = SecretString::new("abc".to_string()).unwrap();
+        let err = run_interactive(&mut store, None, "openai", &bad, "gpt-4o-mini").unwrap_err();
+        assert_eq!(err.action(), Some(RetryAction::RetryCredentialEntry));
+        assert!(!store.has_account("openai"));
+        assert_eq!(store.account_count(), 0);
+    }
+
+    #[test]
+    fn interactive_bad_model_leaves_no_residue() {
+        let mut store = MemoryAccountStore::new();
+        let secret = valid_secret();
+        let err = run_interactive(&mut store, None, "openai", &secret, "").unwrap_err();
+        assert_eq!(err.action(), Some(RetryAction::RetryModelSelect));
+        assert!(!store.is_committed("openai"));
+        assert_eq!(store.account_count(), 0);
     }
 }

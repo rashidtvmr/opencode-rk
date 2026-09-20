@@ -518,9 +518,10 @@
       "status": "in-progress"
     },
     "LANE-ONBOARD-SETUP": {
+      "completedNote": "GREEN 13/13 onboarding (8 existing + 5 interactive_*); RED sha 3d67c670 GREEN sha ef30545b; zero test edits post-freeze; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 110 cargo test -p opencode-rk-cli --bin oc2 onboarding; evidence /tmp/opencode/GREEN-LANE-ONBOARD-SETUP.rs",
       "scratchpad": "worklog/LANE-ONBOARD-SETUP.md",
       "session": "ses_f423cd0e5ffeeHMozSNUJfQ3zq",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-PROV-FALLBACK": {
       "completedNote": "fallback 6/6 green (5 new + 1 existing); CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-providers --lib fallback; zero test edits frozen",
