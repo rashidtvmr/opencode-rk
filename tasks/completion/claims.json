@@ -510,9 +510,10 @@
       "status": "in-progress"
     },
     "LANE-RALPH-MAX2": {
+      "completedNote": "py_compile OK; default=2, effective-with-config6=2; hard cap min(limit,2) in main(); cmd: timeout 60 python3 -m py_compile tools/ralph_loop.py",
       "scratchpad": "worklog/LANE-RALPH-MAX2.md",
       "session": "ses_f423cceb8ffeWknMXoafTgKEZd",
-      "status": "in-progress"
+      "status": "completed"
     },
     "LANE-RULES": {
       "blockedNote": "",

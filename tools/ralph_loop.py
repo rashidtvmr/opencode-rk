@@ -62,7 +62,7 @@ MANDATORY_VERIFICATION_COMMANDS = [
 
 
 DEFAULT_SETTINGS = {
-    "maxConcurrentLanes": 6,
+    "maxConcurrentLanes": 2,
     "perTaskTimeoutSeconds": 3600,
     "maxAttemptsPerTask": 3,
     "leaseTtlSeconds": 120,
@@ -648,6 +648,8 @@ def main() -> int:
     ledger = Ledger(plan)
     settings = load_settings()
     limit = args.max_lanes or settings["maxConcurrentLanes"]
+    # OOM guard: serialize lanes, hard cap 2 regardless of config/CLI.
+    limit = min(limit, 2)
     lease_ttl = float(settings.get("leaseTtlSeconds", 120))
     heartbeat_interval = float(settings.get("leaseHeartbeatSeconds", 30))
     if limit <= 0 or not math.isfinite(lease_ttl) or lease_ttl <= 0:
