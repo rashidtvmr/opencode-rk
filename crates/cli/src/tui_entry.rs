@@ -75,6 +75,12 @@ pub struct TuiArgs {
     /// stopped. Read-only (stdin is ignored in follow mode).
     #[arg(long)]
     pub follow: bool,
+    /// Provider/model used for submitted turns.
+    #[arg(long, default_value = "openai/gpt-5.6")]
+    pub model: String,
+    /// Reasoning effort used for submitted turns.
+    #[arg(long, default_value = "high")]
+    pub reasoning_effort: String,
     /// Poll interval for follow mode in milliseconds (default 1000).
     #[arg(long, default_value_t = 1000)]
     pub poll_ms: u64,
@@ -368,22 +374,38 @@ fn status_hint(action: StatusAction) -> &'static str {
     }
 }
 
-/// Persist a submitted draft through the daemon. Returns the typed failure on
-/// any non-2xx/transport error; the caller keeps the local state machine.
-fn persist_submit(
+/// Execute a submitted draft through the real daemon turn endpoint. This is
+/// deliberately not the append-message route: a TUI submit must exercise the
+/// same provider/tool/session pipeline as headless and web clients.
+fn execute_submit(
     snapshot: &LiveSnapshot,
     text: &str,
+    model: &str,
+    reasoning_effort: &str,
     auth: Option<&str>,
-) -> Result<(), String> {
-    let payload = serde_json::json!({ "text": text }).to_string();
-    http_request(
+) -> Result<String, String> {
+    let payload = serde_json::json!({
+        "text": text,
+        "model": model,
+        "reasoning_effort": reasoning_effort,
+    })
+    .to_string();
+    let body = http_request(
         &snapshot.origin,
         "POST",
-        &format!("/api/sessions/{}/messages", snapshot.session_id),
+        &format!("/api/sessions/{}/turns", snapshot.session_id),
         Some(&payload),
         auth,
-    )
-    .map(|_| ())
+    )?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("daemon turn response is not valid JSON: {e}"))?;
+    value
+        .get("assistant_message")
+        .and_then(|message| message.get("body"))
+        .and_then(|body| body.get("text"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "daemon turn response is missing assistant_message.body.text".to_string())
 }
 
 /// Interactive line loop. Submit lines echo as `you: <draft>`, `?` shows the
@@ -395,13 +417,15 @@ fn interactive_loop(
     keymap: SubmitKeymap,
     memory: &[MemoryFile],
     live: Option<&LiveSnapshot>,
+    model: &str,
+    reasoning_effort: &str,
     auth: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
     let mut composer = Composer::new();
     let viewer = MemoryViewer::new(memory.to_vec());
-    print!("{}", render_frame(keymap, memory, "unset", live));
+    print!("{}", render_frame(keymap, memory, model, live));
     loop {
         let Some(line) = lines.next() else { break };
         let line = line?;
@@ -421,12 +445,18 @@ fn interactive_loop(
                     Ok(opencode_rk_sessions::tui_state::SubmitOutcome::Sent(sent)) => {
                         println!("you: {sent}");
                         match live {
-                            Some(snapshot) => match persist_submit(snapshot, &sent, auth) {
-                                Ok(()) => println!("[persisted]"),
-                                Err(error) => println!("[error] not persisted: {error}"),
+                            Some(snapshot) => match execute_submit(
+                                snapshot,
+                                &sent,
+                                model,
+                                reasoning_effort,
+                                auth,
+                            ) {
+                                Ok(reply) => println!("assistant: {reply}"),
+                                Err(error) => println!("[error] turn failed: {error}"),
                             },
                             None => {
-                                println!("[offline: not persisted; pass --origin to bind a daemon]")
+                                println!("[offline: turn not executed; pass --origin to bind a daemon]")
                             }
                         }
                         while let Some(next) = composer.finish_turn() {
@@ -527,11 +557,18 @@ pub fn run_with_dir(
         match fetch_snapshot(origin, args.session.as_deref(), auth) {
             Ok(snapshot) => {
                 if args.once {
-                    let frame = render_frame(keymap, &memory, "unset", Some(&snapshot));
+                    let frame = render_frame(keymap, &memory, &args.model, Some(&snapshot));
                     print!("{}", print_native_or_legacy(&frame));
                     return Ok(());
                 }
-                return interactive_loop(keymap, &memory, Some(&snapshot), auth);
+                return interactive_loop(
+                    keymap,
+                    &memory,
+                    Some(&snapshot),
+                    &args.model,
+                    &args.reasoning_effort,
+                    auth,
+                );
             }
             Err(error) => {
                 // Fail closed in snapshot mode; degrade explicitly offline.
@@ -542,7 +579,7 @@ pub fn run_with_dir(
             }
         }
     } else if args.once {
-        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, "unset", None)));
+        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, &args.model, None)));
         return Ok(());
     }
     if !std::io::stdin().is_terminal() {
@@ -554,7 +591,14 @@ pub fn run_with_dir(
             "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY".into(),
         );
     }
-    interactive_loop(keymap, &memory, None, auth)
+    interactive_loop(
+        keymap,
+        &memory,
+        None,
+        &args.model,
+        &args.reasoning_effort,
+        auth,
+    )
 }
 
 /// Resolve the raw bearer token for `--origin` from the validated backend
