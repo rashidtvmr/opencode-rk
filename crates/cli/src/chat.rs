@@ -44,8 +44,40 @@ fn daemon_origin(addr: &str) -> String {
     format!("http://{addr}")
 }
 
-/// Entry bound from `main.rs` when no subcommand is given.
-pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+/// Owned singleton-daemon attachment for UI clients. The child is present
+/// only when this process had to start the daemon; dropping the lease then
+/// tears down that owned child, while a pre-existing daemon is never killed.
+pub struct DaemonLease {
+    origin: Option<String>,
+    auth: Option<String>,
+    owned_daemon: Option<Child>,
+}
+
+impl DaemonLease {
+    pub fn origin(&self) -> Option<&str> {
+        self.origin.as_deref()
+    }
+
+    pub fn auth(&self) -> Option<&str> {
+        self.auth.as_deref()
+    }
+
+    pub fn attached(&self) -> bool {
+        self.origin.is_some()
+    }
+}
+
+impl Drop for DaemonLease {
+    fn drop(&mut self) {
+        if let Some(child) = self.owned_daemon.as_mut() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/// Discover or start the authenticated singleton daemon for any local UI.
+pub fn prepare_daemon(data_dir: &Path) -> DaemonLease {
     let addr = daemon_addr();
     let origin = daemon_origin(&addr);
     let mut owned_daemon: Option<Child> = None;
@@ -53,36 +85,38 @@ pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         owned_daemon = spawn_daemon(&addr, data_dir);
     }
     let attached = probe_daemon(&origin);
-    // Credential-bound reuse (`daemon_client.rs:722-735`
-    // `decide_lifecycle_authed`): a validated descriptor plus a healthy
-    // probe yields the bearer; every other outcome carries no credential and
-    // every `/api/*` call below then fails closed without sending.
-    // Reload after spawn: an owned daemon mints its token at startup.
     let mut credential = reuse_credential(data_dir, &origin, attached);
     if attached && credential.is_none() && owned_daemon.is_some() {
         credential = reuse_credential(data_dir, &origin, true);
     }
-    if !attached {
+    DaemonLease {
+        origin: attached.then_some(origin),
+        auth: credential,
+        owned_daemon,
+    }
+}
+
+/// Entry bound from `main.rs` when no subcommand is given.
+pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let lease = prepare_daemon(data_dir);
+    let origin_label = lease
+        .origin()
+        .unwrap_or("http://127.0.0.1:4096")
+        .to_owned();
+    if !lease.attached() {
         println!(
-            "[offline] daemon unavailable (port {addr} unwinnable); \
-             start it manually with: opencode-rk serve"
+            "[offline] daemon unavailable; start it manually with: opencode-rk serve"
         );
     }
     let mut chat = Chat {
-        origin: attached.then(|| origin.clone()),
-        auth: credential,
+        origin: lease.origin.clone(),
+        auth: lease.auth.clone(),
         session: None,
         model: DEFAULT_MODEL.to_owned(),
     };
-    chat.banner(&origin, attached);
+    chat.banner(&origin_label, lease.attached());
     chat.bind_recent_session();
-    let result = chat.loop_until_exit();
-    if let Some(mut child) = owned_daemon {
-        // Owned lifecycle: the auto-spawned daemon dies with this chat.
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    result
+    chat.loop_until_exit()
 }
 
 struct Chat {
