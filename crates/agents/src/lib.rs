@@ -9,6 +9,8 @@ pub mod executor;
 pub mod message;
 pub mod session;
 pub mod turn_state;
+pub mod ultra_codegen;
+pub mod workflow_schema;
 
 use std::collections::HashMap;
 

@@ -29,6 +29,7 @@ pub mod loop_driver;
 pub mod rules_globs;
 pub mod rules_loader;
 pub mod context_report;
+pub mod context_accounting;
 pub mod runtime_wiring;
 pub mod enterprise_link;
 pub mod error_translate;
