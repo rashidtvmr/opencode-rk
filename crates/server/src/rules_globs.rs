@@ -1,5 +1,13 @@
 #![forbid(unsafe_code)]
 
+//! Rules glob matching with hysteresis: matched rules load immediately and
+//! unload only after [`HYSTERESIS_ROUNDS`] unmatched rounds.
+//!
+//! Boundary note: [`LoopDriver`](crate::loop_driver::LoopDriver) is the pure
+//! plan state machine (no I/O, task-level goals); the live turn path in
+//! `lib.rs` uses `LoopController`, not `LoopDriver`. This module only tracks
+//! which rules are loaded for prompt assembly; it does not drive turns.
+
 use std::collections::{HashMap, VecDeque};
 
 #[derive(Debug, Clone)]
@@ -56,6 +64,16 @@ impl RuleSet {
         };
         rs.apply_always_loaded();
         rs
+    }
+
+    /// Currently loaded rule names, oldest-loaded first.
+    pub fn loaded(&self) -> &[String] {
+        &self.loaded
+    }
+
+    /// Number of currently loaded rules (bounded by [`MAX_LOADED`]).
+    pub fn loaded_count(&self) -> usize {
+        self.loaded.len()
     }
 
     fn apply_always_loaded(&mut self) {

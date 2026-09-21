@@ -7,6 +7,12 @@
 //! Covers: capability probes (provider/daemon/tools), config-precedence
 //! ordering, last-valid fallback for invalid config, and redacted export
 //! (secrets/transcripts dropped unless explicitly selected).
+//!
+//! Log rotation is an OPERATOR boundary, not in-process behavior: this crate
+//! emits diagnostics/tracing to stderr only (see `main.rs` tracing setup) and
+//! never owns log files. The deployment collector (e.g. systemd/journald or a
+//! logrotate-managed file sink) owns retention, rotation, and archival per
+//! ADR-004. No rotation daemon, background thread, or file writer lives here.
 
 use std::{collections::BTreeMap, fs};
 
@@ -14,6 +20,14 @@ use std::{collections::BTreeMap, fs};
 pub const MAX_EXPORT_FIELDS: usize = 128;
 pub const MAX_EXPORT_VALUE_BYTES: usize = 8 * 1024;
 pub const MAX_EXPORT_TRANSCRIPTS: usize = 256;
+
+/// Operator contract for log handling: the application writes diagnostics to
+/// stderr only; rotation/retention/archival belong to the external collector.
+///
+/// Deliberately a `&str` constant (not an enum/config): there is no in-process
+/// knob to change — any rotation must happen outside the binary.
+pub const LOG_ROTATION_CONTRACT: &str =
+    "logs to stderr only; rotation, retention, and archival are operator-owned (external collector)";
 
 /// What subsystem a capability probe describes.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -275,9 +289,11 @@ fn truncate_to_bytes(s: &str, max_bytes: usize) -> (String, bool) {
 
 /// Build a redacted export: secret values become `[redacted]` and
 /// transcripts are dropped unless the corresponding option is set.
-/// Bounds: at most [`MAX_EXPORT_FIELDS`] fields, values capped at
+/// Bounds (enforced on every path): at most [`MAX_EXPORT_FIELDS`] fields,
+/// every emitted value (field values AND transcript entries) capped at
 /// [`MAX_EXPORT_VALUE_BYTES`] bytes, transcripts capped at
-/// [`MAX_EXPORT_TRANSCRIPTS`] entries.
+/// [`MAX_EXPORT_TRANSCRIPTS`] entries. `truncated` is set whenever any cap
+/// (or the transcript opt-out) drops data.
 pub fn redacted_export(
     fields: &BTreeMap<String, String>,
     transcripts: &[String],
@@ -302,7 +318,14 @@ pub fn redacted_export(
     let transcripts_out = if options.include_transcripts {
         let n = transcripts.len().min(MAX_EXPORT_TRANSCRIPTS);
         truncated |= transcripts.len() > MAX_EXPORT_TRANSCRIPTS;
-        transcripts[..n].to_vec()
+        transcripts[..n]
+            .iter()
+            .map(|entry| {
+                let (cut, was_cut) = truncate_to_bytes(entry, MAX_EXPORT_VALUE_BYTES);
+                truncated |= was_cut;
+                cut
+            })
+            .collect()
     } else {
         truncated |= !transcripts.is_empty();
         Vec::new()

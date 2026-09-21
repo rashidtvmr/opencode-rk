@@ -69,10 +69,28 @@ fn request_wire(method: &str, host: &str, path: &str, body: &str, auth_token: &s
 }
 
 fn check_approval_required(prompt: &str) -> Option<String> {
+    // Exact tool names first (preserves existing attribution), then generic
+    // approval-triggering substrings. Case-insensitive. Fail-closed: any
+    // match emits ApprovalRequired exit 20; never auto-approves.
+    let lowered = prompt.to_lowercase();
     let approval_tools = ["shell_exec", "shell_command", "exec", "run_command"];
     for tool in &approval_tools {
-        if prompt.contains(tool) {
+        if lowered.contains(tool) {
             return Some(tool.to_string());
+        }
+    }
+    for pattern in [
+        "request_permissions",
+        "request_permission",
+        "approval",
+        "permissions",
+        "permission",
+        "shell",
+        "exec",
+        "run",
+    ] {
+        if lowered.contains(pattern) {
+            return Some(pattern.to_string());
         }
     }
     None

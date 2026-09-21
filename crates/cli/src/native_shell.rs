@@ -6,6 +6,8 @@
 
 use std::collections::VecDeque;
 
+use crate::native_timeline::{TimelineBuilder, TimelinePage};
+
 /// Max chars retained per line.
 pub const MAX_LINE: usize = 1024;
 /// Max lines retained per buffer.
@@ -123,6 +125,29 @@ impl ShellPages {
 
     pub fn push_transcript(&mut self, text: impl Into<String>, bold: bool) {
         self.transcript.push_line(text, bold);
+    }
+
+    /// Paint the timeline sidebar window into the transcript buffer.
+    ///
+    /// Calls [`TimelineBuilder::render_page`] with the caller's `page`,
+    /// `height` (region rows) and `width` (chars per row), then pushes each
+    /// bounded row into the transcript buffer. Rows are already bounded by
+    /// `render_page` (`MAX_PAGE` rows, wrapped at `width`); the buffer caps
+    /// them again at [`MAX_LINES`] lines / [`MAX_LINE`] chars. Returns the
+    /// number of rows painted.
+    pub fn paint_timeline(
+        &mut self,
+        builder: &TimelineBuilder,
+        page: &TimelinePage,
+        height: usize,
+        width: usize,
+    ) -> usize {
+        let rows = builder.render_page(page, height, width);
+        let n = rows.len();
+        for row in rows {
+            self.push_transcript(row, false);
+        }
+        n
     }
 
     pub fn push_composer(&mut self, text: impl Into<String>, bold: bool) {
