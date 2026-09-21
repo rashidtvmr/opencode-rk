@@ -231,10 +231,14 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let plan = app_start::plan_default_launch(&probe, presence, creds);
             match plan.mode {
                 app_start::LaunchMode::NativeTui => {
-                    if cli.native {
+                    // A native-enabled release defaults to the real OpenTUI
+                    // path. Development builds without the native feature keep
+                    // the compatibility chat unless --native is explicit.
+                    if cli.native || cfg!(feature = "native") {
+                        let lease = chat::prepare_daemon(&data);
                         let args = TuiArgs {
                             once: cli.once,
-                            origin: None,
+                            origin: lease.origin().map(str::to_owned),
                             session: None,
                             follow: false,
                             follow_for: None,
@@ -244,7 +248,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             submit_keymap: None,
                             memory: vec![],
                         };
-                        tui_entry::run(args)?;
+                        tui_entry::run_with_dir(args, Some(&data))?;
                     } else {
                         chat::run(&data)?;
                     }
@@ -277,13 +281,19 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let data = resolve_data_dir(cli.data_dir)?;
             web(data, args).await?;
         }
-        Some(Command::Tui(args)) => {
+        Some(Command::Tui(mut args)) => {
             let data = resolve_data_dir(cli.data_dir)?;
-            // Forward the resolved dir until the tui_entry lane lands its
-            // typed data-dir channel: its descriptor lookup honors
-            // OPENCODE_RK_HOME first, so an explicit --data-dir applies.
-            std::env::set_var("OPENCODE_RK_HOME", &data);
-            tui_entry::run(args)?;
+            // An explicit origin wins. Otherwise the TUI shares the exact
+            // singleton-daemon bootstrap used by the default application.
+            let lease = if args.origin.is_none() {
+                let lease = chat::prepare_daemon(&data);
+                args.origin = lease.origin().map(str::to_owned);
+                Some(lease)
+            } else {
+                None
+            };
+            tui_entry::run_with_dir(args, Some(&data))?;
+            drop(lease);
         }
         Some(Command::Run(args)) => {
             // Prompt via positional or --prompt; absent only matters for usage
