@@ -238,6 +238,8 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             session: None,
                             follow: false,
                             follow_for: None,
+                            model: "openai/gpt-5.6".to_string(),
+                            reasoning_effort: "high".to_string(),
                             poll_ms: 1000,
                             submit_keymap: None,
                             memory: vec![],
