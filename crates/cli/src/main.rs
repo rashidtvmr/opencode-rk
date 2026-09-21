@@ -34,6 +34,7 @@ mod modals;
 mod native_app;
 mod native_approvals;
 mod native_composer;
+mod native_host;
 mod native_layout;
 mod native_navigation;
 mod native_palette;
