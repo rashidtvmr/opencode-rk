@@ -7,8 +7,9 @@
 //! states are explicit (`[offline]`, `[error]`), and nothing buffers without
 //! a cap.
 //!
-//! Daemon ownership rule: a daemon this process spawned is terminated on
-//! exit; a pre-existing daemon is left running. The default listen address
+//! Daemon ownership rule: a daemon this process spawned is detached on client
+//! exit; a pre-existing daemon is left running. Explicit service control owns
+//! daemon termination. The default listen address
 //! is `127.0.0.1:4096`, overridable with `OPENCODE_RK_DAEMON_ADDR`.
 
 use std::{
@@ -44,9 +45,9 @@ fn daemon_origin(addr: &str) -> String {
     format!("http://{addr}")
 }
 
-/// Owned singleton-daemon attachment for UI clients. The child is present
-/// only when this process had to start the daemon; dropping the lease then
-/// tears down that owned child, while a pre-existing daemon is never killed.
+/// Singleton-daemon attachment for UI clients. The child is present only when
+/// this process had to start the daemon. Dropping the lease detaches the
+/// client; it must not terminate daemon-owned sessions used by other clients.
 pub struct DaemonLease {
     origin: Option<String>,
     auth: Option<String>,
@@ -64,15 +65,6 @@ impl DaemonLease {
 
     pub fn attached(&self) -> bool {
         self.origin.is_some()
-    }
-}
-
-impl Drop for DaemonLease {
-    fn drop(&mut self) {
-        if let Some(child) = self.owned_daemon.as_mut() {
-            let _ = child.kill();
-            let _ = child.wait();
-        }
     }
 }
 
@@ -499,7 +491,8 @@ fn reuse_credential(data_dir: &Path, probed_origin: &str, healthy: bool) -> Opti
 }
 
 /// Spawn `serve` from this same binary and wait for readiness. Returns the
-/// owned child process; the caller terminates it when the chat exits.
+/// child handle so it remains owned by the lease while attached. Dropping the
+/// lease closes this client's handle without terminating the shared daemon.
 ///
 /// The child inherits this chat's data directory explicitly (`--data-dir`):
 /// `serve` resolves its HOME/descriptor from it (`main.rs:resolve_data_dir`),
