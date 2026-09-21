@@ -572,6 +572,16 @@ fn native_interactive_loop(
     use std::io::Read as _;
 
     let (cols, rows) = native_terminal_size();
+    let mut host = crate::native_host::NativeHost::new(crate::native_host::HostConfig {
+        cols: cols.min(u32::from(u16::MAX)) as u16,
+        rows: rows.min(u32::from(u16::MAX)) as u16,
+        skip_onboarding: true,
+    });
+    let _ = host.step(if live.is_some() {
+        crate::native_host::HostEvent::DaemonLive
+    } else {
+        crate::native_host::HostEvent::DaemonDown
+    });
     let mut renderer = NativeRenderer::create(cols, rows)?;
     renderer.setup_terminal()?;
     let _ = renderer.enable_mouse(false);
@@ -593,6 +603,10 @@ fn native_interactive_loop(
         if size != current_size {
             current_size = size;
             renderer.resize(size.0, size.1)?;
+            let _ = host.step(crate::native_host::HostEvent::Resize {
+                cols: size.0.min(u32::from(u16::MAX)) as u16,
+                rows: size.1.min(u32::from(u16::MAX)) as u16,
+            });
         }
         let lines = native_page_lines(
             page,
@@ -610,7 +624,13 @@ fn native_interactive_loop(
             break;
         }
         match byte[0] {
-            3 | 4 => break,
+            3 | 4 => {
+                let _ = host.step(crate::native_host::HostEvent::Key(char::from(byte[0])));
+                break;
+            }
+            b'\t' => {
+                let _ = host.step(crate::native_host::HostEvent::Key('\t'));
+            }
             16 => page = NativePage::Palette,
             20 => page = NativePage::Context,
             b'?' if draft.is_empty() => page = NativePage::Help,
@@ -625,6 +645,7 @@ fn native_interactive_loop(
                 }
                 draft.clear();
                 transcript.push(format!("you: {text}"));
+                let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
                 match live {
                     Some(snapshot) => match execute_submit(
                         snapshot,
@@ -644,10 +665,8 @@ fn native_interactive_loop(
                     transcript.drain(..drop_count);
                 }
             }
-            b if page == NativePage::Chat && (b == b'\t' || b >= 0x20) => {
-                if b != b'\t' {
-                    draft.push(char::from(b));
-                }
+            b if page == NativePage::Chat && b >= 0x20 => {
+                draft.push(char::from(b));
             }
             _ => {}
         }
