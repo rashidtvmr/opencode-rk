@@ -94,6 +94,14 @@ extern "C" {
     ) -> NativeHandle;
     fn destroyRenderer(renderer_handle: NativeHandle, flush_input: bool);
     fn setupTerminal(renderer_handle: NativeHandle, useAlternateScreen: bool);
+    fn restoreTerminalModes(renderer_handle: NativeHandle);
+    fn suspendRenderer(renderer_handle: NativeHandle);
+    fn resumeRenderer(renderer_handle: NativeHandle);
+    fn enableMouse(renderer_handle: NativeHandle, enableMovement: bool);
+    fn disableMouse(renderer_handle: NativeHandle);
+    fn enableKittyKeyboard(renderer_handle: NativeHandle, flags: u8);
+    fn disableKittyKeyboard(renderer_handle: NativeHandle);
+    fn clearTerminal(renderer_handle: NativeHandle);
     fn resizeRenderer(renderer_handle: NativeHandle, width: u32, height: u32);
     fn setCursorPosition(renderer_handle: NativeHandle, x: i32, y: i32, visible: bool);
     fn setTerminalTitle(renderer_handle: NativeHandle, titlePtr: *const u8, titleLen: u32);
@@ -180,8 +188,12 @@ impl Renderer {
             return;
         }
         #[cfg(feature = "native")]
-        // SAFETY: live handle owned by self; zeroed below so destroy runs once.
+        // SAFETY: live handle owned by self; terminal mode helpers are
+        // idempotent in OpenTUI and run before the exactly-once destroy.
         unsafe {
+            disableMouse(self.handle);
+            disableKittyKeyboard(self.handle);
+            restoreTerminalModes(self.handle);
             destroyRenderer(self.handle, true);
         }
         self.handle = INVALID_HANDLE;
@@ -212,6 +224,136 @@ impl Renderer {
         {
             // SAFETY: live handle; plain integers only.
             unsafe { setupTerminal(handle, true) };
+            Ok(())
+        }
+    }
+
+    /// Restore terminal modes without destroying the renderer. This is safe
+    /// to call more than once and is also performed during Drop.
+    pub fn restore_terminal_modes(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle owned by self.
+            unsafe { restoreTerminalModes(handle) };
+            Ok(())
+        }
+    }
+
+    /// Suspend terminal rendering while retaining renderer ownership.
+    pub fn suspend(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle owned by self.
+            unsafe { suspendRenderer(handle) };
+            Ok(())
+        }
+    }
+
+    /// Resume a previously suspended renderer.
+    pub fn resume(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle owned by self.
+            unsafe { resumeRenderer(handle) };
+            Ok(())
+        }
+    }
+
+    /// Enable OpenTUI mouse reporting. Movement events remain opt-in.
+    pub fn enable_mouse(&self, movement: bool) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (handle, movement);
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle; plain boolean argument.
+            unsafe { enableMouse(handle, movement) };
+            Ok(())
+        }
+    }
+
+    /// Disable OpenTUI mouse reporting.
+    pub fn disable_mouse(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle.
+            unsafe { disableMouse(handle) };
+            Ok(())
+        }
+    }
+
+    /// Enable Kitty keyboard reporting using OpenTUI's native flags.
+    pub fn enable_kitty_keyboard(&self, flags: u8) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (handle, flags);
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle; flags are forwarded unchanged.
+            unsafe { enableKittyKeyboard(handle, flags) };
+            Ok(())
+        }
+    }
+
+    /// Disable Kitty keyboard reporting.
+    pub fn disable_kitty_keyboard(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle.
+            unsafe { disableKittyKeyboard(handle) };
+            Ok(())
+        }
+    }
+
+    /// Clear the terminal through OpenTUI rather than emitting raw escapes
+    /// from the CLI layer.
+    pub fn clear_terminal(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle.
+            unsafe { clearTerminal(handle) };
             Ok(())
         }
     }
