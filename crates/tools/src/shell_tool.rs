@@ -203,6 +203,7 @@ impl ShellTool {
         }
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
         let mut child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
         self.child = Some(child);
@@ -255,7 +256,7 @@ impl ShellTool {
     /// Hard-cancel an in-flight command. Safe to call when no child exists.
     pub fn cancel(&mut self) {
         if let Some(child) = self.child.as_mut() {
-            let _ = child.kill();
+            let _ = child.start_kill();
         }
     }
 

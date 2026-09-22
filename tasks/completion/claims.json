@@ -941,9 +941,9 @@
       "status": "completed"
     },
     "TOOL-012": {
-      "blockedNote": "RED proves leaked child PID 31070; timeout/output gaps remain",
-      "scratchpad": "worklog/TOOL-012-CANCEL-RED.md",
-      "session": "ses_f374740d1ffelJzHNdPdMt8D4Y",
+      "blockedNote": "child cancellation GREEN: frozen a20570a7345524ea50e7233868871835e2061a7e5a2cb519d29acc25c7847848 1/1; shell_tool lib 9/9. Remaining: public execute timeout is unwired, stdout/stderr are read unbounded before truncation, and web still calls ToolExecutor rather than ShellTool.",
+      "scratchpad": "worklog/TOOL-012-CANCEL-INTEGRATION.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "TOOL-018": {
