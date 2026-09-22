@@ -368,9 +368,10 @@
       "status": "completed"
     },
     "INT-010": {
+      "blockedNote": "No explicit ownership lock in card; impl+tests pre-exist committed (share_descriptor.rs + duplicate int_share_sync_lane.rs); zero writes made; both narrow suites 5/5 GREEN; orchestrator must assign single owned file before implementation",
       "scratchpad": "worklog/INT-010.md",
       "session": "ses_f387af89dffey2aGNmrom5z2Wq",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "LANE-AGENT-FILES": {
       "completedNote": "14/14 agent_files tests GREEN, 68/68 full crate GREEN. RED hash: f040ddaada1967be5427a36784fb3b4adf50c0e6f16f6817b59804292f7e4ae2",
@@ -760,9 +761,10 @@
       "status": "in-progress"
     },
     "OPS-009": {
+      "completedNote": "GREEN 5/5 ops_replay T01-T05, impl pre-landed byte-identical, zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-foundation --test ops_replay",
       "scratchpad": "worklog/OPS-009.md",
       "session": "ses_f387af8a9ffe7GarMQ3qCTI8wr",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
@@ -859,9 +861,10 @@
       "status": "in-progress"
     },
     "RUN-001": {
+      "completedNote": "GREEN 5/5 runner T01-T05, zero test edits, zero impl edits (impl pre-complete); cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-sessions --test runner",
       "scratchpad": "worklog/RUN-001.md",
       "session": "ses_f387af8bcffe4ODf6rkmz706r7",
-      "status": "in-progress"
+      "status": "completed"
     },
     "SYNC-001": {
       "scratchpad": "worklog/SYNC-001.md",
@@ -947,9 +950,10 @@
       "status": "completed"
     },
     "WEB-005": {
+      "completedNote": "GREEN 5/5 event_stream T01-T05, zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test event_stream -- --test-threads=1 @2b28732; impl pre-complete, no impl edits; test-sha b77527a2; RED receipt gap: no independent compiling-RED in this lane (co-landed 248f519/1be93d3)",
       "scratchpad": "worklog/WEB-005.md",
       "session": "ses_f387af8abffeHpTVd4qtNoXaSb",
-      "status": "in-progress"
+      "status": "completed"
     },
     "WEB-ARTIFACT-EXEC": {
       "completedNote": "GREEN 7/7 rustc --test (RED 1pass/6fail frozen 4f86efb2; GREEN ea08bcf7; test-section sha 06b3b37d zero edits); heavy cargo web_artifact 5/5; integrator prewires pub mod",
