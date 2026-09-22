@@ -1049,9 +1049,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "BLOCKED: dormant directly-owned future and abort-on-drop spawned task both failed frozen HTTP test: tool fixture PID publication deadline exceeded. ShellTool::execute exposes no start/readiness handle; server cannot establish non-timing startup boundary. Frozen sha256 95fbe83a0361256d9e0c229cfc97f3cc0b222e8c6d89625ac5db582ce18199e8; lib.rs restored to HEAD 221b8ff; tests untouched.",
-      "scratchpad": "worklog/WEB-009-DISCONNECT-HANDOFF.md",
-      "session": "ses_f35a98f43ffeJyP0Q9B9YSkB0R",
+      "blockedNote": "Startup handshake plus exactly one tokio::task::yield_now().await still failed frozen test: tool fixture PID publication deadline exceeded; crates/server/src/lib.rs restored byte-identical to HEAD 352db15; no product diff retained.",
+      "scratchpad": "worklog/WEB-009-DISCONNECT-STARTUP.md",
+      "session": "ses_f35270c35ffehcQG3Bo2fpQ6oS",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
