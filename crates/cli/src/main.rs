@@ -55,7 +55,7 @@ mod tui_paint;
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 #[derive(Debug, Parser)]
 #[command(
-    name = "opencode-rk",
+    name = "oc2",
     version,
     about = "Resource-efficient native coding-agent harness"
 )]

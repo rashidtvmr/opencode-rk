@@ -21,6 +21,7 @@ use std::{
 };
 
 use serde_json::Value;
+use fs2::FileExt;
 
 use crate::daemon_client;
 use opencode_rk_server::daemon as server_daemon;
@@ -33,6 +34,27 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(750);
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 const HISTORY_LIMIT: usize = 20;
+const STARTUP_LOCK: &str = "startup.lock";
+
+struct StartupGuard(std::fs::File);
+
+impl Drop for StartupGuard {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+fn acquire_startup_guard(data_dir: &Path) -> Option<StartupGuard> {
+    let path = data_dir.join("runtime").join(STARTUP_LOCK);
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)
+        .ok()?;
+    file.try_lock_exclusive().ok().map(|()| StartupGuard(file))
+}
 
 fn daemon_addr() -> String {
     std::env::var("OPENCODE_RK_DAEMON_ADDR")
@@ -74,7 +96,28 @@ pub fn prepare_daemon(data_dir: &Path) -> DaemonLease {
     let origin = daemon_origin(&addr);
     let mut owned_daemon: Option<Child> = None;
     if !probe_daemon(&origin) {
-        owned_daemon = spawn_daemon(&addr, data_dir);
+        if let Some(_guard) = acquire_startup_guard(data_dir) {
+            // Re-check under the inter-process lock. Only its holder may
+            // spawn; concurrent clients wait for the owner's daemon probe.
+            if !probe_daemon(&origin) {
+                owned_daemon = spawn_daemon(&addr, data_dir);
+            }
+        } else {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !probe_daemon(&origin) && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            // The first owner may have exited before publishing readiness.
+            // Re-enter the election once, still under the same bounded wait,
+            // rather than leaving every waiter permanently offline.
+            if !probe_daemon(&origin) {
+                if let Some(_guard) = acquire_startup_guard(data_dir) {
+                    if !probe_daemon(&origin) {
+                        owned_daemon = spawn_daemon(&addr, data_dir);
+                    }
+                }
+            }
+        }
     }
     let attached = probe_daemon(&origin);
     let mut credential = reuse_credential(data_dir, &origin, attached);

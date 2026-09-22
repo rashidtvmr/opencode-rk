@@ -44,7 +44,17 @@ fn pid_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
-    Path::new(&format!("/proc/{pid}")).exists()
+    #[cfg(target_os = "linux")]
+    {
+        Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::process::Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .is_ok_and(|status| status.success())
+    }
 }
 pub struct PidLock {
     path: PathBuf,
@@ -213,25 +223,37 @@ fn owner_uid(meta: &std::fs::Metadata) -> u32 {
     meta.uid()
 }
 
-/// Effective UID of this process, parsed std-only from /proc/self/status
-/// (`Uid: real effective saved fs`). Unparseable means fail-closed Err.
+/// Effective UID of this process. Linux exposes it in `/proc`; Darwin has no
+/// `/proc`, so use the platform `id -u` utility without a shell. Unparseable
+/// output fails closed.
 #[cfg(unix)]
 fn current_uid() -> Result<u32> {
-    let status = std::fs::read_to_string("/proc/self/status").map_err(DaemonError::from)?;
-    for line in status.lines() {
-        if let Some(rest) = line.strip_prefix("Uid:") {
-            return rest
-                .split_whitespace()
-                .nth(1)
-                .and_then(|field| field.parse::<u32>().ok())
-                .ok_or_else(|| {
-                    DaemonError::Descriptor("cannot parse euid from /proc/self/status".to_owned())
-                });
-        }
+    #[cfg(target_os = "linux")]
+    {
+        let status = std::fs::read_to_string("/proc/self/status").map_err(DaemonError::from)?;
+        let field = status
+            .lines()
+            .find_map(|line| line.strip_prefix("Uid:").and_then(|rest| rest.split_whitespace().nth(1)))
+            .ok_or_else(|| DaemonError::Descriptor("no Uid line in /proc/self/status".to_owned()))?;
+        return field.parse::<u32>().map_err(|_| {
+            DaemonError::Descriptor("cannot parse euid from /proc/self/status".to_owned())
+        });
     }
-    Err(DaemonError::Descriptor(
-        "no Uid line in /proc/self/status".to_owned(),
-    ))
+    #[cfg(not(target_os = "linux"))]
+    {
+        let output = std::process::Command::new("/usr/bin/id")
+            .arg("-u")
+            .output()
+            .map_err(DaemonError::from)?;
+        if !output.status.success() {
+            return Err(DaemonError::Descriptor("id -u failed".to_owned()));
+        }
+        let text = String::from_utf8(output.stdout)
+            .map_err(|_| DaemonError::Descriptor("id -u returned non-UTF-8 output".to_owned()))?;
+        text.trim().parse::<u32>().map_err(|_| {
+            DaemonError::Descriptor("cannot parse effective uid from id -u".to_owned())
+        })
+    }
 }
 
 /// Pure owner comparison, unit-testable without filesystem privileges.
