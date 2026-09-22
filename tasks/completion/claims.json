@@ -833,9 +833,10 @@
       "status": "completed"
     },
     "PROV-022": {
+      "completedNote": "GREEN 5/5 prov_022_auth_store T01-T05; zero impl/test edits; cmd: CARGO_BUILD_JOMS=1 cargo test -p opencode-rk-providers --test prov_022_auth_store",
       "scratchpad": "worklog/PROV-022.md",
       "session": "ses_f387af8bdffeEySGQi8lJSC21p",
-      "status": "in-progress"
+      "status": "completed"
     },
     "RC-01": {
       "completedNote": "GREEN server-lib 154/154 + daemon_auth_api 5/5 zero test edits; log rc01",
@@ -868,9 +869,10 @@
       "status": "completed"
     },
     "SYNC-001": {
+      "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
       "scratchpad": "worklog/SYNC-001.md",
       "session": "ses_f387af8b7ffeg2GsF4ErYq07AX",
-      "status": "in-progress"
+      "status": "completed"
     },
     "TUI-001": {
       "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
