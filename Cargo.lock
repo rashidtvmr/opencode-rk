@@ -1053,6 +1053,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "opencode-rk-contracts",
  "opencode-rk-security",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

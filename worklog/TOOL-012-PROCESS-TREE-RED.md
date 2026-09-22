@@ -1,8 +1,7 @@
 # TOOL-012 process-tree cancellation RED
 
-Status: ready for delegated implementation. Reclaimed by integration session
-`ses_f3c4de578ffelQv59xDXmOs03B` after the prior RED author stopped, then
-released after dependency pre-wiring.
+Status: candidate GREEN. Independently verified by integration session
+`ses_f3c4de578ffelQv59xDXmOs03B` after delegated implementation.
 
 ## Source evidence
 
@@ -44,4 +43,6 @@ cannot target a negative process-group ID, and no blocking or detached
 
 ## Remaining unknowns
 
-An approved native process-group primitive must be selected and wired by the implementation lane. This test intentionally owns no product code.
+No TOOL-012 behavior gap remains in the frozen cancellation/bounds surface.
+Release acceptance still belongs to the independent verifier on the integrated
+production revision.
