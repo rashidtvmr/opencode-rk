@@ -379,9 +379,10 @@
       "status": "in-progress"
     },
     "HEAD-002": {
+      "completedNote": "GREEN 8/8 session_export via rustc --test harness (cargo blocked pre-existing opentui native lib); zero test edits; impl+tests at HEAD",
       "scratchpad": "worklog/HEAD-002.md",
       "session": "ses_f384fedf9ffeu54QwccVGqCbzv",
-      "status": "in-progress"
+      "status": "completed"
     },
     "INT-010": {
       "blockedNote": "No explicit ownership lock in card; impl+tests pre-exist committed (share_descriptor.rs + duplicate int_share_sync_lane.rs); zero writes made; both narrow suites 5/5 GREEN; orchestrator must assign single owned file before implementation",
@@ -855,9 +856,10 @@
       "status": "completed"
     },
     "PROV-020": {
+      "completedNote": "GREEN 5/5 prov_020_auth_commands zero test edits; cargo test -p opencode-rk-providers --test prov_020_auth_commands",
       "scratchpad": "worklog/PROV-020.md",
       "session": "ses_f384fee27ffe1QKjki0oZQsHrQ",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PROV-021": {
       "completedNote": "GREEN 5/5 prov_021_usage_status T01-T05 zero test edits; cargo check -p opencode-rk-providers 0 errors; impl pre-complete at HEAD, verify-only",
