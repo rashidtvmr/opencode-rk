@@ -1043,9 +1043,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "compiling RED: runtime event receive timed out at runtime_wiring_events_http.rs:350; SHA-256 a4496430f11fd1cb02e8bc728bc8d1f0abcecd81c233ca895a505a2c00bf5223",
-      "scratchpad": "worklog/WEB-009-EVENTS-RED.md",
-      "session": "ses_f3756bcfcffekwqqbw0PsgFBHh",
+      "blockedNote": "runtime event publication GREEN: frozen a4496430f11fd1cb02e8bc728bc8d1f0abcecd81c233ca895a505c2c00bf5223 1/1; policy 1/1; agent loop 1/1; activity 2/2; permits 1/1; nonstream 1/1. Parent remains blocked: per-turn/browser cancellation, request-local executor/broker, durable tool-call/reference state, citations/accessibility.",
+      "scratchpad": "worklog/WEB-009-EVENTS-INTEGRATION.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {

@@ -125,6 +125,15 @@ fn acquire_http_turn_permit(
         .map_err(|_| ApiFailure::too_many_requests("too many active turns"))
 }
 
+fn publish_runtime_event(
+    events: Option<&event_bus::EventBus>,
+    event: event_bus::ServerEvent,
+) {
+    if let Some(events) = events {
+        events.publish(event).ok();
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: SessionService,
@@ -803,6 +812,13 @@ async fn create_turn(
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
+    publish_runtime_event(
+        runtime.as_ref().map(|runtime| runtime.events()),
+        event_bus::ServerEvent::MessageAppended {
+            session: id,
+            seq: 0,
+        },
+    );
     let history = sessions
         .messages(id, 500)
         .await
@@ -827,6 +843,13 @@ async fn create_turn(
         .append_text(id, MessageRole::Assistant, assistant_text)
         .await
         .map_err(ApiFailure::internal)?;
+    publish_runtime_event(
+        runtime.as_ref().map(|runtime| runtime.events()),
+        event_bus::ServerEvent::MessageAppended {
+            session: id,
+            seq: 0,
+        },
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -846,6 +869,7 @@ struct TurnStreamState {
     reasoning_summary: String,
     stage: TurnStreamStage,
     _permit: HttpTurnPermit,
+    events: Option<event_bus::EventBus>,
     /// Agentic loop state: provider tool schema + step budget + typed history.
     tools: Vec<ResponsesTool>,
     enabled_tools: Vec<String>,
@@ -905,6 +929,7 @@ async fn create_turn_stream(
 ) -> Result<Response, ApiFailure> {
     let runtime = runtime.map(|Extension(runtime)| runtime);
     let permit = acquire_http_turn_permit(runtime.as_ref())?;
+    let events = runtime.as_ref().map(|runtime| runtime.events().clone());
     let sessions = runtime
         .as_ref()
         .map(|runtime| runtime.engine().sessions.clone())
@@ -937,6 +962,13 @@ async fn create_turn_stream(
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
+    publish_runtime_event(
+        events.as_ref(),
+        event_bus::ServerEvent::MessageAppended {
+            session: id,
+            seq: 0,
+        },
+    );
     let history = sessions
         .messages(id, 500)
         .await
@@ -1009,6 +1041,7 @@ async fn create_turn_stream(
             reasoning_summary: String::new(),
             stage: TurnStreamStage::User,
             _permit: permit,
+            events,
             tools,
             enabled_tools,
             broker: PermissionBroker::new(SecurityPolicy::lean_default(
@@ -1135,6 +1168,13 @@ async fn create_turn_stream(
                                 .await
                             {
                                 Ok(message) => {
+                                    publish_runtime_event(
+                                        state.events.as_ref(),
+                                        event_bus::ServerEvent::MessageAppended {
+                                            session: state.session_id,
+                                            seq: 0,
+                                        },
+                                    );
                                     state.stage = TurnStreamStage::Done;
                                     return Some((
                                         Ok::<Bytes, Infallible>(ndjson(json!({
@@ -1299,6 +1339,20 @@ async fn create_turn_stream(
                                     state,
                                 ));
                             }
+                            publish_runtime_event(
+                                state.events.as_ref(),
+                                event_bus::ServerEvent::ToolExecuted {
+                                    name: item.name.clone(),
+                                    duration_ms: 0,
+                                },
+                            );
+                            publish_runtime_event(
+                                state.events.as_ref(),
+                                event_bus::ServerEvent::MessageAppended {
+                                    session: state.session_id,
+                                    seq: 0,
+                                },
+                            );
                             state.history_items.push(ResponsesItem::FunctionCallOutput {
                                 call_id: item.call_id.clone(),
                                 output: item.output.clone(),
@@ -1320,6 +1374,13 @@ async fn create_turn_stream(
                                 .await
                             {
                                 Ok(message) => {
+                                    publish_runtime_event(
+                                        state.events.as_ref(),
+                                        event_bus::ServerEvent::MessageAppended {
+                                            session: state.session_id,
+                                            seq: 0,
+                                        },
+                                    );
                                     state.stage = TurnStreamStage::Done;
                                     return Some((
                                         Ok::<Bytes, Infallible>(ndjson(json!({
