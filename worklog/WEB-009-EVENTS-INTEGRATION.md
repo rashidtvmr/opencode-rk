@@ -30,6 +30,8 @@ Candidate base: `f0be008` on `lane/WEB-006-integration`.
 - After each tool row append succeeds, the stream publishes `ToolExecuted` and
   then `MessageAppended`, preserving the frozen observable order while avoiding
   false events on persistence failure. Denied outcomes use the same durable path.
+  Overflow budget notices have no tool name and therefore publish only the
+  durable-message event, never a fabricated empty-name execution event.
 - Event publication is non-blocking through the existing bounded bus; a full
   subscriber cannot stall provider, persistence or tool execution.
 - Legacy two-field `AppState` routers without `RuntimeWiring` publish no daemon

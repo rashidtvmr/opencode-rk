@@ -1339,13 +1339,15 @@ async fn create_turn_stream(
                                     state,
                                 ));
                             }
-                            publish_runtime_event(
-                                state.events.as_ref(),
-                                event_bus::ServerEvent::ToolExecuted {
-                                    name: item.name.clone(),
-                                    duration_ms: 0,
-                                },
-                            );
+                            if !item.name.is_empty() {
+                                publish_runtime_event(
+                                    state.events.as_ref(),
+                                    event_bus::ServerEvent::ToolExecuted {
+                                        name: item.name.clone(),
+                                        duration_ms: 0,
+                                    },
+                                );
+                            }
                             publish_runtime_event(
                                 state.events.as_ref(),
                                 event_bus::ServerEvent::MessageAppended {
