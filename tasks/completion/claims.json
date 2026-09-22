@@ -374,9 +374,10 @@
       "status": "completed"
     },
     "HEAD-001": {
+      "completedNote": "GREEN 8/8 run_headless via direct rustc harness (/tmp/rh_test2 --test-threads=1); frozen sha85652c80 zero edits; impl sha04d43496; cargo path blocked by pre-existing opentui native gate",
       "scratchpad": "worklog/HEAD-001.md",
       "session": "ses_f384fee05ffee9ZbohjUUo6uif",
-      "status": "in-progress"
+      "status": "completed"
     },
     "HEAD-002": {
       "completedNote": "GREEN 8/8 session_export via rustc --test harness (cargo blocked pre-existing opentui native lib); zero test edits; impl+tests at HEAD",
