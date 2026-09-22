@@ -917,9 +917,10 @@
       "status": "completed"
     },
     "SYNC-002": {
+      "completedNote": "GREEN 5/5 part_events (sync002_t01-t05) zero test edits; frozen sha 1a585f56; impl sha 8ab97dea; cmd: cargo test -p opencode-rk-sessions --test part_events -- --test-threads=1",
       "scratchpad": "worklog/SYNC-002.md",
       "session": "ses_f384fedd2ffeFXapK9O5i12eT7",
-      "status": "in-progress"
+      "status": "completed"
     },
     "TOOL-018": {
       "scratchpad": "worklog/TOOL-018.md",
