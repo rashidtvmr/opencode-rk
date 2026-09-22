@@ -23,7 +23,11 @@ Command (required initial command, corrected only for shell env syntax):
 
 Result: compiled; 1 test failed at `crates/server/tests/runtime_wiring_policy_http.rs:318`: `assertion failed: denied.contains("denied") || denied.contains("not permitted")`. This is the intended semantic mismatch: request-local allowlist bypassed injected runtime policy; failure occurred after provider parsing and real function-call/tool-output path, not timeout or fixture setup. Initial attempted `CARGO_BUILD_JOBS=1 ...` without `env` was shell error (`rtk: No such file or directory`), not test evidence.
 
-Frozen test SHA-256: `5466ca14492dc6fd8405e1290cec73f0509e2a3821471014cd477d29957d216a`
+Frozen test SHA-256: `dc543a5cc9a950d135c75cb0b4765325c5782401d8fffeebe012bf2b7567b6c7`
+
+Reconciliation: `5466ca...` was recorded before the final test-file write and was
+stale. The committed bytes at `c6b9284` and the unchanged working-tree bytes now
+hash to `dc543a...`; these committed bytes are the frozen contract.
 
 ## Implementation proposal
 
