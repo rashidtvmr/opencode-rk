@@ -1,9 +1,10 @@
 {
   "claims": {
     "ACP-001": {
+      "completedNote": "GREEN 5/5 acp_bridge frozen (t01-t05); zero test edits; impl+test hashes unchanged 2f38d370/e5eb31de; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test acp_bridge -- --test-threads=1",
       "scratchpad": "worklog/ACP-001.md",
       "session": "ses_f384fedeaffeiMPH6Dl2h3q5Ox",
-      "status": "in-progress"
+      "status": "completed"
     },
     "APP-001": {
       "completedNote": "GREEN 13/13 app_start (8 existing + 5 APP-001 T1-T05); RED sha256 6f41ab6f, GREEN sha256 38454ed3; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin opencode-rk app_start; log /tmp/opencode/app001.log",
