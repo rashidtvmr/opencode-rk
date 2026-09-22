@@ -953,10 +953,10 @@
       "status": "completed"
     },
     "TUI-001": {
-      "blockedNote": "SIGSEGV reproduced: safe_renderer.rs:432 passes null fg; pinned lib.zig:1800-1810 and :107-109 dereference fg[0..3]. No implementation in verifier.",
-      "scratchpad": "worklog/TUI-001-ABI-REVERIFY.md",
-      "session": "ses_f37c0c458ffeZ2updlajKXosyh",
-      "status": "blocked"
+      "completedNote": "GREEN exact native 1/1 + lib-native 73/73 + lib-default 72/72 + check ok; test-body sha256 bc606827 pre/post identical; zero test edits; CLI Scenario B pre-existing TTY-guard fail recorded, untouched",
+      "scratchpad": "worklog/TUI-001-ABI-FIX.md",
+      "session": "ses_f37bb976cffebTIxeEDiL1hTCc",
+      "status": "completed"
     },
     "TUI-002": {
       "completedNote": "17/17 terminal_host green; sha 93c3216a; log /tmp/opencode/tui002.log",

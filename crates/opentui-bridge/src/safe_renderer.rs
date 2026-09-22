@@ -416,8 +416,22 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            // SAFETY: live handle; `text` outlives the call; null fg/bg
-            // selects native defaults (nullable `?[*]u16`).
+            // Pinned core default foreground (`RGBA.ts` `defaultForeground`):
+            // `DEFAULT_FOREGROUND_RGB=[255,255,255]`, alpha 255, packed with
+            // `packMeta(INTENT_DEFAULT)`. Zig `bufferDrawText` takes fg as a
+            // non-nullable `[*]const u16` (`lib.zig:1800-1810`; `ptrToRGBA`
+            // at `:107-109` dereferences unconditionally), so null fg is
+            // invalid. Bg is genuinely optional (`optionalPtrToRGBA` at
+            // `:111-117`), so bg stays null.
+            let fg = crate::color::pack_rgba8(
+                255,
+                255,
+                255,
+                255,
+                crate::color::pack_meta(crate::color::INTENT_DEFAULT, 0),
+            );
+            // SAFETY: live handle; `text` and `fg` outlive the call; null bg
+            // selects the native default (nullable `?[*]u16`).
             unsafe {
                 let buf = getCurrentBuffer(handle);
                 if buf == INVALID_HANDLE {
@@ -429,7 +443,7 @@ impl Renderer {
                     text.len().min(u32::MAX as usize) as u32,
                     x,
                     y,
-                    std::ptr::null(),
+                    fg.as_ptr(),
                     std::ptr::null(),
                     0,
                 );
