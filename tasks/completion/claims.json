@@ -1,5 +1,10 @@
 {
   "claims": {
+    "ACP-001": {
+      "scratchpad": "worklog/ACP-001.md",
+      "session": "ses_f384fedeaffeiMPH6Dl2h3q5Ox",
+      "status": "in-progress"
+    },
     "APP-001": {
       "completedNote": "GREEN 13/13 app_start (8 existing + 5 APP-001 T1-T05); RED sha256 6f41ab6f, GREEN sha256 38454ed3; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin opencode-rk app_start; log /tmp/opencode/app001.log",
       "scratchpad": "worklog/APP-001.md",
@@ -366,6 +371,16 @@
       "scratchpad": "worklog/G6-CHAT-DATADIR.md",
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
+    },
+    "HEAD-001": {
+      "scratchpad": "worklog/HEAD-001.md",
+      "session": "ses_f384fee05ffee9ZbohjUUo6uif",
+      "status": "in-progress"
+    },
+    "HEAD-002": {
+      "scratchpad": "worklog/HEAD-002.md",
+      "session": "ses_f384fedf9ffeu54QwccVGqCbzv",
+      "status": "in-progress"
     },
     "INT-010": {
       "blockedNote": "No explicit ownership lock in card; impl+tests pre-exist committed (share_descriptor.rs + duplicate int_share_sync_lane.rs); zero writes made; both narrow suites 5/5 GREEN; orchestrator must assign single owned file before implementation",
@@ -838,6 +853,16 @@
       "session": "ses_f386f5b1fffeYqbqZ1uC13paZz",
       "status": "completed"
     },
+    "PROV-020": {
+      "scratchpad": "worklog/PROV-020.md",
+      "session": "ses_f384fee27ffe1QKjki0oZQsHrQ",
+      "status": "in-progress"
+    },
+    "PROV-021": {
+      "scratchpad": "worklog/PROV-021.md",
+      "session": "ses_f384fee20ffertocB89srK0rm7",
+      "status": "in-progress"
+    },
     "PROV-022": {
       "completedNote": "GREEN 5/5 prov_022_auth_store T01-T05; zero impl/test edits; cmd: CARGO_BUILD_JOMS=1 cargo test -p opencode-rk-providers --test prov_022_auth_store",
       "scratchpad": "worklog/PROV-022.md",
@@ -874,10 +899,37 @@
       "session": "ses_f387af8bcffe4ODf6rkmz706r7",
       "status": "completed"
     },
+    "SDK-001": {
+      "completedNote": "GREEN 12/12 sdk_client (T01-T05+4neg) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-server --test sdk_client -- --test-threads=1",
+      "scratchpad": "worklog/SDK-001.md",
+      "session": "ses_f384fede9ffer5DDd9SzW9hr44",
+      "status": "completed"
+    },
+    "SDK-002": {
+      "scratchpad": "worklog/SDK-002.md",
+      "session": "ses_f384fede7ffenpg6X2t2lZtIyS",
+      "status": "in-progress"
+    },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
       "scratchpad": "worklog/SYNC-001.md",
       "session": "ses_f387af8b7ffeg2GsF4ErYq07AX",
+      "status": "completed"
+    },
+    "SYNC-002": {
+      "scratchpad": "worklog/SYNC-002.md",
+      "session": "ses_f384fedd2ffeFXapK9O5i12eT7",
+      "status": "in-progress"
+    },
+    "TOOL-018": {
+      "scratchpad": "worklog/TOOL-018.md",
+      "session": "ses_f384fedaeffenNesgxTRphfrXU",
+      "status": "in-progress"
+    },
+    "TOOL-019": {
+      "completedNote": "GREEN 5/5 mcp_payload_filter T01-T05 zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --test mcp_payload_filter -- --test-threads=1",
+      "scratchpad": "worklog/TOOL-019.md",
+      "session": "ses_f384fec49ffeN1ZefbdMWO6lwv",
       "status": "completed"
     },
     "TUI-001": {
