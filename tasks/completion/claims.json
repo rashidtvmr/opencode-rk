@@ -859,9 +859,10 @@
       "status": "in-progress"
     },
     "PROV-021": {
+      "completedNote": "GREEN 5/5 prov_021_usage_status T01-T05 zero test edits; cargo check -p opencode-rk-providers 0 errors; impl pre-complete at HEAD, verify-only",
       "scratchpad": "worklog/PROV-021.md",
       "session": "ses_f384fee20ffertocB89srK0rm7",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PROV-022": {
       "completedNote": "GREEN 5/5 prov_022_auth_store T01-T05; zero impl/test edits; cmd: CARGO_BUILD_JOMS=1 cargo test -p opencode-rk-providers --test prov_022_auth_store",
@@ -906,9 +907,10 @@
       "status": "completed"
     },
     "SDK-002": {
+      "completedNote": "GREEN 11/11 sdk_spawns (5 frozen T01-T05 + 6 negatives); zero test edits; impl fa737acb, tests a8561295; cmd: cargo test -p opencode-rk-server --test sdk_spawns -- --test-threads=1",
       "scratchpad": "worklog/SDK-002.md",
       "session": "ses_f384fede7ffenpg6X2t2lZtIyS",
-      "status": "in-progress"
+      "status": "completed"
     },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
