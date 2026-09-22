@@ -941,9 +941,9 @@
       "status": "completed"
     },
     "TOOL-012": {
-      "blockedNote": "child cancellation GREEN: frozen a20570a7345524ea50e7233868871835e2061a7e5a2cb519d29acc25c7847848 1/1; shell_tool lib 9/9. Remaining: public execute timeout is unwired, stdout/stderr are read unbounded before truncation, and web still calls ToolExecutor rather than ShellTool.",
-      "scratchpad": "worklog/TOOL-012-CANCEL-INTEGRATION.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "RED verified: timeout watchdog elapsed in public execute; bounded result passed. Test SHA-256 frozen in scratchpad.",
+      "scratchpad": "worklog/TOOL-012-BOUNDS-RED.md",
+      "session": "ses_f3740df3dffeYEpTFVcSVtHd1u",
       "status": "blocked"
     },
     "TOOL-018": {
