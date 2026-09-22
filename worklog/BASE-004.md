@@ -14,7 +14,8 @@ SHA-256 `a3402c6ddd2cf4d14823511e1845cedc37bda1a2bd728ae975633673c904101d`
 - `crates/server/src/daemon.rs:148-275`, new derivation + gate:
   `MAX_SOCKET_PATH_BYTES=104`, `short_root` (`/private/tmp` macOS,
   `/tmp` other unix, `temp_dir` non-unix), `short_socket_path`,
-  `fnv1a64` x2 bases, `uid_tag`, `normalized_key`, `ensure_socket_parent`,
+  local FIPS 180-4 `sha256` with 128-bit lowercase-hex truncation, `uid_tag`,
+  `normalized_key`, `ensure_socket_parent`,
   `is_managed_leaf`, `mode_is_private`.
 - `crates/server/src/daemon.rs` bind section: `PidLock::acquire` runs before
   `ensure_socket_parent`, before stale-socket removal, before
@@ -31,8 +32,8 @@ SHA-256 `a3402c6ddd2cf4d14823511e1845cedc37bda1a2bd728ae975633673c904101d`
 
 ## Design
 
-Socket = `<short_root>/rk-<euid>/rk-<hex128>.sock` where hex128 is two
-FNV-1a 64-bit digests (distinct offset bases) over
+Socket = `<short_root>/rk-<euid>/rk-<hex128>.sock` where hex128 is the first
+128 bits of SHA-256 over
 `euid || 0xff || normalized-path-bytes`. Normalization walks
 `Path::components`: prefix/root kept, `.` skipped, `..` pops, duplicate
 separators collapsed. Same canonical or logically equivalent spelling maps
@@ -50,7 +51,8 @@ deliberately unused in both derivation and root.
   root is additionally refused when it lost private mode (group/other bits).
 - No broad deletion: only the exact socket file is removed, only after the
   PID lock is held, so a live owner's socket is never deleted by a rival
-  (`acquire` returns `AlreadyRunning` first).
+  (`acquire` returns `AlreadyRunning` first). A collision aliases names;
+  locking prevents concurrent binding but is not an identity proof.
 - Drop semantics unchanged: `PidLock::drop` unlocks; `SingletonDaemon::drop`
   removes only its socket file.
 - Auth untouched: descriptor schema/pid/liveness/loopback/bearer validation
@@ -71,6 +73,7 @@ deliberately unused in both derivation and root.
   under data dir, socket outside data dir.
 - `socket_parent_gate_refuses_symlink_not_dir`: symlink parent and
   file-as-parent both refused.
+- `sha256_known_vector_abc`: FIPS 180-4 known vector.
 
 ## Verification
 
@@ -81,7 +84,7 @@ deliberately unused in both derivation and root.
   `cargo test -p opencode-rk-server --test daemon_long_path -- --test-threads=1`
   => 1 passed.
 - `cargo test -p opencode-rk-server --lib daemon`
-  => 23 passed (21 pre-existing + 2 new), 0 failed.
+  => 24 passed (21 pre-existing + 3 new), 0 failed.
 - `cargo test -p opencode-rk-server --test daemon_auth_api -- --test-threads=1`
   => 5 passed, 0 failed.
 - `cargo test -p opencode-rk-server --test web_singleton_lock`
@@ -99,11 +102,10 @@ deliberately unused in both derivation and root.
 
 ## Remaining seams
 
-- FNV-1a is non-cryptographic (64-bit birthday bound per half); deliberate
-  `ponytail` ceiling noted in code: swap for SHA-256 truncation when a
-  crypto dependency is approved. Collision consequence is limited: two data
-  dirs sharing a socket path serialize on the PID lock and the second gets
-  `AlreadyRunning`, never silent cross-talk.
+- Repaired post-3f0aae9: FNV-1a removed. Local std-only FIPS 180-4 SHA-256,
+  truncated to 128 bits and rendered lowercase hex. A collision aliases the
+  socket name; PID locking prevents concurrent owners, while lock-before-unlink
+  prevents an unlocked rival from deleting a live owner's socket.
 - `web_006_t02` (see above) needs its owning lane to reconcile the legacy
   no-token publish helper with the RC-01 bearer rule; out of BASE-004
   authority.

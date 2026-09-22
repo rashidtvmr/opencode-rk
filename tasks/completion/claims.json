@@ -206,10 +206,10 @@
       "status": "completed"
     },
     "BASE-004": {
-      "blockedNote": "frozen daemon_long_path GREEN 1/1 + lib daemon 23/23 + daemon_auth_api 5/5; web_singleton_lock web_006_t02 pre-existing failure (legacy empty-token vs RC-01 bearer rule, fails on clean tree too); sha a3402c6ddd2cf4d14823511e1845cedc37bda1a2bd728ae975633673c904101d unchanged",
+      "completedNote": "SHA-256 repair GREEN: daemon_long_path 1/1; daemon lib 24/24 incl sha256 abc vector; daemon_auth_api 5/5; cargo check clean. web_singleton_lock 1/2, unrelated legacy empty-token failure.",
       "scratchpad": "worklog/BASE-004.md",
-      "session": "ses_f38227d01ffeptQrUFzwnKG3kn",
-      "status": "blocked"
+      "session": "ses_f380c4bc9ffei2XDG2DStCM92e",
+      "status": "completed"
     },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
