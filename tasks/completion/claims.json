@@ -1043,9 +1043,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "runtime policy/snapshot outer intersection GREEN: frozen dc543a5cc9a950d135c75cb0b4765325c5782401d8fffeebe012bf2b7567b6c7 1/1; agent loop 1/1; runtime permit 1/1; stream 2/2; runtime lib 6/6. Parent remains blocked: request-local executor/broker, runtime events, per-turn cancellation, durable tool-call/reference persistence, citations/accessibility.",
-      "scratchpad": "worklog/WEB-009-POLICY-INTEGRATION.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "compiling RED: runtime event receive timed out at runtime_wiring_events_http.rs:350; SHA-256 a4496430f11fd1cb02e8bc728bc8d1f0abcecd81c233ca895a505a2c00bf5223",
+      "scratchpad": "worklog/WEB-009-EVENTS-RED.md",
+      "session": "ses_f3756bcfcffekwqqbw0PsgFBHh",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
