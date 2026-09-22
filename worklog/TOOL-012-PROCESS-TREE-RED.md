@@ -1,6 +1,8 @@
 # TOOL-012 process-tree cancellation RED
 
-Status: blocked; RED-only prerequisite. Owner/session: `ses_f372ed281ffegQ8MpCgpsZgGnC`.
+Status: ready for delegated implementation. Reclaimed by integration session
+`ses_f3c4de578ffelQv59xDXmOs03B` after the prior RED author stopped, then
+released after dependency pre-wiring.
 
 ## Source evidence
 
@@ -23,7 +25,11 @@ Frozen test SHA-256: `f7f2e3a49e4125943c17f366911dbaa4ff18b0e69424bcb1584c76ab39
 
 ## Implementation blocker
 
-BLOCKED pending an approved safe process-group signal primitive/dependency. This crate forbids unsafe; direct-child `start_kill` cannot target a negative process-group ID; blocking or spawned `/bin/kill` in `Drop` would violate async ownership and no-detached-process rules. No bypass proposed.
+Resolved by the user's instruction to resolve all blockers: promote the already
+locked `rustix 1.1.4` package to a direct workspace dependency with its safe
+`process` feature. This crate still forbids unsafe; direct-child `start_kill`
+cannot target a negative process-group ID, and no blocking or detached
+`/bin/kill` workaround is permitted.
 
 ## Remaining unknowns
 
