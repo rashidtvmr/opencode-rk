@@ -941,9 +941,9 @@
       "status": "completed"
     },
     "TOOL-012": {
-      "blockedNote": "timeout/output bounds GREEN: frozen 140179dc85ee5cb57685205ab33b2242554a6b1ea3fa0828eac3ed23b735b0d2 2/2; cancel frozen 1/1; shell_tool lib 9/9. Remains blocked under no-dead-code rule: ShellTool has no real product caller; WEB-009 still invokes ToolExecutor and browser-disconnect cancellation is unproven.",
-      "scratchpad": "worklog/TOOL-012-BOUNDS-INTEGRATION.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "process-tree RED compiled and failed: direct-child cancellation leaks descendant; implementation blocked pending approved safe process-group primitive/dependency",
+      "scratchpad": "worklog/TOOL-012-PROCESS-TREE-RED.md",
+      "session": "ses_f372ed281ffegQ8MpCgpsZgGnC",
       "status": "blocked"
     },
     "TOOL-018": {
