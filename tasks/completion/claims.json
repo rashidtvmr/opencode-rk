@@ -1049,10 +1049,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "runtime events GREEN with overflow repair: frozen a4496430f11fd1cb02e8bc728bc8d1f0abcecd81c233ca895a505c2c00bf5223 1/1; no fabricated empty-name ToolExecuted; agent loop 1/1. Parent blocked: per-turn/browser cancellation, request-local executor/broker, durable tool-call/reference state, citations/accessibility.",
       "scratchpad": "worklog/WEB-009-EVENTS-INTEGRATION.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "WEB-ARTIFACT-EXEC": {
       "completedNote": "GREEN 7/7 rustc --test (RED 1pass/6fail frozen 4f86efb2; GREEN ea08bcf7; test-section sha 06b3b37d zero edits); heavy cargo web_artifact 5/5; integrator prewires pub mod",
