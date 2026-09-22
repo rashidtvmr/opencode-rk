@@ -941,9 +941,9 @@
       "status": "completed"
     },
     "TOOL-012": {
-      "blockedNote": "RED verified: timeout watchdog elapsed in public execute; bounded result passed. Test SHA-256 frozen in scratchpad.",
-      "scratchpad": "worklog/TOOL-012-BOUNDS-RED.md",
-      "session": "ses_f3740df3dffeYEpTFVcSVtHd1u",
+      "blockedNote": "timeout/output bounds GREEN: frozen 140179dc85ee5cb57685205ab33b2242554a6b1ea3fa0828eac3ed23b735b0d2 2/2; cancel frozen 1/1; shell_tool lib 9/9. Remains blocked under no-dead-code rule: ShellTool has no real product caller; WEB-009 still invokes ToolExecutor and browser-disconnect cancellation is unproven.",
+      "scratchpad": "worklog/TOOL-012-BOUNDS-INTEGRATION.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "TOOL-018": {
