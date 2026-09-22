@@ -1049,9 +1049,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "scratchpad": "worklog/WEB-009-EVENTS-INTEGRATION.md",
-      "session": "",
-      "status": "not-started"
+      "blockedNote": "RED blocked: compiled, failed at test.rs:347 parent survived disconnect; sha256 95fbe83a0361256d9e0c229cfc97f3cc0b222e8c6d89625ac5db582ce18199e8; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test runtime_wiring_disconnect_http -- --test-threads=1; provider closed, permit returned, process cleanup missing.",
+      "scratchpad": "worklog/WEB-009-DISCONNECT-RED.md",
+      "session": "ses_f36a4db27ffeFF5FhEO6bDvonm",
+      "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
       "completedNote": "GREEN 7/7 rustc --test (RED 1pass/6fail frozen 4f86efb2; GREEN ea08bcf7; test-section sha 06b3b37d zero edits); heavy cargo web_artifact 5/5; integrator prewires pub mod",
