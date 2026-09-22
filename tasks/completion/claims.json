@@ -1037,9 +1037,9 @@
       "status": "completed"
     },
     "WEB-006": {
-      "blockedNote": "Frozen web_singleton_runtime RED: bearer-less /api/sessions POST gets 401 (test predates RC-01 auth); fix owned by test/server files. See worklog/WEB-006.md.",
-      "scratchpad": "worklog/WEB-006.md",
-      "session": "ses_f38410948ffesMjSnHQZ0q4bdz",
+      "blockedNote": "frozen readiness RED awaiting implementation; focused Cargo test blocked before test compile by pre-existing opencode-rk-opentui-bridge custom build artifact",
+      "scratchpad": "worklog/WEB-006-READINESS.md",
+      "session": "ses_f38060eecffel8uIM3uo6rif9k",
       "status": "blocked"
     },
     "WEB-009": {
