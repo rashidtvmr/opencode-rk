@@ -206,9 +206,9 @@
       "status": "completed"
     },
     "BASE-004": {
-      "blockedNote": "frozen RED awaiting implementation",
+      "blockedNote": "frozen daemon_long_path GREEN 1/1 + lib daemon 23/23 + daemon_auth_api 5/5; web_singleton_lock web_006_t02 pre-existing failure (legacy empty-token vs RC-01 bearer rule, fails on clean tree too); sha a3402c6ddd2cf4d14823511e1845cedc37bda1a2bd728ae975633673c904101d unchanged",
       "scratchpad": "worklog/BASE-004.md",
-      "session": "ses_f3824491affeLCAK4H9PoqPaJC",
+      "session": "ses_f38227d01ffeptQrUFzwnKG3kn",
       "status": "blocked"
     },
     "DISC-102": {

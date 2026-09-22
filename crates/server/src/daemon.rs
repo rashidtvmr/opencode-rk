@@ -139,10 +139,183 @@ impl DaemonPaths {
         let runtime = data_dir.as_ref().join("runtime");
         Self {
             pid: runtime.join("opencode-rk.pid"),
-            socket: runtime.join("opencode-rk.sock"),
+            socket: short_socket_path(data_dir.as_ref()),
             descriptor: runtime.join("backend.json"),
         }
     }
+}
+
+/// Darwin `sockaddr_un.sun_path` fits 104 bytes including its NUL, so a
+/// portable socket pathname must stay below 104 bytes. The socket therefore
+/// lives under a short per-user runtime root, never under the data dir.
+pub const MAX_SOCKET_PATH_BYTES: usize = 104;
+
+/// Short per-user runtime root for the socket: a fixed system directory,
+/// never `TMPDIR` (untrusted environment) and never the data dir
+/// (unbounded length). The per-user leaf is created 0700 by `bind`.
+#[cfg(target_os = "macos")]
+fn short_root() -> PathBuf {
+    PathBuf::from("/private/tmp")
+}
+#[cfg(all(unix, not(target_os = "macos")))]
+fn short_root() -> PathBuf {
+    PathBuf::from("/tmp")
+}
+#[cfg(not(unix))]
+fn short_root() -> PathBuf {
+    std::env::temp_dir()
+}
+
+/// Deterministic socket path for a data directory:
+/// `<root>/rk-<uid>/rk-<hex>.sock`. The hex digest is a bounded
+/// deterministic 128-bit FNV-1a pair over the lexically normalized path
+/// plus the caller euid, so equivalent spellings of one directory map
+/// together and distinct directories map apart with no PID, clock,
+/// random-state, secret, or environment dependence.
+// ponytail: FNV-1a is non-cryptographic (64-bit birthday bound per half);
+// swap for a SHA-256 truncation when a crypto dependency is approved.
+fn short_socket_path(data_dir: &Path) -> PathBuf {
+    let mut key = uid_tag().into_bytes();
+    key.push(0xff);
+    key.extend_from_slice(&normalized_key(data_dir));
+    let name = format!(
+        "rk-{:016x}{:016x}.sock",
+        fnv1a64(&key, FNV_BASIS_1),
+        fnv1a64(&key, FNV_BASIS_2)
+    );
+    let path = short_root().join(format!("rk-{}", uid_tag())).join(name);
+    debug_assert!(path.as_os_str().as_encoded_bytes().len() < MAX_SOCKET_PATH_BYTES);
+    path
+}
+
+const FNV_BASIS_1: u64 = 0xcbf2_9ce4_8422_2325;
+const FNV_BASIS_2: u64 = 0x8422_2325_cbf2_9ce5;
+const FNV_PRIME: u64 = 0x100_0000_01b3;
+
+fn fnv1a64(bytes: &[u8], basis: u64) -> u64 {
+    let mut hash = basis;
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
+}
+
+/// Euid tag for per-user isolation of the socket root. `current_uid` only
+/// fails when the platform cannot report an euid at all; the digest still
+/// isolates data directories in that case.
+fn uid_tag() -> String {
+    current_uid()
+        .map(|uid| uid.to_string())
+        .unwrap_or_else(|_| "unknown".to_owned())
+}
+
+/// Lexically normalized path bytes: `.` skipped, `..` pops, duplicate
+/// separators collapsed by `components`, so logically equivalent spellings
+/// share one digest. Symlinks are not resolved here; callers pass the
+/// canonical directory when identity must survive links.
+fn normalized_key(data_dir: &Path) -> Vec<u8> {
+    use std::path::Component;
+    let mut root: Vec<u8> = Vec::new();
+    let mut parts: Vec<&[u8]> = Vec::new();
+    for component in data_dir.components() {
+        match component {
+            Component::Prefix(prefix) => {
+                root.extend_from_slice(prefix.as_os_str().as_encoded_bytes());
+            }
+            Component::RootDir => root.push(b'/'),
+            Component::CurDir => {}
+            Component::ParentDir => {
+                parts.pop();
+            }
+            Component::Normal(part) => parts.push(part.as_encoded_bytes()),
+        }
+    }
+    let mut out = Vec::with_capacity(root.len() + parts.len() * 2 + 16);
+    out.extend_from_slice(&root);
+    for part in parts {
+        out.push(b'/');
+        out.extend_from_slice(part);
+    }
+    out
+}
+
+/// Fail-closed gate for the socket parent, run inside `bind` after the PID
+/// lock is held: the parent must be a real directory (never a symlink) and,
+/// on unix, owned by the caller euid. Missing parents are created with
+/// private 0700 mode; a managed `rk-<uid>` leaf that lost its private mode
+/// is refused. Pre-existing unrelated directories keep their mode.
+fn ensure_socket_parent(socket_path: &Path) -> Result<()> {
+    let Some(parent) = socket_path.parent() else {
+        return Err(DaemonError::Io(
+            "socket path has no parent directory".to_owned(),
+        ));
+    };
+    if parent.as_os_str().is_empty() {
+        return Err(DaemonError::Io(
+            "socket path has no parent directory".to_owned(),
+        ));
+    }
+    match std::fs::symlink_metadata(parent) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            std::fs::create_dir_all(parent)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+            }
+        }
+        Err(error) => return Err(error.into()),
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                return Err(DaemonError::Io(format!(
+                    "socket parent {} is a symlink; refusing",
+                    parent.display()
+                )));
+            }
+            if !meta.file_type().is_dir() {
+                return Err(DaemonError::Io(format!(
+                    "socket parent {} is not a directory; refusing",
+                    parent.display()
+                )));
+            }
+        }
+    }
+    #[cfg(unix)]
+    {
+        let meta = std::fs::symlink_metadata(parent)?;
+        let caller = current_uid()?;
+        if owner_uid(&meta) != caller {
+            return Err(DaemonError::Io(format!(
+                "socket parent {} owned by uid {}, caller is uid {caller}; refusing",
+                parent.display(),
+                owner_uid(&meta)
+            )));
+        }
+        if is_managed_leaf(parent) && !mode_is_private(&meta) {
+            return Err(DaemonError::Io(format!(
+                "socket parent {} lost private mode; refusing",
+                parent.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// True when `parent` is the `rk-<uid>` leaf directly under our short root.
+#[cfg(unix)]
+fn is_managed_leaf(parent: &Path) -> bool {
+    parent.parent().is_some_and(|grand| grand == short_root())
+        && parent
+            .file_name()
+            .is_some_and(|leaf| leaf.as_encoded_bytes().starts_with(b"rk-"))
+}
+
+/// True when no group/other permission bit is set (0700 satisfies this).
+#[cfg(unix)]
+fn mode_is_private(meta: &std::fs::Metadata) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    meta.permissions().mode() & 0o077 == 0
 }
 
 pub fn read_backend_descriptor(data_dir: impl AsRef<Path>) -> Result<Option<BackendDescriptor>> {
@@ -225,7 +398,14 @@ fn owner_uid(meta: &std::fs::Metadata) -> u32 {
 
 /// Effective UID of this process. Linux exposes it in `/proc`; Darwin has no
 /// `/proc`, so use the platform `id -u` utility without a shell. Unparseable
-/// output fails closed.
+/// output fails closed. Non-unix targets have no euid: fail closed and let
+/// callers fall back to the shared tag.
+#[cfg(not(unix))]
+fn current_uid() -> Result<u32> {
+    Err(DaemonError::Descriptor(
+        "no effective uid on this platform".to_owned(),
+    ))
+}
 #[cfg(unix)]
 fn current_uid() -> Result<u32> {
     #[cfg(target_os = "linux")]
@@ -340,14 +520,16 @@ pub struct SingletonDaemon {
 impl SingletonDaemon {
     pub fn bind(socket_path: impl AsRef<Path>, pid_path: impl AsRef<Path>) -> Result<Self> {
         let socket_path = socket_path.as_ref().to_path_buf();
+        // Lock authority first: the PID lock decides who may delete/rebind
+        // the socket. A live owner's socket is never removed; `acquire`
+        // fails with `AlreadyRunning` before any filesystem mutation here.
         let lock = PidLock::acquire(pid_path)?;
+        // Fail-closed gate on the short socket parent (directory, not a
+        // symlink, owned by this euid, private mode on our managed leaf).
+        // Never `TMPDIR`: the path above is derived, not environmental.
+        ensure_socket_parent(&socket_path)?;
         if socket_path.exists() {
             let _ = std::fs::remove_file(&socket_path);
-        }
-        if let Some(parent) = socket_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
         }
         let listener = UnixListener::bind(&socket_path)?;
         Ok(Self {
@@ -631,9 +813,62 @@ mod tests {
         assert_eq!(owner_uid(&meta), current_uid().unwrap());
         let _ = std::fs::remove_dir_all(&d);
     }
+    #[test]
+    fn socket_paths_isolated_and_bounded() {
+        // BASE-004: socket derivation is deterministic, bounded, isolated.
+        // These unit tests cover the private helpers; the frozen
+        // `daemon_long_path` integration test owns the acceptance contract.
+        let a = std::path::PathBuf::from("/tmp/data/profile-a");
+        let first = short_socket_path(&a);
+        assert_eq!(short_socket_path(&a), first);
+        assert_eq!(
+            short_socket_path(&std::path::PathBuf::from("/tmp/data/./profile-a")),
+            first
+        );
+        let other = short_socket_path(&std::path::PathBuf::from("/tmp/data/profile-b"));
+        assert_ne!(first, other);
+        let len = if cfg!(unix) {
+            short_socket_path(&std::path::PathBuf::from(
+                "/tmp/data-with-a-deliberately-very-long-name-0123456789/Library/Application Support/OpenCode RK/profile-a",
+            ))
+        } else {
+            first.clone()
+        }
+        .as_os_str()
+        .len();
+        assert!(
+            !cfg!(unix) || len < MAX_SOCKET_PATH_BYTES,
+            "short socket must stay below Darwin SUN_LEN: {len}"
+        );
+        let paths = DaemonPaths::for_data_dir(&a);
+        assert!(paths.pid.starts_with(&a));
+        assert!(paths.descriptor.starts_with(&a));
+        assert!(!paths.socket.starts_with(&a));
+    }
+    #[test]
+    fn socket_parent_gate_refuses_symlink_not_dir() {
+        let base = test_dir("sockgate");
+        let target = base.join("real");
+        std::fs::create_dir_all(&target).unwrap();
+        let link = base.join("linkdir");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        #[cfg(not(unix))]
+        std::fs::create_dir_all(&link).unwrap();
+        assert!(
+            ensure_socket_parent(&link.join("rk.sock")).is_err(),
+            "symlink socket parent must be refused"
+        );
+        let file = base.join("afile");
+        std::fs::write(&file, b"x").unwrap();
+        assert!(
+            ensure_socket_parent(&file.join("rk.sock")).is_err(),
+            "non-directory socket parent must be refused"
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
     #[tokio::test]
-    async fn daemon_accept_client() {
-        let d = test_dir("accept");
+    async fn daemon_accept_client() {        let d = test_dir("accept");
         let sock = d.join("rk.sock");
         let daemon = Arc::new(SingletonDaemon::bind(&sock, d.join("rk.pid")).unwrap());
         let worker = Arc::clone(&daemon);
