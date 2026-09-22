@@ -12,6 +12,9 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
 use tokio::time::{Duration, timeout as tokio_timeout};
 
+#[cfg(unix)]
+use rustix::process::{kill_process_group, Pid, Signal};
+
 /// Maximum output bytes retained for stdout/stderr (10 MiB).
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
 
@@ -87,6 +90,8 @@ pub struct ShellTool {
     /// new callers; deny of a missing broker is a future upgrade).
     pub authz: Option<PermissionBroker>,
     child: Option<Child>,
+    #[cfg(unix)]
+    process_group: Option<Pid>,
 }
 
 impl ShellTool {
@@ -100,6 +105,8 @@ impl ShellTool {
             cwd: None,
             authz: None,
             child: None,
+            #[cfg(unix)]
+            process_group: None,
         }
     }
 
@@ -203,10 +210,21 @@ impl ShellTool {
         }
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        #[cfg(unix)]
+        cmd.process_group(0);
         cmd.kill_on_drop(true);
 
         let child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
+        #[cfg(unix)]
+        let process_group = child
+            .id()
+            .and_then(|id| i32::try_from(id).ok())
+            .and_then(Pid::from_raw);
         self.child = Some(child);
+        #[cfg(unix)]
+        {
+            self.process_group = process_group;
+        }
 
         // Borrow child for reading; take it back before we await kill on drop.
         let child_ref = self.child.as_mut().expect("child set");
@@ -251,6 +269,10 @@ impl ShellTool {
 
         // Clear child so drop cannot kill an already-reaped process.
         self.child = None;
+        #[cfg(unix)]
+        {
+            self.process_group = None;
+        }
 
         Ok(ShellResult {
             success,
@@ -263,6 +285,11 @@ impl ShellTool {
 
     /// Hard-cancel an in-flight command. Safe to call when no child exists.
     pub fn cancel(&mut self) {
+        #[cfg(unix)]
+        if let Some(group) = self.process_group {
+            let _ = kill_process_group(group, Signal::KILL);
+        }
+        #[cfg(not(unix))]
         if let Some(child) = self.child.as_mut() {
             let _ = child.start_kill();
         }
@@ -279,6 +306,10 @@ impl Drop for ShellTool {
         // Cancel any in-flight child on drop.
         self.cancel();
         self.child = None;
+        #[cfg(unix)]
+        {
+            self.process_group = None;
+        }
     }
 }
 

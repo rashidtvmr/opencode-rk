@@ -31,6 +31,17 @@ locked `rustix 1.1.4` package to a direct workspace dependency with its safe
 cannot target a negative process-group ID, and no blocking or detached
 `/bin/kill` workaround is permitted.
 
+## GREEN implementation evidence
+
+- `crates/tools/src/shell_tool.rs` now creates a Unix process group with Tokio's
+  safe `Command::process_group(0)`, stores the leader PGID, and uses
+  `rustix::process::kill_process_group(..., Signal::KILL)` on cancellation/drop.
+- Non-Unix retains Tokio's direct-child `start_kill` behavior via `cfg`.
+- Focused tests passed sequentially with `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1`:
+  `shell_tool_process_tree` (1 passed), `shell_tool_cancel` (1 passed),
+  `shell_tool_bounds` (2 passed).
+- Frozen test hash unchanged: `f7f2e3a49e4125943c17f366911dbaa4ff18b0e69424bcb1584c76ab39809a27`.
+
 ## Remaining unknowns
 
 An approved native process-group primitive must be selected and wired by the implementation lane. This test intentionally owns no product code.
