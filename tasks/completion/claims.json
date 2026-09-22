@@ -1049,9 +1049,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "RED blocked: compiled, failed at test.rs:347 parent survived disconnect; sha256 95fbe83a0361256d9e0c229cfc97f3cc0b222e8c6d89625ac5db582ce18199e8; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test runtime_wiring_disconnect_http -- --test-threads=1; provider closed, permit returned, process cleanup missing.",
-      "scratchpad": "worklog/WEB-009-DISCONNECT-RED.md",
-      "session": "ses_f36a4db27ffeFF5FhEO6bDvonm",
+      "blockedNote": "BLOCKER EVIDENCE: frozen disconnect test remains RED after one evidence-driven stream-owned startup repair; tool fixture PID publication deadline exceeded at approximately 4.02s. lib.rs sees only opaque ShellTool::execute future; tools-layer spawned/cancellable handle or explicit start handshake required, not arbitrary sleep. Test hash 95fbe83a0361256d9e0c229cfc97f3cc0b222e8c6d89625ac5db582ce18199e8; no product diff remains.",
+      "scratchpad": "worklog/WEB-009-DISCONNECT-IMPLEMENTATION.md",
+      "session": "ses_f367a280bffecOJUSbqVxHB9mh",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
