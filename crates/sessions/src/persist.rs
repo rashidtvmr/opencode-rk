@@ -6,7 +6,7 @@
 
 use std::collections::HashSet;
 
-use opencode_rk_contracts::{SessionId, SessionState, SessionSummary, Timestamp};
+use opencode_rk_contracts::{SessionId, SessionSummary, Timestamp};
 use thiserror::Error;
 
 /// Error types for persistent session store operations.
@@ -83,13 +83,17 @@ impl PersistentSessionStore {
         Ok(())
     }
 
-    /// Compacts the store by removing orphaned sessions.
+    /// Compacts the store by removing orphaned (still-dirty) sessions.
     ///
-    /// An orphaned session is considered an archived session that has
-    /// been marked for removal. This method removes all archived sessions.
+    /// An orphaned session is one saved but never flushed: its id remains in
+    /// the dirty set. Flushed sessions (ids absent from the dirty set) are
+    /// retained. Removed ids are also dropped from the dirty set.
     pub fn compact(&mut self) -> Result<(), PersistentSessionStoreError> {
-        self.sessions
-            .retain(|s| s.state != SessionState::Archived);
+        let dirty = &self.dirty;
+        self.sessions.retain(|s| !dirty.contains(&s.id));
+        let live: std::collections::HashSet<SessionId> =
+            self.sessions.iter().map(|s| s.id).collect();
+        self.dirty.retain(|id| live.contains(id));
         Ok(())
     }
 
@@ -100,11 +104,27 @@ impl PersistentSessionStore {
     pub fn stats(&self) -> (usize, usize) {
         (self.sessions.len(), self.dirty.len())
     }
+
+    /// Returns the configured flush interval in milliseconds.
+    ///
+    /// The store is in-memory only: the interval is advisory metadata for a
+    /// future caller-owned flush scheduler. No background flush is spawned.
+    #[must_use]
+    pub fn flush_interval_ms(&self) -> u64 {
+        self.flush_interval_ms
+    }
+
+    /// Returns true when the given session id has unflushed changes.
+    #[must_use]
+    pub fn is_dirty(&self, id: SessionId) -> bool {
+        self.dirty.contains(&id)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use opencode_rk_contracts::SessionState;
 
     fn make_session(title: &str) -> SessionSummary {
         SessionSummary {
