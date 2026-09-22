@@ -814,6 +814,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PROV-018": {
+      "completedNote": "5/5 frozen tests green. CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-providers --test prov_018_local_credential_import: 5 passed.",
+      "scratchpad": "worklog/PROV-018.md",
+      "session": "ses_f389670a7ffeuc9N40EFR1AM4H",
+      "status": "completed"
+    },
     "RC-01": {
       "completedNote": "GREEN server-lib 154/154 + daemon_auth_api 5/5 zero test edits; log rc01",
       "scratchpad": "worklog/RC-01.md",
