@@ -75,7 +75,7 @@ pub mod web_turn_adapter;
 pub mod workspace_sessions;
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, Extension, Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -100,9 +100,30 @@ use opencode_rk_agents::agent_executor::AgentExecutor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
-use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore, SemaphorePermit};
 
 static TURN_PERMITS: Semaphore = Semaphore::const_new(2);
+
+enum HttpTurnPermit {
+    Shared { _permit: OwnedSemaphorePermit },
+    Legacy { _permit: SemaphorePermit<'static> },
+}
+
+fn acquire_http_turn_permit(
+    runtime: Option<&runtime_wiring::RuntimeWiring>,
+) -> Result<HttpTurnPermit, ApiFailure> {
+    if let Some(runtime) = runtime {
+        return runtime
+            .try_acquire_turn()
+            .map(|permit| HttpTurnPermit::Shared { _permit: permit })
+            .map_err(|_| ApiFailure::too_many_requests("too many active turns"));
+    }
+    TURN_PERMITS
+        .try_acquire()
+        .map(|permit| HttpTurnPermit::Legacy { _permit: permit })
+        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: SessionService,
@@ -742,15 +763,19 @@ struct CreateTurnBody {
 }
 
 async fn create_turn(
+    runtime: Option<Extension<runtime_wiring::RuntimeWiring>>,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
-    let _permit = TURN_PERMITS
-        .try_acquire()
-        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let runtime = runtime.map(|Extension(runtime)| runtime);
+    let _permit = acquire_http_turn_permit(runtime.as_ref())?;
+    let sessions = runtime
+        .as_ref()
+        .map(|runtime| runtime.engine().sessions.clone())
+        .unwrap_or_else(|| state.sessions.clone());
     let id = parse_session_id(&id)?;
-    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    sessions.get(id).await.map_err(ApiFailure::internal)?;
 
     if body.text.trim().is_empty() {
         return Err(ApiFailure::bad_request("turn text must not be empty"));
@@ -773,13 +798,11 @@ async fn create_turn(
     }
 
     let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
-    let user_message = state
-        .sessions
+    let user_message = sessions
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
-    let history = state
-        .sessions
+    let history = sessions
         .messages(id, 500)
         .await
         .map_err(ApiFailure::internal)?;
@@ -799,8 +822,7 @@ async fn create_turn(
         .create(model_id, &body.reasoning_effort, &input)
         .await
         .map_err(provider_failure)?;
-    let assistant_message = state
-        .sessions
+    let assistant_message = sessions
         .append_text(id, MessageRole::Assistant, assistant_text)
         .await
         .map_err(ApiFailure::internal)?;
@@ -822,7 +844,7 @@ struct TurnStreamState {
     assistant_text: String,
     reasoning_summary: String,
     stage: TurnStreamStage,
-    _permit: SemaphorePermit<'static>,
+    _permit: HttpTurnPermit,
     /// Agentic loop state: provider tool schema + step budget + typed history.
     tools: Vec<ResponsesTool>,
     enabled_tools: Vec<String>,
@@ -875,15 +897,19 @@ enum TurnStreamStage {
 }
 
 async fn create_turn_stream(
+    runtime: Option<Extension<runtime_wiring::RuntimeWiring>>,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<Response, ApiFailure> {
-    let permit = TURN_PERMITS
-        .try_acquire()
-        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let runtime = runtime.map(|Extension(runtime)| runtime);
+    let permit = acquire_http_turn_permit(runtime.as_ref())?;
+    let sessions = runtime
+        .as_ref()
+        .map(|runtime| runtime.engine().sessions.clone())
+        .unwrap_or_else(|| state.sessions.clone());
     let id = parse_session_id(&id)?;
-    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    sessions.get(id).await.map_err(ApiFailure::internal)?;
 
     if body.text.trim().is_empty() {
         return Err(ApiFailure::bad_request("turn text must not be empty"));
@@ -906,13 +932,11 @@ async fn create_turn_stream(
     }
 
     let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
-    let user_message = state
-        .sessions
+    let user_message = sessions
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
-    let history = state
-        .sessions
+    let history = sessions
         .messages(id, 500)
         .await
         .map_err(ApiFailure::internal)?;
@@ -961,7 +985,7 @@ async fn create_turn_stream(
     let stream = stream::unfold(
         TurnStreamState {
             provider,
-            sessions: state.sessions,
+            sessions,
             session_id: id,
             user_message: Some(user_message),
             assistant_text: String::new(),

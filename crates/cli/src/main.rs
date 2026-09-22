@@ -5,12 +5,15 @@ use opencode_rk_contracts::{
     CapabilityReport, DiagnosticReport, MessageRole, SessionId, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_server::{
+    app_runtime::EnginePolicy,
     daemon::{
         publish_backend_descriptor_with_auth, read_backend_descriptor, BackendDescriptor,
         DaemonError, DaemonPaths, SingletonDaemon,
     },
     daemon_auth::DaemonAuth,
-    router_with_auth, AppState,
+    router_with_auth,
+    runtime_wiring::{EngineLease, RuntimeWiring},
+    AppState,
 };
 use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
@@ -709,6 +712,17 @@ async fn serve(
         Err(error) => return Err(Box::new(error)),
     };
     let sessions = open_web_sessions(&data)?;
+    let _engine_lease = EngineLease::acquire()?;
+    let mut runtime_policy = EnginePolicy::default_deny();
+    for name in env::var("OPENCODE_RK_TURN_TOOLS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        runtime_policy.allow_tool(name.to_owned())?;
+    }
+    let runtime = RuntimeWiring::for_daemon(sessions.clone(), ToolRegistry::new(), runtime_policy);
     let path = args
         .models_file
         .unwrap_or_else(|| catalog_cache_path(&data));
@@ -736,7 +750,9 @@ async fn serve(
     let control = tokio::spawn(async move {
         daemon_accept.accept_clients().await;
     });
-    let result = axum::serve(listener, router_with_auth(AppState { sessions, catalog }, Some(credential))).await;
+    let app = router_with_auth(AppState { sessions, catalog }, Some(credential))
+        .layer(axum::Extension(runtime));
+    let result = axum::serve(listener, app).await;
     daemon.shutdown();
     let _ = control.await;
     result?;
