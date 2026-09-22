@@ -12,4 +12,4 @@ Contract: hold real PID lock; delay valid 64-hex descriptor publication 250ms; p
 
 RED test: added `crates/cli/tests/web_startup_readiness.rs`. No product edits.
 
-Verification: focused command `rtk sh -c 'CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-cli --test web_startup_readiness -- --test-threads=1'` blocked before test compilation by pre-existing `opencode-rk-opentui-bridge` custom build failure. Expected runtime RED is `backend is already running but its endpoint descriptor is unavailable` before publication. Test SHA-256: `069866974500d94ce027c3f5e679c59aefe6db20c899c03278970ab6b602cbb7`.
+Verification: dev binary build passed: `CARGO_BUILD_JOBS=1 cargo build -p opencode-rk-cli --bin opencode-rk`. Disposable harness compiled owned test. Runtime RED command used built test executable with `OPENCODE_RK_TEST_BIN`; failing assertion: `second caller exited during publication window` at test line 145, confirming one-shot `AlreadyRunning` descriptor read. Fixture RAII joins publisher/health threads on unwind. Test SHA-256: `7fad25153f8f08b554541b34c78cf237912e40ee89b97b3c5a2723a57180320`.

@@ -1037,7 +1037,7 @@
       "status": "completed"
     },
     "WEB-006": {
-      "blockedNote": "frozen readiness RED awaiting implementation; focused Cargo test blocked before test compile by pre-existing opencode-rk-opentui-bridge custom build artifact",
+      "blockedNote": "valid frozen readiness RED awaiting implementation; harness compiled and runtime failed at pre-publication early-exit assertion",
       "scratchpad": "worklog/WEB-006-READINESS.md",
       "session": "ses_f38060eecffel8uIM3uo6rif9k",
       "status": "blocked"

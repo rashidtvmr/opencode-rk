@@ -3,6 +3,7 @@ use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpListener},
     process::{Child, Command, Stdio},
+    sync::atomic::{AtomicU64, Ordering},
     thread,
     time::{Duration, Instant},
 };
@@ -11,15 +12,34 @@ use opencode_rk_server::daemon::{publish_backend_descriptor_with_auth, DaemonPat
 
 struct TempData(std::path::PathBuf);
 
+static NEXT_FIXTURE: AtomicU64 = AtomicU64::new(0);
+
 impl TempData {
     fn new() -> Self {
+        let id = NEXT_FIXTURE.fetch_add(1, Ordering::Relaxed);
         let path = std::env::temp_dir().join(format!(
             "opencode-rk-web006-readiness-{}-{}",
             std::process::id(),
-            Instant::now().elapsed().as_nanos()
+            id
         ));
         fs::create_dir_all(&path).expect("create disposable data directory");
         Self(path)
+    }
+}
+
+struct FixtureThreads {
+    publisher: Option<thread::JoinHandle<String>>,
+    health: Option<thread::JoinHandle<()>>,
+}
+
+impl Drop for FixtureThreads {
+    fn drop(&mut self) {
+        if let Some(handle) = self.publisher.take() {
+            let _ = handle.join();
+        }
+        if let Some(handle) = self.health.take() {
+            let _ = handle.join();
+        }
     }
 }
 
@@ -59,12 +79,20 @@ fn wait_for_exit(mut child: Child, bound: Duration) -> std::process::Output {
                 .wait_with_output()
                 .expect("collect serve output after exit");
         }
-        assert!(
-            Instant::now() < deadline,
-            "readiness wait exceeded 3 seconds"
-        );
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("readiness wait exceeded 3 seconds");
+        }
         thread::sleep(Duration::from_millis(10));
     }
+}
+
+fn test_binary() -> std::path::PathBuf {
+    std::env::var_os("OPENCODE_RK_TEST_BIN")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_file())
+        .expect("OPENCODE_RK_TEST_BIN must name the built opencode-rk binary")
 }
 
 #[test]
@@ -92,7 +120,11 @@ fn serve_waits_for_authenticated_publication_while_singleton_lock_is_held() {
         publish_origin
     });
 
-    let mut second = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
+    let mut fixture_threads = FixtureThreads {
+        publisher: Some(publisher),
+        health: Some(health),
+    };
+    let mut second = Command::new(test_binary())
         .env_clear()
         .env("OPENCODE_RK_HOME", &data.0)
         .args(["serve", "--listen", "127.0.0.1:0"])
@@ -102,20 +134,37 @@ fn serve_waits_for_authenticated_publication_while_singleton_lock_is_held() {
         .spawn()
         .expect("start second serve caller");
     thread::sleep(Duration::from_millis(100));
-    assert!(
-        second
-            .try_wait()
-            .expect("inspect pre-publication caller")
-            .is_none(),
-        "second caller must remain alive during the publication window"
-    );
+    if second
+        .try_wait()
+        .expect("inspect pre-publication caller")
+        .is_some()
+    {
+        let output = second
+            .wait_with_output()
+            .expect("collect early-exited serve output");
+        panic!(
+            "second caller exited during publication window: status={:?}, stderr={:?}",
+            output.status, output.stderr
+        );
+    }
 
     let output = wait_for_exit(second, Duration::from_secs(3));
     assert!(output.status.success(), "serve stderr: {:?}", output.stderr);
     assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), origin);
     assert_eq!(
-        publisher.join().expect("publisher child thread").as_str(),
+        fixture_threads
+            .publisher
+            .take()
+            .expect("publisher handle")
+            .join()
+            .expect("publisher child thread")
+            .as_str(),
         origin
     );
-    health.join().expect("health fixture thread reaped");
+    fixture_threads
+        .health
+        .take()
+        .expect("health handle")
+        .join()
+        .expect("health fixture thread reaped");
 }
