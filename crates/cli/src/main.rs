@@ -6,8 +6,8 @@ use opencode_rk_contracts::{
 };
 use opencode_rk_server::{
     daemon::{
-        publish_backend_descriptor_with_auth, read_backend_descriptor, DaemonError, DaemonPaths,
-        SingletonDaemon,
+        publish_backend_descriptor_with_auth, read_backend_descriptor, BackendDescriptor,
+        DaemonError, DaemonPaths, SingletonDaemon,
     },
     daemon_auth::DaemonAuth,
     router_with_auth, AppState,
@@ -635,6 +635,33 @@ async fn model_command(data: PathBuf, c: ModelCommand) -> Result<(), Box<dyn std
     }
     Ok(())
 }
+
+/// Bounded wait for the singleton owner to publish its authenticated
+/// descriptor. The `serve` AlreadyRunning path calls this: the PID lock is
+/// held by another process, so this caller must never bind a second
+/// listener. `Ok(None)` (absent, stale pid, schema mismatch, or non-loopback
+/// origin) is retryable until the monotonic deadline; `Err`
+/// (symlink/owner/oversize/malformed-or-empty-token/oversize-after-read)
+/// fails closed immediately and is propagated, never mapped to absence.
+/// `Ok(None)` is returned only at the deadline.
+async fn wait_for_owner_descriptor(
+    data: &std::path::Path,
+) -> Result<Option<BackendDescriptor>, DaemonError> {
+    const WAIT_BUDGET: std::time::Duration = std::time::Duration::from_millis(2000);
+    const WAIT_POLL: std::time::Duration = std::time::Duration::from_millis(25);
+    let deadline = std::time::Instant::now() + WAIT_BUDGET;
+    loop {
+        match read_backend_descriptor(data)? {
+            Some(descriptor) => return Ok(Some(descriptor)),
+            None => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        tokio::time::sleep(WAIT_POLL).await;
+    }
+}
+
 async fn web(data: PathBuf, args: WebArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(descriptor) = read_backend_descriptor(&data)? {
         println!("{}", descriptor.http_origin);
@@ -664,7 +691,13 @@ async fn serve(
     let daemon = match SingletonDaemon::bind(&daemon_paths.socket, &daemon_paths.pid) {
         Ok(daemon) => Arc::new(daemon),
         Err(DaemonError::AlreadyRunning(_)) => {
-            let descriptor = read_backend_descriptor(&data)?.ok_or_else(|| {
+            // The PID lock is held by the owner, which may still be
+            // publishing its descriptor. Poll boundedly for the valid
+            // authenticated descriptor instead of failing one-shot; a
+            // symlink/owner/oversize/malformed-or-empty-token refusal
+            // (`Err`) propagates immediately, and no second listener is
+            // ever bound here.
+            let descriptor = wait_for_owner_descriptor(&data).await?.ok_or_else(|| {
                 "backend is already running but its endpoint descriptor is unavailable".to_string()
             })?;
             println!("{}", descriptor.http_origin);
