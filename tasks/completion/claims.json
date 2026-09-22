@@ -1049,9 +1049,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "BLOCKER EVIDENCE: frozen disconnect test remains RED after one evidence-driven stream-owned startup repair; tool fixture PID publication deadline exceeded at approximately 4.02s. lib.rs sees only opaque ShellTool::execute future; tools-layer spawned/cancellable handle or explicit start handshake required, not arbitrary sleep. Test hash 95fbe83a0361256d9e0c229cfc97f3cc0b222e8c6d89625ac5db582ce18199e8; no product diff remains.",
-      "scratchpad": "worklog/WEB-009-DISCONNECT-IMPLEMENTATION.md",
-      "session": "ses_f367a280bffecOJUSbqVxHB9mh",
+      "blockedNote": "BLOCKED: dormant directly-owned future and abort-on-drop spawned task both failed frozen HTTP test: tool fixture PID publication deadline exceeded. ShellTool::execute exposes no start/readiness handle; server cannot establish non-timing startup boundary. Frozen sha256 95fbe83a0361256d9e0c229cfc97f3cc0b222e8c6d89625ac5db582ce18199e8; lib.rs restored to HEAD 221b8ff; tests untouched.",
+      "scratchpad": "worklog/WEB-009-DISCONNECT-HANDOFF.md",
+      "session": "ses_f35a98f43ffeJyP0Q9B9YSkB0R",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
