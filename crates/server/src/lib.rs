@@ -73,6 +73,7 @@ pub mod remote_sessions;
 pub mod remote_turns;
 pub mod web_turn_adapter;
 pub mod workspace_sessions;
+use crate::app_runtime::PolicyDecision;
 use axum::{
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Extension, Path, Query, State},
@@ -958,10 +959,26 @@ async fn create_turn_stream(
     // an advertised tool is executable, an unadvertised one is not.
     let turn_tools = turn_tool_config();
     let registry = ToolRegistry::new();
+    let runtime_engine = runtime.as_ref().map(|runtime| runtime.engine());
+    let enabled_tools: Vec<String> = registry
+        .list()
+        .into_iter()
+        .filter(|tool| {
+            turn_tools.iter().any(|name| *name == tool.id)
+                && runtime_engine.map_or(true, |engine| {
+                    engine
+                        .tools
+                        .iter()
+                        .any(|snapshot| snapshot.enabled && snapshot.id == tool.id)
+                        && engine.policy.decision(&tool.id) == PolicyDecision::Allow
+                })
+        })
+        .map(|tool| tool.id.clone())
+        .collect();
     let tools: Vec<ResponsesTool> = registry
         .list()
         .into_iter()
-        .filter(|tool| turn_tools.iter().any(|name| *name == tool.id))
+        .filter(|tool| enabled_tools.iter().any(|name| *name == tool.id))
         .map(|tool| {
             ResponsesTool::function(
                 tool.id.clone(),
@@ -993,7 +1010,7 @@ async fn create_turn_stream(
             stage: TurnStreamStage::User,
             _permit: permit,
             tools,
-            enabled_tools: turn_tools,
+            enabled_tools,
             broker: PermissionBroker::new(SecurityPolicy::lean_default(
                 std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             )),
