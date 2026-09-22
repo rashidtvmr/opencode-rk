@@ -1024,6 +1024,12 @@
       "session": "ses_f387af8abffeHpTVd4qtNoXaSb",
       "status": "completed"
     },
+    "WEB-009": {
+      "blockedNote": "AppState has only sessions/catalog and frozen literal constructors; RuntimeWiring/EngineHandles have no live caller. Cross-file daemon composition required; focused tests already GREEN.",
+      "scratchpad": "worklog/WEB-009.md",
+      "session": "ses_f384183edffefv0KL9K7uk6GC5",
+      "status": "blocked"
+    },
     "WEB-ARTIFACT-EXEC": {
       "completedNote": "GREEN 7/7 rustc --test (RED 1pass/6fail frozen 4f86efb2; GREEN ea08bcf7; test-section sha 06b3b37d zero edits); heavy cargo web_artifact 5/5; integrator prewires pub mod",
       "scratchpad": "worklog/WEB-ARTIFACT-EXEC.md",
