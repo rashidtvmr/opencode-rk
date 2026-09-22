@@ -941,10 +941,10 @@
       "status": "completed"
     },
     "TOOL-012": {
-      "completedNote": "GREEN independently: process-tree 1/1, direct cancel 1/1, bounds 2/2, shell units 9/9; frozen hashes unchanged; safe rustix process-group kill; zero test edits",
-      "scratchpad": "worklog/TOOL-012-PROCESS-TREE-RED.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "completed"
+      "blockedNote": "RED compile+run: shell_tool_startup 4/5; startup_notification_requires_child_wrapper_readiness fails line 223 with Err(Elapsed(())); production startup API absent; implementation required",
+      "scratchpad": "worklog/TOOL-012-STARTUP-RED.md",
+      "session": "ses_f350b2ee1ffeev3X7fXp9IbaOX",
+      "status": "blocked"
     },
     "TOOL-018": {
       "completedNote": "GREEN 5/5 mcp_lifecycle T01-T05, zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --test mcp_lifecycle -- --test-threads=1; impl sha 5e63c909 pre-existing, frozen test sha 2fbaca62",
