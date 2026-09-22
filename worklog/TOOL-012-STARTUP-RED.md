@@ -39,6 +39,7 @@ The implementation must send a typed startup event from the child-wrapper handsh
 
 - Focused command: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --test shell_tool_startup -- --test-threads=1` (outer tool timeout 120s; macOS image has no `timeout` executable)
 - Observed RED: compile succeeds; 4/5 tests pass; `startup_notification_requires_child_wrapper_readiness` fails at line 223 with `child wrapper became ready, but no distinct startup notification arrived: Err(Elapsed(()))`. The adapter can emit only `Completed` after execute returns; the fixture is intentionally blocked, so no false startup event exists.
+- Frozen test SHA-256: `b083736af8a9b540252efd3ad75e6471fe8444ab8fd4967c61f4a190b2e9b9ff`
 - No product source, manifest, frozen test, policy, or dylib changed.
 
 ## Remaining blocker
