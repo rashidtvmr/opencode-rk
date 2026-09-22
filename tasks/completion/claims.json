@@ -856,9 +856,10 @@
       "status": "in-progress"
     },
     "REL-003": {
+      "completedNote": "GREEN validator CLI vs frozen fixtures: T01 exit0 pass; T02/T03/T04/T05 exit2 with exact check+reason; malformed/notadir/flag/timeout exit1; determinism 303B identical; zero test/fixture/validator edits",
       "scratchpad": "worklog/REL-003.md",
       "session": "ses_f387af899ffeojhREiG4Rewoar",
-      "status": "in-progress"
+      "status": "completed"
     },
     "RUN-001": {
       "completedNote": "GREEN 5/5 runner T01-T05, zero test edits, zero impl edits (impl pre-complete); cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-sessions --test runner",
