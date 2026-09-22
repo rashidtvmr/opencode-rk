@@ -953,10 +953,10 @@
       "status": "completed"
     },
     "TUI-001": {
-      "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
-      "scratchpad": "worklog/TUI-001.md",
-      "session": "ses_orch_TUI001",
-      "status": "completed"
+      "blockedNote": "SIGSEGV reproduced: safe_renderer.rs:432 passes null fg; pinned lib.zig:1800-1810 and :107-109 dereference fg[0..3]. No implementation in verifier.",
+      "scratchpad": "worklog/TUI-001-ABI-REVERIFY.md",
+      "session": "ses_f37c0c458ffeZ2updlajKXosyh",
+      "status": "blocked"
     },
     "TUI-002": {
       "completedNote": "17/17 terminal_host green; sha 93c3216a; log /tmp/opencode/tui002.log",
