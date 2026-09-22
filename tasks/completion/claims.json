@@ -1043,9 +1043,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "AppState has only sessions/catalog and frozen literal constructors; RuntimeWiring/EngineHandles have no live caller. Cross-file daemon composition required; focused tests already GREEN.",
-      "scratchpad": "worklog/WEB-009.md",
-      "session": "ses_f384183edffefv0KL9K7uk6GC5",
+      "blockedNote": "Compiling RED frozen: runtime_wiring_http SHA-256 5a2572d2339a53036c236062fef7f7ff9136e25ed7472988804ef5ab96e6ef3e; expected status mismatch left 400 right 429; no product edits.",
+      "scratchpad": "worklog/WEB-009-RUNTIME-RED.md",
+      "session": "ses_f37b17e2cffepkbIqiPrne9M2j",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
