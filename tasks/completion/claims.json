@@ -367,6 +367,11 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
+    "INT-010": {
+      "scratchpad": "worklog/INT-010.md",
+      "session": "ses_f387af89dffey2aGNmrom5z2Wq",
+      "status": "in-progress"
+    },
     "LANE-AGENT-FILES": {
       "completedNote": "14/14 agent_files tests GREEN, 68/68 full crate GREEN. RED hash: f040ddaada1967be5427a36784fb3b4adf50c0e6f16f6817b59804292f7e4ae2",
       "scratchpad": "worklog/LANE-AGENT-FILES.md",
@@ -754,6 +759,11 @@
       "session": "ses_worker_wf",
       "status": "in-progress"
     },
+    "OPS-009": {
+      "scratchpad": "worklog/OPS-009.md",
+      "session": "ses_f387af8a9ffe7GarMQ3qCTI8wr",
+      "status": "in-progress"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
@@ -820,6 +830,11 @@
       "session": "ses_f389670a7ffeuc9N40EFR1AM4H",
       "status": "completed"
     },
+    "PROV-022": {
+      "scratchpad": "worklog/PROV-022.md",
+      "session": "ses_f387af8bdffeEySGQi8lJSC21p",
+      "status": "in-progress"
+    },
     "RC-01": {
       "completedNote": "GREEN server-lib 154/154 + daemon_auth_api 5/5 zero test edits; log rc01",
       "scratchpad": "worklog/RC-01.md",
@@ -836,6 +851,21 @@
       "completedNote": "GREEN: standalone rustc harness RED 3-fail then 5/5 green; in-crate service_commands 14/14 (9 existing + 5 rc03 new) via cargo test -p opencode-rk-cli --bin opencode-rk service_commands; logs /tmp/opencode/rc03-red.log + /tmp/opencode/rc03.log; zero test edits post-freeze",
       "scratchpad": "worklog/RC-03.md",
       "session": "ses_orch_RC03",
+      "status": "in-progress"
+    },
+    "REL-003": {
+      "scratchpad": "worklog/REL-003.md",
+      "session": "ses_f387af899ffeojhREiG4Rewoar",
+      "status": "in-progress"
+    },
+    "RUN-001": {
+      "scratchpad": "worklog/RUN-001.md",
+      "session": "ses_f387af8bcffe4ODf6rkmz706r7",
+      "status": "in-progress"
+    },
+    "SYNC-001": {
+      "scratchpad": "worklog/SYNC-001.md",
+      "session": "ses_f387af8b7ffeg2GsF4ErYq07AX",
       "status": "in-progress"
     },
     "TUI-001": {
@@ -909,6 +939,17 @@
       "scratchpad": "worklog/TUI-011.md",
       "session": "ses_orch_TUI011b",
       "status": "completed"
+    },
+    "WEB-004": {
+      "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
+      "scratchpad": "worklog/WEB-004.md",
+      "session": "ses_f387af8aaffeFWlAQiQn1gYKIU",
+      "status": "completed"
+    },
+    "WEB-005": {
+      "scratchpad": "worklog/WEB-005.md",
+      "session": "ses_f387af8abffeHpTVd4qtNoXaSb",
+      "status": "in-progress"
     },
     "WEB-ARTIFACT-EXEC": {
       "completedNote": "GREEN 7/7 rustc --test (RED 1pass/6fail frozen 4f86efb2; GREEN ea08bcf7; test-section sha 06b3b37d zero edits); heavy cargo web_artifact 5/5; integrator prewires pub mod",
