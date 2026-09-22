@@ -1037,9 +1037,9 @@
       "status": "completed"
     },
     "WEB-006": {
-      "completedNote": "GREEN frozen readiness 1/1 sha 7fad2515 zero test edits; bin build+check exit0; fail-closed probe 1/1; main.rs wait_for_owner_descriptor 2s/25ms",
-      "scratchpad": "worklog/WEB-006-READINESS.md",
-      "session": "ses_f37eafa15ffehrOnUvpgLV5tnT",
+      "completedNote": "daemon.rs publish_backend_descriptor mints DaemonAuth; frozen web_singleton_lock 2/2, daemon_auth_api 5/5, daemon_long_path 1/1, lib daemon 24/24, check exit0; zero test edits",
+      "scratchpad": "worklog/WEB-006-DESCRIPTOR.md",
+      "session": "ses_f37d1ed3affeMszns7VKYpWhOw",
       "status": "completed"
     },
     "WEB-009": {

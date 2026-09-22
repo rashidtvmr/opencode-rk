@@ -525,16 +525,29 @@ fn parse_loopback_port(origin: &str) -> Option<u16> {
     Some(port as u16)
 }
 
+/// Publish the descriptor with a freshly minted bearer credential.
+///
+/// Secure-by-default: mints a real `DaemonAuth` credential via the existing
+/// same-crate API and delegates to `publish_backend_descriptor_with_auth`.
+/// Mint failure maps to `DaemonError::Descriptor` without leaking entropy
+/// source details. The returned descriptor is immediately consumable by
+/// `read_backend_descriptor`; legacy empty-token descriptors read from disk
+/// are still refused by the reader.
 pub fn publish_backend_descriptor(
     data_dir: impl AsRef<Path>,
     address: SocketAddr,
 ) -> Result<BackendDescriptor> {
-    publish_backend_descriptor_with_auth(data_dir, address, String::new())
+    let credential = crate::daemon_auth::DaemonAuth::mint().map_err(|_| {
+        DaemonError::Descriptor("cannot mint daemon bearer credential".to_owned())
+    })?;
+    publish_backend_descriptor_with_auth(data_dir, address, credential.token().to_owned())
 }
 
-/// Publish the descriptor with the daemon's bearer token. Empty token marks
-/// a legacy descriptor: `DaemonAuth::from_published` rejects it, so readers
-/// treat it as stale.
+/// Publish the descriptor with the daemon's bearer token. Callers that
+/// already hold their minted credential pass it here. Empty or malformed
+/// tokens still publish a descriptor that authenticated readers refuse, so
+/// they must never be used for fresh publication; use
+/// `publish_backend_descriptor` (which mints) instead.
 pub fn publish_backend_descriptor_with_auth(
     data_dir: impl AsRef<Path>,
     address: SocketAddr,
