@@ -1031,9 +1031,10 @@
       "status": "completed"
     },
     "WEB-006": {
+      "blockedNote": "Frozen web_singleton_runtime RED: bearer-less /api/sessions POST gets 401 (test predates RC-01 auth); fix owned by test/server files. See worklog/WEB-006.md.",
       "scratchpad": "worklog/WEB-006.md",
       "session": "ses_f38410948ffesMjSnHQZ0q4bdz",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "WEB-009": {
       "blockedNote": "AppState has only sessions/catalog and frozen literal constructors; RuntimeWiring/EngineHandles have no live caller. Cross-file daemon composition required; focused tests already GREEN.",
