@@ -832,6 +832,12 @@
       "session": "ses_f389670a7ffeuc9N40EFR1AM4H",
       "status": "completed"
     },
+    "PROV-019": {
+      "completedNote": "GREEN 5/5 prov_019_request_profile T01-T05 zero test edits; cmd: rtk cargo test -p opencode-rk-providers --test prov_019_request_profile -- --test-threads=1",
+      "scratchpad": "worklog/PROV-019.md",
+      "session": "ses_f386f5b1fffeYqbqZ1uC13paZz",
+      "status": "completed"
+    },
     "PROV-022": {
       "completedNote": "GREEN 5/5 prov_022_auth_store T01-T05; zero impl/test edits; cmd: CARGO_BUILD_JOMS=1 cargo test -p opencode-rk-providers --test prov_022_auth_store",
       "scratchpad": "worklog/PROV-022.md",
