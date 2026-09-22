@@ -1043,9 +1043,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "GREEN shared runtime permit/session caller: frozen runtime_wiring_http 1/1 sha 5a2572d2; stream/activity 2/2 each; runtime_wiring 6/6; CLI build + readiness 1/1. Parent remains blocked: HTTP tool/policy/event/per-turn cancellation and durable references not fully shared.",
-      "scratchpad": "worklog/WEB-009-RUNTIME-INTEGRATION.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "compiling RED: runtime policy assertion fails at runtime_wiring_policy_http.rs:318; request-local OPENCODE_RK_TURN_TOOLS permits bash despite injected EnginePolicy::default_deny; test SHA256 5466ca14492dc6fd8405e1290cec73f0509e2a3821471014cd477d29957d216a",
+      "scratchpad": "worklog/WEB-009-POLICY-RED.md",
+      "session": "ses_f3768887affeJ07LIbxDfSkAOt",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
