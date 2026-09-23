@@ -1031,9 +1031,9 @@
       "status": "completed"
     },
     "UI-014": {
-      "blockedNote": "REJECT candidate hash 5338e5cf: include_str source-token scan can pass via comments/dead code and does not execute Composer keys, queue, interrupt, draft, event decoding, or PTY outcomes. Replacement must assert real callable/PTY behavior; see worklog/UI-014-RED-REVIEW.md.",
-      "scratchpad": "worklog/UI-014-RED-REVIEW.md",
-      "session": "ses_f33190dd5ffeuGqKCX2G7TGvVo",
+      "blockedNote": "Boundary audit blocked at 6be9c14: native loop lacks decoded-event seam, live native Composer, paste/focus decode, cancellable owned turn. Source-scan RED rejected. Prewire and behavioral/PTY sequence in worklog/UI-014-BEHAVIORAL-BOUNDARY.md. No product/test edits; heavy checks not run, host <1 GiB; 53 gate findings remain.",
+      "scratchpad": "worklog/UI-014-BEHAVIORAL-BOUNDARY.md",
+      "session": "ses_f32809283ffegTC3aHkt60t3RK",
       "status": "blocked"
     },
     "WEB-004": {
