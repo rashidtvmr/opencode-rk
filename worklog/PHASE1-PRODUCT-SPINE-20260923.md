@@ -50,3 +50,14 @@
 No candidate is integrated merely because it compiles or has isolated GREEN
 tests. The hard installed `oc2` journey in `docs/CONVERGENCE.md` remains the
 parent acceptance boundary.
+
+## Exact integrated structural gates
+
+At `680ea12`, after WEB-009 and UI-014 integration:
+
+- `python3 tools/convergence_gate.py`: blocked with the unchanged 80 findings.
+- `python3 tools/validate_repository.py`: protection fixtures pass, then the
+  unchanged backlog-exhaustion contract conflict reports 51 errors.
+
+No accepted flag, ownership source, frozen validator, evidence file, or policy
+was weakened to alter either result.
