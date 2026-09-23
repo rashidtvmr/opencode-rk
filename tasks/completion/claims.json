@@ -923,9 +923,9 @@
       "status": "completed"
     },
     "SESS-008": {
-      "blockedNote": "Authorized save.clone() test correction applied GREEN 5/5 in disposable harness (hash 1399460b...). Persist.rs module unwired in lib.rs \u2014 no `pub mod persist`; SessionService (lib.rs:332-869) does not reference persist::PersistentSessionStore. Real caller proof pending integrator wiring. Durable restart SQLite-owned by Storage/SessionService, not in scope.",
-      "scratchpad": "worklog/SESS-008-SAVE-TEST-CORRECTION.md",
-      "session": "ses_f32d3cd57ffeudkCVZIl43vEwO",
+      "blockedNote": "Caller audit: persist.rs is unwired state-only cache; SessionService uses Arc<Storage>. Wiring duplicates truth, lacks invalidation/bounds, and flush is non-durable. No valid public SessionService RED without inventing observability or durability. Controller must retire/decompose SESS-008/011; see worklog/SESS-008-CALLER-REVIEW.md. Gate blocked: 53 findings.",
+      "scratchpad": "worklog/SESS-008-CALLER-REVIEW.md",
+      "session": "ses_f32bf295effe9f16wtSPaJNIxT",
       "status": "blocked"
     },
     "SYNC-001": {
