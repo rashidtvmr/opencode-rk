@@ -1038,7 +1038,7 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "GREEN security 3/3 and native closure 5/5; sh -n; parent rpath/cross-arch/SBOM/signing remain",
+      "blockedNote": "Review corrections GREEN: quoted staged help; cleanup preserves backed rollback files on failed restoration. Parent rpath/cross-arch/SBOM/signing blockers remain.",
       "scratchpad": "worklog/TUI-011-INSTALLER-SECURITY-IMPL.md",
       "session": "ses_f32880ed8ffeQpIqPaYmzt0MQj",
       "status": "blocked"

@@ -66,7 +66,13 @@ cleanup() {
   if [ -n "$stage" ]; then
     rm -rf "$stage" 2>/dev/null || :
   fi
-  rm -f "$binary_tmp" "$native_tmp" "$binary_backup" "$native_backup" 2>/dev/null || :
+  rm -f "$binary_tmp" "$native_tmp" 2>/dev/null || :
+  if [ "$binary_backed" -eq 0 ]; then
+    rm -f "$binary_backup" 2>/dev/null || :
+  fi
+  if [ "$native_backed" -eq 0 ]; then
+    rm -f "$native_backup" 2>/dev/null || :
+  fi
 }
 
 rollback_install() {
@@ -281,7 +287,7 @@ case "$identity_out" in
     ;;
 esac
 
-help_out="$($src --help 2>&1)" || {
+help_out="$("$src" --help 2>&1)" || {
   echo "FAIL: staged binary --help failed; install unchanged" >&2
   exit 74
 }

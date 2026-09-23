@@ -13,3 +13,5 @@ Changes: reject destination symlink directories before creation/writes; uninstal
 Verification commands: `sh -n scripts/install-oc2.sh`; `python3 tests/bootstrap/test_tui011_installer_security.py`; `python3 tests/bootstrap/test_tui011_installer_native_closure.py`; hash checks.
 
 Blocked parent gaps: rpath, cross-architecture validation/production, SBOM/license closure, checksum provenance, signing/notarization.
+
+Review correction: staged help invocation is quoted as `"$src"`; `cleanup()` always removes destination temps, removes unused backup placeholders only when the matching `*_backed=0`, and preserves backed rollback files if restoration fails after `rollback_install` sets `transaction_active=0`.
