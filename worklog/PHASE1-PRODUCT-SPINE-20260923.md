@@ -57,7 +57,9 @@
   Authenticated embedded-bundle RED integrated at `2f06398` and deterministic
   production bundle rebuilt at `523c2e0`: embedded router 1/1, existing assets
   1/1, full web 49/49, and two builds byte-identical. Exact-artifact independent
-  verification is pending; branch-session activity unification remains blocked.
+  verification integrated at `69174ef` with no defect: one same-origin module,
+  509255-byte JS under the 2 MiB cap, no stale assets/maps/secret-looking bytes.
+  Branch-session activity unification remains the local blocker.
 - PROV-023 runtime catalog RED integrated at `896103a`: frozen test SHA-256
   `f74dba4c600c89f59d011fff0361ef6d5be1925d113ac750b7897889b1d57e95`.
   Its public request-path case compiles and fails because Google is documented
