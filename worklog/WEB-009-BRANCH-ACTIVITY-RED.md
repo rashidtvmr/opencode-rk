@@ -71,6 +71,26 @@ Blocked on two upstream bugs outside lane scope:
 
 This is a partial blocked commit, not completion. The branch_v2.rs changes (V2Writer delegation, list_assistant_activity decoder with duplicate/failure-closed/malformed guards, message filtering) are complete and self-contained, but integration cannot achieve GREEN until writer_v2.rs and lib.rs are fixed by their respective owners.
 
+## Final branch-activity implementation lane
+
+- Preflight: exact worktree path, HEAD `95cf7aa7db28c7eb5f0ab27e297b26b2fba87eda`, branch `lane/WEB-009-branch-activity`; only pre-existing orchestrator claim-reclaim change in `tasks/completion/claims.json` before claim.
+- Frozen RED SHA-256 rechecked: `23f591fcb7d2990a60aabc23a9b5f9677e9e46974ce7a89fccc1db88551a0872` at `crates/sessions/tests/web009_branch_activity_red.rs`.
+- Claim: `WEB-009` claimed by actual session `ses_f30a1e05fffe7ez8qdKQEi88tZ`; scratchpad is this file. Ledger status `in-progress`.
+- Required source boundary: only `crates/sessions/src/lib.rs` plus this scratchpad and the `WEB-009` claims row may change. No test, `branch_v2.rs`, storage, server, verifier, policy, or controller edits.
+- Source evidence: `crates/sessions/src/lib.rs:492-542` validates reasoning-summary bytes before routing, rejects branch tool/reference activity at `:509-515`, and otherwise delegates branch reasoning at `:516-519`; `crates/sessions/src/branch_v2.rs:305-337` already exposes `SessionManager::append_fork_assistant_with_activity`, moving all activity parts into one `V2Writer::append_message_with_activity`; `lib.rs:921-929` supplies the existing `run_session_blocking` spawn-blocking boundary and `SessionError` mapping.
+- Required implementation: remove only the branch blanket guard; call the landed manager activity method inside `run_session_blocking`, moving `text`, `reasoning_summary`, `tool_calls`, and `references` into the closure. Retain pre-validation before lookup/write and one append only.
+- Expected validation state: manager/V2Writer performs tool/reference validation before transaction; malformed/over-bound branch activity must leave message count/order unchanged. Reasoning summary bound remains checked in service before manager lookup.
+- Remaining parent boundary: this lane proves branch activity only. Parent WEB-009 remains blocked/not accepted while real external provider/browser evidence and any unresolved production tool/reference producer/accessibility evidence remain.
+
+## Final GREEN evidence
+
+- `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-sessions --test web009_branch_activity_red -- --test-threads=1` => 3 passed, 0 failed. Frozen SHA unchanged.
+- `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-sessions --test web_activity_branch -- --test-threads=1` => 1 passed, 0 failed.
+- `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-sessions --lib -- --test-threads=1` => exit 0.
+- `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test web009_embedded_activity_red -- --test-threads=1` => 1 passed, 0 failed.
+- `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test web009_durable_persistence_red -- --test-threads=1` => 1 passed, 0 failed.
+- No cargo fmt run. No test edits. `git diff --check` passed. Changed paths: `crates/sessions/src/lib.rs`, this scratchpad, `tasks/completion/claims.json` only.
+
 ## Repair lane (writer_v2.rs BLOB fix)
 - Session: `ses_f30a8238effeCQCXu3Yq25LsTJ`
 - HEAD: `90f6b245b66f2fb8fabf35210b3965eee2263788`

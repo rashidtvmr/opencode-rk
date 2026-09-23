@@ -1084,10 +1084,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "BLOB fix writer_v2.rs to_vec+as_slice green: storage lib 122/122, writer_v2 10/10, web_activity_branch 1/1. frozen web009 2pass/1fail; sole fail child_append red.rs:142 via Contract guard sessions/src/lib.rs:509-519",
+      "completedNote": "Branch activity GREEN: frozen web009_branch_activity_red 3/3, web_activity_branch 1/1, sessions lib exit 0, embedded activity 1/1, durable persistence 1/1; only lib.rs changed; parent remains blocked for external provider/browser evidence.",
       "scratchpad": "worklog/WEB-009-BRANCH-ACTIVITY-RED.md",
-      "session": "ses_f30a8238effeCQCXu3Yq25LsTJ",
-      "status": "blocked"
+      "session": "ses_f30a1e05fffe7ez8qdKQEi88tZ",
+      "status": "completed"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
