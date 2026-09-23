@@ -1060,9 +1060,9 @@
       "status": "blocked"
     },
     "UI-014": {
-      "blockedNote": "Frozen real-binary RED: ui014_turn_worker_pty.rs SHA-256 813e12181951bdb8967eba8b2b1c9dd1b97672e43a7b26e0b57f20475903f214; standalone oc2 run exit 101, 0 passed/1 failed, missing async input ownership (before=1, final records=2, max_active=1). Native Cargo artifact blocker tracked separately by TUI-011.",
+      "blockedNote": "tui_entry lane source checks and standalone frozen PTY GREEN; orchestrator integration/native acceptance pending",
       "scratchpad": "worklog/UI-014-TURN-WORKER-PTY-RED.md",
-      "session": "ses_f308d04f2ffeyW7O602eMLxyFe",
+      "session": "ses_f30b58505ffeVJpOClhFDfjOoP",
       "status": "blocked"
     },
     "WEB-004": {

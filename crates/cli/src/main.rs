@@ -51,6 +51,7 @@ mod pair;
 mod service_commands;
 mod shutdown;
 mod terminal_host;
+mod turn_worker;
 mod themes;
 mod title;
 mod transcript;
@@ -252,9 +253,9 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             submit_keymap: None,
                             memory: vec![],
                         };
-                        tui_entry::run_with_dir(args, Some(&data))?;
+                        tui_entry::run_with_dir(args, Some(&data)).await?;
                     } else {
-                        chat::run(&data)?;
+                        chat::run(&data).await?;
                     }
                 }
                 app_start::LaunchMode::Headless(reason) => {
@@ -296,7 +297,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             } else {
                 None
             };
-            tui_entry::run_with_dir(args, Some(&data))?;
+            tui_entry::run_with_dir(args, Some(&data)).await?;
             drop(lease);
         }
         Some(Command::Run(args)) => {

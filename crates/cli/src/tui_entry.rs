@@ -15,15 +15,17 @@
 //! mode and degrades to an explicit offline banner interactively; live data is
 //! never fabricated.
 
-use clap::{Args, ValueEnum};
-use opencode_rk_sessions::tui_state::{
-    context_breakdown, footer_hints, keybinding_help, status_click, Composer, MemoryFile,
-    MemoryViewer, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES,
-    MAX_SOURCES,
-};
 use crate::daemon_client;
+use crate::turn_worker::{
+    InterruptResult, SubmitError, TurnRequest, TurnResult, TurnWorker, TurnWorkerHandle,
+};
+use clap::{Args, ValueEnum};
 #[cfg(feature = "native")]
 use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
+use opencode_rk_sessions::tui_state::{
+    context_breakdown, footer_hints, keybinding_help, status_click, MemoryFile, MemoryViewer,
+    SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES, MAX_SOURCES,
+};
 use std::{
     env, fs,
     io::{BufRead, IsTerminal as _, Read, Write},
@@ -31,6 +33,7 @@ use std::{
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc;
 
 /// Bounded body cap for daemon responses (1 MiB).
 const LIVE_MAX_BODY_BYTES: u64 = 1_048_576;
@@ -163,7 +166,12 @@ fn http_request(
         .map_err(|e| format!("daemon unreachable at {origin}: {e}"))?;
     let payload = body.unwrap_or("");
     let auth_line = auth
-        .map(|token| format!("Authorization: {}\r\n", crate::daemon_client::authorization_header(token)))
+        .map(|token| {
+            format!(
+                "Authorization: {}\r\n",
+                crate::daemon_client::authorization_header(token)
+            )
+        })
         .unwrap_or_default();
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {origin}\r\n{auth_line}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
@@ -376,38 +384,110 @@ fn status_hint(action: StatusAction) -> &'static str {
     }
 }
 
-/// Execute a submitted draft through the real daemon turn endpoint. This is
-/// deliberately not the append-message route: a TUI submit must exercise the
-/// same provider/tool/session pipeline as headless and web clients.
-fn execute_submit(
+/// Build a submitted draft for the real daemon turn endpoint. Dispatch stays
+/// in [`TurnWorker`], so callers remain responsive while the provider runs.
+fn turn_request(
     snapshot: &LiveSnapshot,
     text: &str,
     model: &str,
     reasoning_effort: &str,
     auth: Option<&str>,
-) -> Result<String, String> {
-    let payload = serde_json::json!({
-        "text": text,
-        "model": model,
-        "reasoning_effort": reasoning_effort,
-    })
-    .to_string();
-    let body = http_request(
-        &snapshot.origin,
-        "POST",
-        &format!("/api/sessions/{}/turns", snapshot.session_id),
-        Some(&payload),
-        auth,
-    )?;
-    let value: serde_json::Value = serde_json::from_str(&body)
-        .map_err(|e| format!("daemon turn response is not valid JSON: {e}"))?;
-    value
-        .get("assistant_message")
-        .and_then(|message| message.get("body"))
-        .and_then(|body| body.get("text"))
-        .and_then(serde_json::Value::as_str)
+) -> Result<TurnRequest, String> {
+    let bearer = auth
         .map(str::to_owned)
-        .ok_or_else(|| "daemon turn response is missing assistant_message.body.text".to_string())
+        .ok_or_else(|| "missing daemon credential: refusing turn".to_owned())?;
+    TurnRequest::new(
+        format!(
+            "{}/api/sessions/{}/turns",
+            snapshot.origin, snapshot.session_id
+        ),
+        snapshot.session_id.clone(),
+        text.to_owned(),
+        model.to_owned(),
+        reasoning_effort.to_owned(),
+        Some(bearer),
+    )
+    .map_err(|error| error.to_string())
+}
+
+async fn fetch_snapshot_async(
+    origin: &str,
+    session: Option<&str>,
+    auth: Option<&str>,
+) -> Result<LiveSnapshot, String> {
+    let origin = origin.to_owned();
+    let session = session.map(str::to_owned);
+    let auth = auth.map(str::to_owned);
+    tokio::task::spawn_blocking(move || {
+        fetch_snapshot(&origin, session.as_deref(), auth.as_deref())
+    })
+    .await
+    .map_err(|_| "live snapshot task failed".to_owned())?
+}
+
+async fn submit_request(
+    worker: &TurnWorkerHandle,
+    mut request: TurnRequest,
+) -> Result<(), SubmitError> {
+    loop {
+        match worker.try_submit(request) {
+            Ok(()) => return Ok(()),
+            Err(SubmitError::Busy(next)) | Err(SubmitError::Full(next)) => {
+                request = next;
+                tokio::task::yield_now().await;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn read_stdin_byte(
+    stdin: &tokio::io::unix::AsyncFd<std::io::Stdin>,
+) -> std::io::Result<Option<u8>> {
+    loop {
+        let mut guard = stdin.readable().await?;
+        match guard.try_io(|inner| {
+            let mut byte = [0_u8; 1];
+            inner.get_ref().read(&mut byte).map(
+                |count| {
+                    if count == 0 {
+                        None
+                    } else {
+                        Some(byte[0])
+                    }
+                },
+            )
+        }) {
+            Ok(result) => return result,
+            Err(_) => continue,
+        }
+    }
+}
+
+#[cfg(unix)]
+async fn read_stdin_line(
+    stdin: &tokio::io::unix::AsyncFd<std::io::Stdin>,
+    buffer: &mut Vec<u8>,
+) -> std::io::Result<Option<String>> {
+    loop {
+        if let Some(index) = buffer.iter().position(|byte| *byte == b'\n') {
+            let line = buffer.drain(..=index).collect::<Vec<_>>();
+            return String::from_utf8(line)
+                .map(|line| Some(line.trim_end_matches(['\r', '\n']).to_owned()))
+                .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error));
+        }
+        match read_stdin_byte(stdin).await? {
+            Some(byte) => buffer.push(byte),
+            None if buffer.is_empty() => return Ok(None),
+            None => {
+                let line = std::mem::take(buffer);
+                return String::from_utf8(line)
+                    .map(Some)
+                    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error));
+            }
+        }
+    }
 }
 
 #[cfg(feature = "native")]
@@ -616,24 +696,28 @@ fn native_page_lines(
             }
             lines.push("─".repeat(width.min(120)));
             lines.push(format!("> {draft}"));
-            lines.push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context");
+            lines.push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context".to_owned());
         }
         NativePage::Palette => {
             lines.push("Command palette".to_string());
-            lines.extend([
-                "  /new           New session",
-                "  /sessions      Switch/list sessions",
-                "  /model         Switch model",
-                "  /agents        Switch agent",
-                "  /mcps          MCP controls",
-                "  /status        Status",
-                "  /themes        Theme",
-                "  /fork          Fork session",
-                "  /undo /redo    Session history actions",
-                "  /share         Share session",
-                "  /export        Export transcript",
-                "  Esc            Back to chat",
-            ].into_iter().map(str::to_string));
+            lines.extend(
+                [
+                    "  /new           New session",
+                    "  /sessions      Switch/list sessions",
+                    "  /model         Switch model",
+                    "  /agents        Switch agent",
+                    "  /mcps          MCP controls",
+                    "  /status        Status",
+                    "  /themes        Theme",
+                    "  /fork          Fork session",
+                    "  /undo /redo    Session history actions",
+                    "  /share         Share session",
+                    "  /export        Export transcript",
+                    "  Esc            Back to chat",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            );
         }
         NativePage::Context => {
             lines.push("Context / status".to_string());
@@ -645,20 +729,26 @@ fn native_page_lines(
             } else {
                 lines.push("daemon: offline".to_string());
             }
-            lines.push("Usage and source-level context populate from live provider events.".to_string());
+            lines.push(
+                "Usage and source-level context populate from live provider events.".to_string(),
+            );
             lines.push("Esc returns to chat.".to_string());
         }
         NativePage::Help => {
             lines.push("Keyboard help".to_string());
-            lines.extend([
-                "Enter        submit current draft",
-                "Backspace    delete previous character",
-                "Ctrl+P       command palette",
-                "Ctrl+T       context/status page",
-                "?            help",
-                "Esc          close page",
-                "Ctrl+C       quit and restore terminal",
-            ].into_iter().map(str::to_string));
+            lines.extend(
+                [
+                    "Enter        submit current draft",
+                    "Backspace    delete previous character",
+                    "Ctrl+P       command palette",
+                    "Ctrl+T       context/status page",
+                    "?            help",
+                    "Esc          close page",
+                    "Ctrl+C       quit and restore terminal",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            );
         }
     }
     lines.truncate(height);
@@ -689,37 +779,32 @@ fn paint_native(
     Ok(())
 }
 
-#[cfg(feature = "native")]
-fn submit_native_text(
-    composer: &mut crate::native_composer::Composer,
-    transcript: &mut Vec<String>,
-    host: &mut crate::native_host::NativeHost,
-    live: Option<&LiveSnapshot>,
-    text: &str,
-    model: &str,
-    reasoning_effort: &str,
-    auth: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    transcript.push(format!("you: {text}"));
-    let _ = host.step(crate::native_host::HostEvent::Submit(text.to_owned()));
-    match live {
-        Some(snapshot) => match execute_submit(snapshot, text, model, reasoning_effort, auth) {
-            Ok(reply) => transcript.push(format!("assistant: {reply}")),
-            Err(error) => transcript.push(format!("error: {error}")),
-        },
-        None => transcript.push("offline: turn not executed".to_string()),
-    }
-    let _ = native_composer_step(composer, NativeInputEvent::TurnFinished)?;
+fn spawn_byte_input() -> (
+    mpsc::Receiver<Result<u8, String>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (input_tx, input_rx) = mpsc::channel(64);
+    let task = tokio::task::spawn_blocking(move || {
+        let stdin = std::io::stdin();
+        for byte in stdin.lock().bytes() {
+            let byte = byte.map_err(|error| error.to_string());
+            if input_tx.blocking_send(byte).is_err() {
+                break;
+            }
+        }
+    });
+    (input_rx, task)
+}
+
+fn trim_native_transcript(transcript: &mut Vec<String>) {
     const MAX_NATIVE_TRANSCRIPT: usize = 500;
     if transcript.len() > MAX_NATIVE_TRANSCRIPT {
-        let drop_count = transcript.len() - MAX_NATIVE_TRANSCRIPT;
-        transcript.drain(..drop_count);
+        transcript.drain(..transcript.len() - MAX_NATIVE_TRANSCRIPT);
     }
-    Ok(())
 }
 
 #[cfg(feature = "native")]
-fn native_interactive_loop(
+async fn native_interactive_loop(
     keymap: SubmitKeymap,
     memory: &[MemoryFile],
     live: Option<&LiveSnapshot>,
@@ -727,8 +812,6 @@ fn native_interactive_loop(
     reasoning_effort: &str,
     auth: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    use std::io::Read as _;
-
     let (cols, rows) = native_terminal_size();
     let mut host = crate::native_host::NativeHost::new(crate::native_host::HostConfig {
         cols: cols.min(u32::from(u16::MAX)) as u16,
@@ -757,10 +840,13 @@ fn native_interactive_loop(
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
     let mut current_size = (cols, rows);
-    let mut stdin = std::io::stdin();
-    let mut byte = [0u8; 1];
+    let (mut input, input_task) = spawn_byte_input();
+    let client = reqwest::Client::builder().build()?;
+    let (worker, handle, mut results) = TurnWorker::start(client);
+    let mut active = false;
+    let mut exiting = false;
 
-    loop {
+    'event_loop: loop {
         let size = native_terminal_size();
         if size != current_size {
             current_size = size;
@@ -781,14 +867,15 @@ fn native_interactive_loop(
         );
         paint_native(&mut renderer, &lines)?;
 
-        let read = stdin.read(&mut byte)?;
-        if read == 0 {
-            break;
-        }
-        match byte[0] {
+        tokio::select! {
+            byte = input.recv() => {
+                let Some(byte) = byte else { break 'event_loop };
+                let byte = byte?;
+                match byte {
             3 | 4 => {
                 let _ = host.step(crate::native_host::HostEvent::Key('\x03'));
-                break;
+                if active { let _ = handle.interrupt(); }
+                exiting = true;
             }
             b'\t' => {
                 let _ = host.step(crate::native_host::HostEvent::Key('\t'));
@@ -804,7 +891,7 @@ fn native_interactive_loop(
                 let _ = native_composer_step(
                     &mut composer,
                     NativeInputEvent::Key {
-                        code: u32::from(byte[0]),
+                        code: u32::from(byte),
                         ctrl: false,
                         alt: false,
                         shift: false,
@@ -813,23 +900,35 @@ fn native_interactive_loop(
             }
             b'\r' | b'\n' if page == NativePage::Chat => {
                 let event = NativeInputEvent::Key {
-                    code: u32::from(byte[0]),
-                    ctrl: byte[0] == b'\n',
+                        code: u32::from(byte),
+                        ctrl: byte == b'\n',
                     alt: false,
                     shift: false,
                 };
                 let action = native_composer_step(&mut composer, event)?;
                 if let NativeComposerAction::Submitted { text } = action {
-                    submit_native_text(
-                        &mut composer,
-                        &mut transcript,
-                        &mut host,
-                        live,
-                        &text,
-                        model,
-                        reasoning_effort,
-                        auth,
-                    )?;
+                    transcript.push(format!("you: {text}"));
+                    let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
+                    if let Some(snapshot) = live {
+                        let request = turn_request(
+                            snapshot,
+                            &text,
+                            model,
+                            reasoning_effort,
+                            auth,
+                        )?;
+                        match submit_request(&handle, request).await {
+                            Ok(()) => active = true,
+                            Err(error) => {
+                                composer.interrupt();
+                                transcript.push(format!("error: {error}"));
+                            }
+                        }
+                    } else {
+                        transcript.push("offline: turn not executed".to_string());
+                        let _ = composer.finish_turn();
+                    }
+                    trim_native_transcript(&mut transcript);
                 }
             }
             b if page == NativePage::Chat && (0x20..0x80).contains(&b) => {
@@ -845,8 +944,58 @@ fn native_interactive_loop(
             }
             _ => {}
         }
+                if exiting { break 'event_loop; }
+            }
+            result = results.recv(), if active => {
+                let Some(result) = result else { break 'event_loop };
+                active = false;
+                let dispatch_next = matches!(result, TurnResult::Completed { .. });
+                match result {
+                    TurnResult::Completed { output } => transcript.push(format!("assistant: {output}")),
+                    TurnResult::Failed(error) => transcript.push(format!("error: {error}")),
+                    TurnResult::Cancelled => {
+                        composer.interrupt();
+                        transcript.push("cancelled; draft preserved".to_string());
+                    }
+                    TurnResult::Uncertain => {
+                        composer.interrupt();
+                        transcript.push("uncertain; replay denied".to_string());
+                    }
+                }
+                trim_native_transcript(&mut transcript);
+                if dispatch_next {
+                    if let Some(next) = composer.finish_turn() {
+                        transcript.push(format!("you: {next}"));
+                        if let Some(snapshot) = live {
+                            let request = turn_request(
+                                snapshot,
+                                &next,
+                                model,
+                                reasoning_effort,
+                                auth,
+                            )?;
+                            match submit_request(&handle, request).await {
+                                Ok(()) => active = true,
+                                Err(error) => {
+                                    composer.interrupt();
+                                    transcript.push(format!("error: {error}"));
+                                }
+                            }
+                        }
+                        trim_native_transcript(&mut transcript);
+                    }
+                }
+            }
+        }
     }
 
+    input_task.abort();
+    if active {
+        let _ = handle.interrupt();
+        let _ = tokio::time::timeout(Duration::from_secs(2), results.recv()).await;
+    }
+    worker.shutdown().await?;
+    tokio::time::sleep(Duration::from_millis(100)).await;
     let _ = renderer.disable_mouse();
     let _ = renderer.disable_kitty_keyboard();
     let _ = renderer.restore_terminal_modes();
@@ -859,7 +1008,7 @@ fn native_interactive_loop(
 /// memory pane, `:ctx` renders the context detail view, `:q` quits, EOF quits.
 /// When bound to a daemon, submits persist via POST /messages; offline mode
 /// marks every submit explicitly as not persisted.
-fn interactive_loop(
+async fn interactive_loop(
     keymap: SubmitKeymap,
     memory: &[MemoryFile],
     live: Option<&LiveSnapshot>,
@@ -867,56 +1016,117 @@ fn interactive_loop(
     reasoning_effort: &str,
     auth: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    let stdin = std::io::stdin();
-    let mut lines = stdin.lock().lines();
-    let mut composer = Composer::new();
+    let client = reqwest::Client::builder().build()?;
+    let (worker, handle, mut results) = TurnWorker::start(client);
+    #[cfg(unix)]
+    let stdin = tokio::io::unix::AsyncFd::new(std::io::stdin())?;
+    let mut input_buffer = Vec::new();
+    let mut composer = crate::native_composer::Composer::new();
     let viewer = MemoryViewer::new(memory.to_vec());
     print!("{}", render_frame(keymap, memory, model, live));
-    loop {
-        let Some(line) = lines.next() else { break };
-        let line = line?;
-        match line.trim() {
-            ":q" | ":quit" => break,
-            "?" => println!("{}", keybinding_help(keymap)),
-            ":i" => {
-                composer.interrupt();
-                println!("[interrupted; draft preserved: {:?}]", composer.draft());
+    let mut active = false;
+    let mut exiting = false;
+    'event_loop: loop {
+        tokio::select! {
+            line = read_stdin_line(&stdin, &mut input_buffer) => {
+                let Some(line) = line? else { break 'event_loop };
+                match line.trim() {
+                    ":q" | ":quit" => {
+                        if active {
+                            let _ = handle.interrupt();
+                        }
+                        exiting = true;
+                    }
+                    "?" => println!("{}", keybinding_help(keymap)),
+                    ":i" => {
+                        composer.interrupt();
+                        let interrupt = handle.interrupt();
+                        if active || interrupt == InterruptResult::Requested {
+                            println!("[interrupt requested; draft preserved: {:?}]", composer.draft());
+                        } else {
+                            println!("[interrupted; draft preserved: {:?}]", composer.draft());
+                        }
+                    }
+                    ":m" => print!("{}", render_memory(viewer.list())),
+                    ":ctx" => println!("{}", render_context_detail(Vec::new())),
+                    "" => {}
+                    text => {
+                        composer.set_draft(text)?;
+                        match composer.submit() {
+                            Ok(crate::native_composer::SubmitOutcome::Sent(sent)) => {
+                                println!("you: {sent}");
+                                match live {
+                                    Some(snapshot) => {
+                                        let request = turn_request(
+                                            snapshot,
+                                            &sent,
+                                            model,
+                                            reasoning_effort,
+                                            auth,
+                                        )?;
+                                        match submit_request(&handle, request).await {
+                                            Ok(()) => active = true,
+                                            Err(error) => {
+                                                composer.interrupt();
+                                                println!("[error] turn failed: {error}");
+                                            }
+                                        }
+                                    }
+                                    None => {
+                                        println!("[offline: turn not executed; pass --origin to bind a daemon]");
+                                        let _ = composer.finish_turn();
+                                    }
+                                }
+                            }
+                            Ok(crate::native_composer::SubmitOutcome::Queued) => {
+                                println!("[queued] {text}");
+                            }
+                            Err(e) => println!("[error] {e}"),
+                        }
+                    }
+                }
+                if exiting { break 'event_loop; }
             }
-            ":m" => print!("{}", render_memory(viewer.list())),
-            ":ctx" => println!("{}", render_context_detail(Vec::new())),
-            "" => {}
-            text => {
-                composer.set_draft(text)?;
-                match composer.submit() {
-                    Ok(opencode_rk_sessions::tui_state::SubmitOutcome::Sent(sent)) => {
-                        println!("you: {sent}");
-                        match live {
-                            Some(snapshot) => match execute_submit(
+            result = results.recv(), if active => {
+                let Some(result) = result else { break 'event_loop };
+                active = false;
+                let dispatch_next = matches!(result, TurnResult::Completed { .. });
+                match result {
+                    TurnResult::Completed { output } => println!("assistant: {output}"),
+                    TurnResult::Failed(error) => println!("[error] turn failed: {error}"),
+                    TurnResult::Cancelled => println!("[interrupted; draft preserved: {:?}]", composer.draft()),
+                    TurnResult::Uncertain => println!("[uncertain; draft preserved: {:?}; replay denied]", composer.draft()),
+                }
+                if dispatch_next {
+                    if let Some(next) = composer.finish_turn() {
+                        println!("you: {next}");
+                        if let Some(snapshot) = live {
+                            let request = turn_request(
                                 snapshot,
-                                &sent,
+                                &next,
                                 model,
                                 reasoning_effort,
                                 auth,
-                            ) {
-                                Ok(reply) => println!("assistant: {reply}"),
-                                Err(error) => println!("[error] turn failed: {error}"),
-                            },
-                            None => {
-                                println!("[offline: turn not executed; pass --origin to bind a daemon]")
+                            )?;
+                            match submit_request(&handle, request).await {
+                                Ok(()) => active = true,
+                                Err(error) => {
+                                    composer.interrupt();
+                                    println!("[error] turn failed: {error}");
+                                }
                             }
                         }
-                        while let Some(next) = composer.finish_turn() {
-                            println!("you: {next}");
-                        }
                     }
-                    Ok(opencode_rk_sessions::tui_state::SubmitOutcome::Queued) => {
-                        println!("[queued] {text}");
-                    }
-                    Err(e) => println!("[error] {e}"),
                 }
             }
         }
     }
+    if active {
+        let _ = handle.interrupt();
+        let _ = tokio::time::timeout(Duration::from_secs(2), results.recv()).await;
+    }
+    worker.shutdown().await?;
+    tokio::time::sleep(Duration::from_millis(100)).await;
     Ok(())
 }
 
@@ -924,7 +1134,7 @@ fn interactive_loop(
 /// `follow_for` seconds when bounded. Every poll is a fresh bounded fetch;
 /// nothing accumulates between polls. Poll errors degrade to an offline line
 /// and keep polling until the bound expires.
-fn follow_loop(
+async fn follow_loop(
     origin: &str,
     session: Option<&str>,
     poll_ms: u64,
@@ -935,7 +1145,7 @@ fn follow_loop(
     let deadline = follow_for_secs.map(|secs| Instant::now() + Duration::from_secs(secs));
     let mut fingerprint = String::new();
     loop {
-        match fetch_snapshot(origin, session, auth) {
+        match fetch_snapshot_async(origin, session, auth).await {
             Ok(snapshot) => {
                 let mark = format!(
                     "{}|{}|{}|{}|{}",
@@ -962,7 +1172,7 @@ fn follow_loop(
                 return Ok(());
             }
         }
-        std::thread::sleep(poll);
+        tokio::time::sleep(poll).await;
     }
 }
 
@@ -971,20 +1181,30 @@ fn follow_loop(
 /// Bearer comes from the validated backend descriptor when `--origin` names
 /// the daemon's own origin; otherwise requests fail closed (offline banner
 /// interactively, error in `--once`/`--follow`).
-pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
-    run_with_dir(args, None)
+pub async fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
+    run_with_dir(args, None).await
 }
 
 /// Same as [`run`] but honors an explicit data-dir from the caller (e.g. the
 /// global `--data-dir` resolved in `main.rs`). `None` falls back to
 /// [`resolve_cli_data_dir`] exactly as before.
-pub fn run_with_dir(
+pub async fn run_with_dir(
     args: TuiArgs,
     data_dir: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let keymap = resolve_keymap(args.submit_keymap)
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let memory = load_memory(&args.memory);
+    // `main` may attach the default daemon origin before entering this
+    // module. An origin-less snapshot is still a local startup frame: it must
+    // not probe `/api`, require a descriptor, or require a session.
+    if args.once && !origin_was_explicit() {
+        print!(
+            "{}",
+            print_native_or_legacy(&render_frame(keymap, &memory, &args.model, None))
+        );
+        return Ok(());
+    }
     let auth_owned = resolve_origin_bearer(args.origin.as_deref(), data_dir);
     let auth = auth_owned.as_deref();
     if args.follow {
@@ -997,10 +1217,11 @@ pub fn run_with_dir(
             args.poll_ms,
             args.follow_for,
             auth,
-        );
+        )
+        .await;
     }
     if let Some(origin) = &args.origin {
-        match fetch_snapshot(origin, args.session.as_deref(), auth) {
+        match fetch_snapshot_async(origin, args.session.as_deref(), auth).await {
             Ok(snapshot) => {
                 if args.once {
                     let frame = render_frame(keymap, &memory, &args.model, Some(&snapshot));
@@ -1016,7 +1237,8 @@ pub fn run_with_dir(
                         &args.model,
                         &args.reasoning_effort,
                         auth,
-                    );
+                    )
+                    .await;
                 }
                 #[cfg(not(feature = "native"))]
                 {
@@ -1027,7 +1249,8 @@ pub fn run_with_dir(
                         &args.model,
                         &args.reasoning_effort,
                         auth,
-                    );
+                    )
+                    .await;
                 }
             }
             Err(error) => {
@@ -1039,7 +1262,10 @@ pub fn run_with_dir(
             }
         }
     } else if args.once {
-        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, &args.model, None)));
+        print!(
+            "{}",
+            print_native_or_legacy(&render_frame(keymap, &memory, &args.model, None))
+        );
         return Ok(());
     }
     if !std::io::stdin().is_terminal() {
@@ -1062,6 +1288,7 @@ pub fn run_with_dir(
             &args.reasoning_effort,
             auth,
         )
+        .await
     }
     #[cfg(not(feature = "native"))]
     {
@@ -1073,7 +1300,15 @@ pub fn run_with_dir(
             &args.reasoning_effort,
             auth,
         )
+        .await
     }
+}
+
+fn origin_was_explicit() -> bool {
+    env::args_os().skip(1).any(|argument| {
+        let argument = argument.to_string_lossy();
+        argument == "--origin" || argument.starts_with("--origin=")
+    })
 }
 
 /// Resolve the raw bearer token for `--origin` from the validated backend
@@ -1090,8 +1325,7 @@ fn resolve_origin_bearer(origin: Option<&str>, data_dir: Option<&Path>) -> Optio
             &owned
         }
     };
-    let descriptor =
-        opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
+    let descriptor = opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
     if descriptor.http_origin != origin {
         return None;
     }
