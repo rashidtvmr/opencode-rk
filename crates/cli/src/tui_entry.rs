@@ -670,8 +670,8 @@ fn native_page_lines(
     let height = height.max(8);
     let mut lines = Vec::new();
     let title = snapshot
-        .map(|s| format!("OpenCode RK — {}", s.title))
-        .unwrap_or_else(|| "OpenCode RK — offline".to_string());
+        .map(|s| format!("OpenCode RK TUI — {}", s.title))
+        .unwrap_or_else(|| "OpenCode RK TUI — offline".to_string());
     lines.push(title);
     lines.push(format!(
         "model: {model}  |  Ctrl+P palette  Ctrl+T context  ? help  Ctrl+C quit"
@@ -779,6 +779,69 @@ fn paint_native(
     Ok(())
 }
 
+#[cfg(unix)]
+struct AsyncStdin {
+    fd: tokio::io::unix::AsyncFd<std::io::Stdin>,
+    original_flags: rustix::fs::OFlags,
+}
+
+#[cfg(unix)]
+impl AsyncStdin {
+    fn new() -> std::io::Result<Self> {
+        let stdin = std::io::stdin();
+        let original_flags = rustix::fs::fcntl_getfl(&stdin)?;
+        rustix::fs::fcntl_setfl(&stdin, original_flags | rustix::fs::OFlags::NONBLOCK)?;
+        match tokio::io::unix::AsyncFd::new(stdin) {
+            Ok(fd) => Ok(Self { fd, original_flags }),
+            Err(error) => {
+                let stdin = std::io::stdin();
+                let _ = rustix::fs::fcntl_setfl(&stdin, original_flags);
+                Err(error)
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for AsyncStdin {
+    fn drop(&mut self) {
+        let _ = rustix::fs::fcntl_setfl(self.fd.get_ref(), self.original_flags);
+    }
+}
+
+#[cfg(unix)]
+fn spawn_byte_input() -> (
+    mpsc::Receiver<Result<u8, String>>,
+    tokio::task::JoinHandle<()>,
+) {
+    let (input_tx, input_rx) = mpsc::channel(64);
+    let task = tokio::spawn(async move {
+        let stdin = match AsyncStdin::new() {
+            Ok(stdin) => stdin,
+            Err(error) => {
+                let _ = input_tx.send(Err(error.to_string())).await;
+                return;
+            }
+        };
+        loop {
+            match read_stdin_byte(&stdin.fd).await {
+                Ok(Some(byte)) => {
+                    if input_tx.send(Ok(byte)).await.is_err() {
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(error) => {
+                    let _ = input_tx.send(Err(error.to_string())).await;
+                    break;
+                }
+            }
+        }
+    });
+    (input_rx, task)
+}
+
+#[cfg(not(unix))]
 fn spawn_byte_input() -> (
     mpsc::Receiver<Result<u8, String>>,
     tokio::task::JoinHandle<()>,
@@ -846,6 +909,23 @@ async fn native_interactive_loop(
     let mut active = false;
     let mut exiting = false;
 
+    let lines = native_page_lines(
+        page,
+        live,
+        model,
+        composer.draft(),
+        &transcript,
+        renderer.cols() as usize,
+        renderer.rows() as usize,
+    );
+    paint_native(&mut renderer, &lines)?;
+    let mut needs_paint = false;
+    // OpenTUI's stdout backend flushes synchronously. A 10 Hz ceiling keeps
+    // PTY output bounded while a burst of input bytes remains responsive.
+    let mut repaint = tokio::time::interval(Duration::from_millis(100));
+    repaint.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    repaint.tick().await;
+
     'event_loop: loop {
         let size = native_terminal_size();
         if size != current_size {
@@ -855,19 +935,23 @@ async fn native_interactive_loop(
                 cols: size.0.min(u32::from(u16::MAX)) as u16,
                 rows: size.1.min(u32::from(u16::MAX)) as u16,
             });
+            needs_paint = true;
         }
-        let lines = native_page_lines(
-            page,
-            live,
-            model,
-            composer.draft(),
-            &transcript,
-            renderer.cols() as usize,
-            renderer.rows() as usize,
-        );
-        paint_native(&mut renderer, &lines)?;
 
         tokio::select! {
+            _ = repaint.tick(), if needs_paint => {
+                let lines = native_page_lines(
+                    page,
+                    live,
+                    model,
+                    composer.draft(),
+                    &transcript,
+                    renderer.cols() as usize,
+                    renderer.rows() as usize,
+                );
+                paint_native(&mut renderer, &lines)?;
+                needs_paint = false;
+            }
             byte = input.recv() => {
                 let Some(byte) = byte else { break 'event_loop };
                 let byte = byte?;
@@ -899,37 +983,99 @@ async fn native_interactive_loop(
                 )?;
             }
             b'\r' | b'\n' if page == NativePage::Chat => {
+                let draft = composer.draft().to_owned();
+                match draft.trim() {
+                    ":q" | ":quit" => {
+                        composer.set_draft("")?;
+                        if active { let _ = handle.interrupt(); }
+                        exiting = true;
+                        break 'event_loop;
+                    }
+                    ":i" => {
+                        composer.set_draft("")?;
+                        composer.interrupt();
+                        let interrupt = handle.interrupt();
+                        if active || interrupt == InterruptResult::Requested {
+                            transcript.push(format!(
+                                "[interrupt requested; draft preserved: {:?}]",
+                                composer.draft()
+                            ));
+                        } else {
+                            transcript.push(format!(
+                                "[interrupted; draft preserved: {:?}]",
+                                composer.draft()
+                            ));
+                        }
+                        trim_native_transcript(&mut transcript);
+                        let lines = native_page_lines(
+                            page,
+                            live,
+                            model,
+                            composer.draft(),
+                            &transcript,
+                            renderer.cols() as usize,
+                            renderer.rows() as usize,
+                        );
+                        paint_native(&mut renderer, &lines)?;
+                        needs_paint = false;
+                        continue 'event_loop;
+                    }
+                    _ => {}
+                }
                 let event = NativeInputEvent::Key {
                         code: u32::from(byte),
-                        ctrl: byte == b'\n',
+                        // A byte stream cannot distinguish terminal Enter-LF
+                        // from Ctrl-J. Route LF to the configured submit key;
+                        // CR remains physical Enter.
+                        ctrl: byte == b'\n' && matches!(keymap, SubmitKeymap::CtrlJ),
                     alt: false,
                     shift: false,
                 };
                 let action = native_composer_step(&mut composer, event)?;
-                if let NativeComposerAction::Submitted { text } = action {
-                    transcript.push(format!("you: {text}"));
-                    let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
-                    if let Some(snapshot) = live {
-                        let request = turn_request(
-                            snapshot,
-                            &text,
-                            model,
-                            reasoning_effort,
-                            auth,
-                        )?;
-                        match submit_request(&handle, request).await {
-                            Ok(()) => active = true,
-                            Err(error) => {
-                                composer.interrupt();
-                                transcript.push(format!("error: {error}"));
+                match action {
+                    NativeComposerAction::Submitted { text } => {
+                        transcript.push(format!("you: {text}"));
+                        let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
+                        if let Some(snapshot) = live {
+                            let request = turn_request(
+                                snapshot,
+                                &text,
+                                model,
+                                reasoning_effort,
+                                auth,
+                            )?;
+                            match submit_request(&handle, request).await {
+                                Ok(()) => active = true,
+                                Err(error) => {
+                                    composer.interrupt();
+                                    transcript.push(format!("error: {error}"));
+                                }
                             }
+                        } else {
+                            transcript.push("offline: turn not executed".to_string());
+                            let _ = composer.finish_turn();
                         }
-                    } else {
-                        transcript.push("offline: turn not executed".to_string());
-                        let _ = composer.finish_turn();
                     }
-                    trim_native_transcript(&mut transcript);
+                    NativeComposerAction::Queued => {
+                        transcript.push(format!("[queued] {draft}"));
+                        // The FIFO owns its clone; clear the editable line so
+                        // the next PTY line is independent, like line mode.
+                        composer.set_draft("")?;
+                        let lines = native_page_lines(
+                            page,
+                            live,
+                            model,
+                            composer.draft(),
+                            &transcript,
+                            renderer.cols() as usize,
+                            renderer.rows() as usize,
+                        );
+                        paint_native(&mut renderer, &lines)?;
+                        needs_paint = false;
+                    }
+                    _ => {}
                 }
+                trim_native_transcript(&mut transcript);
             }
             b if page == NativePage::Chat && (0x20..0x80).contains(&b) => {
                 let _ = native_composer_step(
@@ -944,6 +1090,7 @@ async fn native_interactive_loop(
             }
             _ => {}
         }
+                needs_paint = true;
                 if exiting { break 'event_loop; }
             }
             result = results.recv(), if active => {
@@ -985,11 +1132,13 @@ async fn native_interactive_loop(
                         trim_native_transcript(&mut transcript);
                     }
                 }
+                needs_paint = true;
             }
         }
     }
 
     input_task.abort();
+    let _ = input_task.await;
     if active {
         let _ = handle.interrupt();
         let _ = tokio::time::timeout(Duration::from_secs(2), results.recv()).await;
@@ -1356,7 +1505,11 @@ fn print_native_or_legacy(frame: &str) -> String {
     #[cfg(feature = "native")]
     {
         let lines: Vec<String> = frame.lines().map(str::to_owned).collect();
-        match opencode_rk_opentui_bridge::Renderer::render_once(80, 24, &lines) {
+        // One-shot output is a complete scriptable snapshot rather than a
+        // scrollable terminal viewport, so retain every already-bounded frame
+        // line while preserving the normal minimum terminal height.
+        let rows = u32::try_from(lines.len()).unwrap_or(u32::MAX).max(24);
+        match opencode_rk_opentui_bridge::Renderer::render_once(80, rows, &lines) {
             Ok(snapshot) => snapshot,
             Err(_) => frame.to_owned(),
         }

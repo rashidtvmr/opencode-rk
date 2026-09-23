@@ -1,0 +1,112 @@
+diff --git a/packages/native/build.zig b/packages/native/build.zig
+index b226da7..b6c791c 100644
+--- a/packages/native/build.zig
++++ b/packages/native/build.zig
+@@ -511,6 +511,11 @@ pub fn build(b: *std.Build) void {
+     const bench_optimize = b.option(std.builtin.OptimizeMode, "bench-optimize", "Optimize mode for benchmarks") orelse .ReleaseFast;
+     const debug_use_llvm = b.option(bool, "debug-llvm", "Use LLVM backend for debug/test artifacts");
+     const target_option = b.option([]const u8, "library-target", "Build shared library for a specific target (e.g., 'x86_64-linux-gnu.2.17').");
++    const linkage_option = b.option([]const u8, "linkage", "Library linkage: dynamic (default) or static.") orelse "dynamic";
++    const linkage: std.builtin.LinkMode = if (std.mem.eql(u8, linkage_option, "static")) .static else if (std.mem.eql(u8, linkage_option, "dynamic")) .dynamic else {
++        std.debug.print("Invalid -Dlinkage='{s}': expected 'dynamic' or 'static'\n", .{linkage_option});
++        std.process.exit(1);
++    };
+     const build_all = b.option(bool, "all", "Build for all supported targets") orelse false;
+     const gpa_safe_stats = b.option(bool, "gpa-safe-stats", "Enable GPA safety checks for trustworthy allocator stats") orelse false;
+     const macos_sdk_path = resolveMacOSSDKPath(b);
+@@ -529,19 +534,19 @@ pub fn build(b: *std.Build) void {
+ 
+     if (target_option) |target_str| {
+         // Build single target
+-        buildSingleTarget(b, target_str, optimize, build_options, macos_sdk_path) catch |err| {
++        buildSingleTarget(b, target_str, optimize, build_options, macos_sdk_path, linkage) catch |err| {
+             std.debug.print("Error building target '{s}': {}\n", .{ target_str, err });
+             std.process.exit(1);
+         };
+     } else if (build_all) {
+         // Build all supported targets
+-        buildAllTargets(b, optimize, build_options, macos_sdk_path) catch |err| {
++        buildAllTargets(b, optimize, build_options, macos_sdk_path, linkage) catch |err| {
+             std.debug.print("Error building all targets: {}\n", .{err});
+             std.process.exit(1);
+         };
+     } else {
+         // Build for native target only (default)
+-        buildNativeTarget(b, optimize, build_options, macos_sdk_path) catch |err| {
++        buildNativeTarget(b, optimize, build_options, macos_sdk_path, linkage) catch |err| {
+             std.debug.print("Error building native target: {}\n", .{err});
+             std.process.exit(1);
+         };
+@@ -638,6 +643,7 @@ fn buildAllTargets(
+     optimize: std.builtin.OptimizeMode,
+     build_options: *std.Build.Step.Options,
+     macos_sdk_path: ?[]const u8,
++    linkage: std.builtin.LinkMode,
+ ) !void {
+     for (SUPPORTED_TARGETS) |supported_target| {
+         try buildTarget(
+@@ -648,6 +654,7 @@ fn buildAllTargets(
+             optimize,
+             build_options,
+             macos_sdk_path,
++            linkage,
+         );
+     }
+ }
+@@ -657,6 +664,7 @@ fn buildNativeTarget(
+     optimize: std.builtin.OptimizeMode,
+     build_options: *std.Build.Step.Options,
+     macos_sdk_path: ?[]const u8,
++    linkage: std.builtin.LinkMode,
+ ) !void {
+     // Find the matching supported target for the native platform
+     const native_arch = @tagName(builtin.cpu.arch);
+@@ -675,6 +683,7 @@ fn buildNativeTarget(
+                 optimize,
+                 build_options,
+                 macos_sdk_path,
++                linkage,
+             );
+             return;
+         }
+@@ -690,6 +699,7 @@ fn buildSingleTarget(
+     optimize: std.builtin.OptimizeMode,
+     build_options: *std.Build.Step.Options,
+     macos_sdk_path: ?[]const u8,
++    linkage: std.builtin.LinkMode,
+ ) !void {
+     // Check if it matches a known target, use its output_name
+     for (SUPPORTED_TARGETS) |supported_target| {
+@@ -702,13 +712,14 @@ fn buildSingleTarget(
+                 optimize,
+                 build_options,
+                 macos_sdk_path,
++                linkage,
+             );
+             return;
+         }
+     }
+     // Custom target - use target string as output name
+     const description = try std.fmt.allocPrint(b.allocator, "Custom target: {s}", .{target_str});
+-    try buildTarget(b, target_str, target_str, description, optimize, build_options, macos_sdk_path);
++    try buildTarget(b, target_str, target_str, description, optimize, build_options, macos_sdk_path, linkage);
+ }
+ 
+ fn buildTarget(
+@@ -719,6 +730,7 @@ fn buildTarget(
+     optimize: std.builtin.OptimizeMode,
+     build_options: *std.Build.Step.Options,
+     macos_sdk_path: ?[]const u8,
++    linkage: std.builtin.LinkMode,
+ ) !void {
+     const target_query = try std.Target.Query.parse(.{ .arch_os_abi = zig_target });
+     const target = b.resolveTargetQuery(target_query);
+@@ -742,7 +754,7 @@ fn buildTarget(
+     const lib = b.addLibrary(.{
+         .name = LIB_NAME,
+         .root_module = module,
+-        .linkage = .dynamic,
++        .linkage = linkage,
+     });
+ 
+     if (target.result.os.tag == .linux and optimize != .Debug) lib.build_id = .sha1;

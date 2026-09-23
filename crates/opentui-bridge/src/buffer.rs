@@ -64,7 +64,6 @@ impl CellBuffer {
 /// (`?[*]`) map to raw pointers (null tolerated natively); colors are
 /// `[u16; 4]` RGBA lanes. Linked only under `native`.
 #[cfg(feature = "native")]
-#[link(name = "opentui")]
 unsafe extern "C" {
     pub fn bufferDrawText(
         buffer_handle: NativeHandle,

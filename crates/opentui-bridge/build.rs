@@ -23,7 +23,9 @@ fn main() {
     let target_os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let target_env = std::env::var("CARGO_CFG_TARGET_ENV").unwrap_or_default();
 
-    let static_unix = exists(&libdir, "libopentui.a");
+    // Use a distinct basename so Apple ld cannot prefer a colocated
+    // `libopentui.dylib` for the same `-l` name.
+    let static_unix = exists(&libdir, "libopentui_static.a");
     let linux_shared = exists(&libdir, "libopentui.so");
     let mac_shared = exists(&libdir, "libopentui.dylib");
     let windows_import = exists(&libdir, "opentui.lib") || exists(&libdir, "libopentui.dll.a");
@@ -31,13 +33,13 @@ fn main() {
 
     match target_os.as_str() {
         "macos" if static_unix => {
-            println!("cargo:rustc-link-lib=static=opentui");
+            println!("cargo:rustc-link-lib=static=opentui_static");
         }
         "macos" if mac_shared => {
             println!("cargo:rustc-link-lib=dylib=opentui");
         }
         "linux" if static_unix => {
-            println!("cargo:rustc-link-lib=static=opentui");
+            println!("cargo:rustc-link-lib=static=opentui_static");
         }
         "linux" if linux_shared => {
             println!("cargo:rustc-link-lib=dylib=opentui");
