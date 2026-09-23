@@ -313,6 +313,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "EXT-012": {
+      "blockedNote": "BLOCKED audit: Ralph/FEATURES mark EXT-012 accepted while source gap/backlog ledger remain null/unresolved; plugin_ui_boundary.rs has no production caller or renderer/protocol/permission lifecycle wiring; validate_backlog_exhaustion.py and validate_repository.py each FAIL with 51 errors; convergence_gate.py BLOCKED total=80; see worklog/GUARD-EXT-012.md; authority proposal only, no acceptance.",
+      "scratchpad": "worklog/GUARD-EXT-012.md",
+      "session": "ses_f320d7e2dffeAfAjMr7WiTtYZZ",
+      "status": "blocked"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
