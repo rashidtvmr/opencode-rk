@@ -941,6 +941,12 @@
       "session": "ses_f32bf295effe9f16wtSPaJNIxT",
       "status": "blocked"
     },
+    "SHARE-005": {
+      "blockedNote": "BLOCKED: controller reconciliation required; Ralph/FEATURES accepted conflicts with task/source-gap/backlog not-started unresolved state. Lane twins are #[path]-only, not wired to a real caller. Preserve enterprise/support-admin/auth/secret-lifetime, deletion/retry, bounded-queue blockers; no acceptance or ownership inferred.",
+      "scratchpad": "worklog/GUARD-SHARE-005.md",
+      "session": "ses_f32482b14ffeqkB2k9JP0ZrLe4",
+      "status": "blocked"
+    },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
       "scratchpad": "worklog/SYNC-001.md",
