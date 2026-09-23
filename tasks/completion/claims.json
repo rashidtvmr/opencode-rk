@@ -779,6 +779,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "OPS-003": {
+      "blockedNote": "Local lifecycle GREEN (5/5 tests). Blocked: operations-ownership-gap.json:79 ownershipDecision=null, ownershipBlocker=violates no-network boundary + shared with OPS-002/003/004/006/008 + frozen INT-002/OPS-007/OPS-009. backlog-exhaustion.json:789 controllerStatus=not-started reasonKey=operations-family-not-decomposed. Full repo-cache contract not decomposed.",
+      "scratchpad": "worklog/GUARD-OPS-003.md",
+      "session": "ses_guard_ops_003_audit",
+      "status": "blocked"
+    },
     "OPS-009": {
       "completedNote": "GREEN 5/5 ops_replay T01-T05, impl pre-landed byte-identical, zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-foundation --test ops_replay",
       "scratchpad": "worklog/OPS-009.md",
