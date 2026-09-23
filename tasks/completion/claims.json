@@ -1030,6 +1030,12 @@
       "session": "ses_orch_TUI011b",
       "status": "completed"
     },
+    "UI-014": {
+      "blockedNote": "RED compiles: T01 pass, T02-T05 fail against real native_interactive_loop; native caller has no renderer-independent native_composer adapter. Frozen test sha256 5338e5cf3bb2d8bb2616a9115fdd11ec5e520df344bc7d5e7710727c412c80bc; command in worklog/UI-014-E2E-AUDIT.md",
+      "scratchpad": "worklog/UI-014-E2E-AUDIT.md",
+      "session": "ses_f33322bacffeKBSM2WcJPS8mHa",
+      "status": "blocked"
+    },
     "WEB-004": {
       "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
       "scratchpad": "worklog/WEB-004.md",
