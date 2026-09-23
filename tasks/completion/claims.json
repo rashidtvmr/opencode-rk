@@ -923,10 +923,9 @@
       "status": "completed"
     },
     "SESS-008": {
-      "blockedNote": "In-file compact_removes_orphans encodes SESS-011 archived semantics, contradicts SESS-008 dirty-only compact. persist.rs fixed per card but would fail that test when wired (mod persist missing in lib.rs). Needs contract review + integrator wiring.",
-      "scratchpad": "worklog/SESS-008.md",
-      "session": "ses_f3840883fffeumWydX7cbtnZ04",
-      "status": "blocked"
+      "scratchpad": "worklog/SESS-008-CONTRACT-REVIEW.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "in-progress"
     },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
