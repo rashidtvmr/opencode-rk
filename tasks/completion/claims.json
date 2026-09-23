@@ -905,6 +905,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "REL-001": {
+      "blockedNote": "BLOCKED guard audit: validator exists sha ab9b350e but no frozen test+hash+manifest, no canonical gate wiring, gate-80/backlog drift unresolved; see worklog/GUARD-REL-001.md",
+      "scratchpad": "worklog/GUARD-REL-001.md",
+      "session": "ses_f32482b35ffeZYU0YjjZYqTAhb",
+      "status": "blocked"
+    },
     "REL-002": {
       "blockedNote": "STRONG RED: 12 tests, 11 pass; sole failure executable planning CI step; behavior, malformed, timeout, exact argv, dynamic revision, failure propagation pass; blocked pending protected workflow review; cmd: python3 -m unittest tests.bootstrap.test_rel002_release_tdd",
       "scratchpad": "worklog/REL-002-STRONG-RED.md",
