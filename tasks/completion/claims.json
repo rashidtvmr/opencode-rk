@@ -923,9 +923,10 @@
       "status": "completed"
     },
     "SESS-008": {
-      "scratchpad": "worklog/SESS-008-CONTRACT-REVIEW.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "in-progress"
+      "blockedNote": "BLOCKED: authorized compact test replacement verified in disposable standalone harness: cargo test --manifest-path /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/sess008-test-harness/Cargo.toml --lib -- --test-threads=1 = 5 passed, 0 failed; separate crates/sessions/src/lib.rs wiring and real caller proof remain; durable restart remains SQLite-owned.",
+      "scratchpad": "worklog/SESS-008-TEST-REPLACEMENT.md",
+      "session": "ses_f32f85a86ffeg1aDu4Jj7PCqRO",
+      "status": "blocked"
     },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",

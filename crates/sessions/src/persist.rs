@@ -162,17 +162,21 @@ mod tests {
     #[test]
     fn compact_removes_orphans() {
         let mut store = PersistentSessionStore::new();
-        let active = make_session("active-session");
-        let mut archived = make_session("archived-session");
-        archived.state = SessionState::Archived;
+        let retained = make_session("retained-session");
+        let mut dirty = make_session("dirty-session");
+        dirty.state = SessionState::Archived;
 
-        store.save(active.clone());
-        store.save(archived.clone());
+        store.save(retained.clone());
+        store.flush().unwrap();
+        store.save(dirty.clone());
         assert_eq!(store.sessions.len(), 2);
+        assert_eq!(store.dirty.len(), 1);
 
         store.compact().unwrap();
         assert_eq!(store.sessions.len(), 1);
-        assert!(store.sessions[0].id == active.id);
+        assert_eq!(store.load(retained.id), Some(retained));
+        assert_eq!(store.load(dirty.id), None);
+        assert_eq!(store.stats(), (1, 0));
     }
 
     #[test]
