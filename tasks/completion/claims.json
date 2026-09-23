@@ -463,6 +463,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
+    "INT-007": {
+      "blockedNote": "INT-007 audit: impl+tests 5/5 GREEN. BLOCKED: ownershipDecision.INT-007=null, candidateTaskOwner=null (INT-004 overlap); backlog taskCard/worklog/taskStatus null, reasonKey=integration-family-not-decomposed. validate_repository:59 stale FAIL exit=1 convergence=80. No canonical/product/test/validator edits; controller must re-award or retire residual. Permission/auth/transport/cancel/bounded kept.",
+      "scratchpad": "worklog/GUARD-INT-007.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "INT-009": {
       "blockedNote": "BLOCKED: Ralph/FEATURES accepted vs card NOT STARTED; ownership-gap unresolved; backlog unresolved/no evidence. Guards: backlog exit1 51 errors; repository exit1; convergence exit1 total80. Duplicate impl/tests; no native caller. FS/git/DB, enterprise/spec, auth/secret, network/resource surfaces excluded/separate. See worklog/GUARD-INT-009.md. No canonical/product/test/validator edits.",
       "scratchpad": "worklog/GUARD-INT-009.md",
