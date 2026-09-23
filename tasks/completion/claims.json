@@ -1084,7 +1084,7 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Browser structured activity candidate GREEN: frozen 3/3, affected 5/5, full web suite 49/49; frozen hash 8dbbb07c. Typecheck remains blocked by pre-existing TS6133 errors in frozen canvas-model.test.ts. Parent still needs independent verification, third disconnect pass, production browser evidence, and branch activity unification; see worklog/WEB-009-BROWSER-IMPL.md.",
+      "blockedNote": "Browser activity candidate GREEN: frozen 3/3, full web 49/49, third exact disconnect 1/1; hashes 8dbbb07c and 80d8d505 unchanged. Still blocked on independent verification, production browser evidence, branch activity unification, and unrelated frozen canvas TS6133 typecheck errors; see WEB-009-BROWSER-IMPL.md.",
       "scratchpad": "worklog/WEB-009-BROWSER-IMPL.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
