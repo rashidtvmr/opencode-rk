@@ -941,6 +941,12 @@
       "session": "ses_f32bf295effe9f16wtSPaJNIxT",
       "status": "blocked"
     },
+    "SHARE-003": {
+      "blockedNote": "GUARD audit done: 7 errors enumerated (stale card path, status divergence, null ownership, spec-gap blocked, unresolved-decomposition, neighbor duplicate/drift, gate scope); patch proposal in worklog/GUARD-SHARE-003.md; no product/test/canonical edits; commit/push blocked per orders",
+      "scratchpad": "worklog/GUARD-SHARE-003.md",
+      "session": "ses_f32482b29ffeStYzmIDXdtS2ID",
+      "status": "blocked"
+    },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
       "scratchpad": "worklog/SYNC-001.md",
