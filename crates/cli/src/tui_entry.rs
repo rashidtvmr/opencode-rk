@@ -419,6 +419,134 @@ enum NativePage {
     Help,
 }
 
+/// Renderer-independent input admitted by the native loop. Renderer/FFI code
+/// never owns composer state.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NativeInputEvent {
+    Key {
+        code: u32,
+        ctrl: bool,
+        alt: bool,
+        shift: bool,
+    },
+    Paste {
+        body: String,
+    },
+    Resize {
+        cols: u32,
+        rows: u32,
+    },
+    Focus {
+        active: bool,
+    },
+    Escape,
+    TurnFinished,
+}
+
+/// Result of routing one native event through the one live composer. A submit
+/// carries the draft captured immediately before `handle_key`; no second draft
+/// is retained by the caller.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum NativeComposerAction {
+    Edited,
+    Submitted { text: String },
+    Queued,
+    Pasted { bytes: usize, chars: usize },
+    Interrupted { draft: String },
+    TurnFinished { next: Option<String> },
+    Resized { cols: u32, rows: u32 },
+    FocusChanged { active: bool },
+    Ignored,
+}
+
+fn native_key(
+    code: u32,
+    ctrl: bool,
+    alt: bool,
+    shift: bool,
+) -> Option<crate::native_composer::Key> {
+    use crate::native_composer::Key;
+    if code == 27 && !ctrl && !alt {
+        return None;
+    }
+    if (code == 13 || code == 10) && shift && !ctrl && !alt {
+        return Some(Key::ShiftEnter);
+    }
+    if ctrl && !alt && (code == 10 || code == 74 || code == 106) {
+        return Some(Key::CtrlJ);
+    }
+    if (code == 13 || code == 10) && !ctrl && !alt {
+        return Some(Key::Enter);
+    }
+    if (code == 8 || code == 127) && !ctrl && !alt {
+        return Some(Key::Backspace);
+    }
+    if !ctrl && !alt {
+        let c = char::from_u32(code)?;
+        if !c.is_control() {
+            return Some(Key::Char(c));
+        }
+    }
+    None
+}
+
+/// Route a decoded event through `native_composer::Composer`. Malformed paste
+/// frames are inert. Composer admission is atomic for oversize input and
+/// queue overflow, as guaranteed by the native composer API.
+pub(crate) fn native_composer_step(
+    composer: &mut crate::native_composer::Composer,
+    event: NativeInputEvent,
+) -> Result<NativeComposerAction, crate::native_composer::ComposerError> {
+    use crate::native_composer::{decide_key, unwrap_bracketed, KeyHandled};
+    match event {
+        NativeInputEvent::Key {
+            code,
+            ctrl,
+            alt,
+            shift,
+        } => {
+            if code == 27 && !ctrl && !alt && !shift {
+                let draft = composer.draft().to_owned();
+                composer.interrupt();
+                return Ok(NativeComposerAction::Interrupted { draft });
+            }
+            let Some(key) = native_key(code, ctrl, alt, shift) else {
+                return Ok(NativeComposerAction::Ignored);
+            };
+            let submit = matches!(
+                decide_key(key, composer.keymap()),
+                crate::native_composer::KeyAction::Submit
+            );
+            let submitted_text = submit.then(|| composer.draft().to_owned());
+            match composer.handle_key(key)? {
+                KeyHandled::Edited => Ok(NativeComposerAction::Edited),
+                KeyHandled::Submitted => Ok(NativeComposerAction::Submitted {
+                    text: submitted_text.unwrap_or_default(),
+                }),
+                KeyHandled::Queued => Ok(NativeComposerAction::Queued),
+            }
+        }
+        NativeInputEvent::Paste { body } => {
+            let Some(body) = unwrap_bracketed(&body) else {
+                return Ok(NativeComposerAction::Ignored);
+            };
+            let crate::native_composer::PasteOutcome::Inserted { bytes, chars } =
+                composer.apply_paste(body)?;
+            Ok(NativeComposerAction::Pasted { bytes, chars })
+        }
+        NativeInputEvent::Escape => {
+            let draft = composer.draft().to_owned();
+            composer.interrupt();
+            Ok(NativeComposerAction::Interrupted { draft })
+        }
+        NativeInputEvent::TurnFinished => Ok(NativeComposerAction::TurnFinished {
+            next: composer.finish_turn(),
+        }),
+        NativeInputEvent::Resize { cols, rows } => Ok(NativeComposerAction::Resized { cols, rows }),
+        NativeInputEvent::Focus { active } => Ok(NativeComposerAction::FocusChanged { active }),
+    }
+}
+
 #[cfg(feature = "native")]
 fn native_terminal_size() -> (u32, u32) {
     let cols = std::env::var("COLUMNS").ok().and_then(|v| v.parse().ok());
@@ -562,7 +690,37 @@ fn paint_native(
 }
 
 #[cfg(feature = "native")]
+fn submit_native_text(
+    composer: &mut crate::native_composer::Composer,
+    transcript: &mut Vec<String>,
+    host: &mut crate::native_host::NativeHost,
+    live: Option<&LiveSnapshot>,
+    text: &str,
+    model: &str,
+    reasoning_effort: &str,
+    auth: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    transcript.push(format!("you: {text}"));
+    let _ = host.step(crate::native_host::HostEvent::Submit(text.to_owned()));
+    match live {
+        Some(snapshot) => match execute_submit(snapshot, text, model, reasoning_effort, auth) {
+            Ok(reply) => transcript.push(format!("assistant: {reply}")),
+            Err(error) => transcript.push(format!("error: {error}")),
+        },
+        None => transcript.push("offline: turn not executed".to_string()),
+    }
+    let _ = native_composer_step(composer, NativeInputEvent::TurnFinished)?;
+    const MAX_NATIVE_TRANSCRIPT: usize = 500;
+    if transcript.len() > MAX_NATIVE_TRANSCRIPT {
+        let drop_count = transcript.len() - MAX_NATIVE_TRANSCRIPT;
+        transcript.drain(..drop_count);
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native")]
 fn native_interactive_loop(
+    keymap: SubmitKeymap,
     memory: &[MemoryFile],
     live: Option<&LiveSnapshot>,
     model: &str,
@@ -589,7 +747,11 @@ fn native_interactive_loop(
     renderer.set_title("OpenCode RK")?;
 
     let mut page = NativePage::Chat;
-    let mut draft = String::new();
+    let native_keymap = match keymap {
+        SubmitKeymap::Enter => crate::native_composer::SubmitKeymap::Enter,
+        SubmitKeymap::CtrlJ => crate::native_composer::SubmitKeymap::CtrlJ,
+    };
+    let mut composer = crate::native_composer::Composer::with_keymap(native_keymap);
     let mut transcript: Vec<String> = Vec::new();
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
@@ -612,7 +774,7 @@ fn native_interactive_loop(
             page,
             live,
             model,
-            &draft,
+            composer.draft(),
             &transcript,
             renderer.cols() as usize,
             renderer.rows() as usize,
@@ -625,7 +787,7 @@ fn native_interactive_loop(
         }
         match byte[0] {
             3 | 4 => {
-                let _ = host.step(crate::native_host::HostEvent::Key(char::from(byte[0])));
+                let _ = host.step(crate::native_host::HostEvent::Key('\x03'));
                 break;
             }
             b'\t' => {
@@ -633,40 +795,53 @@ fn native_interactive_loop(
             }
             16 => page = NativePage::Palette,
             20 => page = NativePage::Context,
-            b'?' if draft.is_empty() => page = NativePage::Help,
-            27 => page = NativePage::Chat,
+            b'?' if composer.draft().is_empty() => page = NativePage::Help,
+            27 => {
+                // Escape sequences require a decoder with timeout/pushback.
+                page = NativePage::Chat;
+            }
             8 | 127 if page == NativePage::Chat => {
-                draft.pop();
+                let _ = native_composer_step(
+                    &mut composer,
+                    NativeInputEvent::Key {
+                        code: u32::from(byte[0]),
+                        ctrl: false,
+                        alt: false,
+                        shift: false,
+                    },
+                )?;
             }
             b'\r' | b'\n' if page == NativePage::Chat => {
-                let text = draft.trim().to_string();
-                if text.is_empty() {
-                    continue;
-                }
-                draft.clear();
-                transcript.push(format!("you: {text}"));
-                let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
-                match live {
-                    Some(snapshot) => match execute_submit(
-                        snapshot,
+                let event = NativeInputEvent::Key {
+                    code: u32::from(byte[0]),
+                    ctrl: byte[0] == b'\n',
+                    alt: false,
+                    shift: false,
+                };
+                let action = native_composer_step(&mut composer, event)?;
+                if let NativeComposerAction::Submitted { text } = action {
+                    submit_native_text(
+                        &mut composer,
+                        &mut transcript,
+                        &mut host,
+                        live,
                         &text,
                         model,
                         reasoning_effort,
                         auth,
-                    ) {
-                        Ok(reply) => transcript.push(format!("assistant: {reply}")),
-                        Err(error) => transcript.push(format!("error: {error}")),
-                    },
-                    None => transcript.push("offline: turn not executed".to_string()),
-                }
-                const MAX_NATIVE_TRANSCRIPT: usize = 500;
-                if transcript.len() > MAX_NATIVE_TRANSCRIPT {
-                    let drop_count = transcript.len() - MAX_NATIVE_TRANSCRIPT;
-                    transcript.drain(..drop_count);
+                    )?;
                 }
             }
-            b if page == NativePage::Chat && b >= 0x20 => {
-                draft.push(char::from(b));
+            b if page == NativePage::Chat && (0x20..0x80).contains(&b) => {
+                let _ = native_composer_step(
+                    &mut composer,
+                    NativeInputEvent::Key {
+                        code: u32::from(b),
+                        ctrl: false,
+                        alt: false,
+                        shift: false,
+                    },
+                )?;
             }
             _ => {}
         }
@@ -835,6 +1010,7 @@ pub fn run_with_dir(
                 #[cfg(feature = "native")]
                 {
                     return native_interactive_loop(
+                        keymap,
                         &memory,
                         Some(&snapshot),
                         &args.model,
@@ -872,12 +1048,14 @@ pub fn run_with_dir(
         // empty only after poll) or hang scripts. `--once`/`--follow` are the
         // scriptable paths.
         return Err(
-            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY".into(),
+            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY"
+                .into(),
         );
     }
     #[cfg(feature = "native")]
     {
         native_interactive_loop(
+            keymap,
             &memory,
             None,
             &args.model,

@@ -1059,6 +1059,12 @@
       "session": "ses_f32880ed8ffeQpIqPaYmzt0MQj",
       "status": "blocked"
     },
+    "UI-014": {
+      "blockedNote": "Prewire only. Non-native cargo check passes with CARGO_BUILD_JOBS=1; native artifact missing at crates/opentui-bridge/native/lib/aarch64-apple-darwin. Synchronous execute_submit prevents real queue/cancellation; blocking one-byte stdin cannot safely decode bare Escape, CSI, paste, Unicode, focus, or resize events. No acceptance claimed.",
+      "scratchpad": "worklog/UI-014-PREWIRE.md",
+      "session": "ses_f32124f8cffeDX5qi06BMncyvb",
+      "status": "blocked"
+    },
     "WEB-004": {
       "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
       "scratchpad": "worklog/WEB-004.md",
