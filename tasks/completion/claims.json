@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Review corrections GREEN: quoted staged help; cleanup preserves backed rollback files on failed restoration. Parent rpath/cross-arch/SBOM/signing blockers remain.",
-      "scratchpad": "worklog/TUI-011-INSTALLER-SECURITY-IMPL.md",
-      "session": "ses_f32880ed8ffeQpIqPaYmzt0MQj",
+      "blockedNote": "Manifest matrix truthfully enumerates all 6 vendored files; 5204 B; independent hash/stat 6/6; builder 312d315 verify-only 4 singles + Windows pair exit 0. Frozen host test unchanged efb64236; expected 1 passed/2 failed only: immutable SHA-digit predicate line 95 and multi-MB artifact vs 64KiB line 122. No test/artifact/builder/sidecar edits. Parent remains blocked; no acceptance.",
+      "scratchpad": "worklog/TUI-011.md",
+      "session": "ses_f3000be43ffezAvxGSb7zGVVTT",
       "status": "blocked"
     },
     "UI-014": {
