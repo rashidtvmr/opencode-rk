@@ -1049,10 +1049,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Startup handshake plus exactly one tokio::task::yield_now().await still failed frozen test: tool fixture PID publication deadline exceeded; crates/server/src/lib.rs restored byte-identical to HEAD 352db15; no product diff retained.",
-      "scratchpad": "worklog/WEB-009-DISCONNECT-STARTUP.md",
-      "session": "ses_f35270c35ffehcQG3Bo2fpQ6oS",
-      "status": "blocked"
+      "completedNote": "GREEN 1/1 runtime_wiring_disconnect_http (frozen hash 95fbe83a0361256d9e0c229cfc97f3cc0b222e8c6d89625ac5db582ce18199e8 zero test edits); 208/208 server lib no-regress; ShellExecutionGuard uses pinned ShellTool startup future, no JoinHandle/abort/debug prints; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test runtime_wiring_disconnect_http -- --test-threads=1",
+      "scratchpad": "worklog/WEB-009-DISCONNECT-GREEN.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
     },
     "WEB-ARTIFACT-EXEC": {
       "completedNote": "GREEN 7/7 rustc --test (RED 1pass/6fail frozen 4f86efb2; GREEN ea08bcf7; test-section sha 06b3b37d zero edits); heavy cargo web_artifact 5/5; integrator prewires pub mod",
