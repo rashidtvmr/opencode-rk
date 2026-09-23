@@ -1078,9 +1078,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Disconnect replacement has 2/2 exact serial passes; third pass/regressions pending. Parent blocked on durable tool/reference persistence and accessibility; attempted boundary reviewer produced no artifact.",
-      "scratchpad": "worklog/WEB-009-DISCONNECT-REPLACEMENT-VERIFY.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "Compiling RED: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test web009_durable_persistence_red -- --test-threads=1; test fails at missing final assistant event with bounded provider error: unsupported provider stream event: response.output_text.annotation.added. Native citation/reference producer and durable tool/reference API remain absent.",
+      "scratchpad": "worklog/WEB-009-DURABLE-RED.md",
+      "session": "ses_f31e58165ffeQHXSGRZFyO9hWF",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
