@@ -451,6 +451,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
+    "INT-006": {
+      "blockedNote": "INT-006 stale: ralph accepted vs gap in-progress; ownership null, taskCard/worklog null, 0 commits; validator 1 line stale-semantics",
+      "scratchpad": "worklog/GUARD-INT-006.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "INT-009": {
       "blockedNote": "BLOCKED: Ralph/FEATURES accepted vs card NOT STARTED; ownership-gap unresolved; backlog unresolved/no evidence. Guards: backlog exit1 51 errors; repository exit1; convergence exit1 total80. Duplicate impl/tests; no native caller. FS/git/DB, enterprise/spec, auth/secret, network/resource surfaces excluded/separate. See worklog/GUARD-INT-009.md. No canonical/product/test/validator edits.",
       "scratchpad": "worklog/GUARD-INT-009.md",
