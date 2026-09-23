@@ -900,9 +900,9 @@
       "status": "completed"
     },
     "REL-002": {
-      "blockedNote": "Controller rerun of committed test: 8 executed, 7 pass, only test_ci_calls_release_validator RED because ci.yml lacks tools/check_release_tdd.py. Committed candidate SHA-256 is 2c98f6728be7eec12002b72f904389689fbad7bed7fdcdb3b30ce1d3e413bd34; worker-reported hash was incorrect, so independent freeze approval remains required before protected CI wiring.",
-      "scratchpad": "worklog/REL-002-PHASE1.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "blocked: assertIn does not prove executable caller; static fixture revision; protected workflow. See worklog/REL-002-RED-REVIEW.md",
+      "scratchpad": "worklog/REL-002-RED-REVIEW.md",
+      "session": "ses_f331843f8ffed8wEMoFzV9siFz",
       "status": "blocked"
     },
     "REL-003": {
