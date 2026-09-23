@@ -1049,8 +1049,8 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Frozen disconnect test SHA 95fbe83a is nondeterministic: it disconnects on tool_call before opaque fixture PID publication is synchronized. Exact revision 732c046 passed once and failed controller rerun at PID deadline. Replacement must wait for fixture PIDs before disconnect while preserving permit/provider/process-tree/sentinel/durability assertions; test-authority approval required.",
-      "scratchpad": "worklog/WEB-009-DISCONNECT-CONTRACT-REVIEW.md",
+      "blockedNote": "Authorized replacement test hash 80d8d505a48e018a292b132bde82208bb3afd285ad8b80342365be2f48d28300: pre-implementation 9ded2b9 RED parent survived; candidate product 732c046 GREEN 3/3 serial. Disconnect sub-contract candidate only; parent remains blocked on durable tool/reference persistence and accessibility.",
+      "scratchpad": "worklog/WEB-009-DISCONNECT-REPLACEMENT-RED.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },

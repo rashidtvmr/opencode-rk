@@ -255,7 +255,12 @@ async fn spawn_http(app: axum::Router) -> (SocketAddr, tokio::task::JoinHandle<(
     (address, task)
 }
 
-fn stream_until_tool_call(address: SocketAddr, session_id: String) -> Vec<u8> {
+fn stream_until_tool_call(
+    address: SocketAddr,
+    session_id: String,
+    parent_pid: &Path,
+    descendant_pid: &Path,
+) -> (Vec<u8>, (u32, u32)) {
     let mut stream = TcpStream::connect(address).expect("connect server");
     stream
         .set_read_timeout(Some(Duration::from_millis(100)))
@@ -296,10 +301,11 @@ fn stream_until_tool_call(address: SocketAddr, session_id: String) -> Vec<u8> {
         response.windows(marker.len()).any(|window| window == marker),
         "real HTTP response omitted tool_call event"
     );
+    let pids = wait_for_pids(parent_pid, descendant_pid);
     stream
         .shutdown(Shutdown::Both)
         .expect("disconnect browser-like client");
-    response
+    (response, pids)
 }
 
 fn read_pid(path: &Path) -> Option<u32> {
@@ -403,16 +409,18 @@ async fn disconnect_cancels_provider_tool_tree_and_durable_turn() {
     let session_id = create_session(&app).await;
     let (address, server) = spawn_http(app.clone()).await;
     let client_session = session_id.clone();
-    let client = tokio::task::spawn_blocking(move || stream_until_tool_call(address, client_session));
-    let (parent, descendant) = tokio::task::spawn_blocking({
-        let parent_pid = parent_pid.clone();
-        let descendant_pid = descendant_pid.clone();
-        move || wait_for_pids(&parent_pid, &descendant_pid)
-    })
-    .await
-    .expect("PID polling task");
+    let client_parent_pid = parent_pid.clone();
+    let client_descendant_pid = descendant_pid.clone();
+    let client = tokio::task::spawn_blocking(move || {
+        stream_until_tool_call(
+            address,
+            client_session,
+            &client_parent_pid,
+            &client_descendant_pid,
+        )
+    });
+    let (response, (parent, descendant)) = client.await.expect("HTTP client task");
     let _fixture_processes = FixtureProcesses { parent, descendant };
-    let response = client.await.expect("HTTP client task");
     let tool_call_marker = b"\"type\":\"tool_call\"";
     assert!(response
         .windows(tool_call_marker.len())
