@@ -7,7 +7,7 @@ DISC-003
 ses_f32ffe76efferxGs5oxsA8WXdD
 
 ## Base commit
-dd7670dc78e5738a8dee1ca64c308b8618e8c181 (lane/PHASE1-convergence-review, HEAD)
+dd7670dc78e5738a8dee1ca64c308b8618e8c181 (audited base; parent of this review commit)
 
 ## Objective
 Audit DISC-003 convergence findings: enumerate exactly 53 gate findings from current
@@ -159,9 +159,11 @@ off-plan completed.
 ### The "remediation=43" figure
 
 The prior audit (worklog/DISC-003-PHASE1-CONVERGENCE.md at e57d1d3) contained an
-internal inconsistency. The "remediation=43" figure appears in worklog/GUARD-TRIAGE-16.md
-as a historical reference to a prior wave count, but was erroneously echoed in the
-e57d1d3 audit text as a claim about current findings.
+internal inconsistency. Its blocking-authority section called for migration of
+"43 legacy ralph.json stories (A3 minus WEB-009)". That figure is not a
+convergence-gate count; related `worklog/GUARD-TRIAGE-16.md` evidence separately
+reported 43 accepted/unknown exhaustion-ledger rows. The figure was erroneously
+echoed in the e57d1d3 audit text as a claim about current findings.
 
 The actual e57d1d3 finding count was 54 (52 off-plan + 2 bad-note). Subtracting
 WEB-009 (which was completed then but blocked at dd7670d): 53. There is no
@@ -219,7 +221,7 @@ surfaces them for the integrator/controller to map or resolve.
   the convergence_gate.py output (53 findings, none is WEB-009).
 
 - **Commit dd7670d**: "WEB-009: record disconnect test race" changed claims.json
-  WEB-009 from completed to blocked. git log confirms dd7670d is HEAD.
+  WEB-009 from completed to blocked. `git log` confirms dd7670d is the audited base.
 
 ## Reconciliation Proposal Table
 
@@ -227,7 +229,7 @@ Machine-checkable: old ID -> proposed parent/disposition -> evidence -> authorit
 
 | Old ID | Proposed disposition | Evidence (file:line or command output) | Authority |
 |--------|---------------------|----------------------------------------|-----------|
-| ACP-001 | Remain in legacy set A3; no plan mapping without integrator decision | ralph.json:3390 status=accepted; claims.json status=completed; plan_ids excludes ACP-001; completion_plan.py:165 asserts no overlap | AUD-020 shard (catch-all legacy) |
+| ACP-001 | Remain in legacy set A3; no plan mapping without integrator decision | ralph.json:3890 status=accepted; claims.json status=completed; plan_ids excludes ACP-001; completion_plan.py:165 asserts no overlap | AUD-020 shard (catch-all legacy) |
 | BASE-004 | Remain in legacy set A3; legacy repair, not plan story | ralph.json BASE-004 status=accepted; claims.json completed; not in plan_ids | AUD-020 shard |
 | FIX-LOGROTATE | Map FIX-* into AUD-006 repair children or retire as verify-only | claims.json completedNote; worklog/FIX-LOGROTATE.md; FIX-* prefix not in plan | Controller/integrator |
 | FIX-LOOP-RULES | Map into AUD-017 repair children | claims.json completedNote; worklog/FIX-LOOP-RULES.md | AUD-017 shard |
@@ -264,10 +266,10 @@ Machine-checkable: old ID -> proposed parent/disposition -> evidence -> authorit
 | PROV-018 | Remain in legacy set A3; not a plan story | ralph.json PROV-018 status=accepted; claims.json completed | AUD-002 shard |
 | PROV-019 | Remain in legacy set A3; not a plan story | ralph.json PROV-019 status=accepted; claims.json completed | AUD-002 shard |
 | PROV-020 | Remain in legacy set A3; not a plan story | ralph.json PROV-020 status=accepted; claims.json completed | AUD-002 shard |
-| PROV-021 | Remain in legacy set A3; not a plan story | ralph.json PROV-021 status=accepted; claims.json completed | AUD-002 shard |
+| PROV-021 | Remain in legacy set A3; not a plan story | ralph.json:3651 status=accepted; claims.json completed | AUD-002 shard |
 | PROV-022 | Remain in legacy set A3; not a plan story | ralph.json PROV-022 status=accepted; claims.json completed | AUD-002 shard |
 | REL-003 | Remain in legacy set A3; not a plan story | ralph.json REL-003 status=accepted; claims.json completed | AUD-018 shard |
-| RUN-001 | Remain in legacy set A3; not a plan story | ralph.json RUN-001 status=accepted; claims.json completed | AUD-010 shard |
+| RUN-001 | Remain in legacy set A3; not a plan story | ralph.json:3874 status=accepted; claims.json completed | AUD-010 shard |
 | SDK-001 | Remain in legacy set A3; not a plan story | ralph.json SDK-001 status=accepted; claims.json completed | AUD-010 shard |
 | SDK-002 | Remain in legacy set A3; not a plan story | ralph.json SDK-002 status=accepted; claims.json completed | AUD-010 shard |
 | SYNC-001 | Remain in legacy set A3; not a plan story | ralph.json SYNC-001 status=accepted; claims.json completed | AUD-010 shard |
