@@ -27,6 +27,8 @@
   Its public request-path case compiles and fails because Google is documented
   but `profile_for` returns `UnknownProvider`; malformed/version/cap loader seam
   remains absent, so the task stays blocked after this RED eventually turns green.
+  Exact integrated rerun (bounded through Python because macOS has no `timeout`
+  binary): 4 tests, T02–T04 pass, sole T01 failure is `UnknownProvider`; exit 101.
 
 No candidate is integrated merely because it compiles or has isolated GREEN
 tests. The hard installed `oc2` journey in `docs/CONVERGENCE.md` remains the
