@@ -397,6 +397,12 @@
       "session": "ses_f384fedf9ffeu54QwccVGqCbzv",
       "status": "completed"
     },
+    "INT-009": {
+      "blockedNote": "BLOCKED: Ralph/FEATURES accepted vs card NOT STARTED; ownership-gap unresolved; backlog unresolved/no evidence. Guards: backlog exit1 51 errors; repository exit1; convergence exit1 total80. Duplicate impl/tests; no native caller. FS/git/DB, enterprise/spec, auth/secret, network/resource surfaces excluded/separate. See worklog/GUARD-INT-009.md. No canonical/product/test/validator edits.",
+      "scratchpad": "worklog/GUARD-INT-009.md",
+      "session": "ses_f320c124fffeaH3o77J8sv75V8",
+      "status": "blocked"
+    },
     "INT-010": {
       "blockedNote": "No explicit ownership lock in card; impl+tests pre-exist committed (share_descriptor.rs + duplicate int_share_sync_lane.rs); zero writes made; both narrow suites 5/5 GREEN; orchestrator must assign single owned file before implementation",
       "scratchpad": "worklog/INT-010.md",
