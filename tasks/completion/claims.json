@@ -941,6 +941,12 @@
       "session": "ses_f32bf295effe9f16wtSPaJNIxT",
       "status": "blocked"
     },
+    "SHARE-002": {
+      "blockedNote": "Guard audit complete; validate_repository and validate_plan FAIL 51 errors, direct SHARE-002 stale + task/worklog appeared; convergence_gate FAIL total=80; Ralph accepted vs card/gap/ledger not-started conflict; unresolved merge/snapshot bounds preserved; controller-only reconciliation required; no acceptance.",
+      "scratchpad": "worklog/GUARD-SHARE-002.md",
+      "session": "ses_f32482b35ffckV3g0RPjHTUvXO",
+      "status": "blocked"
+    },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
       "scratchpad": "worklog/SYNC-001.md",
