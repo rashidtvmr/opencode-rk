@@ -1084,9 +1084,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Browser activity candidate GREEN: frozen 3/3, full web 49/49, third exact disconnect 1/1; hashes 8dbbb07c and 80d8d505 unchanged. Still blocked on independent verification, production browser evidence, branch activity unification, and unrelated frozen canvas TS6133 typecheck errors; see WEB-009-BROWSER-IMPL.md.",
-      "scratchpad": "worklog/WEB-009-BROWSER-IMPL.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "VERIFY-ONLY GREEN: browser frozen 3/3 + full web 17f/49t serial, sha 8dbbb07c unchanged, third disconnect 1/1 sha 80d8d505, zero test edits. WEB-009 stays blocked: production browser evidence + branch activity unification external/unresolved; unrelated frozen canvas TS6133 blocks typecheck.",
+      "scratchpad": "worklog/WEB-009-BROWSER-VERIFY.md",
+      "session": "ses_f316984ccffeM8rknVME4AhxbQ",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
