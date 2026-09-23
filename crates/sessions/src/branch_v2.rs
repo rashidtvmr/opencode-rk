@@ -328,6 +328,8 @@ impl SessionManager {
                 Ok(AssistantActivity {
                     message_id,
                     reasoning_summary,
+                    tool_calls: Vec::new(),
+                    references: Vec::new(),
                 })
             },
         )?;

@@ -22,6 +22,14 @@ pub const MAX_ATTACHMENT_MIME_BYTES: usize = 255;
 /// Provider-visible reasoning summaries are transcript metadata, not hidden chain of thought.
 /// Keep them small enough to fit one format-2 inline message part.
 pub const MAX_REASONING_SUMMARY_BYTES: usize = 8 * 1024;
+/// Maximum durable tool lifecycle records attached to one assistant message.
+pub const MAX_ASSISTANT_TOOL_CALLS: usize = 128;
+/// Maximum durable references attached to one assistant message.
+pub const MAX_ASSISTANT_REFERENCES: usize = 64;
+/// Maximum UTF-8 bytes in one durable tool identifier or name.
+pub const MAX_ASSISTANT_TOOL_FIELD_BYTES: usize = 128;
+/// Maximum UTF-8 bytes in one reference label or URL.
+pub const MAX_ASSISTANT_ACTIVITY_FIELD_BYTES: usize = 1024;
 pub const MAX_ARTIFACT_CONTENT_BYTES: usize = 64 * 1024;
 pub const MAX_ARTIFACT_TITLE_BYTES: usize = 256;
 pub const MAX_ARTIFACT_LANGUAGE_BYTES: usize = 64;
@@ -228,6 +236,24 @@ pub struct DraftAttachment {
 pub struct AssistantActivity {
     pub message_id: MessageId,
     pub reasoning_summary: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tool_calls: Vec<AssistantToolCall>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<AssistantReference>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AssistantToolCall {
+    pub call_id: String,
+    pub name: String,
+    pub state: String,
+    pub ok: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct AssistantReference {
+    pub label: String,
+    pub url: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
