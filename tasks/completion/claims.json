@@ -385,6 +385,12 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
+    "GUARD-OPS-002": {
+      "blockedNote": "Guard audit done: lane self-consistent, authority still unowned (gap ownership None, ledger nulls, validator 2x OPS-002 deliberate-review errors); proposal in worklog, no canonical edits, commit/push blocked per orders",
+      "scratchpad": "worklog/GUARD-OPS-002.md",
+      "session": "ses_f32482b65ffd8oU3ZqjMISssge",
+      "status": "blocked"
+    },
     "HEAD-001": {
       "completedNote": "GREEN 8/8 run_headless via direct rustc harness (/tmp/rh_test2 --test-threads=1); frozen sha85652c80 zero edits; impl sha04d43496; cargo path blocked by pre-existing opentui native gate",
       "scratchpad": "worklog/HEAD-001.md",
