@@ -313,6 +313,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "EXT-010": {
+      "blockedNote": "Guard audit done: ralph/FEATURES accepted vs gap ownership null + ledger unresolved-decomposition in-progress; task/worklog on disk vs validator absence rule (2 attributable errors); no wiring/acceptance; proposal in worklog; no canonical edits",
+      "scratchpad": "worklog/GUARD-EXT-010.md",
+      "session": "ses_f320de58affePYMhgJFtkWUXAu",
+      "status": "blocked"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
