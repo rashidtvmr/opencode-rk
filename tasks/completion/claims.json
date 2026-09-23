@@ -313,6 +313,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "EXT-002": {
+      "blockedNote": "Ralph accepted conflicts with REQ-017 gap expected in-progress; task/worklog now exist while frozen guard requires absence. Null ownership and EXT-001 equivalence remain unresolved; controller contract review required.",
+      "scratchpad": "worklog/GUARD-EXT-002.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
