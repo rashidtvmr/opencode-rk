@@ -1025,9 +1025,9 @@
       "status": "in-progress"
     },
     "TUI-011": {
-      "blockedNote": "Review found symlink-directory escape, uninstall native residue, and pre-transaction temp residue; frozen 5/5 green SHA fe5543977bdfb3dd435d240f131b4e2174466225339e536824b21f273a12f1d5; new trusted RED required.",
-      "scratchpad": "worklog/TUI-011-NATIVE-BUNDLE-SECURITY-REVIEW.md",
-      "session": "ses_f32a24247ffeJc0c6ZUCBAwUTK",
+      "blockedNote": "Security RED frozen c1c8fa57017612db43e6a7aaafa4945f1bba077405ee8bc541e0c50abf2a50a4: 3 tests, four expected assertion failures (bin/lib directory symlink escapes, uninstall native residue, pre-transaction temp residue). Existing native closure remains 5/5 SHA fe554397. Product repair must preserve staged --version plus origin/main --help identity gate.",
+      "scratchpad": "worklog/TUI-011-INSTALLER-SECURITY-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "WEB-004": {
