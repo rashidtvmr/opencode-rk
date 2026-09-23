@@ -912,9 +912,9 @@
       "status": "completed"
     },
     "SESS-008": {
-      "blockedNote": "BLOCKED: authorized compact test replacement verified in disposable standalone harness: cargo test --manifest-path /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/sess008-test-harness/Cargo.toml --lib -- --test-threads=1 = 5 passed, 0 failed; separate crates/sessions/src/lib.rs wiring and real caller proof remain; durable restart remains SQLite-owned.",
-      "scratchpad": "worklog/SESS-008-TEST-REPLACEMENT.md",
-      "session": "ses_f32f85a86ffeg1aDu4Jj7PCqRO",
+      "blockedNote": "Authorized save.clone() test correction applied GREEN 5/5 in disposable harness (hash 1399460b...). Persist.rs module unwired in lib.rs \u2014 no `pub mod persist`; SessionService (lib.rs:332-869) does not reference persist::PersistentSessionStore. Real caller proof pending integrator wiring. Durable restart SQLite-owned by Storage/SessionService, not in scope.",
+      "scratchpad": "worklog/SESS-008-SAVE-TEST-CORRECTION.md",
+      "session": "ses_f32d3cd57ffeudkCVZIl43vEwO",
       "status": "blocked"
     },
     "SYNC-001": {
