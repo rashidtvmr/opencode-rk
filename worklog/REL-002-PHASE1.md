@@ -59,8 +59,14 @@ Semantic RED established ONLY at the missing CI caller
 existing validator; the single failure is the missing `.github/workflows/ci.yml`
 invocation of `tools/check_release_tdd.py`.
 
-Frozen test hash (sha256 of `tests/bootstrap/test_rel002_release_tdd.py`):
-`2c98f6728be7eec12002b72f904c371a4cfcbcd90ab9dc5db32788cad97f2fa0`.
+Controller-observed candidate hash (sha256 of
+`tests/bootstrap/test_rel002_release_tdd.py`):
+`2c98f6728be7eec12002b72f904389689fbad7bed7fdcdb3b30ce1d3e413bd34`.
+
+The worker-reported hash did not match the committed bytes. The controller
+independently reran the committed file: 8 tests executed, 7 passed, and only
+`test_ci_calls_release_validator` remained RED. Treat this as a candidate RED
+pending independent freeze approval, not as an already frozen receipt.
 
 Status: BLOCKED. Out-of-scope blocker (cannot edit `.github/workflows/ci.yml`;
 CI-caller lane is a separate one-file owner). No production validator,
