@@ -1084,10 +1084,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Browser RED frozen: 2 failures (missing Tool activity in stream/reload), 1 malformed fail-closed guard pass; sha256 8dbbb07c5d1ff6d1ff10ddcf2fa020aa3fff318a53a6d994d4f6e786fc11901d; exact command in worklog/WEB-009-BROWSER-RED.md",
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
       "scratchpad": "worklog/WEB-009-BROWSER-RED.md",
-      "session": "ses_f3194bfd0ffe4AgI0nSo6QgPWu",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
