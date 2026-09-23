@@ -1084,9 +1084,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Writer v2 support implemented and self-tests GREEN (2/2 storage lib writer_v2). Frozen RED: 1 pass + 2 failures (caller wiring). Failure 1: SessionService::append_assistant_with_activity in sessions/src/lib.rs rejects branch sessions with 'structured assistant activity is not yet available for branch sessions' (test line 142). Failure 2: branch_v2.rs list_assistant_activity (lines 296-336) returns empty tool_calls/references (test line 97). These files are outside owned file scope (writer_v2.rs only). Blocked pending separate lanes to wire callers.",
+      "blockedNote": "branch_v2.rs implemented: synchronize_legacy_shadow and append_fork_assistant_with_activity delegate to V2Writer::append_message_with_activity; list_assistant_activity decodes activity parts with fail-closed on malformed JSON, duplicate kind detection, and empty-activity filtering. RED tests: 1 pass (malformed), 2 fail (legacy copy fails BLOB/TEXT constraint violation in writer_v2.rs INSERT; child append fails at SessionService guard in lib.rs:509-519). Blocked on writer_v2.rs BLOB/TEXT binding bug (params![&String] into payloads.inline_data BLOB) and lib.rs SessionService guard rejecting branch sessions with tool_calls/references. Cannot edit writer_v2.rs or lib.rs per lane ownership scope.",
       "scratchpad": "worklog/WEB-009-BRANCH-ACTIVITY-RED.md",
-      "session": "ses_f30db8445ffedcmUPVoqxoxNG7",
+      "session": "ses_f30c7889affekc5jYJXaGbk0O4",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {

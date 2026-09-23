@@ -10,14 +10,16 @@
 use crate::{SessionError, SessionManager};
 use chrono::Utc;
 use opencode_rk_contracts::{
-    AssistantActivity, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionSummary,
+    AssistantActivity, AssistantReference, AssistantToolCall, MessageId, MessageRecord,
+    MessageRole, PayloadRef, SessionId, SessionSummary,
 };
 use opencode_rk_storage::{
     fork_v2::{ForkV2, MAX_FORK_COPY_MESSAGES, MAX_FORK_DEPTH},
-    writer_v2::MESSAGE_PART_REASONING_SUMMARY,
+    writer_v2::{MESSAGE_PART_REASONING_SUMMARY, MESSAGE_PART_REFERENCES, MESSAGE_PART_TOOL_CALLS},
     NewMessage, NewSession, SchemaV2, StorageError, V2Writer,
 };
 use rusqlite::{params, OptionalExtension};
+use serde_json;
 use std::path::Path;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -54,12 +56,12 @@ impl SessionManager {
         let mut statement = conn.prepare(
             "SELECT m.id, m.seq, m.role, m.created_at_us, p.inline_data, p.blob_pk, p.raw_bytes, b.hash
              FROM messages m
-             JOIN sessions s ON s.pk=m.session_pk
-             JOIN message_parts mp ON mp.message_pk=m.pk AND mp.ordinal=0
-             JOIN payloads p ON p.pk=mp.payload_pk
-             LEFT JOIN blobs b ON b.pk=p.blob_pk
-             WHERE s.id=?1 AND m.seq<?2
-             ORDER BY m.seq DESC LIMIT ?3",
+              JOIN sessions s ON s.pk=m.session_pk
+              JOIN message_parts mp ON mp.message_pk=m.pk AND mp.ordinal=0
+              JOIN payloads p ON p.pk=mp.payload_pk
+              LEFT JOIN blobs b ON b.pk=p.blob_pk
+              WHERE s.id=?1 AND m.seq<?2
+              ORDER BY m.seq DESC LIMIT ?3",
         )?;
         let rows = statement.query_map(
             params![
@@ -225,12 +227,19 @@ impl SessionManager {
                 body: message.body.clone(),
                 created_at_us: message.created_at.as_datetime().timestamp_micros(),
             };
-            let summary = activity
-                .iter()
-                .find(|entry| entry.message_id == message.id)
-                .map(|entry| entry.reasoning_summary.as_str());
-            V2Writer::append_message_with_reasoning(&mut conn, &candidate, summary)?;
+            let matching = activity.iter().find(|entry| entry.message_id == message.id);
+            let reasoning = matching.map(|entry| entry.reasoning_summary.as_str());
+            let tool_calls = matching
+                .map(|entry| entry.tool_calls.as_slice())
+                .unwrap_or(&[]);
+            let references = matching
+                .map(|entry| entry.references.as_slice())
+                .unwrap_or(&[]);
+            V2Writer::append_message_with_activity(
+                &mut conn, &candidate, reasoning, tool_calls, references,
+            )?;
         }
+
         Ok(())
     }
 
@@ -293,48 +302,184 @@ impl SessionManager {
         Ok(message)
     }
 
+    pub fn append_fork_assistant_with_activity(
+        &self,
+        session_id: SessionId,
+        text: String,
+        reasoning_summary: Option<String>,
+        tool_calls: Vec<AssistantToolCall>,
+        references: Vec<AssistantReference>,
+    ) -> Result<MessageRecord, SessionError> {
+        let body =
+            PayloadRef::inline(text).map_err(|error| SessionError::Contract(error.to_string()))?;
+        let message = MessageRecord {
+            id: MessageId::new(),
+            session_id,
+            role: MessageRole::Assistant,
+            body,
+            created_at: opencode_rk_contracts::Timestamp::now(),
+        };
+        let mut conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
+        V2Writer::append_message_with_activity(
+            &mut conn,
+            &NewMessage {
+                id: message.id,
+                session_id,
+                role: MessageRole::Assistant,
+                body: message.body.clone(),
+                created_at_us: message.created_at.as_datetime().timestamp_micros(),
+            },
+            reasoning_summary.as_deref(),
+            &tool_calls,
+            &references,
+        )?;
+        Ok(message)
+    }
+
     pub fn list_assistant_activity(
         &self,
         session_id: SessionId,
         limit: usize,
     ) -> Result<Vec<AssistantActivity>, SessionError> {
         let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
-        let mut statement = conn.prepare(
-            "SELECT m.id,p.inline_data,p.blob_pk FROM messages m
-             JOIN sessions s ON s.pk=m.session_pk
-             JOIN message_parts mp ON mp.message_pk=m.pk AND mp.kind=?2
-             JOIN payloads p ON p.pk=mp.payload_pk
+        let limit = limit.clamp(1, 500);
+        let session_uuid = session_id.as_uuid();
+        let session_bytes = session_uuid.as_bytes();
+
+        // Step 1: fetch bounded set of assistant message IDs in order.
+        let mut message_stmt = conn.prepare(
+            "SELECT m.id FROM messages m JOIN sessions s ON s.pk=m.session_pk
              WHERE s.id=?1 AND m.role=2
-             ORDER BY m.seq ASC LIMIT ?3",
+             ORDER BY m.seq ASC LIMIT ?2",
         )?;
-        let rows = statement.query_map(
-            params![
-                session_id.as_uuid().as_bytes().as_slice(),
-                MESSAGE_PART_REASONING_SUMMARY,
-                limit.clamp(1, 500) as i64,
-            ],
-            |row| {
-                let id: Vec<u8> = row.get(0)?;
-                let inline: Option<Vec<u8>> = row.get(1)?;
-                let blob_pk: Option<i64> = row.get(2)?;
-                if blob_pk.is_some() {
-                    return Err(rusqlite::Error::InvalidQuery);
+        let message_ids: Vec<Vec<u8>> = message_stmt
+            .query_map(params![session_bytes, limit as i64], |row| {
+                row.get::<_, Vec<u8>>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        if message_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        // Step 2: fetch all activity parts for those messages in a single query.
+        // Build a SQL IN-clause with placeholders for the message IDs.
+        let mut in_clause = String::new();
+        for i in 0..message_ids.len() {
+            if i > 0 {
+                in_clause.push(',');
+            }
+            in_clause.push('?');
+        }
+        let sql = format!(
+            "SELECT m.id, mp.kind, p.inline_data, p.blob_pk, m.seq
+             FROM messages m
+             JOIN message_parts mp ON mp.message_pk=m.pk AND mp.kind IN (?1, ?2, ?3)
+             JOIN payloads p ON p.pk=mp.payload_pk
+             WHERE m.id IN ({in_clause})
+             ORDER BY m.seq ASC, mp.kind ASC, mp.ordinal ASC",
+            in_clause = in_clause
+        );
+        let mut part_stmt = conn.prepare(&sql)?;
+
+        // Build params: 3 kind constants first, then message ID bytes.
+        let mut param_refs: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(3 + message_ids.len());
+        param_refs.push(&MESSAGE_PART_REASONING_SUMMARY);
+        param_refs.push(&MESSAGE_PART_TOOL_CALLS);
+        param_refs.push(&MESSAGE_PART_REFERENCES);
+        for id in &message_ids {
+            param_refs.push(id);
+        }
+        let params = rusqlite::params_from_iter(param_refs);
+
+        // Collect rows into a map keyed by message_id (as bytes).
+        use std::collections::BTreeMap;
+        let mut parts_by_message: BTreeMap<Vec<u8>, MessageActivityParts> = BTreeMap::new();
+        for id in &message_ids {
+            parts_by_message.entry(id.clone()).or_default();
+        }
+
+        let rows = part_stmt.query_map(params, |row| {
+            let message_id_bytes: Vec<u8> = row.get(0)?;
+            let kind: i64 = row.get(1)?;
+            let inline: Option<Vec<u8>> = row.get(2)?;
+            let blob_pk: Option<i64> = row.get(3)?;
+            let _seq: i64 = row.get(4)?;
+            Ok((message_id_bytes, kind, inline, blob_pk))
+        })?;
+
+        for row in rows {
+            let (message_id_bytes, kind, inline, blob_pk) = row?;
+            if blob_pk.is_some() {
+                return Err(SessionError::Storage(StorageError::Sqlite(
+                    rusqlite::Error::InvalidQuery,
+                )));
+            }
+            let entry = parts_by_message
+                .get_mut(&message_id_bytes)
+                .ok_or_else(|| rusqlite::Error::InvalidQuery)?;
+            let data = inline.unwrap_or_default();
+            match kind {
+                MESSAGE_PART_REASONING_SUMMARY => {
+                    if entry.reasoning_summary.is_some() {
+                        return Err(SessionError::Contract(
+                            "duplicate reasoning summary part for a single message".to_owned(),
+                        ));
+                    }
+                    entry.reasoning_summary =
+                        Some(String::from_utf8(data).map_err(|_| rusqlite::Error::InvalidQuery)?);
                 }
-                let reasoning_summary = String::from_utf8(inline.unwrap_or_default())
-                    .map_err(|_| rusqlite::Error::InvalidQuery)?;
-                let message_id = MessageId::from_uuid(
-                    uuid::Uuid::from_slice(&id).map_err(|_| rusqlite::Error::InvalidQuery)?,
-                );
-                Ok(AssistantActivity {
-                    message_id,
-                    reasoning_summary,
-                    tool_calls: Vec::new(),
-                    references: Vec::new(),
-                })
-            },
-        )?;
-        rows.collect::<Result<Vec<_>, _>>()
-            .map_err(SessionError::from)
+                MESSAGE_PART_TOOL_CALLS => {
+                    if !entry.tool_calls.is_empty() {
+                        return Err(SessionError::Contract(
+                            "duplicate tool_calls part for a single message".to_owned(),
+                        ));
+                    }
+                    let json_str =
+                        String::from_utf8(data).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    let calls: Vec<AssistantToolCall> = serde_json::from_str(&json_str)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    entry.tool_calls = calls;
+                }
+                MESSAGE_PART_REFERENCES => {
+                    if !entry.references.is_empty() {
+                        return Err(SessionError::Contract(
+                            "duplicate references part for a single message".to_owned(),
+                        ));
+                    }
+                    let json_str =
+                        String::from_utf8(data).map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    let refs: Vec<AssistantReference> = serde_json::from_str(&json_str)
+                        .map_err(|_| rusqlite::Error::InvalidQuery)?;
+                    entry.references = refs;
+                }
+                _ => {}
+            }
+        }
+
+        // Step 3: reconstruct AssistantActivity entries preserving message order,
+        // only for messages that have at least one activity part. Empty activity
+        // messages (no reasoning/tool_calls/references) are omitted.
+        let mut result = Vec::with_capacity(message_ids.len());
+        for id_bytes in &message_ids {
+            let parts = parts_by_message.remove(id_bytes).unwrap_or_default();
+            if parts.reasoning_summary.is_none()
+                && parts.tool_calls.is_empty()
+                && parts.references.is_empty()
+            {
+                continue;
+            }
+            let message_id = MessageId::from_uuid(
+                uuid::Uuid::from_slice(id_bytes).map_err(|_| rusqlite::Error::InvalidQuery)?,
+            );
+            result.push(AssistantActivity {
+                message_id,
+                reasoning_summary: parts.reasoning_summary.unwrap_or_default(),
+                tool_calls: parts.tool_calls,
+                references: parts.references,
+            });
+        }
+        Ok(result)
     }
 
     pub fn retry_request(
@@ -591,4 +736,11 @@ fn role_code(role: MessageRole) -> i64 {
         MessageRole::Assistant => 2,
         MessageRole::Tool => 3,
     }
+}
+
+#[derive(Default)]
+struct MessageActivityParts {
+    reasoning_summary: Option<String>,
+    tool_calls: Vec<AssistantToolCall>,
+    references: Vec<AssistantReference>,
 }
