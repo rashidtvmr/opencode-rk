@@ -49,4 +49,6 @@ No workflow, validator, fixture, policy, protection, or frozen unrelated test ed
 
 ## Candidate hash
 
-Freeze after commit. Controller independently hashes this file and reruns the focused command. Expected: one real missing executable CI step failure; no post-freeze test edits.
+Frozen commit: `27516eb3590a697ff79135dbcad8341a97f30b52`.
+Frozen test SHA-256: `5c8375613afc11a4e7a11427404c60e663615ea19cb3514ccb316bd6241262ae`.
+Controller independently hashes this file and reruns the focused command. Expected: one real missing executable CI step failure; no post-freeze test edits.
