@@ -1,15 +1,16 @@
-# TUI-011 builder lane — macOS arm64 bootstrap script + external build evidence
+# TUI-011 native binary lane — macOS arm64 artifact
 
-Status: builder script implemented and externally verified; TUI-011 stays
-blocked only on copying generated artifact + provenance files into repo.
+Status: generated dylib verified and native bridge suite green. TUI-011 stays
+blocked on the coupled `artifacts.json`, `NOTICES`, and `sbom.json` sidecars.
 
 ## Claim
 - Task: TUI-011
-- Session: `ses_f307abda8ffeXHdsxUCmvo4Qa6`
-- Base commit: `ac13e61f27f0914c85223ad8a808f2ebc9f429e9`
+- Session: `ses_f3065a9f3ffea7opvjVcfLQ5I2`
+- Starting commit: `ea968bd0c3cfda515f4fbcfc7d441d42b15a3ceb`
 - Branch: `lane/TUI-011-native-artifacts`
 - Scratchpad owner file: `worklog/TUI-011-NATIVE-ARTIFACTS.md`
-- Sole owned production file: `crates/opentui-bridge/native/build_opentui.sh`
+- Sole owned production file:
+  `crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib`
 - Frozen test untouched: `crates/opentui-bridge/tests/native_artifact_manifest.rs`
   SHA-256 `efb642364b6a4dc559fff019d21c14f778c170f34f96bf5e7183b4aeb536aa40`
 
@@ -28,7 +29,7 @@ blocked only on copying generated artifact + provenance files into repo.
 - GitHub API commit object: sha `c01292f...`, tree
   `261e8ea4b0ac68bb589760c3c871e202ef71ed6b`.
 
-## Script contract (owned file only)
+## Prior builder contract (reference only; not owned this takeover)
 `crates/opentui-bridge/native/build_opentui.sh`: `set -euo pipefail`,
 explicit argv arrays, no eval, bounded download/archive/extracted sizes,
 caller-supplied absolute work/output dirs refused inside repo, temp trap,
@@ -39,18 +40,7 @@ aarch64-macos.13.0 -Doptimize=ReleaseSafe -Dmacos-sdk=...`, Mach-O arm64
 file/lipo check, nm ABI symbols, rpath/install-name reject, atomic copy,
 SHA-only stdout, `--help` / `--verify-only` modes, exits 0/1/2.
 
-## Fixes this session
-- Apple-tool positional compat: `file -b`, `lipo -archs`, `nm -gU`,
-  `otool -l`, `otool -D` without GNU `--` (macOS otool/lipo reject it).
-  `mkdir/du/mktemp/cp/rm/git/cd/tar/tail` accept `--`; left unchanged.
-- `du -sk` without `--`; `shasum -a 256` positional (BSD-safe).
-- nm/grep pipe under `set -o pipefail` false-negatived on large nm output
-  (SIGPIPE + grep -q early exit): replaced with pure-shell `case` substring
-  match over newline-padded nm output. No path validation weakened.
-- Verified `--verify-only` accepts absolute repo-external artifact paths
-  (path allowlist applies only to `--work-dir`/`--output-dir`).
-
-## Validation matrix
+## Prior builder validation matrix (reference only)
 - `bash -n crates/opentui-bridge/native/build_opentui.sh`: OK.
 - `--help`: exit 0, prints usage + pins.
 - `--bogus`: exit 2 (usage error).
@@ -61,7 +51,7 @@ SHA-only stdout, `--help` / `--verify-only` modes, exits 0/1/2.
   `cargo test -p opencode-rk-opentui-bridge --test native_artifact_manifest`
   => `test result: FAILED. 0 passed; 3 failed`.
 
-## External build (approved dirs only, nothing copied into repo)
+## Prior external build (approved dirs only, nothing copied into repo)
 - Work: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui011-build/work`
 - Out: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui011-build/out`
 - Stdout log: `tui011-build/build-stdout.log`; stderr: `tui011-build/build-stderr.log`.
@@ -73,7 +63,7 @@ SHA-only stdout, `--help` / `--verify-only` modes, exits 0/1/2.
   zig 0.16.0 ok; file `Mach-O 64-bit dynamically linked shared library arm64`;
   lipo `arm64`; ABI symbols ok; no LC_RPATH; install name `@rpath/libopentui.dylib`.
 
-## Verify-only on external dylib (exit 0)
+## Prior external verify-only (exit 0)
 - Path: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui011-build/out/libopentui.dylib`
 - SHA-256: `798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91`
 - Size: 6863648 bytes.
@@ -84,10 +74,39 @@ SHA-only stdout, `--help` / `--verify-only` modes, exits 0/1/2.
 - `nm -gU` exports: `_bufferDrawText`, `_bufferWriteResolvedChars`,
   `_createRenderer`, `_destroyRenderer`, `_getCurrentBuffer`.
 
-## Remaining
-- TUI-011 blocked only on a follow-up lane copying the generated
-  `libopentui.dylib` + `artifacts.json` manifest + NOTICES/SBOM sidecars into
-  `crates/opentui-bridge/native/` (out of scope for this lane; no repo
-  artifact/manifest/sidecar files written here).
-- Commit exactly: script + this scratchpad + claims row; push
-  `lane/TUI-011-native-artifacts` (never force).
+## Takeover verification @ `ea968bd0c3cfda515f4fbcfc7d441d42b15a3ceb`
+- No bytes regenerated or modified. Owned path was already present untracked.
+- SHA-256: `798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91`.
+- Size: `6863648` bytes.
+- `file -b`: `Mach-O 64-bit dynamically linked shared library arm64`.
+- `lipo -archs`: `arm64`.
+- `otool -D`: `@rpath/libopentui.dylib`.
+- `otool -l`: `LC_RPATH=0`.
+- Required ABI exports: `_createRenderer`, `_destroyRenderer`,
+  `_getCurrentBuffer`, `_bufferDrawText`, `_bufferWriteResolvedChars`.
+- `bash crates/opentui-bridge/native/build_opentui.sh --verify-only <owned>`:
+  exit 0; same SHA; all builder checks above passed.
+- Pre-test host memory: 5.82 GiB free pages, 2.25 GiB active, 4.34 GiB
+  inactive, 2.54 GiB wired; host physical memory 24 GiB.
+
+## Native loader/ABI evidence
+- Command:
+  `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 DYLD_LIBRARY_PATH="$PWD/crates/opentui-bridge/native/lib/aarch64-apple-darwin" DYLD_FALLBACK_LIBRARY_PATH="$PWD/crates/opentui-bridge/native/lib/aarch64-apple-darwin" cargo test -p opencode-rk-opentui-bridge --features native --lib -- --test-threads=1`
+- Exit 0: `73 passed; 0 failed`; loader found and executed real renderer FFI.
+- No source, test, manifest, sidecar, or builder-byte edits.
+
+## Frozen artifact test
+- Command:
+  `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-opentui-bridge --test native_artifact_manifest -- --test-threads=1`
+- Cargo output condensed the panic to `Error: No such file or directory`;
+  direct execution of the Cargo-produced frozen test binary confirmed exact
+  count: `0 passed; 3 failed`.
+- Failure causes: `native/artifacts.json` absent; frozen artifact test coupled
+  to manifest; `native/NOTICES` absent. `native/sbom.json` is also required
+  after the first sidecar failure clears.
+- Frozen test file remained unchanged at the recorded SHA-256.
+
+## Remaining blocker
+- Sidecar/manifest lane must add bounded `artifacts.json`, `NOTICES`, and
+  `sbom.json` under `crates/opentui-bridge/native/`, then rerun frozen test.
+- No claim of TUI-011 completion or parent acceptance.

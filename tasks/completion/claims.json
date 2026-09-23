@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "builder ok external dylib 798f30dd SHA; frozen RED 0/3; blocked only on copying artifact+manifest+sidecars into repo",
+      "blockedNote": "dylib SHA 798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91, 6863648 bytes; Mach-O arm64; @rpath; no LC_RPATH; 5 ABI exports; builder verify-only exit 0. Native bridge 73/73 GREEN with scoped DYLD. Frozen artifact test 0/3: artifacts.json and NOTICES absent; sbom.json required next. No source/test edits.",
       "scratchpad": "worklog/TUI-011-NATIVE-ARTIFACTS.md",
-      "session": "ses_f307abda8ffeXHdsxUCmvo4Qa6",
+      "session": "ses_f3065a9f3ffea7opvjVcfLQ5I2",
       "status": "blocked"
     },
     "UI-014": {
