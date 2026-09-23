@@ -880,6 +880,12 @@
       "session": "ses_f387af8bdffeEySGQi8lJSC21p",
       "status": "completed"
     },
+    "PROV-023": {
+      "blockedNote": "RED frozen sha256 29d0c5d17782d39fbb346b2eff4ff4a828a652a2f50ea2a63ffe5daea8fdedd4; focused unittest 6/6 green with existing catalog; isolated missing-catalog RED 5/5; negative fixtures pass; blocked pending catalog implementation",
+      "scratchpad": "worklog/PROV-023-CATALOG-RED.md",
+      "session": "ses_f32dca9d8ffeV3z4jQQdITtaso",
+      "status": "blocked"
+    },
     "RC-01": {
       "completedNote": "GREEN server-lib 154/154 + daemon_auth_api 5/5 zero test edits; log rc01",
       "scratchpad": "worklog/RC-01.md",
