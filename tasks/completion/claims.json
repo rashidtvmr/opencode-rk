@@ -313,6 +313,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "EXT-001": {
+      "blockedNote": "BLOCKED: ownership null per req017 gap; ralph accepted vs expected in-progress + task/worklog appeared = 2 validator lines; no guard-authority patch; impl existence != ownership",
+      "scratchpad": "worklog/GUARD-EXT-001.md",
+      "session": "ses_f3215f2e6ffe6Lw6TDiPweG8X8",
+      "status": "blocked"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
