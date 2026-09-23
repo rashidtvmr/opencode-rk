@@ -1344,10 +1344,24 @@ function App() {
                             </form>
                           ) : (
                             <>
-                              {message.role === 'assistant' && assistantActivity[message.id] ? (
+                              {message.role === 'assistant' &&
+                              assistantActivity[message.id]?.reasoning_summary ? (
                                 <details className="codex-assistant-activity">
                                   <summary>Reasoning summary</summary>
                                   <p>{assistantActivity[message.id].reasoning_summary}</p>
+                                </details>
+                              ) : null}
+                              {message.role === 'assistant' &&
+                              assistantActivity[message.id]?.tool_calls.length ? (
+                                <details className="codex-assistant-activity">
+                                  <summary>Tool activity</summary>
+                                  <ul>
+                                    {assistantActivity[message.id].tool_calls.map((tool) => (
+                                      <li key={tool.call_id}>
+                                        {tool.name}: {tool.state}
+                                      </li>
+                                    ))}
+                                  </ul>
                                 </details>
                               ) : null}
                               <div className="codex-message-content">
@@ -1356,6 +1370,21 @@ function App() {
                                   ? '(open in artifact editor)'
                                   : messageText(message)}
                               </div>
+                              {message.role === 'assistant' &&
+                              assistantActivity[message.id]?.references.length ? (
+                                <section aria-label="References">
+                                  <h3>References</h3>
+                                  <ul>
+                                    {assistantActivity[message.id].references.map((reference) => (
+                                      <li key={reference.url}>
+                                        <a href={reference.url} target="_blank" rel="noreferrer">
+                                          {reference.label}
+                                        </a>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </section>
+                              ) : null}
                             </>
                           )}
                           <MessageActions

@@ -1084,10 +1084,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "scratchpad": "worklog/WEB-009-BROWSER-RED.md",
-      "session": "",
-      "status": "not-started"
+      "blockedNote": "Browser structured activity candidate GREEN: frozen 3/3, affected 5/5, full web suite 49/49; frozen hash 8dbbb07c. Typecheck remains blocked by pre-existing TS6133 errors in frozen canvas-model.test.ts. Parent still needs independent verification, third disconnect pass, production browser evidence, and branch activity unification; see worklog/WEB-009-BROWSER-IMPL.md.",
+      "scratchpad": "worklog/WEB-009-BROWSER-IMPL.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",

@@ -52,6 +52,20 @@ export interface BranchResult {
 export interface AssistantActivity {
   message_id: string
   reasoning_summary: string
+  tool_calls: AssistantToolCall[]
+  references: AssistantReference[]
+}
+
+export interface AssistantToolCall {
+  call_id: string
+  name: string
+  state: 'completed' | 'failed'
+  ok: boolean
+}
+
+export interface AssistantReference {
+  label: string
+  url: string
 }
 
 export interface DraftAttachment {
@@ -788,6 +802,97 @@ export async function getForkProvenance(sessionId: string, signal?: AbortSignal)
 }
 
 const MAX_REASONING_SUMMARY_BYTES = 8 * 1024
+const MAX_ASSISTANT_TOOL_CALLS = 128
+const MAX_ASSISTANT_REFERENCES = 64
+const MAX_ASSISTANT_TOOL_FIELD_BYTES = 128
+const MAX_ASSISTANT_ACTIVITY_FIELD_BYTES = 1024
+
+function isBoundedText(value: unknown, maxBytes: number) {
+  return (
+    typeof value === 'string' &&
+    value.length > 0 &&
+    !/[\u0000-\u001f\u007f]/u.test(value) &&
+    new TextEncoder().encode(value).byteLength <= maxBytes
+  )
+}
+
+function normalizeAssistantActivity(value: unknown): AssistantActivity | null {
+  if (!value || typeof value !== 'object') return null
+  const candidate = value as Record<string, unknown>
+  const rawToolCalls = candidate.tool_calls ?? []
+  const rawReferences = candidate.references ?? []
+  if (
+    !isBoundedText(candidate.message_id, MAX_ASSISTANT_TOOL_FIELD_BYTES) ||
+    typeof candidate.reasoning_summary !== 'string' ||
+    new TextEncoder().encode(candidate.reasoning_summary).byteLength > MAX_REASONING_SUMMARY_BYTES ||
+    !Array.isArray(rawToolCalls) ||
+    rawToolCalls.length > MAX_ASSISTANT_TOOL_CALLS ||
+    !Array.isArray(rawReferences) ||
+    rawReferences.length > MAX_ASSISTANT_REFERENCES
+  ) {
+    return null
+  }
+
+  const tool_calls: AssistantToolCall[] = []
+  const callIds = new Set<string>()
+  for (const value of rawToolCalls) {
+    if (!value || typeof value !== 'object') return null
+    const tool = value as Record<string, unknown>
+    if (
+      !isBoundedText(tool.call_id, MAX_ASSISTANT_TOOL_FIELD_BYTES) ||
+      !isBoundedText(tool.name, MAX_ASSISTANT_TOOL_FIELD_BYTES) ||
+      (tool.state !== 'completed' && tool.state !== 'failed') ||
+      typeof tool.ok !== 'boolean' ||
+      tool.ok !== (tool.state === 'completed') ||
+      callIds.has(tool.call_id as string)
+    ) {
+      return null
+    }
+    callIds.add(tool.call_id as string)
+    tool_calls.push({
+      call_id: tool.call_id as string,
+      name: tool.name as string,
+      state: tool.state,
+      ok: tool.ok,
+    })
+  }
+
+  const references: AssistantReference[] = []
+  const referenceUrls = new Set<string>()
+  for (const value of rawReferences) {
+    if (!value || typeof value !== 'object') return null
+    const reference = value as Record<string, unknown>
+    if (
+      !isBoundedText(reference.label, MAX_ASSISTANT_ACTIVITY_FIELD_BYTES) ||
+      !isBoundedText(reference.url, MAX_ASSISTANT_ACTIVITY_FIELD_BYTES)
+    ) {
+      return null
+    }
+    let parsed: URL
+    try {
+      parsed = new URL(reference.url as string)
+    } catch {
+      return null
+    }
+    if (
+      parsed.protocol !== 'https:' ||
+      parsed.username !== '' ||
+      parsed.password !== '' ||
+      referenceUrls.has(parsed.href)
+    ) {
+      return null
+    }
+    referenceUrls.add(parsed.href)
+    references.push({ label: reference.label as string, url: parsed.href })
+  }
+
+  return {
+    message_id: candidate.message_id,
+    reasoning_summary: candidate.reasoning_summary,
+    tool_calls,
+    references,
+  }
+}
 
 export async function listAssistantActivity(sessionId: string, limit = 200, signal?: AbortSignal) {
   const boundedLimit = Math.max(1, Math.min(500, Math.trunc(limit)))
@@ -796,23 +901,10 @@ export async function listAssistantActivity(sessionId: string, limit = 200, sign
       `/api/sessions/${encodeURIComponent(sessionId)}/activity?limit=${boundedLimit}`,
       { signal },
     )
-    const encoder = new TextEncoder()
     return (payload.activity ?? []).map((value) => {
-      if (!value || typeof value !== 'object') {
-        throw new Error('Server returned invalid assistant activity')
-      }
-      const candidate = value as Record<string, unknown>
-      if (
-        typeof candidate.message_id !== 'string' ||
-        typeof candidate.reasoning_summary !== 'string' ||
-        encoder.encode(candidate.reasoning_summary).byteLength > MAX_REASONING_SUMMARY_BYTES
-      ) {
-        throw new Error('Server returned invalid assistant activity')
-      }
-      return {
-        message_id: candidate.message_id,
-        reasoning_summary: candidate.reasoning_summary,
-      } satisfies AssistantActivity
+      const activity = normalizeAssistantActivity(value)
+      if (!activity) throw new Error('Server returned invalid assistant activity')
+      return activity
     })
   } catch (cause) {
     // Older native servers do not expose structured assistant activity yet.
@@ -864,6 +956,9 @@ function parseTurnStreamEvent(
     assistantMessage: MessageRecord | null
     assistantText: string
     reasoningSummary: string
+    toolCalls: AssistantToolCall[]
+    references: AssistantReference[]
+    activityMessageId: string | null
   },
 ) {
   let value: unknown
@@ -912,6 +1007,61 @@ function parseTurnStreamEvent(
       handlers.onAssistantDelta?.(event.delta)
       break
     }
+    case 'assistant_activity': {
+      const activity = normalizeAssistantActivity(event.activity)
+      if (
+        !activity ||
+        state.activityMessageId !== null ||
+        activity.reasoning_summary !== state.reasoningSummary
+      ) {
+        throw streamError('Server returned invalid assistant activity')
+      }
+      state.activityMessageId = activity.message_id
+      state.toolCalls = activity.tool_calls
+      state.references = activity.references
+      break
+    }
+    case 'tool_call': {
+      if (
+        !isBoundedText(event.call_id, MAX_ASSISTANT_TOOL_FIELD_BYTES) ||
+        !isBoundedText(event.name, MAX_ASSISTANT_TOOL_FIELD_BYTES) ||
+        state.toolCalls.length >= MAX_ASSISTANT_TOOL_CALLS ||
+        state.toolCalls.some((tool) => tool.call_id === event.call_id)
+      ) {
+        throw streamError('Server returned invalid tool activity')
+      }
+      state.toolCalls.push({
+        call_id: event.call_id as string,
+        name: event.name as string,
+        state: 'failed',
+        ok: false,
+      })
+      break
+    }
+    case 'tool_output': {
+      const tool = state.toolCalls.find((candidate) => candidate.call_id === event.call_id)
+      if (!tool || tool.name !== event.name || typeof event.output !== 'string') {
+        throw streamError('Server returned invalid tool activity')
+      }
+      tool.ok = !event.output.startsWith('error:')
+      tool.state = tool.ok ? 'completed' : 'failed'
+      break
+    }
+    case 'reference': {
+      const activity = normalizeAssistantActivity({
+        message_id: 'stream-reference',
+        reasoning_summary: '',
+        tool_calls: [],
+        references: [{ label: event.label, url: event.url }],
+      })
+      if (!activity || state.references.length >= MAX_ASSISTANT_REFERENCES) {
+        throw streamError('Server returned invalid assistant reference')
+      }
+      if (!state.references.some((reference) => reference.url === activity.references[0].url)) {
+        state.references.push(activity.references[0])
+      }
+      break
+    }
     case 'assistant_message': {
       const message = normalizeMessage(event.message)
       if (!message || message.role !== 'assistant' || message.body.storage !== 'inline') {
@@ -934,12 +1084,28 @@ function parseTurnStreamEvent(
       if (new TextEncoder().encode(reasoningSummary).byteLength > MAX_REASONING_SUMMARY_BYTES) {
         throw streamError('Reasoning summary exceeded the browser safety limit')
       }
+      const finalActivity = normalizeAssistantActivity({
+        message_id: message.id,
+        reasoning_summary: reasoningSummary,
+        tool_calls: event.tool_calls ?? state.toolCalls,
+        references: event.references ?? state.references,
+      })
+      if (
+        !finalActivity ||
+        (state.activityMessageId !== null &&
+          (state.activityMessageId !== message.id ||
+            JSON.stringify(finalActivity.tool_calls) !== JSON.stringify(state.toolCalls) ||
+            JSON.stringify(finalActivity.references) !== JSON.stringify(state.references)))
+      ) {
+        throw streamError('Server returned invalid final assistant activity')
+      }
       state.assistantMessage = message
-      if (reasoningSummary) {
-        handlers.onAssistantActivity?.({
-          message_id: message.id,
-          reasoning_summary: reasoningSummary,
-        })
+      if (
+        finalActivity.reasoning_summary ||
+        finalActivity.tool_calls.length > 0 ||
+        finalActivity.references.length > 0
+      ) {
+        handlers.onAssistantActivity?.(finalActivity)
       }
       handlers.onAssistantMessage?.(message)
       break
@@ -1037,6 +1203,9 @@ export async function runTurnStream(
     assistantMessage: null as MessageRecord | null,
     assistantText: '',
     reasoningSummary: '',
+    toolCalls: [] as AssistantToolCall[],
+    references: [] as AssistantReference[],
+    activityMessageId: null as string | null,
   }
 
   const consumeLine = (line: string) => {
