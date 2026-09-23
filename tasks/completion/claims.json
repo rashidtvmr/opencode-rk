@@ -881,9 +881,9 @@
       "status": "completed"
     },
     "PROV-023": {
-      "blockedNote": "Catalog schema GREEN (Rust 5/5 prior reviewer, Python 6/6 independent), but task is Runtime optional: False and no product code loads docs/provider-compatibility.json. request_profile duplicates hardcoded endpoints and has no runtime caller. Blocked pending public provider-path RED and real bounded consumer wiring; see worklog/PROV-023-CATALOG-REVIEW.md.",
-      "scratchpad": "worklog/PROV-023-CATALOG-REVIEW.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "RED 3/4 pass T01 FAIL UnknownProvider on google/generate-content via profile_for; frozen sha f74dba4c; cmd: cargo test -p opencode-rk-providers --test prov_023_runtime_catalog",
+      "scratchpad": "worklog/PROV-023-RUNTIME-RED.md",
+      "session": "ses_f31e1ec20ffejsuBLUqe3nRbsb",
       "status": "blocked"
     },
     "PROV-024": {
