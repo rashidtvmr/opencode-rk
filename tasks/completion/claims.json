@@ -1054,12 +1054,13 @@
       "status": "blocked"
     },
     "TUI-011": {
+      "blockedNote": "Integrated static/package proof GREEN: installer 3/3+5/5, bridge 73/73, parity 13/13, installed PTY 1/1, shared daemon survives client exit. Parent RED: bare fresh-HOME setup/first session absent; frozen installed_default_entrypoint 1/6 due five immutable todo! tests; MSVC SDK and signing authority remain unavailable.",
       "scratchpad": "worklog/TUI-011.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "UI-014": {
-      "blockedNote": "Static PTY GREEN 1/1 plus bridge 73/73 and parity 13/13; exact product-spine integration rerun and packaged application journey remain pending.",
+      "blockedNote": "Exact product-spine and installed executable PTY both GREEN 1/1; shared daemon survives client exit. Parent default-entrypoint remains RED: fresh-HOME setup/first session absent and frozen suite has five immutable todo! bodies.",
       "scratchpad": "worklog/UI-014-TURN-WORKER-PTY-RED.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"

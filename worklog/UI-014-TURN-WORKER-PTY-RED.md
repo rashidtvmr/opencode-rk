@@ -119,3 +119,16 @@ Final caller lane updates `crates/cli/src/tui_entry.rs`: async `run`/`run_with_d
   terminal modes restored, process exited within the frozen bound.
 - Candidate GREEN only. UI-014 stays blocked until the same frozen test passes
   on the exact product-spine integration revision.
+
+## 2026-09-23 integrated and packaged reruns
+
+- Exact product-spine revision
+  `2568eec4eeebf630cddfa15cf4ca196078cb5237`: frozen UI-014 PTY 1/1 GREEN.
+- Disposable installed release executable was selected with `OC2_E2E_BIN` and
+  the same frozen test passed 1/1. The binary hash was
+  `cfae8ac37218c98e2a0ead83eb77eeb47753bce4017a94847d99b660aa205b25`.
+- Separate installed-binary proof confirmed exiting a native one-shot client
+  left the shared authenticated daemon alive and healthy.
+- UI-014 remains blocked rather than self-accepted because the frozen parent
+  default-entrypoint suite is 1/6 (five immutable `todo!()` failures) and bare
+  fresh-HOME `oc2` still does not enter in-app setup or create its first session.
