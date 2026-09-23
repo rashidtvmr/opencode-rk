@@ -881,9 +881,9 @@
       "status": "completed"
     },
     "PROV-023": {
-      "blockedNote": "RED 3/4 pass T01 FAIL UnknownProvider on google/generate-content via profile_for; frozen sha f74dba4c; cmd: cargo test -p opencode-rk-providers --test prov_023_runtime_catalog",
-      "scratchpad": "worklog/PROV-023-RUNTIME-RED.md",
-      "session": "ses_f31e1ec20ffejsuBLUqe3nRbsb",
+      "blockedNote": "RED frozen d6aa3a01ad4e6a4d09c148672d29dbc608c739e5bbf7cb574f8b9ad16becc2d8; cargo test -p opencode-rk-providers --test prov_023_loader_red -- --test-threads=1: 21 run, 3 pass, 18 fail, 0 ignored; awaiting catalog-backed request_profile loader",
+      "scratchpad": "worklog/PROV-023-LOADER-RED.md",
+      "session": "ses_f31706c24ffeCpyRA4Srbaiivb",
       "status": "blocked"
     },
     "PROV-024": {
