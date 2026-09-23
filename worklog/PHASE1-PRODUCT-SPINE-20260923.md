@@ -19,8 +19,13 @@
 
 ## Pending candidates
 
-- UI-014 renderer-independent composer prewire: under semantic review; not
-  accepted, and native artifact/PTY/owned-worker behavior remains blocked.
+- UI-014 renderer-independent composer prewire integrated at `cf80be7` after
+  verifying the pushed three-file commit from disk. It replaces the native
+  loop's second draft with one bounded `native_composer::Composer` and exposes
+  a renderer-independent event seam. Lane non-native check passed; the exact
+  integrated check was deferred under memory pressure. Async turn ownership,
+  queue-while-busy, cancellation/join, PTY decoding, Unicode/paste/focus input,
+  behavioral RED, and the arm64 OpenTUI artifact remain blockers.
 - WEB-009 durable tool/reference persistence RED integrated through `00d0c48`.
   Frozen SHA-256 is
   `c0acaf32cbf235452499acbe3eb5f617b7e319f8e6043a7b3cd54720a5b81bb8`.
