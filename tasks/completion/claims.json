@@ -211,6 +211,12 @@
       "session": "ses_f380c4bc9ffei2XDG2DStCM92e",
       "status": "completed"
     },
+    "DISC-003": {
+      "blockedNote": "PHASE1 convergence review complete: 53 findings enumerated (A1=8 FIX-* claims-only, A2=20 LANE-* claims-only, A3=22 legacy ralph.json+completed, A4=1 G6-CHAT-DATADIR, B=2 AUD-017/AUD-020 no-acceptance). WEB-009 correctly blocked at dd7670d, absent from 53. A3=23 at e57d1d3 included WEB-009; remediation=43 not a gate count. Full table+evidence in worklog/DISC-003-CONVERGENCE-REVIEW.md. Requires integrator authority to map off-plan claims. No product code changes.",
+      "scratchpad": "worklog/DISC-003-CONVERGENCE-REVIEW.md",
+      "session": "ses_f32ffe76efferxGs5oxsA8WXdD",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
