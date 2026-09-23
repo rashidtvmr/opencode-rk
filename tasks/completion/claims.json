@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "SPDX-2.3 SBOM official-schema and custom validation green; native bridge 73/73 green. Frozen target 1 passed/2 failed only: immutable SHA predicate rejects digits and 64 KiB bound rejects verified 6863648-byte dylib. Linux/Windows artifacts and authorized macOS signing/notarization remain.",
+      "blockedNote": "Builder matrix done: 5 targets green (arm64/x86_64 mac, x86/linux-gnu, win-gnu DLL+lib pair); MSVC unproducible by pinned interface; vendor/sign/frozen (:95/:122) lanes remain",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f30452efaffe5B7w9uAlzTh0EL",
+      "session": "ses_f3033b018ffefBqAN95ooRBHD2",
       "status": "blocked"
     },
     "UI-014": {
