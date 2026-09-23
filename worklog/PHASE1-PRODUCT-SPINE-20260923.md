@@ -21,7 +21,13 @@
 
 - UI-014 renderer-independent composer prewire: under semantic review; not
   accepted, and native artifact/PTY/owned-worker behavior remains blocked.
-- WEB-009 durable tool/reference + accessibility RED: test-author lane active.
+- WEB-009 durable tool/reference persistence RED integrated through `00d0c48`.
+  Frozen SHA-256 is
+  `c0acaf32cbf235452499acbe3eb5f617b7e319f8e6043a7b3cd54720a5b81bb8`.
+  The authenticated disposable-SQLite fixture compiles and fails at the real
+  provider adapter with unsupported event
+  `response.output_text.annotation.added`; native citation production and the
+  durable tool/reference read API remain missing.
 - PROV-023 runtime catalog RED integrated at `896103a`: frozen test SHA-256
   `f74dba4c600c89f59d011fff0361ef6d5be1925d113ac750b7897889b1d57e95`.
   Its public request-path case compiles and fails because Google is documented
