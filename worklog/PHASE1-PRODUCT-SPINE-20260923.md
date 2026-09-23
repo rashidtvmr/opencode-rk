@@ -22,8 +22,11 @@
 - UI-014 renderer-independent composer prewire: under semantic review; not
   accepted, and native artifact/PTY/owned-worker behavior remains blocked.
 - WEB-009 durable tool/reference + accessibility RED: test-author lane active.
-- PROV-023 runtime catalog RED: public request-path drift RED found; loader
-  malformed/version/cap seam remains absent.
+- PROV-023 runtime catalog RED integrated at `896103a`: frozen test SHA-256
+  `f74dba4c600c89f59d011fff0361ef6d5be1925d113ac750b7897889b1d57e95`.
+  Its public request-path case compiles and fails because Google is documented
+  but `profile_for` returns `UnknownProvider`; malformed/version/cap loader seam
+  remains absent, so the task stays blocked after this RED eventually turns green.
 
 No candidate is integrated merely because it compiles or has isolated GREEN
 tests. The hard installed `oc2` journey in `docs/CONVERGENCE.md` remains the
