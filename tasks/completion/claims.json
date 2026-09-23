@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Builder matrix done: 5 targets green (arm64/x86_64 mac, x86/linux-gnu, win-gnu DLL+lib pair); MSVC unproducible by pinned interface; vendor/sign/frozen (:95/:122) lanes remain",
+      "blockedNote": "Artifact copied atomically; SHA e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89; builder verify-only ELF aarch64/ABI/NEEDED/no-RPATH-RUNPATH exit 0. Rust aarch64-unknown-linux-gnu target absent; no bridge native check. Remaining x86 Linux, Windows GNU/MSVC, signing/notarization, frozen sidecar issues outside lane.",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f3033b018ffefBqAN95ooRBHD2",
+      "session": "ses_f3016e712ffeVUpWMbxICwi1kZ",
       "status": "blocked"
     },
     "UI-014": {
