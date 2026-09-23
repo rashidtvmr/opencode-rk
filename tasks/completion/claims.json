@@ -1054,15 +1054,14 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Installer 128MiB bounded real-size repair GREEN: sh -n; security 3/3; native closure 5/5; 28,311,552-byte member installs with matching hashes; 134,217,729-byte member rejects exit65 before writes. Static packaged PTY, immutable artifact-test review, MSVC SDK output, and signing authority remain.",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f2ff0754effeM2aS2B5a3WWwXf",
-      "status": "blocked"
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "in-progress"
     },
     "UI-014": {
-      "blockedNote": "tui_entry lane source checks and standalone frozen PTY GREEN; orchestrator integration/native acceptance pending",
+      "blockedNote": "Static PTY GREEN 1/1 plus bridge 73/73 and parity 13/13; exact product-spine integration rerun and packaged application journey remain pending.",
       "scratchpad": "worklog/UI-014-TURN-WORKER-PTY-RED.md",
-      "session": "ses_f30b58505ffeVJpOClhFDfjOoP",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "WEB-004": {

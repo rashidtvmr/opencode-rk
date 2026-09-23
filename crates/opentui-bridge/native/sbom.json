@@ -2,8 +2,8 @@
   "spdxVersion": "SPDX-2.3",
   "dataLicense": "CC0-1.0",
   "SPDXID": "SPDXRef-DOCUMENT",
-  "name": "libopentui-aarch64-apple-darwin",
-  "documentNamespace": "https://github.com/rashidtvmr/opentui/spdx/libopentui-aarch64-apple-darwin-798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91",
+  "name": "libopentui-native-artifact-matrix",
+  "documentNamespace": "https://github.com/rashidtvmr/opentui/spdx/libopentui-native-matrix-c01292fd0837bafd07ce458c74416b2b375a41ab",
   "creationInfo": {
     "created": "2026-09-23T12:00:00Z",
     "creators": [
@@ -12,14 +12,20 @@
     "licenseListVersion": "3.28.0"
   },
   "documentDescribes": [
-    "SPDXRef-Artifact-libopentui"
+    "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
+    "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+    "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+    "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+    "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+    "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+    "SPDXRef-Artifact-opentui-x86-64-windows-gnu-import"
   ],
   "packages": [
     {
-      "SPDXID": "SPDXRef-Artifact-libopentui",
+      "SPDXID": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "name": "libopentui.dylib",
       "versionInfo": "0.1.11+c01292fd0837bafd07ce458c74416b2b375a41ab",
-      "packageFileName": "libopentui.dylib",
+      "packageFileName": "lib/aarch64-apple-darwin/libopentui.dylib",
       "downloadLocation": "NOASSERTION",
       "filesAnalyzed": false,
       "checksums": [
@@ -32,7 +38,121 @@
       "licenseDeclared": "NOASSERTION",
       "copyrightText": "NOASSERTION",
       "primaryPackagePurpose": "LIBRARY",
-      "sourceInfo": "Built from the pinned OpenTUI fork. Artifact path crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib; size 6863648 bytes; Rust target aarch64-apple-darwin; Zig target aarch64-macos.13.0; ReleaseSafe; install name @rpath/libopentui.dylib; no LC_RPATH entries."
+      "sourceInfo": "Vendored artifact; size 6863648 bytes; aarch64-apple-darwin; Zig aarch64-macos.13.0; Mach-O arm64 dylib; install name @rpath/libopentui.dylib; no LC_RPATH entries."
+    },
+    {
+      "SPDXID": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "name": "libopentui_static.a",
+      "versionInfo": "0.1.11+c01292fd0837bafd07ce458c74416b2b375a41ab",
+      "packageFileName": "lib/aarch64-apple-darwin/libopentui_static.a",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a3c80e598f3808c9c600ec90203035065fa81fb87f5beb6086ab0f5383842956"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "sourceInfo": "Vendored artifact; size 7344888 bytes; aarch64-apple-darwin; Zig aarch64-macos.13.0; deterministic Mach-O arm64 archive; 88 members; 369/369 source exports; linkage-static.patch SHA-256 2da616bc1e71a8229f9b392fc32fc6ead651aabfbe9194f0828554e71a16d500."
+    },
+    {
+      "SPDXID": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "name": "libopentui.dylib",
+      "versionInfo": "0.1.11+c01292fd0837bafd07ce458c74416b2b375a41ab",
+      "packageFileName": "lib/x86_64-apple-darwin/libopentui.dylib",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "a7756f27becf5e0b9f25e553ad0141b76de2274c57fee6edb156c9b0ca5c9ef5"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "sourceInfo": "Vendored artifact; size 7190318 bytes; x86_64-apple-darwin; Zig x86_64-macos.13.0; Mach-O x86_64 dylib; install name @rpath/libopentui.dylib; no LC_RPATH entries."
+    },
+    {
+      "SPDXID": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "name": "libopentui.so",
+      "versionInfo": "0.1.11+c01292fd0837bafd07ce458c74416b2b375a41ab",
+      "packageFileName": "lib/aarch64-unknown-linux-gnu/libopentui.so",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "sourceInfo": "Vendored artifact; size 26598960 bytes; aarch64-unknown-linux-gnu; Zig aarch64-linux-gnu.2.17; ELF aarch64 shared object; no RPATH/RUNPATH entries."
+    },
+    {
+      "SPDXID": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "name": "libopentui.so",
+      "versionInfo": "0.1.11+c01292fd0837bafd07ce458c74416b2b375a41ab",
+      "packageFileName": "lib/x86_64-unknown-linux-gnu/libopentui.so",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "9f074adf1e3c67bb027433d44da05b9e285a37ae58cf0b2ed76504304450c79e"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "sourceInfo": "Vendored artifact; size 26627832 bytes; x86_64-unknown-linux-gnu; Zig x86_64-linux-gnu.2.17; ELF x86_64 shared object; no RPATH/RUNPATH entries."
+    },
+    {
+      "SPDXID": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "name": "opentui.dll",
+      "versionInfo": "0.1.11+c01292fd0837bafd07ce458c74416b2b375a41ab",
+      "packageFileName": "lib/x86_64-pc-windows-gnu/opentui.dll",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "0be2efd8a77330ba23b0f5eeb094a548f5fee4b7ad7b4c6f83e0e786dadd6b15"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "sourceInfo": "Vendored artifact; size 6800384 bytes; x86_64-pc-windows-gnu; Zig x86_64-windows-gnu; PE32+ x86-64 DLL; paired with the GNU import archive; 431 exported names."
+    },
+    {
+      "SPDXID": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-import",
+      "name": "libopentui.dll.a",
+      "versionInfo": "0.1.11+c01292fd0837bafd07ce458c74416b2b375a41ab",
+      "packageFileName": "lib/x86_64-pc-windows-gnu/libopentui.dll.a",
+      "downloadLocation": "NOASSERTION",
+      "filesAnalyzed": false,
+      "checksums": [
+        {
+          "algorithm": "SHA256",
+          "checksumValue": "1dce093459b94a4d6bd0538c4fdd1681f50534930f3d59918b765bc87a982019"
+        }
+      ],
+      "licenseConcluded": "NOASSERTION",
+      "licenseDeclared": "NOASSERTION",
+      "copyrightText": "NOASSERTION",
+      "primaryPackagePurpose": "LIBRARY",
+      "sourceInfo": "Vendored artifact; size 101524 bytes; x86_64-pc-windows-gnu GNU import archive generated from the verified DLL export table; 431/431 export/import correspondence."
     },
     {
       "SPDXID": "SPDXRef-Package-OpenTUI",
@@ -274,16 +394,6 @@
   ],
   "relationships": [
     {
-      "spdxElementId": "SPDXRef-DOCUMENT",
-      "relatedSpdxElement": "SPDXRef-Artifact-libopentui",
-      "relationshipType": "DESCRIBES"
-    },
-    {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
-      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
-      "relationshipType": "GENERATED_FROM"
-    },
-    {
       "spdxElementId": "SPDXRef-Package-OpenTUI",
       "relatedSpdxElement": "SPDXRef-Package-uucode-opentui",
       "relationshipType": "DEPENDS_ON"
@@ -334,63 +444,408 @@
       "relationshipType": "DEPENDS_ON"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "GENERATED_FROM"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "GENERATED_FROM"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "GENERATED_FROM"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "GENERATED_FROM"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "GENERATED_FROM"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "GENERATED_FROM"
+    },
+    {
+      "spdxElementId": "SPDXRef-DOCUMENT",
+      "relatedSpdxElement": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-import",
+      "relationshipType": "DESCRIBES"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-import",
+      "relatedSpdxElement": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relationshipType": "GENERATED_FROM"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-uucode-opentui",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-Ghostty-VT",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-uucode-ghostty",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-Yoga",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-stb-image",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-stb-image-resize2",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-Wuffs",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-libwebp",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
       "relatedSpdxElement": "SPDXRef-Package-lcms2",
       "relationshipType": "CONTAINS"
     },
     {
-      "spdxElementId": "SPDXRef-Artifact-libopentui",
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-miniaudio",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-opentui",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-Ghostty-VT",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-ghostty",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-Yoga",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image-resize2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-Wuffs",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-libwebp",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-lcms2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-apple-darwin-static",
+      "relatedSpdxElement": "SPDXRef-Package-miniaudio",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-opentui",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-Ghostty-VT",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-ghostty",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-Yoga",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image-resize2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-Wuffs",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-libwebp",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-lcms2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-apple-darwin-dylib",
+      "relatedSpdxElement": "SPDXRef-Package-miniaudio",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-opentui",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-Ghostty-VT",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-ghostty",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-Yoga",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image-resize2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-Wuffs",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-libwebp",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-lcms2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-aarch64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-miniaudio",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-opentui",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-Ghostty-VT",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-ghostty",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-Yoga",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image-resize2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-Wuffs",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-libwebp",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-lcms2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-libopentui-x86-64-linux-gnu-so",
+      "relatedSpdxElement": "SPDXRef-Package-miniaudio",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-opentui",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-Ghostty-VT",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-uucode-ghostty",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-Yoga",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-stb-image-resize2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-Wuffs",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-libwebp",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
+      "relatedSpdxElement": "SPDXRef-Package-lcms2",
+      "relationshipType": "CONTAINS"
+    },
+    {
+      "spdxElementId": "SPDXRef-Artifact-opentui-x86-64-windows-gnu-dll",
       "relatedSpdxElement": "SPDXRef-Package-miniaudio",
       "relationshipType": "CONTAINS"
     },
     {
       "spdxElementId": "SPDXRef-Tool-Zig",
-      "relatedSpdxElement": "SPDXRef-Artifact-libopentui",
+      "relatedSpdxElement": "SPDXRef-Package-OpenTUI",
       "relationshipType": "BUILD_TOOL_OF"
     }
   ]

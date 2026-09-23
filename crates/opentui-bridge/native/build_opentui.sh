@@ -12,6 +12,7 @@
 #                fabricated per-host hashes)
 #   zig sha256   b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489
 #   build iface  zig build -Dlibrary-target=<t> -Doptimize=ReleaseSafe [-Dmacos-sdk=...]
+#                [--static adds the hash-pinned -Dlinkage=static fork patch]
 #                run in <checkout>/packages/native; artifacts land in
 #                packages/native/lib/<zig-output-name>/
 #
@@ -31,6 +32,7 @@
 #
 # Modes:
 #   build_opentui.sh --work-dir <abs> --output-dir <abs> [--target <rust-triple>]
+#                     [--static]
 #   build_opentui.sh --verify-only <artifact> [--target <rust-triple>]
 #   build_opentui.sh --help
 #
@@ -54,6 +56,9 @@ readonly ZIG_BUILD_SUBDIR="packages/native"
 readonly ZIG_PREPARE_SCRIPT="scripts/prepare-zig-deps.sh"
 readonly OPTIMIZE_MODE="ReleaseSafe"
 readonly DEFAULT_RUST_TARGET="aarch64-apple-darwin"
+readonly STATIC_PATCH_SHA256="2da616bc1e71a8229f9b392fc32fc6ead651aabfbe9194f0828554e71a16d500"
+readonly STATIC_BUILD_ZIG_PREIMAGE_SHA256="8e7e25080db07d7c333e54258f48fd453676e522154f780d0aa6770e86cf8b0e"
+readonly STATIC_BUILD_ZIG_POSTIMAGE_SHA256="67993a110f474a58f956fb9cd3efc020f332b651663ee1bb62b966b21fb717f7"
 
 # Required exported ABI symbols (Mach-O nm -gU names carry a leading
 # underscore; ELF nm -D and the PE export table use undecorated names).
@@ -83,7 +88,7 @@ usage_die() { printf 'build_opentui: error: %s\n' "$*" >&2; print_help >&2; exit
 print_help() {
   cat <<'EOF'
 Usage:
-  build_opentui.sh --work-dir <abs-dir> --output-dir <abs-dir> [--target <rust-triple>]
+  build_opentui.sh --work-dir <abs-dir> --output-dir <abs-dir> [--target <rust-triple>] [--static]
   build_opentui.sh --verify-only <artifact-path> [--target <rust-triple>]
   build_opentui.sh --help
 
@@ -110,8 +115,11 @@ Supported --target values (rust triple -> zig -Dlibrary-target):
   --output-dir  caller-supplied absolute dir receiving the artifact file(s).
                 Must not live inside this repository.
   --verify-only verify an existing artifact for --target (Mach-O arm64/x86_64
-                + ABI + rpath/install-name; ELF arch + ABI + NEEDED/RPATH;
-                PE64 DLL + import lib + export table) and print its SHA-256.
+                 + ABI + rpath/install-name; ELF arch + ABI + NEEDED/RPATH;
+                 PE64 DLL + import lib + export table) and print its SHA-256.
+  --static      build the aarch64 macOS static archive as
+                libopentui_static.a. The pinned fork patch, source pre/post
+                hashes, archive members, and complete exported ABI are checked.
   --help        print this text and exit 0.
 
 Host: Darwin/arm64 only (the sole pinned Zig archive hash covers
@@ -164,6 +172,12 @@ target_outname() {
 
 # Repo/output artifact filenames, exactly as crates/opentui-bridge/build.rs expects.
 target_dll_name() {
+  if [ "${LINKAGE:-dynamic}" = "static" ]; then
+    case "$1" in
+      aarch64-apple-darwin) printf 'libopentui_static.a'; return ;;
+      *) printf ''; return ;;
+    esac
+  fi
   case "$1" in
     *-apple-darwin) printf 'libopentui.dylib' ;;
     *-unknown-linux-gnu) printf 'libopentui.so' ;;
@@ -299,6 +313,76 @@ EOF_RPATHS
   printf 'build_opentui: install name ok: %s\n' "$install_name" >&2
 
   sha256_of "$art"
+}
+
+verify_static_macho() {
+  local art="$1" size ftype members member count=0 check_dir sym nm_out nl padded missing=0
+  art="$(CDPATH= cd -- "$(dirname -- "$art")" && pwd -P)/$(basename -- "$art")" \
+    || die "cannot resolve static artifact path"
+  size="$(file_bytes "$art")"
+  [ "$size" -gt 0 ] || die "static artifact is empty: $art"
+  [ "$size" -le "$MAX_ARTIFACT_BYTES" ] || die "static artifact $size bytes exceeds bound $MAX_ARTIFACT_BYTES"
+  ftype="$(file -b "$art")" || die "file(1) failed on static artifact"
+  case "$ftype" in
+    *"ar archive"*) ;;
+    *) die "not an ar static archive: $ftype" ;;
+  esac
+
+  members="$(ar -t "$art")" || die "ar listing failed"
+  [ -n "$members" ] || die "static archive has no members"
+  while IFS= read -r member; do
+    [ -n "$member" ] || continue
+    case "$member" in
+      __.SYMDEF|*.o) ;;
+      *) die "unsafe or unexpected static member: $member" ;;
+    esac
+    case "$member" in */*|..|.*.o) die "unsafe static member path: $member" ;; esac
+    count=$((count + 1))
+    [ "$count" -le 512 ] || die "static archive member bound exceeded"
+  done <<EOF_STATIC_MEMBERS
+$members
+EOF_STATIC_MEMBERS
+  [ "$count" -ge 2 ] || die "static archive is incomplete"
+
+  check_dir="$(mktemp -d "${TMPDIR:-/tmp}/opentui-static-verify.XXXXXX")" || die "static verify mktemp failed"
+  (cd -- "$check_dir" && ar -x "$art") || { rm -rf -- "$check_dir"; die "static archive extraction failed"; }
+  [ "$(dir_bytes "$check_dir")" -le "$MAX_ARTIFACT_BYTES" ] || { rm -rf -- "$check_dir"; die "static members exceed artifact bound"; }
+  for member in "$check_dir"/*.o; do
+    [ -f "$member" ] || { rm -rf -- "$check_dir"; die "static archive has no object members"; }
+    ftype="$(file -b "$member")" || { rm -rf -- "$check_dir"; die "file(1) failed on static member"; }
+    case "$ftype" in
+      *"Mach-O 64-bit object arm64"*) ;;
+      *) rm -rf -- "$check_dir"; die "non-arm64 Mach-O static member: $ftype" ;;
+    esac
+  done
+  rm -rf -- "$check_dir"
+
+  nm_out="$(nm -gU "$art" 2>/dev/null)" || die "nm -gU failed on static artifact"
+  nl="$(printf '\n_')"; nl="${nl%_}"; padded="$nl$nm_out$nl"
+  for sym in $REQUIRED_SYMBOLS; do
+    case "$padded" in *" _${sym}${nl}"*) ;; *) missing=1; printf 'build_opentui: error: missing static symbol: %s\n' "$sym" >&2 ;; esac
+  done
+  [ "$missing" -eq 0 ] || die "required static ABI symbols absent"
+  printf 'build_opentui: static archive ok: %s members, arm64 Mach-O, required ABI present\n' "$count" >&2
+  sha256_of "$art"
+}
+
+verify_static_exports_from_source() {
+  local art="$1" source="$2" expected sym nm_out nl padded missing=0 count
+  expected="$(sed -n 's/^[[:space:]]*export fn \([A-Za-z_][A-Za-z0-9_]*\).*/\1/p' "$source" | LC_ALL=C sort -u)" \
+    || die "cannot derive pinned exported ABI"
+  count="$(printf '%s\n' "$expected" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  [ "$count" = "369" ] || die "pinned exported ABI count drifted: $count != 369"
+  nm_out="$(nm -gU "$art" 2>/dev/null)" || die "nm failed during complete static ABI check"
+  nl="$(printf '\n_')"; nl="${nl%_}"; padded="$nl$nm_out$nl"
+  while IFS= read -r sym; do
+    [ -n "$sym" ] || continue
+    case "$padded" in *" _${sym}${nl}"*) ;; *) missing=1; printf 'build_opentui: error: static ABI missing: %s\n' "$sym" >&2 ;; esac
+  done <<EOF_STATIC_EXPORTS
+$expected
+EOF_STATIC_EXPORTS
+  [ "$missing" -eq 0 ] || die "static archive does not contain the complete pinned ABI"
+  printf 'build_opentui: complete static ABI ok: %s/%s exports\n' "$count" "$count" >&2
 }
 
 verify_elf() {
@@ -581,6 +665,7 @@ VERIFY_IMPORT_LIB=""
 WORK_DIR=""
 OUTPUT_DIR=""
 RUST_TARGET="$DEFAULT_RUST_TARGET"
+LINKAGE="dynamic"
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
@@ -600,6 +685,8 @@ while [ "$#" -gt 0 ]; do
     --target)
       [ "$#" -ge 2 ] || usage_die "--target needs a rust triple"
       RUST_TARGET="$2"; shift 2 ;;
+    --static)
+      LINKAGE="static"; shift ;;
     --) shift; break ;;
     -*) usage_die "unknown flag: $1" ;;
     *) usage_die "unexpected argument: $1" ;;
@@ -610,6 +697,9 @@ KIND="$(target_kind "$RUST_TARGET")"
 [ "$KIND" = "unknown" ] && usage_die "unknown --target: $RUST_TARGET (see --help for the supported matrix)"
 if [ "$KIND" = "unsupported-msvc" ]; then
   die "$RUST_TARGET is not producible: the pinned build.zig SUPPORTED_TARGETS lists only x86_64/aarch64-windows-gnu, no MSVC ABI entry; refusing to invent one"
+fi
+if [ "$LINKAGE" = "static" ] && [ "$RUST_TARGET" != "aarch64-apple-darwin" ]; then
+  die "--static is currently verified only for aarch64-apple-darwin"
 fi
 ZIG_TARGET="$(target_zig "$RUST_TARGET")"
 ZIG_OUTPUT_NAME="$(target_outname "$RUST_TARGET")"
@@ -629,7 +719,11 @@ if [ "$MODE" = "verify" ]; then
     exit 0
   fi
   [ -n "$VERIFY_IMPORT_LIB" ] && usage_die "--import-lib only applies to the x86_64-pc-windows-gnu target"
-  sum="$(verify_for_target "$RUST_TARGET" "$VERIFY_PATH")"
+  if [ "$LINKAGE" = "static" ]; then
+    sum="$(verify_static_macho "$VERIFY_PATH")"
+  else
+    sum="$(verify_for_target "$RUST_TARGET" "$VERIFY_PATH")"
+  fi
   printf '%s  %s\n' "$sum" "$VERIFY_PATH"
   exit 0
 fi
@@ -640,12 +734,17 @@ fi
 require_abs_dir_outside_repo "--work-dir" "$WORK_DIR"
 require_abs_dir_outside_repo "--output-dir" "$OUTPUT_DIR"
 
-for tool in curl git tar shasum file nm objdump strings sh cksum awk; do
+for tool in curl git tar shasum file nm objdump strings sh cksum awk sed ar; do
   command -v "$tool" >/dev/null 2>&1 || die "required tool missing: $tool"
 done
 if [ "$KIND" = "macho" ]; then
   for tool in otool lipo; do
     command -v "$tool" >/dev/null 2>&1 || die "required tool missing for macOS target: $tool"
+  done
+fi
+if [ "$LINKAGE" = "static" ]; then
+  for tool in libtool ranlib strip; do
+    command -v "$tool" >/dev/null 2>&1 || die "required tool missing for static macOS target: $tool"
   done
 fi
 if [ "$KIND" = "pe" ]; then
@@ -694,6 +793,18 @@ src_bytes="$(dir_bytes "$SRC_DIR")"
 [ "$src_bytes" -le "$MAX_SOURCE_BYTES" ] || die "source $src_bytes bytes exceeds bound"
 [ -f "$SRC_DIR/$ZIG_BUILD_SUBDIR/build.zig" ] || die "fork build interface missing: $ZIG_BUILD_SUBDIR/build.zig"
 [ -f "$SRC_DIR/$ZIG_BUILD_SUBDIR/build.zig.zon" ] || die "fork build metadata missing: build.zig.zon"
+
+if [ "$LINKAGE" = "static" ]; then
+  STATIC_PATCH="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P)/linkage-static.patch"
+  [ -f "$STATIC_PATCH" ] || die "pinned static linkage patch missing"
+  [ "$(sha256_of "$STATIC_PATCH")" = "$STATIC_PATCH_SHA256" ] || die "static linkage patch SHA-256 mismatch"
+  BUILD_ZIG="$SRC_DIR/$ZIG_BUILD_SUBDIR/build.zig"
+  [ "$(sha256_of "$BUILD_ZIG")" = "$STATIC_BUILD_ZIG_PREIMAGE_SHA256" ] || die "static build.zig preimage mismatch"
+  git -C "$SRC_DIR" apply --check "$STATIC_PATCH" || die "static linkage patch does not apply cleanly"
+  git -C "$SRC_DIR" apply "$STATIC_PATCH" || die "static linkage patch apply failed"
+  [ "$(sha256_of "$BUILD_ZIG")" = "$STATIC_BUILD_ZIG_POSTIMAGE_SHA256" ] || die "static build.zig postimage mismatch"
+  printf 'build_opentui: static linkage patch hashes ok\n' >&2
+fi
 
 # ---------------------------------------------------------- 2. fetch zig ---
 printf 'build_opentui: downloading pinned Zig %s\n' "$ZIG_VERSION" >&2
@@ -749,6 +860,7 @@ if [ "$KIND" = "macho" ]; then
 else
   zig_build_args=("$ZIG_BIN" build "-Dlibrary-target=$ZIG_TARGET" "-Doptimize=$OPTIMIZE_MODE")
 fi
+[ "$LINKAGE" = "static" ] && zig_build_args+=("-Dlinkage=static")
 (cd -- "$SRC_DIR/$ZIG_BUILD_SUBDIR" && "${zig_build_args[@]}") || die "zig build failed"
 
 BUILT_DIR="$SRC_DIR/$ZIG_BUILD_SUBDIR/lib/$ZIG_OUTPUT_NAME"
@@ -807,6 +919,39 @@ if [ "$KIND" = "pe" ]; then
   [ "$final_import_sum" = "$built_import_sum" ] || die "published import lib hash changed during copy"
   printf '%s  %s\n' "$final_sum" "$OUTPUT_DIR/$EXPECTED_LIB"
   printf '%s  %s\n' "$final_import_sum" "$OUTPUT_DIR/$IMPORT_BASE"
+  exit 0
+fi
+
+if [ "$LINKAGE" = "static" ]; then
+  BUILT_STATIC="$BUILT_DIR/libopentui.a"
+  [ -f "$BUILT_STATIC" ] || die "expected static build output missing: $BUILT_STATIC"
+  REPACK_DIR="$TMP_ROOT/static-members"
+  mkdir -p -- "$REPACK_DIR" || die "cannot create static repack dir"
+  (cd -- "$REPACK_DIR" && ar -x "$BUILT_STATIC") || die "cannot extract static build output"
+  rm -f -- "$REPACK_DIR/__.SYMDEF" "$REPACK_DIR/__.SYMDEF SORTED"
+  static_objects=("$REPACK_DIR"/*.o)
+  [ -f "${static_objects[0]}" ] || die "static build output has no object members"
+  chmod u+rw "${static_objects[@]}" || die "cannot normalize static object permissions"
+  # ReleaseSafe object files retain DWARF paths rooted in the caller's random
+  # build directory. Remove only debug symbols before repacking so identical
+  # pinned inputs produce identical distributable archives across clean roots.
+  for static_object in "${static_objects[@]}"; do
+    strip -S "$static_object" || die "cannot strip nondeterministic debug data from static object"
+  done
+  REPACKED_STATIC="$TMP_ROOT/$EXPECTED_LIB"
+  ZERO_AR_DATE=1 libtool -static -o "$REPACKED_STATIC" "${static_objects[@]}" || die "Apple-compatible static repack failed"
+  ZERO_AR_DATE=1 ranlib "$REPACKED_STATIC" || die "ranlib failed on static artifact"
+  built_sum="$(verify_static_macho "$REPACKED_STATIC")"
+  verify_static_exports_from_source "$REPACKED_STATIC" "$SRC_DIR/$ZIG_BUILD_SUBDIR/src/lib.zig"
+
+  STAGED="$OUTPUT_DIR/.$EXPECTED_LIB.tmp.$$"
+  cp -- "$REPACKED_STATIC" "$STAGED" || die "stage copy of static artifact failed"
+  mv -f -- "$STAGED" "$OUTPUT_DIR/$EXPECTED_LIB" || die "atomic publish of static artifact failed"
+  trap - EXIT HUP INT TERM
+  cleanup
+  final_sum="$(sha256_of "$OUTPUT_DIR/$EXPECTED_LIB")"
+  [ "$final_sum" = "$built_sum" ] || die "published static artifact hash changed during copy"
+  printf '%s  %s\n' "$final_sum" "$OUTPUT_DIR/$EXPECTED_LIB"
   exit 0
 fi
 

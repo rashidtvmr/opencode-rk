@@ -933,6 +933,7 @@ dependencies = [
  "opencode-rk-storage",
  "opencode-rk-tools",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "tokio",

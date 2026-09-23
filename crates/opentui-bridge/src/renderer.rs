@@ -43,7 +43,6 @@ pub struct ExternalBuildOptions {
 }
 
 #[cfg(feature = "native")]
-#[link(name = "opentui")]
 unsafe extern "C" {
     /// Safety: handle must be a live renderer; null feed_ptr selects buffered backend.
     fn createRenderer(
