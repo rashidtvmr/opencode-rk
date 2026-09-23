@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "DLL copied atomically and verified PE32+ x86-64, 431 unique exports, 5 required ABI, 14 safe imports, exact SHA/size. Full pair verify intentionally fail-closed until import-lib lane; MSVC unsupported; signing/notarization and frozen manifest/sidecar work remain blocked.",
+      "blockedNote": "Vendored exact GNU import library 101524 B SHA 1dce093459b94a4d6bd0538c4fdd1681f50534930f3d59918b765bc87a982019; ar structure and 5/5 ABI pass; builder pair verify exit 0 with 431/431 correspondence; Rust Windows GNU target absent, no install. Parent remains BLOCKED on MSVC, signing/notarization, frozen manifest/sidecar conflicts.",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f300d33cdffeaD8ZWEVsgzB5i5",
+      "session": "ses_f30068899ffe1I3Y6JUB49ciWd",
       "status": "blocked"
     },
     "UI-014": {
