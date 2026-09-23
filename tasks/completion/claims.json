@@ -941,6 +941,12 @@
       "session": "ses_f32bf295effe9f16wtSPaJNIxT",
       "status": "blocked"
     },
+    "SHARE-004": {
+      "blockedNote": "BLOCKED: controller-only reconciliation required; ralph/FEATURES/legacy accepted conflicts with backlog controllerStatus not-started, ownershipDecision null, no taskCard/worklog/implementationCommits; card path crates/share/src/store.rs absent, actual sessions lane is #[path]-tested and unwired. See worklog/GUARD-SHARE-004.md.",
+      "scratchpad": "worklog/GUARD-SHARE-004.md",
+      "session": "ses_f32482b15ffeZP2080YbbYYvRo",
+      "status": "blocked"
+    },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
       "scratchpad": "worklog/SYNC-001.md",
