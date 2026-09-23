@@ -26,6 +26,11 @@
   integrated check was deferred under memory pressure. Async turn ownership,
   queue-while-busy, cancellation/join, PTY decoding, Unicode/paste/focus input,
   behavioral RED, and the arm64 OpenTUI artifact remain blockers.
+  The preserved external fixture at
+  `/Users/mymac/Projects/opencode-rk-web006-integrate/crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib`
+  was verified as a broken symlink to the absent
+  `opentui-pinned/packages/native/lib/aarch64-macos/libopentui.dylib`; it is not
+  usable native-build evidence and remains unmodified/untracked.
 - WEB-009 durable tool/reference persistence RED integrated through `00d0c48`.
   Frozen SHA-256 is
   `c0acaf32cbf235452499acbe3eb5f617b7e319f8e6043a7b3cd54720a5b81bb8`.
