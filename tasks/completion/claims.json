@@ -385,6 +385,12 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
+    "GUARD-SHARE-001": {
+      "blockedNote": "audit-only reconciliation; no implementation/acceptance; secret/persistence/enterprise-missing-spec blockers preserved",
+      "scratchpad": "worklog/GUARD-SHARE-001.md",
+      "session": "ses_guard_share001",
+      "status": "blocked"
+    },
     "HEAD-001": {
       "completedNote": "GREEN 8/8 run_headless via direct rustc harness (/tmp/rh_test2 --test-threads=1); frozen sha85652c80 zero edits; impl sha04d43496; cargo path blocked by pre-existing opentui native gate",
       "scratchpad": "worklog/HEAD-001.md",
