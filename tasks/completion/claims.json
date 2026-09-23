@@ -1049,10 +1049,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "completedNote": "GREEN 1/1 runtime_wiring_disconnect_http (frozen hash 95fbe83a0361256d9e0c229cfc97f3cc0b222e8c6d89625ac5db582ce18199e8 zero test edits); 208/208 server lib no-regress; ShellExecutionGuard uses pinned ShellTool startup future, no JoinHandle/abort/debug prints; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test runtime_wiring_disconnect_http -- --test-threads=1",
-      "scratchpad": "worklog/WEB-009-DISCONNECT-GREEN.md",
+      "blockedNote": "Frozen disconnect test SHA 95fbe83a is nondeterministic: it disconnects on tool_call before opaque fixture PID publication is synchronized. Exact revision 732c046 passed once and failed controller rerun at PID deadline. Replacement must wait for fixture PIDs before disconnect while preserving permit/provider/process-tree/sentinel/durability assertions; test-authority approval required.",
+      "scratchpad": "worklog/WEB-009-DISCONNECT-CONTRACT-REVIEW.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "completed"
+      "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
       "completedNote": "GREEN 7/7 rustc --test (RED 1pass/6fail frozen 4f86efb2; GREEN ea08bcf7; test-section sha 06b3b37d zero edits); heavy cargo web_artifact 5/5; integrator prewires pub mod",
