@@ -1062,7 +1062,7 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Verifier confirmed test hash and 2/2 serial exact-revision passes, but initial free memory ~1.3 GiB was below required 2 GiB reserve; third pass and regressions deferred. Parent also remains blocked on durable references/accessibility. No product/test edits.",
+      "blockedNote": "Disconnect replacement has 2/2 exact serial passes; third pass/regressions pending. Parent blocked on durable tool/reference persistence and accessibility; attempted boundary reviewer produced no artifact.",
       "scratchpad": "worklog/WEB-009-DISCONNECT-REPLACEMENT-VERIFY.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
