@@ -1054,10 +1054,10 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Builder matrix done: 5 targets green (arm64/x86_64 mac, x86/linux-gnu, win-gnu DLL+lib pair); MSVC unproducible by pinned interface; vendor/sign/frozen (:95/:122) lanes remain",
+      "completedNote": "x86_64 dylib copied+verified: SHA a7756f27 match, Mach-O x86_64, @rpath, 0 LC_RPATH, 5 ABI exports ok, build_opentui.sh --verify-only exit 0. Arm64 host: x86_64 target not installed, cross cargo check blocked. Remaining vendor lanes/MSVC/frozen test conflicts.",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f3033b018ffefBqAN95ooRBHD2",
-      "status": "blocked"
+      "session": "subagent-TUI-011",
+      "status": "completed"
     },
     "UI-014": {
       "blockedNote": "No honest caller RED seam: native submit/loop are private cfg(native), synchronous, and unbuildable on arm64 without libopentui; no owned request/cancel/join/result-channel path exists. Pure composer tests cannot prove wiring. See worklog/UI-014-BEHAVIORAL-RED.md.",
