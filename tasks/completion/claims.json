@@ -212,9 +212,9 @@
       "status": "completed"
     },
     "DISC-003": {
-      "blockedNote": "PHASE1 convergence review complete: 53 findings enumerated (A1=8 FIX-* claims-only, A2=20 LANE-* claims-only, A3=22 legacy ralph.json+completed, A4=1 G6-CHAT-DATADIR, B=2 AUD-017/AUD-020 no-acceptance). WEB-009 correctly blocked at dd7670d, absent from 53. A3=23 at e57d1d3 included WEB-009; remediation=43 not a gate count. Full table+evidence in worklog/DISC-003-CONVERGENCE-REVIEW.md. Requires integrator authority to map off-plan claims. No product code changes.",
-      "scratchpad": "worklog/DISC-003-CONVERGENCE-REVIEW.md",
-      "session": "ses_f32ffe76efferxGs5oxsA8WXdD",
+      "blockedNote": "Authority-ready exact 51-row retirement + AUD-017/AUD-020 demotion proposal simulated at 9c4fb6b: convergence gate GREEN. Canonical validate_repository remains blocked by 51 backlog-exhaustion errors. No controller/plan/policy files changed; authority must apply after hash/rebase review.",
+      "scratchpad": "worklog/DISC-003-AUTHORITY-REMAP-PROPOSAL.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "DISC-102": {
