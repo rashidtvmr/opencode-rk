@@ -881,10 +881,10 @@
       "status": "completed"
     },
     "PROV-023": {
-      "blockedNote": "Bounded catalog loader candidate GREEN: frozen 21/21; PROV-019 5/5; runtime catalog 4/4; static catalog 5/5; providers lib 73/73; frozen sha d6aa3a01 unchanged. Parent blocked on real provider transport caller and independent verification; see worklog/PROV-023-LOADER-IMPL.md.",
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
       "scratchpad": "worklog/PROV-023-LOADER-IMPL.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "PROV-024": {
       "blockedNote": "BLOCKED RED: frozen sha 750e3a32; 7/7 pass pre-existing fixtures; missing-root RED only bad-fixture. Negative, unknown-provider, offline, bounds pass. No fixture/product/controller/network edits.",
