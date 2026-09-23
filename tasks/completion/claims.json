@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Frozen RED compile OK; 0 passed/3 failed: manifest missing at crates/opentui-bridge/native/artifacts.json; dylib absent; license/SBOM sidecars absent. Frozen SHA-256 efb642364b6a4dc559fff019d21c14f778c170f34f96bf5e7183b4aeb536aa40; command: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-opentui-bridge --test native_artifact_manifest -- --test-threads=1",
+      "blockedNote": "builder ok external dylib 798f30dd SHA; frozen RED 0/3; blocked only on copying artifact+manifest+sidecars into repo",
       "scratchpad": "worklog/TUI-011-NATIVE-ARTIFACTS.md",
-      "session": "ses_f307ea918ffe90MgsDhcUNmD6u",
+      "session": "ses_f307abda8ffeXHdsxUCmvo4Qa6",
       "status": "blocked"
     },
     "UI-014": {
