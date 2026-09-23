@@ -881,9 +881,9 @@
       "status": "completed"
     },
     "PROV-023": {
-      "blockedNote": "VERIFY abf206a: loader 21/21 + PROV019 5/5 + runtime 4/4 + static 5/5 + lib 73/73 green, frozen SHA d6aa3a01 unchanged, zero test edits; no loader defect; blocked: no real transport caller of profile_for",
-      "scratchpad": "worklog/PROV-023-LOADER-VERIFY.md",
-      "session": "ses_f31530101ffe5jsZ85fgNu9QEf",
+      "blockedNote": "Loader independently GREEN, but live transport posts {OPENAI_BASE_URL}/responses while catalog documents only chat-completions. Exact lookup forbids treating it as equivalent. Needs reviewed Responses catalog entry + real-caller RED; see worklog/PROV-023-TRANSPORT-GAP.md.",
+      "scratchpad": "worklog/PROV-023-TRANSPORT-GAP.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "PROV-024": {
