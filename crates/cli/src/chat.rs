@@ -7,8 +7,9 @@
 //! states are explicit (`[offline]`, `[error]`), and nothing buffers without
 //! a cap.
 //!
-//! Daemon ownership rule: a daemon this process spawned is terminated on
-//! exit; a pre-existing daemon is left running. The default listen address
+//! Daemon ownership rule: a daemon this process spawned is detached on client
+//! exit; a pre-existing daemon is left running. Explicit service control owns
+//! daemon termination. The default listen address
 //! is `127.0.0.1:4096`, overridable with `OPENCODE_RK_DAEMON_ADDR`.
 
 use std::{
@@ -20,6 +21,7 @@ use std::{
 };
 
 use serde_json::Value;
+use fs2::FileExt;
 
 use crate::daemon_client;
 use opencode_rk_server::daemon as server_daemon;
@@ -32,6 +34,27 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 const PROBE_TIMEOUT: Duration = Duration::from_millis(750);
 const MAX_BODY_BYTES: usize = 1024 * 1024;
 const HISTORY_LIMIT: usize = 20;
+const STARTUP_LOCK: &str = "startup.lock";
+
+struct StartupGuard(std::fs::File);
+
+impl Drop for StartupGuard {
+    fn drop(&mut self) {
+        let _ = self.0.unlock();
+    }
+}
+
+fn acquire_startup_guard(data_dir: &Path) -> Option<StartupGuard> {
+    let path = data_dir.join("runtime").join(STARTUP_LOCK);
+    std::fs::create_dir_all(path.parent()?).ok()?;
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .read(true)
+        .write(true)
+        .open(path)
+        .ok()?;
+    file.try_lock_exclusive().ok().map(|()| StartupGuard(file))
+}
 
 fn daemon_addr() -> String {
     std::env::var("OPENCODE_RK_DAEMON_ADDR")
@@ -44,45 +67,91 @@ fn daemon_origin(addr: &str) -> String {
     format!("http://{addr}")
 }
 
-/// Entry bound from `main.rs` when no subcommand is given.
-pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+/// Singleton-daemon attachment for UI clients. The child is present only when
+/// this process had to start the daemon. Dropping the lease detaches the
+/// client; it must not terminate daemon-owned sessions used by other clients.
+pub struct DaemonLease {
+    origin: Option<String>,
+    auth: Option<String>,
+    owned_daemon: Option<Child>,
+}
+
+impl DaemonLease {
+    pub fn origin(&self) -> Option<&str> {
+        self.origin.as_deref()
+    }
+
+    pub fn auth(&self) -> Option<&str> {
+        self.auth.as_deref()
+    }
+
+    pub fn attached(&self) -> bool {
+        self.origin.is_some()
+    }
+}
+
+/// Discover or start the authenticated singleton daemon for any local UI.
+pub fn prepare_daemon(data_dir: &Path) -> DaemonLease {
     let addr = daemon_addr();
     let origin = daemon_origin(&addr);
     let mut owned_daemon: Option<Child> = None;
     if !probe_daemon(&origin) {
-        owned_daemon = spawn_daemon(&addr, data_dir);
+        if let Some(_guard) = acquire_startup_guard(data_dir) {
+            // Re-check under the inter-process lock. Only its holder may
+            // spawn; concurrent clients wait for the owner's daemon probe.
+            if !probe_daemon(&origin) {
+                owned_daemon = spawn_daemon(&addr, data_dir);
+            }
+        } else {
+            let deadline = std::time::Instant::now() + Duration::from_secs(10);
+            while !probe_daemon(&origin) && std::time::Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            // The first owner may have exited before publishing readiness.
+            // Re-enter the election once, still under the same bounded wait,
+            // rather than leaving every waiter permanently offline.
+            if !probe_daemon(&origin) {
+                if let Some(_guard) = acquire_startup_guard(data_dir) {
+                    if !probe_daemon(&origin) {
+                        owned_daemon = spawn_daemon(&addr, data_dir);
+                    }
+                }
+            }
+        }
     }
     let attached = probe_daemon(&origin);
-    // Credential-bound reuse (`daemon_client.rs:722-735`
-    // `decide_lifecycle_authed`): a validated descriptor plus a healthy
-    // probe yields the bearer; every other outcome carries no credential and
-    // every `/api/*` call below then fails closed without sending.
-    // Reload after spawn: an owned daemon mints its token at startup.
     let mut credential = reuse_credential(data_dir, &origin, attached);
     if attached && credential.is_none() && owned_daemon.is_some() {
         credential = reuse_credential(data_dir, &origin, true);
     }
-    if !attached {
+    DaemonLease {
+        origin: attached.then_some(origin),
+        auth: credential,
+        owned_daemon,
+    }
+}
+
+/// Entry bound from `main.rs` when no subcommand is given.
+pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let lease = prepare_daemon(data_dir);
+    let origin_label = lease
+        .origin()
+        .unwrap_or("http://127.0.0.1:4096")
+        .to_owned();
+    if !lease.attached() {
         println!(
-            "[offline] daemon unavailable (port {addr} unwinnable); \
-             start it manually with: opencode-rk serve"
+            "[offline] daemon unavailable; start it manually with: opencode-rk serve"
         );
     }
     let mut chat = Chat {
-        origin: attached.then(|| origin.clone()),
-        auth: credential,
+        origin: lease.origin.clone(),
+        auth: lease.auth.clone(),
         session: None,
         model: DEFAULT_MODEL.to_owned(),
     };
-    chat.banner(&origin, attached);
+    chat.banner(&origin_label, lease.attached());
     chat.bind_recent_session();
-    let result = chat.loop_until_exit();
-    if let Some(mut child) = owned_daemon {
-        // Owned lifecycle: the auto-spawned daemon dies with this chat.
-        let _ = child.kill();
-        let _ = child.wait();
-    }
-    result
+    chat.loop_until_exit()
 }
 
 struct Chat {
@@ -465,7 +534,8 @@ fn reuse_credential(data_dir: &Path, probed_origin: &str, healthy: bool) -> Opti
 }
 
 /// Spawn `serve` from this same binary and wait for readiness. Returns the
-/// owned child process; the caller terminates it when the chat exits.
+/// child handle so it remains owned by the lease while attached. Dropping the
+/// lease closes this client's handle without terminating the shared daemon.
 ///
 /// The child inherits this chat's data directory explicitly (`--data-dir`):
 /// `serve` resolves its HOME/descriptor from it (`main.rs:resolve_data_dir`),

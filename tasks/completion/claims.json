@@ -1,5 +1,11 @@
 {
   "claims": {
+    "ACP-001": {
+      "completedNote": "GREEN 5/5 acp_bridge frozen (t01-t05); zero test edits; impl+test hashes unchanged 2f38d370/e5eb31de; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test acp_bridge -- --test-threads=1",
+      "scratchpad": "worklog/ACP-001.md",
+      "session": "ses_f384fedeaffeiMPH6Dl2h3q5Ox",
+      "status": "completed"
+    },
     "APP-001": {
       "completedNote": "GREEN 13/13 app_start (8 existing + 5 APP-001 T1-T05); RED sha256 6f41ab6f, GREEN sha256 38454ed3; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin opencode-rk app_start; log /tmp/opencode/app001.log",
       "scratchpad": "worklog/APP-001.md",
@@ -199,6 +205,12 @@
       "session": "ses_f41f2c26cffeFFRai2y6T8LbZo",
       "status": "completed"
     },
+    "BASE-004": {
+      "completedNote": "SHA-256 repair GREEN: daemon_long_path 1/1; daemon lib 24/24 incl sha256 abc vector; daemon_auth_api 5/5; cargo check clean. web_singleton_lock 1/2, unrelated legacy empty-token failure.",
+      "scratchpad": "worklog/BASE-004.md",
+      "session": "ses_f380c4bc9ffei2XDG2DStCM92e",
+      "status": "completed"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
@@ -366,6 +378,24 @@
       "scratchpad": "worklog/G6-CHAT-DATADIR.md",
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
+    },
+    "HEAD-001": {
+      "completedNote": "GREEN 8/8 run_headless via direct rustc harness (/tmp/rh_test2 --test-threads=1); frozen sha85652c80 zero edits; impl sha04d43496; cargo path blocked by pre-existing opentui native gate",
+      "scratchpad": "worklog/HEAD-001.md",
+      "session": "ses_f384fee05ffee9ZbohjUUo6uif",
+      "status": "completed"
+    },
+    "HEAD-002": {
+      "completedNote": "GREEN 8/8 session_export via rustc --test harness (cargo blocked pre-existing opentui native lib); zero test edits; impl+tests at HEAD",
+      "scratchpad": "worklog/HEAD-002.md",
+      "session": "ses_f384fedf9ffeu54QwccVGqCbzv",
+      "status": "completed"
+    },
+    "INT-010": {
+      "blockedNote": "No explicit ownership lock in card; impl+tests pre-exist committed (share_descriptor.rs + duplicate int_share_sync_lane.rs); zero writes made; both narrow suites 5/5 GREEN; orchestrator must assign single owned file before implementation",
+      "scratchpad": "worklog/INT-010.md",
+      "session": "ses_f387af89dffey2aGNmrom5z2Wq",
+      "status": "blocked"
     },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
@@ -743,6 +773,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "OPS-009": {
+      "completedNote": "GREEN 5/5 ops_replay T01-T05, impl pre-landed byte-identical, zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-foundation --test ops_replay",
+      "scratchpad": "worklog/OPS-009.md",
+      "session": "ses_f387af8a9ffe7GarMQ3qCTI8wr",
+      "status": "completed"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
@@ -803,6 +839,36 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PROV-018": {
+      "completedNote": "5/5 frozen tests green. CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-providers --test prov_018_local_credential_import: 5 passed.",
+      "scratchpad": "worklog/PROV-018.md",
+      "session": "ses_f389670a7ffeuc9N40EFR1AM4H",
+      "status": "completed"
+    },
+    "PROV-019": {
+      "completedNote": "GREEN 5/5 prov_019_request_profile T01-T05 zero test edits; cmd: rtk cargo test -p opencode-rk-providers --test prov_019_request_profile -- --test-threads=1",
+      "scratchpad": "worklog/PROV-019.md",
+      "session": "ses_f386f5b1fffeYqbqZ1uC13paZz",
+      "status": "completed"
+    },
+    "PROV-020": {
+      "completedNote": "GREEN 5/5 prov_020_auth_commands zero test edits; cargo test -p opencode-rk-providers --test prov_020_auth_commands",
+      "scratchpad": "worklog/PROV-020.md",
+      "session": "ses_f384fee27ffe1QKjki0oZQsHrQ",
+      "status": "completed"
+    },
+    "PROV-021": {
+      "completedNote": "GREEN 5/5 prov_021_usage_status T01-T05 zero test edits; cargo check -p opencode-rk-providers 0 errors; impl pre-complete at HEAD, verify-only",
+      "scratchpad": "worklog/PROV-021.md",
+      "session": "ses_f384fee20ffertocB89srK0rm7",
+      "status": "completed"
+    },
+    "PROV-022": {
+      "completedNote": "GREEN 5/5 prov_022_auth_store T01-T05; zero impl/test edits; cmd: CARGO_BUILD_JOMS=1 cargo test -p opencode-rk-providers --test prov_022_auth_store",
+      "scratchpad": "worklog/PROV-022.md",
+      "session": "ses_f387af8bdffeEySGQi8lJSC21p",
+      "status": "completed"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",
@@ -821,10 +887,70 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "REL-003": {
+      "completedNote": "GREEN validator CLI vs frozen fixtures: T01 exit0 pass; T02/T03/T04/T05 exit2 with exact check+reason; malformed/notadir/flag/timeout exit1; determinism 303B identical; zero test/fixture/validator edits",
+      "scratchpad": "worklog/REL-003.md",
+      "session": "ses_f387af899ffeojhREiG4Rewoar",
+      "status": "completed"
+    },
+    "RUN-001": {
+      "completedNote": "GREEN 5/5 runner T01-T05, zero test edits, zero impl edits (impl pre-complete); cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-sessions --test runner",
+      "scratchpad": "worklog/RUN-001.md",
+      "session": "ses_f387af8bcffe4ODf6rkmz706r7",
+      "status": "completed"
+    },
+    "SDK-001": {
+      "completedNote": "GREEN 12/12 sdk_client (T01-T05+4neg) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-server --test sdk_client -- --test-threads=1",
+      "scratchpad": "worklog/SDK-001.md",
+      "session": "ses_f384fede9ffer5DDd9SzW9hr44",
+      "status": "completed"
+    },
+    "SDK-002": {
+      "completedNote": "GREEN 11/11 sdk_spawns (5 frozen T01-T05 + 6 negatives); zero test edits; impl fa737acb, tests a8561295; cmd: cargo test -p opencode-rk-server --test sdk_spawns -- --test-threads=1",
+      "scratchpad": "worklog/SDK-002.md",
+      "session": "ses_f384fede7ffenpg6X2t2lZtIyS",
+      "status": "completed"
+    },
+    "SESS-008": {
+      "blockedNote": "In-file compact_removes_orphans encodes SESS-011 archived semantics, contradicts SESS-008 dirty-only compact. persist.rs fixed per card but would fail that test when wired (mod persist missing in lib.rs). Needs contract review + integrator wiring.",
+      "scratchpad": "worklog/SESS-008.md",
+      "session": "ses_f3840883fffeumWydX7cbtnZ04",
+      "status": "blocked"
+    },
+    "SYNC-001": {
+      "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
+      "scratchpad": "worklog/SYNC-001.md",
+      "session": "ses_f387af8b7ffeg2GsF4ErYq07AX",
+      "status": "completed"
+    },
+    "SYNC-002": {
+      "completedNote": "GREEN 5/5 part_events (sync002_t01-t05) zero test edits; frozen sha 1a585f56; impl sha 8ab97dea; cmd: cargo test -p opencode-rk-sessions --test part_events -- --test-threads=1",
+      "scratchpad": "worklog/SYNC-002.md",
+      "session": "ses_f384fedd2ffeFXapK9O5i12eT7",
+      "status": "completed"
+    },
+    "TOOL-012": {
+      "completedNote": "GREEN startup 4/4, process_tree 1/1, cancel 1/1, bounds 2/2, shell units 9/9; frozen startup sha 4dae909cd1db9c724a42ab731ef5d0074f8a423561392a6b321cb9ecde442691; zero test edits",
+      "scratchpad": "worklog/TOOL-012-STARTUP-IMPLEMENTATION.md",
+      "session": "ses_f338c638dffeNOgL4RCjogVLIi",
+      "status": "completed"
+    },
+    "TOOL-018": {
+      "completedNote": "GREEN 5/5 mcp_lifecycle T01-T05, zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --test mcp_lifecycle -- --test-threads=1; impl sha 5e63c909 pre-existing, frozen test sha 2fbaca62",
+      "scratchpad": "worklog/TOOL-018.md",
+      "session": "ses_f384fedaeffenNesgxTRphfrXU",
+      "status": "completed"
+    },
+    "TOOL-019": {
+      "completedNote": "GREEN 5/5 mcp_payload_filter T01-T05 zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --test mcp_payload_filter -- --test-threads=1",
+      "scratchpad": "worklog/TOOL-019.md",
+      "session": "ses_f384fec49ffeN1ZefbdMWO6lwv",
+      "status": "completed"
+    },
     "TUI-001": {
-      "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
-      "scratchpad": "worklog/TUI-001.md",
-      "session": "ses_orch_TUI001",
+      "completedNote": "GREEN exact native 1/1 + lib-native 73/73 + lib-default 72/72 + check ok; test-body sha256 bc606827 pre/post identical; zero test edits; CLI Scenario B pre-existing TTY-guard fail recorded, untouched",
+      "scratchpad": "worklog/TUI-001-ABI-FIX.md",
+      "session": "ses_f37bb976cffebTIxeEDiL1hTCc",
       "status": "completed"
     },
     "TUI-002": {
@@ -892,6 +1018,30 @@
       "scratchpad": "worklog/TUI-011.md",
       "session": "ses_orch_TUI011b",
       "status": "completed"
+    },
+    "WEB-004": {
+      "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
+      "scratchpad": "worklog/WEB-004.md",
+      "session": "ses_f387af8aaffeFWlAQiQn1gYKIU",
+      "status": "completed"
+    },
+    "WEB-005": {
+      "completedNote": "GREEN 5/5 event_stream T01-T05, zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test event_stream -- --test-threads=1 @2b28732; impl pre-complete, no impl edits; test-sha b77527a2; RED receipt gap: no independent compiling-RED in this lane (co-landed 248f519/1be93d3)",
+      "scratchpad": "worklog/WEB-005.md",
+      "session": "ses_f387af8abffeHpTVd4qtNoXaSb",
+      "status": "completed"
+    },
+    "WEB-006": {
+      "completedNote": "daemon.rs publish_backend_descriptor mints DaemonAuth; frozen web_singleton_lock 2/2, daemon_auth_api 5/5, daemon_long_path 1/1, lib daemon 24/24, check exit0; zero test edits",
+      "scratchpad": "worklog/WEB-006-DESCRIPTOR.md",
+      "session": "ses_f37d1ed3affeMszns7VKYpWhOw",
+      "status": "completed"
+    },
+    "WEB-009": {
+      "blockedNote": "Verifier confirmed test hash and 2/2 serial exact-revision passes, but initial free memory ~1.3 GiB was below required 2 GiB reserve; third pass and regressions deferred. Parent also remains blocked on durable references/accessibility. No product/test edits.",
+      "scratchpad": "worklog/WEB-009-DISCONNECT-REPLACEMENT-VERIFY.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",

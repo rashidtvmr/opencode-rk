@@ -1,6 +1,8 @@
 //! Shell tool: bounded command execution with timeout, env, cwd and cancellation.
 
 use std::collections::HashMap;
+use std::io::Read as StdRead;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Instant;
@@ -8,9 +10,12 @@ use std::time::Instant;
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker};
 
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
 use tokio::time::{Duration, timeout as tokio_timeout};
+
+#[cfg(unix)]
+use rustix::process::{kill_process_group, Pid, Signal};
 
 /// Maximum output bytes retained for stdout/stderr (10 MiB).
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
@@ -87,6 +92,8 @@ pub struct ShellTool {
     /// new callers; deny of a missing broker is a future upgrade).
     pub authz: Option<PermissionBroker>,
     child: Option<Child>,
+    #[cfg(unix)]
+    process_group: Option<Pid>,
 }
 
 impl ShellTool {
@@ -100,6 +107,8 @@ impl ShellTool {
             cwd: None,
             authz: None,
             child: None,
+            #[cfg(unix)]
+            process_group: None,
         }
     }
 
@@ -152,7 +161,25 @@ impl ShellTool {
     }
 
     /// Execute the shell command under `config`, returning a bounded `ShellResult`.
-    pub async fn execute(mut self, config: ShellConfig) -> Result<ShellResult, ShellError> {
+    pub async fn execute(self, config: ShellConfig) -> Result<ShellResult, ShellError> {
+        self.run(config, None).await
+    }
+
+    /// Execute the shell command and publish its PID after caller-owned readiness.
+    pub async fn execute_with_startup(
+        self,
+        config: ShellConfig,
+        readiness_path: PathBuf,
+        startup: tokio::sync::mpsc::Sender<u32>,
+    ) -> Result<ShellResult, ShellError> {
+        self.run(config, Some((readiness_path, startup))).await
+    }
+
+    async fn run(
+        mut self,
+        config: ShellConfig,
+        startup: Option<(PathBuf, tokio::sync::mpsc::Sender<u32>)>,
+    ) -> Result<ShellResult, ShellError> {
         if self.command.is_empty() {
             return Err(ShellError::NoCommand);
         }
@@ -203,45 +230,103 @@ impl ShellTool {
         }
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        #[cfg(unix)]
+        cmd.process_group(0);
+        cmd.kill_on_drop(true);
 
-        let mut child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
+        let child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
+        let child_id = child.id();
+        #[cfg(unix)]
+        let process_group = child
+            .id()
+            .and_then(|id| i32::try_from(id).ok())
+            .and_then(Pid::from_raw);
         self.child = Some(child);
+        #[cfg(unix)]
+        {
+            self.process_group = process_group;
+        }
 
         // Borrow child for reading; take it back before we await kill on drop.
         let child_ref = self.child.as_mut().expect("child set");
 
-        let stdout_fut = async {
-            if let Some(mut out) = child_ref.stdout.take() {
-                let mut buf = Vec::with_capacity(8 * 1024);
-                let _ = out.read_to_end(&mut buf).await;
-                buf
+        let stdout = child_ref.stdout.take();
+        let stderr = child_ref.stderr.take();
+        let stdout_fut = async move {
+            if let Some(out) = stdout {
+                read_bounded(out, limit).await
             } else {
-                Vec::new()
+                Ok(Vec::new())
             }
         };
-        let stderr_fut = async {
-            if let Some(mut err) = child_ref.stderr.take() {
-                let mut buf = Vec::with_capacity(8 * 1024);
-                let _ = err.read_to_end(&mut buf).await;
-                buf
+        let stderr_fut = async move {
+            if let Some(err) = stderr {
+                read_bounded(err, limit).await
             } else {
-                Vec::new()
+                Ok(Vec::new())
             }
         };
 
         let start = Instant::now();
-        let (stdout_bytes, stderr_bytes) = tokio::join!(stdout_fut, stderr_fut);
+        let timeout_secs = config.timeout_secs.max(1);
+        let execution = async {
+            let (stdout_bytes, stderr_bytes) = tokio::join!(stdout_fut, stderr_fut);
+            let stdout_bytes = stdout_bytes?;
+            let stderr_bytes = stderr_bytes?;
+            let exit_code = child_ref.wait().await?.code();
+            Ok::<_, std::io::Error>((stdout_bytes, stderr_bytes, exit_code))
+        };
+        let (stdout_bytes, stderr_bytes, exit_code) =
+            if let Some((readiness_path, startup)) = startup {
+                let monitor = async {
+                    let Some(child_id) = child_id else {
+                        std::future::pending::<()>().await;
+                        return;
+                    };
+                    loop {
+                        if startup_ready(&readiness_path, child_id) {
+                            let _ = startup.try_send(child_id);
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                };
+                tokio::pin!(execution);
+                tokio::pin!(monitor);
+                tokio_timeout(Duration::from_secs(timeout_secs), async {
+                    tokio::select! {
+                        result = &mut execution => {
+                            if let Some(child_id) = child_id {
+                                if startup_ready(&readiness_path, child_id) {
+                                    let _ = startup.try_send(child_id);
+                                }
+                            }
+                            result
+                        }
+                        _ = &mut monitor => execution.await,
+                    }
+                })
+                .await
+                .map_err(|_| ShellError::Timeout(timeout_secs))??
+            } else {
+                tokio_timeout(Duration::from_secs(timeout_secs), execution)
+                    .await
+                    .map_err(|_| ShellError::Timeout(timeout_secs))??
+            };
         let duration_ms = start.elapsed().as_millis();
 
         // Truncate to limit, converting bytes -> truncated flag.
         let stdout = truncate_to_limit(stdout_bytes, limit);
         let stderr = truncate_to_limit(stderr_bytes, limit);
 
-        let exit_code = child_ref.wait().await?.code();
         let success = exit_code == Some(0);
 
         // Clear child so drop cannot kill an already-reaped process.
         self.child = None;
+        #[cfg(unix)]
+        {
+            self.process_group = None;
+        }
 
         Ok(ShellResult {
             success,
@@ -254,8 +339,13 @@ impl ShellTool {
 
     /// Hard-cancel an in-flight command. Safe to call when no child exists.
     pub fn cancel(&mut self) {
+        #[cfg(unix)]
+        if let Some(group) = self.process_group {
+            let _ = kill_process_group(group, Signal::KILL);
+        }
+        #[cfg(not(unix))]
         if let Some(child) = self.child.as_mut() {
-            let _ = child.kill();
+            let _ = child.start_kill();
         }
     }
 
@@ -270,10 +360,58 @@ impl Drop for ShellTool {
         // Cancel any in-flight child on drop.
         self.cancel();
         self.child = None;
+        #[cfg(unix)]
+        {
+            self.process_group = None;
+        }
     }
 }
 
-/// Enforce a hard timeout on execution, returning `Cancelled` on timeout.
+fn startup_ready(path: &Path, child_id: u32) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if metadata.len() > 20 {
+        return false;
+    }
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut bytes = Vec::with_capacity(21);
+    if file.take(21).read_to_end(&mut bytes).is_err() || bytes.len() > 20 {
+        return false;
+    }
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return false;
+    };
+    let text = text.trim_end_matches(['\r', '\n']);
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    text.parse::<u32>() == Ok(child_id) && child_id > 0
+}
+
+async fn read_bounded<R>(mut reader: R, limit: usize) -> Result<Vec<u8>, std::io::Error>
+where
+    R: AsyncRead + Unpin,
+{
+    let retained_limit = limit.saturating_add(1);
+    let mut retained = Vec::with_capacity(retained_limit.min(8 * 1024));
+    let mut chunk = [0_u8; 8 * 1024];
+    loop {
+        let read = reader.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        let remaining = retained_limit.saturating_sub(retained.len());
+        if remaining > 0 {
+            retained.extend_from_slice(&chunk[..read.min(remaining)]);
+        }
+    }
+    Ok(retained)
+}
+
+/// Enforce a hard timeout on execution, returning [`ShellError::Timeout`].
 async fn with_timeout<T, F>(secs: u64, fut: F) -> Result<T, ShellError>
 where
     T: std::fmt::Debug,

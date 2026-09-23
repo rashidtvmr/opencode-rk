@@ -74,9 +74,10 @@ pub mod remote_sessions;
 pub mod remote_turns;
 pub mod web_turn_adapter;
 pub mod workspace_sessions;
+use crate::app_runtime::PolicyDecision;
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, Extension, Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -96,14 +97,165 @@ use opencode_rk_providers::responses::{
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{SessionError, SessionService};
 use opencode_rk_tools::executor::ToolExecutor;
+use opencode_rk_tools::shell_tool::{ShellConfig, ShellError, ShellResult, ShellTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
-use tokio::sync::{Semaphore, SemaphorePermit};
+use std::{
+    collections::{HashMap, HashSet},
+    convert::Infallible,
+    fs,
+    future::Future,
+    path::PathBuf,
+    pin::Pin,
+    str::FromStr,
+    sync::{atomic::{AtomicU64, Ordering}, Arc},
+};
+use tokio::sync::{mpsc, OwnedSemaphorePermit, Semaphore, SemaphorePermit};
 
 static TURN_PERMITS: Semaphore = Semaphore::const_new(2);
+static NEXT_SHELL_ARTIFACT: AtomicU64 = AtomicU64::new(1);
+
+const SHELL_STARTUP_WRAPPER: &str =
+    "tmp=\"$1.tmp.$$\"; printf '%s\\n' \"$$\" > \"$tmp\"; mv -f \"$tmp\" \"$1\"; exec bash -c \"$2\"";
+const MAX_SHELL_COMMAND_BYTES: usize = 64 * 1024;
+const MAX_SHELL_ERROR_BYTES: usize = 1024;
+const MAX_SHELL_ARTIFACT_ATTEMPTS: u64 = 8;
+
+struct ShellArtifact {
+    directory: PathBuf,
+    readiness_path: PathBuf,
+}
+
+impl ShellArtifact {
+    fn create() -> Result<Self, String> {
+        let root = std::env::temp_dir();
+        let pid = std::process::id();
+        for _ in 0..MAX_SHELL_ARTIFACT_ATTEMPTS {
+            let sequence = NEXT_SHELL_ARTIFACT.fetch_add(1, Ordering::Relaxed);
+            let directory = root.join(format!("opencode-rk-shell-{pid}-{sequence}"));
+            match fs::create_dir(&directory) {
+                Ok(()) => {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::fs::PermissionsExt;
+                        let mut permissions = fs::metadata(&directory)
+                            .map_err(|error| format!("shell readiness metadata: {error}"))?
+                            .permissions();
+                        permissions.set_mode(0o700);
+                        fs::set_permissions(&directory, permissions)
+                            .map_err(|error| format!("shell readiness permissions: {error}"))?;
+                    }
+                    return Ok(Self {
+                        readiness_path: directory.join("ready.pid"),
+                        directory,
+                    });
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                Err(error) => return Err(format!("shell readiness directory: {error}")),
+            }
+        }
+        Err("shell readiness directory allocation exhausted".to_owned())
+    }
+}
+
+impl Drop for ShellArtifact {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.readiness_path);
+        let _ = fs::remove_dir_all(&self.directory);
+    }
+}
+
+struct ShellExecutionGuard {
+    artifact: ShellArtifact,
+    startup: mpsc::Receiver<u32>,
+    execution: Option<Pin<Box<dyn Future<Output = Result<ShellResult, ShellError>> + Send>>>,
+    result: Option<Result<ShellResult, ShellError>>,
+}
+
+impl ShellExecutionGuard {
+    async fn wait_for_startup(&mut self) -> Result<u32, String> {
+        if self.result.is_some() {
+            return Err("shell execution finished before readiness".to_owned());
+        }
+        let Some(mut execution) = self.execution.take() else {
+            return Err("shell execution future missing".to_owned());
+        };
+        tokio::select! {
+            result = &mut execution => {
+                self.result = Some(result);
+                Err("shell execution finished before readiness".to_owned())
+            }
+            startup = self.startup.recv() => {
+                match startup {
+                    Some(pid) if pid > 1 => {
+                        self.execution = Some(execution);
+                        Ok(pid)
+                    }
+                    Some(_) => {
+                        self.execution = Some(execution);
+                        Err("shell startup returned invalid PID".to_owned())
+                    }
+                    None => {
+                        self.execution = Some(execution);
+                        Err("shell startup channel closed before readiness".to_owned())
+                    }
+                }
+            }
+        }
+    }
+
+    async fn finish(mut self) -> Result<ShellResult, String> {
+        let result = if let Some(result) = self.result.take() {
+            result
+        } else if let Some(execution) = self.execution.take() {
+            execution.await
+        } else {
+            return Err("shell execution future missing".to_owned());
+        };
+        result.map_err(|error| error.to_string())
+    }
+}
+
+fn bounded_shell_error(error: impl Into<String>) -> String {
+    let mut error = error.into();
+    if error.len() > MAX_SHELL_ERROR_BYTES {
+        error.truncate(MAX_SHELL_ERROR_BYTES);
+        error.push_str(" [truncated]");
+    }
+    error
+}
+
+enum HttpTurnPermit {
+    Shared { _permit: OwnedSemaphorePermit },
+    Legacy { _permit: SemaphorePermit<'static> },
+}
+
+fn acquire_http_turn_permit(
+    runtime: Option<&runtime_wiring::RuntimeWiring>,
+) -> Result<HttpTurnPermit, ApiFailure> {
+    if let Some(runtime) = runtime {
+        return runtime
+            .try_acquire_turn()
+            .map(|permit| HttpTurnPermit::Shared { _permit: permit })
+            .map_err(|_| ApiFailure::too_many_requests("too many active turns"));
+    }
+    TURN_PERMITS
+        .try_acquire()
+        .map(|permit| HttpTurnPermit::Legacy { _permit: permit })
+        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))
+}
+
+fn publish_runtime_event(
+    events: Option<&event_bus::EventBus>,
+    event: event_bus::ServerEvent,
+) {
+    if let Some(events) = events {
+        events.publish(event).ok();
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: SessionService,
@@ -743,15 +895,19 @@ struct CreateTurnBody {
 }
 
 async fn create_turn(
+    runtime: Option<Extension<runtime_wiring::RuntimeWiring>>,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
-    let _permit = TURN_PERMITS
-        .try_acquire()
-        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let runtime = runtime.map(|Extension(runtime)| runtime);
+    let _permit = acquire_http_turn_permit(runtime.as_ref())?;
+    let sessions = runtime
+        .as_ref()
+        .map(|runtime| runtime.engine().sessions.clone())
+        .unwrap_or_else(|| state.sessions.clone());
     let id = parse_session_id(&id)?;
-    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    sessions.get(id).await.map_err(ApiFailure::internal)?;
 
     if body.text.trim().is_empty() {
         return Err(ApiFailure::bad_request("turn text must not be empty"));
@@ -774,13 +930,18 @@ async fn create_turn(
     }
 
     let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
-    let user_message = state
-        .sessions
+    let user_message = sessions
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
-    let history = state
-        .sessions
+    publish_runtime_event(
+        runtime.as_ref().map(|runtime| runtime.events()),
+        event_bus::ServerEvent::MessageAppended {
+            session: id,
+            seq: 0,
+        },
+    );
+    let history = sessions
         .messages(id, 500)
         .await
         .map_err(ApiFailure::internal)?;
@@ -800,11 +961,17 @@ async fn create_turn(
         .create(model_id, &body.reasoning_effort, &input)
         .await
         .map_err(provider_failure)?;
-    let assistant_message = state
-        .sessions
+    let assistant_message = sessions
         .append_text(id, MessageRole::Assistant, assistant_text)
         .await
         .map_err(ApiFailure::internal)?;
+    publish_runtime_event(
+        runtime.as_ref().map(|runtime| runtime.events()),
+        event_bus::ServerEvent::MessageAppended {
+            session: id,
+            seq: 0,
+        },
+    );
 
     Ok((
         StatusCode::CREATED,
@@ -823,7 +990,8 @@ struct TurnStreamState {
     assistant_text: String,
     reasoning_summary: String,
     stage: TurnStreamStage,
-    _permit: SemaphorePermit<'static>,
+    _permit: HttpTurnPermit,
+    events: Option<event_bus::EventBus>,
     /// Agentic loop state: provider tool schema + step budget + typed history.
     tools: Vec<ResponsesTool>,
     enabled_tools: Vec<String>,
@@ -840,6 +1008,14 @@ struct TurnStreamState {
     forced_stop: Option<TurnStop>,
     /// Agents-crate executor: mirror of the real agent loop plan (CONVERGENCE AGENTS).
     agent_plan: AgentExecutor,
+    /// Stream-owned shell tasks. Dropping the stream drops these guards, which
+    /// aborts their task and therefore drops the process-owning `ShellTool`.
+    shell_guards: HashMap<String, ShellExecutionGuard>,
+    /// Shell call IDs already admitted to the one-shot broker/startup path.
+    prepared_shell_calls: HashSet<String>,
+    /// Bounded explicit startup failures; shell calls never fall back to the
+    /// uncancellable legacy executor.
+    shell_startup_errors: HashMap<String, String>,
 }
 
 /// Turn-tool allowlist from OPENCODE_RK_TURN_TOOLS (comma-separated tool ids).
@@ -862,6 +1038,70 @@ struct CallOutputItem {
     output: String,
 }
 
+fn is_shell_call(name: &str) -> bool {
+    matches!(name, "bash" | "shell")
+}
+
+fn shell_command(arguments: &str) -> Result<String, String> {
+    let parsed: Value = serde_json::from_str(arguments)
+        .map_err(|_| "shell arguments are not valid JSON".to_owned())?;
+    let command = parsed
+        .get("command")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "shell arguments require a string command".to_owned())?;
+    if command.is_empty() {
+        return Err("shell command must not be empty".to_owned());
+    }
+    if command.len() > MAX_SHELL_COMMAND_BYTES {
+        return Err(format!(
+            "shell command exceeds maximum of {MAX_SHELL_COMMAND_BYTES} bytes"
+        ));
+    }
+    Ok(command.to_owned())
+}
+
+fn new_shell_execution(command: String) -> Result<ShellExecutionGuard, String> {
+    let artifact = ShellArtifact::create()?;
+    let (startup_tx, startup_rx) = mpsc::channel(1);
+    let readiness_path = artifact.readiness_path.clone();
+    let shell = ShellTool::new(
+        "bash",
+        vec![
+            "-c".to_owned(),
+            SHELL_STARTUP_WRAPPER.to_owned(),
+            "--".to_owned(),
+            readiness_path.to_string_lossy().into_owned(),
+            command,
+        ],
+    );
+    let config = ShellConfig {
+        allowed_commands: vec!["bash".to_owned()],
+        ..ShellConfig::default()
+    };
+    let execution = Box::pin(shell.execute_with_startup(config, readiness_path, startup_tx));
+    Ok(ShellExecutionGuard {
+        artifact,
+        startup: startup_rx,
+        execution: Some(execution),
+        result: None,
+    })
+}
+
+fn shell_result_output(result: &ShellResult) -> String {
+    let mut output = result.stdout.clone();
+    if !result.stderr.is_empty() {
+        if !output.is_empty() {
+            output.push('\n');
+        }
+        output.push_str("[stderr]\n");
+        output.push_str(&result.stderr);
+    }
+    if !result.success && output.is_empty() {
+        output.push_str("shell command failed");
+    }
+    output
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum TurnStreamStage {
     User,
@@ -876,15 +1116,20 @@ enum TurnStreamStage {
 }
 
 async fn create_turn_stream(
+    runtime: Option<Extension<runtime_wiring::RuntimeWiring>>,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<Response, ApiFailure> {
-    let permit = TURN_PERMITS
-        .try_acquire()
-        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let runtime = runtime.map(|Extension(runtime)| runtime);
+    let permit = acquire_http_turn_permit(runtime.as_ref())?;
+    let events = runtime.as_ref().map(|runtime| runtime.events().clone());
+    let sessions = runtime
+        .as_ref()
+        .map(|runtime| runtime.engine().sessions.clone())
+        .unwrap_or_else(|| state.sessions.clone());
     let id = parse_session_id(&id)?;
-    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    sessions.get(id).await.map_err(ApiFailure::internal)?;
 
     if body.text.trim().is_empty() {
         return Err(ApiFailure::bad_request("turn text must not be empty"));
@@ -907,13 +1152,18 @@ async fn create_turn_stream(
     }
 
     let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
-    let user_message = state
-        .sessions
+    let user_message = sessions
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
-    let history = state
-        .sessions
+    publish_runtime_event(
+        events.as_ref(),
+        event_bus::ServerEvent::MessageAppended {
+            session: id,
+            seq: 0,
+        },
+    );
+    let history = sessions
         .messages(id, 500)
         .await
         .map_err(ApiFailure::internal)?;
@@ -935,10 +1185,26 @@ async fn create_turn_stream(
     // an advertised tool is executable, an unadvertised one is not.
     let turn_tools = turn_tool_config();
     let registry = ToolRegistry::new();
+    let runtime_engine = runtime.as_ref().map(|runtime| runtime.engine());
+    let enabled_tools: Vec<String> = registry
+        .list()
+        .into_iter()
+        .filter(|tool| {
+            turn_tools.iter().any(|name| *name == tool.id)
+                && runtime_engine.map_or(true, |engine| {
+                    engine
+                        .tools
+                        .iter()
+                        .any(|snapshot| snapshot.enabled && snapshot.id == tool.id)
+                        && engine.policy.decision(&tool.id) == PolicyDecision::Allow
+                })
+        })
+        .map(|tool| tool.id.clone())
+        .collect();
     let tools: Vec<ResponsesTool> = registry
         .list()
         .into_iter()
-        .filter(|tool| turn_tools.iter().any(|name| *name == tool.id))
+        .filter(|tool| enabled_tools.iter().any(|name| *name == tool.id))
         .map(|tool| {
             ResponsesTool::function(
                 tool.id.clone(),
@@ -962,15 +1228,16 @@ async fn create_turn_stream(
     let stream = stream::unfold(
         TurnStreamState {
             provider,
-            sessions: state.sessions,
+            sessions,
             session_id: id,
             user_message: Some(user_message),
             assistant_text: String::new(),
             reasoning_summary: String::new(),
             stage: TurnStreamStage::User,
             _permit: permit,
+            events,
             tools,
-            enabled_tools: turn_tools,
+            enabled_tools,
             broker: PermissionBroker::new(SecurityPolicy::lean_default(
                 std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
             )),
@@ -988,6 +1255,9 @@ async fn create_turn_stream(
                 opencode_rk_agents::agent_executor::LoopStep::PolicyCheck,
                 opencode_rk_agents::agent_executor::LoopStep::Settle,
             ]).expect("fixed 4-step turn plan fits agent executor capacity"),
+            shell_guards: HashMap::new(),
+            prepared_shell_calls: HashSet::new(),
+            shell_startup_errors: HashMap::new(),
         },
         |mut state| async move {
             loop {
@@ -1034,6 +1304,85 @@ async fn create_turn_stream(
                             name,
                             arguments,
                         })) => {
+                            if is_shell_call(&name)
+                                && state.enabled_tools.iter().any(|enabled| enabled == &name)
+                            {
+                                let already_prepared =
+                                    !state.prepared_shell_calls.insert(call_id.clone());
+                                if already_prepared {
+                                    state.shell_startup_errors.insert(
+                                        call_id.clone(),
+                                        "duplicate shell call ID was not executed".to_owned(),
+                                    );
+                                } else if state.shell_guards.len() >= MAX_CALLS_PER_ROUND {
+                                    state.shell_startup_errors.insert(
+                                        call_id.clone(),
+                                        format!(
+                                            "shell call limit exceeded (max {MAX_CALLS_PER_ROUND})"
+                                        ),
+                                    );
+                                } else {
+                                    match shell_command(&arguments) {
+                                        Ok(command) => {
+                                            match state.broker.authorize(&OperationIntent::Tool {
+                                                name: name.clone(),
+                                                description: "turn tool call".to_owned(),
+                                            }) {
+                                                Decision::Allow => {
+                                                    match new_shell_execution(command) {
+                                                        Ok(mut guard) => {
+                                                            match guard.wait_for_startup().await {
+                                                                Ok(_pid) => {
+                                                                    state.shell_guards.insert(
+                                                                        call_id.clone(),
+                                                                    guard,
+                                                                    );
+                                                                }
+                                                                Err(error) => {
+                                                                    state.shell_startup_errors.insert(
+                                                                        call_id.clone(),
+                                                                        bounded_shell_error(error),
+                                                                    );
+                                                                }
+                                                            }
+                                                        }
+                                                        Err(error) => {
+                                                            state.shell_startup_errors.insert(
+                                                                call_id.clone(),
+                                                                bounded_shell_error(error),
+                                                            );
+                                                        }
+                                                    }
+                                                }
+                                                Decision::Deny { reason } => {
+                                                    state.shell_startup_errors.insert(
+                                                        call_id.clone(),
+                                                        format!(
+                                                            "error: tool '{}' denied: {}",
+                                                            name, reason
+                                                        ),
+                                                    );
+                                                }
+                                                Decision::RequireHuman { reason, .. } => {
+                                                    state.shell_startup_errors.insert(
+                                                        call_id.clone(),
+                                                        format!(
+                                                            "error: tool '{}' requires human approval: {}",
+                                                            name, reason
+                                                        ),
+                                                    );
+                                                }
+                                            }
+                                        }
+                                        Err(error) => {
+                                            state.shell_startup_errors.insert(
+                                                call_id.clone(),
+                                                bounded_shell_error(error),
+                                            );
+                                        }
+                                    }
+                                }
+                            }
                             state.pending_calls.push(RequestedCall {
                                 call_id: call_id.clone(),
                                 name: name.clone(),
@@ -1095,6 +1444,13 @@ async fn create_turn_stream(
                                 .await
                             {
                                 Ok(message) => {
+                                    publish_runtime_event(
+                                        state.events.as_ref(),
+                                        event_bus::ServerEvent::MessageAppended {
+                                            session: state.session_id,
+                                            seq: 0,
+                                        },
+                                    );
                                     state.stage = TurnStreamStage::Done;
                                     return Some((
                                         Ok::<Bytes, Infallible>(ndjson(json!({
@@ -1164,40 +1520,57 @@ async fn create_turn_stream(
                                 .iter()
                                 .any(|enabled| *enabled == call.name);
                             let raw_output = if permitted {
-                                match state.broker.authorize(&OperationIntent::Tool {
-                                    name: call.name.clone(),
-                                    description: "turn tool call".to_owned(),
-                                }) {
-                                    Decision::Allow => {
-                                        let arguments: Value =
-                                            serde_json::from_str(&call.arguments)
-                                                .unwrap_or_else(|_| json!({}));
-                                        let result = executor
-                                            .execute(opencode_rk_tools::executor::ToolCall::new(
-                                                call.call_id.clone(),
-                                                call.name.clone(),
-                                                arguments,
-                                            ))
-                                            .await;
-                                        if result.success {
-                                            result.output
-                                        } else {
-                                            result
-                                                .error
-                                                .unwrap_or_else(|| "tool failed".to_owned())
+                                if is_shell_call(&call.name) {
+                                    if let Some(error) =
+                                        state.shell_startup_errors.remove(&call.call_id)
+                                    {
+                                        error
+                                    } else if let Some(guard) =
+                                        state.shell_guards.remove(&call.call_id)
+                                    {
+                                        match guard.finish().await {
+                                            Ok(result) => shell_result_output(&result),
+                                            Err(error) => bounded_shell_error(error),
                                         }
+                                    } else {
+                                        "error: shell execution was not prepared".to_owned()
                                     }
-                                    Decision::Deny { reason } => {
-                                        format!(
-                                            "error: tool '{}' denied: {}",
-                                            call.name, reason
-                                        )
-                                    }
-                                    Decision::RequireHuman { reason, .. } => {
-                                        format!(
-                                            "error: tool '{}' requires human approval: {}",
-                                            call.name, reason
-                                        )
+                                } else {
+                                    match state.broker.authorize(&OperationIntent::Tool {
+                                        name: call.name.clone(),
+                                        description: "turn tool call".to_owned(),
+                                    }) {
+                                        Decision::Allow => {
+                                            let arguments: Value =
+                                                serde_json::from_str(&call.arguments)
+                                                    .unwrap_or_else(|_| json!({}));
+                                            let result = executor
+                                                .execute(opencode_rk_tools::executor::ToolCall::new(
+                                                    call.call_id.clone(),
+                                                    call.name.clone(),
+                                                    arguments,
+                                                ))
+                                                .await;
+                                            if result.success {
+                                                result.output
+                                            } else {
+                                                result
+                                                    .error
+                                                    .unwrap_or_else(|| "tool failed".to_owned())
+                                            }
+                                        }
+                                        Decision::Deny { reason } => {
+                                            format!(
+                                                "error: tool '{}' denied: {}",
+                                                call.name, reason
+                                            )
+                                        }
+                                        Decision::RequireHuman { reason, .. } => {
+                                            format!(
+                                                "error: tool '{}' requires human approval: {}",
+                                                call.name, reason
+                                            )
+                                        }
                                     }
                                 }
                             } else {
@@ -1259,6 +1632,22 @@ async fn create_turn_stream(
                                     state,
                                 ));
                             }
+                            if !item.name.is_empty() {
+                                publish_runtime_event(
+                                    state.events.as_ref(),
+                                    event_bus::ServerEvent::ToolExecuted {
+                                        name: item.name.clone(),
+                                        duration_ms: 0,
+                                    },
+                                );
+                            }
+                            publish_runtime_event(
+                                state.events.as_ref(),
+                                event_bus::ServerEvent::MessageAppended {
+                                    session: state.session_id,
+                                    seq: 0,
+                                },
+                            );
                             state.history_items.push(ResponsesItem::FunctionCallOutput {
                                 call_id: item.call_id.clone(),
                                 output: item.output.clone(),
@@ -1280,6 +1669,13 @@ async fn create_turn_stream(
                                 .await
                             {
                                 Ok(message) => {
+                                    publish_runtime_event(
+                                        state.events.as_ref(),
+                                        event_bus::ServerEvent::MessageAppended {
+                                            session: state.session_id,
+                                            seq: 0,
+                                        },
+                                    );
                                     state.stage = TurnStreamStage::Done;
                                     return Some((
                                         Ok::<Bytes, Infallible>(ndjson(json!({

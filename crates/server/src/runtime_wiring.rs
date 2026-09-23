@@ -315,6 +315,14 @@ impl Clone for RuntimeWiring {
 }
 
 impl RuntimeWiring {
+    /// Compose the daemon's shared runtime with an initially empty provider
+    /// registry. Provider credentials and clients remain lazy; constructing
+    /// the HTTP daemon must not read ambient secrets or start background work.
+    #[must_use]
+    pub fn for_daemon(sessions: SessionService, tools: ToolRegistry, policy: EnginePolicy) -> Self {
+        Self::with_sessions(ProviderRegistry::new(), sessions, tools, policy)
+    }
+
     /// Compose from a live session service: sessions and store share the same
     /// value so every client observes one persistence authority. No I/O, no
     /// spawning: the daemon builds providers/sessions/tools/policy and the
@@ -571,6 +579,13 @@ impl RuntimeWiring {
     #[must_use]
     pub fn available_permits(&self) -> usize {
         self.inner.permits.available_permits()
+    }
+
+    /// Admit one HTTP/headless turn onto the daemon-owned concurrency budget.
+    /// The owned permit releases capacity when the request or response stream
+    /// is dropped, including client disconnect and cancellation paths.
+    pub fn try_acquire_turn(&self) -> Result<tokio::sync::OwnedSemaphorePermit, WiringError> {
+        self.inner.permits.try_acquire().map_err(WiringError::from)
     }
 }
 

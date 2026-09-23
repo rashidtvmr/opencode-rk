@@ -22,6 +22,8 @@ use opencode_rk_sessions::tui_state::{
     MAX_SOURCES,
 };
 use crate::daemon_client;
+#[cfg(feature = "native")]
+use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use std::{
     env, fs,
     io::{BufRead, IsTerminal as _, Read, Write},
@@ -75,6 +77,12 @@ pub struct TuiArgs {
     /// stopped. Read-only (stdin is ignored in follow mode).
     #[arg(long)]
     pub follow: bool,
+    /// Provider/model used for submitted turns.
+    #[arg(long, default_value = "openai/gpt-5.6")]
+    pub model: String,
+    /// Reasoning effort used for submitted turns.
+    #[arg(long, default_value = "high")]
+    pub reasoning_effort: String,
     /// Poll interval for follow mode in milliseconds (default 1000).
     #[arg(long, default_value_t = 1000)]
     pub poll_ms: u64,
@@ -368,22 +376,307 @@ fn status_hint(action: StatusAction) -> &'static str {
     }
 }
 
-/// Persist a submitted draft through the daemon. Returns the typed failure on
-/// any non-2xx/transport error; the caller keeps the local state machine.
-fn persist_submit(
+/// Execute a submitted draft through the real daemon turn endpoint. This is
+/// deliberately not the append-message route: a TUI submit must exercise the
+/// same provider/tool/session pipeline as headless and web clients.
+fn execute_submit(
     snapshot: &LiveSnapshot,
     text: &str,
+    model: &str,
+    reasoning_effort: &str,
     auth: Option<&str>,
-) -> Result<(), String> {
-    let payload = serde_json::json!({ "text": text }).to_string();
-    http_request(
+) -> Result<String, String> {
+    let payload = serde_json::json!({
+        "text": text,
+        "model": model,
+        "reasoning_effort": reasoning_effort,
+    })
+    .to_string();
+    let body = http_request(
         &snapshot.origin,
         "POST",
-        &format!("/api/sessions/{}/messages", snapshot.session_id),
+        &format!("/api/sessions/{}/turns", snapshot.session_id),
         Some(&payload),
         auth,
-    )
-    .map(|_| ())
+    )?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("daemon turn response is not valid JSON: {e}"))?;
+    value
+        .get("assistant_message")
+        .and_then(|message| message.get("body"))
+        .and_then(|body| body.get("text"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "daemon turn response is missing assistant_message.body.text".to_string())
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativePage {
+    Chat,
+    Palette,
+    Context,
+    Help,
+}
+
+#[cfg(feature = "native")]
+fn native_terminal_size() -> (u32, u32) {
+    let cols = std::env::var("COLUMNS").ok().and_then(|v| v.parse().ok());
+    let rows = std::env::var("LINES").ok().and_then(|v| v.parse().ok());
+    if let (Some(cols), Some(rows)) = (cols, rows) {
+        if cols > 0 && rows > 0 {
+            return (cols, rows);
+        }
+    }
+    #[cfg(unix)]
+    {
+        if let Ok(output) = std::process::Command::new("stty").arg("size").output() {
+            if output.status.success() {
+                if let Ok(text) = std::str::from_utf8(&output.stdout) {
+                    let mut parts = text.split_whitespace();
+                    if let (Some(rows), Some(cols)) = (parts.next(), parts.next()) {
+                        if let (Ok(rows), Ok(cols)) = (rows.parse::<u32>(), cols.parse::<u32>()) {
+                            if cols > 0 && rows > 0 {
+                                return (cols, rows);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (80, 24)
+}
+
+#[cfg(feature = "native")]
+fn native_page_lines(
+    page: NativePage,
+    snapshot: Option<&LiveSnapshot>,
+    model: &str,
+    draft: &str,
+    transcript: &[String],
+    width: usize,
+    height: usize,
+) -> Vec<String> {
+    let width = width.max(20);
+    let height = height.max(8);
+    let mut lines = Vec::new();
+    let title = snapshot
+        .map(|s| format!("OpenCode RK — {}", s.title))
+        .unwrap_or_else(|| "OpenCode RK — offline".to_string());
+    lines.push(title);
+    lines.push(format!(
+        "model: {model}  |  Ctrl+P palette  Ctrl+T context  ? help  Ctrl+C quit"
+    ));
+    lines.push("─".repeat(width.min(120)));
+    match page {
+        NativePage::Chat => {
+            let body_rows = height.saturating_sub(7);
+            let start = transcript.len().saturating_sub(body_rows);
+            if transcript.is_empty() {
+                lines.push(
+                    snapshot
+                        .and_then(|s| s.last_text.as_ref())
+                        .map(|t| format!("last: {t}"))
+                        .unwrap_or_else(|| "Start typing to send a turn.".to_string()),
+                );
+            } else {
+                lines.extend(transcript[start..].iter().cloned());
+            }
+            while lines.len() < height.saturating_sub(3) {
+                lines.push(String::new());
+            }
+            lines.push("─".repeat(width.min(120)));
+            lines.push(format!("> {draft}"));
+            lines.push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context");
+        }
+        NativePage::Palette => {
+            lines.push("Command palette".to_string());
+            lines.extend([
+                "  /new           New session",
+                "  /sessions      Switch/list sessions",
+                "  /model         Switch model",
+                "  /agents        Switch agent",
+                "  /mcps          MCP controls",
+                "  /status        Status",
+                "  /themes        Theme",
+                "  /fork          Fork session",
+                "  /undo /redo    Session history actions",
+                "  /share         Share session",
+                "  /export        Export transcript",
+                "  Esc            Back to chat",
+            ].into_iter().map(str::to_string));
+        }
+        NativePage::Context => {
+            lines.push("Context / status".to_string());
+            if let Some(snapshot) = snapshot {
+                lines.push(format!("session: {}", snapshot.session_id));
+                lines.push(format!("state: {}", snapshot.state));
+                lines.push(format!("updated: {}", snapshot.updated_at));
+                lines.push(format!("messages: {}", snapshot.message_count));
+            } else {
+                lines.push("daemon: offline".to_string());
+            }
+            lines.push("Usage and source-level context populate from live provider events.".to_string());
+            lines.push("Esc returns to chat.".to_string());
+        }
+        NativePage::Help => {
+            lines.push("Keyboard help".to_string());
+            lines.extend([
+                "Enter        submit current draft",
+                "Backspace    delete previous character",
+                "Ctrl+P       command palette",
+                "Ctrl+T       context/status page",
+                "?            help",
+                "Esc          close page",
+                "Ctrl+C       quit and restore terminal",
+            ].into_iter().map(str::to_string));
+        }
+    }
+    lines.truncate(height);
+    for line in &mut lines {
+        if line.chars().count() > width {
+            *line = line.chars().take(width).collect();
+        }
+    }
+    lines
+}
+
+#[cfg(feature = "native")]
+fn paint_native(
+    renderer: &mut NativeRenderer,
+    lines: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    renderer.fill_rect(
+        0,
+        0,
+        renderer.cols(),
+        renderer.rows(),
+        Rgba::new(0, 0, 0, 255),
+    )?;
+    for (row, line) in lines.iter().enumerate().take(renderer.rows() as usize) {
+        renderer.draw_text(0, row as u32, line)?;
+    }
+    renderer.frame(|_| {})?;
+    Ok(())
+}
+
+#[cfg(feature = "native")]
+fn native_interactive_loop(
+    memory: &[MemoryFile],
+    live: Option<&LiveSnapshot>,
+    model: &str,
+    reasoning_effort: &str,
+    auth: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read as _;
+
+    let (cols, rows) = native_terminal_size();
+    let mut host = crate::native_host::NativeHost::new(crate::native_host::HostConfig {
+        cols: cols.min(u32::from(u16::MAX)) as u16,
+        rows: rows.min(u32::from(u16::MAX)) as u16,
+        skip_onboarding: true,
+    });
+    let _ = host.step(if live.is_some() {
+        crate::native_host::HostEvent::DaemonLive
+    } else {
+        crate::native_host::HostEvent::DaemonDown
+    });
+    let mut renderer = NativeRenderer::create(cols, rows)?;
+    renderer.setup_terminal()?;
+    let _ = renderer.enable_mouse(false);
+    let _ = renderer.enable_kitty_keyboard(1);
+    renderer.set_title("OpenCode RK")?;
+
+    let mut page = NativePage::Chat;
+    let mut draft = String::new();
+    let mut transcript: Vec<String> = Vec::new();
+    if !memory.is_empty() {
+        transcript.push(format!("memory: {} file(s) loaded", memory.len()));
+    }
+    let mut current_size = (cols, rows);
+    let mut stdin = std::io::stdin();
+    let mut byte = [0u8; 1];
+
+    loop {
+        let size = native_terminal_size();
+        if size != current_size {
+            current_size = size;
+            renderer.resize(size.0, size.1)?;
+            let _ = host.step(crate::native_host::HostEvent::Resize {
+                cols: size.0.min(u32::from(u16::MAX)) as u16,
+                rows: size.1.min(u32::from(u16::MAX)) as u16,
+            });
+        }
+        let lines = native_page_lines(
+            page,
+            live,
+            model,
+            &draft,
+            &transcript,
+            renderer.cols() as usize,
+            renderer.rows() as usize,
+        );
+        paint_native(&mut renderer, &lines)?;
+
+        let read = stdin.read(&mut byte)?;
+        if read == 0 {
+            break;
+        }
+        match byte[0] {
+            3 | 4 => {
+                let _ = host.step(crate::native_host::HostEvent::Key(char::from(byte[0])));
+                break;
+            }
+            b'\t' => {
+                let _ = host.step(crate::native_host::HostEvent::Key('\t'));
+            }
+            16 => page = NativePage::Palette,
+            20 => page = NativePage::Context,
+            b'?' if draft.is_empty() => page = NativePage::Help,
+            27 => page = NativePage::Chat,
+            8 | 127 if page == NativePage::Chat => {
+                draft.pop();
+            }
+            b'\r' | b'\n' if page == NativePage::Chat => {
+                let text = draft.trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                draft.clear();
+                transcript.push(format!("you: {text}"));
+                let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
+                match live {
+                    Some(snapshot) => match execute_submit(
+                        snapshot,
+                        &text,
+                        model,
+                        reasoning_effort,
+                        auth,
+                    ) {
+                        Ok(reply) => transcript.push(format!("assistant: {reply}")),
+                        Err(error) => transcript.push(format!("error: {error}")),
+                    },
+                    None => transcript.push("offline: turn not executed".to_string()),
+                }
+                const MAX_NATIVE_TRANSCRIPT: usize = 500;
+                if transcript.len() > MAX_NATIVE_TRANSCRIPT {
+                    let drop_count = transcript.len() - MAX_NATIVE_TRANSCRIPT;
+                    transcript.drain(..drop_count);
+                }
+            }
+            b if page == NativePage::Chat && b >= 0x20 => {
+                draft.push(char::from(b));
+            }
+            _ => {}
+        }
+    }
+
+    let _ = renderer.disable_mouse();
+    let _ = renderer.disable_kitty_keyboard();
+    let _ = renderer.restore_terminal_modes();
+    renderer.close();
+    Ok(())
 }
 
 /// Interactive line loop. Submit lines echo as `you: <draft>`, `?` shows the
@@ -395,13 +688,15 @@ fn interactive_loop(
     keymap: SubmitKeymap,
     memory: &[MemoryFile],
     live: Option<&LiveSnapshot>,
+    model: &str,
+    reasoning_effort: &str,
     auth: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
     let mut composer = Composer::new();
     let viewer = MemoryViewer::new(memory.to_vec());
-    print!("{}", render_frame(keymap, memory, "unset", live));
+    print!("{}", render_frame(keymap, memory, model, live));
     loop {
         let Some(line) = lines.next() else { break };
         let line = line?;
@@ -421,12 +716,18 @@ fn interactive_loop(
                     Ok(opencode_rk_sessions::tui_state::SubmitOutcome::Sent(sent)) => {
                         println!("you: {sent}");
                         match live {
-                            Some(snapshot) => match persist_submit(snapshot, &sent, auth) {
-                                Ok(()) => println!("[persisted]"),
-                                Err(error) => println!("[error] not persisted: {error}"),
+                            Some(snapshot) => match execute_submit(
+                                snapshot,
+                                &sent,
+                                model,
+                                reasoning_effort,
+                                auth,
+                            ) {
+                                Ok(reply) => println!("assistant: {reply}"),
+                                Err(error) => println!("[error] turn failed: {error}"),
                             },
                             None => {
-                                println!("[offline: not persisted; pass --origin to bind a daemon]")
+                                println!("[offline: turn not executed; pass --origin to bind a daemon]")
                             }
                         }
                         while let Some(next) = composer.finish_turn() {
@@ -527,11 +828,31 @@ pub fn run_with_dir(
         match fetch_snapshot(origin, args.session.as_deref(), auth) {
             Ok(snapshot) => {
                 if args.once {
-                    let frame = render_frame(keymap, &memory, "unset", Some(&snapshot));
+                    let frame = render_frame(keymap, &memory, &args.model, Some(&snapshot));
                     print!("{}", print_native_or_legacy(&frame));
                     return Ok(());
                 }
-                return interactive_loop(keymap, &memory, Some(&snapshot), auth);
+                #[cfg(feature = "native")]
+                {
+                    return native_interactive_loop(
+                        &memory,
+                        Some(&snapshot),
+                        &args.model,
+                        &args.reasoning_effort,
+                        auth,
+                    );
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    return interactive_loop(
+                        keymap,
+                        &memory,
+                        Some(&snapshot),
+                        &args.model,
+                        &args.reasoning_effort,
+                        auth,
+                    );
+                }
             }
             Err(error) => {
                 // Fail closed in snapshot mode; degrade explicitly offline.
@@ -542,7 +863,7 @@ pub fn run_with_dir(
             }
         }
     } else if args.once {
-        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, "unset", None)));
+        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, &args.model, None)));
         return Ok(());
     }
     if !std::io::stdin().is_terminal() {
@@ -554,7 +875,27 @@ pub fn run_with_dir(
             "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY".into(),
         );
     }
-    interactive_loop(keymap, &memory, None, auth)
+    #[cfg(feature = "native")]
+    {
+        native_interactive_loop(
+            &memory,
+            None,
+            &args.model,
+            &args.reasoning_effort,
+            auth,
+        )
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        interactive_loop(
+            keymap,
+            &memory,
+            None,
+            &args.model,
+            &args.reasoning_effort,
+            auth,
+        )
+    }
 }
 
 /// Resolve the raw bearer token for `--origin` from the validated backend
