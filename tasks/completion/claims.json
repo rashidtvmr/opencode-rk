@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "x86_64 Linux artifact replaced atomically with required SHA 9f074adf1e3c67bb027433d44da05b9e285a37ae58cf0b2ed76504304450c79e; ELF x86_64 verify-only, 6-NEEDED allowlist, no RPATH/RUNPATH, 5/5 ABI exit 0. Rust x86_64-unknown-linux-gnu target absent; native target check NOT_RUN. Parent blocked on Windows GNU/MSVC, macOS signing/notarization, frozen manifest/sidecar work.",
+      "blockedNote": "DLL copied atomically and verified PE32+ x86-64, 431 unique exports, 5 required ABI, 14 safe imports, exact SHA/size. Full pair verify intentionally fail-closed until import-lib lane; MSVC unsupported; signing/notarization and frozen manifest/sidecar work remain blocked.",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f3011e183ffenp0hQODntJeO5F",
+      "session": "ses_f300d33cdffeaD8ZWEVsgzB5i5",
       "status": "blocked"
     },
     "UI-014": {
