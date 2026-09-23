@@ -445,6 +445,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
+    "INT-003": {
+      "blockedNote": "INT-003 audit-only blocked: stale ledger marks taskCard:null/worklog:null/implementationCommits:[] yet tasks/INT-003.md + crates/providers/src/int_methods.rs exist. validate_repository stale-Ralph; AUD-009 truncates obligations T01-T03 vs ralph/prd T01-T05. INT-001..010 eq-class same DISC-002 story + surface. Auth/cancel/bounded-resource blockers retained. No edits.",
+      "scratchpad": "worklog/GUARD-INT-003.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "INT-005": {
       "blockedNote": "BLOCKED: repository=51, backlog=51, plan=51, convergence=80. ralph/FEATURES accepted conflicts with task NOT STARTED and unresolved ownership; ownershipDecision.INT-005=null. int_refresh.rs is not exported or called by server; provider/auth/network, secret, persistence/events, callback lifetime, and capacity evidence absent. See worklog/GUARD-INT-005.md.",
       "scratchpad": "worklog/GUARD-INT-005.md",
