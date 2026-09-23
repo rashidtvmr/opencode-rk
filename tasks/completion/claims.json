@@ -211,6 +211,118 @@
       "session": "ses_f380c4bc9ffei2XDG2DStCM92e",
       "status": "completed"
     },
+    "BRG-ABI": {
+      "completedNote": "8/8 harness GREEN via rustc --test; build.rs 264 lines; markers provenance/PROVENANCE/expected_artifact present; scratchpad worklog/BRG-ABI.md",
+      "scratchpad": "worklog/BRG-ABI.md",
+      "session": "ses_brg_abi",
+      "status": "completed"
+    },
+    "BRG-BUFFER": {
+      "scratchpad": "worklog/BRG-BUFFER.md",
+      "session": "ses_brg_buffer",
+      "status": "in-progress"
+    },
+    "BRG-CAPS": {
+      "scratchpad": "worklog/BRG-CAPS.md",
+      "session": "ses_brg_caps",
+      "status": "in-progress"
+    },
+    "BRG-CLIPBOARD": {
+      "scratchpad": "worklog/BRG-CLIPBOARD.md",
+      "session": "ses_brg_clip",
+      "status": "in-progress"
+    },
+    "BRG-FEED": {
+      "completedNote": "GREEN 7/7 feed (rustc --test): markers SpanFeed/attach/drain_once/is_backpressured present, 253 lines, sha 5c073432; RED 0/7 on stub impl; zero test edits",
+      "scratchpad": "worklog/BRG-FEED.md",
+      "session": "ses_brg_feed",
+      "status": "completed"
+    },
+    "BRG-FFI": {
+      "completedNote": "10/10 pass: rustc --edition 2021 --test crates/opentui-bridge/src/ffi.rs -o /tmp/opencode/brg_ffi_test && /tmp/opencode/brg_ffi_test",
+      "scratchpad": "worklog/BRG-FFI.md",
+      "session": "ses_brg_ffi",
+      "status": "completed"
+    },
+    "BRG-FRAME": {
+      "completedNote": "GREEN 9/9 brg_frame rustc --test (t01-t09); 449 lines; markers FrameLoop/FrameState/start/stop/suspend/resume/step_frame/Timeline present",
+      "scratchpad": "worklog/BRG-FRAME.md",
+      "session": "ses_brg_frame",
+      "status": "completed"
+    },
+    "BRG-GOLDEN": {
+      "scratchpad": "worklog/BRG-GOLDEN.md",
+      "session": "ses_brg_golden",
+      "status": "in-progress"
+    },
+    "BRG-KEYS": {
+      "scratchpad": "worklog/BRG-KEYS.md",
+      "session": "ses_brg_keys",
+      "status": "in-progress"
+    },
+    "BRG-LAYOUT": {
+      "completedNote": "GREEN 19/19 rustc --edition 2021 --test layout.rs; 8 flex_tests + 11 existing; 1008 lines; zero warnings",
+      "scratchpad": "worklog/BRG-LAYOUT.md",
+      "session": "ses_brg_layout",
+      "status": "completed"
+    },
+    "BRG-MOUSE": {
+      "scratchpad": "worklog/BRG-MOUSE.md",
+      "session": "ses_brg_mouse",
+      "status": "in-progress"
+    },
+    "BRG-POST": {
+      "completedNote": "GREEN 6/6 post frozen (scanlines/invert/grayscale/sepia/identity/uniform-masked-agree); RED 4 failed pre-impl; GREEN sha2747b6fc; rustc --edition 2021 --test crates/opentui-bridge/src/post.rs -o /tmp/opencode/brg_post_test && /tmp/opencode/brg_post_test; 263 lines, zero test edits",
+      "scratchpad": "worklog/BRG-POST.md",
+      "session": "ses_brg_post",
+      "status": "completed"
+    },
+    "BRG-RUNTIME": {
+      "completedNote": "9/9 tests pass; rustc --edition 2021 --test runtime.rs -> /tmp/opencode/brg_runtime_test OK; markers present; 345 lines; forbid(unsafe_code); no todo/unimplemented/panic",
+      "scratchpad": "worklog/BRG-RUNTIME.md",
+      "session": "ses_brg_runtime",
+      "status": "completed"
+    },
+    "BRG-STDIN": {
+      "scratchpad": "worklog/BRG-STDIN.md",
+      "session": "ses_brg_stdin",
+      "status": "in-progress"
+    },
+    "BRG-TERMINAL": {
+      "completedNote": "GREEN 11/11 rustc --test terminal.rs; 390 lines 11 tests forbid(unsafe_code); scratchpad worklog/BRG-TERMINAL.md",
+      "scratchpad": "worklog/BRG-TERMINAL.md",
+      "session": "ses_brg_terminal",
+      "status": "completed"
+    },
+    "BRG-TEXTBUF": {
+      "scratchpad": "worklog/BRG-TEXTBUF.md",
+      "session": "ses_brg_textbuf",
+      "status": "in-progress"
+    },
+    "BRG-TREE": {
+      "completedNote": "renderable.rs: 652 lines, 14 tests, all markers present. rustc --edition 2021 --test compiles clean; all 14 pass. bridge_lane_gate.py: PASS BRG-TREE.",
+      "scratchpad": "worklog/BRG-TREE.md",
+      "session": "ses_brg_tree",
+      "status": "completed"
+    },
+    "BRG-TYPES": {
+      "completedNote": "GREEN 10/10 rustc --test render_context.rs; 898L; forbid(unsafe_code); zero test edits post-freeze",
+      "scratchpad": "worklog/BRG-TYPES.md",
+      "session": "ses_brg_types",
+      "status": "completed"
+    },
+    "BRG-WIDGETS": {
+      "completedNote": "GREEN 14/14 standalone rustc, zero warnings, evidence /tmp/opencode/wbuildG4.log",
+      "scratchpad": "worklog/BRG-WIDGETS.md",
+      "session": "ses_brg_widgets",
+      "status": "completed"
+    },
+    "BRG-ZIGDECL": {
+      "completedNote": "7/7 rustc tests green: rustc --edition 2021 --test crates/opentui-bridge/src/zigdecl.rs -o /tmp/opencode/brg_zigdecl_test && /tmp/opencode/brg_zigdecl_test; 618 lines, 5 markers, 56 decls, RED verified (2 faults caught)",
+      "scratchpad": "worklog/BRG-ZIGDECL.md",
+      "session": "ses_brg_zigdecl",
+      "status": "completed"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",

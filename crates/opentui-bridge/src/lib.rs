@@ -1,5 +1,6 @@
 pub mod buffer;
 pub mod color;
+pub mod capabilities;
 pub mod events;
 pub mod handle;
 pub mod input;
