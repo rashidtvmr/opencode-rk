@@ -1019,6 +1019,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
+    "SHARE-004": {
+      "blockedNote": "BLOCKED: controller-only reconciliation required; ralph/FEATURES/legacy accepted conflicts with backlog controllerStatus not-started, ownershipDecision null, no taskCard/worklog/implementationCommits; card path crates/share/src/store.rs absent, actual sessions lane is #[path]-tested and unwired. See worklog/GUARD-SHARE-004.md.",
+      "scratchpad": "worklog/GUARD-SHARE-004.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "SHARE-005": {
       "blockedNote": "BLOCKED: controller reconciliation required; Ralph/FEATURES accepted conflicts with task/source-gap/backlog not-started unresolved state. Lane twins are #[path]-only, not wired to a real caller. Preserve enterprise/support-admin/auth/secret-lifetime, deletion/retry, bounded-queue blockers; no acceptance or ownership inferred.",
       "scratchpad": "worklog/GUARD-SHARE-005.md",
