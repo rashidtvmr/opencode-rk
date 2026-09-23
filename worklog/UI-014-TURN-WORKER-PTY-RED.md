@@ -5,9 +5,9 @@
 - Task: `UI-014`
 - Session: `ses_f308d04f2ffeyW7O602eMLxyFe`
 - Branch: `lane/UI-014-turn-worker`
-- Candidate base: `73298773714f9a2d48507fe9bfdf9c24960d7c42`
-- Owned paths only: `crates/cli/tests/ui014_turn_worker_pty.rs`, this scratchpad, UI-014 ledger row.
-- No production/shared source edits.
+- Candidate base: `5b18b8fd0c680055568ce7c1ce6435475fcf48e2`
+- Owned paths only: `crates/cli/src/turn_worker.rs`, this scratchpad, UI-014 ledger row.
+- Integrator prewire remains in `crates/cli/src/main.rs`; no edits made here.
 
 ## Source evidence
 
@@ -62,4 +62,28 @@ Bounded run: Python `subprocess.Popen(...).communicate(timeout=60)` against `tar
 
 ## Result
 
-UI-014 remains blocked. The real executable reached the delayed provider POST and failed specifically on missing asynchronous input ownership/queue/interrupt behavior. No production fix or test weakening performed.
+## Worker implementation
+
+- `crates/cli/src/turn_worker.rs`: one Tokio task; `COMMAND_CHANNEL_CAPACITY = 1` control mailbox; no prompt queue; `RESULT_CHANNEL_CAPACITY = 4` caller-owned result mailbox.
+- `TurnRequest::new`/`validate`: loopback URL, non-empty bounded fields, 32 KiB prompt, 128 KiB serialized request, 8 KiB bearer. Bearer omitted from `Debug` and failures.
+- `TurnWorkerHandle::try_submit`: CAS reservation before bounded `try_reserve`; `Busy`/`Full`/`Closed` return the original request for caller ownership.
+- `DispatchPhase`: accepted-to-dispatched CAS closes the race. Interrupt before dispatch returns `Cancelled`; after dispatch returns `Uncertain`, with no replay path.
+- `send_request`: bounded streamed response (1 MiB), bounded assistant output (1 MiB), no raw response/error retention; transport/timeout/malformed/oversize outcomes after dispatch are `Uncertain`.
+- `TurnWorker::shutdown(self).await`: sends cancellation and shutdown through the control channel, awaits the sole `JoinHandle`; `Drop` only aborts best effort and claims no join.
+
+## Verification after implementation
+
+- `CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo check -p opencode-rk-cli --bin oc2 --no-default-features` -> PASS, `Finished dev profile`; existing warnings only. This exercised the integrator's `mod turn_worker;` prewire.
+- `rustfmt --edition 2021 crates/cli/src/turn_worker.rs` -> PASS.
+- `git diff --check` -> PASS.
+- `cargo test -p opencode-rk-cli --bin oc2 turn_worker --no-default-features -- --test-threads=1` -> BLOCKED before test compile by `crates/opentui-bridge/build.rs:58-62`: missing `native/lib/aarch64-apple-darwin/libopentui.a`/`.dylib`; same TUI-011 artifact blocker. No test edits.
+- Strict scoped clippy attempted: `cargo clippy -p opencode-rk-cli --bin oc2 --no-default-features -- -D warnings` -> BLOCKED by pre-existing warnings promoted to errors in security/providers/tools/sessions/server; no owned-file diagnostic.
+
+Final caller lane updates `crates/cli/src/tui_entry.rs`: async `run`/`run_with_dir`, compatibility and native worker ownership, bounded concurrent input/result handling, composer-owned FIFO queue, cancellation classification, explicit worker shutdown before renderer restoration.
+- Latest no-default verification: `rustfmt --edition 2021 crates/cli/src/tui_entry.rs`, `CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo check -p opencode-rk-cli --bin oc2 --no-default-features`, and `cargo build -p opencode-rk-cli --bin oc2 --no-default-features` pass with existing warnings.
+- Standalone frozen PTY rebuilt and rerun: `1 passed; 0 failed`; delayed first POST accepted second input, processed interrupt/exit, observed one provider request, no replay, cleanup completed.
+- Native artifact now present at `crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib`; scoped `DYLD_LIBRARY_PATH=... cargo check -p opencode-rk-cli --bin oc2 --features native` passes. Native filtered test command passes build and runs `0 tests` for the filter.
+- UI-014 remains blocked for orchestrator integration/native acceptance. Changes are uncommitted; no test edits.
+- Baseline repair: `tui_entry::run_with_dir` now short-circuits an origin-less `--once` invocation to the bounded local frame before descriptor resolution or any `/api` request. Explicit `--origin` remains on the validated descriptor/live snapshot path.
+- Native parity verification with `--no-default-features`: `cargo test -p opencode-rk-cli --test native_tui_parity --no-default-features -- --test-threads=1` -> `13 passed; 0 failed`; p11 dead-origin and p12 semantics pass.
+- Native source verification: scoped `DYLD_LIBRARY_PATH=crates/opentui-bridge/native/lib/aarch64-apple-darwin cargo check -p opencode-rk-cli --bin oc2 --features native` and native build pass. Native parity child launch remains blocked by the frozen harness `env_clear()` removing DYLD search paths while the binary has `@rpath/libopentui.dylib` with no LC_RPATH; this is loader/environment setup, not a tui_entry source failure.

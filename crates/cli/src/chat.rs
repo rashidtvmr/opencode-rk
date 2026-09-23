@@ -13,6 +13,7 @@
 //! is `127.0.0.1:4096`, overridable with `OPENCODE_RK_DAEMON_ADDR`.
 
 use std::{
+    collections::VecDeque,
     io::{BufRead, Read, Write},
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
@@ -20,10 +21,15 @@ use std::{
     time::Duration,
 };
 
-use serde_json::Value;
 use fs2::FileExt;
+use serde_json::Value;
+use tokio::sync::mpsc;
 
 use crate::daemon_client;
+use crate::native_composer::{BUSY_QUEUE_CAP, MAX_DRAFT_BYTES};
+use crate::turn_worker::{
+    DispatchPhase, SubmitError, TurnRequest, TurnResult, TurnWorker, TurnWorkerHandle,
+};
 use opencode_rk_server::daemon as server_daemon;
 
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:4096";
@@ -132,26 +138,23 @@ pub fn prepare_daemon(data_dir: &Path) -> DaemonLease {
 }
 
 /// Entry bound from `main.rs` when no subcommand is given.
-pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
+pub async fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let lease = prepare_daemon(data_dir);
-    let origin_label = lease
-        .origin()
-        .unwrap_or("http://127.0.0.1:4096")
-        .to_owned();
+    let origin_label = lease.origin().unwrap_or("http://127.0.0.1:4096").to_owned();
     if !lease.attached() {
-        println!(
-            "[offline] daemon unavailable; start it manually with: opencode-rk serve"
-        );
+        println!("[offline] daemon unavailable; start it manually with: opencode-rk serve");
     }
     let mut chat = Chat {
         origin: lease.origin.clone(),
         auth: lease.auth.clone(),
         session: None,
         model: DEFAULT_MODEL.to_owned(),
+        queued: VecDeque::new(),
+        active_prompt: None,
     };
     chat.banner(&origin_label, lease.attached());
     chat.bind_recent_session();
-    chat.loop_until_exit()
+    chat.loop_until_exit().await
 }
 
 struct Chat {
@@ -162,6 +165,8 @@ struct Chat {
     auth: Option<String>,
     session: Option<String>,
     model: String,
+    queued: VecDeque<String>,
+    active_prompt: Option<String>,
 }
 
 impl Chat {
@@ -192,8 +197,7 @@ impl Chat {
     fn bind_recent_session(&mut self) {
         let Some(origin) = &self.origin else { return };
         let auth = self.auth.clone();
-        let Ok((status, body)) =
-            request(origin, "GET", "/api/sessions", None, auth.as_deref())
+        let Ok((status, body)) = request(origin, "GET", "/api/sessions", None, auth.as_deref())
         else {
             return;
         };
@@ -253,7 +257,13 @@ impl Chat {
         let title = if title.is_empty() { "Chat" } else { title };
         let body = serde_json::json!({ "title": title }).to_string();
         let auth = self.auth.clone();
-        match request(origin, "POST", "/api/sessions", Some(&body), auth.as_deref()) {
+        match request(
+            origin,
+            "POST",
+            "/api/sessions",
+            Some(&body),
+            auth.as_deref(),
+        ) {
             Ok((201, response)) => match serde_json::from_str::<Value>(&response) {
                 Ok(value) => {
                     let id = value
@@ -315,9 +325,7 @@ impl Chat {
             return;
         }
         let auth = self.auth.clone();
-        let Ok((200, body)) =
-            request(origin, "GET", "/api/sessions", None, auth.as_deref())
-        else {
+        let Ok((200, body)) = request(origin, "GET", "/api/sessions", None, auth.as_deref()) else {
             println!("[error] could not list sessions to resolve {prefix}");
             return;
         };
@@ -341,7 +349,10 @@ impl Chat {
             .collect();
         match matches.as_slice() {
             [session] => {
-                let id = session.get("id").and_then(Value::as_str).unwrap_or_default();
+                let id = session
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let title = session.get("title").and_then(Value::as_str).unwrap_or("?");
                 self.session = Some(id.to_owned());
                 println!("session: {id} ({title})");
@@ -372,8 +383,7 @@ impl Chat {
                         );
                     }
                     for model in models.iter().take(25) {
-                        let provider =
-                            model.get("provider").and_then(Value::as_str).unwrap_or("?");
+                        let provider = model.get("provider").and_then(Value::as_str).unwrap_or("?");
                         let id = model.get("id").and_then(Value::as_str).unwrap_or("?");
                         let name = model.get("name").and_then(Value::as_str).unwrap_or("?");
                         println!("{provider}/{id}  {name}");
@@ -399,84 +409,198 @@ impl Chat {
         println!("model: {}", self.model);
     }
 
-    fn send_turn(&mut self, text: &str) {
+    fn turn_request(&self, text: String) -> Result<TurnRequest, String> {
         let Some(origin) = &self.origin else {
-            println!("[error] daemon offline; start it with: opencode-rk serve");
-            return;
+            return Err("daemon offline; start it with: opencode-rk serve".to_owned());
         };
         let Some(session) = &self.session else {
-            println!("[error] no session; run /new first");
-            return;
+            return Err("no session; run /new first".to_owned());
         };
-        println!("you: {text}");
-        let body = serde_json::json!({
-            "text": text,
-            "model": self.model,
-            "reasoning_effort": "high",
-        })
-        .to_string();
-        let path = format!("/api/sessions/{session}/turns");
-        let auth = self.auth.clone();
-        match request(origin, "POST", &path, Some(&body), auth.as_deref()) {
-            Ok((201, response)) => match serde_json::from_str::<Value>(&response) {
-                Ok(value) => {
-                    let assistant = value
-                        .get("assistant_message")
-                        .and_then(message_text)
-                        .unwrap_or_else(|| "(empty assistant reply)".to_owned());
-                    println!("assistant: {assistant}");
-                }
-                Err(error) => println!("[error] malformed turn response: {error}"),
-            },
-            Ok((status, response)) => {
-                let message = serde_json::from_str::<Value>(&response)
-                    .ok()
-                    .and_then(|value| {
-                        value
-                            .get("message")
-                            .and_then(Value::as_str)
-                            .map(str::to_owned)
-                    })
-                    .unwrap_or_else(|| response.clone());
-                println!("[error] provider request failed ({status}): {message}");
+        let bearer = self
+            .auth
+            .as_deref()
+            .and_then(raw_bearer)
+            .ok_or_else(|| "missing daemon credential: refusing turn".to_owned())?;
+        TurnRequest::new(
+            format!("{origin}/api/sessions/{session}/turns"),
+            session.clone(),
+            text,
+            self.model.clone(),
+            "high",
+            Some(bearer),
+        )
+        .map_err(|error| error.to_string())
+    }
+
+    fn submit_or_queue(&mut self, text: String, worker: &TurnWorkerHandle) {
+        if text.len() > MAX_DRAFT_BYTES {
+            println!("[error] prompt exceeds {MAX_DRAFT_BYTES} byte limit");
+            return;
+        }
+        if self.active_prompt.is_some() {
+            if self.queued.len() >= BUSY_QUEUE_CAP {
+                println!("[error] busy queue full ({BUSY_QUEUE_CAP} prompts)");
+            } else {
+                println!("[queued] {text}");
+                self.queued.push_back(text);
             }
-            Err(error) => println!("[error] provider request failed: {error}"),
+            return;
+        }
+        let display = text.clone();
+        let request = match self.turn_request(text) {
+            Ok(request) => request,
+            Err(error) => {
+                println!("[error] {error}");
+                return;
+            }
+        };
+        match worker.try_submit(request) {
+            Ok(()) => {
+                self.active_prompt = Some(display.clone());
+                println!("you: {display}");
+            }
+            Err(SubmitError::Busy(request)) | Err(SubmitError::Full(request)) => {
+                let prompt = request.prompt().to_owned();
+                if self.queued.len() >= BUSY_QUEUE_CAP {
+                    println!("[error] busy queue full ({BUSY_QUEUE_CAP} prompts)");
+                } else {
+                    println!("[queued] {prompt}");
+                    self.queued.push_back(prompt);
+                }
+            }
+            Err(SubmitError::Closed(_)) => println!("[error] turn worker is closed"),
+            Err(SubmitError::Invalid { error, .. }) => println!("[error] {error}"),
         }
     }
 
-    fn loop_until_exit(&mut self) -> Result<(), Box<dyn std::error::Error>> {
-        let stdin = std::io::stdin();
-        for line in stdin.lock().lines() {
-            let line = line?;
-            match line.trim() {
-                "/exit" | "/quit" | "/q" => break,
-                "/help" | "?" => self.help(),
-                "" => {}
-                rest if rest.starts_with("/new") => {
-                    self.create_session(rest.strip_prefix("/new").map(str::trim));
-                }
-                "/sessions" => self.list_sessions(),
-                rest if rest.starts_with("/open") => {
-                    let prefix = rest.strip_prefix("/open").unwrap_or("").trim();
-                    self.open_session(prefix);
-                }
-                "/models" => self.list_models(),
-                rest if rest.starts_with("/model") => {
-                    let arg = rest.strip_prefix("/model").unwrap_or("").trim();
-                    if arg.is_empty() {
-                        println!("model: {}", self.model);
-                    } else {
-                        self.set_model(arg);
-                    }
-                }
-                rest if rest.starts_with('/') => {
-                    println!("[error] unknown command {rest}; /help lists commands");
-                }
-                text => self.send_turn(text),
+    async fn dispatch_next(&mut self, worker: &TurnWorkerHandle) {
+        let Some(text) = self.queued.pop_front() else {
+            return;
+        };
+        while worker.phase() != DispatchPhase::Idle {
+            tokio::task::yield_now().await;
+        }
+        let display = text.clone();
+        let request = match self.turn_request(text) {
+            Ok(request) => request,
+            Err(error) => {
+                println!("[error] {error}");
+                return;
+            }
+        };
+        match worker.try_submit(request) {
+            Ok(()) => {
+                self.active_prompt = Some(display.clone());
+                println!("you: {display}");
+            }
+            Err(SubmitError::Busy(request)) | Err(SubmitError::Full(request)) => {
+                self.queued.push_front(request.prompt().to_owned());
+            }
+            Err(SubmitError::Closed(_)) => println!("[error] turn worker is closed"),
+            Err(SubmitError::Invalid { error, .. }) => println!("[error] {error}"),
+        }
+    }
+
+    async fn handle_result(&mut self, result: TurnResult, worker: &TurnWorkerHandle) {
+        let prompt = self.active_prompt.take().unwrap_or_default();
+        match result {
+            TurnResult::Completed { output } => {
+                println!("assistant: {output}");
+                self.dispatch_next(worker).await;
+            }
+            TurnResult::Cancelled => {
+                println!("[interrupted; draft preserved: {prompt:?}]");
+            }
+            TurnResult::Uncertain => {
+                println!("[uncertain; draft preserved: {prompt:?}; replay denied]");
+            }
+            TurnResult::Failed(error) => {
+                println!("[error] provider request failed: {error}");
+                self.dispatch_next(worker).await;
             }
         }
+    }
+
+    async fn loop_until_exit(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        let client = reqwest::Client::builder().build()?;
+        let (worker, handle, mut results) = TurnWorker::start(client);
+        let (input_tx, mut input_rx) = mpsc::channel::<Result<String, String>>(8);
+        let input_task = tokio::task::spawn_blocking(move || {
+            let stdin = std::io::stdin();
+            for line in stdin.lock().lines() {
+                let line = match line {
+                    Ok(line) => Ok(line),
+                    Err(error) => Err(error.to_string()),
+                };
+                if input_tx.blocking_send(line).is_err() {
+                    break;
+                }
+            }
+        });
+        let mut exiting = false;
+        loop {
+            tokio::select! {
+                line = input_rx.recv() => {
+                    let Some(line) = line else { break };
+                    let Ok(line) = line else {
+                        println!("[error] stdin read failed");
+                        break;
+                    };
+                    match line.trim() {
+                        "/exit" | "/quit" | "/q" | ":q" => {
+                            let _ = handle.interrupt();
+                            exiting = true;
+                        }
+                        ":i" | "/interrupt" => {
+                            if handle.interrupt() == crate::turn_worker::InterruptResult::Requested {
+                                println!("[interrupt requested]");
+                            }
+                        }
+                        "/help" | "?" => self.help(),
+                        "" => {}
+                        rest if rest.starts_with("/new") => {
+                            self.create_session(rest.strip_prefix("/new").map(str::trim));
+                        }
+                        "/sessions" => self.list_sessions(),
+                        rest if rest.starts_with("/open") => {
+                            let prefix = rest.strip_prefix("/open").unwrap_or("").trim();
+                            self.open_session(prefix);
+                        }
+                        "/models" => self.list_models(),
+                        rest if rest.starts_with("/model") => {
+                            let arg = rest.strip_prefix("/model").unwrap_or("").trim();
+                            if arg.is_empty() {
+                                println!("model: {}", self.model);
+                            } else {
+                                self.set_model(arg);
+                            }
+                        }
+                        rest if rest.starts_with('/') => {
+                            println!("[error] unknown command {rest}; /help lists commands");
+                        }
+                        text => self.submit_or_queue(text.to_owned(), &handle),
+                    }
+                    if exiting { break; }
+                }
+                result = results.recv(), if self.active_prompt.is_some() => {
+                    let Some(result) = result else { break };
+                    self.handle_result(result, &handle).await;
+                }
+            }
+        }
+        input_task.abort();
+        if self.active_prompt.is_some() {
+            let _ = results.recv().await;
+        }
+        while results.try_recv().is_ok() {}
+        worker.shutdown().await?;
         Ok(())
     }
+}
+
+fn raw_bearer(header: &str) -> Option<String> {
+    let token = header.strip_prefix("Bearer ")?;
+    daemon_client::is_wellformed_token(token).then(|| token.to_owned())
 }
 
 /// Assistant/user inline message text from the wire shape
@@ -494,10 +618,7 @@ fn message_text(message: &Value) -> Option<String> {
 /// be mistaken for the daemon. `/health` stays public (`daemon_auth.rs:1-7`):
 /// no bearer is sent here.
 fn probe_daemon(origin: &str) -> bool {
-    matches!(
-        request(origin, "GET", "/health", None, None),
-        Ok((200, _))
-    )
+    matches!(request(origin, "GET", "/health", None, None), Ok((200, _)))
 }
 
 /// Bearer for `/api/*` reuse, threaded from
@@ -672,7 +793,9 @@ fn build_request_wire(
     if path.starts_with("/api/") {
         let credential = auth.unwrap_or("").trim();
         if credential.is_empty() {
-            return Err("missing daemon credential: refusing unauthenticated /api/* request".to_owned());
+            return Err(
+                "missing daemon credential: refusing unauthenticated /api/* request".to_owned(),
+            );
         }
         return Ok(format!(
             "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: {credential}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
