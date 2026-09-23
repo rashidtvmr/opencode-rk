@@ -319,15 +319,39 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
+    "EXT-002": {
+      "blockedNote": "Ralph accepted conflicts with REQ-017 gap expected in-progress; task/worklog now exist while frozen guard requires absence. Null ownership and EXT-001 equivalence remain unresolved; controller contract review required.",
+      "scratchpad": "worklog/GUARD-EXT-002.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "EXT-004": {
+      "blockedNote": "BLOCKED: validator EXT-004 stale at tools/validate_backlog_exhaustion.py:1896; backlog/ownership ledgers conflict with ralph.json. Duplicate deferred modules and no real caller. Controller reconciliation, canonical module/caller, verifier acceptance open; see worklog/GUARD-EXT-004.md.",
+      "scratchpad": "worklog/GUARD-EXT-004.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "EXT-006": {
       "blockedNote": "Gap stale: owner null/card null/worklog null vs live card+worklog+impl; 1 validator stale line; RED missing, crate/path mismatch, duplicate pending; no guard patch; verifier decides",
       "scratchpad": "worklog/GUARD-EXT-006.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
+    "EXT-009": {
+      "blockedNote": "GUARD audit: impl+tests GREEN 10/10, RED stub 0/5; ownership gap null taskCard/worklog (EXT-009 vs EXT-012 indistinguishable); card drift references nonexistent crates/ext+opencode-rk-ext (real: tools crate); twin byte-identical ext_namespacing_lane; Namespace unwired no caller; acceptance not release evidence. No authority patch in audit-only bounds. Controller-only follow-ups in worklog.",
+      "scratchpad": "worklog/GUARD-EXT-009.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "EXT-010": {
       "blockedNote": "Guard audit done: ralph/FEATURES accepted vs gap ownership null + ledger unresolved-decomposition in-progress; task/worklog on disk vs validator absence rule (2 attributable errors); no wiring/acceptance; proposal in worklog; no canonical edits",
       "scratchpad": "worklog/GUARD-EXT-010.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "EXT-012": {
+      "blockedNote": "BLOCKED audit: Ralph/FEATURES mark EXT-012 accepted while source gap/backlog ledger remain null/unresolved; plugin_ui_boundary.rs has no production caller or renderer/protocol/permission lifecycle wiring; validate_backlog_exhaustion.py and validate_repository.py each FAIL with 51 errors; convergence_gate.py BLOCKED total=80; see worklog/GUARD-EXT-012.md; authority proposal only, no acceptance.",
+      "scratchpad": "worklog/GUARD-EXT-012.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
@@ -414,6 +438,24 @@
       "scratchpad": "worklog/HEAD-002.md",
       "session": "ses_f384fedf9ffeu54QwccVGqCbzv",
       "status": "completed"
+    },
+    "INT-001": {
+      "blockedNote": "BLOCKED: ralph/FEATURES accepted vs card NOT STARTED, gap null-owner, backlog unresolved-decomp. Guard error: INT-001 gap stale after Ralph semantics change (51 errs). Lane local-only/unwired; secret/net/auth blockers kept.",
+      "scratchpad": "worklog/GUARD-INT-001.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "INT-005": {
+      "blockedNote": "BLOCKED: repository=51, backlog=51, plan=51, convergence=80. ralph/FEATURES accepted conflicts with task NOT STARTED and unresolved ownership; ownershipDecision.INT-005=null. int_refresh.rs is not exported or called by server; provider/auth/network, secret, persistence/events, callback lifetime, and capacity evidence absent. See worklog/GUARD-INT-005.md.",
+      "scratchpad": "worklog/GUARD-INT-005.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "INT-009": {
+      "blockedNote": "BLOCKED: Ralph/FEATURES accepted vs card NOT STARTED; ownership-gap unresolved; backlog unresolved/no evidence. Guards: backlog exit1 51 errors; repository exit1; convergence exit1 total80. Duplicate impl/tests; no native caller. FS/git/DB, enterprise/spec, auth/secret, network/resource surfaces excluded/separate. See worklog/GUARD-INT-009.md. No canonical/product/test/validator edits.",
+      "scratchpad": "worklog/GUARD-INT-009.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
     },
     "INT-010": {
       "blockedNote": "No explicit ownership lock in card; impl+tests pre-exist committed (share_descriptor.rs + duplicate int_share_sync_lane.rs); zero writes made; both narrow suites 5/5 GREEN; orchestrator must assign single owned file before implementation",
