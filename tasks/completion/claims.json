@@ -1084,9 +1084,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Durable structured activity candidate GREEN: frozen WEB-009 1/1, legacy API 2/2, provider 6/6, branch 1/1, storage 122/122; frozen hash c0acaf32. Parent remains blocked on browser accessibility, third exact disconnect pass, integrated web evidence, and branch activity unification; see worklog/WEB-009-DURABLE-IMPL.md.",
-      "scratchpad": "worklog/WEB-009-DURABLE-IMPL.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "Browser RED frozen: 2 failures (missing Tool activity in stream/reload), 1 malformed fail-closed guard pass; sha256 8dbbb07c5d1ff6d1ff10ddcf2fa020aa3fff318a53a6d994d4f6e786fc11901d; exact command in worklog/WEB-009-BROWSER-RED.md",
+      "scratchpad": "worklog/WEB-009-BROWSER-RED.md",
+      "session": "ses_f3194bfd0ffe4AgI0nSo6QgPWu",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
