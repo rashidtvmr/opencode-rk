@@ -1031,9 +1031,9 @@
       "status": "completed"
     },
     "UI-014": {
-      "blockedNote": "RED compiles: T01 pass, T02-T05 fail against real native_interactive_loop; native caller has no renderer-independent native_composer adapter. Frozen test sha256 5338e5cf3bb2d8bb2616a9115fdd11ec5e520df344bc7d5e7710727c412c80bc; command in worklog/UI-014-E2E-AUDIT.md",
-      "scratchpad": "worklog/UI-014-E2E-AUDIT.md",
-      "session": "ses_f33322bacffeKBSM2WcJPS8mHa",
+      "blockedNote": "REJECT candidate hash 5338e5cf: include_str source-token scan can pass via comments/dead code and does not execute Composer keys, queue, interrupt, draft, event decoding, or PTY outcomes. Replacement must assert real callable/PTY behavior; see worklog/UI-014-RED-REVIEW.md.",
+      "scratchpad": "worklog/UI-014-RED-REVIEW.md",
+      "session": "ses_f33190dd5ffeuGqKCX2G7TGvVo",
       "status": "blocked"
     },
     "WEB-004": {
