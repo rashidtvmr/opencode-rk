@@ -1078,9 +1078,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Compiling RED: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test web009_durable_persistence_red -- --test-threads=1; test fails at missing final assistant event with bounded provider error: unsupported provider stream event: response.output_text.annotation.added. Native citation/reference producer and durable tool/reference API remain absent.",
-      "scratchpad": "worklog/WEB-009-DURABLE-RED.md",
-      "session": "ses_f31e58165ffeQHXSGRZFyO9hWF",
+      "blockedNote": "Durable structured activity candidate GREEN: frozen WEB-009 1/1, legacy API 2/2, provider 6/6, branch 1/1, storage 122/122; frozen hash c0acaf32. Parent remains blocked on browser accessibility, third exact disconnect pass, integrated web evidence, and branch activity unification; see worklog/WEB-009-DURABLE-IMPL.md.",
+      "scratchpad": "worklog/WEB-009-DURABLE-IMPL.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {

@@ -86,8 +86,9 @@ use axum::{
 use futures_util::stream;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    ArtifactId, ArtifactKind, AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId,
-    MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
+    ArtifactId, ArtifactKind, AssistantReference, AssistantToolCall, AttachmentId, MessageId,
+    MessageRecord, MessageRole, PayloadRef, SessionId, MAX_ASSISTANT_TOOL_CALLS,
+    MAX_DRAFT_ATTACHMENT_BYTES, MAX_REASONING_SUMMARY_BYTES, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
     OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesInput, ResponsesItem,
@@ -261,6 +262,8 @@ pub struct AppState {
     pub sessions: SessionService,
     pub catalog: Arc<Catalog>,
 }
+#[derive(Clone, Copy)]
+struct StructuredActivityEnabled;
 pub fn router(state: AppState) -> Router {
     router_with_auth(state, None)
 }
@@ -321,10 +324,12 @@ pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) 
         .fallback(web_assets::serve)
         .with_state(state);
     match auth {
-        Some(credential) => app.layer(axum::middleware::from_fn_with_state(
-            credential,
-            daemon_auth::require_bearer,
-        )),
+        Some(credential) => app
+            .layer(Extension(StructuredActivityEnabled))
+            .layer(axum::middleware::from_fn_with_state(
+                credential,
+                daemon_auth::require_bearer,
+            )),
         None => app,
     }
 }
@@ -989,6 +994,9 @@ struct TurnStreamState {
     user_message: Option<MessageRecord>,
     assistant_text: String,
     reasoning_summary: String,
+    activity_tools: Vec<AssistantToolCall>,
+    references: Vec<AssistantReference>,
+    structured_activity_enabled: bool,
     stage: TurnStreamStage,
     _permit: HttpTurnPermit,
     events: Option<event_bus::EventBus>,
@@ -1117,6 +1125,7 @@ enum TurnStreamStage {
 
 async fn create_turn_stream(
     runtime: Option<Extension<runtime_wiring::RuntimeWiring>>,
+    structured_activity: Option<Extension<StructuredActivityEnabled>>,
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<CreateTurnBody>,
@@ -1233,6 +1242,9 @@ async fn create_turn_stream(
             user_message: Some(user_message),
             assistant_text: String::new(),
             reasoning_summary: String::new(),
+            activity_tools: Vec::new(),
+            references: Vec::new(),
+            structured_activity_enabled: structured_activity.is_some(),
             stage: TurnStreamStage::User,
             _permit: permit,
             events,
@@ -1290,6 +1302,18 @@ async fn create_turn_stream(
                             ));
                         }
                         Ok(Some(ResponsesStreamEvent::ReasoningSummaryDelta(delta))) => {
+                            if state.reasoning_summary.len().saturating_add(delta.len())
+                                > MAX_REASONING_SUMMARY_BYTES
+                            {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        "resource_exhausted",
+                                        "reasoning summary exceeds the transcript activity bound",
+                                    )),
+                                    state,
+                                ));
+                            }
                             state.reasoning_summary.push_str(&delta);
                             return Some((
                                 Ok::<Bytes, Infallible>(ndjson(json!({
@@ -1299,11 +1323,50 @@ async fn create_turn_stream(
                                 state,
                             ));
                         }
+                        Ok(Some(ResponsesStreamEvent::UrlCitation { label, url })) => {
+                            if !state.structured_activity_enabled {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        "bad_gateway",
+                                        "unsupported provider stream event: response.output_text.annotation.added",
+                                    )),
+                                    state,
+                                ));
+                            }
+                            state.references.push(AssistantReference {
+                                label: label.clone(),
+                                url: url.clone(),
+                            });
+                            return Some((
+                                Ok::<Bytes, Infallible>(ndjson(json!({
+                                    "type": "reference",
+                                    "label": label,
+                                    "url": url,
+                                }))),
+                                state,
+                            ));
+                        }
                         Ok(Some(ResponsesStreamEvent::FunctionCall {
                             call_id,
                             name,
                             arguments,
                         })) => {
+                            if state
+                                .activity_tools
+                                .len()
+                                .saturating_add(state.pending_calls.len())
+                                >= MAX_ASSISTANT_TOOL_CALLS
+                            {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        "resource_exhausted",
+                                        "tool activity exceeds the durable turn bound",
+                                    )),
+                                    state,
+                                ));
+                            }
                             if is_shell_call(&name)
                                 && state.enabled_tools.iter().any(|enabled| enabled == &name)
                             {
@@ -1434,12 +1497,16 @@ async fn create_turn_stream(
                             let stop_reason = stop.as_str();
                             let persisted_summary = (!reasoning_summary.is_empty())
                                 .then_some(reasoning_summary);
+                            let activity_tools = state.activity_tools.clone();
+                            let references = state.references.clone();
                             match state
                                 .sessions
-                                .append_assistant_with_reasoning(
+                                .append_assistant_with_activity(
                                     state.session_id,
                                     assistant_text,
                                     persisted_summary.clone(),
+                                    activity_tools,
+                                    references.clone(),
                                 )
                                 .await
                             {
@@ -1457,6 +1524,7 @@ async fn create_turn_stream(
                                             "type": "assistant_message",
                                             "message": message,
                                             "reasoning_summary": persisted_summary,
+                                            "references": references,
                                             "stop_reason": stop_reason,
                                         }))),
                                         state,
@@ -1652,6 +1720,18 @@ async fn create_turn_stream(
                                 call_id: item.call_id.clone(),
                                 output: item.output.clone(),
                             });
+                            if !item.name.is_empty() {
+                                state.activity_tools.push(AssistantToolCall {
+                                    call_id: item.call_id.clone(),
+                                    name: item.name.clone(),
+                                    state: if item.output.starts_with("error:") {
+                                        "failed".to_owned()
+                                    } else {
+                                        "completed".to_owned()
+                                    },
+                                    ok: !item.output.starts_with("error:"),
+                                });
+                            }
                         }
                         if let Some(stop) = state.forced_stop.take() {
                             let assistant_text = std::mem::take(&mut state.assistant_text);
@@ -1659,12 +1739,16 @@ async fn create_turn_stream(
                                 std::mem::take(&mut state.reasoning_summary);
                             let persisted_summary =
                                 (!reasoning_summary.is_empty()).then_some(reasoning_summary);
+                            let activity_tools = state.activity_tools.clone();
+                            let references = state.references.clone();
                             match state
                                 .sessions
-                                .append_assistant_with_reasoning(
+                                .append_assistant_with_activity(
                                     state.session_id,
                                     assistant_text,
                                     persisted_summary.clone(),
+                                    activity_tools,
+                                    references.clone(),
                                 )
                                 .await
                             {
@@ -1682,6 +1766,7 @@ async fn create_turn_stream(
                                             "type": "assistant_message",
                                             "message": message,
                                             "reasoning_summary": persisted_summary,
+                                            "references": references,
                                             "stop_reason": stop.as_str(),
                                         }))),
                                         state,
@@ -1720,7 +1805,6 @@ async fn create_turn_stream(
                             Ok(next_stream) => {
                                 state.provider = next_stream;
                                 state.assistant_text.clear();
-                                state.reasoning_summary.clear();
                                 state.stage = TurnStreamStage::Provider;
                                 continue;
                             }

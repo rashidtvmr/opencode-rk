@@ -2,7 +2,10 @@
 
 use std::time::Duration;
 
-use opencode_rk_contracts::{MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES};
+use opencode_rk_contracts::{
+    MAX_ASSISTANT_ACTIVITY_FIELD_BYTES, MAX_ASSISTANT_REFERENCES, MAX_INLINE_PAYLOAD_BYTES,
+    MAX_ASSISTANT_TOOL_FIELD_BYTES, MAX_REASONING_SUMMARY_BYTES,
+};
 use reqwest::redirect::Policy;
 use serde::Serialize;
 use serde_json::{json, Value};
@@ -250,6 +253,10 @@ pub enum ResponsesStopReason {
 pub enum ResponsesStreamEvent {
     OutputTextDelta(String),
     ReasoningSummaryDelta(String),
+    UrlCitation {
+        label: String,
+        url: String,
+    },
     /// One provider-requested tool invocation (Responses `function_call` item).
     FunctionCall {
         call_id: String,
@@ -257,7 +264,9 @@ pub enum ResponsesStreamEvent {
         arguments: String,
     },
     /// Terminal event. Every well-formed stream ends here exactly once.
-    Completed { stop_reason: ResponsesStopReason },
+    Completed {
+        stop_reason: ResponsesStopReason,
+    },
 }
 
 /// Pure SSE event parser shared by the live stream and tests.
@@ -269,6 +278,7 @@ pub enum ResponsesStreamEvent {
 pub struct ResponsesStreamParser {
     output_bytes: usize,
     reasoning_summary_bytes: usize,
+    references: usize,
     completed: bool,
 }
 
@@ -353,6 +363,48 @@ impl ResponsesStreamParser {
                     delta.to_owned(),
                 )))
             }
+            Some("response.output_text.annotation.added") => {
+                let annotation = value.get("annotation").ok_or_else(|| {
+                    ResponsesError::InvalidJson("citation event is missing annotation".into())
+                })?;
+                if annotation.get("type").and_then(Value::as_str) != Some("url_citation") {
+                    return Err(ResponsesError::InvalidJson(
+                        "unsupported output-text annotation".into(),
+                    ));
+                }
+                let url = annotation
+                    .get("url")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        ResponsesError::InvalidJson("URL citation is missing url".into())
+                    })?;
+                let label = annotation
+                    .get("title")
+                    .and_then(Value::as_str)
+                    .ok_or_else(|| {
+                        ResponsesError::InvalidJson("URL citation is missing title".into())
+                    })?;
+                let valid = |text: &str| {
+                    !text.is_empty()
+                        && text.as_bytes().len() <= MAX_ASSISTANT_ACTIVITY_FIELD_BYTES
+                        && !text.chars().any(char::is_control)
+                };
+                if !valid(label) || !valid(url) || !url.starts_with("https://") {
+                    return Err(ResponsesError::InvalidJson(
+                        "URL citation contains invalid or over-bound fields".into(),
+                    ));
+                }
+                self.references = self.references.saturating_add(1);
+                if self.references > MAX_ASSISTANT_REFERENCES {
+                    return Err(ResponsesError::InvalidJson(format!(
+                        "too many URL citations: max {MAX_ASSISTANT_REFERENCES}"
+                    )));
+                }
+                Ok(Some(ResponsesStreamEvent::UrlCitation {
+                    label: label.to_owned(),
+                    url: url.to_owned(),
+                }))
+            }
             Some("response.output_item.done") => {
                 let item_type = value
                     .pointer("/item/type")
@@ -379,6 +431,15 @@ impl ResponsesStreamParser {
                 if call_id.is_empty() || name.is_empty() {
                     return Err(ResponsesError::InvalidJson(
                         "function_call item is missing call_id or name".into(),
+                    ));
+                }
+                if call_id.as_bytes().len() > MAX_ASSISTANT_TOOL_FIELD_BYTES
+                    || name.as_bytes().len() > MAX_ASSISTANT_TOOL_FIELD_BYTES
+                    || call_id.chars().any(char::is_control)
+                    || name.chars().any(char::is_control)
+                {
+                    return Err(ResponsesError::InvalidJson(
+                        "function_call identity exceeds the durable activity bound".into(),
                     ));
                 }
                 Ok(Some(ResponsesStreamEvent::FunctionCall {

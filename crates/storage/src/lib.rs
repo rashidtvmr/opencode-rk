@@ -10,10 +10,10 @@ pub mod fork_v2;
 pub mod gc_v2;
 pub mod import_blobs;
 pub mod import_v2;
+pub mod backup_v2;
 pub mod migrations;
 pub mod quota_v2;
 pub mod retention_v2;
-pub mod backup_v2;
 pub mod rollout_v2;
 pub mod schema_v2;
 pub mod snapshot_v2;
@@ -27,12 +27,14 @@ pub use gc_v2::GcV2;
 pub use import_v2::ImportV2;
 use opencode_rk_contracts::{
     ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, ArtifactVersion,
-    AssistantActivity, AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole,
-    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp, MAX_ARTIFACTS_PER_SESSION,
-    MAX_ARTIFACT_CONTENT_BYTES, MAX_ARTIFACT_LANGUAGE_BYTES, MAX_ARTIFACT_TITLE_BYTES,
-    MAX_ARTIFACT_TOTAL_BYTES, MAX_ARTIFACT_VERSIONS, MAX_ATTACHMENT_MIME_BYTES,
-    MAX_ATTACHMENT_NAME_BYTES, MAX_DRAFT_ATTACHMENTS, MAX_DRAFT_ATTACHMENT_BYTES,
-    MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES,
+    AssistantActivity, AssistantReference, AssistantToolCall, AttachmentId, DraftAttachment,
+    MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary,
+    Timestamp, MAX_ARTIFACTS_PER_SESSION, MAX_ARTIFACT_CONTENT_BYTES, MAX_ARTIFACT_LANGUAGE_BYTES,
+    MAX_ARTIFACT_TITLE_BYTES, MAX_ARTIFACT_TOTAL_BYTES, MAX_ARTIFACT_VERSIONS,
+    MAX_ASSISTANT_ACTIVITY_FIELD_BYTES, MAX_ASSISTANT_REFERENCES, MAX_ASSISTANT_TOOL_CALLS,
+    MAX_ASSISTANT_TOOL_FIELD_BYTES, MAX_ATTACHMENT_MIME_BYTES, MAX_ATTACHMENT_NAME_BYTES,
+    MAX_DRAFT_ATTACHMENTS,
+    MAX_DRAFT_ATTACHMENT_BYTES, MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES,
 };
 pub use quota_v2::QuotaV2;
 pub use retention_v2::RetentionV2;
@@ -71,6 +73,8 @@ pub enum StorageError {
     InvalidArtifact,
     #[error("payload exceeds inline limit and must be stored as a blob")]
     InlinePayloadTooLarge,
+    #[error("assistant activity is invalid or exceeds its resource bound")]
+    InvalidAssistantActivity,
     #[error("event payload exceeds {MAX_EVENT_PAYLOAD_BYTES} bytes")]
     EventPayloadTooLarge,
     #[error("blob hash is malformed")]
@@ -222,6 +226,15 @@ impl Storage {
         message: &MessageRecord,
         reasoning_summary: Option<&str>,
     ) -> Result<(), StorageError> {
+        self.append_message_with_activity(message, reasoning_summary, &[], &[])
+    }
+    pub fn append_message_with_activity(
+        &self,
+        message: &MessageRecord,
+        reasoning_summary: Option<&str>,
+        tool_calls: &[AssistantToolCall],
+        references: &[AssistantReference],
+    ) -> Result<(), StorageError> {
         let (inline_text, blob_hash, byte_len) = match &message.body {
             PayloadRef::Inline { text } => {
                 if text.len() > MAX_INLINE_PAYLOAD_BYTES {
@@ -238,13 +251,25 @@ impl Storage {
                 return Err(StorageError::InlinePayloadTooLarge);
             }
         }
+        validate_assistant_activity(tool_calls, references)?;
+        let tool_calls_json = serde_json::to_string(tool_calls)
+            .map_err(|_| StorageError::InvalidAssistantActivity)?;
+        let references_json = serde_json::to_string(references)
+            .map_err(|_| StorageError::InvalidAssistantActivity)?;
         let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         tx.execute("INSERT INTO messages (id,session_id,role,inline_text,blob_hash,byte_len,created_at) VALUES (?1,?2,?3,?4,?5,?6,?7)",params![message.id.to_string(),message.session_id.to_string(),encode_role(message.role),inline_text,blob_hash,byte_len as i64,message.created_at.to_string()])?;
-        if let Some(summary) = reasoning_summary.filter(|summary| !summary.is_empty()) {
+        if reasoning_summary.is_some() || !tool_calls.is_empty() || !references.is_empty() {
             tx.execute(
-                "INSERT INTO message_activity (message_id,reasoning_summary) VALUES (?1,?2)",
-                params![message.id.to_string(), summary],
+                "INSERT INTO message_activity
+                 (message_id,reasoning_summary,tool_calls_json,references_json)
+                 VALUES (?1,?2,?3,?4)",
+                params![
+                    message.id.to_string(),
+                    reasoning_summary.unwrap_or_default(),
+                    tool_calls_json,
+                    references_json,
+                ],
             )?;
         }
         tx.execute(
@@ -365,7 +390,7 @@ impl Storage {
         let limit = limit.clamp(1, 500) as i64;
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let mut statement = connection.prepare(
-            "SELECT m.id,a.reasoning_summary FROM messages m
+            "SELECT m.id,a.reasoning_summary,a.tool_calls_json,a.references_json FROM messages m
              JOIN message_activity a ON a.message_id=m.id
              WHERE m.session_id=?1 AND m.role='assistant'
              ORDER BY m.rowid ASC LIMIT ?2",
@@ -376,6 +401,10 @@ impl Storage {
             Ok(AssistantActivity {
                 message_id,
                 reasoning_summary: row.get(1)?,
+                tool_calls: serde_json::from_str(&row.get::<_, String>(2)?)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
+                references: serde_json::from_str(&row.get::<_, String>(3)?)
+                    .map_err(|_| rusqlite::Error::InvalidQuery)?,
             })
         })?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -686,7 +715,17 @@ impl Storage {
         })
     }
     fn migrate(connection: &Connection) -> Result<(), StorageError> {
-        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192),tool_calls_json TEXT NOT NULL DEFAULT '[]' CHECK(length(CAST(tool_calls_json AS BLOB))<=65536),references_json TEXT NOT NULL DEFAULT '[]' CHECK(length(CAST(references_json AS BLOB))<=131072)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
+        ensure_activity_column(
+            connection,
+            "tool_calls_json",
+            "TEXT NOT NULL DEFAULT '[]' CHECK(length(CAST(tool_calls_json AS BLOB))<=65536)",
+        )?;
+        ensure_activity_column(
+            connection,
+            "references_json",
+            "TEXT NOT NULL DEFAULT '[]' CHECK(length(CAST(references_json AS BLOB))<=131072)",
+        )?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS draft_attachments(
                 id TEXT PRIMARY KEY,
@@ -726,6 +765,60 @@ impl Storage {
         Ok(())
     }
 }
+
+fn validate_assistant_activity(
+    tool_calls: &[AssistantToolCall],
+    references: &[AssistantReference],
+) -> Result<(), StorageError> {
+    if tool_calls.len() > MAX_ASSISTANT_TOOL_CALLS || references.len() > MAX_ASSISTANT_REFERENCES {
+        return Err(StorageError::InvalidAssistantActivity);
+    }
+    let valid_field = |value: &str, max: usize| {
+        !value.is_empty()
+            && value.as_bytes().len() <= max
+            && !value.chars().any(char::is_control)
+    };
+    if tool_calls.iter().any(|call| {
+        !valid_field(&call.call_id, MAX_ASSISTANT_TOOL_FIELD_BYTES)
+            || !valid_field(&call.name, MAX_ASSISTANT_TOOL_FIELD_BYTES)
+            || !matches!(call.state.as_str(), "completed" | "failed" | "denied")
+    }) || references.iter().any(|reference| {
+        !valid_field(&reference.label, MAX_ASSISTANT_ACTIVITY_FIELD_BYTES)
+            || !valid_field(&reference.url, MAX_ASSISTANT_ACTIVITY_FIELD_BYTES)
+            || !reference.url.starts_with("https://")
+    }) {
+        return Err(StorageError::InvalidAssistantActivity);
+    }
+    let tool_bytes = serde_json::to_vec(tool_calls)
+        .map_err(|_| StorageError::InvalidAssistantActivity)?
+        .len();
+    let reference_bytes = serde_json::to_vec(references)
+        .map_err(|_| StorageError::InvalidAssistantActivity)?
+        .len();
+    if tool_bytes > 64 * 1024 || reference_bytes > 128 * 1024 {
+        return Err(StorageError::InvalidAssistantActivity);
+    }
+    Ok(())
+}
+
+fn ensure_activity_column(
+    connection: &Connection,
+    column: &str,
+    declaration: &str,
+) -> Result<(), StorageError> {
+    let mut statement = connection.prepare("PRAGMA table_info(message_activity)")?;
+    let names = statement.query_map([], |row| row.get::<_, String>(1))?;
+    for name in names {
+        if name? == column {
+            return Ok(());
+        }
+    }
+    connection.execute_batch(&format!(
+        "ALTER TABLE message_activity ADD COLUMN {column} {declaration};"
+    ))?;
+    Ok(())
+}
+
 #[derive(Clone, Debug)]
 pub struct BlobStore {
     root: PathBuf,

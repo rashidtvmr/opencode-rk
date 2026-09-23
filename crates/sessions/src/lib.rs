@@ -52,9 +52,10 @@ pub mod session_membership;
 
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
-    ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity, AttachmentId,
-    DraftAttachment, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState,
-    SessionSummary, Timestamp, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES,
+    ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity,
+    AssistantReference, AssistantToolCall, AttachmentId, DraftAttachment, MessageId,
+    MessageRecord, MessageRole, PayloadRef, SessionId, SessionState, SessionSummary, Timestamp,
+    MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES,
 };
 use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, StorageError, V2Writer};
 use rusqlite::{params, Connection, OptionalExtension};
@@ -479,6 +480,23 @@ impl SessionService {
         text: impl Into<String>,
         reasoning_summary: Option<String>,
     ) -> Result<MessageRecord, SessionError> {
+        self.append_assistant_with_activity(
+            session_id,
+            text,
+            reasoning_summary,
+            Vec::new(),
+            Vec::new(),
+        )
+        .await
+    }
+    pub async fn append_assistant_with_activity(
+        &self,
+        session_id: SessionId,
+        text: impl Into<String>,
+        reasoning_summary: Option<String>,
+        tool_calls: Vec<AssistantToolCall>,
+        references: Vec<AssistantReference>,
+    ) -> Result<MessageRecord, SessionError> {
         let text = text.into();
         if reasoning_summary
             .as_ref()
@@ -489,6 +507,12 @@ impl SessionService {
             ));
         }
         if let Some(manager) = self.fork_manager_for(session_id).await? {
+            if !tool_calls.is_empty() || !references.is_empty() {
+                return Err(SessionError::Contract(
+                    "structured assistant activity is not yet available for branch sessions"
+                        .to_owned(),
+                ));
+            }
             return run_session_blocking(move || {
                 manager.append_fork_assistant_with_reasoning(session_id, text, reasoning_summary)
             })
@@ -506,7 +530,12 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         let candidate = message.clone();
         run_blocking(move || {
-            storage.append_message_with_reasoning(&candidate, reasoning_summary.as_deref())
+            storage.append_message_with_activity(
+                &candidate,
+                reasoning_summary.as_deref(),
+                &tool_calls,
+                &references,
+            )
         })
         .await?;
         Ok(message)
