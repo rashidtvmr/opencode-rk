@@ -50,7 +50,7 @@ event/references or durable tool/reference projection exists.
 - Actual bounded command used because macOS lacks `timeout`: Python
   `subprocess.run(..., timeout=120)` with `CARGO_BUILD_JOBS=1`
   `RUST_TEST_THREADS=1`.
-- Test SHA-256: `m0acaf32cbf235452499acbe3eb5f617b7e319f8e6043a7b3cd54720a5b81bb8`.
+- Test SHA-256: `c0acaf32cbf235452499acbe3eb5f617b7e319f8e6043a7b3cd54720a5b81bb8`.
 
 ## Remaining boundary
 
