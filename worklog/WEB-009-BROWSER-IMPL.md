@@ -22,10 +22,14 @@ Bounded serial commands on the product spine:
 - Frozen browser target: 3 passed, 0 failed.
 - Existing activity/turn plus frozen target: 5 passed, 0 failed.
 - Entire web Vitest suite: 17 files, 49 passed, 0 failed.
+- Third exact serial disconnect/cancellation run:
+  `runtime_wiring_disconnect_http` 1 passed, 0 failed with jobs/threads 1;
+  frozen SHA-256 remained
+  `80d8d505a48e018a292b132bde82208bb3afd285ad8b80342365be2f48d28300`.
 - `pnpm exec tsc -b --pretty false`: blocked before WEB-009 validation by pre-existing TS6133 unused imports in `web/src/lib/canvas-model.test.ts`; that frozen/unrelated test was not edited.
 - `git diff --check`: passed.
 - Frozen test hash re-read unchanged.
 
 ## Remaining blockers
 
-This is a GREEN candidate, not acceptance. WEB-009 remains blocked pending independent verification, the third exact disconnect/cancellation pass, production browser evidence, and branch-session structured activity unification. The repository/convergence gates remain independently blocked by their recorded authority conflicts.
+This is a GREEN candidate, not acceptance. WEB-009 remains blocked pending independent verification, production browser evidence, and branch-session structured activity unification. The repository/convergence gates remain independently blocked by their recorded authority conflicts.
