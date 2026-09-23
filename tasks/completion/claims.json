@@ -385,11 +385,6 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
-    "GUARD-SHARE-001": {
-      "scratchpad": "worklog/GUARD-SHARE-001.md",
-      "session": "ses_guard_share001",
-      "status": "in-progress"
-    },
     "HEAD-001": {
       "completedNote": "GREEN 8/8 run_headless via direct rustc harness (/tmp/rh_test2 --test-threads=1); frozen sha85652c80 zero edits; impl sha04d43496; cargo path blocked by pre-existing opentui native gate",
       "scratchpad": "worklog/HEAD-001.md",
@@ -784,6 +779,48 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "OPS-001": {
+      "blockedNote": "Guard RED: Ralph/FEATURES accepted while operations gap/backlog ledger require unresolved not-started; task/worklog and local implementation appeared without authority reconciliation. validate_backlog_exhaustion.py: 51 errors; convergence gate total=80. Controller must choose retirement or source-backed ownership award before acceptance.",
+      "scratchpad": "worklog/GUARD-OPS-001.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "OPS-002": {
+      "blockedNote": "Guard audit done: lane self-consistent, authority still unowned (gap ownership None, ledger nulls, validator 2x OPS-002 deliberate-review errors); proposal in worklog, no canonical edits, commit/push blocked per orders",
+      "scratchpad": "worklog/GUARD-OPS-002.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "OPS-003": {
+      "blockedNote": "Local lifecycle GREEN (5/5 tests). Blocked: operations-ownership-gap.json:79 ownershipDecision=null, ownershipBlocker=violates no-network boundary + shared with OPS-002/003/004/006/008 + frozen INT-002/OPS-007/OPS-009. backlog-exhaustion.json:789 controllerStatus=not-started reasonKey=operations-family-not-decomposed. Full repo-cache contract not decomposed.",
+      "scratchpad": "worklog/GUARD-OPS-003.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "OPS-004": {
+      "blockedNote": "BLOCKED: validate_backlog_exhaustion.py exit=1, 51 errors; OPS-004-specific: (1) ownership-gap stale after Ralph task semantics changed, (2) task/worklog appeared; canonical reconciliation requires controller/integrator decision. No canonical/product/test/validator edits; no commit/push.",
+      "scratchpad": "worklog/GUARD-OPS-004.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "OPS-005": {
+      "blockedNote": "Gate 51/80 BLOCKED: gap null-owner+identical OPS-001 sig; ledger not-started vs ralph accepted; needs controller retire-or-award; proposal in worklog/GUARD-OPS-005.md",
+      "scratchpad": "worklog/GUARD-OPS-005.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "OPS-006": {
+      "blockedNote": "OPS-006 blocked: operations-family-not-decomposed; repository-only group OPS-002/003/006 identical signatures, no task-specific evidence; candidate repository-reference-normalization ownershipEstablished=false (gap L474-487); ral accepted vs backlog not-started; FEATURES acceptance contradicts ownershipDecision=null+taskCard=null; audit scratchpad+ledger only",
+      "scratchpad": "worklog/GUARD-OPS-006.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "OPS-008": {
+      "blockedNote": "BLOCKED: controller-only reconciliation required; ownershipDecision.OPS-008 remains null. ralph/FEATURES accepted vs backlog unresolved; task/worklog appearance deliberate review; convergence=80, backlog=51. See worklog/GUARD-OPS-008.md.",
+      "scratchpad": "worklog/GUARD-OPS-008.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "OPS-009": {
       "completedNote": "GREEN 5/5 ops_replay T01-T05, impl pre-landed byte-identical, zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-foundation --test ops_replay",
       "scratchpad": "worklog/OPS-009.md",
@@ -910,6 +947,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "REL-001": {
+      "blockedNote": "BLOCKED guard audit: validator exists sha ab9b350e but no frozen test+hash+manifest, no canonical gate wiring, gate-80/backlog drift unresolved; see worklog/GUARD-REL-001.md",
+      "scratchpad": "worklog/GUARD-REL-001.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "REL-002": {
       "blockedNote": "STRONG RED: 12 tests, 11 pass; sole failure executable planning CI step; behavior, malformed, timeout, exact argv, dynamic revision, failure propagation pass; blocked pending protected workflow review; cmd: python3 -m unittest tests.bootstrap.test_rel002_release_tdd",
       "scratchpad": "worklog/REL-002-STRONG-RED.md",
@@ -929,9 +972,10 @@
       "status": "blocked"
     },
     "ROUTE-010": {
+      "blockedNote": "Audit complete. validate_repository FAIL exit=1; validate_backlog_exhaustion 51 errors. ROUTE-010 stale: ralph.json status=accepted vs validator expects not-started (line 733). No task card/worklog/impl. Cannot edit canonical/source/validator per lane boundary. Controller must fix ralph.json status or decompose task.",
       "scratchpad": "worklog/GUARD-ROUTE-010.md",
-      "session": "subagent-guard",
-      "status": "in-progress"
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
     },
     "RUN-001": {
       "completedNote": "GREEN 5/5 runner T01-T05, zero test edits, zero impl edits (impl pre-complete); cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-sessions --test runner",
@@ -955,6 +999,30 @@
       "blockedNote": "Caller audit: persist.rs is unwired state-only cache; SessionService uses Arc<Storage>. Wiring duplicates truth, lacks invalidation/bounds, and flush is non-durable. No valid public SessionService RED without inventing observability or durability. Controller must retire/decompose SESS-008/011; see worklog/SESS-008-CALLER-REVIEW.md. Gate blocked: 53 findings.",
       "scratchpad": "worklog/SESS-008-CALLER-REVIEW.md",
       "session": "ses_f32bf295effe9f16wtSPaJNIxT",
+      "status": "blocked"
+    },
+    "SHARE-001": {
+      "blockedNote": "audit-only reconciliation; no implementation/acceptance; secret/persistence/enterprise-missing-spec blockers preserved",
+      "scratchpad": "worklog/GUARD-SHARE-001.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "SHARE-002": {
+      "blockedNote": "Guard audit complete; validate_repository and validate_plan FAIL 51 errors, direct SHARE-002 stale + task/worklog appeared; convergence_gate FAIL total=80; Ralph accepted vs card/gap/ledger not-started conflict; unresolved merge/snapshot bounds preserved; controller-only reconciliation required; no acceptance.",
+      "scratchpad": "worklog/GUARD-SHARE-002.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "SHARE-003": {
+      "blockedNote": "GUARD audit done: 7 errors enumerated (stale card path, status divergence, null ownership, spec-gap blocked, unresolved-decomposition, neighbor duplicate/drift, gate scope); patch proposal in worklog/GUARD-SHARE-003.md; no product/test/canonical edits; commit/push blocked per orders",
+      "scratchpad": "worklog/GUARD-SHARE-003.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "SHARE-005": {
+      "blockedNote": "BLOCKED: controller reconciliation required; Ralph/FEATURES accepted conflicts with task/source-gap/backlog not-started unresolved state. Lane twins are #[path]-only, not wired to a real caller. Preserve enterprise/support-admin/auth/secret-lifetime, deletion/retry, bounded-queue blockers; no acceptance or ownership inferred.",
+      "scratchpad": "worklog/GUARD-SHARE-005.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "SYNC-001": {
