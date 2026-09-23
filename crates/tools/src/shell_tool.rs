@@ -1,6 +1,8 @@
 //! Shell tool: bounded command execution with timeout, env, cwd and cancellation.
 
 use std::collections::HashMap;
+use std::io::Read as StdRead;
+use std::path::Path;
 use std::path::PathBuf;
 use std::process::Stdio;
 use std::time::Instant;
@@ -159,7 +161,25 @@ impl ShellTool {
     }
 
     /// Execute the shell command under `config`, returning a bounded `ShellResult`.
-    pub async fn execute(mut self, config: ShellConfig) -> Result<ShellResult, ShellError> {
+    pub async fn execute(self, config: ShellConfig) -> Result<ShellResult, ShellError> {
+        self.run(config, None).await
+    }
+
+    /// Execute the shell command and publish its PID after caller-owned readiness.
+    pub async fn execute_with_startup(
+        self,
+        config: ShellConfig,
+        readiness_path: PathBuf,
+        startup: tokio::sync::mpsc::Sender<u32>,
+    ) -> Result<ShellResult, ShellError> {
+        self.run(config, Some((readiness_path, startup))).await
+    }
+
+    async fn run(
+        mut self,
+        config: ShellConfig,
+        startup: Option<(PathBuf, tokio::sync::mpsc::Sender<u32>)>,
+    ) -> Result<ShellResult, ShellError> {
         if self.command.is_empty() {
             return Err(ShellError::NoCommand);
         }
@@ -215,6 +235,7 @@ impl ShellTool {
         cmd.kill_on_drop(true);
 
         let child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
+        let child_id = child.id();
         #[cfg(unix)]
         let process_group = child
             .id()
@@ -256,9 +277,42 @@ impl ShellTool {
             Ok::<_, std::io::Error>((stdout_bytes, stderr_bytes, exit_code))
         };
         let (stdout_bytes, stderr_bytes, exit_code) =
-            tokio_timeout(Duration::from_secs(timeout_secs), execution)
+            if let Some((readiness_path, startup)) = startup {
+                let monitor = async {
+                    let Some(child_id) = child_id else {
+                        std::future::pending::<()>().await;
+                        return;
+                    };
+                    loop {
+                        if startup_ready(&readiness_path, child_id) {
+                            let _ = startup.try_send(child_id);
+                            return;
+                        }
+                        tokio::time::sleep(Duration::from_millis(5)).await;
+                    }
+                };
+                tokio::pin!(execution);
+                tokio::pin!(monitor);
+                tokio_timeout(Duration::from_secs(timeout_secs), async {
+                    tokio::select! {
+                        result = &mut execution => {
+                            if let Some(child_id) = child_id {
+                                if startup_ready(&readiness_path, child_id) {
+                                    let _ = startup.try_send(child_id);
+                                }
+                            }
+                            result
+                        }
+                        _ = &mut monitor => execution.await,
+                    }
+                })
                 .await
-                .map_err(|_| ShellError::Timeout(timeout_secs))??;
+                .map_err(|_| ShellError::Timeout(timeout_secs))??
+            } else {
+                tokio_timeout(Duration::from_secs(timeout_secs), execution)
+                    .await
+                    .map_err(|_| ShellError::Timeout(timeout_secs))??
+            };
         let duration_ms = start.elapsed().as_millis();
 
         // Truncate to limit, converting bytes -> truncated flag.
@@ -311,6 +365,30 @@ impl Drop for ShellTool {
             self.process_group = None;
         }
     }
+}
+
+fn startup_ready(path: &Path, child_id: u32) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    if metadata.len() > 20 {
+        return false;
+    }
+    let Ok(file) = std::fs::File::open(path) else {
+        return false;
+    };
+    let mut bytes = Vec::with_capacity(21);
+    if file.take(21).read_to_end(&mut bytes).is_err() || bytes.len() > 20 {
+        return false;
+    }
+    let Ok(text) = std::str::from_utf8(&bytes) else {
+        return false;
+    };
+    let text = text.trim_end_matches(['\r', '\n']);
+    if text.is_empty() || !text.bytes().all(|byte| byte.is_ascii_digit()) {
+        return false;
+    }
+    text.parse::<u32>() == Ok(child_id) && child_id > 0
 }
 
 async fn read_bounded<R>(mut reader: R, limit: usize) -> Result<Vec<u8>, std::io::Error>
