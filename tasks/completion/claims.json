@@ -1084,10 +1084,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "VERIFY-ONLY GREEN: browser frozen 3/3 + full web 17f/49t serial, sha 8dbbb07c unchanged, third disconnect 1/1 sha 80d8d505, zero test edits. WEB-009 stays blocked: production browser evidence + branch activity unification external/unresolved; unrelated frozen canvas TS6133 blocks typecheck.",
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
       "scratchpad": "worklog/WEB-009-BROWSER-VERIFY.md",
-      "session": "ses_f316984ccffeM8rknVME4AhxbQ",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
