@@ -28,6 +28,12 @@
   provider adapter with unsupported event
   `response.output_text.annotation.added`; native citation production and the
   durable tool/reference read API remain missing.
+  Implementation integrated at `08a40be`: the authenticated turn path now
+  bounds and persists reasoning, tool lifecycle, and HTTPS references in one
+  assistant-message transaction. Exact integrated frozen rerun: 1 passed,
+  0 failed; frozen SHA-256 remained unchanged. WEB-009 stays blocked pending
+  browser accessibility, the third exact disconnect pass, branch activity
+  unification, and independent integrated verification.
 - PROV-023 runtime catalog RED integrated at `896103a`: frozen test SHA-256
   `f74dba4c600c89f59d011fff0361ef6d5be1925d113ac750b7897889b1d57e95`.
   Its public request-path case compiles and fails because Google is documented
