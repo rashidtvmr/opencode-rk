@@ -899,6 +899,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "REL-002": {
+      "blockedNote": "RED only at missing CI caller: test_ci_calls_release_validator fails because .github/workflows/ci.yml does not invoke tools/check_release_tdd.py. Out-of-scope: cannot edit ci.yml (separate one-file CI-integration lane). All 7 behavior tests pass; frozen test sha256 2c98f6728be7eec12002b72f904c371a4cfcbcd90ab9dc5db32788cad97f2fa0. Blocked on next lane.",
+      "scratchpad": "worklog/REL-002-PHASE1.md",
+      "session": "ses_f3335dbc5ffect45yr3f1Ll8N8-rel002",
+      "status": "blocked"
+    },
     "REL-003": {
       "completedNote": "GREEN validator CLI vs frozen fixtures: T01 exit0 pass; T02/T03/T04/T05 exit2 with exact check+reason; malformed/notadir/flag/timeout exit1; determinism 303B identical; zero test/fixture/validator edits",
       "scratchpad": "worklog/REL-003.md",
