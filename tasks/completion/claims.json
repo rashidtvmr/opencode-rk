@@ -397,6 +397,12 @@
       "session": "ses_f384fedf9ffeu54QwccVGqCbzv",
       "status": "completed"
     },
+    "INT-007": {
+      "blockedNote": "INT-007 audit: impl+tests 5/5 GREEN. BLOCKED: ownershipDecision.INT-007=null, candidateTaskOwner=null (INT-004 overlap); backlog taskCard/worklog/taskStatus null, reasonKey=integration-family-not-decomposed. validate_repository:59 stale FAIL exit=1 convergence=80. No canonical/product/test/validator edits; controller must re-award or retire residual. Permission/auth/transport/cancel/bounded kept.",
+      "scratchpad": "worklog/GUARD-INT-007.md",
+      "session": "ses_f320c500bffeObfwmbqSgfPc7",
+      "status": "blocked"
+    },
     "INT-010": {
       "blockedNote": "No explicit ownership lock in card; impl+tests pre-exist committed (share_descriptor.rs + duplicate int_share_sync_lane.rs); zero writes made; both narrow suites 5/5 GREEN; orchestrator must assign single owned file before implementation",
       "scratchpad": "worklog/INT-010.md",
