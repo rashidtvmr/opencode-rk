@@ -917,6 +917,12 @@
       "session": "ses_f387af899ffeojhREiG4Rewoar",
       "status": "completed"
     },
+    "ROUTE-010": {
+      "blockedNote": "Audit complete. validate_repository FAIL exit=1; validate_backlog_exhaustion 51 errors. ROUTE-010 stale: ralph.json status=accepted vs validator expects not-started (line 733). No task card/worklog/impl. Cannot edit canonical/source/validator per lane boundary. Controller must fix ralph.json status or decompose task.",
+      "scratchpad": "worklog/GUARD-ROUTE-010.md",
+      "session": "subagent-guard",
+      "status": "blocked"
+    },
     "RUN-001": {
       "completedNote": "GREEN 5/5 runner T01-T05, zero test edits, zero impl edits (impl pre-complete); cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-sessions --test runner",
       "scratchpad": "worklog/RUN-001.md",
