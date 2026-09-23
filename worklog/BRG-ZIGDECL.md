@@ -30,3 +30,9 @@
 
 ## Remaining unknowns
 - None blocking. Yoga/stream TS-only symbols out of scope (not lib.zig exports).
+
+## GREEN (ses_brg_zigdecl2, 2026-09-23)
+- Claimed via completion_claims (in-progress, self session).
+- RED recorded: 58x E0425/E0433 (all items undeclared); frozen tests sha256 c6591c49...136c16d; impl prepended, tests untouched (sha match True post-GREEN).
+- GREEN: `rustc --edition 2021 --test crates/opentui-bridge/src/zigdecl.rs -o /tmp/opencode/brg_zigdecl_test && /tmp/opencode/brg_zigdecl_test` — 7/7 pass, zero warnings.
+- Contents (820 lines): DECL_COVERAGE table, ALL_SYMBOLS 337 sorted unique, 13 domain consts + ZIGDECL_TOTAL, NativeHandle/INVALID_HANDLE, DEST_*/REMOTE_*, status consts + NativeRenderStatus::from_u8 fail-closed, DeclError, BorderSides/TitleAlign/pack_options (lib.zig:2032-2041 layout), 5 markers (create_renderer/render_native/setup_terminal/destroy_renderer/resize_renderer), 3 audited cfg(feature="native") #[link] extern blocks (renderer 27 fns, buffer 10, text/edit 5) with SAFETY comments. Note: render_native is `pub fn` (const fn with match on param unsupported as const in this shape — kept non-const; `#[must_use]` retained).
