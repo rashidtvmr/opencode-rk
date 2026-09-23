@@ -7,7 +7,8 @@
 
 #![forbid(unsafe_code)]
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::{collections::HashSet, fs::File, io::Read, path::PathBuf};
 use thiserror::Error;
 
 /// Maximum UTF-8 byte length of a provider endpoint.
@@ -24,6 +25,16 @@ pub const MAX_TIMEOUT_MS: u64 = 120_000;
 pub const DEFAULT_MAX_RETRIES: u32 = 1;
 /// Largest accepted number of retries after the initial request.
 pub const MAX_RETRIES: u32 = 3;
+const CATALOG_ENV_VAR: &str = "OPENCODE_RK_PROVIDER_CATALOG_PATH";
+const MAX_CATALOG_BYTES: usize = 256 * 1024;
+const MAX_PROVIDERS: usize = 32;
+const MAX_ENDPOINTS_PER_PROVIDER: usize = 16;
+const MAX_MODEL_ALIASES_PER_PROVIDER: usize = 32;
+const MAX_LIMITATIONS_PER_PROVIDER: usize = 32;
+const MAX_CATALOG_FIELD_BYTES: usize = 4 * 1024;
+const MAX_ID_BYTES: usize = 128;
+const ALLOWED_MODEL_PLACEHOLDER: &str = "{model=models/*}";
+const EMBEDDED_CATALOG: &str = include_str!("../../../docs/provider-compatibility.json");
 
 /// Documented endpoint kinds.  There is intentionally no custom endpoint
 /// variant: adding an endpoint requires a reviewed compatibility entry.
@@ -191,13 +202,13 @@ pub fn profile_for_with_options<'a, K: Into<EndpointSelector<'a>>>(
 ) -> Result<RequestProfile, RequestError> {
     let input = endpoint_kind.into();
     let (endpoint, auth_headers) = documented_entry(provider_id, input)?;
-    validate_endpoint(endpoint)?;
+    validate_endpoint(&endpoint)?;
     validate_bounds(options)?;
 
     let profile = RequestProfile {
         provider_id: provider_id.to_owned(),
-        endpoint: endpoint.to_owned(),
-        auth_headers: auth_headers.to_vec(),
+        endpoint,
+        auth_headers,
         timeout_ms: options.timeout_ms,
         max_retries: options.max_retries,
     };
@@ -232,7 +243,7 @@ impl RequestProfile {
             timeout_ms: self.timeout_ms,
             max_retries: self.max_retries,
         })?;
-        if endpoint != self.endpoint || self.auth_headers.as_slice() != auth_headers {
+        if endpoint != self.endpoint || self.auth_headers != auth_headers {
             return Err(RequestError::HeaderNotAllowed);
         }
         if self.auth_headers.len() > MAX_AUTH_HEADERS {
@@ -299,71 +310,244 @@ pub fn profile_for_with_headers<'a, K: Into<EndpointSelector<'a>>, H>(
     Err(RequestError::HeaderNotAllowed)
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompatibilityCatalog {
+    catalog_version: String,
+    providers: Vec<CatalogProvider>,
+    updated: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogProvider {
+    id: String,
+    display_name: String,
+    doc_source: String,
+    doc_date: String,
+    endpoints: Vec<CatalogEndpoint>,
+    model_aliases: Vec<String>,
+    refresh: CatalogRefresh,
+    limitations: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogEndpoint {
+    kind: String,
+    url_template: String,
+    auth_headers: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CatalogRefresh {
+    supported: bool,
+    method: String,
+}
+
 fn documented_entry(
     provider_id: &str,
     input: EndpointSelector<'_>,
-) -> Result<(&'static str, &'static [AuthHeaderKind]), RequestError> {
-    let entry = match provider_id {
-        "openai" => match input {
-            EndpointSelector::Kind(EndpointKind::ChatCompletions) => Some((
-                "https://api.openai.com/v1/chat/completions",
-                &[AuthHeaderKind::Bearer][..],
-            )),
-            EndpointSelector::Kind(EndpointKind::Messages) => None,
-            EndpointSelector::Name(url) => match url {
-                "chat-completions" | "https://api.openai.com/v1/chat/completions" => Some((
-                    "https://api.openai.com/v1/chat/completions",
-                    &[AuthHeaderKind::Bearer][..],
-                )),
-                _ => None,
-            },
-            EndpointSelector::Owned(ref url) => match url.as_str() {
-                "chat-completions" | "https://api.openai.com/v1/chat/completions" => Some((
-                    "https://api.openai.com/v1/chat/completions",
-                    &[AuthHeaderKind::Bearer][..],
-                )),
-                _ => None,
-            },
-        },
-        "anthropic" => match input {
-            EndpointSelector::Kind(EndpointKind::Messages) => Some((
-                "https://api.anthropic.com/v1/messages",
-                &[AuthHeaderKind::ApiKeyHeader][..],
-            )),
-            EndpointSelector::Kind(EndpointKind::ChatCompletions) => None,
-            EndpointSelector::Name(url) => match url {
-                "messages" | "https://api.anthropic.com/v1/messages" => Some((
-                    "https://api.anthropic.com/v1/messages",
-                    &[AuthHeaderKind::ApiKeyHeader][..],
-                )),
-                _ => None,
-            },
-            EndpointSelector::Owned(ref url) => match url.as_str() {
-                "messages" | "https://api.anthropic.com/v1/messages" => Some((
-                    "https://api.anthropic.com/v1/messages",
-                    &[AuthHeaderKind::ApiKeyHeader][..],
-                )),
-                _ => None,
-            },
-        },
-        _ => return Err(RequestError::UnknownProvider),
+) -> Result<(String, Vec<AuthHeaderKind>), RequestError> {
+    let catalog = load_catalog()?;
+    let provider = catalog
+        .providers
+        .iter()
+        .find(|entry| entry.id == provider_id)
+        .ok_or(RequestError::UnknownProvider)?;
+    let selector = match input {
+        EndpointSelector::Kind(EndpointKind::ChatCompletions) => "chat-completions".to_owned(),
+        EndpointSelector::Kind(EndpointKind::Messages) => "messages".to_owned(),
+        EndpointSelector::Name(value) => value.to_owned(),
+        EndpointSelector::Owned(value) => value,
     };
+    let endpoint = provider
+        .endpoints
+        .iter()
+        .find(|entry| entry.kind == selector || entry.url_template == selector)
+        .ok_or_else(|| {
+            if (selector.starts_with("http://") || selector.starts_with("https://"))
+                && !is_https_endpoint(&selector)
+            {
+                RequestError::BadEndpoint
+            } else {
+                RequestError::UndocumentedEndpoint
+            }
+        })?;
+    Ok((
+        endpoint.url_template.clone(),
+        map_auth_headers(&endpoint.auth_headers)?,
+    ))
+}
 
-    entry.ok_or_else(|| match input {
-        EndpointSelector::Name(url)
-            if (url.starts_with("http://") || url.starts_with("https://"))
-                && !is_https_endpoint(url) =>
+fn load_catalog() -> Result<CompatibilityCatalog, RequestError> {
+    let override_path = std::env::var_os(CATALOG_ENV_VAR)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from);
+    let raw = match override_path {
+        Some(path) => read_bounded_catalog(path)?,
+        None => EMBEDDED_CATALOG.as_bytes().to_vec(),
+    };
+    if raw.len() > MAX_CATALOG_BYTES || contains_secret_like_bytes(&raw) {
+        return Err(RequestError::BadEndpoint);
+    }
+    let catalog: CompatibilityCatalog =
+        serde_json::from_slice(&raw).map_err(|_| RequestError::BadEndpoint)?;
+    validate_catalog(&catalog)?;
+    Ok(catalog)
+}
+
+fn read_bounded_catalog(path: PathBuf) -> Result<Vec<u8>, RequestError> {
+    let file = File::open(path).map_err(|_| RequestError::BadEndpoint)?;
+    let size = file
+        .metadata()
+        .map_err(|_| RequestError::BadEndpoint)?
+        .len();
+    if size > MAX_CATALOG_BYTES as u64 {
+        return Err(RequestError::BadEndpoint);
+    }
+    let mut raw = Vec::with_capacity(size as usize);
+    file.take((MAX_CATALOG_BYTES + 1) as u64)
+        .read_to_end(&mut raw)
+        .map_err(|_| RequestError::BadEndpoint)?;
+    if raw.len() > MAX_CATALOG_BYTES {
+        return Err(RequestError::BadEndpoint);
+    }
+    Ok(raw)
+}
+
+fn validate_catalog(catalog: &CompatibilityCatalog) -> Result<(), RequestError> {
+    if catalog.catalog_version != "1"
+        || !is_date(&catalog.updated)
+        || catalog.providers.is_empty()
+        || catalog.providers.len() > MAX_PROVIDERS
+    {
+        return Err(RequestError::BadEndpoint);
+    }
+    let mut provider_ids = HashSet::new();
+    for provider in &catalog.providers {
+        if !is_id(&provider.id)
+            || !provider_ids.insert(provider.id.as_str())
+            || !is_bounded_text(&provider.display_name, MAX_CATALOG_FIELD_BYTES)
+            || !is_date(&provider.doc_date)
+            || !is_safe_https_url(&provider.doc_source, false)
+            || provider.endpoints.is_empty()
+            || provider.endpoints.len() > MAX_ENDPOINTS_PER_PROVIDER
+            || provider.model_aliases.is_empty()
+            || provider.model_aliases.len() > MAX_MODEL_ALIASES_PER_PROVIDER
+            || provider.limitations.len() > MAX_LIMITATIONS_PER_PROVIDER
+            || !is_bounded_text(&provider.refresh.method, MAX_CATALOG_FIELD_BYTES)
         {
-            RequestError::BadEndpoint
+            return Err(RequestError::BadEndpoint);
         }
-        EndpointSelector::Owned(url)
-            if (url.starts_with("http://") || url.starts_with("https://"))
-                && !is_https_endpoint(&url) =>
+        let _refresh_supported = provider.refresh.supported;
+        if provider
+            .model_aliases
+            .iter()
+            .any(|value| !is_bounded_text(value, MAX_ID_BYTES))
+            || provider
+                .limitations
+                .iter()
+                .any(|value| !is_bounded_text(value, MAX_CATALOG_FIELD_BYTES))
         {
-            RequestError::BadEndpoint
+            return Err(RequestError::BadEndpoint);
         }
-        _ => RequestError::UndocumentedEndpoint,
-    })
+        let mut aliases = HashSet::new();
+        if provider
+            .model_aliases
+            .iter()
+            .any(|alias| !aliases.insert(alias.as_str()))
+        {
+            return Err(RequestError::BadEndpoint);
+        }
+        let mut endpoint_kinds = HashSet::new();
+        for endpoint in &provider.endpoints {
+            if !is_id(&endpoint.kind)
+                || !endpoint_kinds.insert(endpoint.kind.as_str())
+                || endpoint.auth_headers.is_empty()
+                || endpoint.auth_headers.len() > MAX_AUTH_HEADERS
+                || validate_endpoint(&endpoint.url_template).is_err()
+                || map_auth_headers(&endpoint.auth_headers).is_err()
+            {
+                return Err(RequestError::BadEndpoint);
+            }
+        }
+    }
+    Ok(())
+}
+
+fn map_auth_headers(headers: &[String]) -> Result<Vec<AuthHeaderKind>, RequestError> {
+    let mut names = HashSet::new();
+    let mut kinds = Vec::new();
+    for header in headers {
+        if header.is_empty()
+            || header.len() > MAX_ID_BYTES
+            || !header
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
+            || !names.insert(header.as_str())
+        {
+            return Err(RequestError::HeaderNotAllowed);
+        }
+        let kind = match header.as_str() {
+            "Authorization" => Some(AuthHeaderKind::Bearer),
+            "x-api-key" | "x-goog-api-key" => Some(AuthHeaderKind::ApiKeyHeader),
+            "anthropic-version" => None,
+            _ => return Err(RequestError::HeaderNotAllowed),
+        };
+        if let Some(kind) = kind {
+            if !kinds.contains(&kind) {
+                kinds.push(kind);
+            }
+        }
+    }
+    if kinds.is_empty() {
+        return Err(RequestError::HeaderNotAllowed);
+    }
+    Ok(kinds)
+}
+
+fn contains_secret_like_bytes(raw: &[u8]) -> bool {
+    [
+        b"sk-".as_slice(),
+        b"sk-ant-".as_slice(),
+        b"Bearer ".as_slice(),
+    ]
+    .iter()
+    .any(|needle| raw.windows(needle.len()).any(|window| window == *needle))
+}
+
+fn is_id(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= MAX_ID_BYTES
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-')
+}
+
+fn is_bounded_text(value: &str, limit: usize) -> bool {
+    !value.is_empty()
+        && value.len() <= limit
+        && !value
+            .bytes()
+            .any(|byte| byte.is_ascii_control() && !matches!(byte, b'\n' | b'\r' | b'\t'))
+}
+
+fn is_date(value: &str) -> bool {
+    if value.len() != 10
+        || value.as_bytes()[4] != b'-'
+        || value.as_bytes()[7] != b'-'
+        || !value
+            .bytes()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
+    {
+        return false;
+    }
+    let month = value[5..7].parse::<u8>().ok();
+    let day = value[8..10].parse::<u8>().ok();
+    matches!(month, Some(1..=12)) && matches!(day, Some(1..=31))
 }
 
 fn validate_endpoint(endpoint: &str) -> Result<(), RequestError> {
@@ -374,22 +558,51 @@ fn validate_endpoint(endpoint: &str) -> Result<(), RequestError> {
 }
 
 fn is_https_endpoint(endpoint: &str) -> bool {
-    if endpoint.is_empty()
-        || endpoint.len() > MAX_ENDPOINT_BYTES
-        || !endpoint.starts_with("https://")
-    {
-        return false;
-    }
-    if endpoint
-        .bytes()
-        .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
-    {
-        return false;
-    }
+    is_safe_https_url(endpoint, true)
+}
 
-    let authority = &endpoint["https://".len()..];
-    let authority_end = authority.find(['/', '?', '#']).unwrap_or(authority.len());
-    !authority[..authority_end].is_empty()
+fn is_safe_https_url(value: &str, allow_model_placeholder: bool) -> bool {
+    if value.is_empty()
+        || value.len() > MAX_ENDPOINT_BYTES
+        || value
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || byte.is_ascii_control())
+    {
+        return false;
+    }
+    let parsed_value = if allow_model_placeholder {
+        let occurrences = value.matches(ALLOWED_MODEL_PLACEHOLDER).count();
+        if occurrences > 1 {
+            return false;
+        }
+        let without_allowed = value.replace(ALLOWED_MODEL_PLACEHOLDER, "models/model");
+        if without_allowed.contains(['{', '}']) {
+            return false;
+        }
+        without_allowed
+    } else {
+        if value.contains(['{', '}']) {
+            return false;
+        }
+        value.to_owned()
+    };
+    let Ok(url) = reqwest::Url::parse(&parsed_value) else {
+        return false;
+    };
+    if url.scheme() != "https"
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.fragment().is_some()
+    {
+        return false;
+    }
+    !url.query_pairs().any(|(name, _)| {
+        matches!(
+            name.to_ascii_lowercase().as_str(),
+            "key" | "api_key" | "apikey" | "token" | "secret" | "password" | "authorization"
+        )
+    })
 }
 
 fn validate_bounds(options: RequestProfileOptions) -> Result<(), RequestError> {
