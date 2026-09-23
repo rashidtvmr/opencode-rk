@@ -507,14 +507,14 @@ impl SessionService {
             ));
         }
         if let Some(manager) = self.fork_manager_for(session_id).await? {
-            if !tool_calls.is_empty() || !references.is_empty() {
-                return Err(SessionError::Contract(
-                    "structured assistant activity is not yet available for branch sessions"
-                        .to_owned(),
-                ));
-            }
             return run_session_blocking(move || {
-                manager.append_fork_assistant_with_reasoning(session_id, text, reasoning_summary)
+                manager.append_fork_assistant_with_activity(
+                    session_id,
+                    text,
+                    reasoning_summary,
+                    tool_calls,
+                    references,
+                )
             })
             .await;
         }
