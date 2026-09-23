@@ -212,8 +212,8 @@
       "status": "completed"
     },
     "DISC-003": {
-      "blockedNote": "Authority-ready exact 51-row retirement + AUD-017/AUD-020 demotion proposal simulated at 9c4fb6b: convergence gate GREEN. Canonical validate_repository remains blocked by 51 backlog-exhaustion errors. No controller/plan/policy files changed; authority must apply after hash/rebase review.",
-      "scratchpad": "worklog/DISC-003-AUTHORITY-REMAP-PROPOSAL.md",
+      "blockedNote": "Integrated candidate has 80 findings: prior 51 aliases + 27 origin/main aliases + AUD-017/AUD-020. Exact 78-row retirement/two-demotion simulation makes convergence gate GREEN; controller authority still required and parent acceptance unchanged. See worklog/DISC-003-INTEGRATED-REMAP-ADDENDUM.md.",
+      "scratchpad": "worklog/DISC-003-INTEGRATED-REMAP-ADDENDUM.md",
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
