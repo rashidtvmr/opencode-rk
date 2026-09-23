@@ -1025,10 +1025,10 @@
       "status": "in-progress"
     },
     "TUI-011": {
-      "completedNote": "GREEN 5/5 test_dist RED f0fa246b zero-edits + verify PASS 35/35 ABI ldd-clean SBOM e32c98e8 + sys-lib 51/51; logs tui011-green-final/green2/noregress; no commit per orders",
-      "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_orch_TUI011b",
-      "status": "completed"
+      "blockedNote": "Missing aarch64-apple-darwin/x86_64-apple-darwin/windows libopentui (external: Zig+runner), no Apple/Windows signing identity (external authority), install-oc2.sh does not bundle native lib, no SBOM/checksum manifest, native_launch.rs:268 path bug + TTY-guard ordering gap, no rpath. Audit-only.",
+      "scratchpad": "worklog/TUI-011-PROD-AUDIT.md",
+      "session": "ses_f33364810ffe1Tn515VjEblNAr",
+      "status": "blocked"
     },
     "WEB-004": {
       "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
