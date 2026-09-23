@@ -881,10 +881,10 @@
       "status": "completed"
     },
     "PROV-023": {
-      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "scratchpad": "worklog/PROV-023-RUNTIME-RED.md",
-      "session": "",
-      "status": "not-started"
+      "blockedNote": "RED frozen d6aa3a01ad4e6a4d09c148672d29dbc608c739e5bbf7cb574f8b9ad16becc2d8; cargo test -p opencode-rk-providers --test prov_023_loader_red -- --test-threads=1: 21 run, 3 pass, 18 fail, 0 ignored; awaiting catalog-backed request_profile loader",
+      "scratchpad": "worklog/PROV-023-LOADER-RED.md",
+      "session": "ses_f31706c24ffeCpyRA4Srbaiivb",
+      "status": "blocked"
     },
     "PROV-024": {
       "blockedNote": "BLOCKED RED: frozen sha 750e3a32; 7/7 pass pre-existing fixtures; missing-root RED only bad-fixture. Negative, unknown-provider, offline, bounds pass. No fixture/product/controller/network edits.",
