@@ -1084,10 +1084,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "scratchpad": "worklog/WEB-009-BROWSER-IMPL.md",
-      "session": "",
-      "status": "not-started"
+      "blockedNote": "VERIFY-ONLY GREEN frozen target 3/3 + full web 17f/49t serial max/min workers 1, sha 8dbbb07c unchanged, zero test edits; WEB-009 stays blocked: production browser evidence + branch activity unification external/unresolved",
+      "scratchpad": "worklog/WEB-009-BROWSER-VERIFY.md",
+      "session": "ses_f316984ccffeM8rknVME4AhxbQ",
+      "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
