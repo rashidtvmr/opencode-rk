@@ -1060,9 +1060,9 @@
       "status": "blocked"
     },
     "UI-014": {
-      "blockedNote": "Prewire only. Non-native cargo check passes with CARGO_BUILD_JOBS=1; native artifact missing at crates/opentui-bridge/native/lib/aarch64-apple-darwin. Synchronous execute_submit prevents real queue/cancellation; blocking one-byte stdin cannot safely decode bare Escape, CSI, paste, Unicode, focus, or resize events. No acceptance claimed.",
-      "scratchpad": "worklog/UI-014-PREWIRE.md",
-      "session": "ses_f32124f8cffeDX5qi06BMncyvb",
+      "blockedNote": "No honest caller RED seam: native submit/loop are private cfg(native), synchronous, and unbuildable on arm64 without libopentui; no owned request/cancel/join/result-channel path exists. Pure composer tests cannot prove wiring. See worklog/UI-014-BEHAVIORAL-RED.md.",
+      "scratchpad": "worklog/UI-014-BEHAVIORAL-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "WEB-004": {
