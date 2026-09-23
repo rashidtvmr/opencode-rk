@@ -1084,10 +1084,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Embedded production bundle candidate GREEN: authenticated router 1/1, web_assets 1/1, full web 49/49; deterministic Vite rebuild; frozen hash dd202989 unchanged. Still blocked on branch activity unification, exact-artifact independent verification, and external real-provider/browser evidence; see WEB-009-EMBEDDED-IMPL.md.",
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
       "scratchpad": "worklog/WEB-009-EMBEDDED-IMPL.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
