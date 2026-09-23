@@ -1084,9 +1084,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "GREEN verify-only: frozen sha dd2029891ec289cbc3b75abb07f646eb4e2024ff9b5ed48944c4291640eb0a95; embedded 1/1 + web_assets 1/1 serial; web Vitest 17 files/49 passed serial; one /assets/ module; JS 509255B <2MiB; labels/security, stale hashes/assets/maps/secrets green; blocked only activity unification + external provider/browser evidence",
-      "scratchpad": "worklog/WEB-009-EMBEDDED-VERIFY.md",
-      "session": "ses_f314b32b3ffeY0eNBUcAxhOcc2",
+      "blockedNote": "RED expected: 1 pass + 2 failures; no impl edits. See worklog/WEB-009-BRANCH-ACTIVITY-RED.md. Running bounded RED now.",
+      "scratchpad": "worklog/WEB-009-BRANCH-ACTIVITY-RED.md",
+      "session": "ses_f30e02cf6ffebb1RIaHcT3ZZ4s",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
