@@ -13,7 +13,46 @@ CHECKSUM=""
 INSTALL_DIR="${OC2_INSTALL_DIR:-$HOME/.local/bin}"
 DO_UNINSTALL=0
 MAX_ARCHIVE_MEMBERS=4
-MAX_ARCHIVE_PAYLOAD=1048576
+# Fixed release closure bound. Each regular member and the combined expanded
+# payload are capped independently; neither value is environment-configurable.
+MAX_ARCHIVE_MEMBER_PAYLOAD=134217728
+MAX_ARCHIVE_PAYLOAD=134217728
+MAX_ARCHIVE_PROBE_BYTES=134217729
+
+# Normalize an unsigned decimal without arithmetic. This keeps leading-zero
+# test/tool output from changing shell integer interpretation.
+normalize_uint() {
+  case "$1" in
+    ''|*[!0-9]*) return 1 ;;
+  esac
+  NORMALIZED_UINT="$1"
+  while [ "$NORMALIZED_UINT" != "0" ] && [ "${NORMALIZED_UINT#0}" != "$NORMALIZED_UINT" ]; do
+    NORMALIZED_UINT="${NORMALIZED_UINT#0}"
+  done
+  return 0
+}
+
+# Compare unsigned decimals without arithmetic on attacker-sized operands.
+# Equal-length values are compared as strings; length handles every larger
+# value before any shell integer operation.
+uint_gt() {
+  _uint_left="$1"
+  _uint_right="$2"
+  normalize_uint "$_uint_left" || return 2
+  _uint_left="$NORMALIZED_UINT"
+  normalize_uint "$_uint_right" || return 2
+  _uint_right="$NORMALIZED_UINT"
+  _uint_left_len=${#_uint_left}
+  _uint_right_len=${#_uint_right}
+  if [ "$_uint_left_len" -gt "$_uint_right_len" ]; then
+    return 0
+  fi
+  if [ "$_uint_left_len" -lt "$_uint_right_len" ]; then
+    return 1
+  fi
+  # Prefix keeps awk from treating long digit strings as floating-point values.
+  LC_ALL=C awk -v left="x$_uint_left" -v right="x$_uint_right" 'BEGIN { exit !(left > right) }'
+}
 
 usage() {
   echo "usage: install-oc2.sh [--version V] --archive FILE --checksum SHA256 [--install-dir DIR] [--uninstall]" >&2
@@ -222,11 +261,13 @@ if ! tar -tvzf "$ARCHIVE" 2>/dev/null | awk \
 fi
 
 # Probe each required stream before extraction. head bounds expansion even
-# when a malicious header claims a very large regular-file payload.
-payload=0
+# when a malicious header claims a very large regular-file payload. The
+# remaining-budget subtraction avoids adding attacker-controlled byte counts.
+probe_limit=$MAX_ARCHIVE_PROBE_BYTES
+payload_remaining=$MAX_ARCHIVE_PAYLOAD
 for member in "$BIN" "$EXPECTED_NATIVE"; do
   probe_err="$stage/probe.err"
-  probe_bytes="$(tar -xOf "$ARCHIVE" "$member" 2>"$probe_err" | head -c $((MAX_ARCHIVE_PAYLOAD + 1)) | wc -c | tr -d '[:space:]')"
+  probe_bytes="$(tar -xOf "$ARCHIVE" "$member" 2>"$probe_err" | head -c "$probe_limit" | wc -c | tr -d '[:space:]')"
   if [ -s "$probe_err" ]; then
     echo "invalid archive: cannot read $member" >&2
     exit 65
@@ -234,15 +275,17 @@ for member in "$BIN" "$EXPECTED_NATIVE"; do
   case "$probe_bytes" in
     ''|*[!0-9]*) echo "invalid archive: invalid expanded payload size" >&2; exit 65 ;;
   esac
-  if [ "$probe_bytes" -gt "$MAX_ARCHIVE_PAYLOAD" ]; then
+  normalize_uint "$probe_bytes" || { echo "invalid archive: invalid expanded payload size" >&2; exit 65; }
+  probe_bytes="$NORMALIZED_UINT"
+  if uint_gt "$probe_bytes" "$MAX_ARCHIVE_MEMBER_PAYLOAD"; then
+    echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_MEMBER_PAYLOAD bytes" >&2
+    exit 65
+  fi
+  if uint_gt "$probe_bytes" "$payload_remaining"; then
     echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_PAYLOAD bytes" >&2
     exit 65
   fi
-  payload=$((payload + probe_bytes))
-  if [ "$payload" -gt "$MAX_ARCHIVE_PAYLOAD" ]; then
-    echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_PAYLOAD bytes" >&2
-    exit 65
-  fi
+  payload_remaining=$((payload_remaining - probe_bytes))
 done
 
 if ! tar -xzf "$ARCHIVE" -C "$stage" >/dev/null 2>&1; then
@@ -260,11 +303,26 @@ actual_payload="$(wc -c <"$src" | tr -d '[:space:]')"
 native_payload="$(wc -c <"$native_src" | tr -d '[:space:]')"
 case "$actual_payload" in ''|*[!0-9]*) echo "invalid archive: invalid expanded payload size" >&2; exit 65 ;; esac
 case "$native_payload" in ''|*[!0-9]*) echo "invalid archive: invalid expanded payload size" >&2; exit 65 ;; esac
-expanded_payload=$((actual_payload + native_payload))
-[ "$expanded_payload" -le "$MAX_ARCHIVE_PAYLOAD" ] || {
+normalize_uint "$actual_payload" || { echo "invalid archive: invalid expanded payload size" >&2; exit 65; }
+actual_payload="$NORMALIZED_UINT"
+normalize_uint "$native_payload" || { echo "invalid archive: invalid expanded payload size" >&2; exit 65; }
+native_payload="$NORMALIZED_UINT"
+if uint_gt "$actual_payload" "$MAX_ARCHIVE_MEMBER_PAYLOAD" || uint_gt "$native_payload" "$MAX_ARCHIVE_MEMBER_PAYLOAD"; then
+  echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_MEMBER_PAYLOAD bytes" >&2
+  exit 65
+fi
+if uint_gt "$actual_payload" "$MAX_ARCHIVE_PAYLOAD"; then
   echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_PAYLOAD bytes" >&2
   exit 65
-}
+fi
+native_limit=$MAX_ARCHIVE_PAYLOAD
+if ! uint_gt "$actual_payload" "$native_limit"; then
+  native_limit=$((native_limit - actual_payload))
+  if uint_gt "$native_payload" "$native_limit"; then
+    echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_PAYLOAD bytes" >&2
+    exit 65
+  fi
+fi
 
 # Identity is checked while still staged. A failed upgrade leaves both old
 # files untouched. This also preserves the historical exit 74 contract.
