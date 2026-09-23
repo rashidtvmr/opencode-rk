@@ -141,7 +141,7 @@ mod tests {
     fn save_and_load() {
         let mut store = PersistentSessionStore::new();
         let session = make_session("test-session");
-        store.save(session);
+        store.save(session.clone());
         let loaded = store.load(session.id);
         assert!(loaded.is_some());
         let loaded = loaded.unwrap();
