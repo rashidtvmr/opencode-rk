@@ -779,6 +779,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "OPS-008": {
+      "blockedNote": "BLOCKED: controller-only reconciliation required; ownershipDecision.OPS-008 remains null. ralph/FEATURES accepted vs backlog unresolved; task/worklog appearance deliberate review; convergence=80, backlog=51. See worklog/GUARD-OPS-008.md.",
+      "scratchpad": "worklog/GUARD-OPS-008.md",
+      "session": "ses_f32482b4affdygOJZFHaJLGKqq",
+      "status": "blocked"
+    },
     "OPS-009": {
       "completedNote": "GREEN 5/5 ops_replay T01-T05, impl pre-landed byte-identical, zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-foundation --test ops_replay",
       "scratchpad": "worklog/OPS-009.md",
