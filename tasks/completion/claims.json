@@ -385,6 +385,11 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
+    "GUARD-SHARE-001": {
+      "scratchpad": "worklog/GUARD-SHARE-001.md",
+      "session": "ses_guard_share001",
+      "status": "in-progress"
+    },
     "HEAD-001": {
       "completedNote": "GREEN 8/8 run_headless via direct rustc harness (/tmp/rh_test2 --test-threads=1); frozen sha85652c80 zero edits; impl sha04d43496; cargo path blocked by pre-existing opentui native gate",
       "scratchpad": "worklog/HEAD-001.md",
@@ -916,6 +921,17 @@
       "scratchpad": "worklog/REL-003.md",
       "session": "ses_f387af899ffeojhREiG4Rewoar",
       "status": "completed"
+    },
+    "ROUTE-009": {
+      "blockedNote": "BLOCKED: no card/worklog/impl; ralph accepted placeholder not release evidence; 1 attributable guard error: ROUTE-009 routing ownership-gap stale after Ralph semantics changed (exhaustion exit1 51errs); no authority patch in guard bounds",
+      "scratchpad": "worklog/GUARD-ROUTE-009.md",
+      "session": "ses_f32482bc6ffelbymj585Lfs8fW",
+      "status": "blocked"
+    },
+    "ROUTE-010": {
+      "scratchpad": "worklog/GUARD-ROUTE-010.md",
+      "session": "subagent-guard",
+      "status": "in-progress"
     },
     "RUN-001": {
       "completedNote": "GREEN 5/5 runner T01-T05, zero test edits, zero impl edits (impl pre-complete); cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-sessions --test runner",
