@@ -49,6 +49,8 @@ existing evidence may not be weakened or deleted.
 - Each source branch was pushed before integration.
 - Integrated ledger JSON parsed before every commit.
 - `git diff --check` passed before every commit.
+- Exact integrated rerun: `python3 tools/convergence_gate.py` remains blocked
+  with the same 80 findings; no new audit row created a convergence finding.
 - No broad Cargo run was performed for audit-only integration.
 
 ## Audit closure
