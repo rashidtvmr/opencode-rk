@@ -875,6 +875,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
+    "PROV-024": {
+      "blockedNote": "BLOCKED RED: frozen sha 750e3a32; 7/7 pass pre-existing fixtures; missing-root RED only bad-fixture. Negative, unknown-provider, offline, bounds pass. No fixture/product/controller/network edits.",
+      "scratchpad": "worklog/PROV-024-FIXTURE-RED.md",
+      "session": "ses_f32d353c2ffePoAP8P93AgDut9",
+      "status": "blocked"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",
