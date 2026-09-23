@@ -66,6 +66,7 @@ cleanup() {
   if [ -n "$stage" ]; then
     rm -rf "$stage" 2>/dev/null || :
   fi
+  rm -f "$binary_tmp" "$native_tmp" "$binary_backup" "$native_backup" 2>/dev/null || :
 }
 
 rollback_install() {
@@ -107,7 +108,13 @@ trap 'on_signal 143' 15
 
 uninstall() {
   target="$INSTALL_DIR/$BIN"
-  if [ -e "$target" ]; then
+  native_dir="$INSTALL_DIR/../lib"
+  native_target="$native_dir/$NATIVE_NAME"
+  if [ -L "$INSTALL_DIR" ] || [ -L "$native_dir" ]; then
+    echo "refusing: destination directory is a symlink" >&2
+    exit 74
+  fi
+  if [ -e "$target" ] || [ -L "$target" ]; then
     # Export marker so history tooling can re-import; never delete user data.
     echo "note: preserving user data; only removing $target" >&2
     rm -f "$target"
@@ -115,14 +122,18 @@ uninstall() {
   else
     echo "nothing to uninstall at $target" >&2
   fi
+  if [ -e "$native_target" ] || [ -L "$native_target" ]; then
+    rm -f "$native_target"
+    echo "uninstalled $native_target (user data untouched)" >&2
+  fi
   exit 0
 }
 
-[ "$DO_UNINSTALL" -eq 1 ] && uninstall
-
-[ -n "$ARCHIVE" ] || { echo "missing --archive" >&2; usage; exit 64; }
-[ -n "$CHECKSUM" ] || { echo "missing --checksum (fail-closed)" >&2; usage; exit 64; }
-[ -f "$ARCHIVE" ] || { echo "archive not found: $ARCHIVE" >&2; exit 66; }
+if [ "$DO_UNINSTALL" -eq 0 ]; then
+  [ -n "$ARCHIVE" ] || { echo "missing --archive" >&2; usage; exit 64; }
+  [ -n "$CHECKSUM" ] || { echo "missing --checksum (fail-closed)" >&2; usage; exit 64; }
+  [ -f "$ARCHIVE" ] || { echo "archive not found: $ARCHIVE" >&2; exit 66; }
+fi
 
 PLATFORM="$(detect_platform)"
 echo "platform: $PLATFORM${VERSION:+ version: $VERSION}" >&2
@@ -133,6 +144,7 @@ case "$PLATFORM" in
 esac
 NATIVE_NAME="libopentui$LIB_SUFFIX"
 EXPECTED_NATIVE="native/lib/$PLATFORM/$NATIVE_NAME"
+[ "$DO_UNINSTALL" -eq 1 ] && uninstall
 
 # Checksum gate BEFORE any write. sha256sum or shasum required.
 if command -v sha256sum >/dev/null 2>&1; then
@@ -269,9 +281,31 @@ case "$identity_out" in
     ;;
 esac
 
+help_out="$($src --help 2>&1)" || {
+  echo "FAIL: staged binary --help failed; install unchanged" >&2
+  exit 74
+}
+case "$help_out" in
+  *opencode-rk*)
+    echo "FAIL: staged binary --help identifies as legacy name; install unchanged" >&2
+    exit 74
+    ;;
+esac
+case "$help_out" in
+  *oc2*) ;;
+  *)
+    echo "FAIL: staged binary identity mismatch (no oc2 in --help); install unchanged" >&2
+    exit 74
+    ;;
+esac
+
 target="$INSTALL_DIR/$BIN"
 native_dir="$INSTALL_DIR/../lib"
 native_target="$native_dir/$NATIVE_NAME"
+if [ -L "$INSTALL_DIR" ] || [ -L "$native_dir" ]; then
+  echo "refusing: destination directory is a symlink" >&2
+  exit 74
+fi
 if ! mkdir -p "$INSTALL_DIR" "$native_dir"; then
   echo "FAIL: cannot create install directories" >&2
   exit 74
