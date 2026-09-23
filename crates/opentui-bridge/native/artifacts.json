@@ -114,6 +114,30 @@
         "independent_sha256": "matched",
         "independent_size": "matched"
       }
+    },
+    {
+      "target": "aarch64-apple-darwin",
+      "zig_target": "aarch64-macos.13.0",
+      "path": "lib/aarch64-apple-darwin/libopentui_static.a",
+      "sha256": "a3c80e598f3808c9c600ec90203035065fa81fb87f5beb6086ab0f5383842956",
+      "size": 7344888,
+      "type": "mach-o-64-static-archive",
+      "optimize": "ReleaseSafe",
+      "linkage": "static",
+      "archive_members": 88,
+      "complete_exports": "369/369",
+      "source_patch": "linkage-static.patch",
+      "source_patch_sha256": "2da616bc1e71a8229f9b392fc32fc6ead651aabfbe9194f0828554e71a16d500",
+      "builder_script_sha256": "8d1861cb688ed7f09b9b167e2e412fc88c154dfd6c78d6c551a80f10a67b6536",
+      "verification": {
+        "builder_verify_only": "passed",
+        "independent_sha256": "matched",
+        "independent_size": "matched",
+        "clean_build_reproducibility": "two clean roots byte-identical",
+        "native_bridge_tests": "73/73 passed",
+        "native_parity_tests": "13/13 passed",
+        "native_pty_test": "1/1 passed"
+      }
     }
   ],
   "verification": {
@@ -128,15 +152,21 @@
         "status": "passed",
         "artifact_count": 2,
         "export_import_correspondence": "431/431"
+      },
+      "aarch64-apple-darwin-static": {
+        "status": "passed",
+        "archive_members": 88,
+        "complete_exports": "369/369",
+        "reproducible_clean_builds": "a3c80e598f3808c9c600ec90203035065fa81fb87f5beb6086ab0f5383842956 == a3c80e598f3808c9c600ec90203035065fa81fb87f5beb6086ab0f5383842956"
       }
     },
     "independent_integrity": {
       "hash_algorithm": "SHA-256",
       "hash_command": "shasum -a 256",
       "size_command": "stat -f %z",
-      "result": "6/6 paths, hashes, and sizes matched"
+      "result": "7/7 paths, hashes, and sizes matched"
     },
-    "runtime_execution": "not-run"
+    "runtime_execution": "aarch64-apple-darwin static bridge/parity/PTY passed; other targets not run"
   },
   "unsupported_targets": [
     {

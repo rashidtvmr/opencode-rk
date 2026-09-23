@@ -1054,15 +1054,14 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Manifest matrix truthfully enumerates all 6 vendored files; 5204 B; independent hash/stat 6/6; builder 312d315 verify-only 4 singles + Windows pair exit 0. Frozen host test unchanged efb64236; expected 1 passed/2 failed only: immutable SHA-digit predicate line 95 and multi-MB artifact vs 64KiB line 122. No test/artifact/builder/sidecar edits. Parent remains blocked; no acceptance.",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f3000be43ffezAvxGSb7zGVVTT",
-      "status": "blocked"
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "in-progress"
     },
     "UI-014": {
-      "blockedNote": "tui_entry lane source checks and standalone frozen PTY GREEN; orchestrator integration/native acceptance pending",
+      "blockedNote": "Static PTY GREEN 1/1 plus bridge 73/73 and parity 13/13; exact product-spine integration rerun and packaged application journey remain pending.",
       "scratchpad": "worklog/UI-014-TURN-WORKER-PTY-RED.md",
-      "session": "ses_f30b58505ffeVJpOClhFDfjOoP",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "WEB-004": {

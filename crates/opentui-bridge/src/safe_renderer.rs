@@ -83,7 +83,6 @@ pub struct Renderer {
 }
 
 #[cfg(feature = "native")]
-#[link(name = "opentui")]
 extern "C" {
     fn createRenderer(
         width: u32,
@@ -106,6 +105,7 @@ extern "C" {
     fn setCursorPosition(renderer_handle: NativeHandle, x: i32, y: i32, visible: bool);
     fn setTerminalTitle(renderer_handle: NativeHandle, titlePtr: *const u8, titleLen: u32);
     fn getCurrentBuffer(renderer_handle: NativeHandle) -> NativeHandle;
+    fn getNextBuffer(renderer_handle: NativeHandle) -> NativeHandle;
     fn render(renderer_handle: NativeHandle, force: bool) -> u8;
     fn bufferDrawText(
         buffer_handle: NativeHandle,
@@ -145,8 +145,7 @@ impl Renderer {
         {
             // SAFETY: plain integers + null feed ptr (buffered backend);
             // handle checked below, destroyed in `release`.
-            let handle =
-                unsafe { createRenderer(cols, rows, dest, 0, std::ptr::null()) };
+            let handle = unsafe { createRenderer(cols, rows, dest, 0, std::ptr::null()) };
             if handle == INVALID_HANDLE {
                 CLAIMED.store(false, Ordering::Release);
                 return Err(BridgeError::CreateFailed);
@@ -389,8 +388,9 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            // SAFETY: live handle; returned buffer valid for the frame.
-            let buf = unsafe { getCurrentBuffer(handle) };
+            // SAFETY: live handle; OpenTUI paints the next buffer, then
+            // `render` swaps it into the current/displayed position.
+            let buf = unsafe { getNextBuffer(handle) };
             if buf == INVALID_HANDLE {
                 return Err(BridgeError::RenderFailed);
             }
@@ -433,7 +433,7 @@ impl Renderer {
             // SAFETY: live handle; `text` and `fg` outlive the call; null bg
             // selects the native default (nullable `?[*]u16`).
             unsafe {
-                let buf = getCurrentBuffer(handle);
+                let buf = getNextBuffer(handle);
                 if buf == INVALID_HANDLE {
                     return Err(BridgeError::RenderFailed);
                 }
@@ -479,7 +479,7 @@ impl Renderer {
             ];
             // SAFETY: live handle; `bg` outlives the call.
             unsafe {
-                let buf = getCurrentBuffer(handle);
+                let buf = getNextBuffer(handle);
                 if buf == INVALID_HANDLE {
                     return Err(BridgeError::RenderFailed);
                 }
@@ -544,13 +544,17 @@ impl Renderer {
             loop {
                 let mut out = vec![0u8; cap];
                 // SAFETY: `out` sized `cap`; native writes ≤ `outputLen` bytes.
-                let n = unsafe {
-                    bufferWriteResolvedChars(buf, out.as_mut_ptr(), cap as u32, true)
-                } as usize;
+                let n = unsafe { bufferWriteResolvedChars(buf, out.as_mut_ptr(), cap as u32, true) }
+                    as usize;
                 let n = n.min(cap);
                 if n < cap || cap >= SNAP_MAX {
                     out.truncate(n);
-                    return String::from_utf8(out).map_err(|_| BridgeError::RenderFailed);
+                    return String::from_utf8(out)
+                        // The pinned native memory backend serializes untouched
+                        // blank cells as U+0A00. They are terminal blanks, not
+                        // user content; normalize them at the bridge boundary.
+                        .map(|snapshot| snapshot.replace('\u{0a00}', " "))
+                        .map_err(|_| BridgeError::RenderFailed);
                 }
                 cap = (cap * 2).min(SNAP_MAX);
             }
@@ -572,7 +576,7 @@ impl Renderer {
         if lines.iter().any(|l| l.len() > MAX_TEXT_BYTES) {
             return Err(BridgeError::TextTooLarge);
         }
-        let renderer = Self::create_memory(cols, rows)?;
+        let mut renderer = Self::create_memory(cols, rows)?;
         let max_cols = cols as usize;
         for (y, line) in lines.iter().enumerate().take(rows as usize) {
             let clipped: String = line.chars().take(max_cols).collect();
@@ -581,6 +585,7 @@ impl Renderer {
             }
             renderer.draw_text(0, y as u32, &clipped)?;
         }
+        renderer.frame(|_| {})?;
         renderer.snapshot_text()
     }
 }

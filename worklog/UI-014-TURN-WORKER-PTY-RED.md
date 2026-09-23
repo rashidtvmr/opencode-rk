@@ -87,3 +87,35 @@ Final caller lane updates `crates/cli/src/tui_entry.rs`: async `run`/`run_with_d
 - Baseline repair: `tui_entry::run_with_dir` now short-circuits an origin-less `--once` invocation to the bounded local frame before descriptor resolution or any `/api` request. Explicit `--origin` remains on the validated descriptor/live snapshot path.
 - Native parity verification with `--no-default-features`: `cargo test -p opencode-rk-cli --test native_tui_parity --no-default-features -- --test-threads=1` -> `13 passed; 0 failed`; p11 dead-origin and p12 semantics pass.
 - Native source verification: scoped `DYLD_LIBRARY_PATH=crates/opentui-bridge/native/lib/aarch64-apple-darwin cargo check -p opencode-rk-cli --bin oc2 --features native` and native build pass. Native parity child launch remains blocked by the frozen harness `env_clear()` removing DYLD search paths while the binary has `@rpath/libopentui.dylib` with no LC_RPATH; this is loader/environment setup, not a tui_entry source failure.
+## 2026-09-23 static native renderer repair
+
+- Exact integrated base: `a5339df7a098fb1e4ab2c0bfd06e6c4d76542fb8`.
+- Frozen `crates/cli/tests/native_tui_parity.rs` SHA-256 remained
+  `81d12f9a9e149b713fe6891fd56f081d528ff944e5d7f25d4cf2728a62abe4c3`.
+- Real static OpenTUI execution compiled and ran, then RED 8/13: untouched
+  blank cells serialized as U+0A00 and the fixed 24-row snapshot clipped the
+  bounded 64-entry memory pane to 20 visible entries.
+- Minimal production repair normalizes the pinned backend's U+0A00 blank-cell
+  sentinel in `safe_renderer.rs` and sizes scriptable one-shot snapshots to all
+  already-bounded frame lines in `tui_entry.rs`.
+- Disposable static snapshot GREEN: native parity 13/13 with no test edits.
+- UI-014 remains blocked until the static artifact/build lane is integrated and
+  the PTY journey is rerun on the exact integrated revision.
+
+## 2026-09-23 real static PTY GREEN
+
+- Frozen PTY test was not edited. Native startup now renders the exact
+  `OpenCode RK TUI` marker through the real statically linked OpenTUI backend.
+- OpenTUI stdout writes are synchronous, so byte-rate full-frame repainting
+  blocked PTY input. Production rendering now coalesces ordinary paints behind
+  a bounded 100 ms cadence while queue/interrupt state receives an immediate
+  paint before exit.
+- Unix input no longer leaves an uncancellable `spawn_blocking` stdin reader at
+  Tokio shutdown. A bounded async channel is fed by `AsyncFd` after setting
+  `O_NONBLOCK`; task abort is awaited and original descriptor flags are restored.
+- Exact command: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-cli --test ui014_turn_worker_pty --features native -- --test-threads=1`.
+  Result: 1/1 passed in 0.32 s; one provider POST, second prompt consumed while
+  request one remained unresolved, interrupt and quit handled, no replay,
+  terminal modes restored, process exited within the frozen bound.
+- Candidate GREEN only. UI-014 stays blocked until the same frozen test passes
+  on the exact product-spine integration revision.
