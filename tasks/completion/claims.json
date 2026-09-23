@@ -1084,10 +1084,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "scratchpad": "worklog/WEB-009-EMBEDDED-VERIFY.md",
-      "session": "",
-      "status": "not-started"
+      "blockedNote": "RED frozen: 1 passed, 2 failed. Branch projection has empty tool_calls/references; branch append rejects structured activity. Negative no-side-effect guard passes. SHA256 23f591fcb7d2990a60aabc23a9b5f9677e9e46974ce7a89fccc1db88551a0872. Cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 Python timeout=180 cargo test -p opencode-rk-sessions --test web009_branch_activity_red -- --test-threads=1.",
+      "scratchpad": "worklog/WEB-009-BRANCH-ACTIVITY-RED.md",
+      "session": "ses_f31381759ffegPGvEjks41sScI",
+      "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
