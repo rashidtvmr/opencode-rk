@@ -12,6 +12,8 @@ ARCHIVE=""
 CHECKSUM=""
 INSTALL_DIR="${OC2_INSTALL_DIR:-$HOME/.local/bin}"
 DO_UNINSTALL=0
+MAX_ARCHIVE_MEMBERS=4
+MAX_ARCHIVE_PAYLOAD=1048576
 
 usage() {
   echo "usage: install-oc2.sh [--version V] --archive FILE --checksum SHA256 [--install-dir DIR] [--uninstall]" >&2
@@ -47,6 +49,62 @@ detect_platform() {
   esac
 }
 
+stage=""
+transaction_active=0
+target=""
+native_target=""
+binary_tmp=""
+native_tmp=""
+binary_backup=""
+native_backup=""
+binary_backed=0
+native_backed=0
+binary_installed=0
+native_installed=0
+
+cleanup() {
+  if [ -n "$stage" ]; then
+    rm -rf "$stage" 2>/dev/null || :
+  fi
+}
+
+rollback_install() {
+  rollback_code="$1"
+  transaction_active=0
+
+  if [ "$native_installed" -eq 1 ]; then
+    rm -f "$native_target" 2>/dev/null || :
+  fi
+  if [ "$binary_installed" -eq 1 ]; then
+    rm -f "$target" 2>/dev/null || :
+  fi
+  if [ "$native_backed" -eq 1 ]; then
+    if ! mv "$native_backup" "$native_target" 2>/dev/null; then
+      echo "FAIL: could not restore previous native library" >&2
+    fi
+  fi
+  if [ "$binary_backed" -eq 1 ]; then
+    if ! mv "$binary_backup" "$target" 2>/dev/null; then
+      echo "FAIL: could not restore previous binary" >&2
+    fi
+  fi
+  rm -f "$binary_tmp" "$native_tmp" 2>/dev/null || :
+  echo "FAIL: install transaction rolled back" >&2
+  exit "$rollback_code"
+}
+
+on_signal() {
+  signal_code="$1"
+  if [ "$transaction_active" -eq 1 ]; then
+    rollback_install "$signal_code"
+  fi
+  exit "$signal_code"
+}
+
+trap cleanup 0
+trap 'on_signal 130' 2
+trap 'on_signal 143' 15
+
 uninstall() {
   target="$INSTALL_DIR/$BIN"
   if [ -e "$target" ]; then
@@ -68,6 +126,13 @@ uninstall() {
 
 PLATFORM="$(detect_platform)"
 echo "platform: $PLATFORM${VERSION:+ version: $VERSION}" >&2
+case "$PLATFORM" in
+  linux-*) LIB_SUFFIX=".so" ;;
+  macos-*) LIB_SUFFIX=".dylib" ;;
+  *) echo "unsupported platform: $PLATFORM" >&2; exit 64 ;;
+esac
+NATIVE_NAME="libopentui$LIB_SUFFIX"
+EXPECTED_NATIVE="native/lib/$PLATFORM/$NATIVE_NAME"
 
 # Checksum gate BEFORE any write. sha256sum or shasum required.
 if command -v sha256sum >/dev/null 2>&1; then
@@ -80,65 +145,185 @@ fi
 [ "$actual" = "$CHECKSUM" ] || { echo "checksum mismatch, aborting" >&2; exit 65; }
 
 # Never overwrite a legacy `opencode` binary in the same dir.
-if [ -e "$INSTALL_DIR/opencode" ]; then
+[ ! -e "$INSTALL_DIR/opencode" ] || {
   echo "refusing: $INSTALL_DIR/opencode exists; oc2 installs side-by-side only" >&2
   exit 73
+}
+
+stage="$(mktemp -d)"
+
+# The first pass retains no archive names and stops after the four-member bound.
+# Only regular files and directories are permitted; regular files are limited
+# to the exact binary and native closure. Every name is relative and safe.
+if ! tar -tzf "$ARCHIVE" 2>/dev/null | awk \
+  -v bin="$BIN" -v native="$EXPECTED_NATIVE" -v max="$MAX_ARCHIVE_MEMBERS" '
+  BEGIN { count = 0; bin_seen = 0; native_seen = 0 }
+  {
+    count++
+    if (count > max || $0 == "" || $0 ~ /^\// || $0 ~ /(^|\/)\.\.(\/|$)/ || $0 ~ /(^|\/)\.\/(\/|$)/ || $0 ~ /\/\// || $0 ~ /[[:cntrl:]]/) exit 1
+    if ($0 == bin) {
+      if (bin_seen) exit 1
+      bin_seen = 1
+    } else if ($0 == native) {
+      if (native_seen) exit 1
+      native_seen = 1
+    } else if ($0 !~ /\/$/) {
+      exit 1
+    }
+  }
+  END { if (count < 2 || !bin_seen || !native_seen) exit 1 }
+'; then
+  echo "invalid archive: expected bounded safe members" >&2
+  exit 65
 fi
 
-stage="$(mktemp -d)"; trap 'rm -rf "$stage"' EXIT INT TERM
-tar -xzf "$ARCHIVE" -C "$stage"
+# Validate member types before extraction. The first character is portable
+# across BSD and GNU tar listings: '-' regular, 'd' directory.
+if ! tar -tvzf "$ARCHIVE" 2>/dev/null | awk \
+  -v bin="$BIN" -v native="$EXPECTED_NATIVE" -v max="$MAX_ARCHIVE_MEMBERS" '
+  BEGIN { count = 0; bin_seen = 0; native_seen = 0 }
+  {
+    count++
+    type = substr($0, 1, 1)
+    name = $NF
+    if (count > max || (type != "-" && type != "d")) exit 1
+    if (name == bin) {
+      if (type != "-" || bin_seen) exit 1
+      bin_seen = 1
+    } else if (name == native) {
+      if (type != "-" || native_seen) exit 1
+      native_seen = 1
+    } else if (type != "d" || name !~ /\/$/) {
+      exit 1
+    }
+  }
+  END { if (count < 2 || !bin_seen || !native_seen) exit 1 }
+'; then
+  echo "invalid archive: unsafe type or member" >&2
+  exit 65
+fi
+
+# Probe each required stream before extraction. head bounds expansion even
+# when a malicious header claims a very large regular-file payload.
+payload=0
+for member in "$BIN" "$EXPECTED_NATIVE"; do
+  probe_err="$stage/probe.err"
+  probe_bytes="$(tar -xOf "$ARCHIVE" "$member" 2>"$probe_err" | head -c $((MAX_ARCHIVE_PAYLOAD + 1)) | wc -c | tr -d '[:space:]')"
+  if [ -s "$probe_err" ]; then
+    echo "invalid archive: cannot read $member" >&2
+    exit 65
+  fi
+  case "$probe_bytes" in
+    ''|*[!0-9]*) echo "invalid archive: invalid expanded payload size" >&2; exit 65 ;;
+  esac
+  if [ "$probe_bytes" -gt "$MAX_ARCHIVE_PAYLOAD" ]; then
+    echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_PAYLOAD bytes" >&2
+    exit 65
+  fi
+  payload=$((payload + probe_bytes))
+  if [ "$payload" -gt "$MAX_ARCHIVE_PAYLOAD" ]; then
+    echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_PAYLOAD bytes" >&2
+    exit 65
+  fi
+done
+
+if ! tar -xzf "$ARCHIVE" -C "$stage" >/dev/null 2>&1; then
+  echo "invalid archive: extraction failed" >&2
+  exit 65
+fi
 src="$stage/$BIN"
+native_src="$stage/$EXPECTED_NATIVE"
 [ -f "$src" ] || { echo "archive missing $BIN binary" >&2; exit 65; }
+[ -f "$native_src" ] || { echo "archive missing $EXPECTED_NATIVE" >&2; exit 65; }
+[ ! -L "$src" ] || { echo "invalid archive: $BIN is not regular" >&2; exit 65; }
+[ ! -L "$native_src" ] || { echo "invalid archive: native library is not regular" >&2; exit 65; }
 
-mkdir -p "$INSTALL_DIR"
-if [ -e "$INSTALL_DIR/$BIN" ]; then
-  echo "upgrade: preserving existing install (history lives in user data dir, untouched)" >&2
+actual_payload="$(wc -c <"$src" | tr -d '[:space:]')"
+native_payload="$(wc -c <"$native_src" | tr -d '[:space:]')"
+case "$actual_payload" in ''|*[!0-9]*) echo "invalid archive: invalid expanded payload size" >&2; exit 65 ;; esac
+case "$native_payload" in ''|*[!0-9]*) echo "invalid archive: invalid expanded payload size" >&2; exit 65 ;; esac
+expanded_payload=$((actual_payload + native_payload))
+[ "$expanded_payload" -le "$MAX_ARCHIVE_PAYLOAD" ] || {
+  echo "invalid archive: expanded payload exceeds $MAX_ARCHIVE_PAYLOAD bytes" >&2
+  exit 65
+}
+
+# Identity is checked while still staged. A failed upgrade leaves both old
+# files untouched. This also preserves the historical exit 74 contract.
+chmod 755 "$src"
+identity_out="$("$src" --version 2>&1)" || {
+  echo "FAIL: staged binary --version failed; install unchanged" >&2
+  exit 74
+}
+case "$identity_out" in
+  *opencode-rk*)
+    echo "FAIL: staged binary identifies as legacy name; install unchanged" >&2
+    exit 74
+    ;;
+esac
+case "$identity_out" in
+  *oc2*) ;;
+  *)
+    echo "FAIL: staged binary identity mismatch (no oc2 in --version); install unchanged" >&2
+    exit 74
+    ;;
+esac
+
+target="$INSTALL_DIR/$BIN"
+native_dir="$INSTALL_DIR/../lib"
+native_target="$native_dir/$NATIVE_NAME"
+if ! mkdir -p "$INSTALL_DIR" "$native_dir"; then
+  echo "FAIL: cannot create install directories" >&2
+  exit 74
 fi
-cp -f "$src" "$INSTALL_DIR/$BIN"
-chmod 755 "$INSTALL_DIR/$BIN"
-# Packaged-output identity check (APP-010): the installed binary must
-# identify as oc2 and never as the legacy dev name. Mirrors
-# packaged_output_names_oc2 in crates/cli/src/install_commands.rs.
-identity_out="$("$INSTALL_DIR/$BIN" --version 2>&1)" || {
-  echo "FAIL: installed binary --version failed; removing $INSTALL_DIR/$BIN" >&2
-  rm -f "$INSTALL_DIR/$BIN"
+if ! binary_tmp="$(mktemp "$INSTALL_DIR/.oc2.tmp.XXXXXX")"; then
+  echo "FAIL: cannot stage installed binary" >&2
   exit 74
-}
-case "$identity_out" in
-  *opencode-rk*)
-    echo "FAIL: installed binary identifies as legacy name; removing $INSTALL_DIR/$BIN" >&2
-    rm -f "$INSTALL_DIR/$BIN"
-    exit 74
-    ;;
-esac
-case "$identity_out" in
-  *oc2*) ;;
-  *)
-    echo "FAIL: installed binary identity mismatch (no oc2 in --version); removing $INSTALL_DIR/$BIN" >&2
-    rm -f "$INSTALL_DIR/$BIN"
-    exit 74
-    ;;
-esac
-help_out="$("$INSTALL_DIR/$BIN" --help 2>&1)" || {
-  echo "FAIL: installed binary --help failed; removing $INSTALL_DIR/$BIN" >&2
-  rm -f "$INSTALL_DIR/$BIN"
+fi
+if ! native_tmp="$(mktemp "$native_dir/.libopentui.tmp.XXXXXX")"; then
+  echo "FAIL: cannot stage native library" >&2
   exit 74
-}
-case "$help_out" in
-  *opencode-rk*)
-    echo "FAIL: installed binary --help identifies as legacy name; removing $INSTALL_DIR/$BIN" >&2
-    rm -f "$INSTALL_DIR/$BIN"
-    exit 74
-    ;;
-esac
-case "$help_out" in
-  *oc2*) ;;
-  *)
-    echo "FAIL: installed binary identity mismatch (no oc2 in --help); removing $INSTALL_DIR/$BIN" >&2
-    rm -f "$INSTALL_DIR/$BIN"
-    exit 74
-    ;;
-esac
-rm -rf "$stage"; trap - EXIT INT TERM
+fi
+if ! binary_backup="$(mktemp "$INSTALL_DIR/.oc2.backup.XXXXXX")"; then
+  echo "FAIL: cannot prepare binary rollback" >&2
+  exit 74
+fi
+if ! native_backup="$(mktemp "$native_dir/.libopentui.backup.XXXXXX")"; then
+  echo "FAIL: cannot prepare native rollback" >&2
+  exit 74
+fi
+rm -f "$binary_backup" "$native_backup"
+if ! cp "$src" "$binary_tmp" || ! chmod 755 "$binary_tmp"; then
+  echo "FAIL: cannot stage installed binary" >&2
+  exit 74
+fi
+if ! cp "$native_src" "$native_tmp" || ! chmod 644 "$native_tmp"; then
+  echo "FAIL: cannot stage native library" >&2
+  exit 74
+fi
+
+transaction_active=1
+if [ -e "$target" ] || [ -L "$target" ]; then
+  if ! mv "$target" "$binary_backup"; then
+    rollback_install 74
+  fi
+  binary_backed=1
+fi
+if [ -e "$native_target" ] || [ -L "$native_target" ]; then
+  if ! mv "$native_target" "$native_backup"; then
+    rollback_install 74
+  fi
+  native_backed=1
+fi
+if ! mv "$binary_tmp" "$target"; then
+  rollback_install 74
+fi
+binary_installed=1
+if ! mv "$native_tmp" "$native_target"; then
+  rollback_install 74
+fi
+native_installed=1
+transaction_active=0
+rm -f "$binary_backup" "$native_backup" 2>/dev/null || :
 echo "installed $INSTALL_DIR/$BIN ($PLATFORM)" >&2
 printf '%s\n' "$identity_out"
