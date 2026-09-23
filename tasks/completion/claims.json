@@ -1060,10 +1060,10 @@
       "status": "blocked"
     },
     "UI-014": {
-      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "scratchpad": "worklog/UI-014-PREWIRE.md",
-      "session": "",
-      "status": "not-started"
+      "blockedNote": "No honest caller RED seam: native submit/loop are private cfg(native), synchronous, and unbuildable on arm64 without libopentui; no owned request/cancel/join/result-channel path exists. Pure composer tests cannot prove wiring. See worklog/UI-014-BEHAVIORAL-RED.md.",
+      "scratchpad": "worklog/UI-014-BEHAVIORAL-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
     },
     "WEB-004": {
       "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
