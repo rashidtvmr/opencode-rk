@@ -46,9 +46,8 @@ backlog-exhaustion errors or authorize edits to canonical source-gap records.
 - No Cargo, browser, network, or heavy validation command was run for this
   evidence-only integration.
 
-## Pending from Wave 1
+## Wave 1 closure
 
-- `SHARE-004` audit was still active when this receipt was written and is not
-  included.
+- `SHARE-004` landed afterward from `3e89fbe` and was integrated in `cf514a4`.
 - Controller/integrator must still synthesize and review an atomic reconciliation
   patch before running `tools/validate_repository.py` as an acceptance gate.
