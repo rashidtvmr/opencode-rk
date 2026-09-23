@@ -211,6 +211,12 @@
       "session": "ses_f380c4bc9ffei2XDG2DStCM92e",
       "status": "completed"
     },
+    "DISC-003": {
+      "blockedNote": "PHASE1 convergence audit complete. 54 gate findings classified and documented in worklog/DISC-003-PHASE1-CONVERGENCE.md: A1 legacy/repair 8, A2 LANE-* 20, A3 ralph.json-not-plan 23 (incl WEB-009 false completed at 732c046 with disconnect-only GREEN, parent NOT ACCEPTED; dd7670d correctly blocks), A4 other 1, B audit bad-note 2 (AUD-017/AUD-020 self-admitted no acceptance), C WEB-009 false compl...",
+      "scratchpad": "worklog/DISC-003-PHASE1-CONVERGENCE.md",
+      "session": "ses_f33319188ffe45W7jd4C8he6JS",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
