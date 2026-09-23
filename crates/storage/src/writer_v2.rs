@@ -1,12 +1,14 @@
 //! Bounded writers for the format-2 workspace schema.
 
 use opencode_rk_contracts::{
-    MessageId, MessageRole, PayloadRef, SessionId, MAX_REASONING_SUMMARY_BYTES,
+    AssistantReference, AssistantToolCall, MAX_REASONING_SUMMARY_BYTES, MessageId, MessageRole,
+    PayloadRef, SessionId,
 };
-use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
 
-use crate::quota_v2::{QuotaSnapshot, QuotaV2, QuotaV2Error};
 use crate::StorageError;
+use crate::quota_v2::{QuotaSnapshot, QuotaV2, QuotaV2Error};
+use crate::validate_assistant_activity;
 
 const MAX_TITLE_BYTES: usize = 1024;
 const MAX_INLINE_PAYLOAD_BYTES: usize = 8192;
@@ -15,6 +17,8 @@ const MAX_EVENT_PAYLOAD_BYTES: usize = 4096;
 const MAX_SESSION_PAGE_SIZE: usize = 500;
 pub const MESSAGE_PART_TEXT: i64 = 0;
 pub const MESSAGE_PART_REASONING_SUMMARY: i64 = 1;
+pub const MESSAGE_PART_TOOL_CALLS: i64 = 2;
+pub const MESSAGE_PART_REFERENCES: i64 = 3;
 
 pub struct NewSession {
     pub id: SessionId,
@@ -76,6 +80,22 @@ impl V2Writer {
         insert_message(connection, message, reasoning_summary)
     }
 
+    pub fn append_message_with_activity(
+        connection: &mut Connection,
+        message: &NewMessage,
+        reasoning_summary: Option<&str>,
+        tool_calls: &[AssistantToolCall],
+        references: &[AssistantReference],
+    ) -> Result<(), StorageError> {
+        insert_message_with_activity(
+            connection,
+            message,
+            reasoning_summary,
+            tool_calls,
+            references,
+        )
+    }
+
     pub fn append_outbox_event(
         connection: &mut Connection,
         session_id: SessionId,
@@ -131,6 +151,17 @@ fn insert_message(
     message: &NewMessage,
     reasoning_summary: Option<&str>,
 ) -> Result<(), StorageError> {
+    insert_message_with_activity(connection, message, reasoning_summary, &[], &[])
+}
+
+fn insert_message_with_activity(
+    connection: &mut Connection,
+    message: &NewMessage,
+    reasoning_summary: Option<&str>,
+    tool_calls: &[AssistantToolCall],
+    references: &[AssistantReference],
+) -> Result<(), StorageError> {
+    // Validate all inputs before any side effect.
     let inline_data = match &message.body {
         PayloadRef::Inline { text } if text.len() <= MAX_INLINE_PAYLOAD_BYTES => text.as_bytes(),
         PayloadRef::Inline { .. } | PayloadRef::Blob { .. } => {
@@ -145,6 +176,12 @@ fn insert_message(
             return Err(StorageError::InlinePayloadTooLarge);
         }
     }
+    validate_assistant_activity(tool_calls, references)?;
+    let tool_calls_json =
+        serde_json::to_string(tool_calls).map_err(|_| StorageError::InvalidAssistantActivity)?;
+    let references_json =
+        serde_json::to_string(references).map_err(|_| StorageError::InvalidAssistantActivity)?;
+
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
     let session = transaction
@@ -176,16 +213,21 @@ fn insert_message(
         ],
     )?;
     let message_pk = transaction.last_insert_rowid();
+
+    // Text part (ordinal 0): the message body.
     transaction.execute(
         "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
         params![inline_data, inline_data.len() as i64, message.created_at_us],
     )?;
-    let payload_pk = transaction.last_insert_rowid();
+    let text_payload_pk = transaction.last_insert_rowid();
     transaction.execute(
         "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk)
          VALUES (?1, 0, ?2, ?3)",
-        params![message_pk, MESSAGE_PART_TEXT, payload_pk],
+        params![message_pk, MESSAGE_PART_TEXT, text_payload_pk],
     )?;
+
+    // Reasoning summary part (ordinal 1, kind 1).
+    let mut ordinal: i64 = 1;
     if let Some(summary) = reasoning_summary.filter(|summary| !summary.is_empty()) {
         transaction.execute(
             "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
@@ -198,14 +240,64 @@ fn insert_message(
         let summary_payload_pk = transaction.last_insert_rowid();
         transaction.execute(
             "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk, mime, name)
-             VALUES (?1, 1, ?2, ?3, 'text/plain; charset=utf-8', 'reasoning_summary')",
+             VALUES (?1, ?2, ?3, ?4, 'text/plain; charset=utf-8', 'reasoning_summary')",
             params![
                 message_pk,
+                ordinal,
                 MESSAGE_PART_REASONING_SUMMARY,
                 summary_payload_pk
             ],
         )?;
+        ordinal += 1;
     }
+
+    // Tool calls part (ordinal N, kind 2).
+    if !tool_calls.is_empty() {
+        transaction.execute(
+            "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
+            params![
+                &tool_calls_json,
+                tool_calls_json.len() as i64,
+                message.created_at_us
+            ],
+        )?;
+        let tool_calls_payload_pk = transaction.last_insert_rowid();
+        transaction.execute(
+            "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk, mime, name)
+             VALUES (?1, ?2, ?3, ?4, 'application/json', 'tool_calls')",
+            params![
+                message_pk,
+                ordinal,
+                MESSAGE_PART_TOOL_CALLS,
+                tool_calls_payload_pk
+            ],
+        )?;
+        ordinal += 1;
+    }
+
+    // References part (ordinal N, kind 3).
+    if !references.is_empty() {
+        transaction.execute(
+            "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
+            params![
+                &references_json,
+                references_json.len() as i64,
+                message.created_at_us
+            ],
+        )?;
+        let references_payload_pk = transaction.last_insert_rowid();
+        transaction.execute(
+            "INSERT INTO message_parts (message_pk, ordinal, kind, payload_pk, mime, name)
+             VALUES (?1, ?2, ?3, ?4, 'application/json', 'references')",
+            params![
+                message_pk,
+                ordinal,
+                MESSAGE_PART_REFERENCES,
+                references_payload_pk
+            ],
+        )?;
+    }
+
     transaction.commit()?;
     Ok(())
 }

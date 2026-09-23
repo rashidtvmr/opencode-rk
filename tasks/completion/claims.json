@@ -1084,9 +1084,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "RED expected: 1 pass + 2 failures; no impl edits. See worklog/WEB-009-BRANCH-ACTIVITY-RED.md. Running bounded RED now.",
+      "blockedNote": "Writer v2 support implemented and self-tests GREEN (2/2 storage lib writer_v2). Frozen RED: 1 pass + 2 failures (caller wiring). Failure 1: SessionService::append_assistant_with_activity in sessions/src/lib.rs rejects branch sessions with 'structured assistant activity is not yet available for branch sessions' (test line 142). Failure 2: branch_v2.rs list_assistant_activity (lines 296-336) returns empty tool_calls/references (test line 97). These files are outside owned file scope (writer_v2.rs only). Blocked pending separate lanes to wire callers.",
       "scratchpad": "worklog/WEB-009-BRANCH-ACTIVITY-RED.md",
-      "session": "ses_f30e02cf6ffebb1RIaHcT3ZZ4s",
+      "session": "ses_f30db8445ffedcmUPVoqxoxNG7",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
