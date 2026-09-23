@@ -3,45 +3,54 @@
 ## Claim
 
 - Task: TOOL-012
-- Session: ses_f350b2ee1ffeev3X7fXp9IbaOX
-- HEAD at claim: 88ae9a2e9c3f4f9bbecd4ca975bcf90468a58ae8
-- Owned product test: `crates/tools/tests/shell_tool_startup.rs`
-- Prior TOOL-012 history: process-tree cancellation surface was previously marked completed by another process. This reopening covers the newly discovered startup-readiness integration contract only.
+- Session: `ses_f33ab1b02ffeqfziBahkwvDgb5`
+- HEAD at claim: `1d20224ecca26e341c15783089cd5573b63c8de8`
+- Owned test: `crates/tools/tests/shell_tool_startup.rs`
+- Reopening explicitly authorized by the user after independent review. Previous replacement worker stopped without changes; orchestrator reclaimed the ledger claim before this session.
+- Ownership boundary: startup test, this scratchpad, TOOL-012 ledger row only. No product edits.
+
+## Review and replacement
+
+- Invalid prior RED: `b083736af8a9b540252efd3ad75e6471fe8444ab8fd4967c61f4a190b2e9b9ff`.
+- Review reason: prior test used a `StartupEvent` enum and a completion-only adapter, rather than the required compile-compatible standard API. It did not exercise the caller-owned readiness path or exact production method-resolution contract.
+- Replacement keeps semantic RED and removes the invalid event abstraction. Fallback invokes existing `ShellTool::execute` only and never emits a valid startup PID before completion.
 
 ## Source evidence
 
-- `crates/tools/src/shell_tool.rs:161-283`, `ShellTool::execute`: public async API performs allowlist, broker, spawn, bounded output, wait, and result return; no startup sender, callback, readiness handle, or child-wrapper handshake.
-- `crates/tools/src/shell_tool.rs:212-223`: process group configured, `Command::spawn()` called, child retained internally; parent-side spawn is not an externally observable child-executed readiness event.
+- `crates/tools/src/shell_tool.rs:161-284`, `ShellTool::execute`: allowlist, broker, spawn, bounded output, wait, result; no startup sender or readiness probe.
+- `crates/tools/src/shell_tool.rs:212-227`: process group configured, `Command::spawn()` called, child retained internally; parent-side spawn is not child-wrapper readiness.
 - `crates/tools/src/shell_tool.rs:286-313`: `cancel` and `Drop` kill the recorded process group.
-- `crates/tools/tests/shell_tool_process_tree.rs:13-134`: existing disposable PID fixture demonstrates cancellation tree cleanup, but only by polling fixture files; it has no startup notification contract.
-- `worklog/WEB-009-DISCONNECT-STARTUP.md:15-19,32-51`: disconnect repair requires an owned task and a startup signal after child spawn; existing API exposes no start/readiness handle.
+- `crates/tools/tests/shell_tool_process_tree.rs:13-134`: disposable parent/descendant fixture and cancellation containment; no startup notification.
+- `worklog/WEB-009-DISCONNECT-STARTUP.md` was referenced by the prior review; this replacement does not broaden ownership into WEB files.
+
+## Exact RED adapter contract
+
+Test-local fallback signature:
+
+```text
+execute_with_startup(self, config: ShellConfig, readiness_path: PathBuf, startup: tokio::sync::mpsc::Sender<u32>) -> Pin<Box<dyn Future<Output=Result<ShellResult,ShellError>> + Send>>
+```
+
+Fallback body discards `readiness_path` and `startup`, then awaits existing `execute`. This is compile-compatible and semantic RED. A future inherent `ShellTool::execute_with_startup` with the same public signature wins Rust method resolution over the test-local trait method, requiring no test edits and avoiding a private event type.
 
 ## Contract under test
 
-1. A bounded startup notification is distinct from `Command::spawn` and arrives only after the child wrapper writes its readiness marker.
-2. Child execution remains owned by the cancellation task. Abort after readiness kills recorded parent and descendant and suppresses delayed sentinel creation.
-3. Startup instrumentation does not enter stdout/stderr; normal output is byte-faithful.
-4. Startup failures are explicit and bounded. Channels have finite capacity.
-
-## RED adapter decision
-
-No production startup API exists at this revision. The test-local `LegacyStartupAdapter` drives the real `ShellTool::execute` callable API. It emits only `Completed` after execute returns, intentionally not pretending that completion is startup. A blocking child fixture writes `child-wrapper-ready` before waiting, then the RED test proves the child began while no distinct startup event can be delivered. This is a semantic RED, not a mocked success.
-
-Intended additive production shape for the implementation lane:
-
-```text
-ShellTool::execute_with_startup(config, bounded startup sender)
-```
-
-The implementation must send a typed startup event from the child-wrapper handshake, not from the parent immediately after `Command::spawn`, while preserving the existing `ShellResult` output contract and owned cancellation.
+1. Caller supplies a unique disposable readiness path. Fixture atomically writes its bounded numeric PID there only after its wrapper is released, then starts a descendant and blocks.
+2. No startup event before readiness. Exactly one matching `u32` PID after readiness. Bounded channel; no duplicate.
+3. Abort after event kills wrapper and descendant; delayed sentinel never appears.
+4. Readiness instrumentation is absent from normal stdout/stderr; output remains byte-faithful.
+5. Nonexistent command returns bounded `ShellError::Spawn` and emits no event.
+6. All startup-specific cases call `execute_with_startup`; disposable fixtures use exact argv paths, no shell-string concatenation, bounded waits, explicit failure containment.
 
 ## Verification
 
-- Focused command: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --test shell_tool_startup -- --test-threads=1` (outer tool timeout 120s; macOS image has no `timeout` executable)
-- Observed RED: compile succeeds; 4/5 tests pass; `startup_notification_requires_child_wrapper_readiness` fails at line 223 with `child wrapper became ready, but no distinct startup notification arrived: Err(Elapsed(()))`. The adapter can emit only `Completed` after execute returns; the fixture is intentionally blocked, so no false startup event exists.
-- Frozen test SHA-256: `b083736af8a9b540252efd3ad75e6471fe8444ab8fd4967c61f4a190b2e9b9ff`
-- No product source, manifest, frozen test, policy, or dylib changed.
+- Command: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --test shell_tool_startup -- --test-threads=1`
+- Compile: pass.
+- Semantic RED: 2/4 pass; `startup_notification_requires_child_wrapper_readiness` fails at line 221 with `readiness must publish exactly the wrapper PID`, `left: None`, `right: Some(<fixture PID>)`; `startup_instrumentation_is_absent_and_normal_output_is_faithful` fails at line 256 with `startup event missing`. Both failures are missing production readiness events; spawn, bounded sender, cancellation/containment cases pass.
+- Test SHA-256: `4dae909cd1db9c724a42ab731ef5d0074f8a423561392a6b321cb9ecde442691`.
+- `git diff --check`: pass.
+- No product source, manifest, policy, or verifier changed.
 
-## Remaining blocker
+## Blocker
 
-Production API absent from `shell_tool.rs`; implementation lane must add the bounded child-wrapper startup handshake. TOOL-012 remains blocked, not completed, until the frozen startup test passes on the integrated tree.
+Production `ShellTool::execute_with_startup` is absent from `crates/tools/src/shell_tool.rs`. TOOL-012 remains blocked, not completed, until implementation adds the bounded caller-path readiness handshake and passes this frozen test hash.

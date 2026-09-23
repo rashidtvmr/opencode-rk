@@ -941,9 +941,9 @@
       "status": "completed"
     },
     "TOOL-012": {
-      "blockedNote": "RED compile+run: shell_tool_startup 4/5; startup_notification_requires_child_wrapper_readiness fails line 223 with Err(Elapsed(())); production startup API absent; implementation required",
+      "blockedNote": "Authorized startup RED replacement; compile pass, semantic RED 2/4: missing inherent readiness event; test sha256 4dae909c; cmd cargo test -p opencode-rk-tools --test shell_tool_startup -- --test-threads=1; no product edits.",
       "scratchpad": "worklog/TOOL-012-STARTUP-RED.md",
-      "session": "ses_f350b2ee1ffeev3X7fXp9IbaOX",
+      "session": "ses_f33ab1b02ffeqfziBahkwvDgb5",
       "status": "blocked"
     },
     "TOOL-018": {
