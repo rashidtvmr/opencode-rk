@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "repo": "https://github.com/rashidtvmr/opentui.git",
+  "commit": "c01292fd0837bafd07ce458c74416b2b375a41ab",
+  "tree": "261e8ea4b0ac68bb589760c3c871e202ef71ed6b",
+  "zig_version": "0.16.0",
+  "zig_archive_url": "https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz",
+  "zig_archive_sha256": "b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489",
+  "zig_archive_size": 52238004,
+  "zig_target": "aarch64-macos.13.0",
+  "target": "aarch64-apple-darwin",
+  "path": "lib/aarch64-apple-darwin/libopentui.dylib",
+  "sha256": "798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91",
+  "size": 6863648,
+  "optimize": "ReleaseSafe",
+  "install_name": "@rpath/libopentui.dylib",
+  "rpath": [],
+  "required_abi": [
+    "_createRenderer",
+    "_destroyRenderer",
+    "_getCurrentBuffer",
+    "_bufferDrawText",
+    "_bufferWriteResolvedChars"
+  ],
+  "builder_commit": "6eba7ba7f8a29b82f7a81f87a6fdf9c93b852cc4",
+  "builder_path": "crates/opentui-bridge/native/build_opentui.sh"
+}

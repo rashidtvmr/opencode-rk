@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "dylib SHA 798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91, 6863648 bytes; Mach-O arm64; @rpath; no LC_RPATH; 5 ABI exports; builder verify-only exit 0. Native bridge 73/73 GREEN with scoped DYLD. Frozen artifact test 0/3: artifacts.json and NOTICES absent; sbom.json required next. No source/test edits.",
-      "scratchpad": "worklog/TUI-011-NATIVE-ARTIFACTS.md",
-      "session": "ses_f3065a9f3ffea7opvjVcfLQ5I2",
+      "blockedNote": "Frozen native_artifact_manifest: 0/3. Immutable test rejects truthful SHA because digits fail is_ascii_lowercase; also applies 64KiB to verified 6,863,648-byte dylib. NOTICES and sbom.json missing. Builder verify exit 0; native suite 73/73; manifest SHA/size match.",
+      "scratchpad": "worklog/TUI-011.md",
+      "session": "ses_f305ebdc0ffeCnRhTWuyJnTGWl",
       "status": "blocked"
     },
     "UI-014": {
