@@ -31,6 +31,10 @@
   was verified as a broken symlink to the absent
   `opentui-pinned/packages/native/lib/aarch64-macos/libopentui.dylib`; it is not
   usable native-build evidence and remains unmodified/untracked.
+  Independent behavioral-RED review integrated at `0464988` confirms no honest
+  public caller seam exists before a production-owned async worker with bounded
+  result channels and cancellation/join is wired. No test was fabricated from
+  pure composer state.
 - WEB-009 durable tool/reference persistence RED integrated through `00d0c48`.
   Frozen SHA-256 is
   `c0acaf32cbf235452499acbe3eb5f617b7e319f8e6043a7b3cd54720a5b81bb8`.
@@ -44,6 +48,12 @@
   0 failed; frozen SHA-256 remained unchanged. WEB-009 stays blocked pending
   browser accessibility, the third exact disconnect pass, branch activity
   unification, and independent integrated verification.
+  Browser RED integrated at `7cce88f` and implementation at `598e2f3`: the
+  client now validates bounded tool/reference activity, consumes production
+  stream events, renders collapsed Reasoning/Tool controls and navigable HTTPS
+  References, and preserves reload fidelity. Frozen browser target is 3/3 and
+  the full web Vitest suite is 49/49. Typecheck remains independently blocked by
+  pre-existing TS6133 errors in `web/src/lib/canvas-model.test.ts`.
 - PROV-023 runtime catalog RED integrated at `896103a`: frozen test SHA-256
   `f74dba4c600c89f59d011fff0361ef6d5be1925d113ac750b7897889b1d57e95`.
   Its public request-path case compiles and fails because Google is documented
@@ -58,7 +68,7 @@ parent acceptance boundary.
 
 ## Exact integrated structural gates
 
-At `680ea12`, after WEB-009 and UI-014 integration:
+At `0464988`, after WEB-009 browser GREEN and UI-014 no-seam integration:
 
 - `python3 tools/convergence_gate.py`: blocked with the unchanged 80 findings.
 - `python3 tools/validate_repository.py`: protection fixtures pass, then the
