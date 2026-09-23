@@ -54,6 +54,10 @@
   References, and preserves reload fidelity. Frozen browser target is 3/3 and
   the full web Vitest suite is 49/49. Typecheck remains independently blocked by
   pre-existing TS6133 errors in `web/src/lib/canvas-model.test.ts`.
+  Authenticated embedded-bundle RED integrated at `2f06398` and deterministic
+  production bundle rebuilt at `523c2e0`: embedded router 1/1, existing assets
+  1/1, full web 49/49, and two builds byte-identical. Exact-artifact independent
+  verification is pending; branch-session activity unification remains blocked.
 - PROV-023 runtime catalog RED integrated at `896103a`: frozen test SHA-256
   `f74dba4c600c89f59d011fff0361ef6d5be1925d113ac750b7897889b1d57e95`.
   Its public request-path case compiles and fails because Google is documented
@@ -61,6 +65,12 @@
   remains absent, so the task stays blocked after this RED eventually turns green.
   Exact integrated rerun (bounded through Python because macOS has no `timeout`
   binary): 4 tests, T02–T04 pass, sole T01 failure is `UnknownProvider`; exit 101.
+  Bounded loader RED integrated at `fefe6e1`, implemented at `abf206a`, and
+  independently verified at `7e23cc4`: loader 21/21, PROV-019 5/5, runtime 4/4,
+  static 5/5, provider lib 73/73. Live caller review at `5cc50c3` found the
+  production transport posts `/responses` while the catalog documents only
+  `chat-completions`; a reviewed Responses catalog entry and caller RED are
+  required before end-to-end acceptance.
 
 No candidate is integrated merely because it compiles or has isolated GREEN
 tests. The hard installed `oc2` journey in `docs/CONVERGENCE.md` remains the
@@ -68,7 +78,7 @@ parent acceptance boundary.
 
 ## Exact integrated structural gates
 
-At `0464988`, after WEB-009 browser GREEN and UI-014 no-seam integration:
+At `5cc50c3`, after WEB-009 bundle, PROV-023 loader, and caller-gap integration:
 
 - `python3 tools/convergence_gate.py`: blocked with the unchanged 80 findings.
 - `python3 tools/validate_repository.py`: protection fixtures pass, then the
