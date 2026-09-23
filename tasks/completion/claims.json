@@ -313,6 +313,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "EXT-011": {
+      "blockedNote": "Audit: ralph/FEATURES accept EXT-011 but ownershipDecision=null, taskCard=null (extensibility-remaining-ownership-gap.json); backlog-exhaustion.json marks unresolved-decomposition. Task card crates/ext/ mismatches on-disk crates/tools/src/plugin_transform.rs (lib.rs:47). Equival-group ownership prohibition unresolved. Blocked pending controller authority patch. See worklog/GUARD-EXT-011.md.",
+      "scratchpad": "worklog/GUARD-EXT-011.md",
+      "session": "ses_f320db215ffeV0T6c6QGbytnrH",
+      "status": "blocked"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
