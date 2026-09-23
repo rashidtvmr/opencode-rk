@@ -22,6 +22,126 @@
     "_bufferDrawText",
     "_bufferWriteResolvedChars"
   ],
-  "builder_commit": "6eba7ba7f8a29b82f7a81f87a6fdf9c93b852cc4",
-  "builder_path": "crates/opentui-bridge/native/build_opentui.sh"
+  "builder_commit": "312d31586dbab33e8cab4607fd3227469b5f0b58",
+  "builder_path": "crates/opentui-bridge/native/build_opentui.sh",
+  "artifacts": [
+    {
+      "target": "aarch64-apple-darwin",
+      "zig_target": "aarch64-macos.13.0",
+      "path": "lib/aarch64-apple-darwin/libopentui.dylib",
+      "sha256": "798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91",
+      "size": 6863648,
+      "type": "mach-o-64-dylib",
+      "optimize": "ReleaseSafe",
+      "verification": {
+        "builder_verify_only": "passed",
+        "independent_sha256": "matched",
+        "independent_size": "matched"
+      }
+    },
+    {
+      "target": "x86_64-apple-darwin",
+      "zig_target": "x86_64-macos.13.0",
+      "path": "lib/x86_64-apple-darwin/libopentui.dylib",
+      "sha256": "a7756f27becf5e0b9f25e553ad0141b76de2274c57fee6edb156c9b0ca5c9ef5",
+      "size": 7190318,
+      "type": "mach-o-64-dylib",
+      "optimize": "ReleaseSafe",
+      "verification": {
+        "builder_verify_only": "passed",
+        "independent_sha256": "matched",
+        "independent_size": "matched"
+      }
+    },
+    {
+      "target": "aarch64-unknown-linux-gnu",
+      "zig_target": "aarch64-linux-gnu.2.17",
+      "path": "lib/aarch64-unknown-linux-gnu/libopentui.so",
+      "sha256": "e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89",
+      "size": 26598960,
+      "type": "elf-64-shared-object",
+      "optimize": "ReleaseSafe",
+      "verification": {
+        "builder_verify_only": "passed",
+        "independent_sha256": "matched",
+        "independent_size": "matched"
+      }
+    },
+    {
+      "target": "x86_64-unknown-linux-gnu",
+      "zig_target": "x86_64-linux-gnu.2.17",
+      "path": "lib/x86_64-unknown-linux-gnu/libopentui.so",
+      "sha256": "9f074adf1e3c67bb027433d44da05b9e285a37ae58cf0b2ed76504304450c79e",
+      "size": 26627832,
+      "type": "elf-64-shared-object",
+      "optimize": "ReleaseSafe",
+      "verification": {
+        "builder_verify_only": "passed",
+        "independent_sha256": "matched",
+        "independent_size": "matched"
+      }
+    },
+    {
+      "target": "x86_64-pc-windows-gnu",
+      "zig_target": "x86_64-windows-gnu",
+      "path": "lib/x86_64-pc-windows-gnu/opentui.dll",
+      "sha256": "0be2efd8a77330ba23b0f5eeb094a548f5fee4b7ad7b4c6f83e0e786dadd6b15",
+      "size": 6800384,
+      "type": "pe32plus-64-dll",
+      "optimize": "ReleaseSafe",
+      "pair_id": "x86_64-pc-windows-gnu-opentui",
+      "pair_role": "runtime-dll",
+      "paired_path": "lib/x86_64-pc-windows-gnu/libopentui.dll.a",
+      "verification": {
+        "builder_verify_only": "passed-as-pair",
+        "independent_sha256": "matched",
+        "independent_size": "matched"
+      }
+    },
+    {
+      "target": "x86_64-pc-windows-gnu",
+      "zig_target": "x86_64-windows-gnu",
+      "path": "lib/x86_64-pc-windows-gnu/libopentui.dll.a",
+      "sha256": "1dce093459b94a4d6bd0538c4fdd1681f50534930f3d59918b765bc87a982019",
+      "size": 101524,
+      "type": "gnu-import-archive",
+      "optimize": "ReleaseSafe",
+      "pair_id": "x86_64-pc-windows-gnu-opentui",
+      "pair_role": "import-library",
+      "paired_path": "lib/x86_64-pc-windows-gnu/opentui.dll",
+      "verification": {
+        "builder_verify_only": "passed-as-pair",
+        "independent_sha256": "matched",
+        "independent_size": "matched"
+      }
+    }
+  ],
+  "verification": {
+    "verified_on": "2026-09-23",
+    "builder_mode": "verify-only",
+    "builder_results": {
+      "aarch64-apple-darwin": "passed",
+      "x86_64-apple-darwin": "passed",
+      "aarch64-unknown-linux-gnu": "passed",
+      "x86_64-unknown-linux-gnu": "passed",
+      "x86_64-pc-windows-gnu": {
+        "status": "passed",
+        "artifact_count": 2,
+        "export_import_correspondence": "431/431"
+      }
+    },
+    "independent_integrity": {
+      "hash_algorithm": "SHA-256",
+      "hash_command": "shasum -a 256",
+      "size_command": "stat -f %z",
+      "result": "6/6 paths, hashes, and sizes matched"
+    },
+    "runtime_execution": "not-run"
+  },
+  "unsupported_targets": [
+    {
+      "target": "x86_64-pc-windows-msvc",
+      "reason": "The pinned OpenTUI build.zig SUPPORTED_TARGETS has no MSVC ABI target; the pinned builder refuses MSVC instead of relabeling the Windows GNU pair."
+    }
+  ]
 }

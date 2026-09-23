@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Vendored exact GNU import library 101524 B SHA 1dce093459b94a4d6bd0538c4fdd1681f50534930f3d59918b765bc87a982019; ar structure and 5/5 ABI pass; builder pair verify exit 0 with 431/431 correspondence; Rust Windows GNU target absent, no install. Parent remains BLOCKED on MSVC, signing/notarization, frozen manifest/sidecar conflicts.",
+      "blockedNote": "Manifest matrix truthfully enumerates all 6 vendored files; 5204 B; independent hash/stat 6/6; builder 312d315 verify-only 4 singles + Windows pair exit 0. Frozen host test unchanged efb64236; expected 1 passed/2 failed only: immutable SHA-digit predicate line 95 and multi-MB artifact vs 64KiB line 122. No test/artifact/builder/sidecar edits. Parent remains blocked; no acceptance.",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f30068899ffe1I3Y6JUB49ciWd",
+      "session": "ses_f3000be43ffezAvxGSb7zGVVTT",
       "status": "blocked"
     },
     "UI-014": {
