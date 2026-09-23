@@ -385,6 +385,12 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
+    "GUARD-OPS-006": {
+      "blockedNote": "OPS-006 blocked: operations-family-not-decomposed; repository-only group OPS-002/003/006 identical signatures, no task-specific evidence; candidate repository-reference-normalization ownershipEstablished=false (gap L474-487); ral accepted vs backlog not-started; FEATURES acceptance contradicts ownershipDecision=null+taskCard=null; audit scratchpad+ledger only",
+      "scratchpad": "worklog/GUARD-OPS-006.md",
+      "session": "ses_guard_ops006_audit",
+      "status": "blocked"
+    },
     "HEAD-001": {
       "completedNote": "GREEN 8/8 run_headless via direct rustc harness (/tmp/rh_test2 --test-threads=1); frozen sha85652c80 zero edits; impl sha04d43496; cargo path blocked by pre-existing opentui native gate",
       "scratchpad": "worklog/HEAD-001.md",
