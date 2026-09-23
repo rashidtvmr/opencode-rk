@@ -70,3 +70,13 @@ Blocked on two upstream bugs outside lane scope:
 2. **lib.rs SessionService guard** (line 509-519): `SessionService::append_assistant_with_activity` hard-rejects branch sessions with non-empty tool_calls/references. Cannot fix lib.rs (not owned by this lane).
 
 This is a partial blocked commit, not completion. The branch_v2.rs changes (V2Writer delegation, list_assistant_activity decoder with duplicate/failure-closed/malformed guards, message filtering) are complete and self-contained, but integration cannot achieve GREEN until writer_v2.rs and lib.rs are fixed by their respective owners.
+
+## Repair lane (writer_v2.rs BLOB fix)
+- Session: `ses_f30a8238effeCQCXu3Yq25LsTJ`
+- HEAD: `90f6b245b66f2fb8fabf35210b3965eee2263788`
+- Fix: `crates/storage/src/writer_v2.rs` `insert_message_with_activity` now serializes tool_calls/references with `serde_json::to_vec` (bounded `Vec<u8>`) and binds `tool_calls_json.as_slice()` / `references_json.as_slice()` (BLOB) into STRICT `payloads.inline_data BLOB`. Upfront `validate_assistant_activity`, Immediate transaction, message ordering, reasoning behavior unchanged. `rustfmt --edition 2021 crates/storage/src/writer_v2.rs` applied (also normalized two import lines).
+- Results:
+  - storage writer filter: `cargo test -p opencode-rk-storage --test writer_v2 -- --test-threads=1` => 10 passed, 0 failed.
+  - storage lib: `cargo test -p opencode-rk-storage --lib -- --test-threads=1` => 122 passed, 0 failed.
+  - existing `web_activity_branch`: 1 passed, 0 failed.
+  - frozen `web009_branch_activity_red`: 2 passed, 1 failed. `legacy_assistant_activity_is_copied_to_branch_without_reexecution` ok (BLOB fix). `malformed_or_over_bound_child_activity_has_no_message_side_effect` ok. Only `child_activity_append_survives_manager_and_service_reopen` fails at `crates/sessions/tests/web009_branch_activity_red.rs:142` with `Contract("structured assistant activity is not yet available for branch sessions")` from `crates/sessions/src/lib.rs:509-519` SessionService guard. Out of this lane scope (sole source file `writer_v2.rs`).

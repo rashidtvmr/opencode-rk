@@ -1084,9 +1084,9 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "branch_v2.rs implemented: synchronize_legacy_shadow and append_fork_assistant_with_activity delegate to V2Writer::append_message_with_activity; list_assistant_activity decodes activity parts with fail-closed on malformed JSON, duplicate kind detection, and empty-activity filtering. RED tests: 1 pass (malformed), 2 fail (legacy copy fails BLOB/TEXT constraint violation in writer_v2.rs INSERT; child append fails at SessionService guard in lib.rs:509-519). Blocked on writer_v2.rs BLOB/TEXT binding bug (params![&String] into payloads.inline_data BLOB) and lib.rs SessionService guard rejecting branch sessions with tool_calls/references. Cannot edit writer_v2.rs or lib.rs per lane ownership scope.",
+      "blockedNote": "BLOB fix writer_v2.rs to_vec+as_slice green: storage lib 122/122, writer_v2 10/10, web_activity_branch 1/1. frozen web009 2pass/1fail; sole fail child_append red.rs:142 via Contract guard sessions/src/lib.rs:509-519",
       "scratchpad": "worklog/WEB-009-BRANCH-ACTIVITY-RED.md",
-      "session": "ses_f30c7889affekc5jYJXaGbk0O4",
+      "session": "ses_f30a8238effeCQCXu3Yq25LsTJ",
       "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {

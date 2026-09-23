@@ -1,14 +1,14 @@
 //! Bounded writers for the format-2 workspace schema.
 
 use opencode_rk_contracts::{
-    AssistantReference, AssistantToolCall, MAX_REASONING_SUMMARY_BYTES, MessageId, MessageRole,
-    PayloadRef, SessionId,
+    AssistantReference, AssistantToolCall, MessageId, MessageRole, PayloadRef, SessionId,
+    MAX_REASONING_SUMMARY_BYTES,
 };
-use rusqlite::{Connection, OptionalExtension, Transaction, TransactionBehavior, params};
+use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBehavior};
 
-use crate::StorageError;
 use crate::quota_v2::{QuotaSnapshot, QuotaV2, QuotaV2Error};
 use crate::validate_assistant_activity;
+use crate::StorageError;
 
 const MAX_TITLE_BYTES: usize = 1024;
 const MAX_INLINE_PAYLOAD_BYTES: usize = 8192;
@@ -178,9 +178,9 @@ fn insert_message_with_activity(
     }
     validate_assistant_activity(tool_calls, references)?;
     let tool_calls_json =
-        serde_json::to_string(tool_calls).map_err(|_| StorageError::InvalidAssistantActivity)?;
+        serde_json::to_vec(tool_calls).map_err(|_| StorageError::InvalidAssistantActivity)?;
     let references_json =
-        serde_json::to_string(references).map_err(|_| StorageError::InvalidAssistantActivity)?;
+        serde_json::to_vec(references).map_err(|_| StorageError::InvalidAssistantActivity)?;
 
     let transaction = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
 
@@ -256,7 +256,7 @@ fn insert_message_with_activity(
         transaction.execute(
             "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
             params![
-                &tool_calls_json,
+                tool_calls_json.as_slice(),
                 tool_calls_json.len() as i64,
                 message.created_at_us
             ],
@@ -280,7 +280,7 @@ fn insert_message_with_activity(
         transaction.execute(
             "INSERT INTO payloads (inline_data, raw_bytes, created_at_us) VALUES (?1, ?2, ?3)",
             params![
-                &references_json,
+                references_json.as_slice(),
                 references_json.len() as i64,
                 message.created_at_us
             ],
