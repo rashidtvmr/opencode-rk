@@ -1084,10 +1084,10 @@
       "status": "completed"
     },
     "WEB-009": {
-      "blockedNote": "Durable structured activity candidate GREEN: frozen WEB-009 1/1, legacy API 2/2, provider 6/6, branch 1/1, storage 122/122; frozen hash c0acaf32. Parent remains blocked on browser accessibility, third exact disconnect pass, integrated web evidence, and branch activity unification; see worklog/WEB-009-DURABLE-IMPL.md.",
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
       "scratchpad": "worklog/WEB-009-DURABLE-IMPL.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
