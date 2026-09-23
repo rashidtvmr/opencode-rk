@@ -1025,10 +1025,10 @@
       "status": "in-progress"
     },
     "TUI-011": {
-      "completedNote": "GREEN 5/5 frozen native closure: sh -n scripts/install-oc2.sh; python3 tests/bootstrap/test_tui011_installer_native_closure.py; test SHA fe5543977bdfb3dd435d240f131b4e2174466225339e536824b21f273a12f1d5; oversize disposable fixture exit 65; zero frozen test edits. Parent remains blocked for rpath/cross-arch/SBOM/signing.",
-      "scratchpad": "worklog/TUI-011-NATIVE-BUNDLE-IMPL.md",
-      "session": "ses_f32f0afd0ffeXqSxD78n7xuyZs",
-      "status": "completed"
+      "blockedNote": "Review found symlink-directory escape, uninstall native residue, and pre-transaction temp residue; frozen 5/5 green SHA fe5543977bdfb3dd435d240f131b4e2174466225339e536824b21f273a12f1d5; new trusted RED required.",
+      "scratchpad": "worklog/TUI-011-NATIVE-BUNDLE-SECURITY-REVIEW.md",
+      "session": "ses_f32a24247ffeJc0c6ZUCBAwUTK",
+      "status": "blocked"
     },
     "WEB-004": {
       "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
