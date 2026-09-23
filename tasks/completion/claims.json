@@ -881,10 +881,10 @@
       "status": "completed"
     },
     "PROV-023": {
-      "blockedNote": "RED 3/4 pass T01 FAIL UnknownProvider on google/generate-content via profile_for; frozen sha f74dba4c; cmd: cargo test -p opencode-rk-providers --test prov_023_runtime_catalog",
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
       "scratchpad": "worklog/PROV-023-RUNTIME-RED.md",
-      "session": "ses_f31e1ec20ffejsuBLUqe3nRbsb",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "PROV-024": {
       "blockedNote": "BLOCKED RED: frozen sha 750e3a32; 7/7 pass pre-existing fixtures; missing-root RED only bad-fixture. Negative, unknown-provider, offline, bounds pass. No fixture/product/controller/network edits.",
