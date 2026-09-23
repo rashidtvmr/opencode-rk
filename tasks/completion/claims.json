@@ -899,9 +899,9 @@
       "status": "in-progress"
     },
     "REL-002": {
-      "blockedNote": "blocked: assertIn does not prove executable caller; static fixture revision; protected workflow. See worklog/REL-002-RED-REVIEW.md",
-      "scratchpad": "worklog/REL-002-RED-REVIEW.md",
-      "session": "ses_f331843f8ffed8wEMoFzV9siFz",
+      "blockedNote": "STRONG RED: 12 tests, 11 pass; sole failure executable planning CI step; behavior, malformed, timeout, exact argv, dynamic revision, failure propagation pass; blocked pending protected workflow review; cmd: python3 -m unittest tests.bootstrap.test_rel002_release_tdd",
+      "scratchpad": "worklog/REL-002-STRONG-RED.md",
+      "session": "ses_f32d2ba72ffeZ7tOBYK7YE5rto",
       "status": "blocked"
     },
     "REL-003": {
