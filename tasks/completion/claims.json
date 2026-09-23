@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Frozen native_artifact_manifest: 0/3. Immutable test rejects truthful SHA because digits fail is_ascii_lowercase; also applies 64KiB to verified 6,863,648-byte dylib. NOTICES and sbom.json missing. Builder verify exit 0; native suite 73/73; manifest SHA/size match.",
+      "blockedNote": "NOTICES 18635B landed; frozen 0/3: immutable SHA predicate :95 + 64KiB-vs-6863648B :122 + missing sbom.json :174 (NOTICES :155 cleared).",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f305ebdc0ffeCnRhTWuyJnTGWl",
+      "session": "ses_f30523ca0ffetJJlEddDF6sYQ7",
       "status": "blocked"
     },
     "UI-014": {

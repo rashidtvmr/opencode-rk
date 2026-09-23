@@ -1,0 +1,360 @@
+NOTICES for libopentui.dylib (aarch64-apple-darwin)
+==================================================
+
+Artifact provenance
+-------------------
+Fork repository: https://github.com/rashidtvmr/opentui.git
+Fork commit: c01292fd0837bafd07ce458c74416b2b375a41ab
+Source tree: 261e8ea4b0ac68bb589760c3c871e202ef71ed6b
+Build interface: packages/native (zig build
+  -Dlibrary-target=aarch64-macos.13.0 -Doptimize=ReleaseSafe)
+Artifact: lib/aarch64-apple-darwin/libopentui.dylib
+SHA-256: 798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91
+Size: 6863648 bytes
+Install name: @rpath/libopentui.dylib; no LC_RPATH entries.
+Required exports: _createRenderer, _destroyRenderer, _getCurrentBuffer,
+  _bufferDrawText, _bufferWriteResolvedChars.
+
+This file lists every third-party component statically incorporated into
+the library, with its pinned source and required license notice.
+Build-only tools (section B) are labeled as such and are NOT linked
+into the library.
+
+A. Statically incorporated components
+-------------------------------------
+
+A1. OpenTUI native sources (fork above) - MIT
+Source: pinned fork commit c01292f (tree 261e8ea...), packages/native.
+License file: LICENSE at repository root.
+Copyright (c) 2025 opentui.
+
+MIT License
+
+Copyright (c) 2025 opentui
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+A2. uucode-opentui (grapheme break / width tables) - MIT
+Linked via build.zig.zon dependency "uucode" (path zig-deps/uucode-opentui,
+non-lazy) and build.zig applyDependencies uucode import (fields
+grapheme_break, east_asian_width, general_category,
+is_emoji_presentation; fields_1 wcwidth_zero_in_grapheme).
+Pin: jacobsandlund/uucode @ 8ad04b756f85a5ba1ac8d2b8cb48d0946f06b630,
+archive SHA-256 f1ce9f0038c46cc75fdd4e8469baac0dce60e20517d8d32ed813bfa9906fefc2
+(per pinned src/vendor/update-zig-deps.sh).
+License file: zig-deps/uucode-opentui/LICENSE.md (also references
+licenses/LICENSE_Bjoern_Hoehrmann and licenses/LICENSE_unicode for
+bundled Unicode data tables; those data licenses ship inside the
+uucode archive).
+
+MIT License
+
+Copyright (c) 2026 Jacob Sandlund
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+Other licenses referenced by uucode (Unicode data tables):
+See licenses/LICENSE_Bjoern_Hoehrmann and licenses/LICENSE_unicode
+inside the uucode source archive.
+
+A3. Yoga layout engine (Meta) - MIT
+Linked via build.zig.zon dependency "yoga" (path zig-deps/yoga,
+non-lazy); build.zig compiles YOGA_CXX_SOURCES and translateC Yoga.h.
+Pin: facebook/yoga v3.2.1,
+archive SHA-256 86b399ac31fd820d8ffa823c3fae31bb690b6fc45301b2a8a966c09b5a088b55
+(per pinned src/vendor/update-zig-deps.sh).
+License file: zig-deps/yoga/LICENSE.
+
+MIT License
+
+Copyright (c) Facebook, Inc. and its affiliates.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+A4. Ghostty VT modules (conditional on this target) - MIT
+build.zig.zon dependency "ghostty" is lazy; build.zig links it via
+lazyDependency("ghostty", emit-lib-vt=true, simd=false, ...) only when
+ghosttyVtAvailable(target) is true. For aarch64-macos this is true
+(arch aarch64 + os macos), so the VT module IS incorporated here.
+Pin: ghostty-org/ghostty @ 727b8a02f8734840de664c060678dd66f01931f6,
+archive SHA-256 1cdde6bd3c1071de0f4ba489ee526361045e967170e8b50ca6f1d3fe0c624adf
+(per pinned src/vendor/update-zig-deps.sh). OpenTUI change:
+vendor/zig-deps/ghostty-shared-deps.patch (removes unused GUI frame data).
+Also uses uucode-ghostty tables: jacobsandlund/uucode @
+2826a37a4562284fdacd8fa029d49509cc9bffcd, archive SHA-256
+7e76fc7fab1e7ac728c52b35bbb3e5b8c639841abfc7fe1a4bcb13050594bc9e.
+License file: zig-deps/ghostty/LICENSE.
+
+MIT License
+
+Copyright (c) 2024 Mitchell Hashimoto, Ghostty contributors
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+uucode-ghostty tables carry the same uucode MIT notice (Copyright (c)
+2026 Jacob Sandlund) as reproduced in section A2.
+
+A5. stb image decoders (stb_image.h, stb_image_resize2.h) - dual MIT / Public Domain
+Vendored at packages/native/src/vendor/stb/; compiled into image
+decoding paths (build.zig notes stb patch context at vendor/stb/README.md).
+Pins (per pinned src/vendor/update.sh):
+stb_image.h: nothings/stb @ f0569113c93ad095470c54bf34a17b36646bbbb5,
+upstream SHA-256 594c2fe35d49488b4382dbfaec8f98366defca819d916ac95becf3e75f4200b3,
+patched SHA-256 1657895e86c730668cc5af6d3c8ae8f80b67c64f2ade81c44c40cee70fba555e
+(patch patches/stb_image-strict-jpeg.patch);
+stb_image_resize2.h: nothings/stb @ 904aa67e1e2d1dec92959df63e700b166d5c1022,
+upstream SHA-256 173e654634f6ccaad98f603e686ea212eec1fe8ea6d2a5e5e8056efa10ae3880,
+patched SHA-256 3cfc10a3aa7287fa1f1360df360b22e63b2e3426965d7696f8b5c273bc810d55
+(patch patches/stb_image_resize2-alignment.patch).
+License file: src/vendor/stb/LICENSE. Dual-licensed; either alternative
+satisfies redistribution. Alternative A (MIT) notice reproduced here:
+
+ALTERNATIVE A - MIT License
+Copyright (c) 2017 Sean Barrett
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so, subject to the following conditions:
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+ALTERNATIVE B - Public Domain (www.unlicense.org)
+This is free and unencumbered software released into the public domain.
+Anyone is free to copy, modify, publish, use, compile, sell, or distribute this
+software, either in source code form or as a compiled binary, for any purpose,
+commercial or non-commercial, and by any means.
+In jurisdictions that recognize copyright laws, the author or authors of this
+software dedicate any and all copyright interest in the software to the public
+domain. We make this dedication for the benefit of the public at large and to
+the detriment of our heirs and successors. We intend this dedication to be an
+overt act of relinquishment in perpetuity of all present and future rights to
+this software under copyright law.
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+A6. Wuffs image decoder (wuffs-v0.3.c) - Apache-2.0
+Vendored at packages/native/src/vendor/wuffs/wuffs-v0.3.c; compiled
+into image decoding paths.
+Pin: google/wuffs @ ec71f9c6d829ca763fbbc1f7adecc30a89a8ed0a,
+file SHA-256 a3db4bd979663423de00309d1ba07d7fa8576845223d3e02764181bd6da23f90
+(per pinned src/vendor/update.sh).
+License file: src/vendor/wuffs/LICENSE (Apache License 2.0).
+Source header: Copyright 2017 The Wuffs Authors.
+Required notice: this product includes Wuffs software licensed under
+the Apache License, Version 2.0 (http://www.apache.org/licenses/).
+You may not use the Wuffs file except in compliance with the License.
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+The complete license text is in the pinned source at
+src/vendor/wuffs/LICENSE (10174 bytes; omitted here to stay within
+the 64 KiB sidecar bound).
+
+A7. libwebp decoder subset - BSD-3-Clause (Google) + patent grant
+Vendored subset at packages/native/src/vendor/libwebp/ (file list in
+src/vendor/libwebp/FILES); compiled with webp flags per build.zig.
+Pin: libwebp 1.6.0,
+archive SHA-256 e4ab7009bf0629fd11982d4c2aa83964cf244cffba7347ecd39019a9e38c4564
+(per pinned src/vendor/update.sh).
+License files: src/vendor/libwebp/COPYING (BSD-3-Clause), PATENTS
+(additional patent grant), AUTHORS (contributor list).
+Required notices reproduced here:
+
+Copyright (c) 2010, Google Inc. All rights reserved.
+
+Redistribution and use in source and binary forms, with or without
+modification, are permitted provided that the following conditions are
+met:
+
+  * Redistributions of source code must retain the above copyright
+    notice, this list of conditions and the following disclaimer.
+
+  * Redistributions in binary form must reproduce the above copyright
+    notice, this list of conditions and the following disclaimer in
+    the documentation and/or other materials provided with the
+    distribution.
+
+  * Neither the name of Google nor the names of its contributors may
+    be used to endorse or promote products derived from this software
+    without specific prior written permission.
+
+THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+"AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
+A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
+HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
+LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+(INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+
+Additional IP Rights Grant (Patents): Google grants a perpetual,
+worldwide, non-exclusive, no-charge, royalty-free, irrevocable
+(except as stated in that file) patent license covering necessarily
+infringed claims in these WebM implementations; the grant terminates
+as of the date patent litigation is filed alleging infringement by
+these implementations. See the pinned src/vendor/libwebp/PATENTS
+file for the complete text.
+
+A8. Little CMS (lcms2) color management - MIT
+Vendored subset at packages/native/src/vendor/lcms2/ (file list in
+src/vendor/lcms2/FILES); include paths and sources wired in build.zig.
+Pin: lcms2 2.19.1,
+archive SHA-256 bfc54f7bab59fbc921012014a8032e4cba4abd46db47d46b76416a8c0b2815c8
+(per pinned src/vendor/update.sh).
+License file: src/vendor/lcms2/LICENSE.
+
+MIT License
+
+Copyright (c) 2023 Marti Maria Saguer
+
+Permission is hereby granted, free of charge, to any person obtaining
+a copy of this software and associated documentation files (the
+"Software"), to deal in the Software without restriction, including
+without limitation the rights to use, copy, modify, merge, publish,
+distribute, sublicense, and/or sell copies of the Software, and to
+permit persons to whom the Software is furnished to do so, subject
+to the following conditions:
+
+The above copyright notice and this permission notice shall be
+included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+A9. miniaudio audio engine - dual Public Domain / MIT-0
+Vendored single header at packages/native/src/vendor/miniaudio/miniaudio.h
+(v0.11.22, 2025-02-24, David Reid); imported via build.zig translateC
+"miniaudio" module and compiled via src/miniaudio_shim.c.
+Pinned in the fork commit above (no separate upstream pin file;
+version recorded in the header itself).
+License: header states "Choice of public domain or MIT-0. See license
+statements at the end of this file." Dual-licensed; either alternative
+satisfies redistribution. MIT-0 notice reproduced here:
+
+ALTERNATIVE 2 - MIT No Attribution
+Copyright 2025 David Reid
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to do
+so.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+(Alternative 1 is the Unlicense public-domain dedication; see the
+pinned header tail of src/vendor/miniaudio/miniaudio.h for its text.)
+
+B. Build-only toolchain (NOT linked into the library)
+-----------------------------------------------------
+Zig compiler 0.16.0, used only to compile the sources above.
+Archive: https://ziglang.org/download/0.16.0/zig-aarch64-macos-0.16.0.tar.xz
+Archive SHA-256: b23d70deaa879b5c2d486ed3316f7eaa53e84acf6fc9cc747de152450d401489
+Archive size: 52238004 bytes.
+Target: aarch64-macos.13.0. Optimize: ReleaseSafe.
+macOS SDK (CoreFoundation-bearing) supplied at build time; not distributed.
+Helper scripts scripts/prepare-zig-deps.sh and build flags are build
+plumbing, not runtime components.
+
+Verification notes
+------------------
+License texts above were compared against the pinned checkout files:
+LICENSE (root), packages/native/build.zig.zon, packages/native/build.zig,
+src/vendor/update.sh, src/vendor/update-zig-deps.sh,
+src/vendor/stb/LICENSE, src/vendor/wuffs/LICENSE (+ wuffs-v0.3.c header),
+src/vendor/libwebp/COPYING + PATENTS + AUTHORS, src/vendor/lcms2/LICENSE,
+src/vendor/miniaudio/miniaudio.h (head + tail), and the LICENSE files
+inside src/vendor/zig-deps.tar.gz (ghostty/LICENSE,
+uucode-ghostty/LICENSE.md, uucode-opentui/LICENSE.md, yoga/LICENSE).
