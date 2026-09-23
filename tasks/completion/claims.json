@@ -313,6 +313,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "EXT-009": {
+      "blockedNote": "GUARD audit: impl+tests GREEN 10/10, RED stub 0/5; ownership gap null taskCard/worklog (EXT-009 vs EXT-012 indistinguishable); card drift references nonexistent crates/ext+opencode-rk-ext (real: tools crate); twin byte-identical ext_namespacing_lane; Namespace unwired no caller; acceptance not release evidence. No authority patch in audit-only bounds. Controller-only follow-ups in worklog.",
+      "scratchpad": "worklog/GUARD-EXT-009.md",
+      "session": "subagent-guard-EXT-009",
+      "status": "blocked"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
