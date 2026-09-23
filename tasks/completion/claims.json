@@ -313,6 +313,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "EXT-006": {
+      "blockedNote": "Gap stale: owner null/card null/worklog null vs live card+worklog+impl; 1 validator stale line; RED missing, crate/path mismatch, duplicate pending; no guard patch; verifier decides",
+      "scratchpad": "worklog/GUARD-EXT-006.md",
+      "session": "ses_f321548e6ffe22mBRL2oHHHTpL",
+      "status": "blocked"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
