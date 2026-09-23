@@ -1025,9 +1025,9 @@
       "status": "in-progress"
     },
     "TUI-011": {
-      "blockedNote": "Missing aarch64-apple-darwin/x86_64-apple-darwin/windows libopentui (external: Zig+runner), no Apple/Windows signing identity (external authority), install-oc2.sh does not bundle native lib, no SBOM/checksum manifest, native_launch.rs:268 path bug + TTY-guard ordering gap, no rpath. Audit-only.",
-      "scratchpad": "worklog/TUI-011-PROD-AUDIT.md",
-      "session": "ses_f33364810ffe1Tn515VjEblNAr",
+      "blockedNote": "BLOCKED: RED python3 tests/bootstrap/test_tui011_installer_native_closure.py = 5 run, 1 fail; native bundle/atomicity failure only; frozen test SHA-256 fe5543977bdfb3dd435d240f131b4e2174466225339e536824b21f273a12f1d5; checksum, identity, malformed, traversal pass; pending scripts/install-oc2.sh native closure implementation.",
+      "scratchpad": "worklog/TUI-011-NATIVE-BUNDLE-RED.md",
+      "session": "ses_f3318a12affe4ygqfER51PhtXn",
       "status": "blocked"
     },
     "WEB-004": {
