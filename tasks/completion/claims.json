@@ -1054,9 +1054,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Artifact copied atomically; SHA e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89; builder verify-only ELF aarch64/ABI/NEEDED/no-RPATH-RUNPATH exit 0. Rust aarch64-unknown-linux-gnu target absent; no bridge native check. Remaining x86 Linux, Windows GNU/MSVC, signing/notarization, frozen sidecar issues outside lane.",
+      "blockedNote": "x86_64 Linux artifact replaced atomically with required SHA 9f074adf1e3c67bb027433d44da05b9e285a37ae58cf0b2ed76504304450c79e; ELF x86_64 verify-only, 6-NEEDED allowlist, no RPATH/RUNPATH, 5/5 ABI exit 0. Rust x86_64-unknown-linux-gnu target absent; native target check NOT_RUN. Parent blocked on Windows GNU/MSVC, macOS signing/notarization, frozen manifest/sidecar work.",
       "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f3016e712ffeVUpWMbxICwi1kZ",
+      "session": "ses_f3011e183ffenp0hQODntJeO5F",
       "status": "blocked"
     },
     "UI-014": {
