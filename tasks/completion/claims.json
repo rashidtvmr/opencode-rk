@@ -313,6 +313,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "EXT-004": {
+      "blockedNote": "BLOCKED: validator EXT-004 stale at tools/validate_backlog_exhaustion.py:1896; backlog/ownership ledgers conflict with ralph.json. Duplicate deferred modules and no real caller. Controller reconciliation, canonical module/caller, verifier acceptance open; see worklog/GUARD-EXT-004.md.",
+      "scratchpad": "worklog/GUARD-EXT-004.md",
+      "session": "ses_f321584b7ffe8sTHU6bZsNvSQC",
+      "status": "blocked"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",
