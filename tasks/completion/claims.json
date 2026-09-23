@@ -881,10 +881,10 @@
       "status": "completed"
     },
     "PROV-023": {
-      "blockedNote": "Catalog schema GREEN (Rust 5/5 prior reviewer, Python 6/6 independent), but task is Runtime optional: False and no product code loads docs/provider-compatibility.json. request_profile duplicates hardcoded endpoints and has no runtime caller. Blocked pending public provider-path RED and real bounded consumer wiring; see worklog/PROV-023-CATALOG-REVIEW.md.",
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
       "scratchpad": "worklog/PROV-023-CATALOG-REVIEW.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "PROV-024": {
       "blockedNote": "BLOCKED RED: frozen sha 750e3a32; 7/7 pass pre-existing fixtures; missing-root RED only bad-fixture. Negative, unknown-provider, offline, bounds pass. No fixture/product/controller/network edits.",
