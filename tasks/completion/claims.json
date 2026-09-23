@@ -1060,9 +1060,9 @@
       "status": "blocked"
     },
     "UI-014": {
-      "blockedNote": "No honest caller RED seam: native submit/loop are private cfg(native), synchronous, and unbuildable on arm64 without libopentui; no owned request/cancel/join/result-channel path exists. Pure composer tests cannot prove wiring. See worklog/UI-014-BEHAVIORAL-RED.md.",
-      "scratchpad": "worklog/UI-014-BEHAVIORAL-RED.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "Frozen real-binary RED: ui014_turn_worker_pty.rs SHA-256 813e12181951bdb8967eba8b2b1c9dd1b97672e43a7b26e0b57f20475903f214; standalone oc2 run exit 101, 0 passed/1 failed, missing async input ownership (before=1, final records=2, max_active=1). Native Cargo artifact blocker tracked separately by TUI-011.",
+      "scratchpad": "worklog/UI-014-TURN-WORKER-PTY-RED.md",
+      "session": "ses_f308d04f2ffeyW7O602eMLxyFe",
       "status": "blocked"
     },
     "WEB-004": {
