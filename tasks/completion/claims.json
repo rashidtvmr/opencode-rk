@@ -927,6 +927,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-WAVE1-DISPATCH-MAP-COMPACT": {
+      "completedNote": "Manifest written: 153 lines, 4 launchable lanes, 7 blocked, breadth 4/14, all rows trace to source evidence at 29ec0b3. Validated: git diff --check clean, no placeholders, no duplicate owned files in launch table.",
+      "scratchpad": "worklog/PHASE1-WAVE1-DISPATCH-MAP-COMPACT.md",
+      "session": "ses_f2dbfcec5ffe7ZCXch4BywjKk1",
+      "status": "completed"
+    },
     "PHASE1-WAVE1-SOURCE-EVIDENCE": {
       "completedNote": "Research matrix complete; cargo metadata PASS; git diff --check PASS; convergence_gate BLOCKED total=90; no Cargo build/test per research-only scope; no product/test/policy/controller files changed.",
       "scratchpad": "worklog/PHASE1-WAVE1-SOURCE-EVIDENCE.md",
