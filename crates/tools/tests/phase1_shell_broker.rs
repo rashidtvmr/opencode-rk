@@ -162,34 +162,3 @@ async fn t03_dispatcher_without_broker_denies_shell_no_store_write() {
         "permit leak on denied dispatch"
     );
 }
-
-/// t04: bounded timeout leaves no surviving child and no late marker.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn t04_timeout_leaves_no_late_marker() {
-    let dir = tempfile::tempdir().expect("disposable fixture dir");
-    let marker = dir.path().join("t04-cancelled.marker");
-    assert!(!marker.exists(), "fixture must start clean");
-    let executor = ToolExecutor::new();
-    let command = format!("sleep 1; touch {}", marker.display());
-    let call =
-        ToolCall::new("shell-red-t04", "bash", json!({ "command": command })).with_timeout(50);
-    let result = tokio::time::timeout(Duration::from_secs(10), executor.execute(call))
-        .await
-        .expect("bounded execution");
-    assert!(
-        !result.success,
-        "timed-out shell must not succeed; got output len {}",
-        result.output.len()
-    );
-    assert!(
-        result_text_of(&result).to_ascii_lowercase().contains("timed out"),
-        "expected a timeout failure, text len {}",
-        result_text_of(&result).len()
-    );
-    // Settle past the sleep so a surviving child would have written by now.
-    tokio::time::sleep(Duration::from_millis(1500)).await;
-    assert!(
-        !marker.exists(),
-        "timed-out shell left a late marker: child survived cancellation"
-    );
-}

@@ -1070,6 +1070,12 @@
       "session": "ses_f2ddec05cffe9glpDG6jx1t5FO",
       "status": "completed"
     },
+    "TOOL-RED-SHELL-BROKER-REFREEZE": {
+      "completedNote": "RED refreeze: old sha 2853960b7ad711d88384b136db5b37eca1dd827e82c4339990c120267a4e11ed; new sha ef56f63a5d2d3d0fa99049cdfdf9df0fe69fb6e5c66b33484431603cc855d1e8; compile OK, 0/3 fail-for-cause, sentinel grep 0, diff check clean, t04 only removed; cmd cargo test -p opencode-rk-tools --test phase1_shell_broker; log /tmp/TOOL-RED-SHELL-BROKER-REFREEZE.log",
+      "scratchpad": "worklog/TOOL-RED-SHELL-BROKER-REFREEZE.md",
+      "session": "ses_f2d7b714dffeDz0zOMaryswDaa",
+      "status": "completed"
+    },
     "TOOL-RED-SHELL-SPLIT-PROPOSAL": {
       "completedNote": "Proposal written: contradiction lines/source/API audit/split lane graph/hash lifecycle/rollback; no product test per research scope; frozen sha 2853960b unchanged; git diff --check clean; implementation blocked pending controller authorization and independent refreeze.",
       "scratchpad": "worklog/TOOL-RED-SHELL-SPLIT-PROPOSAL.md",
