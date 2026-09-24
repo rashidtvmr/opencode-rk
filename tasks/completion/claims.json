@@ -137,6 +137,12 @@
       "session": "ses_f2ead14d9ffeii28wFZ6HGVyWf",
       "status": "blocked"
     },
+    "APP012-KEYRING-CONTRACT-CORRECTION": {
+      "completedNote": "Corrected keyring 3.6.3 API/features, namespace, state/error, restart fake/native receipt, resource, redaction, and ownership contract in worklog/APP012-KEYRING-CONTRACT-CORRECTION.md. Validation: git grep, frozen APP012 SHA-256 945236c4c6a565fefb3853afa6930c438ab38f250c074ef650b5cd252d3c8c50, git diff --check. Research lane; no product RED/GREEN or native access.",
+      "scratchpad": "worklog/APP012-KEYRING-CONTRACT-CORRECTION.md",
+      "session": "ses_f2cc178b5ffe9zulW64uCTjFxa",
+      "status": "completed"
+    },
     "APP012-KEYRING-PERSISTENCE-CONTRACT": {
       "completedNote": "Contract written+committed at f23bc8e. Frozen RED sha 945236c4 unchanged. git diff --check clean. Only worklog file authored; no source/test/Cargo edits.",
       "scratchpad": "worklog/APP012-KEYRING-PERSISTENCE-CONTRACT.md",
