@@ -915,6 +915,12 @@
       "session": "ses_f2ddc7059ffeJ7wXZLQ28LqozO",
       "status": "completed"
     },
+    "PHASE1-RELEASE-EVIDENCE-CORRECTIONS-VERIFY": {
+      "completedNote": "Caveat1 convergence PASS: 88/84 historical non-normative bound 73be580, drift 90/86@68b837c, normative=CONVERGENCE BLOCKED, live total=93 exit1. Caveat2 build.rs FAIL partial: line58 fixed, line119 still absent at HEAD candidate; ls-tree 68b837c/0e16363 empty, 5d66683 blob f880e89. diff 3 files 2 hunks, no classification/blocker regression, no release acceptance. No repair.",
+      "scratchpad": "worklog/PHASE1-RELEASE-EVIDENCE-CORRECTIONS-VERIFY.md",
+      "session": "ses_f2d52634effenzrjL3XPqs1xLo",
+      "status": "completed"
+    },
     "PHASE1-RELEASE-EVIDENCE-FINAL-CORRECTION": {
       "completedNote": "Textual corrections only to worklog/PHASE1-RELEASE-EVIDENCE-MAP.md: (1) convergence 88/84 anchored non-normative, live drift 90/86 at 68b837c, normative state CONVERGENCE BLOCKED; (2) build.rs tree-absent at evidence-map revision 68b837c, present on product-spine 5d66683. git diff --check clean. No Cargo/test edits. Pending independent verification of the two corrections.",
       "scratchpad": "worklog/PHASE1-RELEASE-EVIDENCE-FINAL-CORRECTION.md",
