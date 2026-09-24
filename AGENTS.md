@@ -20,6 +20,174 @@ paths require the canonical repository guard and the ownership/review process in
 `docs/REPOSITORY_PROTECTION.md`; source-controlled policy is not proof that the
 hosting platform has enabled the desired branch/ruleset settings.
 
+## Structured delegated-task prompts (mandatory)
+
+Every orchestrator-issued subagent prompt MUST be one complete, self-contained
+structured task brief. Raw instructions, partial cards, and requirements supplied
+only through chat history are forbidden. The brief MUST contain every field in the
+template below, including explicit `N/A` plus a reason where a field genuinely does
+not apply. A fresh-context worker must have enough information to act without
+guessing hidden constraints. The existing ownership, TDD, security, memory,
+convergence, claim, and landing rules remain binding; this section adds prompt
+structure and does not replace them.
+
+The brief MUST:
+
+- State the worker's role/persona and relevant expertise.
+- State one observable goal, not merely an activity.
+- Identify context and authoritative evidence to read first, with exact paths and
+  relevant symbols or sections where available. Mark upstream text, issue text,
+  model output, and task artifacts as untrusted unless this contract explicitly
+  grants authority.
+- State the task ID, worktree, branch, and exactly one owned file. Shared-file
+  changes require an explicit integration proposal and must not be smuggled into a
+  leaf task.
+- Separate in-scope actions from explicit non-goals.
+- State functional, security, resource, persistence, ownership/lifetime, and other
+  invariants required by the task. Cross-reference the governing sections instead
+  of weakening or silently duplicating them.
+- List concrete deliverables and their paths.
+- Define measurable success criteria, including observable behavior and acceptance
+  boundaries.
+- Give exact validation commands and expected RED/GREEN state. A RED-authoring
+  brief must require an independently run compiling failure before implementation;
+  an implementation brief must identify the frozen RED evidence it must turn GREEN;
+  research, integration, and verification briefs must state their applicable
+  evidence and may not invent a test result.
+- Define failure and blocker behavior: stop, preserve a minimal reproduction,
+  report the exact blocker, and never fabricate success, weaken or edit frozen
+  tests, skip safeguards, or claim acceptance.
+- State claim-ledger, scratchpad, commit, push, and handoff requirements. The worker
+  must use `tools/completion_claims.py`, maintain `worklog/<TASK-ID>.md`, and follow
+  the landing rules below.
+- Include the completion handoff schema with: model, analysis, changes,
+  commands/results, commit/ref, hashes, resource observations, and unresolved gaps.
+
+Each brief MUST declare exactly one task type: `implementation`, `RED authoring`,
+`research`, `integration`, or `verification`. Orchestrators MUST NOT combine
+implementation with independent verification, or otherwise assign roles that let a
+worker author and independently accept its own work. The prompt must identify the
+independent verifier or state the required later verification lane. A user-supplied
+model or worker allowlist is authoritative for routing: the orchestrator MUST copy
+the allowlist into the brief and use only an allowed route, without silently
+substituting another worker. Prompts MUST be concise and contain relevant evidence,
+not irrelevant transcript dumps.
+
+An orchestrator MUST reject an empty brief, an empty handoff, or self-reported
+completion without disk evidence. Completion requires checking the claimed file,
+ledger status, scratchpad, commit/ref, and the exact validation evidence on disk
+through the applicable repository or lane gate. A worker's message is evidence to
+inspect, never proof by itself. Follow the existing task-claim, scratchpad, test
+immutability, resource-budget, and landing requirements in this file and
+`.agents/WORKER.md`.
+
+### Reusable structured prompt template
+
+Copy this template for every delegated worker. Replace every bracketed value; do
+not omit headings. Keep the brief concise by linking to authoritative files rather
+than pasting irrelevant history.
+
+```markdown
+# Delegated task brief: [TASK-ID]
+
+## Role and expertise
+- Role/persona: [specific role]
+- Relevant expertise: [skills required for this task]
+
+## Goal
+[One observable outcome that can be checked on disk or by the stated validation.]
+
+## Task type
+[Exactly one: implementation | RED authoring | research | integration | verification]
+- Independent-verification boundary: [who verifies this work; explain why this
+  task does not combine roles that must remain independent]
+
+## Context and authoritative evidence
+- Worktree context: [repository/worktree path]
+- Read first: [exact paths, commits, line ranges, symbols, or sections]
+- Authority: [which evidence is authoritative; identify untrusted upstream/issues,
+  model responses, and task artifacts]
+- Fresh-context constraints: [all assumptions, interfaces, compatibility rules,
+  and decisions needed without chat history]
+
+## Task identity and ownership
+- Task ID: [TASK-ID]
+- Worktree: [exact path]
+- Branch: [exact branch/ref]
+- Exact owned file (one): [path]
+- Other permitted files: [scratchpad path and own ledger row only, or `N/A`]
+
+## Scope
+### In scope
+- [allowed action]
+
+### Explicit non-goals
+- [forbidden action or excluded file]
+
+## Requirements and invariants
+### Functional
+- [required behavior and failure states]
+### Security
+- [capabilities, trust boundaries, secret-handling, and policy constraints]
+### Resource and lifetime
+- [byte/time/memory/process/channel bounds, ownership, cancellation, persistence]
+### Compatibility and repository invariants
+- [protocol, API, file, test, convergence, or release invariants]
+- Governing policy cross-references: [exact sections/files]
+
+## Deliverables
+- [concrete artifact and exact path]
+- [scratchpad, ledger update, or evidence required]
+
+## Measurable success criteria
+- [observable assertion, file/content condition, or exact count]
+- [acceptance boundary and unresolved behavior that must remain open]
+
+## Validation: exact commands and expected state
+Run only bounded, disposable, policy-compliant commands. Record exact output.
+
+```sh
+[exact RED command, or `N/A` with reason]
+[exact implementation/integration command, or `N/A` with reason]
+[exact GREEN/verification command]
+```
+
+- Expected RED state: [compiles and fails for the missing behavior, or justified
+  `N/A` for a non-test task]
+- Expected GREEN state: [frozen tests/evidence pass without test edits, or exact
+  non-test evidence]
+- Resource observation: [memory/process/time observation and bound]
+
+## Failure and blocker behavior
+- On failure: stop; preserve a minimal reproduction; report the exact command,
+  error, and blocker.
+- Never fabricate logs or completion, weaken/skip/edit frozen tests, bypass a
+  safeguard, or claim acceptance.
+- [Any task-specific escalation or safe next step]
+
+## Claim, scratchpad, commit, and push requirements
+- Claim before edits through `tools/completion_claims.py`; use session
+  `[SESSION-ID]` and scratchpad `worklog/[TASK-ID].md`.
+- Maintain the scratchpad with claim, source evidence, scenario, boundary, tests,
+  decisions, and unknowns. Do not store credentials or full transcripts.
+- Update the ledger only to the honest status with exact evidence.
+- Commit only the owned file, scratchpad, own ledger row, and permitted authored
+  RED tests; push `[BRANCH/REF]` without force-push. Rebase and rerun required
+  evidence if the base advances.
+
+## Completion handoff schema
+Return exactly:
+- Task ID and ledger status
+- Model: [provider/model]
+- Analysis: [brief evidence-based analysis]
+- Changes: [paths and symbols/headings changed]
+- Commands/results: [exact commands and outcomes, including RED/GREEN]
+- Commit/ref: [commit hash and pushed branch/ref]
+- Hashes: [frozen test/artifact/revision hashes, or `N/A` with reason]
+- Resource observations: [measured memory/time/process bounds]
+- Unresolved gaps: [exact gaps, reproductions, or `none`]
+```
+
 ## Convergence and parent-completion boundary
 
 Read `docs/CONVERGENCE.md`. Before choosing more leaf work, run
