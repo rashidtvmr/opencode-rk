@@ -137,6 +137,12 @@
       "session": "ses_f2ead14d9ffeii28wFZ6HGVyWf",
       "status": "blocked"
     },
+    "APP012-RESTART-RESUME-CONTRACT": {
+      "completedNote": "Research contract complete: worklog/APP012-RESTART-RESUME-CONTRACT.md; 18-row crash/recovery matrix; source owner crates/storage/src/recovery_v2.rs + future RED crates/storage/tests/app012_restart_resume_red.rs; frozen 945236c4 verified; git diff --check exit 0; no product test: research lane",
+      "scratchpad": "worklog/APP012-RESTART-RESUME-CONTRACT.md",
+      "session": "ses_f2cd8fde1ffedvLsDWTIAT0UoM",
+      "status": "completed"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
