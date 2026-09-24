@@ -1064,6 +1064,12 @@
       "session": "ses_f384fec49ffeN1ZefbdMWO6lwv",
       "status": "completed"
     },
+    "TOOL-AUTHORIZED-PROCESS-SEAM": {
+      "completedNote": "public execute_authorized_process seam + normative types; cargo check 0 errors; frozen broker 3/3 sha ef56f63a; external probe 4/4; baseline executor lib 3 pass/2 stale fail unchanged; no test edits",
+      "scratchpad": "worklog/TOOL-AUTHORIZED-PROCESS-SEAM.md",
+      "session": "ses_f2cc620c6ffeMsfgIyrBm8Ap2H",
+      "status": "completed"
+    },
     "TOOL-RED-SHELL": {
       "completedNote": "RED 0/4 fail-for-cause; sha 2853960b; cmd cargo test -p opencode-rk-tools --test phase1_shell_broker",
       "scratchpad": "worklog/TOOL-RED-SHELL.md",
