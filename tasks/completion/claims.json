@@ -914,6 +914,12 @@
       "session": "ses_f2e2b0c72ffeT2x01toLrwBRBC",
       "status": "in-progress"
     },
+    "PHASE1-ROADMAP-VERIFY": {
+      "blockedNote": "NOT CONSUMABLE @ bb027c1 (landed, remote==local). PASS: structure/deps/critical path/wave 4+2+<=14/platform split/no acceptance; counts+shas MATCH. BLOCKING: (1) branch relation inverted, origin/main IS ancestor, branch AHEAD +174/0; (2) W5 scratchpads absent from origin/main too; (3) stale frozen blockers already landed by 15381e3/0153bc1. No repair. Re-verify after 1-3.",
+      "scratchpad": "worklog/PHASE1-ROADMAP-VERIFY.md",
+      "session": "ses_f2e26c28bfferM86JJzsHLeEEK",
+      "status": "blocked"
+    },
     "PROV-018": {
       "completedNote": "5/5 frozen tests green. CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-providers --test prov_018_local_credential_import: 5 passed.",
       "scratchpad": "worklog/PROV-018.md",
