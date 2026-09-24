@@ -196,7 +196,16 @@ pub fn execute_authorized(
     match broker.authorize(&intent) {
         Decision::Allow => (),
         Decision::Deny { reason } => {
-            return Ok(FileResult::failure(format!("file operation denied: {reason}")));
+            // Read-class denial is a fixed, path-free, reason-free refusal so a
+            // broker reason, permission-rule pattern, target path, or file bytes
+            // can never reach the caller. Non-read denials keep the existing
+            // prefixed broker reason for compatibility.
+            let message = if action == FileAction::Read {
+                "file read denied".to_owned()
+            } else {
+                format!("file operation denied: {reason}")
+            };
+            return Ok(FileResult::failure(message));
         }
         Decision::RequireHuman { reason, .. } => {
             return Ok(FileResult::failure(format!(

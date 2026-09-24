@@ -149,6 +149,12 @@
       "session": "Mac-verifier",
       "status": "completed"
     },
+    "APP012-PROTECTED-PATH-FILEOPS-GREEN": {
+      "completedNote": "GREEN 7/7 app012_protected_path_red (ed524ec1) + 148/148 security lib + 1/1 app012 journey + 5/5 file_ops; read Deny -> fixed path-free \"file read denied\", non-read prefix kept; file_ops sha 7e84624c->a98675aa; frozen hashes unchanged; zero test edits; pre-existing host /bin/false mcp_spawn t04 fails on baseline too",
+      "scratchpad": "worklog/APP012-PROTECTED-PATH-FILEOPS-GREEN.md",
+      "session": "ses_f2b63b5b6ffe43SaxKJetZxysI",
+      "status": "completed"
+    },
     "APP012-PROTECTED-PATH-GREEN": {
       "blockedNote": "BLOCKED: broker policy half complete in lib.rs - canonical containment denial, redacted reason 'file read denied', no content leak verified; 148 security tests pass; 2/7 RED pass, 5/7 fail purely due to file_ops.rs:199 format prefix 'file operation denied: {reason}' wrapping broker reason into 'file operation denied: file read denied' instead of exact 'file read denied'. Integration proposal: file_ops.rs line 199 change from format!(prefix + reason) to passing reason directly.",
       "scratchpad": "worklog/APP012-PROTECTED-PATH-GREEN.md",
