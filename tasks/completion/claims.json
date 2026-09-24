@@ -867,6 +867,12 @@
       "session": "ses_f387af8a9ffe7GarMQ3qCTI8wr",
       "status": "completed"
     },
+    "PACKAGE-RECEIPT-BINDING-CONTRACT": {
+      "completedNote": "research artifact landed: producer-absence proof + receipt/manifest/runtime contract in worklog; frozen fec2fdb9 unchanged; no product edits",
+      "scratchpad": "worklog/PACKAGE-RECEIPT-BINDING-CONTRACT.md",
+      "session": "ses_f2cd8fdc1ffeFytgFHCfmIlhOK",
+      "status": "completed"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
