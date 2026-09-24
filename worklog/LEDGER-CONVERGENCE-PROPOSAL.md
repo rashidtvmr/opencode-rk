@@ -1,150 +1,388 @@
 # LEDGER-CONVERGENCE-PROPOSAL
 
-## Claim
-- Task: LEDGER-CONVERGENCE-PROPOSAL
-- Session: ses_f2e2ae321ffe6rN1WqKR6j2r1D
-- Status: in-progress -> completed (controller-authority reconciliation proposal)
-- Branch: plan/ledger-convergence
+## Status and authority boundary
 
-## Source evidence
+This document supersedes the proposal committed as `d93927e`
+(`worklog/LEDGER-CONVERGENCE-PROPOSAL.md` at that revision). The old 54-row
+retirement and 28-residual proposal is rejected and unsafe. It omitted 24
+authoritative aliases, duplicated 27 rows, listed 15 wrong fold targets, risked
+destroying the only evidence for three rows, and used operations unavailable to
+workers.
 
-### convergence_gate.py (tools/convergence_gate.py:126-148)
-Two findings emitted by `ledger_errors()`:
-1. `LEDGER: completed off-plan task {tid}` — row.status == "completed" and tid not in plan_ids (loaded from completion_plan.load().stories).
-2. `LEDGER: {tid} is completed but its own note admits '{marker}'` — completedNote contains a BAD_NOTE_MARKERS token:
-("repair child","follow-up","follow up","unwired","unproven","state-only","state only","missing","partial","no acceptance","not accepted","out of scope").
+This is a research and controller-reconciliation proposal only. It does not
+modify `tasks/completion/claims.json`, parent status, plan files, verifier
+configuration, tests, product files, or acceptance state. A controller must
+recompute all preconditions on the exact integrated revision before any
+operation. A worker must not apply the operation described here.
 
-### Current gate output (86 findings)
-- 83 off-plan completed tasks (tid not in 109 plan IDs).
-- 3 in-plan completed with bad-note markers: AUD-017 ("no acceptance"), AUD-020 ("no acceptance"), INSTALLED-DEFAULT-CONTRACT-INTEGRATION ("missing").
-  - INSTALLED-DEFAULT-CONTRACT-INTEGRATION is BOTH off-plan (parent task INSTALLED-DEFAULT-CONTRACT is in plan) and bad-note.
+## Authoritative evidence
 
-### Plan IDs (109 total)
-Loaded from ralph.completion.json via completion_plan.load(). Includes APP-001..APP-012, AUD-001..AUD-020, DISC-101..DISC-119, COORD-001..008, MOB-001..006, NET-001..015, PAR-001..010, SHIP-001..008, TUI-001..011, plus PROV-014.
+| Evidence | Exact location | Meaning |
+|---|---|---|
+| Original alias set and mappings | `worklog/DISC-003-AUTHORITY-REMAP-PROPOSAL.md:22-81,100-127` | 51 aliases, exact canonical parents |
+| Integrated alias addendum | `worklog/DISC-003-INTEGRATED-REMAP-ADDENDUM.md:11-69` | 27 new aliases, exact canonical parents, prior hash warning |
+| Authoritative verifier | `worklog/LEDGER-CONVERGENCE-VERIFY-RETRY.md:12-28,60-233` | Rejection, API limits, evidence hazard, transaction requirements |
+| Gate implementation | `tools/convergence_gate.py:126-148` | Finding definition and line-count behavior |
+| Claim API | `tools/completion_claims.py:32-38,89-92,144-192,243-247` | Legal transitions and absence of retire/demote API |
+| Worker boundary | `AGENTS.md:10-15,174-194` and `.agents/WORKER.md:144-155` | No controller-state mutation by this lane |
 
-Note: PROV-018..PROV-022, OPS-009, SYNC-001..SYNC-002, SDK-001..SDK-002, TOOL-012/018/019, WEB-004..WEB-006, WEB-EVENT-STREAM, WEB-HINT, RC-01..03, REL-003, RUN-001, HEAD-001..002, BASE-004, FIX-*, G6-*, LANE-* are NOT in the plan stories.
+The authoritative set is reproducibly derived, not inferred from naming:
 
-### DISC-003-INTEGRATED-REMAP-ADDENDUM.md (worklog/DISC-003-INTEGRATED-REMAP-ADDENDUM.md:1-76)
-- 78 off-plan completed alias rows eligible for retirement to canonical AUD-xx parents.
-- 27 of those aliases are enumerated (LANE-* -> AUD-xx, RC-* -> AUD-001, WEB-* -> AUD-014).
-- Demote AUD-017 and AUD-020 from completed -> blocked (preserve notes as blockedNote).
-- Prior 51-row proposal hash-locked to 9c4fb6b, NOT applicable to rebased candidate.
-- Algorithm: assert len(retire) == 78; remove 78 rows; change AUD-017/AUD-020 status.
+```text
+R51 = the exact `retire` set in DISC-003-AUTHORITY-REMAP-PROPOSAL.md:100-110
+R27 = the exact alias IDs in DISC-003-INTEGRATED-REMAP-ADDENDUM.md:18-45
+R78 = R51 union R27
+|R51| = 51
+|R27| = 27
+R51 intersect R27 = empty
+|R78| = 78
+```
 
-### validate_repository.py output
-51 backlog-exhaustion errors for stories not in plan (AUTO-003..007, EXT-001..013, INT-001..010, OPS-001..010, REL-001..003, ROUTE-001..012, SHARE-001..005, etc.). Controller-accepted stories must not appear in exhaustion ledger. This is orthogonal to convergence_gate but referenced in AGENTS.md as the canonical repository guard.
+The two source documents are the canonical mapping evidence. The following
+complete transcription preserves every alias-to-parent assignment. No target
+outside those documents is proposed.
 
-### INSTALLED-DEFAULT-CONTRACT vs INSTALLED-DEFAULT-CONTRACT-INTEGRATION
-- INSTALLED-DEFAULT-CONTRACT: blocked; scratchpad worklog/INSTALLED-DEFAULT-CONTRACT.md; note admits "missing" revision receipt.
-- INSTALLED-DEFAULT-CONTRACT-INTEGRATION: completed; note admits "missing" (no-receipt RED 4/5). Parent remains open per note. This is the contradiction: child completed while parent admits missing acceptance criteria.
+### R51: original authority mapping
 
-## Root-cause grouping
+```text
+ACP-001 -> AUD-009
+BASE-004 -> AUD-001
+FIX-LOGROTATE -> AUD-018
+FIX-LOOP-RULES -> AUD-017
+FIX-NATIVE-DAEMON -> AUD-001
+FIX-PACKAGING -> AUD-018
+FIX-SANDBOX -> DISC-106
+FIX-SESSIONS-STUBS -> AUD-003
+FIX-SQLITE-GATE -> AUD-007
+FIX-TIMELINE -> AUD-013
+G6-CHAT-DATADIR -> AUD-001
+HEAD-001 -> AUD-001
+HEAD-002 -> AUD-001
+LANE-APPSTART-VIEW -> APP-001
+LANE-AUTH-401 -> AUD-001
+LANE-AUTODRIVE-CLAMP -> AUD-017
+LANE-CHAT-ORIGIN -> APP-011
+LANE-CI-CAPS -> AUD-018
+LANE-DESC-STALE -> AUD-001
+LANE-FILE-AUTHZ -> AUD-005
+LANE-LOOP-CAP -> AUD-004
+LANE-MAIN-ONCE2 -> APP-001
+LANE-ONBOARD-SETUP -> APP-005
+LANE-PROV-FALLBACK -> AUD-002
+LANE-RALPH-MAX2 -> AUD-017
+LANE-SHELL-AUTHZ -> AUD-005
+LANE-SRV-ROUTER -> AUD-001
+LANE-TIMELINE-LAND -> AUD-013
+LANE-TOOL-PERM -> DISC-105
+LANE-TRANSCRIPT-LAND -> AUD-013
+LANE-TUI-HOST -> AUD-011
+LANE-TURN-SETTLE -> APP-004
+LANE-WEB-HONEST -> AUD-014
+OPS-009 -> AUD-018
+PROV-018 -> AUD-002
+PROV-019 -> AUD-002
+PROV-020 -> AUD-002
+PROV-021 -> AUD-002
+PROV-022 -> AUD-002
+REL-003 -> AUD-018
+RUN-001 -> AUD-010
+SDK-001 -> AUD-010
+SDK-002 -> AUD-010
+SYNC-001 -> AUD-010
+SYNC-002 -> AUD-010
+TOOL-012 -> AUD-005
+TOOL-018 -> AUD-005
+TOOL-019 -> AUD-005
+WEB-004 -> AUD-014
+WEB-005 -> AUD-014
+WEB-006 -> AUD-014
+```
 
-### Group A: Alias rows with canonical plan parents (retire via removal)
-The 27 enumerated aliases in DISC-003 addendum plus 27 additional alias rows sharing the same naming pattern and completion-note evidence structure. These are evidence-only rows to be retired (removed from active claims ledger); Git history and worklogs remain evidence.
+### R27: integrated addendum mapping
 
-Sub-group A1 (27 covered by DISC-003 addendum) -- enumerated alias->parent mappings:
-LANE-AGENT-FILES, LANE-CI, LANE-CI-EXT, LANE-CI-FLAG, LANE-COMMANDS-LIVE, LANE-CONTEXT-ACCOUNT, LANE-CONTEXT-CMD, LANE-DISPATCH-DENY, LANE-GLOBS, LANE-GLOBS-LIVE, LANE-LOOP, LANE-LOOP-LIVE, LANE-MCP-LIVE, LANE-RULES, LANE-SANDBOX, LANE-SUBAGENT-LIVE, LANE-THEMES, LANE-TUI-GRAPH, LANE-ULTRA-CODEGEN, LANE-WEB-CANVAS, LANE-WF-CREATE, LANE-WF-TIMELINE, RC-01, RC-02, RC-03, WEB-EVENT-STREAM, WEB-HINT. (See DISC-003-INTEGRATED-REMAP-ADDENDUM.md:18-45 for parent assignments.)
+```text
+LANE-AGENT-FILES -> AUD-004
+LANE-CI -> AUD-018
+LANE-CI-EXT -> AUD-018
+LANE-CI-FLAG -> AUD-018
+LANE-COMMANDS-LIVE -> AUD-012
+LANE-CONTEXT-ACCOUNT -> AUD-003
+LANE-CONTEXT-CMD -> AUD-003
+LANE-DISPATCH-DENY -> AUD-005
+LANE-GLOBS -> AUD-012
+LANE-GLOBS-LIVE -> AUD-012
+LANE-LOOP -> AUD-004
+LANE-LOOP-LIVE -> AUD-004
+LANE-MCP-LIVE -> AUD-009
+LANE-RULES -> AUD-012
+LANE-SANDBOX -> AUD-006
+LANE-SUBAGENT-LIVE -> AUD-004
+LANE-THEMES -> AUD-013
+LANE-TUI-GRAPH -> AUD-013
+LANE-ULTRA-CODEGEN -> AUD-004
+LANE-WEB-CANVAS -> AUD-014
+LANE-WF-CREATE -> AUD-004
+LANE-WF-TIMELINE -> AUD-013
+RC-01 -> AUD-001
+RC-02 -> AUD-001
+RC-03 -> AUD-001
+WEB-EVENT-STREAM -> AUD-014
+WEB-HINT -> AUD-014
+```
 
-Sub-group A2 (27 additional aliases, same naming pattern, evidence folded into canonical parents by controller):
-BASE-004, FIX-LOGROTATE, FIX-LOOP-RULES, FIX-NATIVE-DAEMON, FIX-PACKAGING, FIX-SANDBOX, FIX-SESSIONS-STUBS, FIX-SQLITE-GATE, FIX-TIMELINE, G6-CHAT-DATADIR, HEAD-001, HEAD-002, LANE-APPSTART-VIEW, LANE-AUTH-401, LANE-AUTODRIVE-CLAMP, LANE-CHAT-ORIGIN, LANE-CI-CAPS, LANE-DESC-STALE, LANE-FILE-AUTHZ, LANE-LOOP-CAP, LANE-MAIN-ONCE2, LANE-ONBOARD-SETUP, LANE-PROV-FALLBACK, LANE-RALPH-MAX2, LANE-SHELL-AUTHZ, LANE-SRV-ROUTER, LANE-TIMELINE-LAND.
+All 78 rows are evidence aliases, not plan stories. Retiring an alias must
+not mark its parent completed, alter a parent worklog, reopen a feature, or
+reverse an accepted commit. The fold target records evidence ownership only.
 
-Proposed canonical fold targets (controller assigns; not this lane's authority):
-BASE-004/AUD-010, FIX-LOGROTATE/AUD-001, FIX-LOOP-RULES/AUD-005, FIX-NATIVE-DAEMON/AUD-001, FIX-PACKAGING/DISC-102, FIX-SANDBOX/DISC-106, FIX-SESSIONS-STUBS/AUD-003, FIX-SQLITE-GATE/AUD-007, FIX-TIMELINE/AUD-013, G6-CHAT-DATADIR/AUD-011, HEAD-001/AUD-011, HEAD-002/AUD-003, LANE-APPSTART-VIEW/APP-001, LANE-AUTH-401/AUD-001, LANE-AUTODRIVE-CLAMP/COORD-001, LANE-CHAT-ORIGIN/AUD-015, LANE-CI-CAPS/COORD-005, LANE-DESC-STALE/AUD-001, LANE-FILE-AUTHZ/DISC-105, LANE-LOOP-CAP/AUD-004, LANE-MAIN-ONCE2/APP-001, LANE-ONBOARD-SETUP/APP-005, LANE-PROV-FALLBACK/PROV-014, LANE-RALPH-MAX2/COORD-002, LANE-SHELL-AUTHZ/DISC-105, LANE-SRV-ROUTER/AUD-018, LANE-TIMELINE-LAND/AUD-013, LANE-TUI-HOST/TUI-002, LANE-TURN-SETTLE/APP-004, LANE-TOOL-PERM/DISC-105, LANE-TRANSCRIPT-LAND/AUD-013, LANE-WEB-HONEST/AUD-005.
+## Resolution of the 15 contradictory targets
 
-### Group B: Truly orphaned implementation completions (need canonical task entries OR status downgrade)
-Tasks that were completed as standalone lanes but have no canonical plan parent. These need either:
-(a) A new canonical plan task entry (canonicalization), OR
-(b) Status correction if the parent admits missing/no-acceptance.
+The old proposal's A2 table is not source authority and must be discarded.
+The authoritative table in `DISC-003-AUTHORITY-REMAP-PROPOSAL.md:24-76`
+resolves all 15 conflicts:
 
-ACP-001: off-plan, green 5/5 acp_bridge. No canonical plan task. -> Needs new plan entry OR downgrade.
-APP-012-FILE-OPS: off-plan sub-lane of APP-012 (in plan). Evidence for APP-012. -> status correction: fold into APP-012 (still in-progress), remove alias.
-APP-012-READ-EXECUTOR: off-plan sub-lane of APP-012. Fold into APP-012 parent.
-APP-012-READ-INTEGRATION: off-plan sub-lane of APP-012. Fold into APP-012 parent.
-APP-012-SERVER-READ-WIRING: off-plan sub-lane of APP-012. Fold into APP-012 parent.
-OPS-009: off-plan. green 5/5 ops_replay. PROV-014 exists in plan but OPS-009 != PROV-014. -> new canonical entry or downgrade.
-PROV-018..PROV-022: off-plan, green. PROV-014 is in plan but these are distinct. -> new canonical entries or downgrade to blocked.
-SYNC-001, SYNC-002: off-plan. NET-014/NET-015 in plan (sync). -> fold into NET-0xx canonical or new entries.
-SDK-001, SDK-002: off-plan. No canonical plan task. -> new entries or downgrade.
-TOOL-012, TOOL-018, TOOL-019: off-plan. TOOL-015 in plan. -> new entries or downgrade.
-WEB-004, WEB-005, WEB-006: off-plan. WEB-001..WEB-017 range in plan. -> fold into corresponding WEB-xx or new entries.
-REL-003: off-plan. REL-001..REL-008 in plan. -> fold into REL family.
-RUN-001: off-plan. COORD-007 or SHIP family? -> new entry or downgrade.
-INSTALLED-DEFAULT-CONTRACT-INTEGRATION: off-plan + bad-note ("missing"). Parent INSTALLED-DEFAULT-CONTRACT is blocked with matching "missing" note. -> status correction: downgrade to blocked (already effectively blocked by parent).
+| Alias | Rejected target | Authoritative target |
+|---|---|---|
+| BASE-004 | AUD-010 | AUD-001 |
+| FIX-LOGROTATE | AUD-001 | AUD-018 |
+| FIX-LOOP-RULES | AUD-005 | AUD-017 |
+| FIX-PACKAGING | DISC-102 | AUD-018 |
+| G6-CHAT-DATADIR | AUD-011 | AUD-001 |
+| HEAD-001 | AUD-011 | AUD-001 |
+| HEAD-002 | AUD-003 | AUD-001 |
+| LANE-AUTODRIVE-CLAMP | COORD-001 | AUD-017 |
+| LANE-CHAT-ORIGIN | AUD-015 | APP-011 |
+| LANE-CI-CAPS | COORD-005 | AUD-018 |
+| LANE-FILE-AUTHZ | DISC-105 | AUD-005 |
+| LANE-PROV-FALLBACK | PROV-014 | AUD-002 |
+| LANE-RALPH-MAX2 | COORD-002 | AUD-017 |
+| LANE-SHELL-AUTHZ | DISC-105 | AUD-005 |
+| LANE-SRV-ROUTER | AUD-018 | AUD-001 |
 
-### Group C: In-plan completed with bad-note contradiction (status downgrade)
-AUD-017: completed, note says "no acceptance". -> demote to blocked, preserve note as blockedNote.
-AUD-020: completed, note says "no acceptance". -> demote to blocked, preserve note as blockedNote.
+No target is invented for these rows. The other 63 mappings are the exact
+source mappings transcribed above.
 
-### Group D: Parent-child contradiction
-INSTALLED-DEFAULT-CONTRACT-INTEGRATION (completed) vs INSTALLED-DEFAULT-CONTRACT (blocked, parent). Child admits "missing" revision receipt = parent's own blocker. -> downgrade child to blocked; preserve INSTALLED-DEFAULT-CONTRACT blockedNote.
+## Evidence re-homing before removal
 
-## Immutable evidence to preserve
-- Git history: all committed worklogs and lane branches (lane/*) persist as evidence.
-- claims.json history (git) records prior status transitions.
-- worklog/*.md scratchpad files are append-only evidence records.
-- Frozen test SHAs and RED/GREEN shas in completedNote fields.
-- The DISC-003 hash-locked ledger SHA-256 (6c8cf2d8...) must be verified before any mutation.
+Three rows point to scratchpads absent from the working tree and all refs:
 
-## Exact safe commands/files an authorized controller would change
-Only `tasks/completion/claims.json` is mutated in this proposal. No worklog/*.md, PLAN.md, ralph*.json, tests, or verifier code changes.
+| Alias | Missing scratchpad | Current note evidence | Current canonical row hash |
+|---|---|---|---|
+| LANE-CI-EXT | `worklog/LANE-CI-EXT.md` | `VERIFY 11/12 (t03 gated pre-existing STREAM regression, owner LANE-STREAM-FIX/ci_ext.rs fixture) @767a86a, zero test edits` | `70913b2873eb0595a3875c28c0ec9a69682073b524823d8e4b4cf9425c03c771` |
+| WEB-EVENT-STREAM | `worklog/WEB-EVENT-STREAM.md` | `VERIFY 5/5 event_stream @767a86a, zero test edits` | `4ebddbb46e15ed8bb479fbcdfb7582221af5a1ba1729a103c1d56bec1250e197` |
+| WEB-HINT | `worklog/WEB-HINT.md` | `VERIFY 8/8 composer-effort vitest + tsc clean @767a86a, zero test edits (blobs restored, untracked)` | `b75907e6767a87381bf9885f247b622f8b7ef08f88e6130bb623fa0dccb3adeb` |
 
-Stage 1 -- remove 54 alias rows (use completion_claims module for validation):
-  python3 -c "
-  import sys, pathlib, json
-  sys.path.insert(0, 'tools')
-  import completion_claims as cc
-  root = pathlib.Path('.')
-  doc = cc.load_ledger(root)
-  retire = {DISC-003 27 IDs} | {A2 27 IDs}
-  for tid in retire:
-      if tid in doc['claims']:
-          del doc['claims'][tid]
-  cc.save_ledger(root, doc)
-  "
-  Then verify: python3 tools/convergence_gate.py (expect fewer off-plan lines)
+Before removal, the authorized controller must create and commit a durable,
+append-only evidence file, proposed destination:
+`worklog/DISC-003-ALIAS-EVIDENCE-REHOME.md`. This proposal does not create it.
+The file must preserve, verbatim and without secret material:
 
-Stage 2 -- demote 3 bad-note rows (completed -> blocked, note preserved):
-  python3 -c "
-  import sys, pathlib
-  sys.path.insert(0, 'tools')
-  import completion_claims as cc
-  root = pathlib.Path('.')
-  for tid in ['AUD-017', 'AUD-020', 'INSTALLED-DEFAULT-CONTRACT-INTEGRATION']:
-      doc = cc.load_ledger(root)
-      note = doc['claims'].get(tid, {}).get('completedNote', '')
-      doc['claims'][tid]['status'] = 'blocked'
-      doc['claims'][tid]['blockedNote'] = note
-      doc['claims'][tid].pop('completedNote', None)
-      cc.save_ledger(root, doc)
-  "
-  (Note: cc.update transitions in-progress->blocked only; completed->blocked requires direct JSON or orchestrator release. Controller uses direct validated JSON edit.)
+1. alias ID, exact canonical row JSON, row hash, session, status, missing
+   scratchpad path, and completed note;
+2. source commit, pre-operation full-ledger SHA-256, mapping-document commit
+   and path/line references;
+3. authoritative parent mapping and explicit statement that the row is
+   retired bookkeeping, not feature reversal or acceptance;
+4. controller transaction ID, destination-file hash, commit hash, and
+   independent-verifier receipt hash after re-homing.
 
-Stage 3 -- re-run: python3 tools/convergence_gate.py -> expect 28 findings (orphans needing canonicalization).
+The controller must refuse the 78-row removal if any of these three notes is
+not durably re-homed and hash-linked first. A row deletion that leaves only an
+uncommitted or chat copy is evidence loss.
 
-Stage 4 -- canonicalize remaining 28 orphans: requires plan-file authority (AGENTS.md: plan files immutable to implementers). Either add stories to ralph.completion.json FEATURES/PLAN, or demote each orphan to blocked. NOT this lane.
+## Legal operations and authority
 
-## Expected gate reduction
-Current gate output: 86 finding LINES (83 off-plan-completed + 3 bad-note-completed).
-Distinct tids producing findings: 85 (INSTALLED-DEFAULT-CONTRACT-INTEGRATION produces BOTH an off-plan line and a bad-note line).
+| Operation | Worker API/status | Proposal boundary |
+|---|---|---|
+| Claim a task | `not-started -> in-progress` via `claim()` | Legal only for the worker's own leased task |
+| Finish a task | `in-progress -> completed` or `blocked` via `update()` | Legal only with required evidence note |
+| Release/reclaim live work | `release()` for own in-progress; controller `reclaim()` for live foreign claim | Does not touch completed rows |
+| Retire/delete completed alias row | No `delete`, `remove`, or `retire` API | Explicit controller authority required |
+| Demote completed row | `TRANSITIONS["completed"] == set()`; `completed -> blocked` is rejected | Explicit controller authority required |
 
-Precise off-plan completed breakdown (83):
-- DISC-003 retire set (27): sub-group A1 enumerated aliases.
-- A2 aliases (27): LANE-*/FIX-*/G6-*/HEAD-*/BASE-004 pattern rows folding into canonical parents.
-- Remaining orphans (29): ACP-001 (1) + 4 APP-012 sub-lanes + OPS-009/PROV-018..PROV-022/SYNC-001..SYNC-002/SDK-001..SDK-002/TOOL-012/018/019/WEB-004..006/REL-003/RUN-001 (24) + INSTALLED-DEFAULT-CONTRACT-INTEGRATION (1).
+`save_ledger()` validates row shape but does not authorize a transition.
+Raw `del claims[id]`, raw status replacement, or a direct `save_ledger()` call
+is therefore not a routine worker command. The old proposal's Stage 1 and
+Stage 2 snippets are withdrawn, not authorized instructions. No worker may
+extend `completion_claims.py` or bypass it in this lane.
 
-Conservative ledger-only controller proposal (NO plan-file mutation):
-- Stage 1: Remove 54 alias rows (27 DISC-003 + 27 A2) from claims.json. Removes 54 off-plan finding lines.
-- Stage 2: Demote AUD-017, AUD-020, INSTALLED-DEFAULT-CONTRACT-INTEGRATION to blocked (preserve notes). Removes 2 bad-note lines + 1 off-plan line (INSTALLED-INTEGRATION).
-- Remaining after stages 1-2: 83 - 54 - 1 = 28 off-plan + 0 bad-note = 28 findings. These 28 require canonicalization (plan-file authority) or demotion by an authorized controller -- NOT in this lane's safe set.
+## Proposed controller transaction
 
-Staged order to avoid false acceptance:
-- Stage 1 (hash-locked ledger removal): verify ledger/HEAD state; remove 54 verified alias rows from tasks/completion/claims.json only; git diff --check.
-- Stage 2 (demotions): set AUD-017, AUD-020, INSTALLED-DEFAULT-CONTRACT-INTEGRATION status completed->blocked; move completedNote to blockedNote; preserve scratchpad/session.
-- Stage 3 (re-run gate): python3 tools/convergence_gate.py -> expect 28 remaining finding lines, all off-plan-completed orphans requiring controller canonicalization/demotion. NOT GREEN -- convergence not falsely claimed.
-- Stage 4 (controller-only canonicalization): add plan stories for true orphans OR demote them; requires AGENTS.md plan-file authority.
-- ## Notes / Remaining limitations
-- This lane authored only `worklog/LEDGER-CONVERGENCE-PROPOSAL.md` and its own ledger row. No product, test, verifier, plan, ralph, or controller files were edited.
-- The proposal row itself (LEDGER-CONVERGENCE-PROPOSAL) is off-plan; after commit, convergence_gate reports total=87 (was 86) because the proposal's own completed claim is not in plan stories. A controller applying Stage 1 would remove or canonicalize this row during reconciliation.
-- Stage 4 canonicalization of the 28 remaining orphans requires plan-file authority (AGENTS.md: plan files immutable to implementers). This lane does not exercise that authority.
-- validate_repository.py backlog-exhaustion errors (51 stories classified as controller-accepted but appearing in exhaustion ledger) are independent of ledger cleanup and require separate controller classification work.
+This is a design, not an execution command. It requires a separate
+implementation/controller lane and an independent verifier.
+
+### Preconditions
+
+1. Freeze the exact integrated commit and calculate the full SHA-256 of
+   `tasks/completion/claims.json`; do not reuse stale `6c8cf2d8...`, which
+   belongs to the addendum's earlier commit `3ba4cf9`.
+2. Verify schema version, bounded row count, every row shape, all 78 IDs
+   present with `status == completed`, no 78 ID in plan stories, and the exact
+   `R51 union R27` set. Verify the three dead scratchpads are still absent or
+   already re-homed.
+3. Verify `AUD-017`, `AUD-020`, and
+   `INSTALLED-DEFAULT-CONTRACT-INTEGRATION` are completed and preserve their
+   exact notes. Record dependency consequences: demoting AUD-017/AUD-020
+   affects `PAR-001`, `COORD-001`, `SHIP-004`, and `DISC-119`.
+4. Confirm no accepted parent, frozen test hash, worklog, or product commit is
+   being edited or deleted. Confirm the transaction is not a feature rollback.
+
+### Disposable simulation
+
+Copy the repository and ledger to a disposable restricted fixture. In that
+copy only, re-home the three notes, remove R78, move each of the three
+completed notes verbatim to `blockedNote`, and validate the candidate. Run the
+gate against that copy. Do not write the canonical ledger during simulation.
+
+### Backup, candidate, atomic write
+
+Create a content-addressed backup of the pre-operation ledger, re-homing file,
+and transaction manifest. Write a candidate ledger plus manifest to temporary
+files in the same filesystem, fsync as required by the controller, validate
+JSON/schema/hash preconditions, then atomically replace the canonical ledger.
+Retain the backup and rollback metadata. On any mismatch, leave the canonical
+ledger untouched and report the exact failed precondition. Rollback restores
+the backup only under the same explicit controller authority and receipt
+process.
+
+### Post-operation verification
+
+The independent verifier, on the exact resulting commit, must run:
+
+1. JSON/schema validation and exact changed-ID diff: only R78 removals plus the
+   three status/note demotions, and the authored evidence re-home;
+2. `python3 tools/convergence_gate.py`, with expected ledger result described
+   below;
+3. `python3 tools/validate_repository.py`, independently, without treating
+   backlog findings as ledger convergence;
+4. repository validation, `git diff --check`, backup/hash/rollback receipt
+   checks, and preservation checks for accepted commits, worklogs, frozen test
+   hashes, and historical evidence;
+5. a signed or hash-linked post-operation receipt naming input SHA, output SHA,
+   transaction ID, verifier commit, commands, results, and unresolved rows.
+
+No convergence gate result is an acceptance claim. The parent remains open
+until its integrated journey and independent release verification satisfy the
+repository contract.
+
+## Count model and expected residuals
+
+Counts are finding lines emitted by `tools/convergence_gate.py`, not unique
+task IDs. A task can emit two lines when it is both off-plan and has a bad
+completed note.
+
+### Immutable bases
+
+| Base | Ledger SHA-256 | Off-plan lines | Bad-note lines | Total lines | Distinct finding IDs |
+|---|---|---:|---:|---:|---:|
+| `1f4a9e6`, before rejected proposal | `25bb55306e0f3f4650a2b4430d68a277627c15a3fc1d3c9a833109ab6985fca3` | 83 | 3 | 86 | 85 |
+| `d93927e`, rejected proposal row added | `950ac488642cd667700ee4582afddef192ecd986ea683ab88fe38b0fd935a2f4` | 84 | 3 | 87 | 86 |
+| `b16e71b`, prior verifier row added | `62d5af88aaa9dbef360afbd4b9dd760fbe5c85532f90c09419ddab706e4b3959` | 88 | 4 | 92 | 90 |
+| `4e5175e`, retry verifier row added | `10137d6df687357159f46209eef1e780c8c7092e01ce81496012b40422970d52` | 89 | 4 | 93 | 91 |
+
+Current observed gate is `total=93` at `4e5175e`/`056a210` base before this
+proposal row is counted. This correction's in-progress row is itself a new
+off-plan row, so a later gate count can become `94` unless the controller
+includes or retires it. The correction row must not be silently folded into
+the authoritative R78 set.
+
+The drift from 86 to 93 is not a change to DISC-003's 78 aliases. It is seven
+additional planning/verifier rows: `LEDGER-CONVERGENCE-PROPOSAL`,
+`LEDGER-CONVERGENCE-VERIFY`, `LEDGER-CONVERGENCE-VERIFY-RETRY`,
+`APP-010-FROZEN-INTEGRITY`, `APP-010-REVISION-RECEIPT`,
+`APP-010-REVISION-RECEIPT-INTEGRATION`, and this correction row. The current
+observed 93 includes the first six and excludes this in-progress row from
+`ledger_errors()` because only completed rows are findings.
+
+### Residual after the authoritative operation
+
+At immutable base `1f4a9e6`, disposable simulation of R78 removal plus the
+three demotions leaves exactly 4 finding lines:
+
+```text
+APP-012-FILE-OPS
+APP-012-READ-EXECUTOR
+APP-012-READ-INTEGRATION
+APP-012-SERVER-READ-WIRING
+```
+
+At prior-verifier base `b16e71b`, the same operation leaves exactly 10 finding
+lines. The retry verifier commit `4e5175e` and current `056a210` add one
+completed off-plan retry row, so the current base operation leaves exactly 11
+finding lines:
+
+```text
+APP-010-FROZEN-INTEGRITY       off-plan + bad-note ('out of scope') = 2 lines
+APP-010-REVISION-RECEIPT       off-plan = 1
+APP-010-REVISION-RECEIPT-INTEGRATION off-plan = 1
+APP-012-FILE-OPS               off-plan = 1
+APP-012-READ-EXECUTOR          off-plan = 1
+APP-012-READ-INTEGRATION       off-plan = 1
+APP-012-SERVER-READ-WIRING     off-plan = 1
+LEDGER-CONVERGENCE-PROPOSAL   off-plan = 1
+LEDGER-CONVERGENCE-VERIFY     off-plan = 1
+LEDGER-CONVERGENCE-VERIFY-RETRY off-plan = 1
+```
+
+The retry row is already present at current base. This correction row is
+in-progress and therefore emits no finding. Any controller disposition for
+proposal, verifier, retry, or correction rows requires explicit scope and must
+not be silently counted as DISC-003 reconciliation.
+
+## Classification of every residual after R78 reconciliation
+
+This classification is for the current-base 11-line projection. It is not an
+instruction to mutate state.
+
+| Residual finding | Classification | Required authority/evidence |
+|---|---|---|
+| `APP-010-FROZEN-INTEGRITY` off-plan line | Investigate, then canonicalize or keep open | Review its `out of scope` note and parent receipt; no automatic fold |
+| `APP-010-FROZEN-INTEGRITY` bad-note line | Keep open pending investigation | Its note explicitly limits scope; no completion claim |
+| `APP-010-REVISION-RECEIPT` | Canonicalize only if controller maps it to `APP-010`; otherwise keep open | Parent ownership and receipt scope must be verified |
+| `APP-010-REVISION-RECEIPT-INTEGRATION` | Canonicalize only if controller maps it to `APP-010`; otherwise keep open | Integrated revision receipt must remain durable |
+| `APP-012-FILE-OPS` | Keep open under in-progress `APP-012` | Parent remains open; do not retire child as accepted |
+| `APP-012-READ-EXECUTOR` | Keep open under in-progress `APP-012` | Parent remains open; preserve frozen hash and note |
+| `APP-012-READ-INTEGRATION` | Keep open under in-progress `APP-012` | Parent remains open; preserve integrated receipt |
+| `APP-012-SERVER-READ-WIRING` | Keep open under in-progress `APP-012` | Parent remains open; preserve caller/wiring evidence |
+| `LEDGER-CONVERGENCE-PROPOSAL` | Retire or canonicalize only under controller authority | Historical proposal must remain in Git/worklog evidence |
+| `LEDGER-CONVERGENCE-VERIFY` | Retire or canonicalize only under controller authority | Preserve verifier worklog and rejection receipt |
+| `LEDGER-CONVERGENCE-VERIFY-RETRY` | Retire or canonicalize only under controller authority | Preserve retry verifier worklog and rejection receipt |
+
+`canonicalize` means an explicit controller mapping to a real plan parent with
+evidence retained; it does not mean marking that parent completed. `demote`
+means an explicit controller status decision preserving the note and recording
+dependency ripple. No current residual is authorized for automatic demotion.
+The retry row and this correction row require the same explicit disposition if
+they become completed/off-plan findings later.
+
+## Separate repository backlog gate
+
+`validate_repository.py` backlog-exhaustion findings are separate from ledger
+convergence. The verifier reports a pre-existing 51-error backlog-exhaustion
+failure at current base. A green convergence simulation cannot suppress,
+reinterpret, or satisfy that guard. The controller must run repository
+validation independently and retain its failure or success receipt. No
+backlog, plan, `ralph`, DISC-003 manifest, protection, or acceptance state is
+changed by this proposal.
+
+## Explicit authorization and handoff
+
+Before application, the designated controller/integrator must explicitly
+authorize all of the following in a recorded transaction:
+
+1. the exact integrated commit and fresh pre-operation ledger SHA;
+2. R78, exactly as `R51 union R27`, and the authoritative mapping table;
+3. evidence re-homing for all three dead-scratchpad rows;
+4. removal of exactly the authorized alias rows, if approved;
+5. demotion of `AUD-017`, `AUD-020`, and
+   `INSTALLED-DEFAULT-CONTRACT-INTEGRATION`, with notes preserved and
+   dependency impact recorded;
+6. any separate disposition for off-plan proposal/verifier/retry/correction
+   rows and current APP-010/APP-012 residuals;
+7. backup, atomic-write, rollback, schema, repository-validation, gate, and
+   independent-verifier procedures;
+8. post-operation receipt location and hashes.
+
+Application belongs to a separate implementation/controller lane. Verification
+belongs to an independent verifier lane on the exact resulting commit. This
+proposal author cannot authorize, apply, or accept reconciliation. Until those
+lanes complete, DISC-003 and the parent convergence task remain open.

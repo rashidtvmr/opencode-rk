@@ -867,6 +867,12 @@
       "session": "ses_f2e2ae321ffe6rN1WqKR6j2r1D",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-PROPOSAL-CORRECTION": {
+      "completedNote": "Corrected proposal: authoritative R78 mapping, 15 target fixes, dead-note re-home, legal API boundary, controller transaction, base-count drift, residual matrix. Author checks: diff clean; no Cargo; gate base total=93 recorded.",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-PROPOSAL-CORRECTION.md",
+      "session": "ses_f2df0db24ffeURdCksWFAmHJFm",
+      "status": "completed"
+    },
     "LEDGER-CONVERGENCE-VERIFY": {
       "completedNote": "VERIFY FAIL on proposal as written. Base 1f4a9e6 = 86 findings/85 tids/83 off-plan/3 bad-note reproduced; d93927e = 87/86. Authoritative retire=78 (51+27), not 54; A2 dup 27, omits 24; true residual=4 APP-012 sub-lanes, not 28. No delete/demote API; needs controller authority. 3 rows cite absent worklogs. See worklog/LEDGER-CONVERGENCE-VERIFY.md",
       "scratchpad": "worklog/LEDGER-CONVERGENCE-VERIFY.md",
