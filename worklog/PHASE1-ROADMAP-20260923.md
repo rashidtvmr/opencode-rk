@@ -2,14 +2,16 @@
 
 ## Claim
 
-- Task: `PHASE1-ROADMAP-20260923`, session `ses_f2e2b0c72ffeT2x01toLrwBRBC`.
-- Branch: `plan/phase1-roadmap`, base `1f4a9e6` (local) vs `origin/main 8a91a7b`.
+- Task: `PHASE1-ROADMAP-CORRECTION`, session `ses_f2e0a198bffed33LOjzpZaaADc`.
+- Corrected artifact originally produced by `PHASE1-ROADMAP-20260923`, session
+  `ses_f2e2b0c72ffeT2x01toLrwBRBC`.
+- Branch: `plan/phase1-roadmap`, audited roadmap revision `bb027c1`; `origin/main 8a91a7b` is an ancestor. At the audited revision, `git rev-list --left-right --count origin/main...bb027c1` = `0 174` (174 ahead, 0 behind).
 - Owned files ONLY: `worklog/PHASE1-ROADMAP-20260923.md` + own ledger row. No product/test/controller edits.
-- Status: `in-progress` (analysis lane, no acceptance claimed).
+- Status: `completed` (corrections landed; no acceptance claimed).
 
 ## Source evidence (exact revisions)
 
-- Local HEAD `1f4a9e6 integrate installed default contract evidence`; `origin/main 8a91a7b Complete-app wave 21-Sep`.
+- Audited roadmap revision `bb027c1 plan(phase1-roadmap): evidence-grounded dependency graph to unsigned release`; `origin/main 8a91a7b Complete-app wave 21-Sep`. The audited branch already contains `origin/main`; no rebase is required for this ancestry relation.
 - Plan scope: 89 stories across `tasks/completion/{local,delivery,discovered,parity,remote,tui}.json`.
   Ledger-vs-plan accounting (local tree): completed 47, not-started 40, in-progress 1, blocked 1.
 - Gate: `python3 tools/convergence_gate.py` = CONVERGENCE BLOCKED, total=86
@@ -27,15 +29,14 @@
 ## Mandatory parents (must stay open, evidence)
 
 1. APP-012 (in-progress, `worklog/APP-012.md`): golden installed journey open. Blockers: trusted RED
-   being authored; frozen `installed_default_entrypoint.rs` has five immutable `todo!()` bodies
-   (controller contract review required); APP-001/APP-005 rows admit unwired wiring; executor only
-   runs bash/shell/echo (`tools/src/executor.rs:105-119`), RequireHuman converts to terminal error
+   being authored; APP-001/APP-005 rows admit unwired wiring; executor generic `execute` only
+   runs bash/shell/echo (`crates/tools/src/executor.rs:118-125`), RequireHuman converts to terminal error
    (no approval-resume channel); `install-oc2.ps1:54-66` lacks native closure + bounds; no release workflow.
 2. TUI-011 (blocked, `worklog/TUI-011.md`): builder matrix done (macOS arm64+x86_64, linux-gnu
    x86_64+aarch64, windows-gnu DLL+import-lib via zig dlltool, MSVC fail-closed by design).
-   Remaining: vendor/copy lanes, macOS signing/notarization (external), frozen
-   `native_artifact_manifest` conflicts (SHA-digit predicate :95, 64KiB dylib bound :122, see
-   `worklog/TUI-011-FROZEN-CONTRACT-REVIEW.md`).
+   Remaining: vendor/copy lanes, macOS signing/notarization (external). The frozen
+   `native_artifact_manifest` contract correction is landed at SHA `cb7d4cde...` (full
+   artifact hash recorded below); no frozen-contract correction remains open.
 3. DISC-003 (blocked, `worklog/DISC-003-INTEGRATED-REMAP-ADDENDUM.md`): 80 findings on integrated
    candidate (78 alias retire + 2 bad-note rows); controller authority required, no acceptance.
 4. SESS-008 (blocked, `worklog/SESS-008-CALLER-REVIEW.md`): `persist.rs` unwired state-only;
@@ -46,13 +47,15 @@
 7. REL-002 (blocked, `worklog/REL-002-STRONG-RED.md`): 11/12 pass, executable planning CI step fails;
    blocked on protected workflow review.
 8. UI-014 (blocked, `worklog/UI-014-TURN-WORKER-PTY-RED.md`): product PTY GREEN but parent RED
-   (fresh-HOME setup/first session absent, five todo! bodies).
+   (fresh-HOME setup/first session absent).
 9. WEB-009 (blocked, `worklog/WEB-009-EMBEDDED-VERIFY.md`): embedded proof GREEN, blocked on
    activity unification + external provider/browser evidence.
 10. INT-010 (blocked): no ownership lock; duplicate impl files; needs single owned-file assignment.
 11. ROUTE-009 (blocked): no card/worklog/impl; stale ownership-gap note.
-12. INSTALLED-DEFAULT-CONTRACT (blocked): 4/5 without receipt; GREEN 5/5 only with explicit
-    `OC2_E2E_REVISION`; packaging must inject truthful receipt (frozen sha fec2fdb9...).
+12. INSTALLED-DEFAULT-CONTRACT (blocked on packaging evidence, not contract correction): frozen
+    `installed_default_entrypoint.rs` correction is landed at SHA `fec2fdb9...`; 4/5 without
+    receipt, GREEN 5/5 only with explicit `OC2_E2E_REVISION`; packaging must inject a truthful
+    receipt. The landed correction is not open controller work.
 13. APP-001-REPAIR-RED (blocked): macOS PTY RED, restoration needs ESC `[?1049l`; Linux/Windows out of scope.
 14. APP-005-SECURE-RED (blocked): setup repaint echoes raw sentinel, masking required.
 15. FIX-MCP-STUBS (blocked): frozen `tests/mcp_config.rs:76,87` json!-repeat uncompilable + `:95,109`
@@ -75,19 +78,21 @@
   (RED-ready sha 945236c4...), plus 20 wave-5 LANE-* lanes on origin (AGENTS-LOAD, AUTH-SETUP,
   BOOTSTRAP, CANVAS-RENDER, CLI-ONCE, CMD-LOAD, DCLIENT-DOCS, MCP-CONFIG, RULES-INJECT, SES-IMPORT,
   STREAM-FIX, THEME-RENDER, TUI-BEARER2, TUI-PAINT, ULTRA-LIVE, VALIDATE, VERSION, WEB-ACTIONS,
-  WEB-BEARER, WF-LIVE; scratchpads `worklog/W5-*.md` absent locally = this branch behind origin).
+  WEB-BEARER, WF-LIVE; declared `worklog/W5-*.md` scratchpads are absent from both the audited
+  branch and `origin/main`; absence is not branch-ancestry evidence.
 - Integration lanes required (serialized, one owned file each): APP-012 read-path landing (done
   locally 40d56d5/2ff1e7b), DISC-108/109/111/112/113/114 mod prewires (orchestrator-done, must verify
-  on merged tree), frozen-contract-review corrections (installed_default_entrypoint 5x todo!,
-  native_artifact_manifest 2 assertions; controller authority only), DISC-003 78-row retire
-  (controller only), Windows ps1 native-closure RED author (needs Windows runner).
+  on merged tree), DISC-003 78-row retire (controller only), Windows ps1 native-closure RED author
+  (needs Windows runner). Frozen contract corrections are already landed: `installed_default_entrypoint.rs`
+  SHA `fec2fdb9...`; `native_artifact_manifest.rs` SHA `cb7d4cde...`.
 - Verifier lanes required: independent rerun of every frozen suite on exact integrated revision;
   convergence_gate + validate_repository must go GREEN (controller-owned fixes); SHIP-004 full-scope
   rerun; SHIP-006 soak; SHIP-003 live canaries (budgeted, credentials-gated).
 
 ## Conflicts / owned-file collisions
 
-- `crates/cli/tests/installed_default_entrypoint.rs`: INSTALLED-DEFAULT-CONTRACT vs APP-012 parent RED.
+- `crates/cli/tests/installed_default_entrypoint.rs`: packaging-receipt evidence for
+  INSTALLED-DEFAULT-CONTRACT vs APP-012 parent RED; the frozen contract correction is landed.
 - `crates/server/src/lib.rs`: FIX-STREAM turn path vs integrator wiring patches.
 - `crates/tools/src/lib.rs`, `crates/server/src/lib.rs` mod lines: prewire centrally, never in lanes.
 - `crates/cli/src/main.rs, app_start.rs, tui_entry.rs`: APP-001 repair vs LANE-TUI-LAND vs LANE-DEFAULTTUI-FIX.
@@ -100,8 +105,9 @@
 - Parallel-safe now: COORD-001 RED-author + NET-001 RED-author + DISC-101 RED-author (distinct files,
   distinct deps) + any missing-artifact rebuild lane with a defined owned file + verifier reruns
   (serial heavy validation: one at a time, CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2, 8GiB budget).
-- Blocked behind controller: DISC-003 retire, frozen-test corrections, SESS-008 retire/decompose,
-  PROV-023 catalog entry, INT-010 ownership assignment, COORD-002..008 (need COORD-001).
+- Blocked behind controller: DISC-003 retire, SESS-008 retire/decompose, PROV-023 catalog entry,
+  INT-010 ownership assignment, COORD-002..008 (need COORD-001). Frozen contract corrections are
+  landed and removed from this controller queue.
 - Blocked on external: SHIP-001 signing (macOS notarization + Windows signing identities),
   SHIP-003 canaries (credentials/budget), SHIP-005/MOB-006/DISC-118 (devices), MSVC (out of scope:
   Windows ABI is x86_64-pc-windows-gnu only per 2026-09-23 controller decision).
@@ -114,14 +120,16 @@
 - Implementation lane (owned file, wired): M (2-5 sessions).
 - Repair-child wiring (approval-resume channel, executor read/grep/write/edit, persistent keyring
   setup via keyring 3.6.3 MSRV-compatible): M-L each (3-8 sessions).
-- Rebuild lane (missing artifact): S-M. Frozen-contract review + refreeze: S + controller decision.
+- Rebuild lane (missing artifact): S-M. Frozen contract corrections are already landed; no review/
+  refreeze estimate remains on this path.
 - Integration + verifier rerun per wave: S-M, serialized.
 - SHIP chain (001..008): L-XL; SHIP-005/006 device/soak longest; external blockers unbounded.
 
 ## Critical path to unsigned Phase 1 release
 
-1. Controller rulings (DISC-003 retire, frozen corrections, SESS-008 decompose, PROV-023 child,
-   INT-010 ownership) -> gates unblock.
+1. Controller rulings (DISC-003 retire, SESS-008 decompose, PROV-023 child, INT-010 ownership)
+   -> gates unblock. The installed-entrypoint and native-artifact contract corrections are already
+   landed (`fec2fdb9...`, `cb7d4cde...`) and are not critical-path work.
 2. APP-001 repair + APP-005 secure-red + APP-012 tool/approval/restart REDs GREEN (macOS source).
 3. TUI-011 vendor/copy lanes + ps1 closure RED on Windows runner + Linux PTY matrix.
 4. APP-012 golden journey GREEN on packaged artifact (macOS first) -> SHIP-001 unsigned artifacts
@@ -155,7 +163,20 @@
 
 ## Decisions / unknowns
 
-- No product code written (lane authority forbids). Branch is behind origin/main (missing W5
-  scratchpads + 8a91a7b wave commit); rebase plan/phase1-roadmap before integration use.
+- No product code written (lane authority forbids). At the audited roadmap revision `bb027c1`, the
+  branch is 174 commits ahead and 0 behind `origin/main`; no rebase is required. W5 scratchpad
+  absence is shared by the audited branch and `origin/main`, so it supplies no ancestry evidence.
+- Frozen contract corrections are landed and independently rechecked: `installed_default_entrypoint.rs`
+  SHA-256 `fec2fdb94c74df2493eb8eb2f2098732d813096f0e01928f00a8cb8c621bf317`;
+  `native_artifact_manifest.rs` SHA-256 `cb7d4cde7c3aed1916814c9aab747b68aa48015518c444e90bd8a58e66bd5c8b`.
 - Ledger row stays `in-progress`; no acceptance claimed. Verifier must confirm FIX-STREAM env_lock
   claim and wave-5 LANE outcomes independently.
+
+## Correction verification
+
+- Verifier report reviewed: `cf7859eea04fe677b20e1b84b848bb177edd6dce`.
+- `git rev-list --left-right --count origin/main...bb027c1` -> `0 174`; `git merge-base --is-ancestor origin/main bb027c1` -> success.
+- `git ls-tree -r --name-only bb027c1 | grep 'W5-'` and the equivalent `origin/main` check -> no W5 scratchpad paths in either tree.
+- Frozen hashes -> `fec2fdb94c74df2493eb8eb2f2098732d813096f0e01928f00a8cb8c621bf317`, `cb7d4cde7c3aed1916814c9aab747b68aa48015518c444e90bd8a58e66bd5c8b`.
+- `crates/tools/src/executor.rs` generic dispatch citation refreshed to lines `118-125`.
+- `git diff --check` -> clean. Gate/guard remain recorded as blocked/failing above; no acceptance claimed.
