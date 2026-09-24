@@ -161,6 +161,12 @@
       "session": "ses_f2ccbfb6effeTXk1flxdKqQP55",
       "status": "blocked"
     },
+    "APP012-KEYRING-PERSISTENCE-RED": {
+      "blockedNote": "BLOCKED: no admitted compilable public credential-persistence seam exists on 1cb7039; K01-K10 cannot compile without inventing forbidden symbols; no test/source/dependency/fake/API changes, Cargo, native keyring, hash, or freeze; required seam and continuation command recorded in worklog/APP012-KEYRING-PERSISTENCE-RED.md",
+      "scratchpad": "worklog/APP012-KEYRING-PERSISTENCE-RED.md",
+      "session": "ses_f2b9ea3b9ffeze4hG5032Y6Tk8",
+      "status": "blocked"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
