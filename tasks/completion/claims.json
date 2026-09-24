@@ -873,6 +873,12 @@
       "session": "ses_f2cd8fdc1ffeFytgFHCfmIlhOK",
       "status": "completed"
     },
+    "PACKAGE-RECEIPT-BINDING-CONTRACT-VERIFY": {
+      "blockedNote": "BLOCKED: contract source-grounded, but manifest transport/schema, runtime parser, archive layout, Windows parity/caps, producer owner unspecified. See worklog/PACKAGE-RECEIPT-BINDING-CONTRACT-VERIFY.md. Hash fec2fdb9...; diff check clean; convergence exit 1; no product test.",
+      "scratchpad": "worklog/PACKAGE-RECEIPT-BINDING-CONTRACT-VERIFY.md",
+      "session": "ses_f2cd1b633ffethHotQ6IlxnF2i",
+      "status": "blocked"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
