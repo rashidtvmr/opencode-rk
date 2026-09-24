@@ -231,3 +231,151 @@ from an isolated tree, work in a dedicated git worktree on a named branch:
   orchestrator proves the prior owner stopped and re-claims it.
 - No force-push, no history rewrite, no branch deletion on the remote. If a
   push is rejected, rebase and re-run tests; never `--force`.
+
+## 8. Worker intake checklist (canonical AGENTS.md parity)
+
+Before starting any work, confirm every item below. A missing item is a blocker;
+set status `blocked` with the exact gap rather than proceeding.
+
+1. **Task identity**: task ID, task type, role, assigned route, and model are
+   explicit in your delegation prompt. Validate them against section 12 below.
+2. **Owned scope**: exactly one owned file (or the explicitly listed set). No
+   other product, test, controller, or policy files may be modified.
+3. **Source evidence**: cite exact repository commit, path, and line/symbol for
+   each discovered behavior before writing code (AGENTS.md Required workflow
+   step 1). Distinguish current code, shared compatibility, planned upstream
+   behavior, and new requirements.
+4. **Observable contract**: define failure states, ownership/lifetime,
+   persistence transitions, and resource bounds for the leased task (AGENTS.md
+   Required workflow step 2).
+5. **Persistence and lifetime invariants**: if your task involves state that
+   outlives a single function call (sessions, database rows, file handles,
+   spawned processes), document the creation site, owner, transfer rules, and
+   destruction/cleanup guarantee in your scratchpad before implementation.
+6. **Resource bounds**: confirm byte budgets, queue limits, timeout values, and
+   memory ceilings relevant to your task. No unbounded queue or unbounded
+   retained output (AGENTS.md Non-negotiable engineering rules).
+7. **Security posture**: confirm your task does not require direct secret file
+   access, unrestricted inherited environment, shell-string concatenation, or
+   broad filesystem access. Work through the permission broker (docs/SECURITY.md).
+8. **Test plan**: RED tests must compile and fail for the missing behavior
+   before implementation. Frozen hash recorded. Discovery/declarative tasks
+   still require executable validators and a captured failing fixture
+   (docs/TDD.md section 3).
+9. **Convergence check**: run `python3 tools/convergence_gate.py` before
+   choosing leaf work. Your isolated GREEN is a candidate, not parent-completion
+   authority (docs/CONVERGENCE.md).
+10. **Dependencies**: confirm prerequisite tasks are `completed` in the ledger,
+    not merely `in-progress` or self-reported done.
+
+## 9. Independent verification boundary
+
+You cannot verify your own work. The following rules are mandatory:
+
+- The implementer and the verifier MUST be separate agents. Never mark your own
+  story accepted or assert completion on your own behalf (docs/TDD.md section 6).
+- An independent verifier runs frozen tests against the exact integrated tree.
+  Your self-report is advisory only; the gate re-reads the file on disk and runs
+  the Rust test target (AGENTS.md Subagent lane gating).
+- Do not weaken assertions, narrow selectors, regenerate expected outputs, or
+  edit frozen tests to obtain GREEN. A disputed frozen test is a blocked
+  contract review, never an implementation edit (docs/CONVERGENCE.md Immutable-test rule).
+- Submit evidence and a patch, never acceptance. The verifier decides whether
+  the slice can be integrated and accepted (AGENTS.md Required workflow step 6).
+
+## 10. Emergency stop and revocation
+
+If you receive a stop signal, budget exhaustion notice, context ceiling, or
+revocation from the orchestrator, execute this procedure immediately. Do NOT
+complete your current operation first.
+
+1. **Stop before tools and mutations**: halt immediately. Do not invoke further
+   tool calls, file writes, shell commands, or network requests after receiving
+   the stop signal. The stop takes effect even without a full brief.
+2. **Assess claim state**:
+   - **No claim held**: report `no claim held` to the orchestrator. Do NOT
+     attempt to create, update, or fabricate a ledger entry. No ledger operation
+     is required or permitted when you hold no claim.
+   - **Claim exists**: update your ledger row to `blocked` with the exact stop
+     reason using `cc.update(...)` ONLY if the ledger API is reachable and safe
+     to call. If the ledger tool is unavailable, the session is being revoked, or the
+     update would itself constitute a mutation after stop, report the exact
+     recovery state (claim ID, last known status) to the orchestrator without
+     performing the update.
+3. **Report**: deliver the handoff schema (section 13) with status `blocked` and
+   the stop reason. Include what was completed vs remaining at the instant of stop.
+4. **No new work**: a stop exception cannot authorize new work. Do not pick
+   another task, start a repair, or continue implementation after a stop signal
+   even if the blocker appears trivially resolvable. Only the orchestrator can
+   re-delegate.
+
+## 11. Validation N/A semantics
+
+When your task card or delegation prompt marks validation as `N/A`, the
+following strict semantics apply:
+
+- `N/A` means **no product test is required** for this specific task. It applies
+  only to purely declarative, documentation-only, or policy-only lanes where no
+  product code changes.
+- `N/A` **never** bypasses the discovery/declarative executable validator
+  requirement. A purely declarative or discovery task still needs executable
+  validators and a captured failing fixture (docs/TDD.md section 3: "do not
+  invent product tests for it" but DO provide validators).
+- `N/A` **never** bypasses frozen-test status checks. If frozen tests exist for
+  adjacent code, they must still pass on the integrated tree.
+- `N/A` **never** bypasses RED evidence requirements for tasks that involve
+  product code. If your task touches product code, validation is not `N/A`
+  regardless of what the prompt says; report the discrepancy as `blocked`.
+- `N/A` **never** bypasses contract validation. The observable contract,
+  failure states, and resource bounds must still be defined in the scratchpad
+  (AGENTS.md Required workflow step 2).
+
+## 12. Route and allowlist validation
+
+Before claiming or starting work, validate your execution authorization:
+
+1. **Assigned route**: confirm the route/model identifier in your delegation
+   prompt matches the route you are actually executing on.
+2. **Allowlist check**: if a user allowlist is provided in your task context,
+   verify your assigned route appears in it. If your route is not in the
+   allowlist, set status `blocked` with the exact mismatch and do not proceed.
+3. **Canonical N/A**: if the task specifies `N/A -- no user allowlist`, then no
+   allowlist restriction applies; confirm only that your assigned route matches
+   the delegation.
+4. **Route permission confirmation**: record in your scratchpad that you verified
+   the assigned route against the allowlist (or confirmed canonical N/A). This
+   is part of the intake checklist (section 8, item 1).
+
+## 13. Structured handoff schema
+
+Your completion message to the orchestrator MUST include ALL of the following
+fields, in this order. Omitting a field is a protocol violation; use `N/A` only
+where the canonical schema permits it (see section 11 for N/A constraints).
+
+1. **Task ID**: the exact task identifier from your delegation prompt.
+2. **Task type**: e.g., `implementation`, `policy`, `discovery`, `test-author`,
+   `verification`.
+3. **Role**: your role in this lane, e.g., `worker`, `verifier`, `integrator`.
+4. **Status**: final ledger status (`completed`, `blocked`).
+5. **Model/route**: the provider/model identifier you executed on, e.g.,
+   `9router/xk/qwen/qwen3.8-max:free`.
+6. **Analysis**: concise summary of what the task required and how you
+   approached it, citing source evidence (commit, path, line/symbol).
+7. **Changes**: exact list of files modified, created, or deleted. For each
+   file, state the nature of the change (e.g., "added sections 8-13 to
+   `.agents/WORKER.md`").
+8. **Commands/results**: exact commands run (prefixed with `rtk`) and their
+   outputs or exit codes. Include test commands, lint checks, and validation
+   gates.
+9. **Commit/ref**: the git commit hash and branch/ref pushed to. If no commit
+   was made (e.g., blocked before landing), state `no commit` with the reason.
+10. **Hashes**: frozen test hash (if applicable), implementation hash, and any
+    other integrity digests referenced by the verifier.
+11. **Resources**: memory measurements, command durations, token/context usage
+    estimates, and any deviations from the 8 GB budget.
+12. **Unresolved gaps**: exact descriptions of blockers, missing behaviors,
+    partial implementations, or follow-up work required. Do not claim all
+    features are covered while any upstream surface or mandatory task is
+    unresolved (AGENTS.md Completion report).
+13. **Scratchpad path**: e.g., `worklog/<TASK-ID>.md`. The orchestrator collects
+    these via `cc.scratchpad_report(document, session)`.
