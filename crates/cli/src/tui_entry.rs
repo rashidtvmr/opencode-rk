@@ -425,6 +425,36 @@ async fn fetch_snapshot_async(
     .map_err(|_| "live snapshot task failed".to_owned())?
 }
 
+async fn fetch_or_create_snapshot_async(
+    origin: &str,
+    session: Option<&str>,
+    auth: Option<&str>,
+) -> Result<LiveSnapshot, String> {
+    match fetch_snapshot_async(origin, session, auth).await {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error)
+            if session.is_none()
+                && error.starts_with("daemon is reachable but has no sessions yet") =>
+        {
+            let origin = origin.to_owned();
+            let auth = auth.map(str::to_owned);
+            tokio::task::spawn_blocking(move || {
+                http_request(
+                    &origin,
+                    "POST",
+                    "/api/sessions",
+                    Some(r#"{"title":"New session"}"#),
+                    auth.as_deref(),
+                )?;
+                fetch_snapshot(&origin, None, auth.as_deref())
+            })
+            .await
+            .map_err(|_| "first-session task failed".to_owned())?
+        }
+        Err(error) => Err(error),
+    }
+}
+
 async fn submit_request(
     worker: &TurnWorkerHandle,
     mut request: TurnRequest,
@@ -665,18 +695,29 @@ fn native_page_lines(
     transcript: &[String],
     width: usize,
     height: usize,
+    setup_mode: bool,
 ) -> Vec<String> {
     let width = width.max(20);
     let height = height.max(8);
     let mut lines = Vec::new();
-    let title = snapshot
-        .map(|s| format!("OpenCode RK TUI — {}", s.title))
-        .unwrap_or_else(|| "OpenCode RK TUI — offline".to_string());
+    let title = if setup_mode {
+        "OpenCode RK TUI — provider setup".to_string()
+    } else {
+        snapshot
+            .map(|s| format!("OpenCode RK TUI — {}", s.title))
+            .unwrap_or_else(|| "OpenCode RK TUI — offline".to_string())
+    };
     lines.push(title);
     lines.push(format!(
         "model: {model}  |  Ctrl+P palette  Ctrl+T context  ? help  Ctrl+C quit"
     ));
     lines.push("─".repeat(width.min(120)));
+    if setup_mode {
+        lines.push(crate::app_start::setup_message().to_string());
+        lines.push(
+            "Provider setup is required before starting a session. Ctrl+C or :q exits.".to_string(),
+        );
+    }
     match page {
         NativePage::Chat => {
             let body_rows = height.saturating_sub(7);
@@ -874,12 +915,13 @@ async fn native_interactive_loop(
     model: &str,
     reasoning_effort: &str,
     auth: Option<&str>,
+    setup_mode: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cols, rows) = native_terminal_size();
     let mut host = crate::native_host::NativeHost::new(crate::native_host::HostConfig {
         cols: cols.min(u32::from(u16::MAX)) as u16,
         rows: rows.min(u32::from(u16::MAX)) as u16,
-        skip_onboarding: true,
+        skip_onboarding: !setup_mode,
     });
     let _ = host.step(if live.is_some() {
         crate::native_host::HostEvent::DaemonLive
@@ -917,6 +959,7 @@ async fn native_interactive_loop(
         &transcript,
         renderer.cols() as usize,
         renderer.rows() as usize,
+        setup_mode,
     );
     paint_native(&mut renderer, &lines)?;
     let mut needs_paint = false;
@@ -948,6 +991,7 @@ async fn native_interactive_loop(
                     &transcript,
                     renderer.cols() as usize,
                     renderer.rows() as usize,
+                    setup_mode,
                 );
                 paint_native(&mut renderer, &lines)?;
                 needs_paint = false;
@@ -1015,6 +1059,7 @@ async fn native_interactive_loop(
                             &transcript,
                             renderer.cols() as usize,
                             renderer.rows() as usize,
+                            setup_mode,
                         );
                         paint_native(&mut renderer, &lines)?;
                         needs_paint = false;
@@ -1069,6 +1114,7 @@ async fn native_interactive_loop(
                             &transcript,
                             renderer.cols() as usize,
                             renderer.rows() as usize,
+                            setup_mode,
                         );
                         paint_native(&mut renderer, &lines)?;
                         needs_paint = false;
@@ -1341,6 +1387,33 @@ pub async fn run_with_dir(
     args: TuiArgs,
     data_dir: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    run_with_startup(args, data_dir, false, false).await
+}
+
+/// Run the no-subcommand application entrypoint with its planned initial view.
+/// Setup launches the native onboarding surface without misreporting an empty
+/// daemon as offline. Main launches atomically create the first session when an
+/// authenticated daemon is empty.
+pub async fn run_default(
+    args: TuiArgs,
+    data_dir: Option<&Path>,
+    view: crate::app_start::StartupView,
+) -> Result<(), Box<dyn std::error::Error>> {
+    run_with_startup(
+        args,
+        data_dir,
+        view == crate::app_start::StartupView::Setup,
+        view == crate::app_start::StartupView::Main,
+    )
+    .await
+}
+
+async fn run_with_startup(
+    args: TuiArgs,
+    data_dir: Option<&Path>,
+    setup_mode: bool,
+    create_first_session: bool,
+) -> Result<(), Box<dyn std::error::Error>> {
     let keymap = resolve_keymap(args.submit_keymap)
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let memory = load_memory(&args.memory);
@@ -1356,6 +1429,31 @@ pub async fn run_with_dir(
     }
     let auth_owned = resolve_origin_bearer(args.origin.as_deref(), data_dir);
     let auth = auth_owned.as_deref();
+    if setup_mode {
+        if args.once {
+            return Err("provider setup requires an interactive terminal".into());
+        }
+        if !std::io::stdin().is_terminal() {
+            return Err("refusing provider setup on piped stdin: run on a TTY".into());
+        }
+        #[cfg(feature = "native")]
+        {
+            return native_interactive_loop(
+                keymap,
+                &memory,
+                None,
+                &args.model,
+                &args.reasoning_effort,
+                auth,
+                true,
+            )
+            .await;
+        }
+        #[cfg(not(feature = "native"))]
+        {
+            return Err("in-app provider setup requires the native build".into());
+        }
+    }
     if args.follow {
         let Some(origin) = args.origin else {
             return Err("--follow requires --origin".into());
@@ -1370,7 +1468,12 @@ pub async fn run_with_dir(
         .await;
     }
     if let Some(origin) = &args.origin {
-        match fetch_snapshot_async(origin, args.session.as_deref(), auth).await {
+        let snapshot = if create_first_session {
+            fetch_or_create_snapshot_async(origin, args.session.as_deref(), auth).await
+        } else {
+            fetch_snapshot_async(origin, args.session.as_deref(), auth).await
+        };
+        match snapshot {
             Ok(snapshot) => {
                 if args.once {
                     let frame = render_frame(keymap, &memory, &args.model, Some(&snapshot));
@@ -1386,6 +1489,7 @@ pub async fn run_with_dir(
                         &args.model,
                         &args.reasoning_effort,
                         auth,
+                        false,
                     )
                     .await;
                 }
@@ -1436,6 +1540,7 @@ pub async fn run_with_dir(
             &args.model,
             &args.reasoning_effort,
             auth,
+            false,
         )
         .await
     }

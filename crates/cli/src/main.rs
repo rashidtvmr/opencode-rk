@@ -253,7 +253,10 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             submit_keymap: None,
                             memory: vec![],
                         };
-                        tui_entry::run_with_dir(args, Some(&data)).await?;
+                        let view = plan.view.ok_or(
+                            "native default launch is missing its planned startup view",
+                        )?;
+                        tui_entry::run_default(args, Some(&data), view).await?;
                     } else {
                         chat::run(&data).await?;
                     }

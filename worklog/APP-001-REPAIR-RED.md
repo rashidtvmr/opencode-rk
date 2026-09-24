@@ -99,3 +99,21 @@ The native bridge/build availability and exact renderer reset bytes must be
 confirmed by the focused command. If compilation fails in an unrelated native
 dependency, record that as an environment/product build blocker rather than
 weakening this frozen test.
+
+## Integrated GREEN candidate
+
+- Product revision under test wires `DefaultLaunch.view` through
+  `main.rs::run` into `tui_entry::run_default`.
+- Setup plans enter the native onboarding-gated surface and do not fetch an
+  empty session or print offline/manual server instructions.
+- Main plans use the authenticated daemon API to create `New session` only
+  when the session list is empty, then fetch the durable snapshot.
+- Frozen test SHA-256 remained
+  `f5689f0f5b53fd7aacd0934b104a4e0fd5c38bdcdf1943f9f16f03e1535283ab`.
+- GREEN command: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p
+  opencode-rk-cli --test app001_repair_e2e --features native --
+  --test-threads=1`; result `3 passed, 0 failed` in 1.10s.
+- Regressions: `app_start` unit subset `16/16`; frozen native parity `13/13`.
+- This is candidate evidence only. The setup surface does not yet persist a
+  credential through an OS secure store, and simultaneous first-client
+  create-if-empty atomicity is not proven. APP-012 remains open.
