@@ -78,6 +78,23 @@
       "session": "ses_f42269ebaffejbo6GG4ng10o5V",
       "status": "completed"
     },
+    "APP-010-FROZEN-INTEGRITY": {
+      "completedNote": "Canonical frozen test already byte-identical after fetch; local/canonical SHA-256 fec2fdb94c74df2493eb8eb2f2098732d813096f0e01928f00a8cb8c621bf317; cmp and git diff --exit-code both 0; Cargo not run because build.rs is out of scope and known uncompilable; no commit/push per shared dirty-worktree instruction.",
+      "scratchpad": "worklog/APP-010-FROZEN-INTEGRITY.md",
+      "session": "ses_f2e4d3794ffepNEsPynSulLele",
+      "status": "completed"
+    },
+    "APP-010-REVISION-RECEIPT": {
+      "completedNote": "GREEN: build.rs compile-time exact HEAD receipt; explicit valid and absent explicit installed_default_entrypoint 5/5; invalid explicit fails closed without echo; no-repo omission succeeds; frozen SHA-256 fec2fdb94c74df2493eb8eb2f2098732d813096f0e01928f00a8cb8c621bf317 unchanged; cargo check native 0 errors; zero test edits.",
+      "scratchpad": "worklog/APP-010-REVISION-RECEIPT.md",
+      "session": "ses_f2e4bc295ffeIavwxz3k0Ab2IR",
+      "status": "completed"
+    },
+    "APP-010-REVISION-RECEIPT-INTEGRATION": {
+      "scratchpad": "worklog/APP-010-REVISION-RECEIPT-INTEGRATION.md",
+      "session": "ses_f2e1fb204ffeLVobC1YJZw1QxN",
+      "status": "in-progress"
+    },
     "APP-011": {
       "completedNote": "diagnostics 6/6 + doctor 5+4 green; runtime_settings not needed in design; zero test edits",
       "scratchpad": "worklog/APP-011.md",
