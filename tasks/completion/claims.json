@@ -843,6 +843,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-PROPOSAL": {
+      "completedNote": "Proposal in worklog/LEDGER-CONVERGENCE-PROPOSAL.md: 86 findings -> 4 root-cause classes. Staged controller-only: remove 54 aliases, demote 3 bad-note rows, expect 28 orphan findings remain. No product/test/verifier edits.",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-PROPOSAL.md",
+      "session": "ses_f2e2ae321ffe6rN1WqKR6j2r1D",
+      "status": "completed"
+    },
     "OPS-009": {
       "completedNote": "GREEN 5/5 ops_replay T01-T05, impl pre-landed byte-identical, zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-foundation --test ops_replay",
       "scratchpad": "worklog/OPS-009.md",
