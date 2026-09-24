@@ -920,6 +920,12 @@
       "session": "ses_f2de4205affep08hvKAIHnknAa",
       "status": "completed"
     },
+    "POLICY-STRUCTURED-DELEGATION-WORKER-CORRECTION": {
+      "completedNote": "Added sections 8-13 to .agents/WORKER.md: intake checklist, verification boundary, emergency stop, N/A semantics, handoff schema, route validation. Scratchpad at worklog/POLICY-STRUCTURED-DELEGATION-WORKER-CORRECTION.md.",
+      "scratchpad": "worklog/POLICY-STRUCTURED-DELEGATION-WORKER-CORRECTION.md",
+      "session": "ses_f2dd86343ffe7TOPNsJyJiqoZu",
+      "status": "completed"
+    },
     "PROV-018": {
       "completedNote": "5/5 frozen tests green. CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-providers --test prov_018_local_credential_import: 5 passed.",
       "scratchpad": "worklog/PROV-018.md",
