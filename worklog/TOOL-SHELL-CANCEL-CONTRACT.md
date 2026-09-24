@@ -1,7 +1,7 @@
 # TOOL-SHELL-CANCEL-CONTRACT
 
-Status: research contract only. No product source, test source, manifest, or release
-claim is changed by this lane.
+Status: corrected research contract only; pending independent verification. No
+product source, test source, manifest, or release claim is changed by this lane.
 
 ## Claim and scope
 
@@ -14,6 +14,18 @@ claim is changed by this lane.
 - Product/test edits: forbidden for this lane.
 - No new RED is authored. The contract is a prerequisite for an independently
   frozen cancellation RED.
+
+## Correction lane
+
+- Task: `TOOL-SHELL-CANCEL-CONTRACT-CORRECTION`
+- Task type: `research`
+- Session: `ses_f2d25ff53ffeI8JA2mrF6iLY1Y`
+- Base contract revision: `2c7575362ff73a17134767068809c7513651f501`
+- Verifier evidence: `worklog/TOOL-SHELL-CANCEL-CONTRACT-VERIFY.md` at
+  `da003a9c14d3a4c9907079e2bbee9967172e0641`
+- Scope: reconcile C1-C5 only; no product, test, manifest, or dependency edits.
+- The corrected artifact remains a contract, not an implementation or acceptance
+  claim. A fresh verifier must validate it on the pushed revision.
 
 ## Authority and evidence
 
@@ -81,10 +93,43 @@ The accepted split is therefore:
 
 No test source is edited by this research lane.
 
+## Mandatory seam and RED ordering
+
+The executor-level authorized process entrypoint below is a required public
+seam, not an optional recommendation and not a symbol claimed to exist today.
+Before a cancellation RED file may be authored:
+
+1. **Seam implementation lane.** Implement and expose the exact public
+   `ToolExecutor::execute_authorized_process` API, its request/result/error
+   types, direct-argv authorization, canonical cwd preparation, bounded
+   cancellation receiver, readiness sender, and explicit owner future. This lane
+   may add no dependency and must preserve t01-t03.
+2. **Independent seam verification lane.** A fresh verifier exercises the
+   public API against the real broker and direct-argv fixture, including
+   `Deny`, `RequireHuman` without a grant, valid grant, and no-spawn invariants;
+   then reruns the unchanged broker suite and records the seam revision.
+3. **Compiling behavior RED lane.** Only after step 2 is accepted, author
+   `phase1_shell_cancellation.rs`. It must compile against the public seam and
+   fail at behavioral assertions (cleanup, precedence, bounds, or lifetime),
+   never because a type, import, method, or module is absent. Freeze its hash
+   and command manifest.
+4. **Cancellation implementation lane.** Implement the minimum behavior that
+   turns that frozen RED green.
+5. **Independent cancellation verification.** Re-run the frozen test, focused
+   regressions, and exact integrated journey. No lane may self-accept.
+
+The dependency edge is strict: no cancellation RED lane may be claimed, authored,
+or frozen until the seam implementation is pushed and the independent seam
+verifier has accepted the exact public API revision. A compile-fail/import-fail
+RED is forbidden. A test that targets a private symbol, a shell-string bypass,
+`AllowAll`, or a nonexistent proposed API is not RED evidence. The existing broker
+RED remains t01-t03 only and stays unchanged.
+
 ## Proposed public contract
 
 The following is the integration contract, not a claim that these symbols exist
-in the current revision.
+in the current revision. Every public type and variant named here is normative
+for the later seam/RED lanes.
 
 ```rust
 pub struct ProcessRequest {
@@ -96,10 +141,15 @@ pub struct ProcessRequest {
 
 pub struct ProcessLimits {
     pub timeout: Duration,
+    pub startup_timeout: Duration,
+    pub cleanup_timeout: Duration,
     pub max_stdout_bytes: usize,
     pub max_stderr_bytes: usize,
     pub max_argv_bytes: usize,
+    pub max_argv_elements: usize,
     pub max_env_bytes: usize,
+    pub max_env_elements: usize,
+    pub max_cwd_bytes: usize,
 }
 
 pub struct ProcessReady {
@@ -115,6 +165,45 @@ pub enum ProcessTerminal {
     CancelledBeforeStart,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CleanupStep {
+    NotRequired,
+    Succeeded,
+    Failed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CleanupStatus {
+    NotRequired,
+    Reaped {
+        group_kill: CleanupStep,
+        child_kill: CleanupStep,
+        wait: CleanupStep,
+        readers: CleanupStep,
+    },
+    Failed {
+        group_kill: CleanupStep,
+        child_kill: CleanupStep,
+        wait: CleanupStep,
+        readers: CleanupStep,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProcessError {
+    InvalidRequest { field: &'static str, reason: String },
+    InvalidCwd { reason: String },
+    InvalidLimits { reason: String },
+    Denied { reason: String },
+    HumanRequired { reason: String },
+    InvalidGrant { reason: String },
+    Spawn { reason: String },
+    ReadinessReceiverClosed { pid: u32 },
+    Io { operation: &'static str, reason: String },
+    CleanupFailed { terminal: ProcessTerminal, status: CleanupStatus },
+    UnsupportedPlatform { operation: &'static str },
+}
+
 pub struct ProcessResult {
     pub terminal: ProcessTerminal,
     pub stdout: String,
@@ -124,9 +213,40 @@ pub struct ProcessResult {
     pub cleanup: CleanupStatus,
     pub duration_ms: u64,
 }
+
+pub type ProcessCancellation = tokio::sync::watch::Receiver<bool>;
 ```
 
-Recommended public entrypoint on `ToolExecutor`:
+`ProcessLimits` is required on every request and is validated at the seam boundary
+before authorization. Every timeout is a positive, finite `Duration`; every byte
+and element ceiling is positive. `startup_timeout` is the bounded interval from
+spawn attempt until readiness publication, `timeout` is one absolute deadline for
+the whole request, and `cleanup_timeout` starts when cleanup begins. The hard
+ceilings are normative: timeout fields at most 300 seconds; retained stdout and
+stderr at most 10 MiB each; argv at most 64 KiB and 4,096 elements; environment
+at most 64 KiB and 1,024 elements; cwd at most 4 KiB. The retained-byte caps
+exclude the fixed truncation marker. A request cannot widen these ceilings by
+passing larger values.
+
+`ProcessResult.duration_ms` is exactly `u64`, matching the existing public
+`ToolResult.duration_ms` at `crates/tools/src/executor.rs:74-87` and the other
+bounded public result surfaces. It is computed from one `Instant` at request
+entry as `u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)`: a
+sub-millisecond duration is `0`; an elapsed value above `u64::MAX` saturates at
+`u64::MAX`; no unchecked `as` cast, wrap, or platform-dependent integer type is
+permitted. The legacy `ShellResult.duration_ms: u128` at
+`crates/tools/src/shell_tool.rs:23-33` is not this public result type and is not
+silently cast or changed by this contract.
+
+`ProcessResult` is returned only for a completed, bounded request. `Exited`
+carries `CleanupStatus::Reaped` with kill steps `NotRequired` when the child
+already exited, `wait`/`readers` `Succeeded`, and the exact exit code (or
+`None` when the platform cannot provide one). `TimedOut`, `Cancelled`, and
+`CancelledBeforeStart` carry `CleanupStatus::NotRequired` only when no child was
+created; after a child exists they require `Reaped`. No `ProcessError` returns a
+partial stdout/stderr result.
+
+Required public entrypoint on `ToolExecutor`:
 
 ```rust
 pub async fn execute_authorized_process(
@@ -136,90 +256,232 @@ pub async fn execute_authorized_process(
     grant: Option<&Grant>,
     expected: &ExpectedScope,
     limits: ProcessLimits,
-    cancellation: CancellationToken,
+    cancellation: ProcessCancellation,
     ready: tokio::sync::oneshot::Sender<ProcessReady>,
 ) -> Result<ProcessResult, ProcessError>;
 ```
 
+`ProcessError` meanings are exact: `InvalidRequest` covers malformed program,
+argv, or env; `InvalidCwd` covers cwd validation/canonicalization failure;
+`InvalidLimits` covers non-positive or over-limit bounds; `Denied` and
+`HumanRequired` are pre-spawn broker outcomes; `InvalidGrant` is a supplied
+grant that fails scope, digest, freshness, policy-version, or single-use
+checks; `Spawn` is an OS spawn failure; `ReadinessReceiverClosed` is returned
+only after a child was successfully spawned and the `ready` oneshot receiver was
+dropped, after the owner has completed bounded cleanup; `Io` identifies a
+bounded wait/read/join operation; `CleanupFailed` is returned instead of an
+ordinary result when required cleanup cannot be proven; and
+`UnsupportedPlatform` is the fail-closed result for a platform without the
+required backend. `InvalidRequest.field` is one of `program`, `args`, or `env`;
+`Io.operation` is one of `readiness_pid`, `stdout_read`, `stderr_read`, `child_wait`,
+or `reader_join`. Error reason text is bounded to 512 bytes and redacted; it
+never retains raw env, argv, cwd, or secret values.
+
+When `ready.send(ProcessReady { .. })` fails, the executor must immediately latch
+`Cancelled` as the cleanup terminal, run the same group-kill/child-kill/wait/
+reader-join sequence with `cleanup_timeout`, and return no ordinary
+`ProcessResult`. If cleanup is `Reaped`, return
+`ProcessError::ReadinessReceiverClosed { pid }`; if any required cleanup step
+fails or its bounded wait expires, return
+`ProcessError::CleanupFailed { terminal: ProcessTerminal::Cancelled, status }`
+with `status` equal to `CleanupStatus::Failed`. The PID is retained only as the
+numeric error field needed for bounded diagnostics, never as a readiness event.
+
+`CleanupFailed.status` is always `CleanupStatus::Failed` and `terminal` is the
+already-latched terminal reason. A cleanup failure cannot be downgraded to a
+warning or ordinary success.
+
+`CleanupStep` has exactly three meanings. `NotRequired` is legal only when
+that specific operation was unnecessary: no child was created; the child was
+already reaped; the group-kill API was unavailable after the child exited; or no
+reader task was created because the corresponding pipe was absent. `Succeeded`
+means the operation was attempted and its required observable effect completed
+without error. `Failed` means the operation was required but its effect was not
+observed, its await exceeded `cleanup_timeout`, or joining the corresponding
+reader failed.
+
+`CleanupStatus::NotRequired` means no child was ever created. For
+`CleanupStatus::Reaped` or `CleanupStatus::Failed`, each field is interpreted
+as follows: `group_kill` is required whenever a child exists and a termination
+request is latched; `child_kill` is required only when the group-kill operation
+was unavailable or did not establish child termination; `wait` is required after
+a successful spawn until `Child::wait` has returned; and `readers` is required for
+every pipe that was taken, until its reader task has been joined. A child already
+reaped by a successful `wait` makes the later kill steps `NotRequired`; it does
+not make `wait` `NotRequired`. `Reaped` is valid only when every required field
+is `Succeeded`, every other field is an allowed `NotRequired`, and the owned child
+has been explicitly waited. `Failed` means at least one required field is
+`Failed`; it is never returned inside `Ok(ProcessResult)` and never claims
+deterministic cleanup.
+
 The security module remains the authority for constructing/validating the
 authorization. The execution module must not accept `AllowAll`, a boolean policy
 hook, a timeout, or an opaque command string as proof of authorization. The
-implementation may use a typed capability instead of the exact parameter names
-above, but it must preserve these observables and ownership rules.
+public seam must preserve these observables and ownership rules. `Grant` and
+`ExpectedScope` remain caller-supplied capability inputs within the existing
+broker model; this contract claims neither a signed capability nor an OS
+sandbox, and a caller must not treat a self-constructed grant as authority
+outside the trusted broker/policy boundary.
 
-### Request and environment invariants
+### Cancellation primitive and exact semantics
 
-- `program`, every argv element, and `cwd` are the exact values placed in
-  `OperationIntent::Process` and in `Command`.
+`ProcessCancellation` is a caller-owned `tokio::sync::watch::Receiver<bool>`.
+The caller creates `watch::channel(false)`, retains the `watch::Sender<bool>` for
+the operation lifetime, and passes the receiver to the executor. The receiver is
+the only cancellation state read by the request. `borrow()` checks the current
+value; `changed()` is awaited only while at least one sender remains. A `true`
+value is a monotonic cancellation request: once observed, the request is latched
+and later `false` values cannot reopen it. Sending `false`, sending no value, or
+dropping all senders without first sending `true` does **not** cancel the
+operation. A closed receiver is treated as “no cancellation signal,” not as
+cancellation.
+
+The receiver is checked from its current value before authorization, after
+authorization, immediately before spawn, and at every bounded running
+observation. Each check is made in the fixed precedence below. Repeated
+cancellation is idempotent, and a signal received after the terminal state is
+latched has no effect. Cancellation is scoped to this one request; no shared or
+global token exists. Only Tokio's existing `sync` feature is used; `tokio-util`
+and `CancellationToken` are not part of this contract.
+
+### Request, cwd, and environment invariants
+
+- `program`, every argv element, and the prepared canonical `cwd` are the exact
+  values placed in `OperationIntent::Process` and in `Command`.
 - No shell parsing, interpolation, concatenation, or implicit `-c` exists on the
   authorized direct-process path.
 - `env` is explicit. `env_clear()` is mandatory. No secret-bearing inherited
   variable is available unless explicitly supplied and policy-authorized.
 - PATH is a fixed minimal value unless the request explicitly supplies one.
 - Empty program, NUL-containing values, invalid cwd, oversized argv/env, and
-  invalid limits fail before spawn.
+  invalid limits fail before broker/spawn. All byte and element ceilings in
+  `ProcessLimits` are checked before authorization; a zero limit is invalid.
 - A grant, if needed, remains scoped to the exact operation digest, workspace,
   session, requester, policy version, and expiry. It is single-use.
+
+Validation is exact: `program` is non-empty and NUL-free; every argv element is
+NUL-free and within the byte/element limits; each environment key is non-empty,
+NUL-free, and contains no `=`; each environment value is NUL-free and within
+the byte/element limits. A malformed program/argv/env value is
+`InvalidRequest`; a malformed or non-directory cwd is `InvalidCwd`; a zero,
+non-finite, or over-cap limit is `InvalidLimits`. These checks precede broker
+authorization and grant-ledger mutation.
+
+#### Canonical cwd identity (one preparation pass)
+
+`ProcessRequest.cwd` is mandatory; there is no optional cwd and no `/tmp`
+fallback. Before broker authorization, the executor performs one preparation
+function, in this order:
+
+1. Reject empty, NUL-containing, and over-`max_cwd_bytes` path values.
+2. Call `std::fs::canonicalize` exactly once. Reject failure, non-absolute
+   results, over-limit canonical bytes, and paths whose metadata is not a
+   directory. Return `ProcessError::InvalidCwd` for any failure.
+3. Store the returned `PathBuf` unchanged as `canonical_cwd`. Do not call
+   `canonicalize`, lexical-normalize, substitute, or otherwise rewrite it again.
+
+The exact `canonical_cwd` value is cloned into
+`OperationIntent::Process { cwd: ... }` and passed to
+`Command::current_dir(&canonical_cwd)`. No second canonicalization, lexical
+normalization, current-directory lookup, `/tmp` substitution, or alternate
+default is permitted between authorization and spawn. Authorization and spawn
+therefore consume the same path value/bytes. The current `ShellTool` fallback at
+`crates/tools/src/shell_tool.rs:196-200` versus `:228-230` is a latent defect;
+the new seam must not inherit it. Tests use a direct executable to record its
+actual cwd and compare it byte-for-byte with the broker-bound canonical path,
+including a relative-input/canonical-output case.
 
 ### Broker and no-spawn invariants
 
 - Resolve the broker decision before `Command::spawn`.
 - `Decision::Allow` is necessary but not sufficient for a human-gated intent;
   an explicit covering grant is required for `RequireHuman`.
-- `Decision::Deny` and unresolved `RequireHuman` return no PID, no output, no
-  process-group ID, and no durable dispatch/output-store side effect.
+- `Decision::Deny`, `HumanRequired`, and `InvalidGrant` return no PID, no
+  output, no process-group ID, and no durable dispatch/output-store side effect.
 - `OperationIntent::Tool` is not a substitute for the exact process intent.
-- Recheck cancellation after authorization and before spawn.
+- Recheck the deadline and cancellation receiver after authorization and before
+  spawn; use the precedence rule below.
 
 ## Lifecycle and state machine
 
 | State/event | Required action | Observable result/invariant |
 |---|---|---|
-| `Created` | Validate request, argv/env/cwd/limit sizes | Invalid input returns before broker/spawn. |
-| `CancellationRequested` before authorization | Stop immediately | No broker grant consumption if no authorization was needed; no spawn. |
+| `Created` | Validate request, argv/env/cwd/limit sizes; create the request deadline | Invalid input returns before broker/spawn. |
+| `CancellationRequested` before authorization | Latch cancellation and stop | Return `CancelledBeforeStart`; no broker grant consumption and no spawn. |
 | `Authorized` | Store exact decision for this request only | No implicit permission retention. |
 | `Denied` / `HumanRequired` | Return typed denial | No PID, no child, no side effect. |
-| `SpawnPending` | Recheck cancellation; enforce deadline | Cancellation before spawn yields no child. |
-| `Spawned` | Create owned process group; record child | No unrelated process can enter cleanup scope. |
-| `Ready` | Publish one PID/group event | Exactly one readiness event after successful spawn. |
-| `Running` | Read both pipes with retained-byte caps; drain excess | Memory remains bounded; no unbounded pipe wait. |
-| `CancelRequested` | Mark request cancellation | Trigger affects only this request's owned group. |
-| `Timeout` | Enter same cleanup path as cancellation | Terminal state is `TimedOut`, never success. |
-| `Exited` | Await child and join readers | Exit code and bounded output are returned. |
-| `Cleanup` | Group kill first; direct child kill fallback; explicit `Child::wait().await`; join readers | No zombie or owned descendant remains when status is `Reaped`. |
-| `Completed` | Publish one result | Future is consumed; no detached owner remains. |
+| `SpawnPending` | Recheck cancellation, then deadline, using the fixed precedence | Cancellation before spawn yields `CancelledBeforeStart`; deadline yields `TimedOut`; neither spawns. |
+| `Spawned` | Create and record the owned Unix process group and child | No unrelated process can enter cleanup scope. |
+| `Ready` | Publish one PID/group event | Exactly one readiness event after successful spawn; a send failure enters `CleanupFailed` policy. |
+| `Running` | Read both pipes with retained-byte caps; drain excess; await completion | Memory remains bounded; no unbounded pipe wait or deadline reset. |
+| `CancelRequested` | Latch cancellation for this request | Trigger affects only this request's owned group; cleanup follows the shared state machine. |
+| `Timeout` | Latch timeout and enter the same cleanup path | Terminal state is `TimedOut`, never success. |
+| `Exited` | Await child and join readers | Exit code and bounded output are returned; later signals cannot rewrite the result. |
+| `Cleanup` | Group kill first; direct child kill fallback; explicit `Child::wait().await`; join readers | `Reaped` only after required steps succeed; otherwise return `CleanupFailed`. |
+| `Completed` | Publish one result or one typed error | Future is consumed; no detached owner remains. |
 | `Dropped` | Signal emergency cleanup if possible | Best-effort only; caller cannot claim deterministic reap without awaiting completion. |
 
-Cleanup must record whether group kill, child kill, wait, and reader joins
-succeeded. A cleanup failure must never be reported as ordinary success. It is a
-terminal error or an explicit failed `CleanupStatus`; the integration lane must
-choose one stable representation before freezing RED assertions.
+Cleanup records the four `CleanupStep` values. A failed step or expired
+`cleanup_timeout` is represented only by `ProcessError::CleanupFailed`; it is
+never an ordinary `Ok(ProcessResult)`, and no later integration decision can
+change that representation.
 
 ### Race and terminal semantics
 
-- Cancellation before readiness: either no spawn (if observed before spawn), or
-  spawn followed by owned group cleanup; no late side effect.
-- Cancellation after readiness: readiness remains observable once; result is
-  `Cancelled`; group and parent are reaped.
-- Timeout and cancellation are the same cleanup state machine, with distinct
-  terminal reasons.
-- If the child has already exited, normal exit wins; a later cancellation request
-  cannot retroactively change a completed result.
-- If cancellation is observed before spawn, return `CancelledBeforeStart`.
-- If readiness channel delivery fails, do not continue as if the caller received
-  ownership; either cancel the child before returning or expose a terminal
-  ownership error. The integration lane must freeze the chosen policy.
+The request has one monotonic `Instant` deadline. `timeout` covers the whole
+request from entry; `startup_timeout` covers only the interval from the spawn
+attempt until the readiness send; `cleanup_timeout` starts when cleanup begins.
+Each read, wait, and reader join uses the remaining bounded budget; polling or
+reading more output never resets the deadline.
+
+At every observation checkpoint, terminal selection is deterministic:
+
+1. If the child-completion future is already resolved, latch `Exited`.
+2. Otherwise, if `cancellation.borrow()` is `true`, latch cancellation
+   (`CancelledBeforeStart` before spawn, `Cancelled` after spawn).
+3. Otherwise, if the current instant is at or beyond the relevant deadline,
+   latch `TimedOut`.
+4. Otherwise continue the bounded wait.
+
+The running select must use this branch order (for example, a biased select):
+child completion, cancellation change, then deadline. Thus, when cancellation
+and timeout are both observable in the same poll, cancellation wins; if child
+completion is also already observable, normal exit wins. A later signal cannot
+retroactively change a latched terminal state.
+
+- Cancellation before authorization, after authorization but before spawn, or
+  after the deadline has also elapsed before spawn returns
+  `CancelledBeforeStart`; no PID, group, output, or broker side effect exists.
+- Cancellation after spawn and before readiness runs owned cleanup and returns
+  `Cancelled`; readiness is sent only if its receiver is still live.
+- Cancellation after readiness leaves exactly one readiness event, returns
+  `Cancelled`, and reaps the owned group and parent.
+- Timeout and cancellation share the cleanup state machine but retain distinct
+  terminal reasons. Timeout is `TimedOut`, never success.
+- If the child has already exited, normal exit wins; a later cancellation or
+  timeout cannot change `Exited`.
+- If `ready.send(...)` fails, follow the fixed `ReadinessReceiverClosed`
+  policy in `ProcessError`: clean up first, return that error only after a
+  `Reaped` status, or return `CleanupFailed` if cleanup cannot be proven.
 
 ## Readiness contract
 
 - Use a bounded `oneshot` channel, not an unbounded queue or readiness file.
-- Send after successful spawn, before waiting on stdout/stderr.
-- Send child PID and Unix process-group ID, with PID validity checks.
-- Send exactly once; duplicate publication is an implementation error.
+- Send exactly once after successful spawn, before waiting on stdout/stderr.
+- Send child PID and Unix process-group ID, with PID validity checks. On Unix,
+  both values must be greater than zero. An invalid PID is returned as
+  `ProcessError::Io { operation: "readiness_pid", .. }` after bounded owned
+  cleanup is `Reaped`; if that cleanup fails, return
+  `ProcessError::CleanupFailed` instead. It is never a readiness success.
 - Never send for `Denied`, `HumanRequired`, invalid request, or spawn failure.
 - Readiness means the child exists; it does not mean the process has completed.
 - A caller that receives readiness must still await the owner future for cleanup
   and result.
+- If the receiver is dropped before or during `ready.send`, the send failure is
+  not silently ignored. Latch `Cancelled`, run bounded owned cleanup, then
+  return `ReadinessReceiverClosed { pid }` only when cleanup is `Reaped`; return
+  `CleanupFailed` with a `Failed` status when any required cleanup step fails.
+  Do not publish a second readiness event or return a normal `ProcessResult`.
 
 ## Resource and lifetime ceilings
 
@@ -233,19 +495,31 @@ must enforce them at its own boundary rather than trusting callers:
 - Existing `shell_bounds` pattern: retain only the configured prefix, drain and
   discard excess, and append a fixed truncation marker.
 
-Required additional bounds before a RED can be frozen:
+Required additional bounds are normative at the public seam, not values a
+caller can opt out of:
 
-- argv byte count and element count;
-- environment byte count, element count, and name/value validation;
-- cwd byte limit and canonicalization policy;
-- one process owner per request, with no unbounded pending queue;
-- bounded startup/readiness deadline;
-- bounded cleanup/reap deadline;
-- bounded error text, with no secret values retained.
+- `timeout`, `startup_timeout`, and `cleanup_timeout` are finite positive
+  `Duration`s, each no greater than 300 seconds; `startup_timeout` also may not
+  exceed `timeout`;
+- `max_stdout_bytes` and `max_stderr_bytes` are each 1..=10 MiB; retained data
+  stays within the selected cap, while the fixed truncation marker is outside
+  that cap;
+- when a stream exceeds its cap, its `*_truncated` flag is `true` and the exact
+  marker `"\n[truncated]"` is appended once; otherwise both flags are `false`;
+- `max_argv_bytes` is 1..=64 KiB and `max_argv_elements` is 1..=4,096; byte
+  counts include every argv element's UTF-8 bytes;
+- `max_env_bytes` is 1..=64 KiB and `max_env_elements` is 1..=1,024; byte
+  counts include every name and value, and names/values containing NUL are
+  rejected;
+- `max_cwd_bytes` is 1..=4 KiB and applies to both the input and returned
+  canonical path;
+- one process owner exists per request, readiness is a single-slot `oneshot`,
+  error text is at most 512 bytes, and no pending queue or detached owner is
+  permitted.
 
-Cancellation is caller-owned through a scoped token/channel. The execution
-future or explicit owner handle must be awaited. `kill_on_drop` is only a last
-resort signal; it is not proof of process-group cleanup or reaping.
+`kill_on_drop` is only a last-resort signal. It is not proof of process-group
+cleanup, reader joining, or child reaping; the owner future or explicit owner
+handle must be awaited for the bounded cleanup result.
 
 ## Unix and Windows boundary
 
@@ -271,20 +545,22 @@ mocked test.
 
 | Scenario | Required observable behavior |
 |---|---|
-| Broker `Allow` | Exact process spawns; readiness/PID emitted once; result awaited. |
+| Broker `Allow` | Exact process intent spawns; readiness/PID emitted once; result awaited. |
 | Broker `Deny` | No spawn, no PID, no marker, no output-store record, no permit leak. |
-| Broker `RequireHuman`, no grant | No spawn; explicit human-required result. |
+| Broker `RequireHuman`, no grant | No spawn; explicit `HumanRequired` error. |
 | `RequireHuman` with valid grant | One covered operation may spawn; grant is single-use. |
-| Invalid/oversized argv/env/cwd | Reject before broker/spawn; no side effect. |
-| Cancellation before authorization | No spawn and no unrelated side effect. |
-| Cancellation after authorization, before spawn | `CancelledBeforeStart`; no PID. |
-| Cancellation before readiness | Owned child/group killed and reaped; no late marker. |
-| Cancellation after readiness | Exactly one readiness event; cancellation cleanup; explicit reap. |
+| Invalid/oversized argv/env/cwd/limits | Reject before broker/spawn; no side effect. |
+| Cancellation before authorization | Return `CancelledBeforeStart`; no spawn and no unrelated side effect. |
+| Cancellation after authorization, before spawn | Return `CancelledBeforeStart`; no PID, group, or output. |
+| Cancellation before readiness | Owned child/group is cleaned and reaped; no late marker. |
+| Cancellation after readiness | Exactly one readiness event; `Cancelled`; explicit group/parent reap. |
+| Cancellation and timeout observed together | Cancellation wins; deterministic `Cancelled`/`TimedOut` branch, never a scheduler-dependent result. |
 | Timeout | Bounded result `TimedOut`; group cleanup; explicit reap; no late marker. |
 | Normal exit | Explicit wait, bounded stdout/stderr, deterministic exit result. |
-| Spawn failure | Typed error; no readiness; no leaked child ownership. |
-| Output over cap | Retained bytes stay within cap plus fixed marker; excess drained/discarded. |
-| Reader/pipe failure | Cleanup still runs; failure cannot be reported as ordinary success. |
+| Spawn failure | Typed `Spawn` error; no readiness; no leaked child ownership. |
+| Readiness receiver dropped | Bounded cleanup, then `ReadinessReceiverClosed` or `CleanupFailed`; never normal success. |
+| Output over cap | Retained data stays within the cap; fixed marker is appended; excess drained/discarded. |
+| Reader/pipe failure | Cleanup still runs; `Io` or `CleanupFailed`, never ordinary success. |
 | Drop/abort | Emergency signal only; deterministic guarantee requires awaiting owner. |
 | Descendant survives parent | Group cleanup kills descendant; test observes bounded death. |
 | Unrelated process present | It remains alive; cleanup is scoped to owned process group. |
@@ -314,6 +590,12 @@ Future ownership must remain serialized where files overlap:
 
 ## Future RED contract
 
+This section is subordinate to **Mandatory seam and RED ordering**. The seam
+implementation and its independent verification must be accepted first. A RED
+authored before then is forbidden, especially a compile-fail or import-fail
+caused by the absent public API. The RED lane must use the public seam exactly as
+specified; it may not reach into private modules or use a shell-string bypass.
+
 Path: `crates/tools/tests/phase1_shell_cancellation.rs`
 
 Command:
@@ -330,45 +612,61 @@ The fixture must:
 - assert `Deny` and `RequireHuman` cause zero spawn;
 - observe exactly one readiness/PID event;
 - cancel before readiness and after readiness in separate tests;
-- exercise timeout, normal exit, spawn failure, output cap, and drop/abort;
+- pre-load or send the watch cancellation value before the observation poll for
+  deterministic cancellation cases;
+- use paused Tokio time plus an explicit deadline advance for timeout cases;
+  test the cancellation/deadline tie with both values observable before one
+  poll, rather than relying on scheduler timing;
+- exercise timeout, normal exit, spawn failure, output cap, readiness-receiver
+  drop, and drop/abort;
 - assert parent/descendant death within bounded deadlines;
 - assert no delayed marker after a bounded settle period;
 - assert no permit/store/FD leak;
+- assert `duration_ms` is `u64`, is `0` for a sub-millisecond fixture, and
+  saturates rather than wrapping for a deliberately injected elapsed value;
 - run only on the supported Unix backend unless Windows backend proof exists.
 
 ## Validation and landing record
 
-Required bounded checks:
+Required bounded checks for this correction:
 
 ```sh
-rtk git grep -n 'execute_authorized\|execute_with_startup\|ShellTool\|execute_shell' -- crates
+rtk git grep -n 'tokio-util\|CancellationToken\|CleanupStatus\|ProcessError\|duration_ms\|compile-fail' -- worklog/TOOL-SHELL-CANCEL-CONTRACT.md
 rtk shasum -a 256 crates/tools/tests/phase1_shell_broker.rs
 rtk git diff --check
 ```
 
-Expected:
+The C1-C5 matrix is captured in
+`worklog/TOOL-SHELL-CANCEL-CONTRACT-CORRECTION.md`. Expected:
 
-- source citations resolve at candidate revision;
+- the scan shows the existing `tokio::sync::watch::Receiver<bool>` seam, the
+  named `CleanupStatus`/`ProcessError` definitions, the `u64` duration rule,
+  and the explicit compile-fail prohibition; it must not require a
+  `CancellationToken` or `tokio-util` dependency;
 - frozen broker test hash remains
   `ef56f63a5d2d3d0fa99049cdfdf9df0fe69fb6e5c66b33484431603cc855d1e8`;
 - diff check passes;
 - no Cargo/heavy process is run for this research landing;
-- only this worklog and the existing claim row are committed;
+- only this contract, its correction scratchpad, and the existing own ledger
+  row are committed;
 - branch is pushed without force and remote containment is verified.
 
 ## Unresolved gaps
 
-- No public executor-level authorized cancellation API exists yet.
-- No cancellation RED exists or is frozen.
+- No public executor-level authorized cancellation API exists yet; the seam
+  implementation and its independent verification remain future lanes.
+- No cancellation RED exists or is frozen; authoring remains blocked until the
+  strict seam/verification ordering above is satisfied.
 - Current `ShellTool` timeout/drop path lacks an explicit awaited public cleanup
   result.
 - Current server does not inject a broker into `new_shell_execution` and does
   not authorize the exact process intent.
 - Current dispatcher default remains `AllowAll`.
-- No Windows process-tree backend or real-platform proof exists.
+- No Windows process-tree backend or real-platform proof exists; Windows remains
+  explicitly unsupported/gated.
 - `ShellBounds` is a reference module, not a live caller.
-- Cleanup-error representation, readiness-channel failure policy, and exact
-  resource constants require integration-owner decisions before RED freeze.
 - A parent shell journey remains open until the new API, broker wiring,
   cancellation implementation, independent RED verification, and integrated
   rerun are complete.
+- This correction is not independently verified or accepted by this research
+  lane; a fresh verifier must inspect the pushed contract revision.
