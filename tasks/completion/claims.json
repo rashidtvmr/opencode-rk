@@ -915,9 +915,10 @@
       "status": "completed"
     },
     "PHASE1-SECURITY-MAP-VERIFY-RETRY": {
+      "completedNote": "Verdict: ACCEPT WITH CORRECTIONS. All P0/P1 claims verified against product-spine 5d666830. Committed 7834ed6 pushed to origin/plan/security-acceptance.",
       "scratchpad": "worklog/PHASE1-SECURITY-MAP-VERIFY-RETRY.md",
       "session": "ses_f2de4205affep08hvKAIHnknAa",
-      "status": "in-progress"
+      "status": "completed"
     },
     "PROV-018": {
       "completedNote": "5/5 frozen tests green. CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-providers --test prov_018_local_credential_import: 5 passed.",
