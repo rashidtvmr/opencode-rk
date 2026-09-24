@@ -32,8 +32,10 @@ every field below. Use the canonical template headings for exact content.
   compatibility/repository, with governing policy cross-references.
 - [ ] Concrete deliverables and their paths.
 - [ ] Measurable success criteria and the acceptance boundary.
-- [ ] Exact validation commands and expected RED/GREEN state, or a justified
-  `N/A`.
+- [ ] Exact validation commands and expected RED/GREEN state. `N/A` is permitted
+  only to mean `no product test: [reason]`; it cannot replace an applicable RED
+  obligation, captured failing fixture, frozen-test status/hash, executable
+  validator, or contract validation.
 - [ ] Failure and blocker behavior.
 - [ ] Landing requirements: claim, scratchpad, commit, and push.
 - [ ] Completion handoff schema.
@@ -142,10 +144,11 @@ Your completion message to the orchestrator MUST state:
 3. Exact test commands you ran and their results.
 
 It MUST also return the full completion handoff schema from `AGENTS.md`
-"Completion handoff schema": model; task id and role/type; analysis; changes
-(paths and symbols/headings); commands/results; commit/ref; hashes (or `N/A`
-with reason); resource observations; and unresolved gaps. Do not emit
-`passes:true` or claim acceptance.
+"Completion handoff schema" (the canonical 12 fields in section 13): Task ID;
+Task type; Role; Status; Model/route; Analysis; Changes; Commands/results;
+Commit/ref; Hashes (or `none — [reason]` where no frozen-test hash applies);
+Resource observations; and Unresolved gaps. `N/A` is permitted only to mean
+`no product test: [reason]`. Do not emit `passes:true` or claim acceptance.
 
 Do not `release()` your own claim; releasing is the orchestrator's job when it
 integrates or abandons your lane. If you must stop early (blocked, budget,
@@ -239,6 +242,9 @@ set status `blocked` with the exact gap rather than proceeding.
 
 1. **Task identity**: task ID, task type, role, assigned route, and model are
    explicit in your delegation prompt. Validate them against section 12 below.
+   The brief MUST declare the independent-verification boundary (who verifies
+   this work and why this task does not combine roles that must remain
+   independent).
 2. **Owned scope**: exactly one owned file (or the explicitly listed set). No
    other product, test, controller, or policy files may be modified.
 3. **Source evidence**: cite exact repository commit, path, and line/symbol for
@@ -267,6 +273,9 @@ set status `blocked` with the exact gap rather than proceeding.
    authority (docs/CONVERGENCE.md).
 10. **Dependencies**: confirm prerequisite tasks are `completed` in the ledger,
     not merely `in-progress` or self-reported done.
+11. **Independent-verification boundary**: confirm the brief identifies who
+    verifies this work and explains why roles that must remain independent (e.g.,
+    implementer vs. verifier) are not combined (AGENTS.md:130-133).
 
 ## 9. Independent verification boundary
 
@@ -338,44 +347,48 @@ Before claiming or starting work, validate your execution authorization:
    prompt matches the route you are actually executing on.
 2. **Allowlist check**: if a user allowlist is provided in your task context,
    verify your assigned route appears in it. If your route is not in the
-   allowlist, set status `blocked` with the exact mismatch and do not proceed.
-3. **Canonical N/A**: if the task specifies `N/A -- no user allowlist`, then no
-   allowlist restriction applies; confirm only that your assigned route matches
-   the delegation.
-4. **Route permission confirmation**: record in your scratchpad that you verified
-   the assigned route against the allowlist (or confirmed canonical N/A). This
-   is part of the intake checklist (section 8, item 1).
+   allowlist, STOP immediately and report the mismatch before claiming; never
+   silently substitute another worker or model, and do not perform any ledger
+   operation before a claim exists.
+3. **Canonical sentinel**: if the task specifies `N/A — no user allowlist`,
+   then no allowlist restriction applies; confirm only that your assigned route
+   matches the delegation.
+4. **Route permission confirmation**: record in your scratchpad that you
+   verified the assigned route against the allowlist (or confirmed the canonical
+   `N/A — no user allowlist` sentinel). This is part of the intake checklist
+   (section 8, item 1).
 
 ## 13. Structured handoff schema
 
 Your completion message to the orchestrator MUST include ALL of the following
-fields, in this order. Omitting a field is a protocol violation; use `N/A` only
-where the canonical schema permits it (see section 11 for N/A constraints).
+fields, in this order, matching the canonical schema in `AGENTS.md`
+"Completion handoff schema". Omitting a field is a protocol violation; use
+`none — [reason]` for absent frozen-test/artifact hashes; use `no product
+test: [reason]` only for absent product tests (see section 11 for N/A
+constraints). The five canonical task types are: `implementation`,
+`RED authoring`, `research`, `integration`, `verification`.
 
 1. **Task ID**: the exact task identifier from your delegation prompt.
-2. **Task type**: e.g., `implementation`, `policy`, `discovery`, `test-author`,
-   `verification`.
+2. **Task type**: exactly one of `implementation`, `RED authoring`,
+   `research`, `integration`, `verification`.
 3. **Role**: your role in this lane, e.g., `worker`, `verifier`, `integrator`.
 4. **Status**: final ledger status (`completed`, `blocked`).
-5. **Model/route**: the provider/model identifier you executed on, e.g.,
-   `9router/xk/qwen/qwen3.8-max:free`.
-6. **Analysis**: concise summary of what the task required and how you
-   approached it, citing source evidence (commit, path, line/symbol).
-7. **Changes**: exact list of files modified, created, or deleted. For each
-   file, state the nature of the change (e.g., "added sections 8-13 to
-   `.agents/WORKER.md`").
+5. **Model/route**: the provider/model identifier you executed on.
+6. **Analysis**: concise evidence-based summary citing source (commit, path,
+   line/symbol).
+7. **Changes**: exact paths and symbols/headings modified, created, or deleted.
 8. **Commands/results**: exact commands run (prefixed with `rtk`) and their
-   outputs or exit codes. Include test commands, lint checks, and validation
-   gates.
-9. **Commit/ref**: the git commit hash and branch/ref pushed to. If no commit
-   was made (e.g., blocked before landing), state `no commit` with the reason.
-10. **Hashes**: frozen test hash (if applicable), implementation hash, and any
-    other integrity digests referenced by the verifier.
-11. **Resources**: memory measurements, command durations, token/context usage
-    estimates, and any deviations from the 8 GB budget.
-12. **Unresolved gaps**: exact descriptions of blockers, missing behaviors,
-    partial implementations, or follow-up work required. Do not claim all
-    features are covered while any upstream surface or mandatory task is
-    unresolved (AGENTS.md Completion report).
-13. **Scratchpad path**: e.g., `worklog/<TASK-ID>.md`. The orchestrator collects
-    these via `cc.scratchpad_report(document, session)`.
+   outputs or exit codes, including the scenario matrix and RED/GREEN when
+   applicable.
+9. **Commit/ref**: the git commit hash and pushed branch/ref. If no commit
+   was made, state `no commit` with the reason.
+10. **Hashes**: frozen-test/artifact/revision hashes, or `none — [reason]`;
+    applicable frozen-test status/hash cannot use `none`.
+11. **Resource observations**: memory measurements, command durations,
+    token/context usage estimates, and any deviations from the 8 GB budget.
+12. **Unresolved gaps**: exact blocker descriptions, missing behaviors,
+    partial implementations, or follow-up work required. State `none` when
+    nothing remains unresolved.
+
+The `Scratchpad path` is reported in section 4 (handback) and collected by the
+orchestrator via `cc.scratchpad_report`; it is not a handoff-schema field.
