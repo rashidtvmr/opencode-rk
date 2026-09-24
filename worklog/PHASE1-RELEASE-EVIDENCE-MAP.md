@@ -40,9 +40,10 @@
 - REL-003: **completed**, session ses_f387af899ffeojhREiG4Rewoar, scratchpad `worklog/REL-003.md`. `worklog/REL-003-FINAL.md` = Y at 248f519, validator sha256 `3a462032...`.
 - Task-card text "Status: NOT STARTED" is card-authorship metadata, not ledger state.
 
-**Convergence gate (at candidate commit 73be580):**
+**Convergence gate (anchored historical, at candidate commit 73be580):**
 - `python3 tools/convergence_gate.py`: `total=88`, 84 `off-plan` lines, 4 `admits` lines (AUD-017, AUD-020, INSTALLED-DEFAULT-CONTRACT-INTEGRATION, PHASE1-RELEASE-EVIDENCE-MAP). Exit=1 (CONVERGENCE BLOCKED).
 - Off-plan completed = **84**, not 86 as candidate claimed.
+- This 88/84 figure is a **historical, non-normative observation bound to commit 73be580**, NOT a release criterion and NOT a current reading. Final verifier 42889fc observed live drift to `total=90`, 86 `off-plan`, 4 `admits` at 68b837c; the count continues to drift with ledger churn. Live count is observational only; the normative state is simply CONVERGENCE BLOCKED (exit=1).
 - The gate's own row for PHASE1-RELEASE-EVIDENCE-MAP fires because completedNote contains "missing". Self-referential; not release evidence either way.
 
 **validate_repository:**
@@ -54,7 +55,7 @@
 - Only hits for "sign" are unrelated ("signed Unix time", "signed actions/checkout", "wake signal")
 
 **build.rs at receipt:**
-- `crates/cli/build.rs` exists at 5d66683 (commit-time GIT_COMMIT receipt), absent at HEAD of candidate branch.
+- `crates/cli/build.rs` exists at product-spine 5d66683 (commit-time GIT_COMMIT receipt); tree-absent at the evidence-map revision 68b837c (`git ls-tree 68b837c -- crates/cli/build.rs` = empty).
 
 **INSTALLED-DEFAULT-CONTRACT-INTEGRATION** ledger row states: completed at commit 15381e3, frozen test SHA-256 `fec2fdb9...`, 5/5 GREEN with `OC2_E2E_REVISION=$(git rev-parse HEAD)` env var receipt substitute. Parent remains open because packaging must inject truthful receipt.
 
@@ -125,8 +126,8 @@ Original inaccurate classifications from commit 73be580 are superseded below.
 - Status: CONVERGENCE BLOCKED (exit=1)
 - Classification: **stale/invalid** as release gate
 - Command: `python3 tools/convergence_gate.py`
-- Result: `total=88`, 84 `off-plan` completed lines, 4 `admits` lines
-- Off-plan count: 84 (candidate claimed 86 - **superseded**)
+- Result: `total=88`, 84 `off-plan` completed lines, 4 `admits` lines (historical, anchored to commit 73be580; non-normative - live count drifts with ledger churn, e.g. 90/86 at 68b837c)
+- Off-plan count: 84 at 73be580 (candidate claimed 86 - **superseded**); count is observational history, not a release criterion
 - Admits: AUD-017, AUD-020, INSTALLED-DEFAULT-CONTRACT-INTEGRATION, PHASE1-RELEASE-EVIDENCE-MAP
 - Blocker: convergence gate reports ledger entries but does not constitute release acceptance per AGENTS.md parent-completion boundary
 - Repository validation failure (validate_repository FAIL backlog exhaustion, exit=1) is **separate** from convergence count and pre-existing repo-wide
