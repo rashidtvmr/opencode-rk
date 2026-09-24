@@ -1070,6 +1070,12 @@
       "session": "ses_f2ddec05cffe9glpDG6jx1t5FO",
       "status": "completed"
     },
+    "TOOL-RED-SHELL-SPLIT-PROPOSAL": {
+      "completedNote": "Proposal written: contradiction lines/source/API audit/split lane graph/hash lifecycle/rollback; no product test per research scope; frozen sha 2853960b unchanged; git diff --check clean; implementation blocked pending controller authorization and independent refreeze.",
+      "scratchpad": "worklog/TOOL-RED-SHELL-SPLIT-PROPOSAL.md",
+      "session": "ses_f2dc08073ffe3gPMjh3dJ5uqhm",
+      "status": "completed"
+    },
     "TOOL-RED-SHELL-VERIFY": {
       "completedNote": "ACCEPT WITH SPLIT: RED compiles 0/4 fail-for-cause; hash 2853960b before/after; no leak/artifacts; t01-t03 broker authz, t04 cancellation must split; cmd cargo test -p opencode-rk-tools --test phase1_shell_broker",
       "scratchpad": "worklog/TOOL-RED-SHELL-VERIFY.md",
