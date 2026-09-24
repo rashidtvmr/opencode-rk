@@ -168,6 +168,12 @@
       "session": "ses_f2b8ff1e5ffe7F4M9TAgQi2nMB",
       "status": "completed"
     },
+    "APP012-PROTECTED-PATH-VERIFY": {
+      "completedNote": "VERIFY scoped ACCEPT containment+redacted denial: protected 7/7, sec-lib 148/148, journey 1/1, file_ops 5/5, tool_allow 5/5, tool_audit 5/5, check 0 errors; frozen ed524ec1/945236 unchanged; zero test edits",
+      "scratchpad": "worklog/APP012-PROTECTED-PATH-VERIFY.md",
+      "session": "ses_f2b570c08ffeqHpagV0MtJ03Db",
+      "status": "completed"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
