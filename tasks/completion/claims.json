@@ -939,6 +939,11 @@
       "session": "ses_f2df2827bffepxCodKqLThdFlm",
       "status": "completed"
     },
+    "POLICY-STRUCTURED-DELEGATION-VERIFY-LANDING": {
+      "scratchpad": "worklog/POLICY-STRUCTURED-DELEGATION-VERIFY-LANDING.md",
+      "session": "ses_f2de883efffe5RnnnwTfZQ0Yn4",
+      "status": "in-progress"
+    },
     "POLICY-STRUCTURED-DELEGATION-WORKER": {
       "completedNote": "Added mandatory structured-brief intake gate (section 0) + handoff schema cross-ref to .agents/WORKER.md cross-referencing canonical AGENTS.md template; docs-only, rtk git diff --check PASS; no Cargo tests required.",
       "scratchpad": "worklog/POLICY-STRUCTURED-DELEGATION-WORKER.md",

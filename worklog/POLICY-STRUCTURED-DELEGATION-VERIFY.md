@@ -88,6 +88,7 @@ No harmful circular reference was found in the two policy files. The existing `A
 - `rtk git push --dry-run` -> exit 128, upstream branch name mismatch; no push occurred.
 - `rtk sysctl -n hw.memsize` -> `25769803776`; `rtk vm_stat` recorded only. No Cargo/build/browser/database command run.
 - `rtk timeout 120 python3 tools/convergence_gate.py` -> exit 127 because macOS `timeout` executable is unavailable; reran with the tool’s 120-second bound.
+- `rtk git push origin HEAD:refs/heads/docs/structured-subagent-prompts` -> success; `rtk git fetch --prune origin` -> `HEAD == origin/docs/structured-subagent-prompts`; candidate and verifier ancestry checks all exit 0.
 
 ## Scope, landing, unresolved gaps
 
