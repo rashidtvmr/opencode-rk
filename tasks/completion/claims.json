@@ -1071,9 +1071,10 @@
       "status": "completed"
     },
     "TOOL-RED-SHELL-VERIFY": {
+      "completedNote": "ACCEPT WITH SPLIT: RED compiles 0/4 fail-for-cause; hash 2853960b before/after; no leak/artifacts; t01-t03 broker authz, t04 cancellation must split; cmd cargo test -p opencode-rk-tools --test phase1_shell_broker",
       "scratchpad": "worklog/TOOL-RED-SHELL-VERIFY.md",
       "session": "ses_f2dd51d07ffe8n7qJum4Kh4DPT",
-      "status": "in-progress"
+      "status": "completed"
     },
     "TUI-001": {
       "completedNote": "GREEN exact native 1/1 + lib-native 73/73 + lib-default 72/72 + check ok; test-body sha256 bc606827 pre/post identical; zero test edits; CLI Scenario B pre-existing TTY-guard fail recorded, untouched",
