@@ -1070,6 +1070,12 @@
       "session": "ses_f2cc620c6ffeMsfgIyrBm8Ap2H",
       "status": "completed"
     },
+    "TOOL-PROCESS-CWD-BYTES-GREEN": {
+      "completedNote": "cwd RED 1/1 GREEN; broker 3/3; hashes f4eea500/ef56f63a unchanged; check OK; zero test edits",
+      "scratchpad": "worklog/TOOL-PROCESS-CWD-BYTES-GREEN.md",
+      "session": "ses_f2bbf46c1ffeHpY4JN1bjjJeG5",
+      "status": "completed"
+    },
     "TOOL-PROCESS-CWD-BYTES-RED": {
       "completedNote": "RED 0/1 fail-for-cause; left=cwd exceeds max_cwd_bytes right=cwd could not be canonicalized; frozen sha f4eea500; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 cargo test -p opencode-rk-tools --test process_cwd_bytes_red -- --test-threads=1",
       "scratchpad": "worklog/TOOL-PROCESS-CWD-BYTES-RED.md",

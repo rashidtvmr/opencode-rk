@@ -189,6 +189,24 @@ fn process_now() -> TokioInstant {
     TokioInstant::now()
 }
 
+/// Exact raw OS bytes of an `OsStr` for cwd budget/NUL accounting.
+///
+/// Unix counts the bytes actually handed to the kernel
+/// (`std::os::unix::ffi::OsStrExt::as_bytes`), so a non-UTF-8 path is never
+/// inflated by lossy U+FFFD expansion. Non-Unix only has to compile: the
+/// process seam returns `UnsupportedPlatform` before preparation is reached,
+/// so this path is never executed and makes no Windows support claim.
+#[cfg(unix)]
+fn raw_os_bytes(value: &std::ffi::OsStr) -> &[u8] {
+    use std::os::unix::ffi::OsStrExt;
+    value.as_bytes()
+}
+
+#[cfg(not(unix))]
+fn raw_os_bytes(value: &std::ffi::OsStr) -> &[u8] {
+    value.as_encoded_bytes()
+}
+
 /// Result of the one canonical-cwd preparation pass.
 fn prepare_canonical_cwd(
     cwd: &Path,
@@ -199,12 +217,12 @@ fn prepare_canonical_cwd(
             reason: "cwd must not be empty".to_owned(),
         });
     }
-    if cwd.to_string_lossy().contains('\0') {
+    if raw_os_bytes(cwd.as_os_str()).contains(&0) {
         return Err(ProcessError::InvalidCwd {
             reason: "cwd must not contain NUL".to_owned(),
         });
     }
-    if cwd.to_string_lossy().len() > max_cwd_bytes {
+    if raw_os_bytes(cwd.as_os_str()).len() > max_cwd_bytes {
         return Err(ProcessError::InvalidCwd {
             reason: "cwd exceeds max_cwd_bytes".to_owned(),
         });
@@ -217,7 +235,7 @@ fn prepare_canonical_cwd(
             reason: "canonical cwd is not absolute".to_owned(),
         });
     }
-    if canonical.to_string_lossy().len() > max_cwd_bytes {
+    if raw_os_bytes(canonical.as_os_str()).len() > max_cwd_bytes {
         return Err(ProcessError::InvalidCwd {
             reason: "canonical cwd exceeds max_cwd_bytes".to_owned(),
         });
