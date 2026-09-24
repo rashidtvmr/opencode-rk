@@ -867,6 +867,12 @@
       "session": "ses_f2e2ae321ffe6rN1WqKR6j2r1D",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-VERIFY": {
+      "completedNote": "VERIFY FAIL on proposal as written. Base 1f4a9e6 = 86 findings/85 tids/83 off-plan/3 bad-note reproduced; d93927e = 87/86. Authoritative retire=78 (51+27), not 54; A2 dup 27, omits 24; true residual=4 APP-012 sub-lanes, not 28. No delete/demote API; needs controller authority. 3 rows cite absent worklogs. See worklog/LEDGER-CONVERGENCE-VERIFY.md",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-VERIFY.md",
+      "session": "ses_f2e217617ffenDJZbnchx5Jkjr",
+      "status": "completed"
+    },
     "OPS-009": {
       "completedNote": "GREEN 5/5 ops_replay T01-T05, impl pre-landed byte-identical, zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-foundation --test ops_replay",
       "scratchpad": "worklog/OPS-009.md",
