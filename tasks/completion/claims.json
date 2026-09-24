@@ -12,6 +12,12 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-REPAIR-RED": {
+      "blockedNote": "BLOCKED RED-ready: frozen test sha256 046c88df4d4cd755ed244e04ff8e781ee569e15d236da1a0d81ebdce8703c26d; focused native PTY command compiled and ran 3 tests, 2 product failures (missing setup view and first-session auto-create), sequential daemon reuse test passed; no product/existing-test edits",
+      "scratchpad": "worklog/APP-001-REPAIR-RED.md",
+      "session": "ses_f2ebc132cffe34eVmCawNBFKae",
+      "status": "blocked"
+    },
     "APP-002": {
       "completedNote": "GREEN 20/20 daemon_client (13 existing + 7 APP-002) rustc --test + cargo test -p opencode-rk-cli --bin opencode-rk daemon_client; zero test edits post-freeze; log /tmp/opencode/app002.log",
       "scratchpad": "worklog/APP-002.md",
