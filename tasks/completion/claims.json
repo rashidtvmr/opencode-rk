@@ -909,6 +909,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-RELEASE-EVIDENCE-MAP": {
+      "completedNote": "Evidence ledger written: REL-001/002/003 missing, revision receipt local-only, signing external unavailable, validate_repository pre-existing FAIL",
+      "scratchpad": "worklog/PHASE1-RELEASE-EVIDENCE-MAP.md",
+      "session": "ses_f2e03dda0ffeBAMXeSY7uhsOvP",
+      "status": "completed"
+    },
     "PROV-018": {
       "completedNote": "5/5 frozen tests green. CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-providers --test prov_018_local_credential_import: 5 passed.",
       "scratchpad": "worklog/PROV-018.md",
