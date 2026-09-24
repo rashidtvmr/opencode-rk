@@ -2,7 +2,7 @@
 
 - Claim: `in-progress`; session `ses_f2dfc25c9ffeJyXsBvNHRgHsSF`.
 - Owned file: `.agents/WORKER.md`.
-- Task type: policy/documentation.
+- Task type: implementation. (Corrected from invalid `policy/documentation` to canonical enum per AGENTS.md:131.)
 - Worktree: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/structured-subagent-prompts`.
 - Branch: `docs/structured-subagent-prompts` (tracks `origin/lane/PHASE1-product-spine-20260923`, ahead 1).
 - Source evidence:
