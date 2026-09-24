@@ -1088,6 +1088,12 @@
       "session": "ses_f2dd51d07ffe8n7qJum4Kh4DPT",
       "status": "completed"
     },
+    "TOOL-SHELL-BATCH-IMMEDIATE-RED": {
+      "completedNote": "compiling RED fail-for-cause 6/6, SHA aaad6ab33406a3d5cecf8ca8d5ce0ae6ca16ba7aa22ce264d1abf5240efdc0af; cargo test -p opencode-rk-tools --test registry_batch_immediate_red => 0 passed/6 failed; each Immediate maps to Unknown(\"slot-i\") (unknown/disabled/oversized/shell-denied/denied/parity); no source edits; broker hash ef56f63a unchanged; diff clean",
+      "scratchpad": "worklog/TOOL-SHELL-BATCH-IMMEDIATE-RED.md",
+      "session": "ses_f2b9f0cf6ffeeGf6eX3o5WJSuh",
+      "status": "completed"
+    },
     "TOOL-SHELL-BROKER-EXECUTOR-GREEN": {
       "completedNote": "t01/t02 GREEN; t03 remains RED solely in registry dispatcher lane; frozen hash ef56f63a5d2d3d0fa99049cdfdf9df0fe69fb6e5c66b33484431603cc855d1e8; legacy executor shell unit tests conflict with deny-default and fail unchanged",
       "scratchpad": "worklog/TOOL-SHELL-BROKER-EXECUTOR-GREEN.md",
