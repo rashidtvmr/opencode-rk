@@ -879,6 +879,12 @@
       "session": "ses_f2dcc8c53ffeLSzMHx0D73yJ08",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-TRANSACTION-CHECKLIST-VERIFY": {
+      "completedNote": "PASS checklist; SIM PASS hash/CAS/rollback; STATE TABLE PASS 7 states; git diff --check clean; convergence_gate expected blocked total=96",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-TRANSACTION-CHECKLIST-VERIFY.md",
+      "session": "ses_f2d6eadc7ffe23VAdUciWQpcwV",
+      "status": "completed"
+    },
     "LEDGER-CONVERGENCE-TRANSACTION-CORRECTION": {
       "completedNote": "RESEARCH GREEN: corrected proposal specifies b15e0b6 residual 12; Phase A/B/C non-self hashes, lock/CAS, fsync/rename, crash recovery, guarded rollback, receipt; disposable sim PASS; gate current 95 before row, validate backlog 51, diff clean",
       "scratchpad": "worklog/LEDGER-CONVERGENCE-TRANSACTION-CORRECTION.md",
