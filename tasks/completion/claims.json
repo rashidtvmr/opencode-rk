@@ -143,6 +143,12 @@
       "session": "ses_f2cc178b5ffe9zulW64uCTjFxa",
       "status": "completed"
     },
+    "APP012-KEYRING-CONTRACT-CORRECTION-VERIFY": {
+      "completedNote": "ACCEPT readiness for separate compiling RED; required grep PASS; frozen SHA 945236c4c6a565fefb3853afa6930c438ab38f250c074ef650b5cd252d3c8c50; diff check PASS; no product/native tests; convergence/validator pre-existing blocked.",
+      "scratchpad": "worklog/APP012-KEYRING-CONTRACT-CORRECTION-VERIFY.md",
+      "session": "ses_f2c0ac049ffeGGVeohLhuPAU43",
+      "status": "completed"
+    },
     "APP012-KEYRING-PERSISTENCE-CONTRACT": {
       "completedNote": "Contract written+committed at f23bc8e. Frozen RED sha 945236c4 unchanged. git diff --check clean. Only worklog file authored; no source/test/Cargo edits.",
       "scratchpad": "worklog/APP012-KEYRING-PERSISTENCE-CONTRACT.md",
