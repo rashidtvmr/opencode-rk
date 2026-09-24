@@ -23,3 +23,17 @@ Exact RED command: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencod
 Decisions: no Enter submit (avoids `you: {text}` transcript side effect); Ctrl-C exit; descriptor PID cleanup best-effort; all failure excerpts redacted (sentinel never printed).
 
 Remaining unknowns: exact masked-marker string the GREEN renderer will use (`[hidden]` assumed per task); whether GREEN also masks transcript echoes.
+
+## Integrated GREEN candidate
+
+- Native Unix entry now installs a scoped rustix raw-mode guard before reading
+  bytes, disabling kernel TTY echo and restoring the original termios on every
+  exit path. `native_page_lines` replaces a non-empty setup draft with the fixed
+  non-secret marker `[hidden]`; normal chat drafts are unchanged.
+- The frozen test SHA-256 remains
+  `5c7e9efdb72f209dd47429d9a7a391d83ef5686e7c8d5806c1773983544f3a19`.
+- Exact GREEN command: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p
+  opencode-rk-cli --test app005_setup_secret_red --features native --
+  --test-threads=1`; result `1 passed, 0 failed`.
+- This proves PTY output masking before submission on macOS only. Persistent OS
+  keyring storage and submitted-secret handling remain separate APP-005 work.

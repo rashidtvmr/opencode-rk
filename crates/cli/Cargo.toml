@@ -29,7 +29,7 @@ opencode-rk-server = { path = "../server" }
 opencode-rk-storage = { path = "../storage" }
 opencode-rk-tools = { path = "../tools" }
 reqwest.workspace = true
-rustix = { workspace = true, features = ["fs"] }
+rustix = { workspace = true, features = ["fs", "termios"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true

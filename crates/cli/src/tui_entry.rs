@@ -35,6 +35,35 @@ use std::{
 };
 use tokio::sync::mpsc;
 
+#[cfg(all(feature = "native", unix))]
+struct UnixRawMode {
+    original: rustix::termios::Termios,
+}
+
+#[cfg(all(feature = "native", unix))]
+impl UnixRawMode {
+    fn enter() -> std::io::Result<Self> {
+        let stdin = std::io::stdin();
+        let original = rustix::termios::tcgetattr(&stdin)?;
+        let mut raw = original.clone();
+        raw.make_raw();
+        rustix::termios::tcsetattr(&stdin, rustix::termios::OptionalActions::Now, &raw)?;
+        Ok(Self { original })
+    }
+}
+
+#[cfg(all(feature = "native", unix))]
+impl Drop for UnixRawMode {
+    fn drop(&mut self) {
+        let stdin = std::io::stdin();
+        let _ = rustix::termios::tcsetattr(
+            &stdin,
+            rustix::termios::OptionalActions::Now,
+            &self.original,
+        );
+    }
+}
+
 /// Bounded body cap for daemon responses (1 MiB).
 const LIVE_MAX_BODY_BYTES: u64 = 1_048_576;
 /// Connect/read timeout for live snapshot calls.
@@ -717,6 +746,9 @@ fn native_page_lines(
         lines.push(
             "Provider setup is required before starting a session. Ctrl+C or :q exits.".to_string(),
         );
+        if !draft.is_empty() {
+            lines.push("Credential: [hidden]".to_string());
+        }
     }
     match page {
         NativePage::Chat => {
@@ -736,7 +768,12 @@ fn native_page_lines(
                 lines.push(String::new());
             }
             lines.push("─".repeat(width.min(120)));
-            lines.push(format!("> {draft}"));
+            let displayed_draft = if setup_mode && !draft.is_empty() {
+                "[hidden]"
+            } else {
+                draft
+            };
+            lines.push(format!("> {displayed_draft}"));
             lines.push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context".to_owned());
         }
         NativePage::Palette => {
@@ -930,6 +967,8 @@ async fn native_interactive_loop(
     });
     let mut renderer = NativeRenderer::create(cols, rows)?;
     renderer.setup_terminal()?;
+    #[cfg(unix)]
+    let _raw_mode = UnixRawMode::enter()?;
     let _ = renderer.enable_mouse(false);
     let _ = renderer.enable_kitty_keyboard(1);
     renderer.set_title("OpenCode RK")?;
