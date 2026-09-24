@@ -143,6 +143,12 @@
       "session": "ses_f2cd8fde1ffedvLsDWTIAT0UoM",
       "status": "completed"
     },
+    "APP012-RESTART-RESUME-CONTRACT-VERIFY": {
+      "blockedNote": "REVISE minor: P1 open_existing caller sentence inexact, P2 row12 replay-block wording; else source-grounded, RED feasible, frozen hash unchanged",
+      "scratchpad": "worklog/APP012-RESTART-RESUME-CONTRACT-VERIFY.md",
+      "session": "ses_f2cb4cbcaffeCuFVBWVglB0ngq",
+      "status": "blocked"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
