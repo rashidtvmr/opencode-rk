@@ -161,6 +161,13 @@
       "session": "ses_f2c03db99ffemfbWZLy0zQAIGG",
       "status": "completed"
     },
+    "APP012-RESTART-RESUME-RED": {
+      "blockedNote": "Existing-API behavior lock authored: crates/storage/tests/app012_restart_resume_red.rs (12 tests, 18-row subset). recovery_v2.rs/RecoveryV2 absent -> scan/startup-fencing RED subset blocked (compile fail); prewire in worklog/APP012-RESTART-RESUME-RED.md. No Cargo slot; pending storage test target. No source edits; frozen 945236c4 unchanged.",
+      "completedNote": "Compiling stable RED: app012_restart_resume_red -> 13 passed, 5 failed fail-for-cause via StorageFacade::open (owner_generation 0!=1, clean_shutdown 1!=0, running exec (1,None)!=(4,None), attempt 0!=4, 501 running after bounded pass). Frozen d2745fe142fb1add3cc26c9fe9715438c73a51084d5498373c990c0a8e2a8cce; APP-012 945236c4 preserved; no source edits.",
+      "scratchpad": "worklog/APP012-RESTART-RESUME-RED.md",
+      "session": "ses_f2b9e2f5bffeIZKsTT1YveNzWZ",
+      "status": "completed"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
