@@ -1076,6 +1076,12 @@
       "session": "ses_f2bbf46c1ffeHpY4JN1bjjJeG5",
       "status": "completed"
     },
+    "TOOL-PROCESS-CWD-BYTES-GREEN-VERIFY": {
+      "completedNote": "ACCEPT: repaired seam 1fcd3838 satisfies accepted contract; RED 1/1 + broker 3/3 GREEN at exact revision; frozen hashes unchanged; raw_os_bytes fix audited; no source/test edits by verifier; commit+push worklog+own row only",
+      "scratchpad": "worklog/TOOL-PROCESS-CWD-BYTES-GREEN-VERIFY.md",
+      "session": "ses_f2bbd2bf0ffeltT7dyVSweyZMH",
+      "status": "completed"
+    },
     "TOOL-PROCESS-CWD-BYTES-RED": {
       "completedNote": "RED 0/1 fail-for-cause; left=cwd exceeds max_cwd_bytes right=cwd could not be canonicalized; frozen sha f4eea500; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 cargo test -p opencode-rk-tools --test process_cwd_bytes_red -- --test-threads=1",
       "scratchpad": "worklog/TOOL-PROCESS-CWD-BYTES-RED.md",
