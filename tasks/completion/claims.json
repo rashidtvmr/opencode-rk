@@ -1029,9 +1029,10 @@
       "status": "completed"
     },
     "SEC-RED-OS": {
+      "blockedNote": "BLOCKED: macOS host intentionally unsupported; os_backend.rs:112-181 reports no backend and engage() always Err(Blocked). Linux-only RED would run zero tests here; cross-compile cannot prove runtime isolation. Need authorized Linux runner plus linked syscall backend/public supported API. Focused os_backend lib tests GREEN; no candidate test/hash.",
       "scratchpad": "worklog/SEC-RED-OS.md",
-      "session": "ses_f2dc11dd3ffeWw31mT4dyuJYOM",
-      "status": "in-progress"
+      "session": "ses_f2db129e9ffeliWnPz0Avf6axT",
+      "status": "blocked"
     },
     "SEC-RED-OS-VERIFY": {
       "completedNote": "VERDICT INCOMPLETE: candidate crates/security/tests/phase1_os_isolation.rs absent (shasum ENOENT; not in git ls-files; no ref in git log --all); author worklog/SEC-RED-OS.md absent; author row SEC-RED-OS still in-progress ses_f2dc11dd3ffeWw31mT4dyuJYOM; no commit/push. Cargo not run (no candidate). No candidate bytes changed. See worklog/SEC-RED-OS-VERIFY.md.",
