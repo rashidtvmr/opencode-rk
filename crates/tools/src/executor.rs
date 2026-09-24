@@ -3,8 +3,9 @@
 //! Provides `ToolExecutor` for running tool calls with timeout support,
 //! and `ToolCall`/`ToolResult` types for structured tool invocation.
 
+use opencode_rk_security::{Decision, OperationIntent, PermissionBroker};
 use serde_json::Value;
-use opencode_rk_security::PermissionBroker;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::time::timeout;
@@ -22,6 +23,19 @@ fn parse_optional_usize(input: &Value, field: &'static str) -> Result<Option<usi
         .and_then(|value| usize::try_from(value).ok())
         .ok_or_else(|| format!("Invalid '{field}' field in input"))?;
     Ok(Some(parsed))
+}
+
+fn shell_cwd(input: &Value) -> Result<PathBuf, String> {
+    let Some(value) = input.get("cwd") else {
+        return std::env::current_dir().map_err(|_| "Invalid 'cwd' field in input".to_owned());
+    };
+    let Some(cwd) = value.as_str() else {
+        return Err("Invalid 'cwd' field in input".to_owned());
+    };
+    if cwd.trim().is_empty() || cwd.contains('\0') {
+        return Err("Invalid 'cwd' field in input".to_owned());
+    }
+    Ok(PathBuf::from(cwd))
 }
 
 /// Configuration for tool execution timeouts.
@@ -114,9 +128,17 @@ impl ToolExecutor {
             .map(|t| Duration::from_millis(t.min(self.timeout_config.max_timeout_ms)))
             .unwrap_or_else(|| Duration::from_millis(self.timeout_config.default_timeout_ms));
 
-        // For now, shell/bash tools are supported for demonstration
+        // Shell execution is never available through the generic path. The
+        // brokered entrypoint below is the only path allowed to construct a
+        // process command.
         let result = if call.name == "bash" || call.name == "shell" {
-            self.execute_shell(&call, effective_timeout).await
+            ToolResult {
+                tool_id: call.tool_id,
+                output: String::new(),
+                success: false,
+                duration_ms: elapsed_ms(start),
+                error: Some("shell execution denied: broker authorization required".to_owned()),
+            }
         } else if call.name == "echo" {
             self.execute_echo(&call, effective_timeout).await
         } else {
@@ -140,6 +162,15 @@ impl ToolExecutor {
         call: ToolCall,
         broker: &PermissionBroker,
     ) -> ToolResult {
+        let effective_timeout = call
+            .timeout_ms
+            .map(|value| Duration::from_millis(value.min(self.timeout_config.max_timeout_ms)))
+            .unwrap_or_else(|| Duration::from_millis(self.timeout_config.default_timeout_ms));
+        if call.name == "bash" || call.name == "shell" {
+            return self
+                .execute_shell_authorized(&call, effective_timeout, broker)
+                .await;
+        }
         if call.name != "read" {
             return self.execute(call).await;
         }
@@ -198,9 +229,8 @@ impl ToolExecutor {
             .timeout_ms
             .map(|value| Duration::from_millis(value.min(self.timeout_config.max_timeout_ms)))
             .unwrap_or_else(|| Duration::from_millis(self.timeout_config.default_timeout_ms));
-        let task = tokio::task::spawn_blocking(move || {
-            crate::file_ops::execute_authorized(op, &broker)
-        });
+        let task =
+            tokio::task::spawn_blocking(move || crate::file_ops::execute_authorized(op, &broker));
         match timeout(effective_timeout, task).await {
             Ok(Ok(Ok(result))) => ToolResult {
                 tool_id,
@@ -237,61 +267,106 @@ impl ToolExecutor {
         }
     }
 
-    async fn execute_shell(&self, call: &ToolCall, timeout_duration: Duration) -> ToolResult {
+    async fn execute_shell_authorized(
+        &self,
+        call: &ToolCall,
+        timeout_duration: Duration,
+        broker: &PermissionBroker,
+    ) -> ToolResult {
         let start = Instant::now();
-        let command = call.input.get("command").and_then(|v| v.as_str());
-
-        match command {
-            Some(cmd) => {
-                let cmd = Command::new("bash").arg("-c").arg(cmd).output();
-
-                match timeout(timeout_duration, cmd).await {
-                    Ok(output_result) => match output_result {
-                        Ok(output) => {
-                            let duration_ms = elapsed_ms(start);
-                            let success = output.status.success();
-                            let stdout = String::from_utf8_lossy(&output.stdout).to_string();
-
-                            let error = if success {
-                                None
-                            } else {
-                                Some(format!("Command failed with status: {}", output.status))
-                            };
-
-                            ToolResult {
-                                tool_id: call.tool_id.clone(),
-                                output: stdout,
-                                success,
-                                duration_ms,
-                                error,
-                            }
-                        }
-                        Err(e) => ToolResult {
-                            tool_id: call.tool_id.clone(),
-                            output: String::new(),
-                            success: false,
-                            duration_ms: elapsed_ms(start),
-                            error: Some(format!("Failed to execute command: {}", e)),
-                        },
-                    },
-                    Err(_) => {
-                        let duration_ms = elapsed_ms(start);
-                        ToolResult {
-                            tool_id: call.tool_id.clone(),
-                            output: String::new(),
-                            success: false,
-                            duration_ms,
-                            error: Some("Execution timed out".to_string()),
-                        }
-                    }
-                }
-            }
-            None => ToolResult {
+        let Some(command) = call.input.get("command").and_then(Value::as_str) else {
+            return ToolResult {
                 tool_id: call.tool_id.clone(),
                 output: String::new(),
                 success: false,
                 duration_ms: elapsed_ms(start),
-                error: Some("Missing 'command' field in input".to_string()),
+                error: Some("Missing 'command' field in input".to_owned()),
+            };
+        };
+        if command.is_empty() || command.contains('\0') {
+            return ToolResult {
+                tool_id: call.tool_id.clone(),
+                output: String::new(),
+                success: false,
+                duration_ms: elapsed_ms(start),
+                error: Some("Invalid 'command' field in input".to_owned()),
+            };
+        }
+
+        let cwd = match shell_cwd(&call.input) {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                return ToolResult {
+                    tool_id: call.tool_id.clone(),
+                    output: String::new(),
+                    success: false,
+                    duration_ms: elapsed_ms(start),
+                    error: Some(error),
+                };
+            }
+        };
+        let args = vec!["-c".to_owned(), command.to_owned()];
+        let intent = OperationIntent::Process {
+            program: "bash".to_owned(),
+            args: args.clone(),
+            cwd: cwd.clone(),
+        };
+
+        match broker.authorize(&intent) {
+            Decision::Allow => {}
+            Decision::Deny { .. } | Decision::RequireHuman { .. } => {
+                return ToolResult {
+                    tool_id: call.tool_id.clone(),
+                    output: String::new(),
+                    success: false,
+                    duration_ms: elapsed_ms(start),
+                    error: Some("shell execution denied by broker".to_owned()),
+                };
+            }
+        }
+
+        let mut process = Command::new("bash");
+        process.args(&args).current_dir(&cwd).env_clear().env(
+            "PATH",
+            "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+        );
+        let cmd = process.output();
+
+        match timeout(timeout_duration, cmd).await {
+            Ok(output_result) => match output_result {
+                Ok(output) => {
+                    let duration_ms = elapsed_ms(start);
+                    let success = output.status.success();
+                    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+                    let error = if success {
+                        None
+                    } else {
+                        Some(format!("Command failed with status: {}", output.status))
+                    };
+
+                    ToolResult {
+                        tool_id: call.tool_id.clone(),
+                        output: stdout,
+                        success,
+                        duration_ms,
+                        error,
+                    }
+                }
+                Err(_) => ToolResult {
+                    tool_id: call.tool_id.clone(),
+                    output: String::new(),
+                    success: false,
+                    duration_ms: elapsed_ms(start),
+                    error: Some("Failed to execute command".to_owned()),
+                },
+            },
+            Err(_) => ToolResult {
+                tool_id: call.tool_id.clone(),
+                output: String::new(),
+                success: false,
+                duration_ms: elapsed_ms(start),
+                error: Some("Execution timed out".to_owned()),
             },
         }
     }
