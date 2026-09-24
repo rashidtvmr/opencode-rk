@@ -24,7 +24,7 @@
 
 ## Working observations
 
-- Current branch tracks `origin/docs/structured-subagent-prompts`; `HEAD` and remote ref are `aa069938d6812f6a147798a7d1354d4f19a47ba9`.
+- Current branch tracks `origin/docs/structured-subagent-prompts`; policy baseline was `aa069938d6812f6a147798a7d1354d4f19a47ba9`; verifier landing commits follow that baseline.
 - Policy diff from parent `5d666830...` is additive in intent but includes explanatory deletions/replacements in `AGENTS.md`; no product/test/controller/security-policy changes observed.
 - Prior correction claims F1-F7 addressed. Independent comparison must verify actual current text, not claims.
 
@@ -92,7 +92,7 @@ Supporting drift, not additional matrix failures: `.agents/WORKER.md:35-36,144-1
 
 - `rtk git diff --check` → exit `0`.
 - `rtk git push --dry-run` → `Everything up-to-date`, exit `0`.
-- `rtk git push` → topic branch advanced to `80366c1`, exit `0`.
+- `rtk git push` → evidence commit `80366c1` pushed, then landing-record commit `56067c7` pushed; both commands exit `0`.
 - `rtk git fetch --prune origin` followed by `rtk git merge-base --is-ancestor HEAD origin/docs/structured-subagent-prompts` → exit `0`.
 - `rtk python3 tools/convergence_gate.py` → exit `1`, `CONVERGENCE BLOCKED`, `total=99`.
 - `rtk python3 tools/validate_repository.py` → exit `1`, `validate_backlog_exhaustion: 51 error(s)`; protection fixture passed, hosting-platform state unverified.
@@ -106,7 +106,8 @@ Supporting drift, not additional matrix failures: `.agents/WORKER.md:35-36,144-1
 - `worklog/POLICY-STRUCTURED-DELEGATION-WORKER.md`: `c4d5401389a827ad761ad870c94be32135cee1f38085984cbb3ffa7848595836`
 - Policy baseline before verifier landing: `aa069938d6812f6a147798a7d1354d4f19a47ba9`
 - Verifier evidence commit: `80366c16a04d7ae6b305fb776223ec9a4b55214f`
-- Pushed branch/ref: `docs/structured-subagent-prompts`; `origin/docs/structured-subagent-prompts` contains the verifier commit
+- Landing-record commit: `56067c7c014669a9a6b9692a7a7ff5f0519e41bd`
+- Pushed branch/ref: `docs/structured-subagent-prompts`; `origin/docs/structured-subagent-prompts` contains the landing-record commit
 - `origin/main`: not containing the policy topic branch
 
 ### Recommendation
