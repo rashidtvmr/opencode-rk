@@ -879,6 +879,12 @@
       "session": "ses_f2dcc8c53ffeLSzMHx0D73yJ08",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-TOOL-TEST-BOUNDARY": {
+      "completedNote": "RESEARCH GREEN: exact tool tools/ledger_convergence_controller.py and RED tests/bootstrap/test_ledger_convergence_controller.py; API/CLI fixture, apply-disabled, canonical/JCS, A/B/C, lock/CAS, fsync/crash, bounds/rollback matrix in worklog; no product test by research boundary; convergence_gate expected blocked total=97; git diff --check clean",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-TOOL-TEST-BOUNDARY.md",
+      "session": "ses_f2d559e92ffeubDCHSP4ruM5BO",
+      "status": "completed"
+    },
     "LEDGER-CONVERGENCE-TRANSACTION-CHECKLIST-VERIFY": {
       "completedNote": "PASS checklist; SIM PASS hash/CAS/rollback; STATE TABLE PASS 7 states; git diff --check clean; convergence_gate expected blocked total=96",
       "scratchpad": "worklog/LEDGER-CONVERGENCE-TRANSACTION-CHECKLIST-VERIFY.md",
