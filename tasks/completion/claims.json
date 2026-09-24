@@ -12,6 +12,11 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-REPAIR-RED": {
+      "scratchpad": "worklog/APP-001-REPAIR-RED.md",
+      "session": "ses_f2ec4da52ffeqvBmjXifr2Bx28",
+      "status": "in-progress"
+    },
     "APP-002": {
       "completedNote": "GREEN 20/20 daemon_client (13 existing + 7 APP-002) rustc --test + cargo test -p opencode-rk-cli --bin opencode-rk daemon_client; zero test edits post-freeze; log /tmp/opencode/app002.log",
       "scratchpad": "worklog/APP-002.md",
@@ -66,11 +71,21 @@
       "session": "ses_f42269ebaffejbo6GG4ng10o5V",
       "status": "completed"
     },
+    "APP-010-REVISION-RECEIPT": {
+      "scratchpad": "worklog/APP-010-REVISION-RECEIPT.md",
+      "session": "ses_subagent_01",
+      "status": "in-progress"
+    },
     "APP-011": {
       "completedNote": "diagnostics 6/6 + doctor 5+4 green; runtime_settings not needed in design; zero test edits",
       "scratchpad": "worklog/APP-011.md",
       "session": "ses_orch_APP011",
       "status": "completed"
+    },
+    "APP-012-TOOL-RED": {
+      "scratchpad": "worklog/APP-012-TOOL-RED.md",
+      "session": "ses_f2ec3a38fffer2ivp1cowx22WB",
+      "status": "in-progress"
     },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
@@ -891,6 +906,12 @@
       "completedNote": "gate differential_gate 5/5 GREEN; plan --check SPEC OK; evidence bumped to 1f7640a, certified false honest; zero test edits",
       "scratchpad": "worklog/PAR-010.md",
       "session": "ses_take_par010",
+      "status": "completed"
+    },
+    "PHASE1-SECURITY-ACCEPTANCE-MAP": {
+      "completedNote": "Audit map complete; cited source lines, contract/failure/lifetime/bounds ledger, 16 RED-first lanes, dependency order, P0/P1 blockers; convergence_gate blocked total=80; no product/test/controller edits; git diff --check PASS.",
+      "scratchpad": "worklog/PHASE1-SECURITY-ACCEPTANCE-MAP.md",
+      "session": "ses_f2e2ab491ffeyB58I4Fs08HH9p",
       "status": "completed"
     },
     "PROV-018": {
