@@ -1070,6 +1070,12 @@
       "session": "ses_f2cc620c6ffeMsfgIyrBm8Ap2H",
       "status": "completed"
     },
+    "TOOL-PROCESS-CWD-BYTES-RED": {
+      "completedNote": "RED 0/1 fail-for-cause; left=cwd exceeds max_cwd_bytes right=cwd could not be canonicalized; frozen sha f4eea500; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 cargo test -p opencode-rk-tools --test process_cwd_bytes_red -- --test-threads=1",
+      "scratchpad": "worklog/TOOL-PROCESS-CWD-BYTES-RED.md",
+      "session": "ses_f2bc6c5b6ffeG2rVOWH3DyOkAA",
+      "status": "completed"
+    },
     "TOOL-RED-SHELL": {
       "completedNote": "RED 0/4 fail-for-cause; sha 2853960b; cmd cargo test -p opencode-rk-tools --test phase1_shell_broker",
       "scratchpad": "worklog/TOOL-RED-SHELL.md",
