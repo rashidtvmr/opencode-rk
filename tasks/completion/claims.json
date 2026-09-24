@@ -89,6 +89,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "in-progress"
     },
+    "APP-012-TOOL-RED": {
+      "blockedNote": "RED-ready: compiling test fails at safe read assertion with Unknown tool: read; SHA256 945236c4c6a565fefb3853afa6930c438ab38f250c074ef650b5cd252d3c8c50",
+      "scratchpad": "worklog/APP-012-TOOL-RED.md",
+      "session": "ses_f2ead14d9ffeii28wFZ6HGVyWf",
+      "status": "blocked"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
