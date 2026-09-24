@@ -803,6 +803,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-INTEGRATION-GUARD-UNBLOCK": {
+      "blockedNote": "BLOCKED: origin/main validate_repository fails 51 backlog errors; convergence_gate fails 58 findings. Candidate guards unchanged. Controller/integration authority required for ralph.json, FEATURES.md, exhaustion/ownership manifests, PLAN.md, and acceptance state; no automated repair authorized.",
+      "scratchpad": "worklog/PHASE1-INTEGRATION-GUARD-UNBLOCK.md",
+      "session": "ses_f2b72d43bffe7t0GZtupUc2SWq",
+      "status": "blocked"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",
