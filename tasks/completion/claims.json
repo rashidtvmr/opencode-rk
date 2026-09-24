@@ -1248,6 +1248,12 @@
       "scratchpad": "worklog/WEB-VOICE.md",
       "session": "ses_complete_app_21sep",
       "status": "blocked"
+    },
+    "POLICY-STRUCTURED-DELEGATION-AGENTS-CORRECTION": {
+      "completedNote": "AGENTS.md canonical route/allowlist/permission fields, stop-first no-claim handling, discovery-safe N/A, aligned 12-field handoff; 15/15 text checks and 4/4 scenarios PASS; git diff --check PASS; no Cargo; independent verification pending.",
+      "scratchpad": "worklog/POLICY-STRUCTURED-DELEGATION-AGENTS-CORRECTION.md",
+      "session": "ses_f2de5cddbffeQtkE264unOuVpT",
+      "status": "completed"
     }
   },
   "schemaVersion": 1

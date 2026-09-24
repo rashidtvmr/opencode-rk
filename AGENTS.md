@@ -24,10 +24,27 @@ hosting platform has enabled the desired branch/ruleset settings.
 
 Every orchestrator-issued subagent prompt MUST be one complete, self-contained
 structured task brief. Raw instructions, partial cards, and requirements supplied
-only through chat history are forbidden. The brief MUST contain every field in the
-template below, including explicit `N/A` plus a reason where a field genuinely does
-not apply. A fresh-context worker must have enough information to act without
-guessing hidden constraints. The existing ownership, TDD, security, memory,
+only through chat history are forbidden. The sole exception is an emergency stop
+or authorization revocation: it takes effect immediately even when delivered as
+a raw or incomplete instruction. On receipt, stop before further tools or
+mutations. If no claim exists, report `no claim held` and do not fabricate a
+ledger row or transition. If a claim exists, use an existing claim API, without
+bypassing ownership, to record the most honest legal stopped or blocked state; if
+no safe legal update or release exists, report the exact claim ID, owning session,
+and current status for orchestrator recovery. The only permitted post-stop tool
+action is that minimum status recording. This exception authorizes cessation and
+honest status recording only, never new work.
+
+The brief MUST contain every field in the template below. In validation,
+`N/A` may state only `no product test: [reason]`; it cannot replace an applicable
+RED obligation, captured failing fixture, frozen-test status/hash, executable
+validator, or contract validation. The exact routing sentinel
+`N/A — no user allowlist` is the only non-test `N/A` form. Other genuinely absent
+values must say `none — [reason]`, not `N/A`. A purely declarative or discovery
+task MUST still provide the executable validator and captured failing fixture
+required by `docs/TDD.md` when applicable. A fresh-context worker must have
+enough information to act without guessing hidden constraints. The existing
+ownership, TDD, security, memory,
 convergence, claim, and landing rules remain binding; this section adds prompt
 structure and does not replace them.
 
@@ -49,29 +66,40 @@ The brief MUST:
 - List concrete deliverables and their paths.
 - Define measurable success criteria, including observable behavior and acceptance
   boundaries.
-- Give exact validation commands and expected RED/GREEN state. A RED-authoring
-  brief must require an independently run compiling failure before implementation;
-  an implementation brief must identify the frozen RED evidence it must turn GREEN;
-  research, integration, and verification briefs must state their applicable
-  evidence and may not invent a test result.
+- Give exact validation commands and expected RED/GREEN state. Mark only a
+  product-test command `N/A — no product test: [reason]`; never use `N/A` in
+  place of RED evidence, frozen-test status/hash, or contract validation. A
+  RED-authoring brief must require an independently run compiling failure before
+  implementation; an implementation brief must identify the frozen RED evidence
+  it must turn GREEN; research, integration, and verification briefs must state
+  their applicable evidence and may not invent a test result. A purely
+  declarative or discovery brief must still identify the executable validator and
+  captured failing fixture required by `docs/TDD.md` when applicable.
 - Define failure and blocker behavior: stop, preserve a minimal reproduction,
   report the exact blocker, and never fabricate success, weaken or edit frozen
   tests, skip safeguards, or claim acceptance.
 - State claim-ledger, scratchpad, commit, push, and handoff requirements. The worker
   must use `tools/completion_claims.py`, maintain `worklog/<TASK-ID>.md`, and follow
   the landing rules below.
-- Include the completion handoff schema with: model, analysis, changes,
-  commands/results, commit/ref, hashes, resource observations, and unresolved gaps.
+- Include the completion handoff schema with, in this exact order: task ID, task
+  type, role, status, model/route, analysis, changes, commands/results, commit/ref,
+  hashes, resource observations, and unresolved gaps.
 
 Each brief MUST declare exactly one task type: `implementation`, `RED authoring`,
 `research`, `integration`, or `verification`. Orchestrators MUST NOT combine
 implementation with independent verification, or otherwise assign roles that let a
-worker author and independently accept its own work. The prompt must identify the
-independent verifier or state the required later verification lane. A user-supplied
-model or worker allowlist is authoritative for routing: the orchestrator MUST copy
-the allowlist into the brief and use only an allowed route, without silently
-substituting another worker. Prompts MUST be concise and contain relevant evidence,
-not irrelevant transcript dumps.
+worker author and independently accept its own work. The prompt and reusable
+template MUST identify the independent verifier or state the required later
+verification lane.
+
+The routing and authorization fields MUST state the assigned worker/model route,
+copy any user-supplied worker/model allowlist verbatim or state exactly
+`N/A — no user allowlist`, and explicitly confirm that the assigned route is
+permitted by that allowlist. A user-supplied allowlist is authoritative: the
+orchestrator MUST use only an allowed route. If the assigned route is absent,
+stop and report the mismatch; never silently substitute another worker or model.
+Prompts MUST be concise and contain relevant evidence, not irrelevant transcript
+dumps.
 
 An orchestrator MUST reject an empty brief, an empty handoff, or self-reported
 completion without disk evidence. Completion requires checking the claimed file,
@@ -79,7 +107,9 @@ ledger status, scratchpad, commit/ref, and the exact validation evidence on disk
 through the applicable repository or lane gate. A worker's message is evidence to
 inspect, never proof by itself. Follow the existing task-claim, scratchpad, test
 immutability, resource-budget, and landing requirements in this file and
-`.agents/WORKER.md`.
+`.agents/WORKER.md`. This `AGENTS.md` section and its template are canonical; a
+worker-side checklist must preserve every canonical field and must not define a
+weaker or divergent subset.
 
 ### Reusable structured prompt template
 
@@ -102,6 +132,13 @@ than pasting irrelevant history.
 - Independent-verification boundary: [who verifies this work; explain why this
   task does not combine roles that must remain independent]
 
+## Assigned route and authorization
+- Assigned worker/model route: [provider/model and exact assigned route identifier]
+- User-supplied worker/model allowlist: [copy the exact user allowlist, or state
+  exactly `N/A — no user allowlist`]
+- Assigned-route permission: [`confirmed: assigned route is permitted by the
+  copied allowlist`, or `N/A — no user allowlist`]
+
 ## Context and authoritative evidence
 - Worktree context: [repository/worktree path]
 - Read first: [exact paths, commits, line ranges, symbols, or sections]
@@ -115,7 +152,8 @@ than pasting irrelevant history.
 - Worktree: [exact path]
 - Branch: [exact branch/ref]
 - Exact owned file (one): [path]
-- Other permitted files: [scratchpad path and own ledger row only, or `N/A`]
+- Other permitted files: [exact scratchpad path and own ledger row only, or
+  `none — [reason]`]
 
 ## Scope
 ### In scope
@@ -147,13 +185,19 @@ than pasting irrelevant history.
 Run only bounded, disposable, policy-compliant commands. Record exact output.
 
 ```sh
-[exact RED command, or `N/A` with reason]
-[exact implementation/integration command, or `N/A` with reason]
+[exact product-test RED command, or `N/A — no product test: [reason]`]
+[exact discovery/declarative executable-validator command, when applicable]
+[captured failing fixture path produced by that validator, when applicable]
+[exact implementation/integration command]
 [exact GREEN/verification command]
 ```
 
-- Expected RED state: [compiles and fails for the missing behavior, or justified
-  `N/A` for a non-test task]
+- Expected RED state: [compiling failure for missing behavior, captured failing
+  validator fixture, or exact reason no RED obligation applies]
+- Frozen-test status/hash: [exact status and hash, or exact reason no frozen
+  artifact applies; `N/A` is not a substitute]
+- Contract validation: [exact applicable validator and expected result; `N/A`
+  cannot bypass it]
 - Expected GREEN state: [frozen tests/evidence pass without test edits, or exact
   non-test evidence]
 - Resource observation: [memory/process/time observation and bound]
@@ -164,6 +208,19 @@ Run only bounded, disposable, policy-compliant commands. Record exact output.
 - Never fabricate logs or completion, weaken/skip/edit frozen tests, bypass a
   safeguard, or claim acceptance.
 - [Any task-specific escalation or safe next step]
+
+## Emergency stop or authorization revocation
+- A stop or revocation instruction takes effect immediately even when raw or
+  incomplete and before full-brief validation or claim intake.
+- Stop before further tools or mutations. A minimum existing-API claim-status
+  update or release is permitted only to record cessation.
+- If no claim exists, report `no claim held`; do not fabricate a ledger row or
+  transition.
+- If a claim exists, record the most honest legal stopped or blocked state
+  without bypassing ownership. If no safe legal update or release exists, report
+  the exact claim ID, owning session, and current status for orchestrator recovery.
+- This exception authorizes stopping and honest status recording only, never new
+  work.
 
 ## Claim, scratchpad, commit, and push requirements
 - Claim before edits through `tools/completion_claims.py`; use session
@@ -176,14 +233,19 @@ Run only bounded, disposable, policy-compliant commands. Record exact output.
   evidence if the base advances.
 
 ## Completion handoff schema
-Return exactly:
-- Task ID and ledger status
-- Model: [provider/model]
+Return exactly these fields in this order:
+- Task ID: [TASK-ID]
+- Task type: [exactly one declared task type]
+- Role: [role/persona]
+- Status: [final ledger status]
+- Model/route: [provider/model and assigned route identifier]
 - Analysis: [brief evidence-based analysis]
 - Changes: [paths and symbols/headings changed]
-- Commands/results: [exact commands and outcomes, including RED/GREEN]
+- Commands/results: [exact commands and outcomes, including textual scenario
+  matrix where required and RED/GREEN when applicable]
 - Commit/ref: [commit hash and pushed branch/ref]
-- Hashes: [frozen test/artifact/revision hashes, or `N/A` with reason]
+- Hashes: [frozen test/artifact/revision hashes, or `none — [reason]`;
+  applicable frozen-test status/hash cannot use `none`]
 - Resource observations: [measured memory/time/process bounds]
 - Unresolved gaps: [exact gaps, reproductions, or `none`]
 ```
@@ -263,11 +325,26 @@ the structured source/surface ledger and trusted verification receipts.
 
 ## Completion report
 
-Return task ID, candidate revision, exact tests/commands, evidence paths,
-resource measurements and deviations. Do not emit `passes:true` as proof. Do not
-say all features are covered while any upstream surface or mandatory task is
-unresolved. On failure, preserve a minimal reproduction and stop or request the
-next safe task; never disable a safeguard to keep the loop moving.
+Return exactly the `Completion handoff schema` above, with the same field names
+and order:
+
+- Task ID
+- Task type
+- Role
+- Status
+- Model/route
+- Analysis
+- Changes
+- Commands/results
+- Commit/ref
+- Hashes
+- Resource observations
+- Unresolved gaps
+
+Do not emit `passes:true` as proof. Do not say all features are covered while
+any upstream surface or mandatory task is unresolved. On failure, preserve a
+minimal reproduction and stop or request the next safe task; never disable a
+safeguard to keep the loop moving.
 
 ## Agent operating rules (mandatory)
 
