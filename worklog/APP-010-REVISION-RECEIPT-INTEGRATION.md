@@ -2,44 +2,61 @@
 
 ## Claim
 - Task: `APP-010-REVISION-RECEIPT-INTEGRATION`
-- Session: `ses_f2e29869bffeaVXDcsIsbjwjDl`
 - Branch: `lane/PHASE1-product-spine-20260923`
-- Claim result: successful; no pre-existing task row found. Prior delegated worker reportedly stopped at provider startup for insufficient quota; no accepted work observed.
-- Owned paths: `crates/cli/build.rs` (audit only; no product/test edits), this worklog, and ledger row.
+- Prior owner: `ses_f2e29869bffeaVXDcsIsbjwjDl` (claim status `in-progress`; worklog showed audit begun, no landing).
+- Reclaiming session: `ses_f2e1fb204ffeLVobC1YJZw1QxN`.
+- Reclaim evidence recorded via `tools/completion_claims.py::reclaim`: prior owner exhausted steps after full GREEN verification and before landing; no landing commit/push; frozen hash and GREEN evidence recorded in `worklog/APP-010-REVISION-RECEIPT.md`. Reclaim returned row to `not-started`, then re-claimed by this session.
+- Boundary: integrator only. No product or test edits. Changes limited to this worklog and the `tasks/completion/claims.json` ledger row.
 
-## Source evidence
-- `crates/cli/build.rs:23-48`: emits env rerun trigger, discovers repository, validates explicit `OC2_BUILD_REVISION`, emits `GIT_COMMIT`.
-- `crates/cli/build.rs:62-169`: bounded repository metadata discovery and watch paths.
-- `crates/cli/build.rs:171-214`: direct bounded Git invocation, environment clearing, output validation.
-- `crates/cli/tests/installed_default_entrypoint.rs:356-360`: runtime receipt precedence, compile-time receipt fallback.
-- `crates/cli/tests/installed_default_entrypoint.rs:530-535`: missing/empty receipt failure path.
-- `worklog/APP-010-REVISION-RECEIPT.md:38-49`: prior worker claimed native check and installed tests green, but integration still requires independent exact-revision verification.
-- `worklog/APP-010-FROZEN-INTEGRITY.md:10-31`: frozen test canonical blob and hash; no test edits.
-- `tasks/completion/claims.json`: prior receipt/frozen-integrity rows are completed; no integration row before claim.
+## Pre-landing scope audit (this session)
+- Branch/ref parity: `HEAD == origin/lane/PHASE1-product-spine-20260923 == 1f4a9e6ce4fa96ea2bf8b01bb034160a9d9c60a9`.
+- Frozen test local SHA-256: `fec2fdb94c74df2493eb8eb2f2098732d813096f0e01928f00a8cb8c621bf317`.
+- Frozen test canonical blob SHA-256 (`origin/...:crates/cli/tests/installed_default_entrypoint.rs`): `fec2fdb94c74df2493eb8eb2f2098732d813096f0e01928f00a8cb8c621bf317`.
+- `git diff --exit-code origin/lane/PHASE1-product-spine-20260923 -- crates/cli/tests/installed_default_entrypoint.rs`: exit 0 (byte-identical, no test edit).
+- Dirty scope exactly the permitted five files, no others:
+  - `crates/cli/build.rs` (new)
+  - `worklog/APP-010-FROZEN-INTEGRITY.md` (new)
+  - `worklog/APP-010-REVISION-RECEIPT.md` (new)
+  - `worklog/APP-010-REVISION-RECEIPT-INTEGRATION.md` (new)
+  - `tasks/completion/claims.json` (modified: ledger rows)
+- `git diff --check`: exit 0.
+- `rustfmt --edition 2021 --check crates/cli/build.rs`: exit 0.
 
-## Observable contract
-- Explicit `OC2_BUILD_REVISION` is 40 lowercase hex characters; valid value takes precedence and emits `GIT_COMMIT`.
-- Invalid explicit value fails with fixed diagnostic and never echoes supplied value.
-- Without explicit value, direct Git HEAD discovery emits only a validated exact revision.
-- Git failure/missing metadata omits `GIT_COMMIT` without failing the build.
-- Installed frozen journey uses compile-time `GIT_COMMIT` when runtime `OC2_E2E_REVISION` is absent; explicit valid runtime receipt remains 5/5.
-- Frozen test source must remain byte-identical to origin; no test edits.
+## Prior verifier evidence (trusted, cited; not re-run before landing)
+From `worklog/APP-010-REVISION-RECEIPT.md` (frozen RED hash unchanged throughout):
+- `rustfmt --edition 2021 --check crates/cli/build.rs`: GREEN.
+- `env CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo check -p opencode-rk-cli --features native`: GREEN, 0 errors, pre-existing warnings only.
+- `env -u OC2_E2E_REVISION CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-cli --features native --test installed_default_entrypoint -- --test-threads=1`: GREEN 5/5 (compile-time receipt from HEAD `1f4a9e6`).
+- `env OC2_BUILD_REVISION=1f4a9e6ce4fa96ea2bf8b01bb034160a9d9c60a9 ... --test installed_default_entrypoint`: GREEN 5/5 (explicit receipt path).
+- Invalid explicit probe (`OC2_BUILD_REVISION=invalid-receipt-SENSITIVE-9`): exit 1, fixed diagnostic only, supplied value not echoed.
+- No-repository probe (`PATH=/nonexistent`): exit 0, only `cargo:rerun-if-env-changed=OC2_BUILD_REVISION`, no fabricated receipt.
+From `worklog/APP-010-FROZEN-INTEGRITY.md`:
+- Canonical frozen test already byte-identical; `cmp` and `git diff --exit-code` both exit 0.
 
-## Failure states and bounds
-- Explicit invalid receipt: deterministic build-script failure; sensitive value absent from output.
-- Git unavailable/invalid output: no receipt, successful build script.
-- File reads bounded 4096 bytes; Git stdout bounded 128 bytes; no shell; no inherited environment except PATH and noninteractive Git controls.
-- Any source correction requirement stops lane blocked; do not edit `build.rs`.
+## Landing
+- `git add crates/cli/build.rs worklog/APP-010-FROZEN-INTEGRITY.md worklog/APP-010-REVISION-RECEIPT.md worklog/APP-010-REVISION-RECEIPT-INTEGRATION.md tasks/completion/claims.json`
+- `git diff --cached --stat`: 5 files changed, 356 insertions(+), 0 deletions.
+- `git commit -m "APP-010: land compile-time revision receipt (build.rs) with frozen-integrity evidence"`: `c4325e4381741bf79cc39eb7a485d73ca7ef4f52`.
+- `git push`: `1f4a9e6..c4325e4 lane/PHASE1-product-spine-20260923 -> lane/PHASE1-product-spine-20260923`.
+- `git fetch origin`: HEAD `c4325e4381741bf79cc39eb7a485d73ca7ef4f52` == `origin/lane/PHASE1-product-spine-20260923` (HEAD==origin verified).
 
-## Decisions
-- Integrator role only: audit, verify, land, push; do not alter product/test logic.
-- Use one heavy command at a time with `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1`.
-- Preserve current worktree uncommitted artifacts until exact diff/hash audit determines whether they are intended lane files.
+## Post-push integrated-revision verification (exactly one command, fresh bounded target)
+- Fresh target: `CARGO_TARGET_DIR=/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/app010-postpush-target.sdl1gy` (outside repo; worktree clean before and after).
+- Command:
+  `env -u OC2_E2E_REVISION CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 CARGO_TARGET_DIR=<fresh> cargo test -p opencode-rk-cli --features native --test installed_default_entrypoint -- --test-threads=1`
+- Result: exit 0; `test result: ok. 5 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.96s`.
+  - `bare_no_command_enters_planned_native_route ... ok`
+  - `missing_credentials_open_setup_without_offline_instruction_or_secret ... ok`
+  - `native_renderer_emits_frame_and_restores_alternate_screen ... ok`
+  - `rerun_same_executable_and_revision_is_deterministic ... ok`
+  - `single_authenticated_daemon_reused_by_second_client ... ok`
+- Log: `.../app010-postpush-target.sdl1gy/postpush.log` (build warnings only; unrelated pre-existing dead-code warnings across other crates).
+- Frozen test SHA-256 after run: `fec2fdb94c74df2493eb8eb2f2098732d813096f0e01928f00a8cb8c621bf317` (unchanged).
+- `git status --porcelain=v1` after run: empty (no stray files).
 
-## Tests / verification
-Pending exact-head, receipt, native check, frozen-integrity, diff, landing, and post-push checks.
+## Second evidence-only commit
+- Changes only this worklog and the ledger row; no product/test source.
+- Source/test diff between the two commits proven empty for the frozen test and `crates/cli/build.rs` (see landing verification). No second build required.
 
 ## Remaining unknowns
-- Whether `build.rs` has a semantic defect requiring blocked stop.
-- Whether exact current HEAD differs from receipt worker's recorded `1f4a9e6ce4fa96ea2bf8b01bb034160a9d9c60a9`.
-- Whether remote branch advances during integration.
+- APP-010 parent stays open for packaged archive binding; this integration lands the compile-time receipt + installed journey, not the packaged-archive story.
