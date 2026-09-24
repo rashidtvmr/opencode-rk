@@ -1094,6 +1094,12 @@
       "session": "ses_f2d280f56ffekshDTZMD3LgU8V",
       "status": "completed"
     },
+    "TOOL-SHELL-BROKER-REGISTRY-GREEN": {
+      "completedNote": "GREEN frozen 3/3: t03 registry shell denied pre-permit/store (0,0), no marker; frozen sha ef56f63a unchanged; zero test edits; tools lib 107 passed, 4 pre-existing conflicts unchanged (executor execute_success/timeout, mcp disc111_t04, registry disc103_t05 bash-batch); cmd cargo test -p opencode-rk-tools --test phase1_shell_broker",
+      "scratchpad": "worklog/TOOL-SHELL-BROKER-REGISTRY-GREEN.md",
+      "session": "ses_f2cf68244ffek0gyTpqxcEewHa",
+      "status": "completed"
+    },
     "TUI-001": {
       "completedNote": "GREEN exact native 1/1 + lib-native 73/73 + lib-default 72/72 + check ok; test-body sha256 bc606827 pre/post identical; zero test edits; CLI Scenario B pre-existing TTY-guard fail recorded, untouched",
       "scratchpad": "worklog/TUI-001-ABI-FIX.md",

@@ -38,6 +38,11 @@ use crate::registry::{ToolRegistry, Tool};
 /// Marker appended when output hits the byte budget.
 pub const TRUNCATED_MARKER: &str = "[truncated:over-byte-budget]";
 
+/// Bounded, fixed denial for a shell alias dispatched without a concrete
+/// broker capability. Contains no command, input, environment or identity.
+pub const SHELL_DENIED_NO_BROKER: &str =
+    "shell execution denied: broker authorization required";
+
 /// Default bound on concurrent dispatches through one dispatcher.
 pub const DEFAULT_MAX_PARALLEL: usize = 4;
 /// Default bound on serialized input bytes per dispatch.
@@ -193,6 +198,12 @@ impl RegistryDispatcher {
         if !self.policy.authorize(tool, &input) {
             return Err(DispatchError::Denied(name.to_string()));
         }
+        // A boolean/AllowAll dispatch policy is not process authority. Shell
+        // aliases need a concrete broker verdict, which this registry path does
+        // not carry, so deny before any permit, executor call or store write.
+        if is_shell_alias(tool) {
+            return Ok(shell_denied_record(tool, provenance));
+        }
         // Bounded: one permit per live dispatch. Guard drop = reclaim on cancel.
         let _permit = self
             .semaphore
@@ -246,6 +257,11 @@ impl RegistryDispatcher {
                     }
                     Some(tool) if !self.policy.authorize(tool, &input) => {
                         Ready::Immediate(Err(DispatchError::Denied(name)))
+                    }
+                    Some(tool) if is_shell_alias(tool) => {
+                        // Same no-permit/no-spawn/no-store guarantee as single
+                        // dispatch: batch must not bypass the shell gate.
+                        Ready::Immediate(Ok(shell_denied_record(tool, &provenance)))
                     }
                     Some(tool) => Ready::Spawn {
                         tool: tool.clone(),
@@ -339,6 +355,32 @@ fn now_millis() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// True when a registry tool is a shell alias (`bash`/`shell`) by id or name.
+///
+/// The generic executor refuses these too; the registry gate keeps a denied
+/// shell from reaching the executor at all, so no permit is taken and no
+/// durable record is written.
+fn is_shell_alias(tool: &Tool) -> bool {
+    matches!(
+        tool.id.as_str(),
+        "bash" | "shell" | "/bin/bash" | "/bin/sh"
+    ) || matches!(tool.name.as_str(), "bash" | "shell")
+}
+
+/// Bounded failed dispatch record for a shell alias denied before any permit,
+/// spawn or store write. Preserves tool id/name/provenance; never echoes input.
+fn shell_denied_record(tool: &Tool, provenance: &str) -> DispatchRecord {
+    DispatchRecord {
+        tool_id: tool.id.clone(),
+        name: tool.name.clone(),
+        success: false,
+        output: String::new(),
+        error: Some(SHELL_DENIED_NO_BROKER.to_owned()),
+        timestamp_ms: now_millis(),
+        provenance: provenance.to_string(),
+    }
 }
 
 /// Build the executor call + durable record helpers shared by dispatch paths.
