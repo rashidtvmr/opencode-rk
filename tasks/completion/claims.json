@@ -939,6 +939,12 @@
       "session": "ses_f2d73329affeBljDY1VFANGgTW",
       "status": "completed"
     },
+    "PHASE1-WAVE1-DISPATCH-MAP-FINAL-VERIFY": {
+      "completedNote": "ACCEPT @681b93e: all six 0bba574 findings closed; exact 3-row parser PASS; hashes fec2fdb9/945236c4/cb7d4cde match; no shell/SEC launch; distinct read-only ownership; vm_stat+serial caps; APP-012 remains open; no Cargo run.",
+      "scratchpad": "worklog/PHASE1-WAVE1-DISPATCH-MAP-FINAL-VERIFY.md",
+      "session": "ses_f2d6ccb78ffeFgMtU4ijrWTFQd",
+      "status": "completed"
+    },
     "PHASE1-WAVE1-DISPATCH-MAP-VERIFY": {
       "completedNote": "ACCEPT WITH CORRECTIONS. gate total=92; ls-remote 0e6675b/8c514e0/632a71e/2cd9ca9 ok; frozen hashes match src-evidence rows4/5/6; Lane1 already on origin/lane/TOOL-RED-SHELL hash 2853960b verified ACCEPT WITH SPLIT; defects: Lane1 dup, timeout-180 absent macOS, row2 truncated revision, gate 90/91 vs 92, free -h macOS invalid, MSVC unstated. See worklog/PHASE1-WAVE1-DISPATCH-MAP-VERIFY.md",
       "scratchpad": "worklog/PHASE1-WAVE1-DISPATCH-MAP-VERIFY.md",
