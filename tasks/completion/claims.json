@@ -1100,6 +1100,12 @@
       "session": "ses_f2cf68244ffek0gyTpqxcEewHa",
       "status": "completed"
     },
+    "TOOL-SHELL-REMAINING-TEST-CONFLICTS": {
+      "completedNote": "review artifact only; frozen ef56f63a unchanged; t05 stale+Immediate-loss, t04 valid-env; no source/test edits",
+      "scratchpad": "worklog/TOOL-SHELL-REMAINING-TEST-CONFLICTS.md",
+      "session": "ses_f2cc1eac6ffetxXzlo6C4mQoXt",
+      "status": "completed"
+    },
     "TUI-001": {
       "completedNote": "GREEN exact native 1/1 + lib-native 73/73 + lib-default 72/72 + check ok; test-body sha256 bc606827 pre/post identical; zero test edits; CLI Scenario B pre-existing TTY-guard fail recorded, untouched",
       "scratchpad": "worklog/TUI-001-ABI-FIX.md",
