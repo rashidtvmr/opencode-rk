@@ -879,6 +879,12 @@
       "session": "ses_f2dcc8c53ffeLSzMHx0D73yJ08",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-TRANSACTION-CORRECTION": {
+      "completedNote": "RESEARCH GREEN: corrected proposal specifies b15e0b6 residual 12; Phase A/B/C non-self hashes, lock/CAS, fsync/rename, crash recovery, guarded rollback, receipt; disposable sim PASS; gate current 95 before row, validate backlog 51, diff clean",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-TRANSACTION-CORRECTION.md",
+      "session": "ses_f2dbead97ffedhjhN8zZC8VZDT",
+      "status": "completed"
+    },
     "LEDGER-CONVERGENCE-VERIFY": {
       "completedNote": "VERIFY FAIL on proposal as written. Base 1f4a9e6 = 86 findings/85 tids/83 off-plan/3 bad-note reproduced; d93927e = 87/86. Authoritative retire=78 (51+27), not 54; A2 dup 27, omits 24; true residual=4 APP-012 sub-lanes, not 28. No delete/demote API; needs controller authority. 3 rows cite absent worklogs. See worklog/LEDGER-CONVERGENCE-VERIFY.md",
       "scratchpad": "worklog/LEDGER-CONVERGENCE-VERIFY.md",
