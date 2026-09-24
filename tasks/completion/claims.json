@@ -102,7 +102,7 @@
       "status": "completed"
     },
     "APP-012-READ-INTEGRATION": {
-      "completedNote": "Reviewed scope only: frozen hash 945236c4; APP-012 journey 1/1, tools executor 5/5, file_ops 5/5, server broker_gate 1/1, agent_loop 6/6, diff check clean; product parent remains open",
+      "completedNote": "Integration 40d56d5c6232570a477f79a9f109a407f9811b52 pushed; local=origin; frozen sha 945236c4 unchanged; exact pushed-revision APP-012 test 1/1 GREEN; evidence-only finalization pending; APP-012 parent remains open",
       "scratchpad": "worklog/APP-012-READ-INTEGRATION.md",
       "session": "ses_f2e63a880ffeDs27MCzFINfVE5",
       "status": "completed"

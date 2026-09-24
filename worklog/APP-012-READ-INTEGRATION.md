@@ -46,6 +46,15 @@ All heavy commands serial, `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1`:
 - `python3 tools/validate_repository.py`: expected repository-wide backlog-exhaustion failure (51 findings); policy/fixture checks passed. No source/controller repair authorized.
 - `python3 tools/convergence_gate.py`: expected repository-wide ledger failure (83 findings, including off-plan repair rows); no parent completion claimed.
 
+## Landing evidence
+
+- Integration commit: `40d56d5c6232570a477f79a9f109a407f9811b52`.
+- Pushed without force to `origin/lane/PHASE1-product-spine-20260923`.
+- After fetch, local HEAD and remote-tracking ref were byte-identical at the integration commit.
+- On that exact pushed revision, frozen test SHA-256 remained `945236c4c6a565fefb3853afa6930c438ab38f250c074ef650b5cd252d3c8c50`.
+- On that exact pushed revision, the frozen APP-012 command passed 1/1 with `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1`.
+- Final evidence commit: recorded in the handoff after this evidence-only commit is pushed. Source/test tree unchanged from `40d56d5c6232570a477f79a9f109a407f9811b52`; final frozen hash/test confirmation follows push.
+
 ## Remaining unknowns
 
 - Protected-path denial remains open.
