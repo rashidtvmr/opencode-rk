@@ -15,6 +15,7 @@ use std::{
 };
 const MEMORY_SCHEMA_SQL: &str = include_str!("../schema/v2/workspace.sql");
 const CONNECT_POLICY: &str = "PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA trusted_schema=OFF; PRAGMA cache_size=-8192; PRAGMA temp_store=FILE; PRAGMA mmap_size=0;";
+const STARTUP_RECOVERY_LIMIT: i64 = 500;
 static FACADE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
 pub struct StorageFacade {
     connection: Mutex<Connection>,
@@ -32,7 +33,9 @@ impl StorageFacade {
         }
         let nonempty = path.exists() && fs::metadata(path)?.len() > 0;
         let connection = if nonempty {
-            SchemaV2::open_existing(path)?
+            let mut connection = SchemaV2::open_existing(path)?;
+            recover_existing(&mut connection)?;
+            connection
         } else {
             SchemaV2::initialize_workspace(
                 path,
@@ -141,6 +144,81 @@ impl StorageFacade {
         }
         Ok(())
     }
+}
+fn recover_existing(connection: &mut Connection) -> Result<(), StorageError> {
+    let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+    let (owner_generation, _clean_shutdown): (i64, i64) = tx.query_row(
+        "SELECT owner_generation, clean_shutdown FROM workspace_state WHERE id=1",
+        [],
+        |row| Ok((row.get(0)?, row.get(1)?)),
+    )?;
+    let next_generation = owner_generation.checked_add(1).ok_or_else(|| {
+        StorageError::Sqlite(rusqlite::Error::InvalidParameterName(
+            "workspace owner_generation overflow".to_owned(),
+        ))
+    })?;
+    let changed = tx.execute(
+        "UPDATE workspace_state
+         SET owner_generation=?1, clean_shutdown=0
+         WHERE id=1 AND owner_generation=?2",
+        params![next_generation, owner_generation],
+    )?;
+    if changed != 1 {
+        return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+    }
+
+    // Select the same prior-generation roots for each child update before the
+    // root state changes. The partial indexes keep every recovery scan bounded.
+    tx.execute(
+        "UPDATE provider_attempts
+         SET state=4, finished_at_us=NULL
+         WHERE pk IN (
+             SELECT a.pk
+             FROM provider_attempts AS a INDEXED BY attempts_recovery_idx
+             JOIN executions AS e ON e.pk=a.execution_pk
+             WHERE e.owner_generation < ?1
+               AND e.state IN (0,1,4)
+               AND e.state=1
+               AND a.state IN (0,1,4)
+               AND a.state IN (0,1)
+             ORDER BY a.pk
+             LIMIT ?2
+         )",
+        params![next_generation, STARTUP_RECOVERY_LIMIT],
+    )?;
+    tx.execute(
+        "UPDATE tool_calls
+         SET state=5, finished_at_us=NULL
+         WHERE pk IN (
+             SELECT t.pk
+             FROM tool_calls AS t INDEXED BY tools_recovery_idx
+             JOIN executions AS e ON e.pk=t.execution_pk
+             WHERE e.owner_generation < ?1
+               AND e.state IN (0,1,4)
+               AND e.state=1
+               AND t.state IN (0,1,5)
+               AND t.state IN (0,1)
+             ORDER BY t.pk
+             LIMIT ?2
+         )",
+        params![next_generation, STARTUP_RECOVERY_LIMIT],
+    )?;
+    tx.execute(
+        "UPDATE executions
+         SET state=4, finished_at_us=NULL
+         WHERE pk IN (
+             SELECT e.pk
+             FROM executions AS e INDEXED BY executions_recovery_idx
+             WHERE e.owner_generation < ?1
+               AND e.state IN (0,1,4)
+               AND e.state=1
+             ORDER BY e.pk
+             LIMIT ?2
+         )",
+        params![next_generation, STARTUP_RECOVERY_LIMIT],
+    )?;
+    tx.commit()?;
+    Ok(())
 }
 fn now_us() -> i64 {
     SystemTime::now()
