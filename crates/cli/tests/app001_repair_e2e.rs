@@ -31,7 +31,12 @@ impl Root {
     fn home(&self) -> PathBuf { self.0.join("home") }
     fn data(&self) -> PathBuf { self.0.join("data") }
 }
-impl Drop for Root { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.0); } }
+impl Drop for Root {
+    fn drop(&mut self) {
+        terminate_backend(&self.data());
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
 
 #[derive(Default)] struct Bytes( Vec<u8> );
 struct Capture { state: Arc<Mutex<Bytes>>, join: Option<thread::JoinHandle<()>> }
@@ -106,6 +111,27 @@ fn health(addr: &str) -> bool {
     let _ = s.set_read_timeout(Some(Duration::from_millis(300)));
     if s.write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").is_err() { return false }
     let mut b = [0u8; 256]; let n = s.read(&mut b).unwrap_or(0); b[..n].starts_with(b"HTTP/1.1 200")
+}
+fn terminate_backend(data: &Path) {
+    let Ok(desc) = fs::read_to_string(data.join("runtime/backend.json")) else { return };
+    let marker = "\"pid\":";
+    let Some(start) = desc.find(marker).map(|n| n + marker.len()) else { return };
+    let raw_pid: String = desc[start..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    if raw_pid.is_empty() { return; }
+    let Some(origin) = field(&desc, "http_origin") else { return };
+    let Ok(pid) = raw_pid.parse::<u32>() else { return };
+    let _ = Command::new("/bin/kill").args(["-TERM", &pid.to_string()]).status();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while Instant::now() < deadline {
+        if !health(origin.strip_prefix("http://").unwrap_or(&origin)) { return; }
+        thread::sleep(Duration::from_millis(25));
+    }
+    let _ = Command::new("/bin/kill").args(["-KILL", &pid.to_string()]).status();
+    let deadline = Instant::now() + Duration::from_millis(500);
+    while Instant::now() < deadline {
+        if !health(origin.strip_prefix("http://").unwrap_or(&origin)) { return; }
+        thread::sleep(Duration::from_millis(25));
+    }
 }
 fn field(text: &str, name: &str) -> Option<String> {
     let marker = format!("\"{name}\":\"");

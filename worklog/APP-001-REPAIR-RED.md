@@ -17,8 +17,9 @@ ledger row.
   session; an empty daemon reports an offline/no-session error and continues,
   rather than creating/selecting a first session.
 - `crates/cli/src/chat.rs:666-698`: the bare client starts a daemon child when
-  absent and owns that child in `DaemonLease`, so dropping the lease can kill
-  the daemon after the client exits.
+  absent and retains it in `DaemonLease`; `std::process::Child`'s `Drop` does
+  not terminate the OS process, so dropping the lease does not itself kill the
+  daemon. The observed sequential test proves the daemon survives client exit.
 - `crates/cli/src/tui_entry.rs:870-1155`: native PTY renderer setup and
   `restore_terminal_modes` are scoped to the interactive loop.
 
@@ -26,7 +27,9 @@ ledger row.
 
 The test uses `/usr/bin/script` as the Unix PTY adapter, `OC2_E2E_BIN` with the
 Cargo binary fallback, unique loopback ports, disposable HOME/data, bounded
-64 KiB captures, bounded waits, and RAII cleanup. It does not invoke a session
+64 KiB captures, bounded waits, and RAII cleanup. Root cleanup now reads only
+the disposable backend descriptor PID, sends TERM, waits for health to stop,
+then uses KILL as a bounded fallback before removing the root. It does not invoke a session
 command before the bare client. It asserts setup instead of offline/manual
 instructions with no provider key, automatic first-session availability with a
 fixture key, terminal restoration on `:q`, and descriptor PID/health reuse
@@ -40,9 +43,11 @@ Command required by the task:
 CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-cli --test app001_repair_e2e --features native -- --test-threads=1
 ```
 
-Focused run result: compiling RED, 1/3 tests passed and 2/3 failed. The
-frozen test SHA-256 is
+Focused run result: compiling RED, 1/3 tests passed and 2/3 failed. The prior
+frozen test SHA-256 was
 `046c88df4d4cd755ed244e04ff8e781ee569e15d236da1a0d81ebdce8703c26d`.
+After the harness-only cleanup repair, the new frozen test SHA-256 is
+`3ef9c67facf918b2042409396ccb0e1e32a125f6cda877b4a62a20e34a1d6ea2`.
 
 Exact command:
 
@@ -63,6 +68,13 @@ Observed failures:
 - `sequential_bare_clients_reuse_daemon_and_first_exit_keeps_it_healthy`:
   passed on this revision, documenting that this particular current tree did
   not reproduce the lease-kill failure in the sequential path.
+
+The repaired `Root::drop` reads only the disposable `runtime/backend.json`
+descriptor, sends TERM to its recorded PID, waits up to two seconds for the
+recorded loopback health endpoint to stop answering, then sends KILL and waits
+up to 500 ms before deleting the disposable root. No broad process matching or
+unsafe code is used. This prevents the test-owned daemon from being orphaned
+before descriptor/data cleanup.
 
 The RED is attributable to product behavior, not a harness compile issue. The
 first compile attempt found and fixed one owned-test borrow error before the
