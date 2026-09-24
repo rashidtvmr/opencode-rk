@@ -1118,6 +1118,12 @@
       "session": "ses_f2cf68244ffek0gyTpqxcEewHa",
       "status": "completed"
     },
+    "TOOL-SHELL-CANCELLATION-RED": {
+      "blockedNote": "BLOCKED: seam 1fcd3838 deterministic cancellation candidate GREEN 9/9; NOT RED/NOT FROZEN; abort assertion removed per c630f3f; recommend independent acceptance verification; test sha 44c228804107b65451c04fbbad9e93d14f5494605c2bcab40ad740c8aafc6827; broker/cwd hashes unchanged",
+      "scratchpad": "worklog/TOOL-SHELL-CANCELLATION-RED.md",
+      "session": "ses_f2ba9efd6ffej1L41iMyj75iwi",
+      "status": "blocked"
+    },
     "TUI-001": {
       "completedNote": "GREEN exact native 1/1 + lib-native 73/73 + lib-default 72/72 + check ok; test-body sha256 bc606827 pre/post identical; zero test edits; CLI Scenario B pre-existing TTY-guard fail recorded, untouched",
       "scratchpad": "worklog/TUI-001-ABI-FIX.md",
