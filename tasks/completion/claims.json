@@ -873,6 +873,12 @@
       "session": "ses_f2df0db24ffeURdCksWFAmHJFm",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-PROPOSAL-FINAL-VERIFY": {
+      "completedNote": "REJECT b15e0b6: mapping 78 and 15 targets pass; correction row is completed, gate 94, simulated residual 12 vs proposal 11. Transaction spec lacks two-phase non-self-referential re-home, lock/CAS/branch guard, atomic fsync protocol, crash recovery, guarded rollback, post-receipt. Gate/validate/diff evidence in worklog.",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-PROPOSAL-FINAL-VERIFY.md",
+      "session": "ses_f2dcc8c53ffeLSzMHx0D73yJ08",
+      "status": "completed"
+    },
     "LEDGER-CONVERGENCE-VERIFY": {
       "completedNote": "VERIFY FAIL on proposal as written. Base 1f4a9e6 = 86 findings/85 tids/83 off-plan/3 bad-note reproduced; d93927e = 87/86. Authoritative retire=78 (51+27), not 54; A2 dup 27, omits 24; true residual=4 APP-012 sub-lanes, not 28. No delete/demote API; needs controller authority. 3 rows cite absent worklogs. See worklog/LEDGER-CONVERGENCE-VERIFY.md",
       "scratchpad": "worklog/LEDGER-CONVERGENCE-VERIFY.md",
