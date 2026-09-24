@@ -873,6 +873,12 @@
       "session": "ses_f2e217617ffenDJZbnchx5Jkjr",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-VERIFY-RETRY": {
+      "completedNote": "REJECT proposal: 92 findings at HEAD (88 off-plan+4 bad-note). 54-row set short 24, dup 27, 15 misroute, 3 dead scratchpads, no delete/demote API. Authoritative 78-row set reduces to 10. Prior verifier row STALE but substantiated. Disposable sims confirmed. git diff --check clean. See worklog.",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-VERIFY-RETRY.md",
+      "session": "ses_verifier_retry_LEDGER_CONVERGENCE",
+      "status": "completed"
+    },
     "OPS-009": {
       "completedNote": "GREEN 5/5 ops_replay T01-T05, impl pre-landed byte-identical, zero test edits; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-foundation --test ops_replay",
       "scratchpad": "worklog/OPS-009.md",
