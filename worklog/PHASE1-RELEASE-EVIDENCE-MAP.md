@@ -116,7 +116,7 @@ Original inaccurate classifications from commit 73be580 are superseded below.
 - Branch membership: **absent from main** (`git merge-base --is-ancestor 5d66683 origin/main` = NO)
 - Branch membership: absent from `origin/plan/release-evidence` (`git rev-list HEAD | grep -c 5d66683` = 0)
 - Content: APP-010 integration landing and post-push GREEN evidence
-- Source-built receipt: `crates/cli/build.rs` exists at 5d66683 (compile-time GIT_COMMIT receipt), absent at HEAD of candidate branch
+- Source-built receipt: `crates/cli/build.rs` present at full product-spine revision `5d666830bc9e5b716b2ea1d239d9d0ccbe6e067b` (compile-time GIT_COMMIT receipt; `git ls-tree 5d666830bc9e5b716b2ea1d239d9d0ccbe6e067b -- crates/cli/build.rs` = blob `f880e89704d7a7be658d5d65e3461223a202b925`), tree-absent at evidence-map revision `68b837c0b8dd7e5a46f54efc127e96e3cdfc3bfe` (`git ls-tree 68b837c -- crates/cli/build.rs` = empty)
 - Packaged/installed: no packaged-archive or install proof bound to 5d66683; INSTALLED-DEFAULT-CONTRACT-INTEGRATION completedNote states `OC2_E2E_REVISION=$(git rev-parse HEAD)` GREEN 5/5 env-var receipt substitute
 - Classification: **source-built** (revision receipt landed on product-spine, not packaged on main, not main-bound)
 - Packaged binding: **open** - packaging must inject truthful receipt; env var substitute in use
