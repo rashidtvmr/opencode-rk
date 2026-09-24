@@ -885,6 +885,12 @@
       "session": "ses_f2d27018cffeqjKbFHUPWzxOjn",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-TOOL-RED-VERIFY": {
+      "completedNote": "RED verified: hash 056754e6 exact, py_compile PASS, 21 tests/50 assert failures for absent controller, no skips/collection errors, protected files byte-identical before/after, git diff --check clean",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-TOOL-RED-VERIFY.md",
+      "session": "ses_f2d0edd94ffeX0kDaNWO5SMbBj",
+      "status": "completed"
+    },
     "LEDGER-CONVERGENCE-TOOL-TEST-BOUNDARY": {
       "completedNote": "RESEARCH GREEN: exact tool tools/ledger_convergence_controller.py and RED tests/bootstrap/test_ledger_convergence_controller.py; API/CLI fixture, apply-disabled, canonical/JCS, A/B/C, lock/CAS, fsync/crash, bounds/rollback matrix in worklog; no product test by research boundary; convergence_gate expected blocked total=97; git diff --check clean",
       "scratchpad": "worklog/LEDGER-CONVERGENCE-TOOL-TEST-BOUNDARY.md",
