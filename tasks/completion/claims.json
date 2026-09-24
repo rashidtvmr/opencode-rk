@@ -933,6 +933,12 @@
       "session": "ses_f2dbfcec5ffe7ZCXch4BywjKk1",
       "status": "completed"
     },
+    "PHASE1-WAVE1-DISPATCH-MAP-CORRECTION": {
+      "completedNote": "Manifest corrected per 0bba574: Lane1 removed (already-authored 2cd9ca9), wrappers dropped, full 40-hex rev, gate anchored 93, vm_stat, MSVC excluded, SEC-RED-OS blocked bd8ddc9. diff-check clean, parser GREEN.",
+      "scratchpad": "worklog/PHASE1-WAVE1-DISPATCH-MAP-CORRECTION.md",
+      "session": "ses_f2d73329affeBljDY1VFANGgTW",
+      "status": "completed"
+    },
     "PHASE1-WAVE1-DISPATCH-MAP-VERIFY": {
       "completedNote": "ACCEPT WITH CORRECTIONS. gate total=92; ls-remote 0e6675b/8c514e0/632a71e/2cd9ca9 ok; frozen hashes match src-evidence rows4/5/6; Lane1 already on origin/lane/TOOL-RED-SHELL hash 2853960b verified ACCEPT WITH SPLIT; defects: Lane1 dup, timeout-180 absent macOS, row2 truncated revision, gate 90/91 vs 92, free -h macOS invalid, MSVC unstated. See worklog/PHASE1-WAVE1-DISPATCH-MAP-VERIFY.md",
       "scratchpad": "worklog/PHASE1-WAVE1-DISPATCH-MAP-VERIFY.md",
