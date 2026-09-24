@@ -909,6 +909,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-RELEASE-EVIDENCE-CORRECTION-RETRY": {
+      "completedNote": "CORRECTIONS: validators exist (242/295/343 lines @248f519, on main); REL-001 absent ledger, REL-002 blocked CI caller, REL-003 completed; receipt 5d66683 on product-spine not main; convergence 84 not 86; no codesign/notariz refs; FINAL worklogs+verifier.json exist; no controller receipt for 5d66683; packaged binding open. git diff --check passes.",
+      "scratchpad": "worklog/PHASE1-RELEASE-EVIDENCE-CORRECTION-RETRY.md",
+      "session": "ses_f2ddc7059ffeJ7wXZLQ28LqozO",
+      "status": "completed"
+    },
     "PHASE1-RELEASE-EVIDENCE-MAP": {
       "completedNote": "Evidence ledger written: REL-001/002/003 missing, revision receipt local-only, signing external unavailable, validate_repository pre-existing FAIL",
       "scratchpad": "worklog/PHASE1-RELEASE-EVIDENCE-MAP.md",
