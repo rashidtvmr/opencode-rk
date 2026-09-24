@@ -42,6 +42,12 @@
       "session": "ses_orch_APP005",
       "status": "completed"
     },
+    "APP-005-SECURE-RED": {
+      "blockedNote": "Compiling macOS PTY RED 0/1: setup repaint echoes raw sentinel instead of [hidden]; frozen sha256 5c7e9efdb72f209dd47429d9a7a391d83ef5686e7c8d5806c1773983544f3a19; product masking required.",
+      "scratchpad": "worklog/APP-005-SECURE-RED.md",
+      "session": "ses_f2e9f871cffeHOJ3OZ8fi4L24J",
+      "status": "blocked"
+    },
     "APP-006": {
       "completedNote": "membership 7/7 + workspace_sessions 6/6 green, wired routes; zero test edits",
       "scratchpad": "worklog/APP-006.md",
