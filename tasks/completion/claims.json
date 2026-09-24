@@ -879,6 +879,12 @@
       "session": "ses_f2dcc8c53ffeLSzMHx0D73yJ08",
       "status": "completed"
     },
+    "LEDGER-CONVERGENCE-TOOL-RED": {
+      "completedNote": "RED frozen 21 tests, exit 1, 50 assertion failures for absent controller; test sha256 056754e65755411cb12fc8b590e53ca89ecca9f4288cfd41d9acd82bf640f6fe; py_compile and diff-check pass",
+      "scratchpad": "worklog/LEDGER-CONVERGENCE-TOOL-RED.md",
+      "session": "ses_f2d27018cffeqjKbFHUPWzxOjn",
+      "status": "completed"
+    },
     "LEDGER-CONVERGENCE-TOOL-TEST-BOUNDARY": {
       "completedNote": "RESEARCH GREEN: exact tool tools/ledger_convergence_controller.py and RED tests/bootstrap/test_ledger_convergence_controller.py; API/CLI fixture, apply-disabled, canonical/JCS, A/B/C, lock/CAS, fsync/crash, bounds/rollback matrix in worklog; no product test by research boundary; convergence_gate expected blocked total=97; git diff --check clean",
       "scratchpad": "worklog/LEDGER-CONVERGENCE-TOOL-TEST-BOUNDARY.md",
