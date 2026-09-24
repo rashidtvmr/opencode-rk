@@ -149,6 +149,12 @@
       "session": "ses_f2b5ec88bffe51XYIMn0lgMD1h",
       "status": "completed"
     },
+    "APP012-KEYRING-API-SEAM-CORRECTION-VERIFY": {
+      "completedNote": "B REJECT at correction 55174dc83edf9df197d102522d2889c9af3d6408. TDD policy has no implementation-before-RED exception; nine-group audit, exact future RED imports/failure cause, and remaining platform/runtime evidence recorded. No Cargo/product/test/dependency/native changes.",
+      "scratchpad": "worklog/APP012-KEYRING-API-SEAM-CORRECTION-VERIFY.md",
+      "session": "ses_f2b72911cffed5MyTRY0HbGHlI",
+      "status": "completed"
+    },
     "APP012-KEYRING-API-SEAM-VERIFY": {
       "completedNote": "REVISE at 6dcfe198e096721169efb2d96f0d763b35c8daff. Nine blocker/correction groups recorded in worklog; no implementation authorization. Frozen APP-012 SHA-256 945236c4c6a565fefb3853afa6930c438ab38f250c074ef650b5cd252d3c8c50; read-only diff/hash checks; no Cargo/native/product changes.",
       "scratchpad": "worklog/APP012-KEYRING-API-SEAM-VERIFY.md",
