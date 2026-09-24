@@ -3,6 +3,29 @@
 Status: blocked; frozen-test contract review required. No product, test, policy,
 plan, verifier, manifest, or artifact edits.
 
+## Controller-authorized correction and refreeze — 2026-09-23
+
+- Human/controller authorized the minimal semantic corrections after reviewing
+  this evidence. Original frozen SHA-256 remains recorded below.
+- Corrected lowercase-hex validation now permits digits and lowercase `a..f`
+  while rejecting uppercase/non-hex characters.
+- Metadata/sidecars retain the 64 KiB bound; the native artifact uses the
+  builder/installer's 128 MiB artifact bound.
+- The first rerun exposed previously masked Mach-O parser defects after the old
+  size check stopped short-circuiting: invalid magic constants, endian-agnostic
+  `cputype` decoding, and an x86_64 constant mislabeled arm64. A second explicit
+  controller authorization covered the parser correction. The refrozen test
+  uses standard `MH_MAGIC_64=0xFEEDFACF`, `MH_CIGAM_64=0xCFFAEDFE`, decodes the
+  CPU field according to detected file endianness, and uses arm64
+  `CPU_TYPE_ARM64=0x0100000C`.
+- Refrozen SHA-256:
+  `cb7d4cde7c3aed1916814c9aab747b68aa48015518c444e90bd8a58e66bd5c8b`.
+- Exact rerun: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p
+  opencode-rk-opentui-bridge --test native_artifact_manifest --
+  --test-threads=1`; result `3 passed, 0 failed`.
+- This corrects the test contract only. Existing artifact hashes, manifests,
+  SBOM and production code were not changed by the correction.
+
 ## Claim and revision
 
 - Task: `TUI-011-FROZEN-CONTRACT-REVIEW`

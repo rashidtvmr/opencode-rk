@@ -1,4 +1,4 @@
-//! Frozen RED test for TUI-011: native artifact manifest contract.
+//! Controller-corrected and refrozen TUI-011 native artifact contract.
 //! Std-only; no shell/network. Run:
 //!   CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-opentui-bridge --test native_artifact_manifest -- --test-threads=1
 
@@ -8,11 +8,12 @@ use std::fs;
 use std::path::PathBuf;
 
 const MAX_BYTES: u64 = 64 * 1024;
+const MAX_ARTIFACT_BYTES: u64 = 128 * 1024 * 1024;
 const EXPECTED_COMMIT: &str = "c01292fd0837bafd07ce458c74416b2b375a41ab";
 const EXPECTED_TARGET: &str = "aarch64-apple-darwin";
-const MH_MAGIC_64: u32 = 0xFEEDFC0A;
-const MH_CIGAM_64: u32 = 0x0AFCFEEE;
-const CPU_TYPE_ARM64: i32 = 0x01000007;
+const MH_MAGIC_64: u32 = 0xFEEDFACF;
+const MH_CIGAM_64: u32 = 0xCFFAEDFE;
+const CPU_TYPE_ARM64: i32 = 0x0100000C;
 
 fn crate_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -90,7 +91,7 @@ fn test_manifest_exists_bounded_and_records_contract() {
     if sha.len() != 64
         || !sha
             .chars()
-            .all(|c| c.is_ascii_hexdigit() && c.is_ascii_lowercase())
+            .all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c))
     {
         panic!("TUI-011 RED: sha256 must be lowercase 64-hex, found: {sha}")
     }
@@ -118,10 +119,11 @@ fn test_artifact_exists_and_is_macho_arm64() {
     if metadata.len() == 0 {
         panic!("TUI-011 RED: artifact is empty (0 bytes)");
     }
-    if metadata.len() as u64 > MAX_BYTES {
+    if metadata.len() as u64 > MAX_ARTIFACT_BYTES {
         panic!(
-            "TUI-011 RED: artifact is {} bytes, exceeds 64 KiB",
-            metadata.len()
+            "TUI-011 RED: artifact is {} bytes, exceeds {} byte native artifact bound",
+            metadata.len(),
+            MAX_ARTIFACT_BYTES
         );
     }
 
@@ -137,7 +139,12 @@ fn test_artifact_exists_and_is_macho_arm64() {
         panic!("TUI-011 RED: artifact magic 0x{:08X} is not Mach-O 64-bit (expected 0x{:08X} or 0x{:08X})", magic, MH_MAGIC_64, MH_CIGAM_64);
     }
 
-    let cputype = i32::from_be_bytes([data[4], data[5], data[6], data[7]]);
+    let cpu_bytes = [data[4], data[5], data[6], data[7]];
+    let cputype = if magic == MH_CIGAM_64 {
+        i32::from_le_bytes(cpu_bytes)
+    } else {
+        i32::from_be_bytes(cpu_bytes)
+    };
     if cputype != CPU_TYPE_ARM64 {
         panic!(
             "TUI-011 RED: artifact cputype 0x{:08X} is not ARM64 (0x{:08X})",
