@@ -1261,6 +1261,12 @@
       "scratchpad": "worklog/POLICY-STRUCTURED-DELEGATION-AGENTS-CORRECTION.md",
       "session": "ses_f2de5cddbffeQtkE264unOuVpT",
       "status": "completed"
+    },
+    "POLICY-WORKTREE-DISPLACED-FILES-AUDIT": {
+      "completedNote": "All four flattened stash artifacts inventoried; original paths present and differ; no restoration safe; stash preserved; audit worklog complete; git diff --check PASS; no Cargo or heavy processes.",
+      "scratchpad": "worklog/POLICY-WORKTREE-DISPLACED-FILES-AUDIT.md",
+      "session": "ses_f2dd38ef5ffenjC41vDYzM1VgD",
+      "status": "completed"
     }
   },
   "schemaVersion": 1
