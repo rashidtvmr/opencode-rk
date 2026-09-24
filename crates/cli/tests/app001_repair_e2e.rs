@@ -1,4 +1,4 @@
-#![cfg(unix)]
+#![cfg(target_os = "macos")]
 #![forbid(unsafe_code)]
 
 //! APP-001 repair RED: exercise the real bare `oc2` entrypoint through a Unix
@@ -130,7 +130,7 @@ fn bare_without_provider_opens_setup_and_restores_terminal() {
     assert!(status.success(), "bare setup exit: {status}\n{text}");
     assert!(text.contains("setup"), "missing in-app setup view, not offline/manual path\n{text}");
     assert!(!text.contains("offline") && !text.contains("session create") && !text.contains("serve"), "wrong startup path\n{text}");
-    assert!(text.contains("\x1b[?1049l") || text.contains("\x1b[0m"), "terminal restoration sequence missing\n{text}");
+    assert!(text.contains("\x1b[?1049l"), "alternate-screen restoration sequence missing\n{text}");
 }
 
 #[test]
