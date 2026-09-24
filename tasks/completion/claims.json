@@ -1070,6 +1070,12 @@
       "session": "ses_f2cc620c6ffeMsfgIyrBm8Ap2H",
       "status": "completed"
     },
+    "TOOL-AUTHORIZED-PROCESS-SEAM-VERIFY": {
+      "blockedNote": "BLOCKED: cwd byte-budget contract violation at crates/tools/src/executor.rs:202,207,220; to_string_lossy().len() transforms invalid Unix path bytes. Preflight probe passed 1/1. Error-bound probe passed 1/1. Non-UTF-8 runtime fixture unavailable on macOS: filesystem rejects invalid path bytes. No cancellation RED authorization. Disposable probes removed; stale executor tests untouched.",
+      "scratchpad": "worklog/TOOL-AUTHORIZED-PROCESS-SEAM-VERIFY.md",
+      "session": "ses_f2c0335b5ffePuDIBoawHPZagL",
+      "status": "blocked"
+    },
     "TOOL-RED-SHELL": {
       "completedNote": "RED 0/4 fail-for-cause; sha 2853960b; cmd cargo test -p opencode-rk-tools --test phase1_shell_broker",
       "scratchpad": "worklog/TOOL-RED-SHELL.md",
