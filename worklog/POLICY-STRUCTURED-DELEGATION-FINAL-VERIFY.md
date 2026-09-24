@@ -92,6 +92,8 @@ Supporting drift, not additional matrix failures: `.agents/WORKER.md:35-36,144-1
 
 - `rtk git diff --check` → exit `0`.
 - `rtk git push --dry-run` → `Everything up-to-date`, exit `0`.
+- `rtk git push` → topic branch advanced to `80366c1`, exit `0`.
+- `rtk git fetch --prune origin` followed by `rtk git merge-base --is-ancestor HEAD origin/docs/structured-subagent-prompts` → exit `0`.
 - `rtk python3 tools/convergence_gate.py` → exit `1`, `CONVERGENCE BLOCKED`, `total=99`.
 - `rtk python3 tools/validate_repository.py` → exit `1`, `validate_backlog_exhaustion: 51 error(s)`; protection fixture passed, hosting-platform state unverified.
 - Normalized policy matrix → `33` checks, `7` residual failures.
@@ -102,9 +104,10 @@ Supporting drift, not additional matrix failures: `.agents/WORKER.md:35-36,144-1
 - `AGENTS.md`: `0d9af8de76feb4c27f64215b11c08eb33969a96dbd612f6dfe0af52bf1415907`
 - `.agents/WORKER.md`: `f733335f4db945edc83ca7fb699ef57072eb0e84832042c03a02fc003758fe83`
 - `worklog/POLICY-STRUCTURED-DELEGATION-WORKER.md`: `c4d5401389a827ad761ad870c94be32135cee1f38085984cbb3ffa7848595836`
-- `HEAD`: `aa069938d6812f6a147798a7d1354d4f19a47ba9`
-- Topic remote: `origin/docs/structured-subagent-prompts` at same SHA
-- `origin/main`: not containing `HEAD`
+- Policy baseline before verifier landing: `aa069938d6812f6a147798a7d1354d4f19a47ba9`
+- Verifier evidence commit: `80366c16a04d7ae6b305fb776223ec9a4b55214f`
+- Pushed branch/ref: `docs/structured-subagent-prompts`; `origin/docs/structured-subagent-prompts` contains the verifier commit
+- `origin/main`: not containing the policy topic branch
 
 ### Recommendation
 
