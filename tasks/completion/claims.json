@@ -940,9 +940,10 @@
       "status": "completed"
     },
     "POLICY-STRUCTURED-DELEGATION-VERIFY-LANDING": {
+      "completedNote": "Landed verifier push evidence: commit 84d0eff on origin/docs/structured-subagent-prompts; worklog + claims.json only; ACCEPT WITH CORRECTIONS verdict preserved; git diff --check clean; upstream mismatch recorded (local tracks origin/lane/PHASE1-product-spine-20260923 not origin/docs/structured-subagent-prompts)",
       "scratchpad": "worklog/POLICY-STRUCTURED-DELEGATION-VERIFY-LANDING.md",
       "session": "ses_f2de883efffe5RnnnwTfZQ0Yn4",
-      "status": "in-progress"
+      "status": "completed"
     },
     "POLICY-STRUCTURED-DELEGATION-WORKER": {
       "completedNote": "Added mandatory structured-brief intake gate (section 0) + handoff schema cross-ref to .agents/WORKER.md cross-referencing canonical AGENTS.md template; docs-only, rtk git diff --check PASS; no Cargo tests required.",
