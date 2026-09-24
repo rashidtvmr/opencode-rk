@@ -1100,6 +1100,12 @@
       "session": "ses_f2d25ff53ffeI8JA2mrF6iLY1Y",
       "status": "completed"
     },
+    "TOOL-SHELL-CANCEL-CONTRACT-CORRECTION-VERIFY": {
+      "completedNote": "ACCEPT seam implementation only: C1-C5 PASS against 38593f37; semantic parser PASS; required grep 33 matches; frozen broker SHA-256 ef56f63a5d2d3d0fa99049cdfdf9df0fe69fb6e5c66b33484431603cc855d1e8 unchanged; diff check PASS; no Cargo/heavy process; cancellation RED and feature acceptance remain blocked until seam implementation plus independent seam verification.",
+      "scratchpad": "worklog/TOOL-SHELL-CANCEL-CONTRACT-CORRECTION-VERIFY.md",
+      "session": "ses_f2d0df495ffeaOgqWW9QOCFy1E",
+      "status": "completed"
+    },
     "TOOL-SHELL-CANCEL-CONTRACT-VERIFY": {
       "completedNote": "Contract verified ACCEPT WITH CORRECTIONS: 15/15 citations resolve, all states/scenarios present, C1-C2 blocking before RED. Checks: git grep, frozen hash ef56f63a5d2d3d0fa99049cdfdf9df0fe69fb6e5c66b33484431603cc855d1e8, diff check, python heading/state check; no Cargo.",
       "scratchpad": "worklog/TOOL-SHELL-CANCEL-CONTRACT-VERIFY.md",
