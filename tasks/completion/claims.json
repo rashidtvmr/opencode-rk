@@ -1076,6 +1076,12 @@
       "session": "ses_f2d7b714dffeDz0zOMaryswDaa",
       "status": "completed"
     },
+    "TOOL-RED-SHELL-BROKER-REFREEZE-VERIFY": {
+      "completedNote": "ACCEPT: 2c5e9cf authorized broker-only refreeze; old sha 2853960b new sha ef56f63a; compile OK running 3 tests 0/3 fail-for-cause (t01:60 t02:90 t03:135); t01-t03 byte-identical cmp exit0 prefix 1-161; diff pure deletion 0/31 t04 only; sentinel 0; no leftovers; cancellation remains explicit open blocker (Contract B TOOL-RED-SHELL-CANCEL-RED)",
+      "scratchpad": "worklog/TOOL-RED-SHELL-BROKER-REFREEZE-VERIFY.md",
+      "session": "ses_f2d71a9feffeIbSAZUmUQPMLY8",
+      "status": "completed"
+    },
     "TOOL-RED-SHELL-SPLIT-PROPOSAL": {
       "completedNote": "Proposal written: contradiction lines/source/API audit/split lane graph/hash lifecycle/rollback; no product test per research scope; frozen sha 2853960b unchanged; git diff --check clean; implementation blocked pending controller authorization and independent refreeze.",
       "scratchpad": "worklog/TOOL-RED-SHELL-SPLIT-PROPOSAL.md",
