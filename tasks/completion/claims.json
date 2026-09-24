@@ -89,6 +89,30 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "in-progress"
     },
+    "APP-012-FILE-OPS": {
+      "completedNote": "file_ops.rs audit+corrected; 5/5 file_ops tests pass; frozen APP-012 RED passes; list_dir non-secret errors fixed",
+      "scratchpad": "worklog/APP-012-FILE-OPS.md",
+      "session": "ses_subagent_fileops",
+      "status": "completed"
+    },
+    "APP-012-READ-EXECUTOR": {
+      "completedNote": "GREEN executor 5/5 + APP-012 server 1/1; zero test edits; strict path/number validation, 64KiB cap, brokered spawn_blocking read; timeout limitation documented; CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1",
+      "scratchpad": "worklog/APP-012-READ-EXECUTOR.md",
+      "session": "ses_f2e8209d4ffeJv0NexktaSn8bF",
+      "status": "completed"
+    },
+    "APP-012-READ-INTEGRATION": {
+      "completedNote": "Reviewed scope only: frozen hash 945236c4; APP-012 journey 1/1, tools executor 5/5, file_ops 5/5, server broker_gate 1/1, agent_loop 6/6, diff check clean; product parent remains open",
+      "scratchpad": "worklog/APP-012-READ-INTEGRATION.md",
+      "session": "ses_f2e63a880ffeDs27MCzFINfVE5",
+      "status": "completed"
+    },
+    "APP-012-SERVER-READ-WIRING": {
+      "completedNote": "GREEN app012_tool_journey_red 1/1 + broker_gate 1/1 + agent_loop 6/6; frozen sha 945236c4 unchanged; zero test edits; CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1",
+      "scratchpad": "worklog/APP-012-SERVER-READ-WIRING.md",
+      "session": "ses_f2e69526effe3GmfFlddGUowI9",
+      "status": "completed"
+    },
     "APP-012-TOOL-RED": {
       "blockedNote": "RED-ready: compiling test fails at safe read assertion with Unknown tool: read; SHA256 945236c4c6a565fefb3853afa6930c438ab38f250c074ef650b5cd252d3c8c50",
       "scratchpad": "worklog/APP-012-TOOL-RED.md",

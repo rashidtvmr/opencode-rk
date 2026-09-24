@@ -1613,11 +1613,14 @@ async fn create_turn_stream(
                                                 serde_json::from_str(&call.arguments)
                                                     .unwrap_or_else(|_| json!({}));
                                             let result = executor
-                                                .execute(opencode_rk_tools::executor::ToolCall::new(
-                                                    call.call_id.clone(),
-                                                    call.name.clone(),
-                                                    arguments,
-                                                ))
+                                                .execute_authorized(
+                                                    opencode_rk_tools::executor::ToolCall::new(
+                                                        call.call_id.clone(),
+                                                        call.name.clone(),
+                                                        arguments,
+                                                    ),
+                                                    &state.broker,
+                                                )
                                                 .await;
                                             if result.success {
                                                 result.output

@@ -6,8 +6,11 @@
 use opencode_rk_security::{Decision, FileAction, OperationIntent, PermissionBroker};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
-use std::{fs, io::Write};
+use std::{fs, io::{Read, Seek, SeekFrom, Write}};
 use thiserror::Error;
+
+/// Hard cap for one file-read result. Callers may request a smaller limit.
+pub const MAX_READ_BYTES: usize = 64 * 1024;
 
 /// Error type for file operations.
 #[derive(Debug, Error)]
@@ -172,28 +175,33 @@ impl Default for FileTool {
 
 /// Executes a file operation after broker authorization.
 ///
-/// Write ops authorize before any filesystem I/O: `Deny` and `RequireHuman`
-/// return `Ok(FileResult::failure(..))` without creating, truncating, or
-/// making parent directories. Non-write ops pass through to [`execute`].
+/// Every operation authorizes its concrete path before filesystem I/O.
+/// `Deny` and `RequireHuman` return a fixed failure without reading, creating,
+/// truncating, listing, or making parent directories.
 pub fn execute_authorized(
     op: FileOperation,
     broker: &PermissionBroker,
 ) -> Result<FileResult, ToolError> {
-    if let FileOperation::Write { ref path, .. } = op {
-        let intent = OperationIntent::File {
-            action: FileAction::Write,
-            path: path.clone(),
-        };
-        match broker.authorize(&intent) {
-            Decision::Allow => (),
-            Decision::Deny { reason } => {
-                return Ok(FileResult::failure(format!("write denied: {reason}")));
-            }
-            Decision::RequireHuman { reason, .. } => {
-                return Ok(FileResult::failure(format!(
-                    "write requires human approval: {reason}"
-                )));
-            }
+    let (action, path) = match &op {
+        FileOperation::Read { path, .. } | FileOperation::List { path } => {
+            (FileAction::Read, path)
+        }
+        FileOperation::Write { path, .. } => (FileAction::Write, path),
+        FileOperation::CreateDir { path, .. } => (FileAction::CreateDirectory, path),
+    };
+    let intent = OperationIntent::File {
+        action,
+        path: path.clone(),
+    };
+    match broker.authorize(&intent) {
+        Decision::Allow => (),
+        Decision::Deny { reason } => {
+            return Ok(FileResult::failure(format!("file operation denied: {reason}")));
+        }
+        Decision::RequireHuman { reason, .. } => {
+            return Ok(FileResult::failure(format!(
+                "file operation requires human approval: {reason}"
+            )));
         }
     }
     execute(op)
@@ -223,28 +231,29 @@ fn read_file(
     offset: Option<usize>,
     limit: Option<usize>,
 ) -> Result<FileResult, ToolError> {
-    if !path.exists() {
-        return Ok(FileResult::failure(format!("File not found: {:?}", path)));
-    }
-
-    let mut content = fs::read_to_string(path).map_err(ToolError::IoError)?;
-
-    if let Some(off) = offset {
-        if off > content.len() {
-            return Ok(FileResult::failure(format!(
-                "Offset {} exceeds file length {}",
-                off,
-                content.len()
-            )));
+    let mut file = match fs::File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(FileResult::failure("File not found"));
         }
-        content = content[off..].to_string();
+        Err(error) => return Err(ToolError::IoError(error)),
+    };
+    let offset = offset.unwrap_or(0);
+    let file_len = file.metadata().map_err(ToolError::IoError)?.len();
+    if u64::try_from(offset).unwrap_or(u64::MAX) > file_len {
+        return Ok(FileResult::failure("read offset exceeds file length"));
     }
-
-    if let Some(lim) = limit {
-        content = content.chars().take(lim).collect();
+    file.seek(SeekFrom::Start(offset as u64))
+        .map_err(ToolError::IoError)?;
+    let limit = limit.unwrap_or(MAX_READ_BYTES).min(MAX_READ_BYTES);
+    let mut bytes = Vec::with_capacity(limit.min(8 * 1024));
+    file.take(limit as u64)
+        .read_to_end(&mut bytes)
+        .map_err(ToolError::IoError)?;
+    match String::from_utf8(bytes) {
+        Ok(content) => Ok(FileResult::success(content)),
+        Err(_) => Ok(FileResult::failure("file is not valid UTF-8")),
     }
-
-    Ok(FileResult::success(content))
 }
 
 /// Writes content to a file at the given path.
@@ -277,17 +286,11 @@ fn write_file(path: &Path, content: &str, append: bool) -> Result<FileResult, To
 /// Lists the contents of a directory.
 fn list_dir(path: &Path) -> Result<FileResult, ToolError> {
     if !path.exists() {
-        return Ok(FileResult::failure(format!(
-            "Directory not found: {:?}",
-            path
-        )));
+        return Ok(FileResult::failure("directory not found"));
     }
 
     if !path.is_dir() {
-        return Ok(FileResult::failure(format!(
-            "Path is not a directory: {:?}",
-            path
-        )));
+        return Ok(FileResult::failure("path is not a directory"));
     }
 
     let mut entries: Vec<String> = Vec::new();

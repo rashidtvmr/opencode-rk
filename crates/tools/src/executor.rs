@@ -4,12 +4,24 @@
 //! and `ToolCall`/`ToolResult` types for structured tool invocation.
 
 use serde_json::Value;
+use opencode_rk_security::PermissionBroker;
 use std::time::{Duration, Instant};
 use tokio::process::Command;
 use tokio::time::timeout;
 
 fn elapsed_ms(start: Instant) -> u64 {
     start.elapsed().as_millis().max(1) as u64
+}
+
+fn parse_optional_usize(input: &Value, field: &'static str) -> Result<Option<usize>, String> {
+    let Some(value) = input.get(field) else {
+        return Ok(None);
+    };
+    let parsed = value
+        .as_u64()
+        .and_then(|value| usize::try_from(value).ok())
+        .ok_or_else(|| format!("Invalid '{field}' field in input"))?;
+    Ok(Some(parsed))
 }
 
 /// Configuration for tool execution timeouts.
@@ -119,6 +131,110 @@ impl ToolExecutor {
         };
 
         result
+    }
+
+    /// Execute a call whose concrete resource must be authorized by the
+    /// supplied broker. File reads never use the generic unbrokered path.
+    pub async fn execute_authorized(
+        &self,
+        call: ToolCall,
+        broker: &PermissionBroker,
+    ) -> ToolResult {
+        if call.name != "read" {
+            return self.execute(call).await;
+        }
+        self.execute_read(call, broker.clone()).await
+    }
+
+    async fn execute_read(&self, call: ToolCall, broker: PermissionBroker) -> ToolResult {
+        let start = Instant::now();
+        let Some(path) = call.input.get("path").and_then(Value::as_str) else {
+            return ToolResult {
+                tool_id: call.tool_id,
+                output: String::new(),
+                success: false,
+                duration_ms: elapsed_ms(start),
+                error: Some("Missing 'path' field in input".to_owned()),
+            };
+        };
+        if path.trim().is_empty() || path.contains('\0') {
+            return ToolResult {
+                tool_id: call.tool_id,
+                output: String::new(),
+                success: false,
+                duration_ms: elapsed_ms(start),
+                error: Some("Invalid 'path' field in input".to_owned()),
+            };
+        }
+        let offset = match parse_optional_usize(&call.input, "offset") {
+            Ok(value) => value.unwrap_or(0),
+            Err(error) => {
+                return ToolResult {
+                    tool_id: call.tool_id,
+                    output: String::new(),
+                    success: false,
+                    duration_ms: elapsed_ms(start),
+                    error: Some(error),
+                };
+            }
+        };
+        let limit = match parse_optional_usize(&call.input, "limit") {
+            Ok(value) => value
+                .unwrap_or(crate::file_ops::MAX_READ_BYTES)
+                .min(crate::file_ops::MAX_READ_BYTES),
+            Err(error) => {
+                return ToolResult {
+                    tool_id: call.tool_id,
+                    output: String::new(),
+                    success: false,
+                    duration_ms: elapsed_ms(start),
+                    error: Some(error),
+                };
+            }
+        };
+        let op = crate::file_ops::FileOperation::read_with_range(path, offset, Some(limit));
+        let tool_id = call.tool_id;
+        let effective_timeout = call
+            .timeout_ms
+            .map(|value| Duration::from_millis(value.min(self.timeout_config.max_timeout_ms)))
+            .unwrap_or_else(|| Duration::from_millis(self.timeout_config.default_timeout_ms));
+        let task = tokio::task::spawn_blocking(move || {
+            crate::file_ops::execute_authorized(op, &broker)
+        });
+        match timeout(effective_timeout, task).await {
+            Ok(Ok(Ok(result))) => ToolResult {
+                tool_id,
+                output: result.content,
+                success: result.success,
+                duration_ms: elapsed_ms(start),
+                error: result.error,
+            },
+            Ok(Ok(Err(_))) => ToolResult {
+                tool_id,
+                output: String::new(),
+                success: false,
+                duration_ms: elapsed_ms(start),
+                error: Some("file read failed".to_owned()),
+            },
+            Ok(Err(_)) => ToolResult {
+                tool_id,
+                output: String::new(),
+                success: false,
+                duration_ms: elapsed_ms(start),
+                error: Some("file read task failed".to_owned()),
+            },
+            // Dropping a JoinHandle after timeout stops awaiting the result but
+            // cannot cancel blocking I/O already running on Tokio's pool. The
+            // file operation has a fixed 64 KiB read cap, so its work is bounded;
+            // this timeout is not hard cancellation.
+            Err(_) => ToolResult {
+                tool_id,
+                output: String::new(),
+                success: false,
+                duration_ms: elapsed_ms(start),
+                error: Some("Execution timed out".to_owned()),
+            },
+        }
     }
 
     async fn execute_shell(&self, call: &ToolCall, timeout_duration: Duration) -> ToolResult {
