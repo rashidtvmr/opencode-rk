@@ -1028,6 +1028,17 @@
       "session": "ses_f384fede7ffenpg6X2t2lZtIyS",
       "status": "completed"
     },
+    "SEC-RED-OS": {
+      "scratchpad": "worklog/SEC-RED-OS.md",
+      "session": "ses_f2dc11dd3ffeWw31mT4dyuJYOM",
+      "status": "in-progress"
+    },
+    "SEC-RED-OS-VERIFY": {
+      "completedNote": "VERDICT INCOMPLETE: candidate crates/security/tests/phase1_os_isolation.rs absent (shasum ENOENT; not in git ls-files; no ref in git log --all); author worklog/SEC-RED-OS.md absent; author row SEC-RED-OS still in-progress ses_f2dc11dd3ffeWw31mT4dyuJYOM; no commit/push. Cargo not run (no candidate). No candidate bytes changed. See worklog/SEC-RED-OS-VERIFY.md.",
+      "scratchpad": "worklog/SEC-RED-OS-VERIFY.md",
+      "session": "ses_f2db883b4fferZyOpE8bH5RD5K",
+      "status": "completed"
+    },
     "SESS-008": {
       "blockedNote": "Caller audit: persist.rs is unwired state-only cache; SessionService uses Arc<Storage>. Wiring duplicates truth, lacks invalidation/bounds, and flush is non-durable. No valid public SessionService RED without inventing observability or durability. Controller must retire/decompose SESS-008/011; see worklog/SESS-008-CALLER-REVIEW.md. Gate blocked: 53 findings.",
       "scratchpad": "worklog/SESS-008-CALLER-REVIEW.md",
