@@ -1094,6 +1094,12 @@
       "session": "ses_f2d280f56ffekshDTZMD3LgU8V",
       "status": "completed"
     },
+    "TOOL-SHELL-BROKER-FULL-GREEN-VERIFY": {
+      "blockedNote": "BLOCKED full-GREEN: frozen 3/3 GREEN hash ef56f63a; lib 107/4 (2 stale executor,1 env mcp,1 t05+batch Immediate-loss defect at registry_dispatch.rs:278-279); no repair per boundary",
+      "scratchpad": "worklog/TOOL-SHELL-BROKER-FULL-GREEN-VERIFY.md",
+      "session": "ses_f2ccf9035ffekU39eHBRc323Lw",
+      "status": "blocked"
+    },
     "TOOL-SHELL-BROKER-REGISTRY-GREEN": {
       "completedNote": "GREEN frozen 3/3: t03 registry shell denied pre-permit/store (0,0), no marker; frozen sha ef56f63a unchanged; zero test edits; tools lib 107 passed, 4 pre-existing conflicts unchanged (executor execute_success/timeout, mcp disc111_t04, registry disc103_t05 bash-batch); cmd cargo test -p opencode-rk-tools --test phase1_shell_broker",
       "scratchpad": "worklog/TOOL-SHELL-BROKER-REGISTRY-GREEN.md",
