@@ -927,6 +927,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "POLICY-BRANCH-UPSTREAM-CORRECTION": {
+      "completedNote": "GREEN upstream corrected to origin/docs/structured-subagent-prompts; @{upstream}=origin/docs/structured-subagent-prompts; push --dry-run exit 0 Everything up-to-date; HEAD f2c2756 unchanged; remote contains HEAD 0 0; no content/test edits",
+      "scratchpad": "worklog/POLICY-BRANCH-UPSTREAM-CORRECTION.md",
+      "session": "ses_f2db6c148ffe1v6kFLsyQ5zSdY",
+      "status": "completed"
+    },
     "POLICY-STRUCTURED-DELEGATION-AGENTS": {
       "completedNote": "AGENTS.md structured delegation contract and reusable template added; structured-policy-check PASS; rtk git diff --check PASS; docs-only, no Cargo tests.",
       "scratchpad": "worklog/POLICY-STRUCTURED-DELEGATION-AGENTS.md",
