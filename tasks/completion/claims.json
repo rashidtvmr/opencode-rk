@@ -1094,6 +1094,12 @@
       "session": "ses_f2d280f56ffekshDTZMD3LgU8V",
       "status": "completed"
     },
+    "TOOL-SHELL-LEGACY-TEST-CONTRACT-REVIEW": {
+      "completedNote": "Evidence and recommendation only; no code edits. Legacy in-file unit tests classified stale vs frozen broker contract ef56f63a.",
+      "scratchpad": "worklog/TOOL-SHELL-LEGACY-TEST-CONTRACT-REVIEW.md",
+      "session": "ses_f2d1ade6dffewXM5hKsvbMtxiW",
+      "status": "completed"
+    },
     "TUI-001": {
       "completedNote": "GREEN exact native 1/1 + lib-native 73/73 + lib-default 72/72 + check ok; test-body sha256 bc606827 pre/post identical; zero test edits; CLI Scenario B pre-existing TTY-guard fail recorded, untouched",
       "scratchpad": "worklog/TUI-001-ABI-FIX.md",
