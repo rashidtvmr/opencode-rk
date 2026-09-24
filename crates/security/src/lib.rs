@@ -25,6 +25,7 @@ pub mod trusted;
 use opencode_rk_contracts::ApprovalId;
 use serde::{Deserialize, Serialize};
 use std::{
+    fs,
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
     time::SystemTime,
@@ -257,14 +258,14 @@ impl PermissionBroker {
         let normalized = lexical_normalize(path);
         if is_secret_path(&normalized) && !self.policy.allow_secret_reads {
             return Decision::Deny {
-                reason: "secret-bearing paths are not accessible to agents".to_owned(),
+                reason: "file read denied".to_owned(),
             };
         }
         if is_system_path(&normalized) {
             return match action {
                 FileAction::Read if self.policy.system_readable => Decision::Allow,
                 FileAction::Read => Decision::Deny {
-                    reason: "system-file reads are disabled by policy".to_owned(),
+                    reason: "file read denied".to_owned(),
                 },
                 _ => Decision::Deny {
                     reason: "system paths are read-only to agents".to_owned(),
@@ -284,6 +285,11 @@ impl PermissionBroker {
             return human_required(
                 "file deletion requires an explicit human approval in protected mode",
             );
+        }
+        if action == FileAction::Read && !self.is_within_readable_root(&path) {
+            return Decision::Deny {
+                reason: "file read denied".to_owned(),
+            };
         }
         Decision::Allow
     }
@@ -335,6 +341,27 @@ impl PermissionBroker {
             .chain(&self.policy.explicitly_allowed_roots)
             .map(|root| lexical_normalize(root))
             .any(|root| path.starts_with(root))
+    }
+
+    /// Canonical resolution containment check for reads.
+    ///
+    /// Resolves the full symlink chain via `fs::canonicalize` and verifies
+    /// the resulting real path is inside an approved project root. Fails
+    /// closed on any resolution error (broken symlink, permission denied,
+    /// non-existent path, traversal escape).
+    fn is_within_readable_root(&self, path: &Path) -> bool {
+        let canonical = match fs::canonicalize(path) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+        self.policy
+            .project_roots
+            .iter()
+            .chain(&self.policy.explicitly_allowed_roots)
+            .any(|root| match fs::canonicalize(root) {
+                Ok(r) => canonical.starts_with(r),
+                Err(_) => lexical_normalize(root).as_os_str().len() == 0,
+            })
     }
 }
 fn rule_scope(intent: &OperationIntent) -> String {

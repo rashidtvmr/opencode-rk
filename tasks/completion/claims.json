@@ -149,6 +149,12 @@
       "session": "Mac-verifier",
       "status": "completed"
     },
+    "APP012-PROTECTED-PATH-GREEN": {
+      "blockedNote": "BLOCKED: broker policy half complete in lib.rs - canonical containment denial, redacted reason 'file read denied', no content leak verified; 148 security tests pass; 2/7 RED pass, 5/7 fail purely due to file_ops.rs:199 format prefix 'file operation denied: {reason}' wrapping broker reason into 'file operation denied: file read denied' instead of exact 'file read denied'. Integration proposal: file_ops.rs line 199 change from format!(prefix + reason) to passing reason directly.",
+      "scratchpad": "worklog/APP012-PROTECTED-PATH-GREEN.md",
+      "session": "ses_f2b74f6feffeOuRDvMvz6TgZAK",
+      "status": "blocked"
+    },
     "APP012-PROTECTED-PATH-RED": {
       "blockedNote": "RED authored; Cargo/check/freeze prohibited by delegation; cancellation verification owns compile/RED/hash",
       "completedNote": "Compiling valid RED: 7 tests, 2 pass, 5 behavioral failures; SHA-256 ed524ec1a239e8403c76d133e6929683a5a751f758f662b91b0a8d5a2b687d77; frozen APP-012 hash preserved; hardlink/TOCTOU blocked/documented",
