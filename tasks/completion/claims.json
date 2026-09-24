@@ -915,6 +915,12 @@
       "session": "ses_f2e03dda0ffeBAMXeSY7uhsOvP",
       "status": "completed"
     },
+    "PHASE1-RELEASE-EVIDENCE-VERIFY": {
+      "completedNote": "ACCEPT WITH CORRECTIONS: validators+fixtures exist (248f519, on main); REL-001 ledger row absent, REL-002 blocked on CI caller, REL-003 completed; receipt 5d66683 pushed to origin/lane/PHASE1-product-spine-20260923 not main; convergence 84 off-plan not 86; no codesign/notariz refs",
+      "scratchpad": "worklog/PHASE1-RELEASE-EVIDENCE-VERIFY.md",
+      "session": "ses_f2dfeb1c1ffeFTnwzLfbXF6te5",
+      "status": "completed"
+    },
     "PROV-018": {
       "completedNote": "5/5 frozen tests green. CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-providers --test prov_018_local_credential_import: 5 passed.",
       "scratchpad": "worklog/PROV-018.md",
