@@ -223,3 +223,14 @@ No implementation was performed by this lane.
 `completed`: compiling stable RED, fail-for-cause, frozen and committed. This is
 RED readiness only, never feature or APP-012 parent acceptance. Parent APP-012
 stays open.
+
+## Landing
+
+- Commit `929acfcb7a6e5c5a0fdf4718cdaa80f41db1b44f` on
+  `red/APP012-RESTART-RESUME`.
+- Pushed to `origin/red/APP012-RESTART-RESUME`; `fetch` confirms
+  `remote == HEAD`, working tree clean, no force-push.
+- Lane files: `crates/storage/tests/app012_restart_resume_red.rs`,
+  `worklog/APP012-RESTART-RESUME-RED.md`, `tasks/completion/claims.json`.
+- Memory during run: `memory_pressure` reported 42% free before the focused run;
+  single jobs1/threads1 Cargo process, no parallel builds, no survivors.
