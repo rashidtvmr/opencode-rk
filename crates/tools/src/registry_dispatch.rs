@@ -276,31 +276,35 @@ impl RegistryDispatcher {
         let mut set = tokio::task::JoinSet::new();
         let mut spawned_idx: Vec<usize> = Vec::new();
         for (idx, slot) in ready.iter_mut().enumerate() {
-            if let Some(Ready::Spawn { tool, input, provenance }) = slot.take() {
-                let sem = self.semaphore.clone();
-                let max_out = self.config.max_output_bytes;
-                spawned_idx.push(idx);
-                set.spawn(async move {
-                    let _permit = sem
-                        .acquire_owned()
-                        .await
-                        .expect("dispatcher holds the semaphore open");
-                    let call = ToolCall::new(tool.id.clone(), tool.name.clone(), input);
-                    let exec = ToolExecutor::new();
-                    let result = exec.execute(call).await;
-                    let bounded = bound_output(result.output.clone(), max_out);
-                    let record = DispatchRecord {
-                        tool_id: result.tool_id.clone(),
-                        name: tool.name.clone(),
-                        success: result.success,
-                        output: bounded,
-                        error: result.error.clone(),
-                        timestamp_ms: now_millis(),
-                        provenance,
-                    };
-                    (idx, record)
-                });
+            if !matches!(slot, Some(Ready::Spawn { .. })) {
+                continue;
             }
+            let Some(Ready::Spawn { tool, input, provenance }) = slot.take() else {
+                continue;
+            };
+            let sem = self.semaphore.clone();
+            let max_out = self.config.max_output_bytes;
+            spawned_idx.push(idx);
+            set.spawn(async move {
+                let _permit = sem
+                    .acquire_owned()
+                    .await
+                    .expect("dispatcher holds the semaphore open");
+                let call = ToolCall::new(tool.id.clone(), tool.name.clone(), input);
+                let exec = ToolExecutor::new();
+                let result = exec.execute(call).await;
+                let bounded = bound_output(result.output.clone(), max_out);
+                let record = DispatchRecord {
+                    tool_id: result.tool_id.clone(),
+                    name: tool.name.clone(),
+                    success: result.success,
+                    output: bounded,
+                    error: result.error.clone(),
+                    timestamp_ms: now_millis(),
+                    provenance,
+                };
+                (idx, record)
+            });
         }
 
         let mut records: Vec<Option<(usize, DispatchRecord)>> = Vec::new();

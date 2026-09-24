@@ -1088,6 +1088,12 @@
       "session": "ses_f2dd51d07ffe8n7qJum4Kh4DPT",
       "status": "completed"
     },
+    "TOOL-SHELL-BATCH-IMMEDIATE-GREEN": {
+      "completedNote": "Frozen RED SHA aaad6ab33406a3d5cecf8ca8d5ce0ae6ca16ba7aa22ce264d1abf5240efdc0af: 0/6 failed at base. GREEN target: cargo test -p opencode-rk-tools --test registry_batch_immediate_red -> 6/6; broker -> 3/3. cargo check -p opencode-rk-tools -> OK. lib has 4 pre-existing failures; validate_repository backlog blockers recorded in worklog.",
+      "scratchpad": "worklog/TOOL-SHELL-BATCH-IMMEDIATE-GREEN.md",
+      "session": "ses_f2b85a5fcffePZZKuqaYPSdcUj",
+      "status": "completed"
+    },
     "TOOL-SHELL-BATCH-IMMEDIATE-RED": {
       "completedNote": "compiling RED fail-for-cause 6/6, SHA aaad6ab33406a3d5cecf8ca8d5ce0ae6ca16ba7aa22ce264d1abf5240efdc0af; cargo test -p opencode-rk-tools --test registry_batch_immediate_red => 0 passed/6 failed; each Immediate maps to Unknown(\"slot-i\") (unknown/disabled/oversized/shell-denied/denied/parity); no source edits; broker hash ef56f63a unchanged; diff clean",
       "scratchpad": "worklog/TOOL-SHELL-BATCH-IMMEDIATE-RED.md",
