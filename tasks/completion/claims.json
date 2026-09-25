@@ -217,9 +217,10 @@
       "status": "in-progress"
     },
     "BRIDGE-GAP-01": {
+      "completedNote": "input_events.rs CSI/kitty/SGR/utf8/paste parser +7 tests; 764/764 lib green",
       "scratchpad": "worklog/BRIDGE-GAP-01.md",
       "session": "ses_gap01",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-02": {
       "completedNote": "rustc --test native_frame.rs: 7/7 green standalone; zero test edits; lib.rs wiring left to orchestrator (out of scope)",
@@ -228,29 +229,34 @@
       "status": "completed"
     },
     "BRIDGE-GAP-03": {
+      "completedNote": "GREEN 8/8 standalone rustc; rustfmt --check clean; char_width/line_width/clip_to_width verified; zero test edits; no cargo/lib.rs",
       "scratchpad": "worklog/BRIDGE-GAP-03.md",
       "session": "ses_gap03",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-04": {
+      "completedNote": "widget_paint.rs Bar/Spark/Menu/Card -> PaintCall +5 tests; 764/764 lib green",
       "scratchpad": "worklog/BRIDGE-GAP-04.md",
       "session": "ses_gap04",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-05": {
+      "completedNote": "GREEN 11/11 standalone rustc; rustfmt --check clean; error_format/error_message/error_data verified; zero test edits; no cargo/lib.rs",
       "scratchpad": "worklog/BRIDGE-GAP-05.md",
       "session": "ses_f28c0df33ffd42j4xvSA23Rjr6",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-06": {
+      "completedNote": "GREEN 5/5 JSON tests via rustc wrapper (13 total with persistence); rustfmt --check clean; write/read_json_atomic verified; stale comment fixed; no cargo/lib.rs",
       "scratchpad": "worklog/BRIDGE-GAP-06.md",
       "session": "ses_gap06",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-07": {
+      "completedNote": "tool_meta.rs 125L; rustc --test 6/6 green; rustfmt clean; no lib.rs touch",
       "scratchpad": "worklog/BRIDGE-GAP-07.md",
       "session": "ses_gap07",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-08": {
       "completedNote": "GREEN 5/5 rustc --test debounce_signal (no_fire_early,fires_at_deadline,supersede_rearms,flush_now_and_empty,clone_only_type); lib build OK; zero test edits; no lib.rs touch",
@@ -259,9 +265,10 @@
       "status": "completed"
     },
     "BRIDGE-GAP-09": {
+      "completedNote": "keymap_resolve.rs impl+5 in-file tests present; rustfmt --edition 2021 --check clean; no cargo per lane role; scratchpad worklog/BRIDGE-GAP-09.md",
       "scratchpad": "worklog/BRIDGE-GAP-09.md",
       "session": "ses_f28c0df1dffe5aMOPDeP9aDPJg",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-10": {
       "completedNote": "GREEN 8/8 standalone rustc --test (4 toast.rs existing + 4 toast_single new: replace/clear/expiry/default5000); zero test edits; cargo check -p opencode-rk-opentui-bridge 0 errors; lib.rs unwired, integrator prewires pub mod toast_single",
@@ -276,9 +283,10 @@
       "status": "completed"
     },
     "BRIDGE-GAP-12": {
+      "completedNote": "render_focus.rs impl+4 in-file tests present; rustfmt --edition 2021 --check clean; no cargo per lane role; scratchpad worklog/BRIDGE-GAP-12.md",
       "scratchpad": "worklog/BRIDGE-GAP-12.md",
       "session": "ses_gap12",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-13": {
       "completedNote": "Standalone rustc tests: 6 passed, 0 failed; rustfmt and diff checks passed; no cargo per lane restriction",
@@ -287,9 +295,10 @@
       "status": "completed"
     },
     "BRIDGE-GAP-14": {
+      "completedNote": "theme_layers.rs defaults<plugin<custom<system +listeners +5 tests; 764/764 lib green",
       "scratchpad": "worklog/BRIDGE-GAP-14.md",
       "session": "ses_gap14",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-15": {
       "completedNote": "GREEN standalone rustc --test 6/6, rustfmt check pass, zero test edits; implementation SHA256 3255ae7488c7cd6e27d4885efc3ac4cea998af976b57c73d7879ab6f3d3d7a40; lib.rs wiring intentionally out of scope",
