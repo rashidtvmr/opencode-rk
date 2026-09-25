@@ -1,5 +1,12 @@
 # Branch `prod/native-tui-parity` - Bridge Migration Detail
 
+> CORRECTION (2026-09-25): an earlier revision of this doc claimed "missing
+> nothing" / full completion. That is wrong. The bridge is 95 state-model
+> modules (675 tests green) with only a thin native caller. It is NOT a full
+> TUI. See sections 3.5 (wiring gap), 6 (missing), 9 (verification limits).
+> The question "do we have all the rust based tui bridge to create all the ui
+> in tui using opentui?" answers: No. Partial bridge only.
+
 Date (UTC): 2026-09-23. Reference checkout `/home/rashid/projects/opencode` @
 `a0d9b6c` (local). Plan pins `95daf90` (see Divergence 0). Crate:
 `crates/opentui-bridge` (package `opencode-rk-opentui-bridge`). Status:
@@ -11,7 +18,8 @@ before this write-up: modified `lib.rs`, `tasks/completion/claims.json`
 ## 1. Objective and scope boundary
 
 Port every TS bridge in opentui used by the opencode TUI to Rust, optimized
-where needed, missing nothing. `packages/tui/src` has 185 files in 18 dirs
+where needed. Target full parity; current state is partial (see correction
+header + sections 3.5, 6, 9). `packages/tui/src` has 185 files in 18 dirs
 (top-level 13, component 33, component/prompt 9, config 2, context 22,
 feature-plugins 1+3+6+7, plugin 5, prompt 6, routes 1+1+10, theme 1 + 33 JSON
 assets, ui 11, util 21). Related but distinct: `packages/opencode/src/cli/cmd/run`
@@ -94,6 +102,23 @@ substring test; `spinner_colors` LCG seed0 `Rgba::new(20,5,123,255)`;
 `keymap_format` `get("nope")` type; `syntax_rules` `italic(bool)`;
 `prompt_composer` E0753 inner-doc; `renderables` duplicate `Rgba` import +
 `Hash` removal.
+
+### 3.5 Native wiring gap (verified 2026-09-25, answers the full-TUI question)
+
+- `crates/opentui-bridge/native/lib/`: only `x86_64-unknown-linux-gnu/
+  libopentui.so`. No macOS `.dylib`/`.a`, no aarch64, no Windows.
+  `build.rs:50-64` panics fail-closed when `native` on without artifact.
+- Sole native caller `crates/cli/src/tui_entry.rs:546-562` `paint_native`
+  (fill + draw_text + frame), 4 pages (chat/palette/context/help),
+  `print_native_or_legacy:943` for `--once`. Interactive loop
+  `native_interactive_loop:565` reads raw `stdin.read` bytes, not native
+  input events; char-count clip, no unicode-width.
+- Zero callers in `crates/cli/src` for `split_row/split_col`, `paint_calls`,
+  `EventBus`, `FocusRing`, `Bar/Sparkline/Menu/Card`,
+  `theme_slot/pack_options/border_chars/wrap_text`. Pure state exists, unwired.
+- Full transcript/theme renderer paint still open (RAW_FEATURE.md:46).
+- To claim full TUI: vendor `aarch64-apple-darwin` artifact (or drop
+  `--native-on-mac`), wire layout/world/events into the interactive loop.
 
 ### SolidJS research (5 subagents, read-only)
 
