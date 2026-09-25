@@ -1,62 +1,88 @@
-// Native artifact naming for OpenTUI bridge
-// Based on build.rs:50-64 fail-closed gate logic
-// Artifact lookup in native/lib/<triple>/
+#![forbid(unsafe_code)]
+//! Native triple matrix for the OpenTUI bridge.
+//! Fail-closed link gate lives in build.rs:50-64; this module mirrors its
+//! expected artifact names per Rust target triple under native/lib/<triple>.
 
-//! Native artifact naming for OpenTUI bridge.
-//! Provides artifact names and missing message helpers per Rust target triple.
-//! Based on build.rs:50-64 fail-closed gate logic.
-
-/// Status of native artifact presence.
+/// Presence of a vendored native artifact.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ArtifactStatus {
     Present,
     Missing,
 }
 
-/// Map a Rust target triple to its OpenTUI artifact name.
-/// Returns the expected artifact filename (without extension prefix for static libs).
-pub fn artifact_name(triple: &str) -> &'static str {
-    match triple {
-        "x86_64-unknown-linux-gnu" => "libopentui.so",
-        "aarch64-unknown-linux-gnu" => "libopentui.so",
-        "x86_64-apple-darwin" => "libopentui.dylib",
-        "aarch64-apple-darwin" => "libopentui.dylib",
-        "x86_64-pc-windows-msvc" => "opentui.lib",
-        "i686-pc-windows-msvc" => "opentui.lib",
-        _ => "unknown",
-    }
+/// One supported target triple and its vendored artifact filenames.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NativeTriple {
+    pub triple: &'static str,
+    pub static_artifact: &'static str,
+    pub shared_artifact: &'static str,
 }
 
-/// Generate a user-friendly missing message for a target triple.
-/// Matches the panic message format from build.rs:50-64.
+/// Supported triples. Unix prefers the static artifact; Windows needs the
+/// import library plus the runtime DLL beside the executable.
+pub const MATRIX: &[NativeTriple] = &[
+    NativeTriple {
+        triple: "x86_64-unknown-linux-gnu",
+        static_artifact: "libopentui.a",
+        shared_artifact: "libopentui.so",
+    },
+    NativeTriple {
+        triple: "aarch64-unknown-linux-gnu",
+        static_artifact: "libopentui.a",
+        shared_artifact: "libopentui.so",
+    },
+    NativeTriple {
+        triple: "x86_64-apple-darwin",
+        static_artifact: "libopentui.a",
+        shared_artifact: "libopentui.dylib",
+    },
+    NativeTriple {
+        triple: "aarch64-apple-darwin",
+        static_artifact: "libopentui.a",
+        shared_artifact: "libopentui.dylib",
+    },
+    NativeTriple {
+        triple: "x86_64-pc-windows-msvc",
+        static_artifact: "opentui.lib",
+        shared_artifact: "opentui.dll",
+    },
+    NativeTriple {
+        triple: "x86_64-pc-windows-gnu",
+        static_artifact: "libopentui.dll.a",
+        shared_artifact: "opentui.dll",
+    },
+];
+
+/// Primary link artifact for a triple (shared name; import lib on Windows).
+pub fn artifact_name(triple: &str) -> &'static str {
+    MATRIX
+        .iter()
+        .find(|t| t.triple == triple)
+        .map_or("unknown", |t| {
+            if t.triple.contains("-pc-windows-") {
+                t.static_artifact
+            } else {
+                t.shared_artifact
+            }
+        })
+}
+
+/// Fail-closed hint mirroring the build.rs:50-64 panic text.
 pub fn missing_message(triple: &str) -> String {
-    let expected = match triple {
-        "x86_64-apple-darwin" | "aarch64-apple-darwin" => "libopentui.a or libopentui.dylib",
-        "x86_64-unknown-linux-gnu" | "aarch64-unknown-linux-gnu" => "libopentui.a or libopentui.so",
-        "x86_64-pc-windows-msvc" | "i686-pc-windows-msvc" => "opentui.lib and opentui.dll",
-        "i586-unknown-linux-gnu" => "libopentui.a or libopentui.so",
-        _ => "a supported libopentui static/shared artifact",
+    let expected = if triple.ends_with("-apple-darwin") {
+        "libopentui.a or libopentui.dylib"
+    } else if triple.contains("unknown-linux-gnu") {
+        "libopentui.a or libopentui.so"
+    } else if triple.ends_with("-pc-windows-msvc") {
+        "opentui.lib and opentui.dll"
+    } else if triple.contains("-pc-windows-") {
+        "libopentui.dll.a and opentui.dll"
+    } else {
+        "a supported libopentui static/shared artifact"
     };
     format!(
-        "native libopentui artifact missing for target '{}'.\nexpected {}.",
-        triple, expected
+        "native libopentui artifact missing for target '{triple}'.\nexpected {expected} in native/lib/{triple}.\nBuild the pinned OpenTUI native library for this target and vendor it under native/lib/{triple}."
     )
-}
-
-/// Parse a triple string and return its normalized form.
-pub fn parse_triple(triple: &str) -> Option<&'static str> {
-    const TRIPLES: &[&str] = &[
-        "x86_64-unknown-linux-gnu",
-        "aarch64-unknown-linux-gnu",
-        "x86_64-apple-darwin",
-        "aarch64-apple-darwin",
-        "x86_64-pc-windows-msvc",
-        "i686-pc-windows-msvc",
-    ];
-    TRIPLES
-        .iter()
-        .copied()
-        .find(|&t| triple == t || triple.starts_with(t))
 }
 
 #[cfg(test)]
@@ -64,64 +90,54 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_artifact_name_linux_x86_64() {
+    fn linux_shared_names() {
         assert_eq!(artifact_name("x86_64-unknown-linux-gnu"), "libopentui.so");
-    }
-
-    #[test]
-    fn test_artifact_name_linux_aarch64() {
         assert_eq!(artifact_name("aarch64-unknown-linux-gnu"), "libopentui.so");
     }
 
     #[test]
-    fn test_artifact_name_macos_x86_64() {
+    fn macos_shared_names() {
         assert_eq!(artifact_name("x86_64-apple-darwin"), "libopentui.dylib");
-    }
-
-    #[test]
-    fn test_artifact_name_macos_aarch64() {
         assert_eq!(artifact_name("aarch64-apple-darwin"), "libopentui.dylib");
     }
 
     #[test]
-    fn test_artifact_name_windows_msvc() {
+    fn windows_import_names() {
         assert_eq!(artifact_name("x86_64-pc-windows-msvc"), "opentui.lib");
+        assert_eq!(artifact_name("x86_64-pc-windows-gnu"), "libopentui.dll.a");
     }
 
     #[test]
-    fn test_missing_message_linux() {
-        let msg = missing_message("x86_64-unknown-linux-gnu");
-        assert!(msg.contains("libopentui.so"));
-        assert!(msg.contains("x86_64-unknown-linux-gnu"));
+    fn unknown_triple() {
+        assert_eq!(artifact_name("riscv64-unknown-linux-gnu"), "unknown");
     }
 
     #[test]
-    fn test_missing_message_macos() {
-        let msg = missing_message("x86_64-apple-darwin");
-        assert!(msg.contains("libopentui.dylib"));
-        assert!(msg.contains("x86_64-apple-darwin"));
+    fn missing_linux_text() {
+        let m = missing_message("x86_64-unknown-linux-gnu");
+        assert!(m.contains("libopentui.a or libopentui.so"));
+        assert!(m.contains("native/lib/x86_64-unknown-linux-gnu"));
     }
 
     #[test]
-    fn test_missing_message_windows() {
-        let msg = missing_message("x86_64-pc-windows-msvc");
-        assert!(msg.contains("opentui.lib"));
-        assert!(msg.contains("opentui.dll"));
+    fn missing_macos_text() {
+        let m = missing_message("aarch64-apple-darwin");
+        assert!(m.contains("libopentui.a or libopentui.dylib"));
     }
 
     #[test]
-    fn test_parse_triple_valid() {
-        assert!(parse_triple("x86_64-unknown-linux-gnu").is_some());
-        assert!(parse_triple("aarch64-apple-darwin").is_some());
+    fn missing_windows_text() {
+        let msvc = missing_message("x86_64-pc-windows-msvc");
+        assert!(msvc.contains("opentui.lib and opentui.dll"));
+        let gnu = missing_message("x86_64-pc-windows-gnu");
+        assert!(gnu.contains("libopentui.dll.a and opentui.dll"));
     }
 
     #[test]
-    fn test_parse_triple_invalid() {
-        assert!(parse_triple("invalid-triple").is_none());
-    }
-
-    #[test]
-    fn test_unknown_triple_artifact() {
-        assert_eq!(artifact_name("abcdef"), "unknown");
+    fn matrix_covers_five_targets() {
+        assert!(MATRIX.len() >= 5);
+        assert!(MATRIX.iter().any(|t| t.triple == "aarch64-apple-darwin"));
+        assert_eq!(ArtifactStatus::Present, ArtifactStatus::Present);
+        assert_ne!(ArtifactStatus::Present, ArtifactStatus::Missing);
     }
 }
