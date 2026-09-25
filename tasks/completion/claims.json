@@ -66,6 +66,12 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP012-APPROVAL-EXPIRY-GREEN": {
+      "completedNote": "Frozen hash restored a7f844388a6f0c5f2774f51c5989b9dfd70ed3a569d22e8d765ea5862b1542ea; focused GREEN 1/1 and security lib 148/148; cargo check passes. Full integration suite has one baseline-only macOS /var canonicalization failure reproduced unchanged at RED base 7d90cdd.",
+      "scratchpad": "worklog/APP012-APPROVAL-EXPIRY-GREEN.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "APP012-APPROVAL-EXPIRY-RED": {
       "completedNote": "RED compiled and behaviorally failed twice at equality boundary; frozen test sha256 a7f844388a6f0c5f2774f51c5989b9dfd70ed3a569d22e8d765ea5862b1542ea; cmd env CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-security --test app012_approval_expiry_red -- --nocapture; exit 101, 0 passed, 1 failed; no implementation or acceptance claim",
       "scratchpad": "worklog/APP012-APPROVAL-EXPIRY-RED.md",
