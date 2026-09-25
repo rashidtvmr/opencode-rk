@@ -873,6 +873,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "completed"
     },
+    "PACKAGE-POSIX-INSTALLER-VERIFY": {
+      "completedNote": "ACCEPT-SCOPED POSIX consumer: packaged_revision_binding 5/5; frozen SHA-256 d0a800ed7bda8b623aa427604c6ad2c28acdd37633d391079d651246ad0a8858 unchanged; sh -n, dash -n, git diff --check PASS; disposable positive/env-scrub, closed-manifest, USTAR checksum/member-bound, legacy pre-mutation, rollback, timeout/process-cleanup probes PASS; no survivors. Not producer/release/authenticity acceptance.",
+      "scratchpad": "worklog/PACKAGE-POSIX-INSTALLER-VERIFY.md",
+      "session": "ses_f28b9b773ffemP4Lj33uX0c1Ga",
+      "status": "completed"
+    },
     "PACKAGE-RECEIPT-BINDING-CONTRACT": {
       "completedNote": "research artifact landed: producer-absence proof + receipt/manifest/runtime contract in worklog; frozen fec2fdb9 unchanged; no product edits",
       "scratchpad": "worklog/PACKAGE-RECEIPT-BINDING-CONTRACT.md",
