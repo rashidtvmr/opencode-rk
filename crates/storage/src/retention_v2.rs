@@ -94,7 +94,7 @@ impl RetentionV2 {
             "DELETE FROM approvals
              WHERE pk IN (
                  SELECT pk FROM approvals
-                 WHERE state IN (1, 2, 4)
+                  WHERE state IN (1, 2, 3, 4)
                    AND resolved_at_us IS NOT NULL
                    AND resolved_at_us <= ?1
                  ORDER BY resolved_at_us ASC, pk ASC
@@ -139,7 +139,7 @@ impl RetentionV2 {
         )?;
         let resolved_approvals: i64 = connection.query_row(
             "SELECT COUNT(*) FROM approvals
-             WHERE state IN (1, 2, 4)
+             WHERE state IN (1, 2, 3, 4)
                AND resolved_at_us IS NOT NULL
                AND resolved_at_us <= ?1",
             params![now_us],

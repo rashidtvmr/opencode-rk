@@ -66,6 +66,12 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP012-APPROVAL-RETENTION-GREEN": {
+      "completedNote": "Scoped terminal-state predicate GREEN: frozen hash e2f3ecd211ddd27dd7aad803bd95d9a9263873c8d61008d14367d9520f7111cc; focused 3/3, storage lib 122/122, storage tests 190/190, cargo check and rustfmt check pass. Adjacent expire_sweep resolved_at_us=NULL gap remains open for independent RED; no parent acceptance claim.",
+      "scratchpad": "worklog/APP012-APPROVAL-RETENTION-GREEN.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "APP012-APPROVAL-RETENTION-RED": {
       "completedNote": "Compiling deterministic RED twice: 1 pass, 2 fail; state-3 backlog left (0,0,0) vs expected (0,1,0), sweep 0 vs 1; pending/too-new guard passes. Frozen sha256 e2f3ecd211ddd27dd7aad803bd95d9a9263873c8d61008d14367d9520f7111cc; unauthorized formatting reversed; diff clean; no survivors.",
       "scratchpad": "worklog/APP012-APPROVAL-RETENTION-RED.md",
