@@ -827,6 +827,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "SETUP-RED": {
+      "blockedNote": "Existing account_setup is pure state and already unit-tested; complete trusts caller booleans and zero-sized secure marker. No compiling brokered credential input/secret lifetime/validation/save seam or production caller exists. Requires authority prewire; durable keyring remains behind G-KEYRING-SEAM with exact future pin.",
+      "scratchpad": "worklog/SETUP-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "TUI-001": {
       "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
       "scratchpad": "worklog/TUI-001.md",
