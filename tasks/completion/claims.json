@@ -1068,6 +1068,12 @@
       "session": "ses_f32bf295effe9f16wtSPaJNIxT",
       "status": "blocked"
     },
+    "SHIP-004": {
+      "completedNote": "RED frozen; py_compile exit 0; unittest twice exit 1 with 5 deterministic failures; SHA-256 647ca2a2b9deb361be4a14d7ca56b9509ce6f4190085b97323139c257aa7f3f9; no Cargo; release acceptance external",
+      "scratchpad": "worklog/SHIP-004.md",
+      "session": "ses_f27cc582effeFCqhzJJpml0RBy",
+      "status": "completed"
+    },
     "SYNC-001": {
       "completedNote": "GREEN 5/5 sync_log (T01-T05) zero test edits; cmd: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 rtk cargo test -p opencode-rk-server --test sync_log; impl+wire pre-existing, no code change",
       "scratchpad": "worklog/SYNC-001.md",
