@@ -149,6 +149,11 @@
       "session": "ses_f2ccb8a9fffeioF1m83OP7KByU",
       "status": "completed"
     },
+    "APP012-APPROVAL-RESUME-CORRECTION": {
+      "scratchpad": "worklog/APP012-APPROVAL-RESUME-CORRECTION.md",
+      "session": "ses_CORRECTION",
+      "status": "in-progress"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
@@ -944,6 +949,17 @@
       "scratchpad": "worklog/PAR-010.md",
       "session": "ses_take_par010",
       "status": "completed"
+    },
+    "PHASE1-VERTICAL-PRODUCT-MACOS-MAP": {
+      "completedNote": "Artifact complete; JSON parse 4/4 blocks, git diff --check clean; convergence_gate blocked by 93 pre-existing ledger findings; no product acceptance claimed.",
+      "scratchpad": "worklog/PHASE1-VERTICAL-PRODUCT-MACOS-MAP.md",
+      "session": "ses_f296a2e0affeZvQx7kghXrLhRI",
+      "status": "completed"
+    },
+    "PHASE1-VERTICAL-WINDOWS-GNU-MAP": {
+      "scratchpad": "worklog/PHASE1-VERTICAL-WINDOWS-GNU-MAP.md",
+      "session": "ses_f296f6e4cffeL060G0arddh1hz",
+      "status": "in-progress"
     },
     "PROV-018": {
       "completedNote": "5/5 frozen tests green. CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 rtk cargo test -p opencode-rk-providers --test prov_018_local_credential_import: 5 passed.",
