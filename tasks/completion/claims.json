@@ -2076,6 +2076,26 @@
       "session": "ses_par312",
       "status": "completed"
     },
+    "BRIDGE-PAR-316": {
+      "scratchpad": "worklog/BRIDGE-PAR-316.md",
+      "session": "ses_par316",
+      "status": "in-progress"
+    },
+    "BRIDGE-PAR-319": {
+      "scratchpad": "worklog/BRIDGE-PAR-319.md",
+      "session": "ses_par319",
+      "status": "in-progress"
+    },
+    "BRIDGE-PAR-324": {
+      "scratchpad": "worklog/BRIDGE-PAR-324.md",
+      "session": "ses_par324",
+      "status": "in-progress"
+    },
+    "BRIDGE-PAR-331": {
+      "scratchpad": "worklog/BRIDGE-PAR-331.md",
+      "session": "ses_par331",
+      "status": "in-progress"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
