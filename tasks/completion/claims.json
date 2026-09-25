@@ -270,9 +270,10 @@
       "status": "completed"
     },
     "BRIDGE-GAP-11": {
+      "completedNote": "GREEN 5/5 standalone rustc tests; RED 2/5 then 5/5; format and lib compile clean; no cargo; owned solid_boundary.rs",
       "scratchpad": "worklog/BRIDGE-GAP-11.md",
       "session": "ses_gap11",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-12": {
       "scratchpad": "worklog/BRIDGE-GAP-12.md",
