@@ -66,6 +66,12 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP012-APPROVAL-RETENTION-RED": {
+      "completedNote": "Compiling deterministic RED twice: 1 pass, 2 fail; state-3 backlog left (0,0,0) vs expected (0,1,0), sweep 0 vs 1; pending/too-new guard passes. Frozen sha256 e2f3ecd211ddd27dd7aad803bd95d9a9263873c8d61008d14367d9520f7111cc; unauthorized formatting reversed; diff clean; no survivors.",
+      "scratchpad": "worklog/APP012-APPROVAL-RETENTION-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
