@@ -1,19 +1,20 @@
 # TUI-011 GNU objdump architecture RED lane
 
-Status: RED frozen; ledger status `blocked` (implementation absent by design; a
-RED-only lane is never `completed` and the parent TUI-011 stays open).
+Status: RED frozen; ledger status `in-progress` during transfer verification
+(implementation absent by design; a RED-only lane is never `completed` and the
+parent TUI-011 stays open). Final ledger update remains `blocked`.
 
 Frozen test hash (SHA-256):
 `0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`
 `crates/opentui-bridge/tests/gnu_objdump_wrapper.sh`.
 
-Frozen scratchpad hash (SHA-256, pre-final-edit, informational):
-`462205d6f796fcbed0bae5f09e6475cab3d76124f51b3678fbccc0fcf091c686`
+Test hash rechecked on transfer:
+`0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`
 
 ## Claim
 
 - Task: `TUI-011` (RED-only child lane `TUI-011-GNU-OBJDUMP`).
-- Session: `ses_f27295547ffedwPMO18IQD5PBo`.
+- Session: `ses_f271bee8effeOmOikwgBrH5glW`.
 - Base commit: `2d04c1c925595b566f617b073129ecee24593eb9`
   (`origin/lane/CROSS-PLATFORM-RUNNER-CLOSURE-VERIFY`).
 - Worktree: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/lane-tui011-gnu-objdump-red`,
@@ -21,9 +22,12 @@ Frozen scratchpad hash (SHA-256, pre-final-edit, informational):
 - Owned product file: `crates/opentui-bridge/tests/gnu_objdump_wrapper.sh` (new).
 - Owned scratchpad: this file. Own claim row: `tasks/completion/claims.json` TUI-011.
 - Transfer evidence: prior claim `ses_f3c4de578ffelQv59xDXmOs03B` was `blocked`;
-  user explicitly authorized transfer; orchestrator delegated a RED-only lane.
-  Two prior delegated agents failed before startup from provider errors and
-  changed nothing. `cc.reclaim` + `cc.claim` executed with that evidence.
+  user explicitly authorized transfer. Existing branch commits and worktree
+  contents were inspected before edits: `1c4418c` authored the test and
+  `4929322` recorded prior native evidence. Three earlier delegated attempts
+  failed at provider startup per the task handoff. `cc.reclaim` + `cc.claim`
+  executed with recorded transfer evidence. No prior test or product change was
+  overwritten.
 
 ## Source evidence (exact)
 
@@ -89,6 +93,8 @@ FAIL: RED: builder rejects the GNU objdump architecture line (current parser bug
 TEST_EXIT=1
 ```
 
+Transfer re-run on the same host produced the same exact failure and exit 1.
+
 ### Independent native Ubuntu x86_64 RED (nomad node `rashid-lenovo`)
 
 Host: `Linux rashid-lenovo 7.0.0-31-generic #31-Ubuntu SMP ... x86_64 GNU/Linux`,
@@ -113,9 +119,9 @@ TEST_EXIT=1
 DONE
 ```
 
-Log SHA-256 `d7c061432476a17d74ab04a4fa96823ae68902979b4f978ea2c546f533cc2929`
-(kept outside the repo at
-`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui011-nomad/RED-native-ubuntu-x86_64.log`).
+Current bounded allocation `1b487619` captured this output before allocation
+purge. Log SHA-256
+`d7c061432476a17d74ab04a4fa96823ae68902979b4f978ea2c546f533cc2929`.
 
 Natural failure with the real GNU objdump and no wrapper (job
 `tui011-gnu-objdump-natural`), proving the bug is not wrapper-induced:
@@ -147,3 +153,6 @@ preserved before purge. Only the pre-existing `cross-os-smoke` job remains.
   the comma / accept both `x86_64` and `i386:x86-64`) at `build_opentui.sh:404-408`.
 - Parent TUI-011 still blocked on MSVC/signing/frozen manifest review.
 - This lane does not mark `completed`; implementation is absent by contract.
+- No Cargo command run. No product, builder, manifest, policy, or frozen-test
+  edits made. `python3 tools/convergence_gate.py` remains blocked by pre-existing
+  ledger findings, outside this RED lane.
