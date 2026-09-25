@@ -803,6 +803,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-LINUX-RUNNER-CLOSURE": {
+      "completedNote": "Text/static Linux external-runner closure (worklog/PHASE1-LINUX-RUNNER-CLOSURE.md, 10 sections): Landlock attach + inherited FD/env denial, x64/arm64 hashes, bounded POSIX installed APP012, resource bounds, bounded commands, receipt phase1.linux-runner.receipt.v1 status=unrun, failure table, Darwin non-proof. Receipt parses; git diff --check PASS. No runner evidence claimed.",
+      "scratchpad": "worklog/PHASE1-LINUX-RUNNER-CLOSURE.md",
+      "session": "ses_f28972554ffe2Af4z7y1ZT4aFO",
+      "status": "completed"
+    },
     "PHASE1-VERTICAL-SYNTHESIS": {
       "completedNote": "Proposal-only synthesis: 20 lanes (14 breadth/4 integration/2 verifier), 83 stages, 3 waves, 162 closed acyclic dependencies, one Cargo semaphore, no unordered path collisions; approval API RED blocked behind 61b0959 authority gate; Linux/Windows runners and keyring explicit; repository 51 and convergence 58 inherited blockers preserved; no authority/product/test edits.",
       "scratchpad": "worklog/PHASE1-VERTICAL-SYNTHESIS.md",
