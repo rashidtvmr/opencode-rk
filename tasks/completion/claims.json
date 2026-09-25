@@ -803,6 +803,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-VERTICAL-LINUX-MAP": {
+      "completedNote": "Proposal audited: 3 JSON blocks, 10 unique entries, closed dependencies; Linux runner and Landlock proof explicitly blocked; APP-012 open; repository guard 51 and convergence 58 inherited blockers recorded; no product/test/controller edits.",
+      "scratchpad": "worklog/PHASE1-VERTICAL-LINUX-MAP.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",
