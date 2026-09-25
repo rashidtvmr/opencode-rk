@@ -803,6 +803,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-GUARD-RECONCILE": {
+      "completedNote": "Read-only authority manifest: guard reproduces 51 errors (3 ledger, 48 gap); 1128738 flipped 82 Ralph statuses; legacy accepted is not release evidence; simulated --write empties ledger and worsens to 108, so prohibited. Exact 98 categories, rollback/order/owners recorded; no protected edits.",
+      "scratchpad": "worklog/PHASE1-GUARD-RECONCILE.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "PHASE1-VERTICAL-SYNTHESIS": {
       "completedNote": "Proposal-only synthesis: 20 lanes (14 breadth/4 integration/2 verifier), 83 stages, 3 waves, 162 closed acyclic dependencies, one Cargo semaphore, no unordered path collisions; approval API RED blocked behind 61b0959 authority gate; Linux/Windows runners and keyring explicit; repository 51 and convergence 58 inherited blockers preserved; no authority/product/test edits.",
       "scratchpad": "worklog/PHASE1-VERTICAL-SYNTHESIS.md",
