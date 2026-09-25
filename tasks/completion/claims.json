@@ -306,6 +306,90 @@
       "session": "ses_f28c0def2ffeSBWRgUUiwsnX90",
       "status": "completed"
     },
+    "BRIDGE-GAP-16": {
+      "completedNote": "loop_events.rs written 176 lines, 6 in-file tests; rustfmt --check clean",
+      "scratchpad": "worklog/BRIDGE-GAP-16.md",
+      "session": "ses_gap16",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-17": {
+      "completedNote": "frame_layout.rs written; six tests present; rustfmt --check passed; cargo/lib.rs wiring intentionally out of scope",
+      "scratchpad": "worklog/BRIDGE-GAP-17.md",
+      "session": "ses_gap17",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-18": {
+      "completedNote": "transcript_paint.rs + 7 tests, rustfmt clean",
+      "scratchpad": "worklog/BRIDGE-GAP-18.md",
+      "session": "ses_gap18",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-19": {
+      "completedNote": "theme_paint.rs paint_for+RegionColors+4 tests; 852/852 lib green",
+      "scratchpad": "worklog/BRIDGE-GAP-19.md",
+      "session": "ses_gap19",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-20": {
+      "completedNote": "menu_nav.rs 114 lines, rustfmt FMT_OK, 6 unit tests in-file; lib.rs wiring pending orchestrator",
+      "scratchpad": "worklog/BRIDGE-GAP-20.md",
+      "session": "ses_gap20",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-21": {
+      "completedNote": "GREEN 10/10 standalone run_types tests; rustfmt --check passed; zero test edits.",
+      "scratchpad": "worklog/BRIDGE-GAP-21.md",
+      "session": "ses_gap21",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-22": {
+      "completedNote": "run_footer.rs 6 tests; rustfmt --check clean",
+      "scratchpad": "worklog/BRIDGE-GAP-22.md",
+      "session": "ses_gap22",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-23": {
+      "completedNote": "GREEN 5/5 standalone rustc tests; rustfmt --edition 2021 --check clean; owned run_scrollback.rs; no cargo/lib.rs",
+      "scratchpad": "worklog/BRIDGE-GAP-23.md",
+      "session": "ses_gap23",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-24": {
+      "completedNote": "run_replay.rs rustfmt clean, 7/7 unit tests green via rustc --test",
+      "scratchpad": "worklog/BRIDGE-GAP-24.md",
+      "session": "ses_gap24",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-25": {
+      "completedNote": "run_permission.rs: rustfmt --check clean; 6 standalone rustc tests pass. No lib.rs/cargo changes.",
+      "scratchpad": "worklog/BRIDGE-GAP-25.md",
+      "session": "ses_gap25",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-26": {
+      "completedNote": "rustfmt --check clean; 146 lines; 6 unit tests in-file (cap/OOB/answer/confirm/submit/clear); no cargo run per lane orders",
+      "scratchpad": "worklog/BRIDGE-GAP-26.md",
+      "session": "ses_gap26",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-27": {
+      "completedNote": "run_width.rs WidthPolicy policy()+6 tests; 852/852 lib green",
+      "scratchpad": "worklog/BRIDGE-GAP-27.md",
+      "session": "ses_gap27",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-28": {
+      "completedNote": "run_stream.rs rustfmt clean, 6 tests in-file, no cargo per lane rules",
+      "scratchpad": "worklog/BRIDGE-GAP-28.md",
+      "session": "ses_gap28",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-29": {
+      "completedNote": "rustfmt --check PASS; standalone rustc --test 7/7 PASS; std-only; no lib.rs/Cargo/commit.",
+      "scratchpad": "worklog/BRIDGE-GAP-29.md",
+      "session": "ses_gap29",
+      "status": "completed"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
