@@ -137,6 +137,12 @@
       "session": "ses_f2ead14d9ffeii28wFZ6HGVyWf",
       "status": "blocked"
     },
+    "APP012-RECOVERY-CHILD-BOUND-RED": {
+      "completedNote": "Compiling RED: focused storage target 1 pass, 1 fail, 0 ignored; only residual failure leaves one child open after second open (left (1,500,502), right (0,501,502)); SHA256 fe78660842335e79e33787cb95bb675a80c65e541b3bd52fa9e92d1efc9138b0; rustfmt/diff clean; prior RED hashes preserved; no survivors",
+      "scratchpad": "worklog/APP012-RECOVERY-CHILD-BOUND-RED.md",
+      "session": "ses_f2979f4fdffe6mFaOAzpCO77L2",
+      "status": "completed"
+    },
     "APP012-RESTART-RECOVERY-GREEN": {
       "completedNote": "GREEN: app012_restart_resume_red 18/18; storage lib 122; storage integration tests 205; cargo check storage clean except existing duplicate CLI target warning; frozen hashes unchanged; diff check clean; convergence gate pre-existing blocked findings",
       "scratchpad": "worklog/APP012-RESTART-RECOVERY-GREEN.md",
