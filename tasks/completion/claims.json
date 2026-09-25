@@ -1836,6 +1836,126 @@
       "session": "ses_par272",
       "status": "completed"
     },
+    "BRIDGE-PAR-273": {
+      "completedNote": "dialog_agent_full.rs 113 lines, 6 tests, rustfmt PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-273.md",
+      "session": "ses_par273",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-274": {
+      "completedNote": "file+6 tests exist; rustfmt --check FMT_OK 98L",
+      "scratchpad": "worklog/BRIDGE-PAR-274.md",
+      "session": "ses_par274",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-275": {
+      "completedNote": "file+5 tests exist; rustfmt --check FMT_OK 109L",
+      "scratchpad": "worklog/BRIDGE-PAR-275.md",
+      "session": "ses_par275",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-276": {
+      "completedNote": "rustfmt --check FMT-OK, 5 tests in file, 117 lines",
+      "scratchpad": "worklog/BRIDGE-PAR-276.md",
+      "session": "ses_par276",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-277": {
+      "completedNote": "rustfmt --check PASS 129 lines 6 tests dialog_mcp_full.rs",
+      "scratchpad": "worklog/BRIDGE-PAR-277.md",
+      "session": "ses_par277",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-278": {
+      "completedNote": "dialog_confirm_full.rs 80L rustfmt --check PASS 5 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-278.md",
+      "session": "ses_par278",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-279": {
+      "completedNote": "file+6 tests exist; rustfmt --check PASS 101 lines",
+      "scratchpad": "worklog/BRIDGE-PAR-279.md",
+      "session": "ses_par279",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-280": {
+      "completedNote": "file dialog_prompt_full.rs exists, 6 tests, rustfmt --check FMT_OK, 120 lines",
+      "scratchpad": "worklog/BRIDGE-PAR-280.md",
+      "session": "ses_par280",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-281": {
+      "completedNote": "spinner_full.rs written, rustfmt clean",
+      "scratchpad": "worklog/BRIDGE-PAR-281.md",
+      "session": "ses_par281",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-282": {
+      "completedNote": "file toast_ui_full.rs 101L rustfmt --check PASS 5 in-file tests",
+      "scratchpad": "worklog/BRIDGE-PAR-282.md",
+      "session": "ses_par282",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-283": {
+      "completedNote": "border_ui_full.rs written 87 lines 5 tests rustfmt PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-283.md",
+      "session": "ses_par283",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-284": {
+      "completedNote": "file crates/opentui-bridge/src/link_ui_full.rs 66L rustfmt --check PASS 5 tests in-file",
+      "scratchpad": "worklog/BRIDGE-PAR-284.md",
+      "session": "ses_par284",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-285": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/collapse_util_full.rs PASS (FMT_OK); 6 tests written in-file, cargo not run per task (no cargo allowed)",
+      "scratchpad": "worklog/BRIDGE-PAR-285.md",
+      "session": "ses_par285",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-286": {
+      "completedNote": "rustfmt --check clean, 93 lines, 5 tests in-file",
+      "scratchpad": "worklog/BRIDGE-PAR-286.md",
+      "session": "ses_par286",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-287": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/format_util_full.rs PASS; 75 lines; 4 tests inline; zero test edits",
+      "scratchpad": "worklog/BRIDGE-PAR-287.md",
+      "session": "ses_par287",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-288": {
+      "completedNote": "path_util_full.rs rustfmt clean, 4 tests",
+      "scratchpad": "worklog/BRIDGE-PAR-288.md",
+      "session": "ses_par288",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-289": {
+      "completedNote": "model_util_full.rs 75L rustfmt --check FMT_OK 5 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-289.md",
+      "session": "ses_par289",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-290": {
+      "completedNote": "rustfmt --check session_util_full.rs PASS FMT_OK; 79 lines; 5 in-file tests",
+      "scratchpad": "worklog/BRIDGE-PAR-290.md",
+      "session": "ses_par290",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-291": {
+      "completedNote": "rustfmt --check clean, 4 tests in-file",
+      "scratchpad": "worklog/BRIDGE-PAR-291.md",
+      "session": "ses_par291",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-292": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/scroll_util_full.rs PASS; 61 lines, 4 tests, zero test edits",
+      "scratchpad": "worklog/BRIDGE-PAR-292.md",
+      "session": "ses_par292",
+      "status": "completed"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",

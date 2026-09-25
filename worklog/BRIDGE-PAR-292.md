@@ -1,0 +1,2 @@
+# BRIDGE-PAR-292 scroll_util_full
+Claim: ledger ses_par292. Source: packages/tui/src/util/scroll.ts:8-26 (accel selector only, no offset concept); target boundary pure offset helpers extracted from scroll_step_full.rs:46-50 clamp. Observed: ScrollFull owns stateful offset; need stateless clamp_offset/page_step/at_bottom. Tests: clamp edges, empty/oversize, page floor, bottom detect. Decisions: clamp via isize.clamp(0,max); page via saturating_sub(1).max(1); bottom via saturating_add(view)>=total. Unknowns: none.
