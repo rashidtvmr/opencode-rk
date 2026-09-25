@@ -1165,10 +1165,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "Integrated static/package proof GREEN: installer 3/3+5/5, bridge 73/73, parity 13/13, installed PTY 1/1, shared daemon survives client exit. Parent RED: bare fresh-HOME setup/first session absent; frozen installed_default_entrypoint 1/6 due five immutable todo! tests; MSVC SDK and signing authority remain unavailable.",
-      "scratchpad": "worklog/TUI-011.md",
-      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
-      "status": "blocked"
+      "scratchpad": "worklog/TUI-011-GNU-OBJDUMP-RED.md",
+      "session": "ses_f27295547ffedwPMO18IQD5PBo",
+      "status": "in-progress"
     },
     "TUI-011-FROZEN-CONTRACT-REVIEW": {
       "blockedNote": "frozen manifest test internally incorrect: lowercase-hex predicate at line 93 rejects digits; 64 KiB metadata bound applied to 6,863,648-byte Mach-O at line 122; controller contract review required; exact repro exit 101, 1/3 passed; evidence worklog/TUI-011-FROZEN-CONTRACT-REVIEW.md",
