@@ -161,6 +161,12 @@
       "session": "ses_f296640c1ffesCceFQZuKG9ZN4",
       "status": "completed"
     },
+    "APP012-APPROVAL-RESUME-PREWIRE-CORRECTION": {
+      "completedNote": "Proposal-only R1-R6 correction recovered to correct worktree; Manifest A compiling-now checks separated from Manifest B API-dependent blockers; frozen APP012 hash 945236c4 unchanged; diff clean; repository guard 51 and branch convergence 94 inherited findings recorded; no product/schema/test/dependency edits.",
+      "scratchpad": "worklog/APP012-APPROVAL-RESUME-PREWIRE-CORRECTION.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
