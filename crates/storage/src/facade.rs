@@ -167,24 +167,44 @@ fn recover_existing(connection: &mut Connection) -> Result<(), StorageError> {
         return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
     }
 
-    // Select the same prior-generation roots for each child update before the
-    // root state changes. The partial indexes keep every recovery scan bounded.
+    // Keep the bounded eligible root set on this connection. The temp table
+    // avoids an unbounded Rust key vector and lets later opens continue
+    // bounded child recovery after a selected root becomes uncertain.
+    tx.execute_batch(
+        "CREATE TEMP TABLE recovery_roots (
+             pk INTEGER PRIMARY KEY
+         )",
+    )?;
+    tx.execute(
+        "INSERT INTO recovery_roots (pk)
+         SELECT e.pk
+         FROM executions AS e INDEXED BY executions_recovery_idx
+         WHERE e.owner_generation < ?1
+           AND e.state IN (0,1,4)
+           AND (e.state=1 OR (e.state=4 AND EXISTS (
+               SELECT 1 FROM provider_attempts AS a
+               WHERE a.execution_pk=e.pk AND a.state IN (0,1)
+           )) OR (e.state=4 AND EXISTS (
+               SELECT 1 FROM tool_calls AS t
+               WHERE t.execution_pk=e.pk AND t.state IN (0,1)
+           )))
+         ORDER BY e.state, e.pk
+         LIMIT ?2",
+        params![next_generation, STARTUP_RECOVERY_LIMIT],
+    )?;
     tx.execute(
         "UPDATE provider_attempts
          SET state=4, finished_at_us=NULL
          WHERE pk IN (
              SELECT a.pk
              FROM provider_attempts AS a INDEXED BY attempts_recovery_idx
-             JOIN executions AS e ON e.pk=a.execution_pk
-             WHERE e.owner_generation < ?1
-               AND e.state IN (0,1,4)
-               AND e.state=1
-               AND a.state IN (0,1,4)
+             JOIN recovery_roots AS r ON r.pk=a.execution_pk
+             WHERE a.state IN (0,1,4)
                AND a.state IN (0,1)
              ORDER BY a.pk
-             LIMIT ?2
+             LIMIT ?1
          )",
-        params![next_generation, STARTUP_RECOVERY_LIMIT],
+        params![STARTUP_RECOVERY_LIMIT],
     )?;
     tx.execute(
         "UPDATE tool_calls
@@ -192,31 +212,22 @@ fn recover_existing(connection: &mut Connection) -> Result<(), StorageError> {
          WHERE pk IN (
              SELECT t.pk
              FROM tool_calls AS t INDEXED BY tools_recovery_idx
-             JOIN executions AS e ON e.pk=t.execution_pk
-             WHERE e.owner_generation < ?1
-               AND e.state IN (0,1,4)
-               AND e.state=1
-               AND t.state IN (0,1,5)
+             JOIN recovery_roots AS r ON r.pk=t.execution_pk
+             WHERE t.state IN (0,1,5)
                AND t.state IN (0,1)
              ORDER BY t.pk
-             LIMIT ?2
+             LIMIT ?1
          )",
-        params![next_generation, STARTUP_RECOVERY_LIMIT],
+        params![STARTUP_RECOVERY_LIMIT],
     )?;
     tx.execute(
         "UPDATE executions
          SET state=4, finished_at_us=NULL
-         WHERE pk IN (
-             SELECT e.pk
-             FROM executions AS e INDEXED BY executions_recovery_idx
-             WHERE e.owner_generation < ?1
-               AND e.state IN (0,1,4)
-               AND e.state=1
-             ORDER BY e.pk
-             LIMIT ?2
-         )",
-        params![next_generation, STARTUP_RECOVERY_LIMIT],
+         WHERE state=1
+           AND pk IN (SELECT pk FROM recovery_roots)",
+        [],
     )?;
+    tx.execute_batch("DROP TABLE recovery_roots")?;
     tx.commit()?;
     Ok(())
 }
