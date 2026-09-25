@@ -743,6 +743,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "MAC-INSTALLED-RED": {
+      "blockedNote": "Assigned baseline cannot compile any CLI integration test: dev-dependency forces native bridge, but 7262682 lacks compatible arm64 artifact/build gate. Draft was deleted; no hash frozen. Product-spine 5d66683 already reports five-scenario installed entrypoint GREEN, so authority must select approved prewire base and classify existing behavior or define missing additive contract.",
+      "scratchpad": "worklog/MAC-INSTALLED-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
