@@ -743,6 +743,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "NATIVE-MATRIX-RED": {
+      "blockedNote": "No approved producer interface or prewire on 7262682: native directory/builder/artifacts are absent, synthesis proposes undefined top-level script, and later matrix belongs to different manifest/integration ownership. Inventing CLI/output receipt would be test-owned API. Requires authority-selected canonical builder and interface; Linux/Windows runtime gates remain external.",
+      "scratchpad": "worklog/NATIVE-MATRIX-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
