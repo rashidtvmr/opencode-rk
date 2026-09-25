@@ -749,6 +749,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "completed"
     },
+    "OWN-LOCK-RED": {
+      "completedNote": "Compiling deterministic RED twice: orderly close/reopen passes; simultaneous second writable StorageFacade is wrongly accepted (1 pass, 1 fail). Frozen sha256 ca49a6f43a2a5e5bbf49e103c1609a5f68b819f77f81a62bed0018e742f23d6a. GREEN needs authority-approved facade/lib wiring beyond planned workspace_lock.rs ownership.",
+      "scratchpad": "worklog/OWN-LOCK-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
