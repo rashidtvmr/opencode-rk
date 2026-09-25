@@ -1056,6 +1056,96 @@
       "session": "ses_par142",
       "status": "completed"
     },
+    "BRIDGE-PAR-143": {
+      "completedNote": "file crates/opentui-bridge/src/fork_dialog_full.rs 124L rustfmt --check PASS 7 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-143.md",
+      "session": "ses_par143",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-144": {
+      "completedNote": "timeline_dialog.rs written, 6 tests in-file, rustfmt clean",
+      "scratchpad": "worklog/BRIDGE-PAR-144.md",
+      "session": "ses_par144",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-145": {
+      "completedNote": "file crates/opentui-bridge/src/subagent_dialog.rs rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-145.md",
+      "session": "ses_par145",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-146": {
+      "completedNote": "file session_footer_full.rs written, 6 in-file tests, rustfmt --check EXIT 0",
+      "scratchpad": "worklog/BRIDGE-PAR-146.md",
+      "session": "ses_par146",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-147": {
+      "completedNote": "rustfmt --check permission_ctx.rs PASS; 5 in-file tests; 126 lines",
+      "scratchpad": "worklog/BRIDGE-PAR-147.md",
+      "session": "ses_par147",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-148": {
+      "completedNote": "prompt_ctx.rs 167 lines, 6 tests, rustfmt PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-148.md",
+      "session": "ses_par148",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-149": {
+      "completedNote": "kv_ctx.rs 135 lines exists, rustfmt clean, 6 in-file tests; lane worker evidence adopted by orchestrator",
+      "scratchpad": "worklog/BRIDGE-PAR-149.md",
+      "session": "ses_orch_par149",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-150": {
+      "completedNote": "route_ctx.rs exists, rustfmt check pass",
+      "scratchpad": "worklog/BRIDGE-PAR-150.md",
+      "session": "ses_par150",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-151": {
+      "completedNote": "file crates/opentui-bridge/src/event_ctx.rs 124L rustfmt --check PASS 5 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-151.md",
+      "session": "ses_par151",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-152": {
+      "completedNote": "exit_ctx.rs 132 lines 6 tests rustfmt PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-152.md",
+      "session": "ses_par152",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-153": {
+      "completedNote": "rustfmt --check clean, 115 lines, 6 tests",
+      "scratchpad": "worklog/BRIDGE-PAR-153.md",
+      "session": "ses_par153",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-154": {
+      "completedNote": "helper_ctx.rs 120 lines, 6 tests, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-154.md",
+      "session": "ses_par154",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-155": {
+      "completedNote": "file crates/opentui-bridge/src/runtime_ctx.rs 101L rustfmt --check PASS 6 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-155.md",
+      "session": "ses_par155",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-156": {
+      "completedNote": "file+6 tests exist; rustfmt FMT_OK 119 lines; no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-PAR-156.md",
+      "session": "ses_par156",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-157": {
+      "completedNote": "thinking_ctx.rs 119L rustfmt --check PASS 6 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-157.md",
+      "session": "ses_par157",
+      "status": "completed"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
