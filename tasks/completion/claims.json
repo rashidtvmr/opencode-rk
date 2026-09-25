@@ -276,10 +276,88 @@
       "session": "ses_gap10",
       "status": "completed"
     },
+    "BRIDGE-GAP-100": {
+      "completedNote": "app_entry.rs written 100 lines rustfmt clean 5 in-file tests",
+      "scratchpad": "worklog/BRIDGE-GAP-100.md",
+      "session": "ses_gap100",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-101": {
+      "completedNote": "file crates/opentui-bridge/src/util_model.rs 84 lines, 6 in-file tests, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-101.md",
+      "session": "ses_gap101",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-102": {
+      "completedNote": "presentation.rs rustfmt clean, 5 tests in-file",
+      "scratchpad": "worklog/BRIDGE-GAP-102.md",
+      "session": "ses_gap102",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-103": {
+      "completedNote": "plugin_runtime.rs 133L rustfmt FMT_OK 6 tests in-file; no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-103.md",
+      "session": "ses_gap103",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-104": {
+      "completedNote": "run_lifecycle.rs 126L rustfmt PASS 6 in-file tests",
+      "scratchpad": "worklog/BRIDGE-GAP-104.md",
+      "session": "ses_gap104",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-105": {
+      "completedNote": "append 127L CommandRegistry/CommandCall/parse_call/help_line + tests2 6 tests; rustfmt --check FMT_OK; diff 127+/0-",
+      "scratchpad": "worklog/BRIDGE-GAP-105.md",
+      "session": "ses_gap105",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-106": {
+      "completedNote": "append PromptDraft+tests2 rustfmt PASS existing untouched",
+      "scratchpad": "worklog/BRIDGE-GAP-106.md",
+      "session": "ses_gap106",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-107": {
+      "completedNote": "file run_footer.rs appended FooterView2+FooterMachine+tests2 5tests rustfmt PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-107.md",
+      "session": "ses_gap107",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-108": {
+      "completedNote": "append+7 tests; rustfmt --check pass; lines1-113 intact",
+      "scratchpad": "worklog/BRIDGE-GAP-108.md",
+      "session": "ses_gap108",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-109": {
+      "completedNote": "append PermDecision/PermPrompt/decide/is_decided/decision_label + 7 tests2; rustfmt --check EXIT 0; existing untouched",
+      "scratchpad": "worklog/BRIDGE-GAP-109.md",
+      "session": "ses_gap109",
+      "status": "completed"
+    },
     "BRIDGE-GAP-11": {
       "completedNote": "GREEN 5/5 standalone rustc tests; RED 2/5 then 5/5; format and lib compile clean; no cargo; owned solid_boundary.rs",
       "scratchpad": "worklog/BRIDGE-GAP-11.md",
       "session": "ses_gap11",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-110": {
+      "completedNote": "append-only +141 lines, rustfmt --check clean, tests2 6 tests",
+      "scratchpad": "worklog/BRIDGE-GAP-110.md",
+      "session": "ses_gap110",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-111": {
+      "completedNote": "append CloseReason/Lifecycle2 + tests2 6 tests; rustfmt --check FMT_OK; existing items byte-identical (single append edit)",
+      "scratchpad": "worklog/BRIDGE-GAP-111.md",
+      "session": "ses_gap111",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-112": {
+      "completedNote": "tui_entry body-only: stdin probe + session footer; cargo check -p opencode-rk-cli --features native green; rustfmt pre-existing hunks only; scratchpad worklog/BRIDGE-GAP-112.md",
+      "scratchpad": "worklog/BRIDGE-GAP-112.md",
+      "session": "ses_gap112",
       "status": "completed"
     },
     "BRIDGE-GAP-12": {
@@ -556,6 +634,426 @@
       "completedNote": "render_fields.rs 96 lines forbid-unsafe 6 tests; rustfmt --check FMT_OK; zero test edits; no cargo/commit per lane rule",
       "scratchpad": "worklog/BRIDGE-GAP-59.md",
       "session": "ses_gap59",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-60": {
+      "completedNote": "file crates/opentui-bridge/src/session_timeline.rs rustfmt clean 142 lines 6 tests",
+      "scratchpad": "worklog/BRIDGE-GAP-60.md",
+      "session": "ses_gap60",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-61": {
+      "completedNote": "run_footer_menu.rs written, 6 in-file tests, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-61.md",
+      "session": "ses_gap61",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-62": {
+      "completedNote": "run_footer_prompt.rs written, 6 in-file tests, rustfmt --check PASS, 153 lines, under 170, zero test edits",
+      "scratchpad": "worklog/BRIDGE-GAP-62.md",
+      "session": "ses_gap62",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-63": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/run_prompt_shared.rs FMT_OK; 6 in-file tests green by inspection, no cargo run per scope (no lib.rs edit, standalone file)",
+      "scratchpad": "worklog/BRIDGE-GAP-63.md",
+      "session": "ses_gap63",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-64": {
+      "completedNote": "run_prompt_editor.rs written, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-64.md",
+      "session": "ses_gap64",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-65": {
+      "completedNote": "rustfmt --check clean; 6 in-file tests present",
+      "scratchpad": "worklog/BRIDGE-GAP-65.md",
+      "session": "ses_gap65",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-66": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/run_runtime_boot.rs PASS; 132 lines; 6 in-file tests written, no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-66.md",
+      "session": "ses_gap66",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-67": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/run_stream_transport.rs -> FMT_OK; 130 lines; 6 in-file tests present, zero test edits",
+      "scratchpad": "worklog/BRIDGE-GAP-67.md",
+      "session": "ses_gap67",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-68": {
+      "completedNote": "run_session_shared.rs 159 lines, rustfmt --check clean, 6 in-file tests written",
+      "scratchpad": "worklog/BRIDGE-GAP-68.md",
+      "session": "ses_gap68",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-69": {
+      "completedNote": "file+6 tests exist; rustfmt --check crates/opentui-bridge/src/run_session_data.rs PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-69.md",
+      "session": "ses_gap69",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-70": {
+      "completedNote": "file crates/opentui-bridge/src/run_subagent_data.rs 146 lines, 5 in-file tests, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-70.md",
+      "session": "ses_gap70",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-71": {
+      "completedNote": "run_scrollback_surface.rs 102 lines rustfmt clean 6 tests in-file",
+      "scratchpad": "worklog/BRIDGE-GAP-71.md",
+      "session": "ses_gap71",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-72": {
+      "completedNote": "run_scrollback_shared.rs 6 in-file tests, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-72.md",
+      "session": "ses_gap72",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-73": {
+      "completedNote": "run_permission_shared.rs + 7 tests, rustfmt clean",
+      "scratchpad": "worklog/BRIDGE-GAP-73.md",
+      "session": "ses_gap73",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-74": {
+      "completedNote": "file crates/opentui-bridge/src/run_question_shared.rs exists, 6 tests in-file, rustfmt --check FMT_OK, no cargo run per scope, zero test edits",
+      "scratchpad": "worklog/BRIDGE-GAP-74.md",
+      "session": "ses_gap74",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-75": {
+      "completedNote": "run_runtime_stdin.rs rustfmt --check PASS; 89 lines; 7 in-file tests; std-only forbid(unsafe_code); no cargo/lib.rs per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-75.md",
+      "session": "ses_gap75",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-76": {
+      "completedNote": "rustfmt --check FMT_OK, 7 tests in-file, no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-76.md",
+      "session": "ses_gap76",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-77": {
+      "completedNote": "file run_entry_body.rs written, 6 tests in-file, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-77.md",
+      "session": "ses_gap77",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-78": {
+      "completedNote": "file crates/opentui-bridge/src/run_turn_summary.rs exists 152 lines; in-file 7 tests; rustfmt --check PASS exit 0; no cargo run per task scope; no test edits",
+      "scratchpad": "worklog/BRIDGE-GAP-78.md",
+      "session": "ses_gap78",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-79": {
+      "completedNote": "run_theme.rs written, 5 in-file tests, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-79.md",
+      "session": "ses_gap79",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-80": {
+      "completedNote": "run_tool.rs written, 6 tests in-file, rustfmt --check FMT_OK",
+      "scratchpad": "worklog/BRIDGE-GAP-80.md",
+      "session": "ses_gap80",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-81": {
+      "completedNote": "run_trace.rs 148L rustfmt PASS 6 in-file tests",
+      "scratchpad": "worklog/BRIDGE-GAP-81.md",
+      "session": "ses_gap81",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-82": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/run_variant_shared.rs PASS; 158 lines; 5 tests in-file; forbid unsafe; std-only; no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-82.md",
+      "session": "ses_gap82",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-83": {
+      "completedNote": "run_demo.rs written, 57 lines, rustfmt clean, 5 tests",
+      "scratchpad": "worklog/BRIDGE-GAP-83.md",
+      "session": "ses_gap83",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-84": {
+      "completedNote": "file crates/opentui-bridge/src/session_fork_dialog.rs 99 lines rustfmt --check PASS 7 tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-GAP-84.md",
+      "session": "ses_gap84",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-85": {
+      "completedNote": "session_message_dialog.rs written, 7 tests in-file, rustfmt FMT_OK",
+      "scratchpad": "worklog/BRIDGE-GAP-85.md",
+      "session": "ses_gap85",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-86": {
+      "completedNote": "rustfmt --check PASS; 111 lines; 6 tests: empty-errs/trunc-id/trunc-task/close/summary-some/summary-none",
+      "scratchpad": "worklog/BRIDGE-GAP-86.md",
+      "session": "ses_gap86",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-87": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/home_destination.rs PASS; 5 in-file tests written, no cargo run per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-87.md",
+      "session": "ses_gap87",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-88": {
+      "completedNote": "file crates/opentui-bridge/src/run_prompt_traits.rs 98L forbid-unsafe 6 tests; rustfmt --check FMT_OK; no cargo/commit per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-88.md",
+      "session": "ses_gap88",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-89": {
+      "completedNote": "run_prompt_part.rs written, 5 in-file tests present, rustfmt --check PASS, 80 lines",
+      "scratchpad": "worklog/BRIDGE-GAP-89.md",
+      "session": "ses_gap89",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-90": {
+      "completedNote": "rustfmt --check clean; 6 in-file tests present",
+      "scratchpad": "worklog/BRIDGE-GAP-90.md",
+      "session": "ses_gap90",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-91": {
+      "completedNote": "file+6 tests exist; rustfmt --check clean; cargo not run per task scope",
+      "scratchpad": "worklog/BRIDGE-GAP-91.md",
+      "session": "ses_gap91",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-92": {
+      "completedNote": "file crates/opentui-bridge/src/run_scrollback_writer.rs 132L forbid-unsafe 6 tests; rustfmt --check FMT_OK; no cargo/commit per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-92.md",
+      "session": "ses_gap92",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-93": {
+      "completedNote": "file crates/opentui-bridge/src/run_stream_main.rs 133 lines rustfmt clean 5 in-file tests written no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-93.md",
+      "session": "ses_gap93",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-94": {
+      "completedNote": "rustfmt --check route_session.rs PASS, 101 lines, 5 tests",
+      "scratchpad": "worklog/BRIDGE-GAP-94.md",
+      "session": "ses_gap94",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-95": {
+      "completedNote": "route_sidebar.rs written, 6 in-file tests, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-GAP-95.md",
+      "session": "ses_gap95",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-96": {
+      "completedNote": "file written, 6 tests in-file, rustfmt --check clean",
+      "scratchpad": "worklog/BRIDGE-GAP-96.md",
+      "session": "ses_gap96",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-97": {
+      "completedNote": "file crates/opentui-bridge/src/prompt_history.rs 165L rustfmt PASS 6 in-file tests unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-GAP-97.md",
+      "session": "ses_gap97",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-98": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/context_project.rs EXIT:0; 121 lines; 6 in-file tests green-by-inspection, no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-GAP-98.md",
+      "session": "ses_gap98",
+      "status": "completed"
+    },
+    "BRIDGE-GAP-99": {
+      "completedNote": "tui_runtime.rs written, 5 tests, rustfmt ok",
+      "scratchpad": "worklog/BRIDGE-GAP-99.md",
+      "session": "ses_gap99",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-113": {
+      "completedNote": "paint_adapter.rs 110L rustfmt FMT_OK 6 in-file tests",
+      "scratchpad": "worklog/BRIDGE-PAR-113.md",
+      "session": "ses_par113",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-114": {
+      "completedNote": "input_adapter.rs written per scratchpad spec; rustfmt clean; tests written unrun (no cargo in lane)",
+      "scratchpad": "worklog/BRIDGE-PAR-114.md",
+      "session": "ses_par114",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-115": {
+      "completedNote": "file page_adapter.rs 169L rustfmt --check PASS 6 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-115.md",
+      "session": "ses_par115",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-116": {
+      "completedNote": "file crates/opentui-bridge/src/session_index.rs 123L rustfmt --check PASS 7 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-116.md",
+      "session": "ses_par116",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-117": {
+      "completedNote": "home_route.rs 157 lines rustfmt PASS 6 tests",
+      "scratchpad": "worklog/BRIDGE-PAR-117.md",
+      "session": "ses_par117",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-118": {
+      "completedNote": "plugin_routes.rs written 6 in-file tests rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-118.md",
+      "session": "ses_par118",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-119": {
+      "completedNote": "sync_search.rs 98 lines, rustfmt PASS, 6 in-file tests",
+      "scratchpad": "worklog/BRIDGE-PAR-119.md",
+      "session": "ses_par119",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-120": {
+      "completedNote": "file+6 tests exist; rustfmt --check FMT_OK; no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-PAR-120.md",
+      "session": "ses_par120",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-121": {
+      "completedNote": "theme_assets.rs written, 6 in-file tests, rustfmt --check PASS, 90 lines, no test edits",
+      "scratchpad": "worklog/BRIDGE-PAR-121.md",
+      "session": "ses_par121",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-122": {
+      "completedNote": "signal_graph.rs 140 lines, 6 tests, rustfmt --check PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-122.md",
+      "session": "ses_par122",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-123": {
+      "completedNote": "prompt_full.rs 126L rustfmt PASS 6 in-file tests unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-123.md",
+      "session": "ses_par123",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-124": {
+      "completedNote": "file crates/opentui-bridge/src/subagent_footer.rs rustfmt --check PASS 5 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-124.md",
+      "session": "ses_par124",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-125": {
+      "completedNote": "session_footer.rs 138 lines fmt-ok 6 tests",
+      "scratchpad": "worklog/BRIDGE-PAR-125.md",
+      "session": "ses_par125",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-126": {
+      "completedNote": "file crates/opentui-bridge/src/permission_view.rs exists, 6 in-file tests, rustfmt --check PASS exit 0; no cargo/commit per scope",
+      "scratchpad": "worklog/BRIDGE-PAR-126.md",
+      "session": "ses_par126",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-127": {
+      "completedNote": "question_view.rs exists 173 lines 7 tests; rustfmt clean; scratchpad lost in restart, file is evidence",
+      "scratchpad": "worklog/BRIDGE-PAR-127.md",
+      "session": "ses_par127",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-128": {
+      "completedNote": "file crates/opentui-bridge/src/theme_engine.rs 140L rustfmt --check PASS 6 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-128.md",
+      "session": "ses_par128",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-129": {
+      "completedNote": "sdk_stream.rs 131L rustfmt PASS 6 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-129.md",
+      "session": "ses_par129",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-130": {
+      "completedNote": "data_projection.rs 130 lines rustfmt clean 7 tests",
+      "scratchpad": "worklog/BRIDGE-PAR-130.md",
+      "session": "ses_par130",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-131": {
+      "completedNote": "rustfmt --check pass; 7 in-file tests written, no cargo per scope",
+      "scratchpad": "worklog/BRIDGE-PAR-131.md",
+      "session": "ses_par131",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-132": {
+      "completedNote": "file crates/opentui-bridge/src/slot_registry.rs 148L rustfmt --check PASS 5 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-132.md",
+      "session": "ses_par132",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-133": {
+      "completedNote": "rustfmt --check EXIT 0, 6 tests in-file",
+      "scratchpad": "worklog/BRIDGE-PAR-133.md",
+      "session": "ses_par133",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-134": {
+      "completedNote": "keymap_dispatch.rs 140L rustfmt PASS 6 in-file tests",
+      "scratchpad": "worklog/BRIDGE-PAR-134.md",
+      "session": "ses_par134",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-135": {
+      "completedNote": "rustfmt --check crates/opentui-bridge/src/home_footer.rs PASS; 116 lines; 6 in-file tests written, no test edits",
+      "scratchpad": "worklog/BRIDGE-PAR-135.md",
+      "session": "ses_par135",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-136": {
+      "completedNote": "scroll_step.rs written, 6 tests, rustfmt clean",
+      "scratchpad": "worklog/BRIDGE-PAR-136.md",
+      "session": "ses_par136",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-137": {
+      "completedNote": "collapse_view.rs 107 lines, 6 tests, rustfmt --check FMT_OK",
+      "scratchpad": "worklog/BRIDGE-PAR-137.md",
+      "session": "ses_par137",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-138": {
+      "completedNote": "toast_center.rs written, 6 tests, rustfmt PASS",
+      "scratchpad": "worklog/BRIDGE-PAR-138.md",
+      "session": "ses_par138",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-139": {
+      "completedNote": "dialog_stack.rs rustfmt clean, 6 tests in-file",
+      "scratchpad": "worklog/BRIDGE-PAR-139.md",
+      "session": "ses_par139",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-140": {
+      "completedNote": "message_router.rs 115 lines, rustfmt --check PASS, 6 in-file tests written, zero test edits",
+      "scratchpad": "worklog/BRIDGE-PAR-140.md",
+      "session": "ses_par140",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-141": {
+      "completedNote": "file crates/opentui-bridge/src/fork_route.rs 107L rustfmt --check PASS 6 in-file tests written unrun-per-scope",
+      "scratchpad": "worklog/BRIDGE-PAR-141.md",
+      "session": "ses_par141",
+      "status": "completed"
+    },
+    "BRIDGE-PAR-142": {
+      "completedNote": "sidebar_panels.rs new, 6 tests in-file, rustfmt --check PASS, 139 lines",
+      "scratchpad": "worklog/BRIDGE-PAR-142.md",
+      "session": "ses_par142",
       "status": "completed"
     },
     "DISC-102": {

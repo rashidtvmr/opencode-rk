@@ -197,3 +197,145 @@ mod tests {
         assert_eq!(f.view(), FooterView::Done);
     }
 }
+
+/// Second-generation footer view (TS `FooterView` in `run/types.ts`: prompt,
+/// permission, question; plus status, subagent, menu surfaces).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum FooterView2 {
+    /// Idle status line.
+    #[default]
+    Status,
+    /// Composer prompt.
+    Prompt,
+    /// Permission request.
+    Permission,
+    /// Question request.
+    Question,
+    /// Subagent panel.
+    Subagent,
+    /// Menu / picker panel.
+    Menu,
+}
+
+/// Minimal footer view machine with a busy flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct FooterMachine {
+    view: FooterView2,
+    busy: bool,
+}
+
+impl FooterMachine {
+    /// Idle status machine, not busy.
+    #[must_use]
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Current view.
+    #[must_use]
+    pub fn view(&self) -> FooterView2 {
+        self.view
+    }
+
+    /// Busy flag.
+    #[must_use]
+    pub fn is_busy(&self) -> bool {
+        self.busy
+    }
+
+    /// Switch the active view.
+    pub fn show(&mut self, view: FooterView2) {
+        self.view = view;
+    }
+
+    /// Set the busy flag.
+    pub fn set_busy(&mut self, busy: bool) {
+        self.busy = busy;
+    }
+
+    /// True when the prompt view is active.
+    #[must_use]
+    pub fn is_prompt(&self) -> bool {
+        self.view == FooterView2::Prompt
+    }
+
+    /// Stable label for the active view.
+    #[must_use]
+    pub fn view_label(&self) -> &'static str {
+        match self.view {
+            FooterView2::Status => "status",
+            FooterView2::Prompt => "prompt",
+            FooterView2::Permission => "permission",
+            FooterView2::Question => "question",
+            FooterView2::Subagent => "subagent",
+            FooterView2::Menu => "menu",
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests2 {
+    use super::*;
+
+    #[test]
+    fn default_is_status_idle() {
+        let m = FooterMachine::new();
+        assert_eq!(m.view(), FooterView2::Status);
+        assert!(!m.is_busy());
+        assert!(!m.is_prompt());
+    }
+
+    #[test]
+    fn show_switches_view() {
+        let mut m = FooterMachine::new();
+        m.show(FooterView2::Permission);
+        assert_eq!(m.view(), FooterView2::Permission);
+        m.show(FooterView2::Question);
+        assert_eq!(m.view(), FooterView2::Question);
+        m.show(FooterView2::Subagent);
+        assert_eq!(m.view(), FooterView2::Subagent);
+        m.show(FooterView2::Menu);
+        assert_eq!(m.view(), FooterView2::Menu);
+    }
+
+    #[test]
+    fn busy_flag_toggles() {
+        let mut m = FooterMachine::new();
+        m.set_busy(true);
+        assert!(m.is_busy());
+        m.set_busy(false);
+        assert!(!m.is_busy());
+    }
+
+    #[test]
+    fn prompt_detect_only_on_prompt() {
+        let mut m = FooterMachine::new();
+        assert!(!m.is_prompt());
+        m.show(FooterView2::Prompt);
+        assert!(m.is_prompt());
+        m.show(FooterView2::Status);
+        assert!(!m.is_prompt());
+    }
+
+    #[test]
+    fn labels_non_empty_and_stable() {
+        let views = [
+            FooterView2::Status,
+            FooterView2::Prompt,
+            FooterView2::Permission,
+            FooterView2::Question,
+            FooterView2::Subagent,
+            FooterView2::Menu,
+        ];
+        for v in views {
+            let mut m = FooterMachine::new();
+            m.show(v);
+            assert!(!m.view_label().is_empty(), "label empty for {v:?}");
+        }
+        let mut m = FooterMachine::new();
+        m.show(FooterView2::Prompt);
+        assert_eq!(m.view_label(), "prompt");
+        m.show(FooterView2::Permission);
+        assert_eq!(m.view_label(), "permission");
+    }
+}

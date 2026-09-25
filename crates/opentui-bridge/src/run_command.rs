@@ -109,3 +109,130 @@ mod tests {
         assert_eq!(bare.render(), "/test fast");
     }
 }
+
+/// Max registry entries.
+pub const MAX_REGISTRY: usize = 64;
+/// Max chars kept per [`CommandCall`] arg.
+pub const MAX_CALL_ARG_LEN: usize = 256;
+
+/// Registry of bare command names, cap 64.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CommandRegistry {
+    /// Registered names, each truncated to 64 chars.
+    pub names: Vec<String>,
+}
+
+impl CommandRegistry {
+    /// Register `name`; errs on empty/dup/full. Truncates to 64 chars.
+    pub fn register(&mut self, name: &str) -> Result<(), String> {
+        let trimmed = name.trim();
+        let body = trimmed.strip_prefix('/').unwrap_or(trimmed);
+        let clean: String = body.chars().take(MAX_NAME_LEN).collect();
+        if clean.is_empty() {
+            return Err("empty name".to_string());
+        }
+        if self.names.iter().any(|n| n == &clean) {
+            return Err("duplicate command".to_string());
+        }
+        if self.names.len() >= MAX_REGISTRY {
+            return Err("registry full".to_string());
+        }
+        self.names.push(clean);
+        Ok(())
+    }
+}
+
+/// Parsed `/name args...` call (strict leading `/`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CommandCall {
+    /// Command name, truncated to 64 chars.
+    pub name: String,
+    /// Args, truncated to 16 entries of 256 chars each.
+    pub args: Vec<String>,
+}
+
+/// Parse `line` into a [`CommandCall`]; requires a leading `/`.
+pub fn parse_call(line: &str) -> Result<CommandCall, String> {
+    let trimmed = line.trim();
+    let body = trimmed
+        .strip_prefix('/')
+        .ok_or_else(|| "missing leading slash".to_string())?;
+    if body.is_empty() {
+        return Err("empty command".to_string());
+    }
+    let mut parts = body.split_whitespace();
+    let raw_name = parts.next().ok_or_else(|| "empty command".to_string())?;
+    let name: String = raw_name.chars().take(MAX_NAME_LEN).collect();
+    if name.is_empty() {
+        return Err("empty command".to_string());
+    }
+    let args: Vec<String> = parts
+        .take(MAX_ARGS)
+        .map(|a| a.chars().take(MAX_CALL_ARG_LEN).collect())
+        .collect();
+    Ok(CommandCall { name, args })
+}
+
+/// One-line help for a call: `/name args...`.
+pub fn help_line(call: &CommandCall) -> String {
+    if call.args.is_empty() {
+        format!("/{}", call.name)
+    } else {
+        format!("/{} {}", call.name, call.args.join(" "))
+    }
+}
+
+#[cfg(test)]
+mod tests2 {
+    use super::*;
+
+    #[test]
+    fn register_ok() {
+        let mut r = CommandRegistry::default();
+        r.register("build").unwrap();
+        assert_eq!(r.names, vec!["build".to_string()]);
+    }
+
+    #[test]
+    fn register_dup_errs() {
+        let mut r = CommandRegistry::default();
+        r.register("build").unwrap();
+        assert!(r.register("build").is_err());
+    }
+
+    #[test]
+    fn register_cap_errs() {
+        let mut r = CommandRegistry::default();
+        for i in 0..MAX_REGISTRY {
+            r.register(&format!("cmd{i}")).unwrap();
+        }
+        assert!(r.register("overflow").is_err());
+        let long = "a".repeat(100);
+        let mut r2 = CommandRegistry::default();
+        r2.register(&long).unwrap();
+        assert_eq!(r2.names[0].len(), MAX_NAME_LEN);
+        assert!(r2.register("").is_err());
+    }
+
+    #[test]
+    fn parse_ok() {
+        let c = parse_call("/run foo bar").unwrap();
+        assert_eq!(c.name, "run");
+        assert_eq!(c.args, vec!["foo".to_string(), "bar".to_string()]);
+    }
+
+    #[test]
+    fn parse_no_slash_errs() {
+        assert!(parse_call("run foo").is_err());
+        assert!(parse_call("").is_err());
+        assert!(parse_call("/").is_err());
+    }
+
+    #[test]
+    fn help_non_empty() {
+        let c = parse_call("/deploy staging").unwrap();
+        let h = help_line(&c);
+        assert!(!h.is_empty());
+        assert_eq!(h, "/deploy staging");
+    }
+}

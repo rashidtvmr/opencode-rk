@@ -1,0 +1,2 @@
+# BRIDGE-GAP-62
+Claim: ses_gap62. Source: footer.prompt.tsx (draft.text, cursorOffset, resetDraft/submitPrompt). Boundary: ONE file run_footer_prompt.rs, no lib.rs/Cargo.toml, no cargo, no commit. Tests: insert_cap_rejects_overflow, backspace_empty_false, cursor_clamps_both_ends, submit_drains_and_resets, multibyte_safe, insert_at_middle_shifts. Decisions: byte cursor on char boundaries (TS uses Bun.stringWidth graphemes); history/menus/parts host concerns. Verification: rustfmt --check PASS, 153 lines.

@@ -144,3 +144,144 @@ mod tests {
         assert_eq!(q.submit(), None);
     }
 }
+
+/// Maximum chars held by [`AnswerKind::Text`]; longer input is truncated.
+pub const ANSWER_TEXT_CAP: usize = 512;
+
+/// Answer payload for a single question: capped free text or option index.
+pub enum AnswerKind {
+    Text(String),
+    Pick(usize),
+}
+
+impl AnswerKind {
+    /// Build text, truncating to [`ANSWER_TEXT_CAP`] chars.
+    pub fn text(s: String) -> Self {
+        Self::Text(s.chars().take(ANSWER_TEXT_CAP).collect())
+    }
+
+    /// Build an option pick.
+    pub fn pick(index: usize) -> Self {
+        Self::Pick(index)
+    }
+}
+
+/// Confirm-then-submit-once flow; mirrors the footer question verb gate.
+pub struct QuestionFlow {
+    pub confirmed: bool,
+    pub submitted: bool,
+}
+
+impl QuestionFlow {
+    /// Fresh flow: unconfirmed, unsubmitted.
+    pub fn new() -> Self {
+        Self {
+            confirmed: false,
+            submitted: false,
+        }
+    }
+
+    /// Arm submit; ignored once submitted.
+    pub fn confirm(&mut self) {
+        if !self.submitted {
+            self.confirmed = true;
+        }
+    }
+
+    /// Fire once when confirmed; latches submitted, second call is false.
+    pub fn submit(&mut self) -> bool {
+        if self.confirmed && !self.submitted {
+            self.submitted = true;
+            return true;
+        }
+        false
+    }
+
+    /// Clear both flags back to pending.
+    pub fn reset(&mut self) {
+        self.confirmed = false;
+        self.submitted = false;
+    }
+
+    /// "pending" | "confirmed" | "submitted".
+    pub fn state_label(&self) -> &'static str {
+        if self.submitted {
+            "submitted"
+        } else if self.confirmed {
+            "confirmed"
+        } else {
+            "pending"
+        }
+    }
+}
+
+impl Default for QuestionFlow {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests2 {
+    use super::*;
+
+    #[test]
+    fn flow_submit_needs_confirm() {
+        let mut f = QuestionFlow::new();
+        assert!(!f.submit());
+        assert_eq!(f.state_label(), "pending");
+    }
+
+    #[test]
+    fn flow_submit_true_once_then_false() {
+        let mut f = QuestionFlow::new();
+        f.confirm();
+        assert!(f.submit());
+        assert!(!f.submit());
+    }
+
+    #[test]
+    fn flow_reset_clears_flags() {
+        let mut f = QuestionFlow::new();
+        f.confirm();
+        assert!(f.submit());
+        f.reset();
+        assert!(!f.confirmed);
+        assert!(!f.submitted);
+        assert_eq!(f.state_label(), "pending");
+        assert!(!f.submit());
+    }
+
+    #[test]
+    fn flow_state_labels() {
+        let mut f = QuestionFlow::new();
+        assert_eq!(f.state_label(), "pending");
+        f.confirm();
+        assert_eq!(f.state_label(), "confirmed");
+        assert!(f.submit());
+        assert_eq!(f.state_label(), "submitted");
+    }
+
+    #[test]
+    fn flow_confirm_ignored_after_submit() {
+        let mut f = QuestionFlow::new();
+        f.confirm();
+        assert!(f.submit());
+        f.reset();
+        f.confirm();
+        assert_eq!(f.state_label(), "confirmed");
+    }
+
+    #[test]
+    fn answer_text_truncates_at_512() {
+        let long = "a".repeat(ANSWER_TEXT_CAP + 10);
+        match AnswerKind::text(long) {
+            AnswerKind::Text(t) => assert_eq!(t.chars().count(), ANSWER_TEXT_CAP),
+            AnswerKind::Pick(_) => panic!("expected text"),
+        }
+        match AnswerKind::pick(2) {
+            AnswerKind::Pick(i) => assert_eq!(i, 2),
+            AnswerKind::Text(_) => panic!("expected pick"),
+        }
+    }
+}

@@ -463,7 +463,17 @@ fn native_page_lines(
     let mut lines = Vec::new();
     let title = snapshot
         .map(|s| format!("OpenCode RK — {}", s.title))
-        .unwrap_or_else(|| "OpenCode RK — offline".to_string());
+        .unwrap_or_else(|| {
+            let probe = opencode_rk_opentui_bridge::run_runtime_stdin::StdinProbe::new(
+                std::io::stdin().is_terminal(),
+                0,
+            );
+            let stdin_mode: &'static str =
+                opencode_rk_opentui_bridge::run_runtime_stdin::probe_label(
+                    opencode_rk_opentui_bridge::run_runtime_stdin::resolve_probe(probe),
+                );
+            format!("OpenCode RK — offline • stdin:{stdin_mode}")
+        });
     lines.push(title);
     lines.push(format!(
         "model: {model}  |  Ctrl+P palette  Ctrl+T context  ? help  Ctrl+C quit"
@@ -483,12 +493,19 @@ fn native_page_lines(
             } else {
                 lines.extend(transcript[start..].iter().cloned());
             }
+            if let Some(snapshot) = snapshot {
+                let id8: String = snapshot.session_id.chars().take(8).collect();
+                lines.push(format!(
+                    "session {id8} • {} • {} msgs",
+                    snapshot.state, snapshot.message_count
+                ));
+            }
             while lines.len() < height.saturating_sub(3) {
                 lines.push(String::new());
             }
             lines.push("─".repeat(width.min(120)));
             lines.push(format!("> {draft}"));
-            lines.push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context");
+            lines.push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context".to_string());
         }
         NativePage::Palette => {
             lines.push("Command palette".to_string());
@@ -571,6 +588,13 @@ fn native_interactive_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     use std::io::Read as _;
 
+    let stdin_probe = opencode_rk_opentui_bridge::run_runtime_stdin::StdinProbe::new(
+        std::io::stdin().is_terminal(),
+        0,
+    );
+    let stdin_mode: &'static str = opencode_rk_opentui_bridge::run_runtime_stdin::probe_label(
+        opencode_rk_opentui_bridge::run_runtime_stdin::resolve_probe(stdin_probe),
+    );
     let (cols, rows) = native_terminal_size();
     let mut host = crate::native_host::NativeHost::new(crate::native_host::HostConfig {
         cols: cols.min(u32::from(u16::MAX)) as u16,
@@ -591,6 +615,9 @@ fn native_interactive_loop(
     let mut page = NativePage::Chat;
     let mut draft = String::new();
     let mut transcript: Vec<String> = Vec::new();
+    if live.is_none() {
+        transcript.push(format!("offline • stdin:{stdin_mode}"));
+    }
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
