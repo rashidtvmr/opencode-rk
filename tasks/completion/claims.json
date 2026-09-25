@@ -1165,9 +1165,10 @@
       "status": "blocked"
     },
     "TUI-011": {
+      "blockedNote": "BLOCKED: scoped GNU objdump shell GREEN only. Parent requires MSVC/Windows build/signing; clean-target native-library resolution without dev tools; frozen manifest, SBOM, license, checksum, font review; ABI/Unicode/rendering upgrade fixtures on integrated revision; independent acceptance. Repository guard: 51 pre-existing errors; convergence gate: 94 pre-existing findings.",
       "scratchpad": "worklog/TUI-011-GNU-OBJDUMP-RED.md",
-      "session": "ses_f2705567affenLQq1gC05YNgKx",
-      "status": "in-progress"
+      "session": "ses_f26d9154effeEuQu3EDtXLYi1d",
+      "status": "blocked"
     },
     "TUI-011-FROZEN-CONTRACT-REVIEW": {
       "blockedNote": "frozen manifest test internally incorrect: lowercase-hex predicate at line 93 rejects digits; 64 KiB metadata bound applied to 6,863,648-byte Mach-O at line 122; controller contract review required; exact repro exit 101, 1/3 passed; evidence worklog/TUI-011-FROZEN-CONTRACT-REVIEW.md",

@@ -1,186 +1,59 @@
-# TUI-011 GNU objdump architecture RED lane
+# TUI-011 GNU objdump administrative handback
 
-Status: GREEN candidate; ledger status `in-progress` during implementation
-verification. Parent TUI-011 remains open; this lane does not claim release
-acceptance.
+Status: scoped shell GREEN; parent `TUI-011` remains BLOCKED. This handback owns
+only this scratchpad and the `TUI-011` ledger row. Product commit is preserved:
+`8a89a6fe2e40191b8716415669ca2a942e7c044a` on
+`lane/TUI-011-GNU-OBJDUMP-GREEN`.
 
-Frozen test hash (SHA-256):
-`0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`
-`crates/opentui-bridge/tests/gnu_objdump_wrapper.sh`.
+## Claim and transfer
 
-Test hash rechecked on transfer:
-`0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`
+- Current session: `ses_f26d9154effeEuQu3EDtXLYi1d`.
+- Prior implementer: `ses_f2705567affenLQq1gC05YNgKx`, stopped after the step limit.
+- Independent verifier: `ses_f26df5cb7ffe4DLtMB6uIpfoVZ`, accepted scoped GREEN only.
+- User authorized transfer. `cc.reclaim` then `cc.claim` ran with recorded evidence
+  before this administrative edit.
+- Owned admin paths: `worklog/TUI-011-GNU-OBJDUMP-RED.md` and the `TUI-011`
+  row in `tasks/completion/claims.json`. No product, test, controller, policy,
+  or verifier file was edited.
 
-## Claim
+## Frozen contract and scoped result
 
-- Task: `TUI-011` (RED-only child lane `TUI-011-GNU-OBJDUMP`).
-- Prior RED session: `ses_f271bee8effeOmOikwgBrH5glW`.
-- Transfer/implementation session: `ses_f2705567affenLQq1gC05YNgKx`.
-- Base commit: `2d04c1c925595b566f617b073129ecee24593eb9`
-  (`origin/lane/CROSS-PLATFORM-RUNNER-CLOSURE-VERIFY`).
-- Worktree: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/lane-tui011-gnu-objdump-red`,
-  branch `red/TUI-011-GNU-OBJDUMP`.
-- Owned product file: `crates/opentui-bridge/native/build_opentui.sh`.
-- Owned scratchpad: this file. Own claim row: `tasks/completion/claims.json` TUI-011.
-- Transfer evidence: prior claim `ses_f3c4de578ffelQv59xDXmOs03B` was `blocked`;
-  user explicitly authorized transfer. Existing branch commits and worktree
-  contents were inspected before edits: `1c4418c` authored the test and
-  `4929322` recorded prior native evidence. Three earlier delegated attempts
-  failed at provider startup per the task handoff. `cc.reclaim` + `cc.claim`
-  executed with recorded transfer evidence. No prior test or product change was
-  overwritten.
+Frozen test `crates/opentui-bridge/tests/gnu_objdump_wrapper.sh` remains byte
+identical at SHA-256
+`0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`.
 
-## Source evidence (exact)
+The product change at `crates/opentui-bridge/native/build_opentui.sh:403-411`
+extracts the architecture token before GNU's comma-separated flags and accepts
+GNU `i386:x86-64` plus LLVM `x86_64` for x86_64, while retaining fail-closed
+target mapping and existing ELF, ABI, dependency, path, size, and hash checks.
 
-- `crates/opentui-bridge/native/build_opentui.sh:404-408` (`verify_elf`):
-  ```sh
-  archline="$(objdump -f "$art" 2>/dev/null | awk -F': ' '/^architecture:/{print $2; exit}')"
-  [ "$archline" = "$expect_objarch" ] || die "objdump architecture '$archline' is not '$expect_objarch'"
-  ```
-  `awk -F': '` prints everything after the first `: `, so the GNU line
-  `architecture: i386:x86-64, flags 0x00000150:` yields
-  `i386:x86-64, flags 0x00000150:` and fails the literal `x86_64` compare at
-  `build_opentui.sh:649` (`x86_64-unknown-linux-gnu` -> `expect_objarch=x86_64`).
-- LLVM/Apple objdump emits `architecture: x86_64` (no flags suffix), which is
-  why the defect passed on the Darwin/arm64 host and hid on real GNU hosts.
-- GNU binutils emits `architecture: i386:x86-64, flags 0x00000150:` for the
-  same ELF. The x86_64 Linux artifact was built on a GNU host, so any GNU
-  runner re-verifying it through this script fails closed incorrectly.
+Reported scoped evidence:
 
-## Implementation
-
-- `verify_elf` now extracts only the architecture token before the comma and
-  trims trailing whitespace.
-- Accepted mappings: GNU `i386:x86-64` and LLVM `x86_64` for x86_64; GNU/LLVM
-  `aarch64` for aarch64. All other architecture/target pairs fail closed.
-- Existing ELF file-type, ABI, DT_NEEDED allowlist, RPATH/RUNPATH, size, and
-  SHA-256 checks remain unchanged.
-
-## Target boundary
-
-- Fix belongs in `build_opentui.sh` (parser must accept the GNU arch token
-  before the comma or normalize flags), owned by an implementation lane.
-  This RED lane does not touch the script.
-
-## Artifact under test (real, tracked)
-
-- `crates/opentui-bridge/native/lib/x86_64-unknown-linux-gnu/libopentui.so`
-- SHA-256 `9f074adf1e3c67bb027433d44da05b9e285a37ae58cf0b2ed76504304450c79e`
-- size `26627832` bytes.
-- `file -b`: `ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked`.
-- Apple objdump `-f`: `file format elf64-x86-64`, `architecture: x86_64`.
-- GNU wrapper directive line: `architecture: i386:x86-64, flags 0x00000150:`.
-
-## Test contract
-
-`crates/opentui-bridge/tests/gnu_objdump_wrapper.sh`:
-
-1. resolves the real objdump before shadowing it;
-2. asserts the tracked x86_64 Linux artifact SHA-256/size (fail closed on drift);
-3. installs a PATH-prepended `objdump` wrapper: `-f` emits the forced GNU line,
-   every other invocation `exec`s the real objdump;
-4. sanity-checks the wrapper emits/delegates correctly;
-5. runs `bash build_opentui.sh --verify-only <artifact> --target x86_64-unknown-linux-gnu`
-   with the wrapper first in PATH;
-6. RED: expects nonzero exit whose stderr contains the exact current-parser
-   string `objdump architecture 'i386:x86-64, flags 0x00000150:' is not 'x86_64'`;
-7. GREEN: expects exit 0, stderr reports the GNU arch accepted, stdout carries
-   the artifact SHA-256.
-
-Deterministic, offline, tempdir under `$TMPDIR` removed on exit, no user DB,
-no secrets, no repository writes. Bounded.
-
-## RED evidence (macOS Darwin/arm64 host)
-
-```
-$ rtk bash crates/opentui-bridge/tests/gnu_objdump_wrapper.sh
-Running builder with GNU objdump wrapper forced first in PATH
---- builder exit: 1
---- builder stderr
-build_opentui: file type ok: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=90c98cc7d08f714948df9528bc86fd8916f05f90, with debug_info, not stripped
-build_opentui: error: objdump architecture 'i386:x86-64, flags 0x00000150:' is not 'x86_64'
-FAIL: RED: builder rejects the GNU objdump architecture line (current parser bug)
-TEST_EXIT=1
-```
-
-Transfer re-run on the same host produced the same exact failure and exit 1.
-
-### Independent native Ubuntu x86_64 RED (nomad node `rashid-lenovo`)
-
-Host: `Linux rashid-lenovo 7.0.0-31-generic #31-Ubuntu SMP ... x86_64 GNU/Linux`,
-`Ubuntu 26.04.1 LTS`, `GNU objdump (GNU Binutils for Ubuntu) 2.46`.
-
-Nomad job `tui011-gnu-objdump-red` cloned the pushed branch
-`red/TUI-011-GNU-OBJDUMP` and ran the frozen test with SHA
-`0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`:
-
-```
-Linux rashid-lenovo ... x86_64 GNU/Linux
-GNU objdump (GNU Binutils for Ubuntu) 2.46
-TEST_SHA
-0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c  crates/opentui-bridge/tests/gnu_objdump_wrapper.sh
-RUN_TEST
-Running builder with GNU objdump wrapper forced first in PATH
---- builder exit: 1
---- builder stderr
-build_opentui: file type ok: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=90c98cc7d08f714948df9528bc86fd8916f05f90, with debug_info, not stripped
-build_opentui: error: objdump architecture 'i386:x86-64, flags 0x00000150:' is not 'x86_64'
-TEST_EXIT=1
-DONE
-```
-
-Current bounded allocation `1b487619` captured this output before allocation
-purge. Log SHA-256
-`d7c061432476a17d74ab04a4fa96823ae68902979b4f978ea2c546f533cc2929`.
-
-Natural failure with the real GNU objdump and no wrapper (job
-`tui011-gnu-objdump-natural`), proving the bug is not wrapper-induced:
-
-```
-NATURAL_NO_WRAPPER
-/usr/bin/objdump
-...libopentui.so:   file format elf64-x86-64
-architecture: i386:x86-64, flags 0x00000150:
-NATURAL_EXIT=1
-```
-
-Log SHA-256 `2f542961b95b104fd1e97a1b277366e304d3e47614a4d39dd7faf54404ae78ab`.
-All four disposable Nomad jobs were `stop -purge`d; allocation output was
-preserved before purge. Only the pre-existing `cross-os-smoke` job remains.
-
-## Decisions
-
-- One new shell test in `crates/opentui-bridge/tests/` as instructed; not a Rust
-  Cargo target, so no Cargo build is introduced (no Cargo expected).
-- Test asserts the exact current failure string so the RED is specific, not any
-  generic nonzero exit.
-- Test also encodes the GREEN contract so the same frozen file flips to PASS
-  after implementation; no test edit needed for GREEN.
-
-## Verification evidence
-
-- Frozen test now GREEN on macOS wrapper path: `bash
-  crates/opentui-bridge/tests/gnu_objdump_wrapper.sh`; exit 0; tracked artifact
-  SHA `9f074adf1e3c67bb027433d44da05b9e285a37ae58cf0b2ed76504304450c79e`.
-- Native local aarch64 verify-only GREEN: `bash
-  crates/opentui-bridge/native/build_opentui.sh --verify-only
-  crates/opentui-bridge/native/lib/aarch64-unknown-linux-gnu/libopentui.so
-  --target aarch64-unknown-linux-gnu`; SHA
+- Frozen wrapper test GREEN on the macOS wrapper path; tracked artifact SHA
+  `9f074adf1e3c67bb027433d44da05b9e285a37ae58cf0b2ed76504304450c79e`.
+- Local aarch64 verify-only GREEN; artifact SHA
   `e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89`.
-- Synthetic focused checks: LLVM `x86_64` GREEN, GNU `aarch64` with flags
-  GREEN, wrong `aarch64` for x86_64 rejected exit 1.
-- `sh -n crates/opentui-bridge/native/build_opentui.sh` GREEN; `git diff
-  --check` GREEN.
-- `python3 tools/validate_repository.py` blocked by pre-existing backlog
-  exhaustion/ownership accounting (51 errors); no guard changes.
-- `python3 tools/convergence_gate.py` blocked by pre-existing off-plan ledger
-  findings (94); no convergence/controller changes.
+- Synthetic architecture mapping checks, `sh -n`, and `git diff --check` GREEN.
+- `python3 tools/lane_gate.py --run` reported 8 module lanes and 4 test lanes
+  GREEN, but this gate is unrelated to the shell test and is not shell-test
+  evidence.
+- Implementer reported native Ubuntu x86_64 GREEN from Nomad allocation
+  `589731a3`, Ubuntu 26.04.1, GNU objdump 2.46, log SHA-256
+  `821fe4ddd25227fb510ed0206048a87ce876f752e295d2529e6678f2f2f69ae5`.
+  The raw log was not independently inspected here; this is reported evidence.
 
-## Remaining unknowns / blockers
+## Parent obligations and blockers
 
-- Native Lenovo Ubuntu x86_64 verify-only rerun remains required before final
-  lane completion evidence.
-- Parent TUI-011 still blocked on MSVC/signing/frozen manifest review.
-- This lane does not claim parent TUI-011 or release acceptance.
-- No Cargo command run: this is a shell builder lane. Frozen test, manifest,
-  policy, and controller paths were not edited.
+Parent `TUI-011` is not accepted. Remaining obligations: complete the pinned
+native distribution matrix, including MSVC/Windows build and signing; prove a
+clean target resolves released native libraries without developer toolchains;
+review the frozen manifest plus SBOM, licenses, checksums, and font provenance;
+and replay ABI/Unicode/rendering fixtures for the pinned-fork upgrade process on
+the integrated parent revision. Independent parent verification and acceptance
+remain required.
+
+`python3 tools/validate_repository.py` remains blocked by pre-existing 51
+backlog/ownership errors. `python3 tools/convergence_gate.py` remains blocked by
+pre-existing 94 off-plan ledger findings. Neither was changed or bypassed.
+
+No Cargo, Nomad, or new test command was run during this administrative transfer.
