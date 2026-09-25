@@ -157,7 +157,7 @@ impl Grant {
         intent: &OperationIntent,
         expected: &ExpectedScope,
     ) -> Result<(), PolicyDeny> {
-        if expected.now > self.scope.expires_at {
+        if expected.now >= self.scope.expires_at {
             return Err(PolicyDeny::Expired);
         }
         if self.scope.policy_version != expected.policy_version {
