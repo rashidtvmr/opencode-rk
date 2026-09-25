@@ -899,6 +899,12 @@
       "session": "ses_orch_TUI011b",
       "status": "completed"
     },
+    "TURN-RED": {
+      "blockedNote": "Public Turn API only duplicates already-GREEN in-memory unit behavior. Real create_turn_stream has no compiling durable approval observe/approve/deny/resume seam, approval ID/schema, or atomic claim. Requires G-APPROVAL-PREWIRE and caller wiring; invented routes/imports would not be behavioral RED.",
+      "scratchpad": "worklog/TURN-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
       "scratchpad": "worklog/WEB-ARTIFACT-EXEC.md",
