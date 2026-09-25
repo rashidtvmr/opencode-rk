@@ -293,6 +293,12 @@
       "session": "ses_f380c4bc9ffei2XDG2DStCM92e",
       "status": "completed"
     },
+    "COORD-001": {
+      "blockedNote": "BLOCKED: harness_adapter.py is scaffold-only, binds host-supplied NativeHarness Protocol (:158-165); docs/ADAPTER_PROTOCOL.md s8 B1/B3/B4/B5/B6 prove no real host spawn/freeze/verifier/integrator/lease API. No independent compiling RED: tests/completion/ absent, no .py references harness_adapter. py_compile+import OK, card OK. No code/test/doc/config/policy edits; worklog/COORD-001.md.",
+      "scratchpad": "worklog/COORD-001.md",
+      "session": "ses_f27b924a6ffe032yYdAXYh1iK3",
+      "status": "blocked"
+    },
     "CROSS-PLATFORM-RUNNER-CLOSURE-VERIFY": {
       "completedNote": "Artifact complete; verdict BLOCKED. git diff --check clean. validate_repository failed pre-existing backlog exhaustion (51 errors). convergence_gate blocked (92 ledger findings). No Cargo, runner, network, signing, or artifact generation.",
       "scratchpad": "worklog/CROSS-PLATFORM-RUNNER-CLOSURE-VERIFY.md",
