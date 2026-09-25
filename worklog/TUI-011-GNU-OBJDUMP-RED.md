@@ -1,8 +1,8 @@
 # TUI-011 GNU objdump architecture RED lane
 
-Status: RED frozen; ledger status `in-progress` during transfer verification
-(implementation absent by design; a RED-only lane is never `completed` and the
-parent TUI-011 stays open). Final ledger update remains `blocked`.
+Status: GREEN candidate; ledger status `in-progress` during implementation
+verification. Parent TUI-011 remains open; this lane does not claim release
+acceptance.
 
 Frozen test hash (SHA-256):
 `0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`
@@ -14,12 +14,13 @@ Test hash rechecked on transfer:
 ## Claim
 
 - Task: `TUI-011` (RED-only child lane `TUI-011-GNU-OBJDUMP`).
-- Session: `ses_f271bee8effeOmOikwgBrH5glW`.
+- Prior RED session: `ses_f271bee8effeOmOikwgBrH5glW`.
+- Transfer/implementation session: `ses_f2705567affenLQq1gC05YNgKx`.
 - Base commit: `2d04c1c925595b566f617b073129ecee24593eb9`
   (`origin/lane/CROSS-PLATFORM-RUNNER-CLOSURE-VERIFY`).
 - Worktree: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/lane-tui011-gnu-objdump-red`,
   branch `red/TUI-011-GNU-OBJDUMP`.
-- Owned product file: `crates/opentui-bridge/tests/gnu_objdump_wrapper.sh` (new).
+- Owned product file: `crates/opentui-bridge/native/build_opentui.sh`.
 - Owned scratchpad: this file. Own claim row: `tasks/completion/claims.json` TUI-011.
 - Transfer evidence: prior claim `ses_f3c4de578ffelQv59xDXmOs03B` was `blocked`;
   user explicitly authorized transfer. Existing branch commits and worktree
@@ -45,6 +46,15 @@ Test hash rechecked on transfer:
 - GNU binutils emits `architecture: i386:x86-64, flags 0x00000150:` for the
   same ELF. The x86_64 Linux artifact was built on a GNU host, so any GNU
   runner re-verifying it through this script fails closed incorrectly.
+
+## Implementation
+
+- `verify_elf` now extracts only the architecture token before the comma and
+  trims trailing whitespace.
+- Accepted mappings: GNU `i386:x86-64` and LLVM `x86_64` for x86_64; GNU/LLVM
+  `aarch64` for aarch64. All other architecture/target pairs fail closed.
+- Existing ELF file-type, ABI, DT_NEEDED allowlist, RPATH/RUNPATH, size, and
+  SHA-256 checks remain unchanged.
 
 ## Target boundary
 
@@ -147,12 +157,30 @@ preserved before purge. Only the pre-existing `cross-os-smoke` job remains.
 - Test also encodes the GREEN contract so the same frozen file flips to PASS
   after implementation; no test edit needed for GREEN.
 
+## Verification evidence
+
+- Frozen test now GREEN on macOS wrapper path: `bash
+  crates/opentui-bridge/tests/gnu_objdump_wrapper.sh`; exit 0; tracked artifact
+  SHA `9f074adf1e3c67bb027433d44da05b9e285a37ae58cf0b2ed76504304450c79e`.
+- Native local aarch64 verify-only GREEN: `bash
+  crates/opentui-bridge/native/build_opentui.sh --verify-only
+  crates/opentui-bridge/native/lib/aarch64-unknown-linux-gnu/libopentui.so
+  --target aarch64-unknown-linux-gnu`; SHA
+  `e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89`.
+- Synthetic focused checks: LLVM `x86_64` GREEN, GNU `aarch64` with flags
+  GREEN, wrong `aarch64` for x86_64 rejected exit 1.
+- `sh -n crates/opentui-bridge/native/build_opentui.sh` GREEN; `git diff
+  --check` GREEN.
+- `python3 tools/validate_repository.py` blocked by pre-existing backlog
+  exhaustion/ownership accounting (51 errors); no guard changes.
+- `python3 tools/convergence_gate.py` blocked by pre-existing off-plan ledger
+  findings (94); no convergence/controller changes.
+
 ## Remaining unknowns / blockers
 
-- Implementation lane must normalize the GNU `i386:x86-64` arch token (strip at
-  the comma / accept both `x86_64` and `i386:x86-64`) at `build_opentui.sh:404-408`.
+- Native Lenovo Ubuntu x86_64 verify-only rerun remains required before final
+  lane completion evidence.
 - Parent TUI-011 still blocked on MSVC/signing/frozen manifest review.
-- This lane does not mark `completed`; implementation is absent by contract.
-- No Cargo command run. No product, builder, manifest, policy, or frozen-test
-  edits made. `python3 tools/convergence_gate.py` remains blocked by pre-existing
-  ledger findings, outside this RED lane.
+- This lane does not claim parent TUI-011 or release acceptance.
+- No Cargo command run: this is a shell builder lane. Frozen test, manifest,
+  policy, and controller paths were not edited.

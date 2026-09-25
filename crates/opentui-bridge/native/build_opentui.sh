@@ -402,9 +402,12 @@ verify_elf() {
 
   # Architecture ground truth via objdump -f (binutils works cross-format here).
   local archline
-  archline="$(objdump -f "$art" 2>/dev/null | awk -F': ' '/^architecture:/{print $2; exit}')" \
+  archline="$(objdump -f "$art" 2>/dev/null | awk -F': ' '/^architecture:/{arch=$2; sub(/,.*/, "", arch); gsub(/[[:space:]]+$/, "", arch); print arch; exit}')" \
     || die "objdump -f failed on artifact"
-  [ "$archline" = "$expect_objarch" ] || die "objdump architecture '$archline' is not '$expect_objarch'"
+  case "$expect_objarch:$archline" in
+    x86_64:x86_64|x86_64:i386:x86-64|aarch64:aarch64) ;;
+    *) die "objdump architecture '$archline' is not '$expect_objarch'" ;;
+  esac
   printf 'build_opentui: objdump architecture ok: %s\n' "$archline" >&2
 
   # Required exported ABI symbols via dynamic symbol table (undecorated names).

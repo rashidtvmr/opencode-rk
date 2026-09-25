@@ -1165,10 +1165,9 @@
       "status": "blocked"
     },
     "TUI-011": {
-      "blockedNote": "RED-only; impl absent. Frozen test sha256 0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c; native Nomad rashid-lenovo allocation 1b487619 and local RED both exit 1 with exact GNU parser error; logs d7c061432476a17d74ab04a4fa96823ae68902979b4f978ea2c546f533cc2929 and 2f542961b95b104fd1e97a1b277366e304d3e47614a4d39dd7faf54404ae78ab; no Cargo.",
       "scratchpad": "worklog/TUI-011-GNU-OBJDUMP-RED.md",
-      "session": "ses_f271bee8effeOmOikwgBrH5glW",
-      "status": "blocked"
+      "session": "ses_f2705567affenLQq1gC05YNgKx",
+      "status": "in-progress"
     },
     "TUI-011-FROZEN-CONTRACT-REVIEW": {
       "blockedNote": "frozen manifest test internally incorrect: lowercase-hex predicate at line 93 rejects digits; 64 KiB metadata bound applied to 6,863,648-byte Mach-O at line 122; controller contract review required; exact repro exit 101, 1/3 passed; evidence worklog/TUI-011-FROZEN-CONTRACT-REVIEW.md",
