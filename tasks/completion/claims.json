@@ -803,6 +803,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-VERTICAL-WINDOWS-GNU-MAP": {
+      "completedNote": "JSON map 3 waves/11 tasks; python3 -m json.tool and schema assertions pass; git diff --check pass; no product or frozen-test edits; Windows runner/signing/convergence blockers recorded.",
+      "scratchpad": "worklog/PHASE1-VERTICAL-WINDOWS-GNU-MAP.md",
+      "session": "ses_f2967cfbdffewi2h8ulDtchd79",
+      "status": "completed"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",
