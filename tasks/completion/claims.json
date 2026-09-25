@@ -867,6 +867,12 @@
       "session": "ses_f387af8a9ffe7GarMQ3qCTI8wr",
       "status": "completed"
     },
+    "PACKAGE-POSIX-INSTALLER-GREEN": {
+      "completedNote": "Candidate GREEN: frozen package receipt T01-T05 5/5; hash d0a800ed unchanged; sh/dash syntax and disposable dash fixture pass; no survivors. Repository guard remains blocked by 51 inherited reconciliation errors; independent verifier/integration required.",
+      "scratchpad": "worklog/PACKAGE-POSIX-INSTALLER-GREEN.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "PACKAGE-RECEIPT-BINDING-CONTRACT": {
       "completedNote": "research artifact landed: producer-absence proof + receipt/manifest/runtime contract in worklog; frozen fec2fdb9 unchanged; no product edits",
       "scratchpad": "worklog/PACKAGE-RECEIPT-BINDING-CONTRACT.md",
