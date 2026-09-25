@@ -199,6 +199,12 @@
       "session": "ses_f41f2c26cffeFFRai2y6T8LbZo",
       "status": "completed"
     },
+    "AUTHWEB-RED": {
+      "blockedNote": "Existing router bearer tests are already GREEN, but no browser bootstrap/renewal protocol or compiling seam exists. CLI opens bare origin and web fetches send no auth. Inventing query/cookie/exchange semantics would be test-owned security protocol; synthesis also lacks web caller ownership.",
+      "scratchpad": "worklog/AUTHWEB-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
