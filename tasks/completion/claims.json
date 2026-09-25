@@ -743,6 +743,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "OWN-GENERATION-RED": {
+      "completedNote": "Compiling deterministic RED twice: current generation control passes; stale and unissued future generations are wrongly accepted (1 pass, 2 fail). Frozen sha256 0c528325a57d2d8eeb48e2f917f3181fd70f476a9e17a3948310da6b516e56a3; diff clean; no survivors; implementation remains gated by V1-FREEZE-RED.",
+      "scratchpad": "worklog/OWN-GENERATION-RED.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "PAR-001": {
       "completedNote": "PAR-001 traceability evidence: timeout 120 python3 /tmp/opencode/par001_verify.py 5/5 PASS; check-spec SPEC OK 109/545; legacy-evidence.json +258-trace/47-reqs/reconcile/verify keys, discovered.json receipt; zero test edits, no product code, no commit per lane bounds",
       "scratchpad": "worklog/PAR-001.md",
