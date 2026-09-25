@@ -149,6 +149,12 @@
       "session": "ses_f2979f4fdffe6mFaOAzpCO77L2",
       "status": "completed"
     },
+    "APP012-RECOVERY-CHILD-BOUND-VERIFY": {
+      "completedNote": "ACCEPT-SCOPED @3ad58b0: child 2/2, restart 18/18, storage lib 122/122, tests 207/207, check/rustfmt/diff and lane gate PASS; frozen hashes verified on disk; bounded SQL/no replay/no survivors. APP012 and integration remain open.",
+      "scratchpad": "worklog/APP012-RECOVERY-CHILD-BOUND-VERIFY.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "completed"
+    },
     "APP012-RESTART-RECOVERY-GREEN": {
       "completedNote": "GREEN: app012_restart_resume_red 18/18; storage lib 122; storage integration tests 205; cargo check storage clean except existing duplicate CLI target warning; frozen hashes unchanged; diff check clean; convergence gate pre-existing blocked findings",
       "scratchpad": "worklog/APP012-RESTART-RECOVERY-GREEN.md",
