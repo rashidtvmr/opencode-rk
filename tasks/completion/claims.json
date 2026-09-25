@@ -809,6 +809,12 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "completed"
     },
+    "PHASE1-WGNU-RUNNER-CLOSURE": {
+      "completedNote": "Text/static closure spec written: docs/WGNU-RUNNER-CLOSURE.md 10 sections covering DLL loading, ConPTY, Job Objects, PS installer, auth transport, APP-012 journey, schemas, build commands, MSVC/signing exclusions. Zero Cargo/workflow/test edits.",
+      "scratchpad": "worklog/PHASE1-WGNU-RUNNER-CLOSURE.md",
+      "session": "ses_f28c48536ffexdp7w0R7aq47jJ",
+      "status": "completed"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",
