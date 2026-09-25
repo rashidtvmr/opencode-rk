@@ -1165,9 +1165,10 @@
       "status": "blocked"
     },
     "TUI-011": {
+      "blockedNote": "RED-only lane landed, NOT completed (impl absent by design). Frozen test crates/opentui-bridge/tests/gnu_objdump_wrapper.sh sha256 0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c. RED on macOS + native Ubuntu x86_64: --verify-only x86_64-unknown-linux-gnu exits 1, GNU arch i386:x86-64 not x86_64. Impl fixes build_opentui.sh:404-408. worklog/TUI-011-GNU-OBJDUMP-RED.md.",
       "scratchpad": "worklog/TUI-011-GNU-OBJDUMP-RED.md",
       "session": "ses_f27295547ffedwPMO18IQD5PBo",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "TUI-011-FROZEN-CONTRACT-REVIEW": {
       "blockedNote": "frozen manifest test internally incorrect: lowercase-hex predicate at line 93 rejects digits; 64 KiB metadata bound applied to 6,863,648-byte Mach-O at line 122; controller contract review required; exact repro exit 101, 1/3 passed; evidence worklog/TUI-011-FROZEN-CONTRACT-REVIEW.md",

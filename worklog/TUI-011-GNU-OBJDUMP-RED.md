@@ -1,6 +1,14 @@
 # TUI-011 GNU objdump architecture RED lane
 
-Status: RED frozen; task NOT completed (implementation absent, by design).
+Status: RED frozen; ledger status `blocked` (implementation absent by design; a
+RED-only lane is never `completed` and the parent TUI-011 stays open).
+
+Frozen test hash (SHA-256):
+`0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`
+`crates/opentui-bridge/tests/gnu_objdump_wrapper.sh`.
+
+Frozen scratchpad hash (SHA-256, pre-final-edit, informational):
+`462205d6f796fcbed0bae5f09e6475cab3d76124f51b3678fbccc0fcf091c686`
 
 ## Claim
 
@@ -81,7 +89,48 @@ FAIL: RED: builder rejects the GNU objdump architecture line (current parser bug
 TEST_EXIT=1
 ```
 
-Independent RED on native Ubuntu x86_64 (Lenovo node, Nomad) recorded below.
+### Independent native Ubuntu x86_64 RED (nomad node `rashid-lenovo`)
+
+Host: `Linux rashid-lenovo 7.0.0-31-generic #31-Ubuntu SMP ... x86_64 GNU/Linux`,
+`Ubuntu 26.04.1 LTS`, `GNU objdump (GNU Binutils for Ubuntu) 2.46`.
+
+Nomad job `tui011-gnu-objdump-red` cloned the pushed branch
+`red/TUI-011-GNU-OBJDUMP` and ran the frozen test with SHA
+`0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c`:
+
+```
+Linux rashid-lenovo ... x86_64 GNU/Linux
+GNU objdump (GNU Binutils for Ubuntu) 2.46
+TEST_SHA
+0cc44d34f45fac563d871fafcedf41a2623599147d93a8cf325f979e642eaa3c  crates/opentui-bridge/tests/gnu_objdump_wrapper.sh
+RUN_TEST
+Running builder with GNU objdump wrapper forced first in PATH
+--- builder exit: 1
+--- builder stderr
+build_opentui: file type ok: ELF 64-bit LSB shared object, x86-64, version 1 (SYSV), dynamically linked, BuildID[sha1]=90c98cc7d08f714948df9528bc86fd8916f05f90, with debug_info, not stripped
+build_opentui: error: objdump architecture 'i386:x86-64, flags 0x00000150:' is not 'x86_64'
+TEST_EXIT=1
+DONE
+```
+
+Log SHA-256 `d7c061432476a17d74ab04a4fa96823ae68902979b4f978ea2c546f533cc2929`
+(kept outside the repo at
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui011-nomad/RED-native-ubuntu-x86_64.log`).
+
+Natural failure with the real GNU objdump and no wrapper (job
+`tui011-gnu-objdump-natural`), proving the bug is not wrapper-induced:
+
+```
+NATURAL_NO_WRAPPER
+/usr/bin/objdump
+...libopentui.so:   file format elf64-x86-64
+architecture: i386:x86-64, flags 0x00000150:
+NATURAL_EXIT=1
+```
+
+Log SHA-256 `2f542961b95b104fd1e97a1b277366e304d3e47614a4d39dd7faf54404ae78ab`.
+All four disposable Nomad jobs were `stop -purge`d; allocation output was
+preserved before purge. Only the pre-existing `cross-os-smoke` job remains.
 
 ## Decisions
 
