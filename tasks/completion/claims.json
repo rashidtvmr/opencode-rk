@@ -222,9 +222,10 @@
       "status": "in-progress"
     },
     "BRIDGE-GAP-02": {
+      "completedNote": "rustc --test native_frame.rs: 7/7 green standalone; zero test edits; lib.rs wiring left to orchestrator (out of scope)",
       "scratchpad": "worklog/BRIDGE-GAP-02.md",
       "session": "ses_gap02",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-03": {
       "scratchpad": "worklog/BRIDGE-GAP-03.md",
@@ -252,9 +253,10 @@
       "status": "in-progress"
     },
     "BRIDGE-GAP-08": {
+      "completedNote": "GREEN 5/5 rustc --test debounce_signal (no_fire_early,fires_at_deadline,supersede_rearms,flush_now_and_empty,clone_only_type); lib build OK; zero test edits; no lib.rs touch",
       "scratchpad": "worklog/BRIDGE-GAP-08.md",
       "session": "ses_gap08",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-09": {
       "scratchpad": "worklog/BRIDGE-GAP-09.md",
@@ -278,9 +280,10 @@
       "status": "in-progress"
     },
     "BRIDGE-GAP-13": {
+      "completedNote": "Standalone rustc tests: 6 passed, 0 failed; rustfmt and diff checks passed; no cargo per lane restriction",
       "scratchpad": "worklog/BRIDGE-GAP-13.md",
       "session": "ses_f28c0df04ffdnzWb4iVFI94SUN",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BRIDGE-GAP-14": {
       "scratchpad": "worklog/BRIDGE-GAP-14.md",
@@ -288,9 +291,10 @@
       "status": "in-progress"
     },
     "BRIDGE-GAP-15": {
+      "completedNote": "GREEN standalone rustc --test 6/6, rustfmt check pass, zero test edits; implementation SHA256 3255ae7488c7cd6e27d4885efc3ac4cea998af976b57c73d7879ab6f3d3d7a40; lib.rs wiring intentionally out of scope",
       "scratchpad": "worklog/BRIDGE-GAP-15.md",
       "session": "ses_f28c0def2ffeSBWRgUUiwsnX90",
-      "status": "in-progress"
+      "status": "completed"
     },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
