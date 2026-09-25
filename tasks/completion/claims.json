@@ -803,6 +803,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PHASE1-VERTICAL-SECURITY-DURABILITY-MAP": {
+      "completedNote": "Artifact validated: JSON parse, git diff --check, scope audit; map SHA-256 66ccb06b2ba5626d1d060d2695713896da5b351063dfc4ae90ab5152dd590a21; convergence_gate FAIL total=58 pre-existing ledger findings; validate_repository FAIL backlog exhaustion; frozen crates/server/tests/app012_tool_journey_red.rs absent at candidate, historical SHA retained; no source/test/controller edits",
+      "scratchpad": "worklog/PHASE1-VERTICAL-SECURITY-DURABILITY-MAP.md",
+      "session": "ses_f296b0144ffeMzYrnCsVgu9sMV",
+      "status": "completed"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",
