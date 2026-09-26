@@ -17,6 +17,12 @@
       "session": "ses_f2ec4da52ffeqvBmjXifr2Bx28",
       "status": "in-progress"
     },
+    "APP-001-SETUP-REPAIR-RED": {
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "scratchpad": "worklog/APP-001-SETUP-REPAIR-RED.md",
+      "session": "",
+      "status": "not-started"
+    },
     "APP-002": {
       "completedNote": "GREEN 20/20 daemon_client (13 existing + 7 APP-002) rustc --test + cargo test -p opencode-rk-cli --bin opencode-rk daemon_client; zero test edits post-freeze; log /tmp/opencode/app002.log",
       "scratchpad": "worklog/APP-002.md",
@@ -81,6 +87,18 @@
       "scratchpad": "worklog/APP-011.md",
       "session": "ses_orch_APP011",
       "status": "completed"
+    },
+    "APP-012-APPROVAL-RESUME-RED": {
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "scratchpad": "worklog/APP-012-APPROVAL-RESUME-RED.md",
+      "session": "",
+      "status": "not-started"
+    },
+    "APP-012-LIVE-WRITE-CONTRACT-REVIEW": {
+      "blockedNote": "Integration proposal in worklog/APP-012-LIVE-WRITE-CONTRACT-REVIEW.md. Gap spans 3 files across 2 crates. Vacuous OperationIntent::Tool at lib.rs:1539 never binds FileAction::Write; executor.rs:106 has no write branch -> Unknown tool. Multi-slice: need orchestrator integration lane.",
+      "scratchpad": "worklog/APP-012-LIVE-WRITE-CONTRACT-REVIEW.md",
+      "session": "ses_f2146c81cffe1ka4ewmIY4fM14",
+      "status": "blocked"
     },
     "APP-012-TOOL-RED": {
       "scratchpad": "worklog/APP-012-TOOL-RED.md",
@@ -219,6 +237,16 @@
       "scratchpad": "worklog/AUD-020.md",
       "session": "ses_f41f2c26cffeFFRai2y6T8LbZo",
       "status": "completed"
+    },
+    "AUTHWEB-BROWSER": {
+      "scratchpad": "worklog/AUTHWEB-BROWSER-RED.md",
+      "session": "ses_f2184c84bffeWFhpJcFEj8ad42",
+      "status": "in-progress"
+    },
+    "AUTHWEB-BROWSER-CLIENT-VERIFY": {
+      "scratchpad": "worklog/AUTHWEB-BROWSER-CLIENT-VERIFY.md",
+      "session": "ses_f214372a2ffem88gxOOC4xHP39",
+      "status": "in-progress"
     },
     "BASE-004": {
       "completedNote": "SHA-256 repair GREEN: daemon_long_path 1/1; daemon lib 24/24 incl sha256 abc vector; daemon_auth_api 5/5; cargo check clean. web_singleton_lock 1/2, unrelated legacy empty-token failure.",
@@ -1165,6 +1193,11 @@
       "scratchpad": "worklog/TUI-011-INSTALLER-SECURITY-IMPL.md",
       "session": "ses_f32880ed8ffeQpIqPaYmzt0MQj",
       "status": "blocked"
+    },
+    "TUI-011-INSTALLER-REAL-ASSET-RED": {
+      "scratchpad": "worklog/TUI-011-INSTALLER-REAL-ASSET-RED.md",
+      "session": "ses_f21a297d4ffe8SwIKL84D5npfZ",
+      "status": "in-progress"
     },
     "WEB-004": {
       "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
