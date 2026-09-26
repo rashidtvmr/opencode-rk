@@ -244,9 +244,10 @@
       "status": "in-progress"
     },
     "AUTHWEB-BROWSER-CLIENT-VERIFY": {
+      "completedNote": "VERIFY PASS: 2/2 frozen tests green; hashes f007aa29.../4c7201da... match expected; node --experimental-strip-types --test 2/2 PASS (107.96ms); no source/test edits; scratchpad+claim pushed to verify/AUTHWEB-BROWSER-CLIENT-VERIFY @299b969",
       "scratchpad": "worklog/AUTHWEB-BROWSER-CLIENT-VERIFY.md",
       "session": "ses_f214372a2ffem88gxOOC4xHP39",
-      "status": "in-progress"
+      "status": "completed"
     },
     "BASE-004": {
       "completedNote": "SHA-256 repair GREEN: daemon_long_path 1/1; daemon lib 24/24 incl sha256 abc vector; daemon_auth_api 5/5; cargo check clean. web_singleton_lock 1/2, unrelated legacy empty-token failure.",
