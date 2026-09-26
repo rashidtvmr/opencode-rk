@@ -17,6 +17,12 @@
       "session": "ses_f2ec4da52ffeqvBmjXifr2Bx28",
       "status": "in-progress"
     },
+    "APP-001-SETUP-REPAIR-RED": {
+      "completedNote": "UNFROZEN RED, NOT GREEN. installed_setup_flow.rs 460L sha256 be254069; rustc --test compiles exit0; OC2_E2E_BIN=target/debug/oc2 --test-threads=1 => 1 pass 2 fail. T1/T2 fail for MISSING setup state after bare oc2 (main.rs:224-268 routes TTY to chat::run). cargo test unbuildable arm64 (opentui native absent @7938791) -> rustc harness. zero edits; no parent/merge.",
+      "scratchpad": "worklog/APP-001-SETUP-REPAIR-RED.md",
+      "session": "ses_f22bd809bffe0VDwgKNqNQEYwQ",
+      "status": "completed"
+    },
     "APP-002": {
       "completedNote": "GREEN 20/20 daemon_client (13 existing + 7 APP-002) rustc --test + cargo test -p opencode-rk-cli --bin opencode-rk daemon_client; zero test edits post-freeze; log /tmp/opencode/app002.log",
       "scratchpad": "worklog/APP-002.md",
