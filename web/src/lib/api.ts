@@ -168,13 +168,36 @@ class ApiError extends Error {
   }
 }
 
+// If the launcher supplies a local daemon credential in the page fragment,
+// consume it before the first API request and keep it only in this tab's memory.
+let bearerToken: string | undefined
+
+function consumeBrowserCredential(): string | undefined {
+  if (bearerToken || typeof window === 'undefined') return bearerToken
+  const match = /^#oc2-token=([a-fA-F0-9]{64})$/.exec(window.location.hash)
+  if (!match) return undefined
+
+  const page = new URL(window.location.href)
+  window.history.replaceState(window.history.state, '', `${page.pathname}${page.search}`)
+  bearerToken = match[1]
+  return bearerToken
+}
+
+function apiHeaders(path: string, headers?: HeadersInit): Headers {
+  const result = new Headers(headers)
+  if (path.startsWith('/api/')) {
+    const token = consumeBrowserCredential()
+    if (token) result.set('authorization', `Bearer ${token}`)
+  }
+  return result
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const headers = new Headers(init?.headers)
+  if (!headers.has('content-type')) headers.set('content-type', 'application/json')
   const response = await fetch(path, {
     ...init,
-    headers: {
-      'content-type': 'application/json',
-      ...init?.headers,
-    },
+    headers: apiHeaders(path, headers),
   })
 
   if (!response.ok) {
@@ -577,11 +600,12 @@ export async function uploadDraftAttachment(
   signal?: AbortSignal,
 ) {
   const params = new URLSearchParams({ name: file.name || 'attachment' })
+  const path = `/api/sessions/${encodeURIComponent(id)}/attachments?${params.toString()}`
   const response = await fetch(
-    `/api/sessions/${encodeURIComponent(id)}/attachments?${params.toString()}`,
+    path,
     {
       method: 'POST',
-      headers: { 'content-type': file.type || 'application/octet-stream' },
+      headers: apiHeaders(path, { 'content-type': file.type || 'application/octet-stream' }),
       body: file,
       signal,
     },
@@ -601,9 +625,10 @@ export async function deleteDraftAttachment(
   attachmentId: string,
   signal?: AbortSignal,
 ) {
+  const path = `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}`
   const response = await fetch(
-    `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}`,
-    { method: 'DELETE', signal },
+    path,
+    { method: 'DELETE', headers: apiHeaders(path), signal },
   )
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { message?: string } | null
@@ -1000,9 +1025,10 @@ export async function runTurnStream(
   handlers: TurnStreamHandlers = {},
   signal?: AbortSignal,
 ): Promise<TurnResult> {
-  const response = await fetch(`/api/sessions/${encodeURIComponent(id)}/turns/stream`, {
+  const path = `/api/sessions/${encodeURIComponent(id)}/turns/stream`
+  const response = await fetch(path, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: apiHeaders(path, { 'content-type': 'application/json' }),
     body: JSON.stringify({
       text,
       model,

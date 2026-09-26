@@ -220,6 +220,12 @@
       "session": "ses_f41f2c26cffeFFRai2y6T8LbZo",
       "status": "completed"
     },
+    "AUTHWEB-BROWSER-CLIENT-IMPL": {
+      "blockedNote": "Unchanged browser RED tests 2/2 GREEN with actual loopback HTTP; scoped TypeScript check and 2/2 focused Vitest pass; full typecheck has five baseline TS6133 in unchanged canvas-model.test.ts. CLI opens bare origin, browser refresh loses in-memory bearer, disputed direct-test claim and canonical 51-error guard remain. Candidate only, no parent acceptance.",
+      "scratchpad": "worklog/AUTHWEB-BROWSER-CLIENT-IMPL.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "AUTHWEB-BROWSER-RED": {
       "blockedNote": "RED-only test-author candidate: Node 24 test compiled/executed and failed at real listSessions request with server 401 because browser client omitted Authorization; frozen SHA-256 f007aa291204204d366506c2c8b5149099317bb103da6fe915f8e4409e5a6a62. Not implementation completion or acceptance.",
       "scratchpad": "worklog/AUTHWEB-BROWSER-RED.md",
