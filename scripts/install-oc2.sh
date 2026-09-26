@@ -13,7 +13,9 @@ CHECKSUM=""
 INSTALL_DIR="${OC2_INSTALL_DIR:-$HOME/.local/bin}"
 DO_UNINSTALL=0
 MAX_ARCHIVE_MEMBERS=4
-MAX_ARCHIVE_PAYLOAD=1048576
+# The native executable and its library total ~72 MiB on arm64 macOS. Keep
+# expansion finite while admitting actual release assets on both platforms.
+MAX_ARCHIVE_PAYLOAD=134217728
 
 usage() {
   echo "usage: install-oc2.sh [--version V] --archive FILE --checksum SHA256 [--install-dir DIR] [--uninstall]" >&2
@@ -266,8 +268,19 @@ expanded_payload=$((actual_payload + native_payload))
   exit 65
 }
 
-# Identity is checked while still staged. A failed upgrade leaves both old
-# files untouched. This also preserves the historical exit 74 contract.
+# Identity is checked while still staged. Mirror the installed bin/../lib
+# layout first: a dynamic oc2 cannot start from the archive root because its
+# relative loader path would otherwise have no matching native library.
+if ! mkdir -p "$stage/bin" "$stage/lib" ||
+   ! mv "$src" "$stage/bin/$BIN" ||
+   ! mv "$native_src" "$stage/lib/$NATIVE_NAME"; then
+  echo "FAIL: cannot stage native release layout; install unchanged" >&2
+  exit 74
+fi
+src="$stage/bin/$BIN"
+native_src="$stage/lib/$NATIVE_NAME"
+# A failed upgrade leaves both old files untouched. Preserve exit 74 for
+# staged identity failures.
 chmod 755 "$src"
 identity_out="$("$src" --version 2>&1)" || {
   echo "FAIL: staged binary --version failed; install unchanged" >&2

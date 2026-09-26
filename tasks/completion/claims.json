@@ -1166,6 +1166,12 @@
       "session": "ses_f32880ed8ffeQpIqPaYmzt0MQj",
       "status": "blocked"
     },
+    "TUI-011-INSTALLER-REAL-ASSET": {
+      "blockedNote": "Frozen test SHA 0da0e11a... unchanged, real Mac archive GREEN 1/1; existing installer suites GREEN 8/8; 130 MiB oversize fails exit65/no install. Independent verification, Linux installed journey, provenance and canonical guard (51 baseline errors) remain open; base is 109 commits ahead of main. Candidate only, no parent acceptance.",
+      "scratchpad": "worklog/TUI-011-INSTALLER-REAL-ASSET.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "TUI-011-INSTALLER-REAL-ASSET-RED": {
       "blockedNote": "RED-only verified: rustc --test compiles clean, --list yields 1 test, run FAILS on status.success() assertion (installer exit 65 at size probe). Frozen SHA-256 0da0e11a1fa0e562e6057f1fdb2568c7a3ea7dee20680ceb68e3f34c516e7932. Archive sha256 4d7a0ded5f3e0610b7cf8eb8b168404225f11827d81be7c9d2ce614379989131. LC_RPATH fix is separate implementer lane; test author cannot complete.",
       "scratchpad": "worklog/TUI-011-INSTALLER-REAL-ASSET-RED.md",
