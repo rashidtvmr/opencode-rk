@@ -1178,6 +1178,12 @@
       "session": "ses_f21984612ffeQx7yaOWDgyvMEB",
       "status": "blocked"
     },
+    "TUI-011-LINUX-REAL-ASSET-RED": {
+      "blockedNote": "Linux RED pending real archive: test authored (tests/e2e/linux_native_archive_install.rs, 160 lines, draft sha256 2b89898b32f1d4b78752d09161a4e39e813f2dfb8620bbd8ac1707cf3750cfc9); Mac rustc --edition 2021 --test exit 0 with 0 tests discovered (Linux-gated, expected); behavioral RED needs orchestrator-coordinated Linux run with rebuilt real archive (receipt fixture expired with Nomad allocation)",
+      "scratchpad": "worklog/TUI-011-LINUX-REAL-ASSET-RED.md",
+      "session": "ses_f216fb1d9ffeNe31FO5CzQwbw9",
+      "status": "blocked"
+    },
     "TUI-011-MAC-LOADER-RED": {
       "blockedNote": "RED-only: tests/e2e/macos_loader.rs compiles(rustc --test exit0),lists1,runs&FAILS exit101(child exit134 SIGABRT;dyld no LC_RPATH at 55a4292). Test SHA c0a809a28800b542613bfb79b0d9566c07c955e45cb9afe441c0a697ae99ef36. No product edits. BLOCKED-not completed: LC_RPATH fix is separate implementer lane.",
       "scratchpad": "worklog/TUI-011-MAC-LOADER-RED.md",
