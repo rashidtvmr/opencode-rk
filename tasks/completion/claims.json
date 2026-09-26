@@ -1166,6 +1166,12 @@
       "session": "ses_f32880ed8ffeQpIqPaYmzt0MQj",
       "status": "blocked"
     },
+    "TUI-011-INSTALLER-REAL-ASSET-RED": {
+      "blockedNote": "RED-only verified: rustc --test compiles clean, --list yields 1 test, run FAILS on status.success() assertion (installer exit 65 at size probe). Frozen SHA-256 0da0e11a1fa0e562e6057f1fdb2568c7a3ea7dee20680ceb68e3f34c516e7932. Archive sha256 4d7a0ded5f3e0610b7cf8eb8b168404225f11827d81be7c9d2ce614379989131. LC_RPATH fix is separate implementer lane; test author cannot complete.",
+      "scratchpad": "worklog/TUI-011-INSTALLER-REAL-ASSET-RED.md",
+      "session": "ses_f21984612ffeQx7yaOWDgyvMEB",
+      "status": "blocked"
+    },
     "TUI-011-MAC-LOADER-RED": {
       "blockedNote": "RED-only: tests/e2e/macos_loader.rs compiles(rustc --test exit0),lists1,runs&FAILS exit101(child exit134 SIGABRT;dyld no LC_RPATH at 55a4292). Test SHA c0a809a28800b542613bfb79b0d9566c07c955e45cb9afe441c0a697ae99ef36. No product edits. BLOCKED-not completed: LC_RPATH fix is separate implementer lane.",
       "scratchpad": "worklog/TUI-011-MAC-LOADER-RED.md",
