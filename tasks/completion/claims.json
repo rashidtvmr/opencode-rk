@@ -226,6 +226,12 @@
       "session": "ses_f216878cfffeiiHQHFrHhDp5Bb",
       "status": "blocked"
     },
+    "AUTHWEB-CLI-HANDOFF-RED": {
+      "blockedNote": "RED confirmed: rustc --test exit0; fails: bare origin captured, no #oc2-token fragment (main.rs:761-789). SHA256 3c8eea31 frozen. Impl not in scope; blocked pending AUTHWEB-CLI-HANDOFF impl lane.",
+      "scratchpad": "worklog/AUTHWEB-CLI-HANDOFF-RED.md",
+      "session": "ses_f21315667ffeO0KsxS0LtKsvtK",
+      "status": "blocked"
+    },
     "BASE-004": {
       "completedNote": "SHA-256 repair GREEN: daemon_long_path 1/1; daemon lib 24/24 incl sha256 abc vector; daemon_auth_api 5/5; cargo check clean. web_singleton_lock 1/2, unrelated legacy empty-token failure.",
       "scratchpad": "worklog/BASE-004.md",
