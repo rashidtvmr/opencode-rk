@@ -217,6 +217,12 @@
       "session": "ses_f215e9103ffeQRrS4n5lI5Ceyr",
       "status": "blocked"
     },
+    "AUTHWEB-CLI-HANDOFF-RED": {
+      "blockedNote": "RED confirmed: rustc --test exit0; fails: bare origin captured, no #oc2-token fragment (main.rs:761-789). SHA256 3c8eea31 frozen. Impl not in scope; blocked pending AUTHWEB-CLI-HANDOFF impl lane.",
+      "scratchpad": "worklog/AUTHWEB-CLI-HANDOFF-RED.md",
+      "session": "ses_f21315667ffeO0KsxS0LtKsvtK",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
