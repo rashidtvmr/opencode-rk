@@ -1166,6 +1166,12 @@
       "session": "ses_f32880ed8ffeQpIqPaYmzt0MQj",
       "status": "blocked"
     },
+    "TUI-011-NATIVE-COMPILE-RED": {
+      "completedNote": "RED 0/1: rustc --test compiles, --list shows 1 test, run fails with E0308 at tui_entry.rs:491 (expected: type mismatch blocks native build). Test asserts exit 0 + binary exists; build exits 101 due to type mismatch.",
+      "scratchpad": "worklog/TUI-011-NATIVE-COMPILE-RED.md",
+      "session": "ses_f229377e4ffe4F6IJYFB5ct3Q1",
+      "status": "completed"
+    },
     "WEB-004": {
       "completedNote": "GREEN 5/5 control_plane_exposure (T01-T05) via CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test control_plane_exposure; zero test edits, zero impl edits (pre-complete); evidence worklog/WEB-004.md",
       "scratchpad": "worklog/WEB-004.md",
