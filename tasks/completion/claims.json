@@ -1178,6 +1178,12 @@
       "session": "ses_f21984612ffeQx7yaOWDgyvMEB",
       "status": "blocked"
     },
+    "TUI-011-INSTALLER-REAL-ASSET-VERIFY": {
+      "blockedNote": "VERIFY done @2f169298: frozen SHA 0da0e11a unchanged, rustc --test compile/list=1, GREEN 1/1 real archive 4d7a0ded no DYLD_*, Python suites 8/8, sh -n OK, 128MiB cap + staged bin+lib before identity, 130MiB exit65 no install, guard baseline 51 errors unchanged. Candidate receipt only; parent unintegrated, guard FAIL, no acceptance.",
+      "scratchpad": "worklog/TUI-011-INSTALLER-REAL-ASSET-VERIFY.md",
+      "session": "ses_f217abd2bfferQRgAbC0R3kY92",
+      "status": "blocked"
+    },
     "TUI-011-MAC-LOADER-RED": {
       "blockedNote": "RED-only: tests/e2e/macos_loader.rs compiles(rustc --test exit0),lists1,runs&FAILS exit101(child exit134 SIGABRT;dyld no LC_RPATH at 55a4292). Test SHA c0a809a28800b542613bfb79b0d9566c07c955e45cb9afe441c0a697ae99ef36. No product edits. BLOCKED-not completed: LC_RPATH fix is separate implementer lane.",
       "scratchpad": "worklog/TUI-011-MAC-LOADER-RED.md",
