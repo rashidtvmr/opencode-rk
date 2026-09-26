@@ -220,6 +220,12 @@
       "session": "ses_f41f2c26cffeFFRai2y6T8LbZo",
       "status": "completed"
     },
+    "AUTHWEB-BROWSER-RED": {
+      "blockedNote": "RED-only test-author candidate: Node 24 test compiled/executed and failed at real listSessions request with server 401 because browser client omitted Authorization; frozen SHA-256 f007aa291204204d366506c2c8b5149099317bb103da6fe915f8e4409e5a6a62. Not implementation completion or acceptance.",
+      "scratchpad": "worklog/AUTHWEB-BROWSER-RED.md",
+      "session": "ses_f216878cfffeiiHQHFrHhDp5Bb",
+      "status": "blocked"
+    },
     "BASE-004": {
       "completedNote": "SHA-256 repair GREEN: daemon_long_path 1/1; daemon lib 24/24 incl sha256 abc vector; daemon_auth_api 5/5; cargo check clean. web_singleton_lock 1/2, unrelated legacy empty-token failure.",
       "scratchpad": "worklog/BASE-004.md",
