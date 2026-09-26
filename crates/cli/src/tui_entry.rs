@@ -466,9 +466,9 @@ fn native_page_lines(
     let width = width.max(20);
     let height = height.max(8);
     let mut lines = Vec::new();
-    let title = snapshot
-        .map(|s| format!("OpenCode RK — {}", s.title))
-        .unwrap_or_else(|| {
+    let (title, offline) = match snapshot {
+        Some(s) => (format!("OpenCode RK — {}", s.title), false),
+        None => {
             let probe = opencode_rk_opentui_bridge::run_runtime_stdin::StdinProbe::new(
                 std::io::stdin().is_terminal(),
                 0,
@@ -477,8 +477,16 @@ fn native_page_lines(
                 opencode_rk_opentui_bridge::run_runtime_stdin::probe_label(
                     opencode_rk_opentui_bridge::run_runtime_stdin::resolve_probe(probe),
                 );
-            format!("OpenCode RK — offline • stdin:{stdin_mode}")
-        });
+            (
+                format!(
+                    "{} • stdin:{stdin_mode}",
+                    opencode_rk_opentui_bridge::frame_offline_full::OFFLINE_TITLE
+                ),
+                true,
+            )
+        }
+    };
+    let _ = offline;
     lines.push(title);
     lines.push(format!(
         "model: {model}  |  Ctrl+P palette  Ctrl+T context  ? help  Ctrl+C quit"
@@ -492,8 +500,15 @@ fn native_page_lines(
                 lines.push(
                     snapshot
                         .and_then(|s| s.last_text.as_ref())
-                        .map(|t| format!("last: {t}"))
-                        .unwrap_or_else(|| "Start typing to send a turn.".to_string()),
+                        .map(|t| {
+                            opencode_rk_opentui_bridge::frame_offline_full::clip_line(
+                                &format!("last: {t}"),
+                                width,
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            opencode_rk_opentui_bridge::frame_offline_full::EMPTY_HINT.to_string()
+                        }),
                 );
             } else {
                 lines.extend(transcript[start..].iter().cloned());
@@ -568,9 +583,7 @@ fn native_page_lines(
     }
     lines.truncate(height);
     for line in &mut lines {
-        if line.chars().count() > width {
-            *line = line.chars().take(width).collect();
-        }
+        *line = opencode_rk_opentui_bridge::frame_offline_full::clip_line(line, width);
     }
     lines
 }
@@ -624,18 +637,25 @@ fn native_interactive_loop(
     });
     let mut renderer = NativeRenderer::create(cols, rows)?;
     renderer.setup_terminal()?;
-    let _ = renderer.enable_mouse(false);
-    let _ = renderer.enable_kitty_keyboard(1);
+    let mouse_on = false;
+    let _ = renderer.enable_mouse(mouse_on);
+    let kitty = opencode_rk_opentui_bridge::kitty_flags_full::default_flags();
+    let _ = renderer.enable_kitty_keyboard(kitty.into());
     renderer.set_title("OpenCode RK")?;
 
     let mut page = NativePage::Chat;
     let mut draft = String::new();
+    let mut scrollback = opencode_rk_opentui_bridge::scrollback_model_full::ScrollModel::new();
     let mut transcript: Vec<String> = Vec::new();
     if live.is_none() {
-        transcript.push(format!("offline • stdin:{stdin_mode}"));
+        let boot = format!("offline • stdin:{stdin_mode}");
+        scrollback.push(boot.clone());
+        transcript.push(boot);
     }
     if !memory.is_empty() {
-        transcript.push(format!("memory: {} file(s) loaded", memory.len()));
+        let mem = format!("memory: {} file(s) loaded", memory.len());
+        scrollback.push(mem.clone());
+        transcript.push(mem);
     }
     let mut current_size = (cols, rows);
     let mut stdin = std::io::stdin();
@@ -714,20 +734,35 @@ fn native_interactive_loop(
                     continue;
                 }
                 draft.clear();
-                transcript.push(format!("you: {text}"));
+                let you = format!("you: {text}");
+                scrollback.push(you.clone());
+                transcript.push(you);
                 let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
                 match live_now {
                     Some(snapshot) => {
                         match execute_submit(snapshot, &text, model, reasoning_effort, auth) {
-                            Ok(reply) => transcript.push(format!("assistant: {reply}")),
-                            Err(error) => transcript.push(format!("error: {error}")),
+                            Ok(reply) => {
+                                let row = format!("assistant: {reply}");
+                                scrollback.push(row.clone());
+                                transcript.push(row);
+                            }
+                            Err(error) => {
+                                let row = format!("error: {error}");
+                                scrollback.push(row.clone());
+                                transcript.push(row);
+                            }
                         }
                     }
-                    None => transcript.push("offline: turn not executed".to_string()),
+                    None => {
+                        let row = "offline: turn not executed".to_string();
+                        scrollback.push(row.clone());
+                        transcript.push(row);
+                    }
                 }
-                const MAX_NATIVE_TRANSCRIPT: usize = 500;
-                if transcript.len() > MAX_NATIVE_TRANSCRIPT {
-                    let drop_count = transcript.len() - MAX_NATIVE_TRANSCRIPT;
+                if !opencode_rk_opentui_bridge::frame_offline_full::capped_push(transcript.len()) {
+                    let drop_count = transcript.len().saturating_sub(
+                        opencode_rk_opentui_bridge::frame_offline_full::MAX_OFFLINE_TRANSCRIPT - 1,
+                    );
                     transcript.drain(..drop_count);
                 }
             } else if label == "invalid" {
