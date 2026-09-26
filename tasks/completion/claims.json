@@ -82,6 +82,11 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP-012": {
+      "scratchpad": "worklog/APP-012.md",
+      "session": "ses_f231f94eaffe8vlPyMW3GEGO6J",
+      "status": "in-progress"
+    },
     "APP-012-TOOL-RED": {
       "scratchpad": "worklog/APP-012-TOOL-RED.md",
       "session": "ses_f2ec3a38fffer2ivp1cowx22WB",
