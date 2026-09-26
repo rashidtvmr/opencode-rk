@@ -82,6 +82,12 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP-012-TOOL-INTENT-RED": {
+      "blockedNote": "RED-only: T3 live fails as designed (Unknown tool: write, no broker denial) at 9cf998a; frozen test sha256 9a9e8424; T1+T2 guards pass; cmd CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test live_tool_broker -- --test-threads=1; GREEN implementer lane to follow",
+      "scratchpad": "worklog/APP-012-TOOL-INTENT-RED.md",
+      "session": "ses_f218525b5ffeOFVGPHuaWfu46V",
+      "status": "blocked"
+    },
     "APP-012-TOOL-RED": {
       "scratchpad": "worklog/APP-012-TOOL-RED.md",
       "session": "ses_f2ec3a38fffer2ivp1cowx22WB",
