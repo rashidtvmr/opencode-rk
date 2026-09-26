@@ -1172,6 +1172,11 @@
       "session": "ses_f226b7a89ffefS159kISJ5bllJ",
       "status": "blocked"
     },
+    "TUI-011-MAC-RPATH": {
+      "scratchpad": "worklog/TUI-011-MAC-RPATH.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "in-progress"
+    },
     "TUI-011-NATIVE-COMPILE-FIX": {
       "blockedNote": "frozen test tests/e2e/native_compile.rs unsafe: Stdio::piped + try_wait polling loop can deadlock on GREEN (pipes not drained in wait_or_kill); implementer is not verifier; repo-wide guard baseline blocked (convergence_gate/validate_repository FAIL backlog exhaustion); diagnostic direct native build is GREEN exit 0; not parent-completed",
       "scratchpad": "worklog/TUI-011-NATIVE-COMPILE-FIX.md",
