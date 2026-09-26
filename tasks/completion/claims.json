@@ -205,6 +205,12 @@
       "session": "ses_f216878cfffeiiHQHFrHhDp5Bb",
       "status": "blocked"
     },
+    "AUTHWEB-DIRECT-FETCH": {
+      "blockedNote": "RED-only: test compiles and fails with genuine HTTP 401 from local fixture (deleteDraftAttachment sends no bearer at api.ts:599-612). No implementation attempted per RED-only task scope. Frozen sha256 4c7201da9246717ccea089ddcf4f7c0befe749403be985e9d3a630926e3a879c.",
+      "scratchpad": "worklog/AUTHWEB-DIRECT-FETCH-RED.md",
+      "session": "ses_f215e9103ffeQRrS4n5lI5Ceyr",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
