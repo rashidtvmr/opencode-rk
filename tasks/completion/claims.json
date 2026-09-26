@@ -226,6 +226,12 @@
       "session": "ses_f216878cfffeiiHQHFrHhDp5Bb",
       "status": "blocked"
     },
+    "AUTHWEB-DIRECT-FETCH": {
+      "blockedNote": "RED-only: test compiles and fails with genuine HTTP 401 from local fixture (deleteDraftAttachment sends no bearer at api.ts:599-612). No implementation attempted per RED-only task scope. Frozen sha256 4c7201da9246717ccea089ddcf4f7c0befe749403be985e9d3a630926e3a879c.",
+      "scratchpad": "worklog/AUTHWEB-DIRECT-FETCH-RED.md",
+      "session": "ses_f215e9103ffeQRrS4n5lI5Ceyr",
+      "status": "blocked"
+    },
     "BASE-004": {
       "completedNote": "SHA-256 repair GREEN: daemon_long_path 1/1; daemon lib 24/24 incl sha256 abc vector; daemon_auth_api 5/5; cargo check clean. web_singleton_lock 1/2, unrelated legacy empty-token failure.",
       "scratchpad": "worklog/BASE-004.md",
