@@ -199,6 +199,12 @@
       "session": "ses_f41f2c26cffeFFRai2y6T8LbZo",
       "status": "completed"
     },
+    "AUTHWEB-BROWSER-RED": {
+      "blockedNote": "RED-only test-author candidate: Node 24 test compiled/executed and failed at real listSessions request with server 401 because browser client omitted Authorization; frozen SHA-256 f007aa291204204d366506c2c8b5149099317bb103da6fe915f8e4409e5a6a62. Not implementation completion or acceptance.",
+      "scratchpad": "worklog/AUTHWEB-BROWSER-RED.md",
+      "session": "ses_f216878cfffeiiHQHFrHhDp5Bb",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
