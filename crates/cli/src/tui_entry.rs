@@ -488,7 +488,7 @@ fn native_page_lines(
             }
             lines.push("─".repeat(width.min(120)));
             lines.push(format!("> {draft}"));
-            lines.push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context");
+            lines.push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context".to_string());
         }
         NativePage::Palette => {
             lines.push("Command palette".to_string());
