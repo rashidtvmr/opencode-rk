@@ -1,0 +1,2 @@
+# BRIDGE-GAP-98
+claim: cc.claim ses_gap98 ok. source: project.tsx:23-36 store project/instance-path, directory.ts:12-15 dir+vcs-branch label, args.tsx:3-11 Args props, context_session.rs style (forbid unsafe, bounded consts, in-file tests). target: crates/opentui-bridge/src/context_project.rs only. tests: empty_root_false, args_cap, label_format, vcs_default_git, arg_truncates, root_truncates. decisions: char-based truncate (unicode-safe); vcs default git; label "root [vcs] +N args". unknowns: none.

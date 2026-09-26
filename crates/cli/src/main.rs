@@ -5,12 +5,15 @@ use opencode_rk_contracts::{
     CapabilityReport, DiagnosticReport, MessageRole, SessionId, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_server::{
+    app_runtime::EnginePolicy,
     daemon::{
-        publish_backend_descriptor_with_auth, read_backend_descriptor, DaemonError, DaemonPaths,
-        SingletonDaemon,
+        publish_backend_descriptor_with_auth, read_backend_descriptor, BackendDescriptor,
+        DaemonError, DaemonPaths, SingletonDaemon,
     },
     daemon_auth::DaemonAuth,
-    router_with_auth, AppState,
+    router_with_auth,
+    runtime_wiring::{EngineLease, RuntimeWiring},
+    AppState,
 };
 use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
@@ -34,6 +37,7 @@ mod modals;
 mod native_app;
 mod native_approvals;
 mod native_composer;
+mod native_host;
 mod native_layout;
 mod native_navigation;
 mod native_palette;
@@ -54,7 +58,7 @@ mod tui_paint;
 const MODELS_DEV_URL: &str = "https://models.dev/api.json";
 #[derive(Debug, Parser)]
 #[command(
-    name = "opencode-rk",
+    name = "oc2",
     version,
     about = "Resource-efficient native coding-agent harness"
 )]
@@ -231,18 +235,24 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let plan = app_start::plan_default_launch(&probe, presence, creds);
             match plan.mode {
                 app_start::LaunchMode::NativeTui => {
-                    if cli.native {
+                    // A native-enabled release defaults to the real OpenTUI
+                    // path. Development builds without the native feature keep
+                    // the compatibility chat unless --native is explicit.
+                    if cli.native || cfg!(feature = "native") {
+                        let lease = chat::prepare_daemon(&data);
                         let args = TuiArgs {
                             once: cli.once,
-                            origin: None,
+                            origin: lease.origin().map(str::to_owned),
                             session: None,
                             follow: false,
                             follow_for: None,
+                            model: "openai/gpt-5.6".to_string(),
+                            reasoning_effort: "high".to_string(),
                             poll_ms: 1000,
                             submit_keymap: None,
                             memory: vec![],
                         };
-                        tui_entry::run(args)?;
+                        tui_entry::run_with_dir(args, Some(&data))?;
                     } else {
                         chat::run(&data)?;
                     }
@@ -275,13 +285,19 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let data = resolve_data_dir(cli.data_dir)?;
             web(data, args).await?;
         }
-        Some(Command::Tui(args)) => {
+        Some(Command::Tui(mut args)) => {
             let data = resolve_data_dir(cli.data_dir)?;
-            // Forward the resolved dir until the tui_entry lane lands its
-            // typed data-dir channel: its descriptor lookup honors
-            // OPENCODE_RK_HOME first, so an explicit --data-dir applies.
-            std::env::set_var("OPENCODE_RK_HOME", &data);
-            tui_entry::run(args)?;
+            // An explicit origin wins. Otherwise the TUI shares the exact
+            // singleton-daemon bootstrap used by the default application.
+            let lease = if args.origin.is_none() {
+                let lease = chat::prepare_daemon(&data);
+                args.origin = lease.origin().map(str::to_owned);
+                Some(lease)
+            } else {
+                None
+            };
+            tui_entry::run_with_dir(args, Some(&data))?;
+            drop(lease);
         }
         Some(Command::Run(args)) => {
             // Prompt via positional or --prompt; absent only matters for usage
@@ -622,6 +638,33 @@ async fn model_command(data: PathBuf, c: ModelCommand) -> Result<(), Box<dyn std
     }
     Ok(())
 }
+
+/// Bounded wait for the singleton owner to publish its authenticated
+/// descriptor. The `serve` AlreadyRunning path calls this: the PID lock is
+/// held by another process, so this caller must never bind a second
+/// listener. `Ok(None)` (absent, stale pid, schema mismatch, or non-loopback
+/// origin) is retryable until the monotonic deadline; `Err`
+/// (symlink/owner/oversize/malformed-or-empty-token/oversize-after-read)
+/// fails closed immediately and is propagated, never mapped to absence.
+/// `Ok(None)` is returned only at the deadline.
+async fn wait_for_owner_descriptor(
+    data: &std::path::Path,
+) -> Result<Option<BackendDescriptor>, DaemonError> {
+    const WAIT_BUDGET: std::time::Duration = std::time::Duration::from_millis(2000);
+    const WAIT_POLL: std::time::Duration = std::time::Duration::from_millis(25);
+    let deadline = std::time::Instant::now() + WAIT_BUDGET;
+    loop {
+        match read_backend_descriptor(data)? {
+            Some(descriptor) => return Ok(Some(descriptor)),
+            None => {}
+        }
+        if std::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        tokio::time::sleep(WAIT_POLL).await;
+    }
+}
+
 async fn web(data: PathBuf, args: WebArgs) -> Result<(), Box<dyn std::error::Error>> {
     if let Some(descriptor) = read_backend_descriptor(&data)? {
         println!("{}", descriptor.http_origin);
@@ -651,7 +694,13 @@ async fn serve(
     let daemon = match SingletonDaemon::bind(&daemon_paths.socket, &daemon_paths.pid) {
         Ok(daemon) => Arc::new(daemon),
         Err(DaemonError::AlreadyRunning(_)) => {
-            let descriptor = read_backend_descriptor(&data)?.ok_or_else(|| {
+            // The PID lock is held by the owner, which may still be
+            // publishing its descriptor. Poll boundedly for the valid
+            // authenticated descriptor instead of failing one-shot; a
+            // symlink/owner/oversize/malformed-or-empty-token refusal
+            // (`Err`) propagates immediately, and no second listener is
+            // ever bound here.
+            let descriptor = wait_for_owner_descriptor(&data).await?.ok_or_else(|| {
                 "backend is already running but its endpoint descriptor is unavailable".to_string()
             })?;
             println!("{}", descriptor.http_origin);
@@ -663,6 +712,17 @@ async fn serve(
         Err(error) => return Err(Box::new(error)),
     };
     let sessions = open_web_sessions(&data)?;
+    let _engine_lease = EngineLease::acquire()?;
+    let mut runtime_policy = EnginePolicy::default_deny();
+    for name in env::var("OPENCODE_RK_TURN_TOOLS")
+        .unwrap_or_default()
+        .split(',')
+        .map(str::trim)
+        .filter(|name| !name.is_empty())
+    {
+        runtime_policy.allow_tool(name.to_owned())?;
+    }
+    let runtime = RuntimeWiring::for_daemon(sessions.clone(), ToolRegistry::new(), runtime_policy);
     let path = args
         .models_file
         .unwrap_or_else(|| catalog_cache_path(&data));
@@ -690,7 +750,9 @@ async fn serve(
     let control = tokio::spawn(async move {
         daemon_accept.accept_clients().await;
     });
-    let result = axum::serve(listener, router_with_auth(AppState { sessions, catalog }, Some(credential))).await;
+    let app = router_with_auth(AppState { sessions, catalog }, Some(credential))
+        .layer(axum::Extension(runtime));
+    let result = axum::serve(listener, app).await;
     daemon.shutdown();
     let _ = control.await;
     result?;

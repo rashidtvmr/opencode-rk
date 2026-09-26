@@ -96,7 +96,7 @@ fn ok(msg: &str) -> RunExit {
     }
 }
 
-/// Reject `..`, absolute, empty, overlong attachment paths/names.
+/// Reject `..`, absolute (POSIX and drive-letter), empty, overlong names/paths.
 fn valid_name(s: &str) -> bool {
     if s.is_empty() || s.chars().count() > MAX_ATTACH_CHARS {
         return false;
@@ -104,10 +104,28 @@ fn valid_name(s: &str) -> bool {
     if s.starts_with('/') || s.starts_with('\\') {
         return false;
     }
+    let b = s.as_bytes();
+    if b.len() >= 2 && b[1] == b':' {
+        return false;
+    }
     if s.contains("..") {
         return false;
     }
     true
+}
+
+/// Flatten session into a spill filename with no separators (no traversal).
+/// Deterministic; safe sessions (`s1`, `sess`) map to themselves.
+fn spill_name(session: &str, tag: &str) -> String {
+    let mut safe = String::with_capacity(session.len());
+    for c in session.chars() {
+        if c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.' {
+            safe.push(c);
+        } else {
+            safe.push('_');
+        }
+    }
+    format!("{safe}-{tag}.spill")
 }
 
 /// Render one text section; spill oversize to caller dir.
@@ -143,7 +161,7 @@ fn preview_or_spill(
     let head_text = lines.join("\n");
     let head_bytes = head_text.as_bytes();
     let spilled_extra = bytes.len().saturating_sub(head_bytes.len());
-    let spill_name = format!("{session}-{tag}.spill");
+    let spill_name = spill_name(session, tag);
     let spill_path = spill_dir.join(&spill_name);
     if let Some(parent) = spill_path.parent() {
         if let Err(e) = std::fs::create_dir_all(parent) {

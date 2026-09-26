@@ -20,6 +20,7 @@ path = "src/main.rs"
 [dependencies]
 axum.workspace = true
 clap.workspace = true
+fs2.workspace = true
 opencode-rk-catalog = { path = "../catalog" }
 opencode-rk-contracts = { path = "../contracts" }
 opencode-rk-opentui-bridge = { path = "../opentui-bridge", optional = true }

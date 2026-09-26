@@ -8,7 +8,7 @@ use std::time::Instant;
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker};
 
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
 use tokio::time::{Duration, timeout as tokio_timeout};
 
@@ -203,41 +203,50 @@ impl ShellTool {
         }
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
-        let mut child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
+        let child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
         self.child = Some(child);
 
         // Borrow child for reading; take it back before we await kill on drop.
         let child_ref = self.child.as_mut().expect("child set");
 
-        let stdout_fut = async {
-            if let Some(mut out) = child_ref.stdout.take() {
-                let mut buf = Vec::with_capacity(8 * 1024);
-                let _ = out.read_to_end(&mut buf).await;
-                buf
+        let stdout = child_ref.stdout.take();
+        let stderr = child_ref.stderr.take();
+        let stdout_fut = async move {
+            if let Some(out) = stdout {
+                read_bounded(out, limit).await
             } else {
-                Vec::new()
+                Ok(Vec::new())
             }
         };
-        let stderr_fut = async {
-            if let Some(mut err) = child_ref.stderr.take() {
-                let mut buf = Vec::with_capacity(8 * 1024);
-                let _ = err.read_to_end(&mut buf).await;
-                buf
+        let stderr_fut = async move {
+            if let Some(err) = stderr {
+                read_bounded(err, limit).await
             } else {
-                Vec::new()
+                Ok(Vec::new())
             }
         };
 
         let start = Instant::now();
-        let (stdout_bytes, stderr_bytes) = tokio::join!(stdout_fut, stderr_fut);
+        let timeout_secs = config.timeout_secs.max(1);
+        let execution = async {
+            let (stdout_bytes, stderr_bytes) = tokio::join!(stdout_fut, stderr_fut);
+            let stdout_bytes = stdout_bytes?;
+            let stderr_bytes = stderr_bytes?;
+            let exit_code = child_ref.wait().await?.code();
+            Ok::<_, std::io::Error>((stdout_bytes, stderr_bytes, exit_code))
+        };
+        let (stdout_bytes, stderr_bytes, exit_code) =
+            tokio_timeout(Duration::from_secs(timeout_secs), execution)
+                .await
+                .map_err(|_| ShellError::Timeout(timeout_secs))??;
         let duration_ms = start.elapsed().as_millis();
 
         // Truncate to limit, converting bytes -> truncated flag.
         let stdout = truncate_to_limit(stdout_bytes, limit);
         let stderr = truncate_to_limit(stderr_bytes, limit);
 
-        let exit_code = child_ref.wait().await?.code();
         let success = exit_code == Some(0);
 
         // Clear child so drop cannot kill an already-reaped process.
@@ -255,7 +264,7 @@ impl ShellTool {
     /// Hard-cancel an in-flight command. Safe to call when no child exists.
     pub fn cancel(&mut self) {
         if let Some(child) = self.child.as_mut() {
-            let _ = child.kill();
+            let _ = child.start_kill();
         }
     }
 
@@ -273,7 +282,27 @@ impl Drop for ShellTool {
     }
 }
 
-/// Enforce a hard timeout on execution, returning `Cancelled` on timeout.
+async fn read_bounded<R>(mut reader: R, limit: usize) -> Result<Vec<u8>, std::io::Error>
+where
+    R: AsyncRead + Unpin,
+{
+    let retained_limit = limit.saturating_add(1);
+    let mut retained = Vec::with_capacity(retained_limit.min(8 * 1024));
+    let mut chunk = [0_u8; 8 * 1024];
+    loop {
+        let read = reader.read(&mut chunk).await?;
+        if read == 0 {
+            break;
+        }
+        let remaining = retained_limit.saturating_sub(retained.len());
+        if remaining > 0 {
+            retained.extend_from_slice(&chunk[..read.min(remaining)]);
+        }
+    }
+    Ok(retained)
+}
+
+/// Enforce a hard timeout on execution, returning [`ShellError::Timeout`].
 async fn with_timeout<T, F>(secs: u64, fut: F) -> Result<T, ShellError>
 where
     T: std::fmt::Debug,

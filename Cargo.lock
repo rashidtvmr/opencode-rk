@@ -924,6 +924,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
  "clap",
+ "fs2",
  "opencode-rk-catalog",
  "opencode-rk-contracts",
  "opencode-rk-opentui-bridge",

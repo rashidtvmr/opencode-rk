@@ -193,13 +193,24 @@ pub fn parse_loopback_port(origin: &str) -> Option<u16> {
     Some(port as u16)
 }
 
-/// Production PID-liveness check, same rule as `daemon::pid_alive`
-/// (`daemon.rs:43-48`): PID 0 is never alive; otherwise `/proc/<pid>` exists.
+/// Production PID-liveness check, same rule as `daemon::pid_alive`.
+/// Linux uses `/proc`; macOS uses the native `kill -0` probe because Darwin
+/// has no `/proc` mount. A missing or inaccessible process fails closed.
 pub fn pid_alive(pid: u32) -> bool {
     if pid == 0 {
         return false;
     }
-    std::path::Path::new(&format!("/proc/{pid}")).exists()
+    #[cfg(target_os = "linux")]
+    {
+        std::path::Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        std::process::Command::new("/bin/kill")
+            .args(["-0", &pid.to_string()])
+            .status()
+            .is_ok_and(|status| status.success())
+    }
 }
 
 /// Client/server schema version pair for health/version negotiation.
@@ -751,7 +762,7 @@ pub fn discover_presence(data_dir: &std::path::Path) -> crate::app_start::Daemon
             }
         })
         .unwrap_or(0);
-    let live = |pid: u32| std::path::Path::new(&format!("/proc/{pid}")).exists();
+    let live = pid_alive;
     match discover_from_path(&paths.descriptor, uid, live).ok() {
         Some(_) => crate::app_start::DaemonPresence::Reusable,
         None => match std::fs::symlink_metadata(&paths.descriptor) {

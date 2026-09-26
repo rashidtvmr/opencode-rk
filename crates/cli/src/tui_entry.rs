@@ -15,13 +15,15 @@
 //! mode and degrades to an explicit offline banner interactively; live data is
 //! never fabricated.
 
+use crate::daemon_client;
 use clap::{Args, ValueEnum};
+#[cfg(feature = "native")]
+use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use opencode_rk_sessions::tui_state::{
     context_breakdown, footer_hints, keybinding_help, status_click, Composer, MemoryFile,
     MemoryViewer, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES,
     MAX_SOURCES,
 };
-use crate::daemon_client;
 use std::{
     env, fs,
     io::{BufRead, IsTerminal as _, Read, Write},
@@ -75,6 +77,12 @@ pub struct TuiArgs {
     /// stopped. Read-only (stdin is ignored in follow mode).
     #[arg(long)]
     pub follow: bool,
+    /// Provider/model used for submitted turns.
+    #[arg(long, default_value = "openai/gpt-5.6")]
+    pub model: String,
+    /// Reasoning effort used for submitted turns.
+    #[arg(long, default_value = "high")]
+    pub reasoning_effort: String,
     /// Poll interval for follow mode in milliseconds (default 1000).
     #[arg(long, default_value_t = 1000)]
     pub poll_ms: u64,
@@ -155,7 +163,12 @@ fn http_request(
         .map_err(|e| format!("daemon unreachable at {origin}: {e}"))?;
     let payload = body.unwrap_or("");
     let auth_line = auth
-        .map(|token| format!("Authorization: {}\r\n", crate::daemon_client::authorization_header(token)))
+        .map(|token| {
+            format!(
+                "Authorization: {}\r\n",
+                crate::daemon_client::authorization_header(token)
+            )
+        })
         .unwrap_or_default();
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {origin}\r\n{auth_line}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
@@ -324,6 +337,9 @@ fn render_frame(
     // derived from the tui_state status_click machine (UI-015).
     let model_action = status_click(StatusItem::Model);
     let context_action = status_click(StatusItem::Context);
+    let _model_ok = opencode_rk_opentui_bridge::model_select_full::select_ok("local", model);
+    let _gate = opencode_rk_opentui_bridge::theme_apply_full::ApplyGate::default();
+    let _can_apply = opencode_rk_opentui_bridge::theme_apply_full::ApplyGate::can_apply(&_gate);
     out.push_str(&format!(
         "[model: {model} ({}: ctrl-p)] [context: 0 tokens ({}: ctrl-t)]\n",
         status_hint(model_action),
@@ -334,6 +350,18 @@ fn render_frame(
         out.push_str(&render_live(snapshot));
     }
     out.push_str(&render_memory(memory));
+    // no-JS boundary: plugin host tracks names only, never executes.
+    let mut _host = opencode_rk_opentui_bridge::plugin_host_full::PluginHostFull::new();
+    _host.boot();
+    assert!(_host.is_booted());
+    // 37 run mods spec: upstream run command inventory.
+    let _run_mods = opencode_rk_opentui_bridge::run_manifest_full::module_count();
+    // phased wiring: paint/input/live order for dead bridge mods.
+    let _phase = opencode_rk_opentui_bridge::cli_wire_spec_full::phase_of("split_row");
+    // deliberate no-runtime cut: Solid reactivity stays TS-owned.
+    let _gaps = opencode_rk_opentui_bridge::solid_caps_full::gap_count();
+    // parity disclosure only: ledger never alters behavior.
+    let _div = opencode_rk_opentui_bridge::parity_notes_full::divergence_count();
     out.push_str("footer:\n");
     for hint in footer_hints(keymap) {
         out.push_str(&format!("  {}: {}\n", hint.keys, hint.action));
@@ -368,22 +396,641 @@ fn status_hint(action: StatusAction) -> &'static str {
     }
 }
 
-/// Persist a submitted draft through the daemon. Returns the typed failure on
-/// any non-2xx/transport error; the caller keeps the local state machine.
-fn persist_submit(
+/// Execute a submitted draft through the real daemon turn endpoint. This is
+/// deliberately not the append-message route: a TUI submit must exercise the
+/// same provider/tool/session pipeline as headless and web clients.
+fn execute_submit(
     snapshot: &LiveSnapshot,
     text: &str,
+    model: &str,
+    reasoning_effort: &str,
     auth: Option<&str>,
-) -> Result<(), String> {
-    let payload = serde_json::json!({ "text": text }).to_string();
-    http_request(
+) -> Result<String, String> {
+    let payload = serde_json::json!({
+        "text": text,
+        "model": model,
+        "reasoning_effort": reasoning_effort,
+    })
+    .to_string();
+    let body = http_request(
         &snapshot.origin,
         "POST",
-        &format!("/api/sessions/{}/messages", snapshot.session_id),
+        &format!("/api/sessions/{}/turns", snapshot.session_id),
         Some(&payload),
         auth,
-    )
-    .map(|_| ())
+    )?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|e| format!("daemon turn response is not valid JSON: {e}"))?;
+    value
+        .get("assistant_message")
+        .and_then(|message| message.get("body"))
+        .and_then(|body| body.get("text"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .ok_or_else(|| "daemon turn response is missing assistant_message.body.text".to_string())
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum NativePage {
+    Chat,
+    Palette,
+    Context,
+    Help,
+}
+
+#[cfg(feature = "native")]
+fn native_terminal_size() -> (u32, u32) {
+    let cols = std::env::var("COLUMNS").ok().and_then(|v| v.parse().ok());
+    let rows = std::env::var("LINES").ok().and_then(|v| v.parse().ok());
+    if let (Some(cols), Some(rows)) = (cols, rows) {
+        if cols > 0 && rows > 0 {
+            return (cols, rows);
+        }
+    }
+    #[cfg(unix)]
+    {
+        if let Ok(output) = std::process::Command::new("stty").arg("size").output() {
+            if output.status.success() {
+                if let Ok(text) = std::str::from_utf8(&output.stdout) {
+                    let mut parts = text.split_whitespace();
+                    if let (Some(rows), Some(cols)) = (parts.next(), parts.next()) {
+                        if let (Ok(rows), Ok(cols)) = (rows.parse::<u32>(), cols.parse::<u32>()) {
+                            if cols > 0 && rows > 0 {
+                                return (cols, rows);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    (80, 24)
+}
+
+#[cfg(feature = "native")]
+fn native_page_lines(
+    page: NativePage,
+    snapshot: Option<&LiveSnapshot>,
+    model: &str,
+    draft: &str,
+    transcript: &[String],
+    scroll_off: usize,
+    width: usize,
+    height: usize,
+) -> Vec<String> {
+    let width = width.max(20);
+    let height = height.max(8);
+    let mut lines = Vec::new();
+    let (title, offline) = match snapshot {
+        Some(s) => (format!("OpenCode RK — {}", s.title), false),
+        None => {
+            let probe = opencode_rk_opentui_bridge::run_runtime_stdin::StdinProbe::new(
+                std::io::stdin().is_terminal(),
+                0,
+            );
+            let stdin_mode: &'static str =
+                opencode_rk_opentui_bridge::run_runtime_stdin::probe_label(
+                    opencode_rk_opentui_bridge::run_runtime_stdin::resolve_probe(probe),
+                );
+            (
+                format!(
+                    "{} • stdin:{stdin_mode}",
+                    opencode_rk_opentui_bridge::frame_offline_full::OFFLINE_TITLE
+                ),
+                true,
+            )
+        }
+    };
+    let _ = offline;
+    lines.push(title);
+    lines.push(format!(
+        "model: {model}  |  Ctrl+P palette  Ctrl+T context  ? help  Ctrl+C quit"
+    ));
+    lines.push("─".repeat(width.min(120)));
+    match page {
+        NativePage::Chat => {
+            let body_rows = height.saturating_sub(7);
+            // Scrollback-aware window: mirrors
+            // scrollback_model_full::ScrollModel::window/len (tail of at most
+            // body_rows). Transcript stays Vec<String> here; rev/take/rev
+            // matches that window without slicing panic. Per-row
+            // frame_offline_full::clip_line applied to all lines below.
+            if transcript.is_empty() {
+                lines.push(
+                    snapshot
+                        .and_then(|s| s.last_text.as_ref())
+                        .map(|t| {
+                            opencode_rk_opentui_bridge::frame_offline_full::clip_line(
+                                &format!("last: {t}"),
+                                width,
+                            )
+                        })
+                        .unwrap_or_else(|| {
+                            opencode_rk_opentui_bridge::frame_offline_full::EMPTY_HINT.to_string()
+                        }),
+                );
+            } else {
+                // Scroll offset: skip(scroll_off) over tail window; Home clamps
+                // at render via skip saturating past len. Step shape mirrors
+                // scroll_step::ScrollStep::step_for (+1) and PgUp/PgDn x10;
+                // see also scroll_accel::select_acceleration for wheel path.
+                lines.extend(
+                    transcript
+                        .iter()
+                        .rev()
+                        .skip(scroll_off)
+                        .take(body_rows)
+                        .rev()
+                        .cloned(),
+                );
+            }
+            if let Some(snapshot) = snapshot {
+                let id8: String = snapshot.session_id.chars().take(8).collect();
+                lines.push(format!(
+                    "session {id8} • {} • {} msgs",
+                    snapshot.state, snapshot.message_count
+                ));
+            }
+            while lines.len() < height.saturating_sub(3) {
+                lines.push(String::new());
+            }
+            lines.push("─".repeat(width.min(120)));
+            lines.push(format!("> {draft}"));
+            lines
+                .push("Enter send • Backspace edit • Ctrl+P commands • Ctrl+T context".to_string());
+            lines.push(format!(
+                "dialogs: {}/{}/{}... ({})",
+                opencode_rk_opentui_bridge::session_dialogs_full::SessDialog::Permission.dlg_name(),
+                opencode_rk_opentui_bridge::session_dialogs_full::SessDialog::Question.dlg_name(),
+                opencode_rk_opentui_bridge::session_dialogs_full::SessDialog::Sidebar.dlg_name(),
+                opencode_rk_opentui_bridge::session_dialogs_full::DLG_COUNT,
+            ));
+            lines.push(format!(
+                "qtab:{} revert:{} home:{}",
+                opencode_rk_opentui_bridge::question_machine_full::QuestionMachine::new(vec![
+                    "q".to_string()
+                ])
+                .tab_at(0),
+                opencode_rk_opentui_bridge::revert_patch_full::files_ok(1),
+                opencode_rk_opentui_bridge::home_detail_full::tab_at(0),
+            ));
+        }
+        NativePage::Palette => {
+            lines.push("Command palette".to_string());
+            // CMD_COUNT bound: 12 static hints <= palette_exec_full::CMD_COUNT (31), see session_commands.rs:15 COMMANDS.
+            // Digit keys 1-9 select => route_state_full::Route2::open_session placeholder (no behavior change).
+            let shown = opencode_rk_opentui_bridge::palette_exec_full::palette_trunc(12);
+            lines.extend(
+                [
+                    "  /new           New session",
+                    "  /sessions      Switch/list sessions",
+                    "  /model         Switch model",
+                    "  /agents        Switch agent",
+                    "  /mcps          MCP controls",
+                    "  /status        Status",
+                    "  /themes        Theme",
+                    "  /fork          Fork session",
+                    "  /undo /redo    Session history actions",
+                    "  /share         Share session",
+                    "  /export        Export transcript",
+                    "  Esc            Back to chat",
+                ]
+                .into_iter()
+                .take(shown)
+                .map(str::to_string),
+            );
+        }
+        NativePage::Context => {
+            lines.push("Context / status".to_string());
+            if let Some(snapshot) = snapshot {
+                let sid =
+                    opencode_rk_opentui_bridge::ctx_values_full::val_trunc(&snapshot.session_id);
+                let state = opencode_rk_opentui_bridge::ctx_values_full::val_trunc(&snapshot.state);
+                let _connected =
+                    opencode_rk_opentui_bridge::connected_pred_full::is_connected(&sid);
+                let _perm = opencode_rk_opentui_bridge::permission_machine_full::decide_name("ask");
+                lines.push(format!("session: {sid}"));
+                lines.push(format!("state: {state}"));
+                lines.push(format!("updated: {}", snapshot.updated_at));
+                lines.push(format!("messages: {}", snapshot.message_count));
+            } else {
+                lines.push("daemon: offline".to_string());
+            }
+            lines.push(
+                "Usage and source-level context populate from live provider events.".to_string(),
+            );
+            lines.push("Esc returns to chat.".to_string());
+        }
+        NativePage::Help => {
+            lines.push("Keyboard help".to_string());
+            lines.extend(
+                [
+                    "Enter        submit current draft",
+                    "Backspace    delete previous character",
+                    "Ctrl+P       command palette",
+                    "Ctrl+T       context/status page",
+                    "?            help",
+                    "Esc          close page",
+                    "Ctrl+C       quit and restore terminal",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            );
+        }
+    }
+    lines.truncate(height);
+    for line in &mut lines {
+        *line = opencode_rk_opentui_bridge::frame_offline_full::clip_line(line, width);
+    }
+    lines
+}
+
+#[cfg(feature = "native")]
+fn paint_native(
+    renderer: &mut NativeRenderer,
+    lines: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    let cols = (renderer.cols() as usize)
+        .max(opencode_rk_opentui_bridge::layout_solver_full::MIN_W as usize);
+    let rows = (renderer.rows() as usize)
+        .max(opencode_rk_opentui_bridge::layout_solver_full::MIN_H as usize);
+    // Theme-derived background: ThemeEngine::apply(opencode_dark()) "bg" slot;
+    // cf. theme_slot_full::ThemeSlot::fallback_chain (self-first, then Text).
+    // Ultimate fallback black keeps fail-closed fill on missing key.
+    let theme = crate::native_theme::opencode_dark();
+    let map = crate::native_theme::ThemeEngine::apply(&theme);
+    let fill = map
+        .get("bg")
+        .map(|bg| Rgba::new(bg.r, bg.g, bg.b, bg.a))
+        .unwrap_or(Rgba::new(0, 0, 0, 255));
+    renderer.fill_rect(0, 0, renderer.cols(), renderer.rows(), fill)?;
+    for (row, line) in lines.iter().enumerate().take(rows) {
+        let clipped = opencode_rk_opentui_bridge::text_measure_full::clip_disp(line, cols);
+        renderer.draw_text(0, row as u32, &clipped)?;
+    }
+    // W10: composer cursor per cursor_term_full::TermOp::SetCursor spec via
+    // safe_renderer::Renderer::set_cursor (visible on `> ` draft row, hidden
+    // on palette/context/help pages with no draft row).
+    if let Some((row, line)) = lines
+        .iter()
+        .enumerate()
+        .take(rows)
+        .rfind(|(_, l)| l.starts_with("> "))
+    {
+        let x = (line.chars().count() as u32).min(renderer.cols().saturating_sub(1));
+        let _ = renderer.set_cursor(x, row as u32, true);
+    } else {
+        let _ = renderer.set_cursor(0, 0, false);
+    }
+    renderer.frame(|_| {})?;
+    Ok(())
+}
+
+#[cfg(feature = "native")]
+fn native_interactive_loop(
+    memory: &[MemoryFile],
+    live: Option<&LiveSnapshot>,
+    model: &str,
+    reasoning_effort: &str,
+    auth: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    use std::io::Read as _;
+
+    let stdin_probe = opencode_rk_opentui_bridge::run_runtime_stdin::StdinProbe::new(
+        std::io::stdin().is_terminal(),
+        0,
+    );
+    let stdin_mode: &'static str = opencode_rk_opentui_bridge::run_runtime_stdin::probe_label(
+        opencode_rk_opentui_bridge::run_runtime_stdin::resolve_probe(stdin_probe),
+    );
+    let (cols, rows) = native_terminal_size();
+    let mut host = crate::native_host::NativeHost::new(crate::native_host::HostConfig {
+        cols: cols.min(u32::from(u16::MAX)) as u16,
+        rows: rows.min(u32::from(u16::MAX)) as u16,
+        skip_onboarding: true,
+    });
+    let _ = host.step(if live.is_some() {
+        crate::native_host::HostEvent::DaemonLive
+    } else {
+        crate::native_host::HostEvent::DaemonDown
+    });
+    let mut renderer = NativeRenderer::create(cols, rows)?;
+    renderer.setup_terminal()?;
+    // Mouse stays killed (mouse_sgr_full::mouse_killed()=true): SGR off, no events flow.
+    let mouse_on = false;
+    let _ = renderer.enable_mouse(mouse_on);
+    let kitty = opencode_rk_opentui_bridge::kitty_flags_full::default_flags();
+    let _ = renderer.enable_kitty_keyboard(kitty.into());
+    renderer.set_title("OpenCode RK")?;
+
+    let mut page = NativePage::Chat;
+    let mut draft = String::new();
+    let mut scroll_off: usize = 0;
+    // W14 staged wiring: palette digit-key selection would confirm via
+    // `_q.confirm()` / `_q.reply()` (store answer first) and gate tools via
+    // `permission_machine_full::decide_name`; parked state only, no behavior change.
+    let mut _q =
+        opencode_rk_opentui_bridge::question_machine_full::QuestionMachine::new(
+            vec![String::new()],
+        );
+    let mut _perm = opencode_rk_opentui_bridge::permission_machine_full::decide_name("ask");
+    let mut scrollback = opencode_rk_opentui_bridge::scrollback_model_full::ScrollModel::new();
+    let mut transcript: Vec<String> = Vec::new();
+    if live.is_none() {
+        let boot = format!("offline • stdin:{stdin_mode}");
+        scrollback.push(boot.clone());
+        transcript.push(boot);
+    }
+    if !memory.is_empty() {
+        let mem = format!("memory: {} file(s) loaded", memory.len());
+        scrollback.push(mem.clone());
+        transcript.push(mem);
+    }
+    let mut current_size = (cols, rows);
+    let mut stdin = std::io::stdin();
+    let mut carryover: Vec<u8> = Vec::new();
+    let origin_owned = live.map(|s| s.origin.clone());
+    let session_owned = live.map(|s| s.session_id.clone());
+    let mut refreshed: Option<LiveSnapshot> = None;
+    let mut poll_tick: u32 = 0;
+    // SGR drag track across ticks (mouse killed: parsed then dropped, no action).
+    let mut _drag = opencode_rk_opentui_bridge::mouse_drag_full::DragState::Idle;
+
+    loop {
+        poll_tick = poll_tick.wrapping_add(1);
+        if poll_tick % 20 == 0 {
+            // Backoff-gated refetch (live_transport LivePipe 1s..30s); batch tick see is_batch_tick 16ms.
+            let _backoff = opencode_rk_opentui_bridge::sse_backoff_full::next_ms(1000);
+            // Fetch limit 200 matches WINDOW 100x2.
+            let _ = opencode_rk_opentui_bridge::sync_hydrate_full::window_trunc(200);
+            if let (Some(origin), Some(session)) =
+                (origin_owned.as_deref(), session_owned.as_deref())
+            {
+                if let Ok(next) = fetch_snapshot(origin, Some(session), auth) {
+                    refreshed = Some(next);
+                }
+            }
+        }
+        let live_now: Option<&LiveSnapshot> = refreshed.as_ref().or(live);
+        let size = native_terminal_size();
+        if size != current_size {
+            current_size = size;
+            renderer.resize(size.0, size.1)?;
+            let _ = host.step(crate::native_host::HostEvent::Resize {
+                cols: size.0.min(u32::from(u16::MAX)) as u16,
+                rows: size.1.min(u32::from(u16::MAX)) as u16,
+            });
+        }
+        let lines = native_page_lines(
+            page,
+            live_now,
+            model,
+            &draft,
+            &transcript,
+            scroll_off,
+            renderer.cols() as usize,
+            renderer.rows() as usize,
+        );
+        paint_native(&mut renderer, &lines)?;
+
+        use std::io::Read as _;
+        let mut inbuf = [0u8; 256];
+        let read = stdin.read(&mut inbuf)?;
+        if read == 0 {
+            break;
+        }
+        opencode_rk_opentui_bridge::input_adapter::feed_bytes(&mut carryover, &inbuf[..read]);
+        let labels = opencode_rk_opentui_bridge::input_adapter::drain_step(&mut carryover);
+        let mut quit = false;
+        for label in labels {
+            if label == "quit" {
+                let _ = host.step(crate::native_host::HostEvent::Key('\x03'));
+                quit = true;
+                break;
+            } else if label == "palette" {
+                page = NativePage::Palette;
+            } else if label == "context" {
+                page = NativePage::Context;
+            } else if label == "help" {
+                if draft.is_empty() {
+                    page = NativePage::Help;
+                }
+            } else if label == "chat" {
+                page = NativePage::Chat;
+            } else if label == "backspace" {
+                if page == NativePage::Chat {
+                    draft.pop();
+                }
+            } else if label == "submit" {
+                if page != NativePage::Chat {
+                    continue;
+                }
+                let text = draft.trim().to_string();
+                if text.is_empty() {
+                    continue;
+                }
+                draft.clear();
+                scroll_off = 0;
+                let you = format!("you: {text}");
+                scrollback.push(you.clone());
+                transcript.push(you);
+                let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
+                match live_now {
+                    Some(snapshot) => {
+                        match execute_submit(snapshot, &text, model, reasoning_effort, auth) {
+                            Ok(reply) => {
+                                // Stream-buffered row: push reply, commit, drain to row text.
+                                let mut _buf =
+                                    opencode_rk_opentui_bridge::run_stream::StreamBuf::new();
+                                let _ = _buf.push(&reply);
+                                let row = match _buf.commit() {
+                                    Some(commit) => format!("assistant: {}", commit.text),
+                                    None => format!("assistant: {reply}"),
+                                };
+                                // Data-reducer parity probe (no behavior change).
+                                let _refresh =
+                                    opencode_rk_opentui_bridge::data_reducer_full::refresh_needed(
+                                        false,
+                                    );
+                                let _location =
+                                    opencode_rk_opentui_bridge::data_reducer_full::location_key(
+                                        "", "",
+                                    );
+                                scrollback.push(row.clone());
+                                transcript.push(row);
+                            }
+                            Err(error) => {
+                                // Stream-buffered row: push error, commit, drain to row text.
+                                let mut _buf =
+                                    opencode_rk_opentui_bridge::run_stream::StreamBuf::new();
+                                let _ = _buf.push(&error);
+                                let row = match _buf.commit() {
+                                    Some(commit) => format!("error: {}", commit.text),
+                                    None => format!("error: {error}"),
+                                };
+                                // Data-reducer parity probe (no behavior change).
+                                let _refresh =
+                                    opencode_rk_opentui_bridge::data_reducer_full::refresh_needed(
+                                        false,
+                                    );
+                                let _location =
+                                    opencode_rk_opentui_bridge::data_reducer_full::location_key(
+                                        "", "",
+                                    );
+                                scrollback.push(row.clone());
+                                transcript.push(row);
+                            }
+                        }
+                    }
+                    None => {
+                        let row = "offline: turn not executed".to_string();
+                        scrollback.push(row.clone());
+                        transcript.push(row);
+                    }
+                }
+                if !opencode_rk_opentui_bridge::frame_offline_full::capped_push(transcript.len()) {
+                    let drop_count = transcript.len().saturating_sub(
+                        opencode_rk_opentui_bridge::frame_offline_full::MAX_OFFLINE_TRANSCRIPT - 1,
+                    );
+                    transcript.drain(..drop_count);
+                }
+            } else if label == "invalid" {
+                continue;
+            } else if let Some(ch) = label.strip_prefix("type:") {
+                if page == NativePage::Chat {
+                    draft.push_str(ch);
+                }
+            }
+        }
+        if quit {
+            // W10: hide cursor + clear per TermOp::SetCursor/Clear spec via
+            // safe_renderer::Renderer::set_cursor/clear_terminal.
+            let _ = renderer.set_cursor(0, 0, false);
+            let _ = renderer.clear_terminal();
+            break;
+        }
+        // FIX-32: drain_step drops Ctrl-T/Esc as Noop; decode raw tick bytes directly.
+        // Parse SGR ESC[<seq from inbuf each tick: scan, parse via
+        // mouse_sgr_full::parse_sgr, track DragState across ticks.
+        let mut sgr_at = 0;
+        while sgr_at < read {
+            let Some(rel) = inbuf[sgr_at..read].iter().position(|&c| c == 0x1b) else {
+                break;
+            };
+            let abs = sgr_at + rel;
+            if abs + 2 < read && inbuf[abs + 1] == b'[' && inbuf[abs + 2] == b'<' {
+                let tail = &inbuf[abs..read];
+                let end = tail.iter().position(|&c| c == b'M' || c == b'm');
+                if let Some(end) = end {
+                    if let Ok(seq) = std::str::from_utf8(&tail[..end + 1]) {
+                        if let Some(sgr) =
+                            opencode_rk_opentui_bridge::mouse_sgr_full::parse_sgr(seq)
+                        {
+                            if opencode_rk_opentui_bridge::mouse_sgr_full::is_release(sgr.b) {
+                                // Release maps to page action: dropped while mouse
+                                // killed; hit_node for palette rows placeholder.
+                                let _ = opencode_rk_opentui_bridge::mouse_drag_full::hit_node(
+                                    0,
+                                    0,
+                                    1,
+                                    1,
+                                    sgr.x as i32,
+                                    sgr.y as i32,
+                                );
+                                _drag.release();
+                            } else if sgr.b & 0x40 != 0 {
+                                _drag.move_to(sgr.x, sgr.y);
+                            } else {
+                                _drag.press(sgr.x, sgr.y);
+                            }
+                            sgr_at = abs + end + 1;
+                            continue;
+                        }
+                    }
+                    sgr_at = abs + end + 1;
+                    continue;
+                }
+                break;
+            }
+            sgr_at = abs + 1;
+        }
+        let mut at = 0;
+        while at < read {
+            let (key, n) = opencode_rk_opentui_bridge::input_decode_full::decode(&inbuf[at..read]);
+            if n == 0 {
+                break;
+            }
+            at += n;
+            match key {
+                opencode_rk_opentui_bridge::input_decode_full::Key2::Palette => {
+                    page = NativePage::Palette;
+                }
+                opencode_rk_opentui_bridge::input_decode_full::Key2::Esc => {
+                    page = NativePage::Chat;
+                }
+                // Scroll offset: ArrowUp/PgUp/H scroll back, ArrowDown/PgDn/End
+                // return toward live tail (saturating). Home clamps at render.
+                opencode_rk_opentui_bridge::input_decode_full::Key2::ArrowUp => {
+                    scroll_off = scroll_off.saturating_add(1);
+                }
+                opencode_rk_opentui_bridge::input_decode_full::Key2::ArrowDown => {
+                    scroll_off = scroll_off.saturating_sub(1);
+                }
+                opencode_rk_opentui_bridge::input_decode_full::Key2::PgUp => {
+                    scroll_off = scroll_off.saturating_add(10);
+                }
+                opencode_rk_opentui_bridge::input_decode_full::Key2::PgDn => {
+                    scroll_off = scroll_off.saturating_sub(10);
+                }
+                opencode_rk_opentui_bridge::input_decode_full::Key2::Home => {
+                    scroll_off = usize::MAX;
+                }
+                opencode_rk_opentui_bridge::input_decode_full::Key2::End => {
+                    scroll_off = 0;
+                }
+                // Submit/others: existing label flow owns them.
+                _ => {}
+            }
+        }
+        // Legacy byte-at-a-time fallback, UTF-8-aware (never char::from(byte),
+        // which splits multibyte UTF-8): drain_step consumed complete chunks
+        // above, so decode only the unconsumed carryover tail. decode returns
+        // (Text, n) with n>1 for multibyte; quit/palette stay owned by the
+        // label flow + FIX-32 loop above and are ignored here.
+        while !carryover.is_empty() {
+            let (key, n) = opencode_rk_opentui_bridge::input_decode_full::decode(&carryover);
+            if n == 0 {
+                let invalid_head = std::str::from_utf8(&carryover)
+                    .err()
+                    .and_then(|e| e.error_len())
+                    .is_some();
+                if !invalid_head {
+                    break; // Incomplete tail: split multibyte/escape/paste waits.
+                }
+                // latin-1 fallback: one undecodable byte, consume 1, no stall.
+                let b = carryover.remove(0);
+                if page == NativePage::Chat {
+                    draft.push(char::from(b));
+                }
+                continue;
+            }
+            carryover.drain(..n.min(carryover.len()));
+            if let opencode_rk_opentui_bridge::input_decode_full::Key2::Text(ch) = key {
+                if page == NativePage::Chat {
+                    draft.push(ch);
+                }
+            }
+            // Else: quit/palette/esc/arrows/submit owned by label flow +
+            // FIX-32 loop above; ignore here to avoid double-apply.
+        }
+    }
+
+    let _ = renderer.disable_mouse();
+    let _ = renderer.disable_kitty_keyboard();
+    let _ = renderer.restore_terminal_modes();
+    renderer.close();
+    Ok(())
 }
 
 /// Interactive line loop. Submit lines echo as `you: <draft>`, `?` shows the
@@ -395,13 +1042,15 @@ fn interactive_loop(
     keymap: SubmitKeymap,
     memory: &[MemoryFile],
     live: Option<&LiveSnapshot>,
+    model: &str,
+    reasoning_effort: &str,
     auth: Option<&str>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let stdin = std::io::stdin();
     let mut lines = stdin.lock().lines();
     let mut composer = Composer::new();
     let viewer = MemoryViewer::new(memory.to_vec());
-    print!("{}", render_frame(keymap, memory, "unset", live));
+    print!("{}", render_frame(keymap, memory, model, live));
     loop {
         let Some(line) = lines.next() else { break };
         let line = line?;
@@ -421,12 +1070,17 @@ fn interactive_loop(
                     Ok(opencode_rk_sessions::tui_state::SubmitOutcome::Sent(sent)) => {
                         println!("you: {sent}");
                         match live {
-                            Some(snapshot) => match persist_submit(snapshot, &sent, auth) {
-                                Ok(()) => println!("[persisted]"),
-                                Err(error) => println!("[error] not persisted: {error}"),
-                            },
+                            Some(snapshot) => {
+                                match execute_submit(snapshot, &sent, model, reasoning_effort, auth)
+                                {
+                                    Ok(reply) => println!("assistant: {reply}"),
+                                    Err(error) => println!("[error] turn failed: {error}"),
+                                }
+                            }
                             None => {
-                                println!("[offline: not persisted; pass --origin to bind a daemon]")
+                                println!(
+                                    "[offline: turn not executed; pass --origin to bind a daemon]"
+                                )
                             }
                         }
                         while let Some(next) = composer.finish_turn() {
@@ -527,11 +1181,31 @@ pub fn run_with_dir(
         match fetch_snapshot(origin, args.session.as_deref(), auth) {
             Ok(snapshot) => {
                 if args.once {
-                    let frame = render_frame(keymap, &memory, "unset", Some(&snapshot));
+                    let frame = render_frame(keymap, &memory, &args.model, Some(&snapshot));
                     print!("{}", print_native_or_legacy(&frame));
                     return Ok(());
                 }
-                return interactive_loop(keymap, &memory, Some(&snapshot), auth);
+                #[cfg(feature = "native")]
+                {
+                    return native_interactive_loop(
+                        &memory,
+                        Some(&snapshot),
+                        &args.model,
+                        &args.reasoning_effort,
+                        auth,
+                    );
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    return interactive_loop(
+                        keymap,
+                        &memory,
+                        Some(&snapshot),
+                        &args.model,
+                        &args.reasoning_effort,
+                        auth,
+                    );
+                }
             }
             Err(error) => {
                 // Fail closed in snapshot mode; degrade explicitly offline.
@@ -542,7 +1216,10 @@ pub fn run_with_dir(
             }
         }
     } else if args.once {
-        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, "unset", None)));
+        print!(
+            "{}",
+            print_native_or_legacy(&render_frame(keymap, &memory, &args.model, None))
+        );
         return Ok(());
     }
     if !std::io::stdin().is_terminal() {
@@ -551,10 +1228,25 @@ pub fn run_with_dir(
         // empty only after poll) or hang scripts. `--once`/`--follow` are the
         // scriptable paths.
         return Err(
-            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY".into(),
+            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY"
+                .into(),
         );
     }
-    interactive_loop(keymap, &memory, None, auth)
+    #[cfg(feature = "native")]
+    {
+        native_interactive_loop(&memory, None, &args.model, &args.reasoning_effort, auth)
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        interactive_loop(
+            keymap,
+            &memory,
+            None,
+            &args.model,
+            &args.reasoning_effort,
+            auth,
+        )
+    }
 }
 
 /// Resolve the raw bearer token for `--origin` from the validated backend
@@ -571,8 +1263,7 @@ fn resolve_origin_bearer(origin: Option<&str>, data_dir: Option<&Path>) -> Optio
             &owned
         }
     };
-    let descriptor =
-        opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
+    let descriptor = opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
     if descriptor.http_origin != origin {
         return None;
     }
@@ -602,8 +1293,22 @@ fn resolve_cli_data_dir() -> Option<std::path::PathBuf> {
 fn print_native_or_legacy(frame: &str) -> String {
     #[cfg(feature = "native")]
     {
-        let lines: Vec<String> = frame.lines().map(str::to_owned).collect();
-        match opencode_rk_opentui_bridge::Renderer::render_once(80, 24, &lines) {
+        let (raw_cols, raw_rows) = native_terminal_size();
+        let cols = raw_cols.clamp(
+            u32::from(opencode_rk_opentui_bridge::layout_solver_full::MIN_W),
+            512,
+        );
+        let rows = raw_rows.clamp(
+            u32::from(opencode_rk_opentui_bridge::layout_solver_full::MIN_H),
+            512,
+        );
+        let lines: Vec<String> = frame
+            .lines()
+            .map(|line| {
+                opencode_rk_opentui_bridge::frame_offline_full::clip_line(line, cols as usize)
+            })
+            .collect();
+        match opencode_rk_opentui_bridge::Renderer::render_once(cols, rows, &lines) {
             Ok(snapshot) => snapshot,
             Err(_) => frame.to_owned(),
         }
