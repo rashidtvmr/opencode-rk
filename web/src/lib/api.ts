@@ -188,6 +188,12 @@ function apiHeaders(path: string, headers?: HeadersInit): Headers {
   if (path.startsWith('/api/')) {
     const token = consumeBrowserCredential()
     if (token) result.set('authorization', `Bearer ${token}`)
+    else if (
+      typeof window !== 'undefined' &&
+      !window.location.hash.startsWith('#oc2-token=')
+    ) {
+      throw new ApiError(401, 'Re-authentication required: relaunch the authenticated browser session')
+    }
   }
   return result
 }
