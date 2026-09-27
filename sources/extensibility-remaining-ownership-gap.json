@@ -14,25 +14,51 @@
     "EXT-012"
   ],
   "storySurfaceSignatures": {
-    "EXT-004": ["opencode.extensibility"],
-    "EXT-006": ["opencode.extensibility"],
-    "EXT-009": ["opencode.extensibility"],
-    "EXT-010": ["opencode.extensibility"],
-    "EXT-011": ["opencode.extensibility"],
-    "EXT-012": ["opencode.extensibility"]
+    "EXT-004": [
+      "opencode.extensibility"
+    ],
+    "EXT-006": [
+      "opencode.extensibility"
+    ],
+    "EXT-009": [
+      "opencode.extensibility"
+    ],
+    "EXT-010": [
+      "opencode.extensibility"
+    ],
+    "EXT-011": [
+      "opencode.extensibility"
+    ],
+    "EXT-012": [
+      "opencode.extensibility"
+    ]
   },
   "equivalenceGroups": [
     {
       "id": "generic-disc-placeholder",
-      "storyIds": ["EXT-004", "EXT-006", "EXT-010", "EXT-011"],
+      "storyIds": [
+        "EXT-004",
+        "EXT-006",
+        "EXT-010",
+        "EXT-011"
+      ],
       "requirementIds": [],
-      "surfaceSignature": ["opencode.extensibility"]
+      "surfaceSignature": [
+        "opencode.extensibility"
+      ]
     },
     {
       "id": "req005-v2-plugin-ui",
-      "storyIds": ["EXT-009", "EXT-012"],
-      "requirementIds": ["REQ-005"],
-      "surfaceSignature": ["opencode.extensibility"]
+      "storyIds": [
+        "EXT-009",
+        "EXT-012"
+      ],
+      "requirementIds": [
+        "REQ-005"
+      ],
+      "surfaceSignature": [
+        "opencode.extensibility"
+      ]
     }
   ],
   "ownershipDecision": {
@@ -44,17 +70,62 @@
     "EXT-012": null
   },
   "taskBindingState": {
-    "EXT-004": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "EXT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "EXT-009": {"controllerStatus":"in-progress","ralphStory":"TBD - see source audit","requirementIds":["REQ-005"],"taskCard":null,"worklog":null},
-    "EXT-010": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "EXT-011": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "EXT-012": {"controllerStatus":"in-progress","ralphStory":"TBD - see source audit","requirementIds":["REQ-005"],"taskCard":null,"worklog":null}
+    "EXT-004": {
+      "controllerStatus": "accepted",
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "EXT-006": {
+      "controllerStatus": "accepted",
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "EXT-009": {
+      "controllerStatus": "accepted",
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-005"
+      ],
+      "taskCard": null,
+      "worklog": null
+    },
+    "EXT-010": {
+      "controllerStatus": "accepted",
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "EXT-011": {
+      "controllerStatus": "accepted",
+      "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+      "requirementIds": [],
+      "taskCard": null,
+      "worklog": null
+    },
+    "EXT-012": {
+      "controllerStatus": "accepted",
+      "ralphStory": "TBD - see source audit",
+      "requirementIds": [
+        "REQ-005"
+      ],
+      "taskCard": null,
+      "worklog": null
+    }
   },
   "requirementTopology": {
     "REQ-005": {
       "requirement": "OpenCode V2 plugins including UI behavior",
-      "tasks": ["EXT-005", "EXT-009", "EXT-012", "UI-012"],
+      "tasks": [
+        "EXT-005",
+        "EXT-009",
+        "EXT-012",
+        "UI-012"
+      ],
       "conclusion": "After excluding the separately guarded EXT-005 compatibility ambiguity and dependency-constrained UI-012, EXT-009 and EXT-012 remain requirement-identical. Requirement subtraction does not define which plugin lifecycle or UI-adjacent behavior belongs to either row."
     }
   },
@@ -69,23 +140,80 @@
     ".opencode/**"
   ],
   "excludedOwners": [
-    {"id":"EXT-001","disposition":"guarded-by-REQ-017-extensibility-gap"},
-    {"id":"EXT-002","disposition":"guarded-by-REQ-017-extensibility-gap"},
-    {"id":"EXT-003","disposition":"local-implemented-stale","implementationCommit":"31a5adec20d0e70a2e02f4fdc1d626c14c5098b6"},
-    {"id":"EXT-005","disposition":"guarded-adjacent-singleton-compatibility-ambiguity"},
-    {"id":"EXT-007","disposition":"local-implemented-stale","implementationCommit":"b76d6126c97f928b5145dd19b6bdec1c4e70aa83"},
-    {"id":"EXT-008","disposition":"explicit-blocker","reasonKey":"plugin-hook-contract-mismatch"},
-    {"id":"UI-012","disposition":"dependency-constrained","reasonKey":"client-architecture-dependency"}
+    {
+      "id": "EXT-001",
+      "disposition": "guarded-by-REQ-017-extensibility-gap"
+    },
+    {
+      "id": "EXT-002",
+      "disposition": "guarded-by-REQ-017-extensibility-gap"
+    },
+    {
+      "id": "EXT-003",
+      "disposition": "local-implemented-stale",
+      "implementationCommit": "31a5adec20d0e70a2e02f4fdc1d626c14c5098b6"
+    },
+    {
+      "id": "EXT-005",
+      "disposition": "guarded-adjacent-singleton-compatibility-ambiguity"
+    },
+    {
+      "id": "EXT-007",
+      "disposition": "local-implemented-stale",
+      "implementationCommit": "b76d6126c97f928b5145dd19b6bdec1c4e70aa83"
+    },
+    {
+      "id": "EXT-008",
+      "disposition": "explicit-blocker",
+      "reasonKey": "plugin-hook-contract-mismatch"
+    },
+    {
+      "id": "UI-012",
+      "disposition": "dependency-constrained",
+      "reasonKey": "client-architecture-dependency"
+    }
   ],
   "reviewedPartitions": [
     {
       "id": "plugin-v2-lifecycle",
       "candidateTaskOwner": null,
       "evidence": [
-        {"kind":"source","path":"packages/core/src/plugin.ts","blobSha":"a89cdfda5f0a58e674fec3641911abd6fe3d977b","reviewedLines":{"from":19,"to":167}},
-        {"kind":"caller","path":"packages/core/src/plugin/internal.ts","blobSha":"d4ab71cb6b04d3c696b58bc865245b746cec5741","reviewedLines":{"from":54,"to":153}},
-        {"kind":"test","path":"packages/core/test/plugin.test.ts","blobSha":"1e278976539b06711d0b967e403932dad52c09ee","reviewedLines":{"from":11,"to":71}},
-        {"kind":"spec","path":"specs/v2/catalog-config-plugin-lifecycle.md","blobSha":"785b6826b904f664fef1126483305076ef97f465","reviewedLines":{"from":1,"to":189}}
+        {
+          "kind": "source",
+          "path": "packages/core/src/plugin.ts",
+          "blobSha": "a89cdfda5f0a58e674fec3641911abd6fe3d977b",
+          "reviewedLines": {
+            "from": 19,
+            "to": 167
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/core/src/plugin/internal.ts",
+          "blobSha": "d4ab71cb6b04d3c696b58bc865245b746cec5741",
+          "reviewedLines": {
+            "from": 54,
+            "to": 153
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/plugin.test.ts",
+          "blobSha": "1e278976539b06711d0b967e403932dad52c09ee",
+          "reviewedLines": {
+            "from": 11,
+            "to": 71
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/v2/catalog-config-plugin-lifecycle.md",
+          "blobSha": "785b6826b904f664fef1126483305076ef97f465",
+          "reviewedLines": {
+            "from": 1,
+            "to": 189
+          }
+        }
       ],
       "inputs": "plugin id and Effect plugin activation callback within a location-scoped host",
       "outputs": "active plugin scope, replacement/removal effects, wait completion, plugin-added event and replayed transformed state",
@@ -98,9 +226,33 @@
       "id": "configured-external-js-ts-plugin-loading",
       "candidateTaskOwner": null,
       "evidence": [
-        {"kind":"source","path":"packages/core/src/config/plugin/external.ts","blobSha":"d8ace63b3dd8a83419d6d5d1167189edc165c7a9","reviewedLines":{"from":15,"to":91}},
-        {"kind":"caller","path":"packages/core/src/plugin/internal.ts","blobSha":"d4ab71cb6b04d3c696b58bc865245b746cec5741","reviewedLines":{"from":108,"to":123}},
-        {"kind":"spec","path":"specs/v2/catalog-config-plugin-lifecycle.md","blobSha":"785b6826b904f664fef1126483305076ef97f465","reviewedLines":{"from":1,"to":84}}
+        {
+          "kind": "source",
+          "path": "packages/core/src/config/plugin/external.ts",
+          "blobSha": "d8ace63b3dd8a83419d6d5d1167189edc165c7a9",
+          "reviewedLines": {
+            "from": 15,
+            "to": 91
+          }
+        },
+        {
+          "kind": "caller",
+          "path": "packages/core/src/plugin/internal.ts",
+          "blobSha": "d4ab71cb6b04d3c696b58bc865245b746cec5741",
+          "reviewedLines": {
+            "from": 108,
+            "to": 123
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/v2/catalog-config-plugin-lifecycle.md",
+          "blobSha": "785b6826b904f664fef1126483305076ef97f465",
+          "reviewedLines": {
+            "from": 1,
+            "to": 84
+          }
+        }
       ],
       "inputs": "configured package/file references, location config entries, plugin options and .opencode plugin files",
       "outputs": "dynamically imported Effect/Promise plugin modules registered into the scoped plugin host",
@@ -113,9 +265,33 @@
       "id": "built-in-plugin-composition",
       "candidateTaskOwner": null,
       "evidence": [
-        {"kind":"source","path":"packages/core/src/plugin/internal.ts","blobSha":"d4ab71cb6b04d3c696b58bc865245b746cec5741","reviewedLines":{"from":63,"to":153}},
-        {"kind":"test","path":"packages/core/test/plugin.test.ts","blobSha":"1e278976539b06711d0b967e403932dad52c09ee","reviewedLines":{"from":40,"to":71}},
-        {"kind":"spec","path":"specs/v2/catalog-config-plugin-lifecycle.md","blobSha":"785b6826b904f664fef1126483305076ef97f465","reviewedLines":{"from":53,"to":189}}
+        {
+          "kind": "source",
+          "path": "packages/core/src/plugin/internal.ts",
+          "blobSha": "d4ab71cb6b04d3c696b58bc865245b746cec5741",
+          "reviewedLines": {
+            "from": 63,
+            "to": 153
+          }
+        },
+        {
+          "kind": "test",
+          "path": "packages/core/test/plugin.test.ts",
+          "blobSha": "1e278976539b06711d0b967e403932dad52c09ee",
+          "reviewedLines": {
+            "from": 40,
+            "to": 71
+          }
+        },
+        {
+          "kind": "spec",
+          "path": "specs/v2/catalog-config-plugin-lifecycle.md",
+          "blobSha": "785b6826b904f664fef1126483305076ef97f465",
+          "reviewedLines": {
+            "from": 53,
+            "to": 189
+          }
+        }
       ],
       "inputs": "location services spanning catalog, config, commands, skills, integrations, agents, references, models, filesystem and HTTP",
       "outputs": "ordered built-in plugin registrations and replayable service transforms",
@@ -161,5 +337,98 @@
     "External plugin work must explicitly own JS/npm/package-install/network authority, module validation/failure policy, cache/update lifetime and location-scope cleanup before a native implementation is attempted.",
     "Existing EXT-001/002 guards, EXT-003/007 implementations, EXT-005 compatibility ambiguity, EXT-008 hook blocker and UI-012 dependency constraint must remain excluded.",
     "All unresolved partitions and design gaps must receive task-specific dispositions or remain explicitly blocked before the extensibility family can be called decomposed."
-  ]
+  ],
+  "controllerBacklogProjection": {
+    "source": "ralph.json:userStories",
+    "ledgerSource": "sources/backlog-exhaustion.json",
+    "observedAtRevision": "f21a01e21a4a82b57dae641c032472585f84b2c4",
+    "totalStories": 258,
+    "statusCounts": {
+      "accepted": 224,
+      "in-progress": 23,
+      "not-started": 11
+    },
+    "controllerAccepted": 224,
+    "nonAccepted": 34,
+    "acceptedResidualStoryIds": [
+      "EXT-004",
+      "EXT-006",
+      "EXT-009",
+      "EXT-010",
+      "EXT-011",
+      "EXT-012"
+    ],
+    "activeNonAcceptedExtensibilityRows": [
+      {
+        "category": "explicit-blocker",
+        "controllerStatus": "in-progress",
+        "evidenceIds": [
+          "OC-PLUGIN-RUNTIME",
+          "OC-PLUGIN-INTERNAL",
+          "OC-PLUGIN-TEST",
+          "OC-PLUGIN-LIFECYCLE",
+          "OC-EVENT-V2-BRIDGE",
+          "OC-CONFIG-V2-COMPAT",
+          "OC-CONTROL-PLANE-HANDLER",
+          "OC-LEGACY-EVENT-TEST",
+          "OC-LEGACY-SCHEMA-IDENTITY-TEST",
+          "OC-V2-BOUNDARY-SPEC"
+        ],
+        "id": "EXT-005",
+        "implementationCommits": [],
+        "localEvidencePaths": [
+          "tasks/EXT-005.md",
+          "worklog/EXT-005.md",
+          "crates/tools/src/ext_manifest_lane.rs",
+          "crates/tools/src/lib.rs",
+          "sources/routing-ownership-gap.json",
+          "sources/extensibility-remaining-ownership-gap.json"
+        ],
+        "reasonKey": "manifest-validation-frozen-red-evidence-incomplete",
+        "reopenPolicy": "material-new-pinned-evidence-required",
+        "requirementIds": [
+          "REQ-005"
+        ],
+        "surfaceEvidenceGaps": [],
+        "surfaceIds": [
+          "opencode.extensibility",
+          "opencode.legacy-compatibility"
+        ],
+        "taskCard": "tasks/EXT-005.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/EXT-005.md"
+      },
+      {
+        "category": "explicit-blocker",
+        "controllerStatus": "not-started",
+        "evidenceIds": [
+          "OC-PLUGIN-RUNTIME",
+          "OC-PLUGIN-INTERNAL",
+          "OC-PLUGIN-TEST",
+          "OC-PLUGIN-LIFECYCLE"
+        ],
+        "id": "EXT-008",
+        "implementationCommits": [],
+        "localEvidencePaths": [
+          "tasks/EXT-008.md",
+          "worklog/EXT-008.md",
+          "crates/tools/src/plugin_hook_boundary.rs",
+          "sources/extensibility-remaining-ownership-gap.json"
+        ],
+        "reasonKey": "plugin-hook-contract-mismatch",
+        "reopenPolicy": "material-new-pinned-evidence-required",
+        "requirementIds": [
+          "REQ-020"
+        ],
+        "surfaceEvidenceGaps": [],
+        "surfaceIds": [
+          "opencode.extensibility"
+        ],
+        "taskCard": "tasks/EXT-008.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/EXT-008.md"
+      }
+    ],
+    "interpretation": "Controller-accepted status recorded as-is for EXT-004/006/009/010/011/012 with source ownershipDecision null retained; active nonaccepted projection holds only EXT-005 (in-progress blocker) and EXT-008 (not-started plugin-hook blocker). Acceptance does not establish source ownership."
+  }
 }

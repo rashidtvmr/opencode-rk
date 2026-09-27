@@ -397,6 +397,12 @@
       "session": "ses_f1df19246ffeHZhaVSzTCipJiP",
       "status": "blocked"
     },
+    "GAP-EXTENSIBILITY-34-W1": {
+      "blockedNote": "manifest reconciled 224/34: binding accepted x6 ownership-null retained, projection active EXT-005/008; validator exit1 93 errors incl 15 extensibility stale lines (frozen assumptions conflict, no edit); JSON+diff-check pass; candidate blocked pending integrator",
+      "scratchpad": "worklog/GAP-EXTENSIBILITY-34-W1.md",
+      "session": "ses_f1d3ebf56ffe2o5YHyoE6pMOEr",
+      "status": "blocked"
+    },
     "GAP-INTEGRATIONS-34-W1": {
       "blockedNote": "JSON/projection/diff-check pass; backlog validator blocked by pre-existing companion-gap drift; convergence blocked by pre-existing ledger findings. See worklog/GAP-INTEGRATIONS-34-W1.md",
       "scratchpad": "worklog/GAP-INTEGRATIONS-34-W1.md",
