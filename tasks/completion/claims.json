@@ -12,6 +12,12 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-CREDENTIAL-PERSISTENCE-RED": {
+      "blockedNote": "RED-only: 6 tests compiled; 4 FAIL for missing credential-persistence behavior (T01 fresh setup persists, T02 owner-only 0600, T03 restart skips setup + stored-cred request, T06 reaped+persisted); 2 guards GREEN (T04 redaction, T05 cancel residue). Build blocked by pre-existing opentui native-lib link; ran standalone rustc --test + prebuilt binary. Implementation is a separate task.",
+      "scratchpad": "worklog/APP-001-CREDENTIAL-PERSISTENCE-RED.md",
+      "session": "ses_f1ea8c87bffetFz0ztkES0ZnxZ",
+      "status": "blocked"
+    },
     "APP-001-REPAIR-RED": {
       "scratchpad": "worklog/APP-001-REPAIR-RED.md",
       "session": "ses_f2ec4da52ffeqvBmjXifr2Bx28",
