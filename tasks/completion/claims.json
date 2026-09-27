@@ -803,6 +803,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "POLICY-MANDATORY-DELEGATION-W1": {
+      "blockedNote": "Repository guard blocked: validate_repository backlog exhaustion fails with 51 pre-existing errors; diff-check passes; policy candidate ready, no safeguard weakened.",
+      "scratchpad": "worklog/POLICY-MANDATORY-DELEGATION-W1.md",
+      "session": "ses_f1d482e05ffe74n1HfhQ6HMsK8",
+      "status": "blocked"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",

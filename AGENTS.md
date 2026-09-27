@@ -101,6 +101,35 @@ say all features are covered while any upstream surface or mandatory task is
 unresolved. On failure, preserve a minimal reproduction and stop or request the
 next safe task; never disable a safeguard to keep the loop moving.
 
+## Highest-priority user policy: mandatory delegation
+
+This section is a user-mandated policy and takes priority over conflicting
+worker or orchestrator guidance below. Policy updates themselves must be
+delegated to a subagent; the main agent must not edit policy files.
+
+- The main agent is an orchestrator only. It may define execution plans and
+  vertical slices, dispatch and sequence subagents, ask necessary authority
+  questions, and review read-only evidence and reports. It must delegate every
+  other task, including repository research that can be delegated.
+- The main agent MUST NOT perform repository edits, implementation, test
+  authoring, shell/build/test/validation commands, worktree or branch
+  integration, conflict resolution, commits, or pushes. Each such task MUST be
+  assigned to a subagent.
+- Every subagent MUST read `.agents/WORKER.md` first, claim its task before
+  touching files, own exactly one product or protected file unless explicitly
+  given an integration lease, and maintain its append-only `worklog/<TASK-ID>.md`
+  scratchpad. Subagents MUST follow frozen RED TDD, security, and resource
+  limits; commit and push candidate work; and provide exact evidence receipts.
+- The main agent MUST independently review reports and artifacts and delegate
+  independent verification. It MUST NOT trust self-report, silently take over a
+  failed lane, or touch a held task. Reclaim a stopped claim only with recorded
+  evidence, then re-delegate the work.
+- Maintain safe concurrency and refill lanes as capacity permits. Resource,
+  security, ownership, and integration limits override speed or throughput.
+- OpenCode V2 behavior remains the default per user direction; see `PLAN.md`
+  section 1 and `sources/upstream.lock.json`. This cross-reference does not
+  define additional upstream behavior.
+
 ## Agent operating rules (mandatory)
 
 These apply to the main agent AND every delegated subagent.

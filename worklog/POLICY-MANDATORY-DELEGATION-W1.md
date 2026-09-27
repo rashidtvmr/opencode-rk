@@ -1,0 +1,10 @@
+# POLICY-MANDATORY-DELEGATION-W1
+
+- Claim: `POLICY-MANDATORY-DELEGATION-W1`, session `ses_f1d482e05ffe74n1HfhQ6HMsK8`; claimed before edits.
+- Source evidence: `AGENTS.md` lines 104-207 contains worker operating rules but no orchestrator-only policy; `.agents/WORKER.md` lines 7-38 requires claim-first, one task file, scratchpad; `docs/CONVERGENCE.md` lines 70-85 governs safe role-based concurrency; `docs/TDD.md` lines 21-42 governs frozen RED/GREEN and independent integration; `docs/SECURITY.md` lines 57-72 governs authorization and stop conditions. `PLAN.md` line 6 states preserve audited OpenCode V2 behavior; `PLAN.md` lines 36-38 pins upstream sources.
+- Observed scenario: no explicit main-agent boundary or mandatory delegation section in source `AGENTS.md`; no OpenCode V2 default cross-reference in that policy file.
+- Target boundary: `AGENTS.md` policy section only, plus this scratchpad and own ledger claim. Do not edit frozen tests, controller, verifier, or security policy.
+- Tests: declarative policy; no product tests authored. Run `git diff --check` and canonical `python3 tools/validate_repository.py`; preserve any pre-existing validator failures without changing guardrails.
+- Decisions: permit only orchestration, dispatch/sequence, necessary authority questions, and read-only report/evidence review for main agent. All other work, including policy edits and delegable research, goes to subagents. Explicit V2 note is cross-reference only; no details, model allowlists, or transient routing policy added.
+- Verification: `rtk git diff --check` passed. `rtk python3 tools/validate_repository.py` failed at pre-existing backlog-exhaustion validation with 51 errors, including unclassified/unknown stories and stale ownership-gap evidence; no validator, manifest, task, or policy guard was changed to suppress findings. Repowise reported no index; direct source evidence used.
+- Remaining unknowns: push availability; independent orchestrator review/verification not yet performed.
