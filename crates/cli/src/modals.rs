@@ -67,11 +67,7 @@ impl ModalStack {
     }
 
     /// Push a modal; title truncated to [`MAX_TITLE_LEN`]. Errors when full.
-    pub fn open(
-        &mut self,
-        kind: ModalKind,
-        title: impl Into<String>,
-    ) -> Result<(), ModalError> {
+    pub fn open(&mut self, kind: ModalKind, title: impl Into<String>) -> Result<(), ModalError> {
         if self.stack.len() >= MAX_MODALS {
             return Err(ModalError::StackFull);
         }
@@ -179,7 +175,9 @@ mod tests {
         let mut stack = ModalStack::new();
         stack.open(ModalKind::Help, "first").unwrap();
         stack.open(ModalKind::Confirm, "second").unwrap();
-        stack.open(ModalKind::Picker, "x".repeat(MAX_TITLE_LEN + 10)).unwrap();
+        stack
+            .open(ModalKind::Picker, "x".repeat(MAX_TITLE_LEN + 10))
+            .unwrap();
         assert_eq!(stack.top().unwrap().title.chars().count(), MAX_TITLE_LEN);
         assert_eq!(stack.close_top().unwrap().kind, ModalKind::Picker);
         assert_eq!(stack.top().unwrap().kind, ModalKind::Confirm);

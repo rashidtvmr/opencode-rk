@@ -1,6 +1,7 @@
 //! Session lifecycle over the format-2 workspace schema (primary) plus the
 //! legacy format-1 [`SessionService`] kept for the server/CLI boundary.
 #![forbid(unsafe_code)]
+pub mod app_history;
 pub mod auto_compact;
 pub mod auto_lease;
 pub mod auto_sched;
@@ -11,9 +12,12 @@ pub mod legacy_view;
 pub mod mcp_status_panel;
 pub mod migration;
 pub mod ops_limits;
+pub mod part_events;
 pub mod query;
 pub mod reference;
 pub mod remote_share;
+pub mod runner;
+pub mod session_membership;
 pub mod share;
 pub mod share_audit;
 pub mod share_count;
@@ -29,6 +33,7 @@ pub mod share_token;
 pub mod state;
 pub mod store;
 pub mod task_quota;
+pub mod tui_info_panel;
 pub mod tui_state;
 mod types;
 pub mod ui_001;
@@ -44,12 +49,8 @@ pub mod ui_010;
 pub mod ui_011;
 pub mod ui_012;
 pub mod ui_013;
-pub mod part_events;
-pub mod runner;
-pub mod tui_info_panel;
-pub mod app_history;
-pub mod session_membership;
 
+pub use branch_v2::ForkProvenance;
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
     ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity, AttachmentId,
@@ -58,9 +59,11 @@ use opencode_rk_contracts::{
 };
 use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, StorageError, V2Writer};
 use rusqlite::{params, Connection, OptionalExtension};
-use std::{path::{Path, PathBuf}, sync::{Arc, Mutex}};
+use std::{
+    path::{Path, PathBuf},
+    sync::{Arc, Mutex},
+};
 use thiserror::Error;
-pub use branch_v2::ForkProvenance;
 pub type SessionRecord = SessionSummary;
 pub use opencode_rk_contracts::MessageRole as Role;
 const ACTIVE: i64 = 0;
@@ -459,8 +462,7 @@ impl SessionService {
             return run_session_blocking(move || manager.append_fork_text(session_id, role, text))
                 .await;
         }
-        let body =
-            PayloadRef::inline(text).map_err(|e| SessionError::Contract(e.to_string()))?;
+        let body = PayloadRef::inline(text).map_err(|e| SessionError::Contract(e.to_string()))?;
         let message = MessageRecord {
             id: MessageId::new(),
             session_id,
@@ -494,8 +496,7 @@ impl SessionService {
             })
             .await;
         }
-        let body =
-            PayloadRef::inline(text).map_err(|e| SessionError::Contract(e.to_string()))?;
+        let body = PayloadRef::inline(text).map_err(|e| SessionError::Contract(e.to_string()))?;
         let message = MessageRecord {
             id: MessageId::new(),
             session_id,
@@ -584,7 +585,8 @@ impl SessionService {
             return Err(SessionError::DraftAttachmentUnavailable);
         }
         let storage = Arc::clone(&self.storage);
-        match run_blocking(move || storage.delete_draft_attachment(session_id, attachment_id)).await {
+        match run_blocking(move || storage.delete_draft_attachment(session_id, attachment_id)).await
+        {
             Ok(()) => Ok(()),
             Err(SessionError::Storage(StorageError::Sqlite(
                 rusqlite::Error::QueryReturnedNoRows,
@@ -617,7 +619,9 @@ impl SessionService {
             .await;
         }
         let storage = Arc::clone(&self.storage);
-        match run_blocking(move || storage.list_message_history_page(session_id, before, limit)).await {
+        match run_blocking(move || storage.list_message_history_page(session_id, before, limit))
+            .await
+        {
             Err(SessionError::Storage(StorageError::MessageNotFound(message_id))) => {
                 Err(SessionError::HistoryCursorNotFound(message_id))
             }
@@ -630,8 +634,10 @@ impl SessionService {
         limit: usize,
     ) -> Result<Vec<AssistantActivity>, SessionError> {
         if let Some(manager) = self.fork_manager_for(session_id).await? {
-            return run_session_blocking(move || manager.list_assistant_activity(session_id, limit))
-                .await;
+            return run_session_blocking(move || {
+                manager.list_assistant_activity(session_id, limit)
+            })
+            .await;
         }
         let storage = Arc::clone(&self.storage);
         Ok(run_blocking(move || storage.list_assistant_activity(session_id, limit)).await?)
@@ -709,12 +715,7 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         map_artifact_storage_result(
             run_blocking(move || {
-                storage.append_artifact_version(
-                    session_id,
-                    artifact_id,
-                    &content,
-                    Timestamp::now(),
-                )
+                storage.append_artifact_version(session_id, artifact_id, &content, Timestamp::now())
             })
             .await,
         )
@@ -745,14 +746,15 @@ impl SessionService {
                 return Err(SessionError::ForkHistoryTooLarge);
             }
             let storage = Arc::clone(&self.storage);
-            let prefix = run_blocking(move || {
-                storage.list_messages(parent_session_id, ordinal as usize)
-            })
-            .await?;
+            let prefix =
+                run_blocking(move || storage.list_messages(parent_session_id, ordinal as usize))
+                    .await?;
             let manager_for_sync = Arc::clone(&manager);
             let parent_for_sync = parent.clone();
             let storage = Arc::clone(&self.storage);
-            let activity = run_blocking(move || storage.list_assistant_activity(parent_session_id, 500)).await?;
+            let activity =
+                run_blocking(move || storage.list_assistant_activity(parent_session_id, 500))
+                    .await?;
             run_session_blocking(move || {
                 manager_for_sync.synchronize_legacy_shadow(&parent_for_sync, &prefix, &activity)
             })
@@ -787,14 +789,17 @@ impl SessionService {
             .await?
         } else {
             let storage = Arc::clone(&self.storage);
-            let ordinal = run_blocking(move || storage.message_ordinal(parent_session_id, target_message_id))
-                .await?
-                .ok_or(SessionError::BranchMessageNotFound(target_message_id))?;
+            let ordinal =
+                run_blocking(move || storage.message_ordinal(parent_session_id, target_message_id))
+                    .await?
+                    .ok_or(SessionError::BranchMessageNotFound(target_message_id))?;
             if ordinal > opencode_rk_storage::fork_v2::MAX_FORK_COPY_MESSAGES as u64 {
                 return Err(SessionError::ForkHistoryTooLarge);
             }
             let storage = Arc::clone(&self.storage);
-            let prefix = run_blocking(move || storage.list_messages(parent_session_id, ordinal as usize)).await?;
+            let prefix =
+                run_blocking(move || storage.list_messages(parent_session_id, ordinal as usize))
+                    .await?;
             let target = prefix.last().ok_or(SessionError::InvalidBranchBoundary)?;
             if target.id != target_message_id {
                 return Err(SessionError::BranchMessageNotFound(target_message_id));
@@ -825,9 +830,15 @@ impl SessionService {
             let manager_for_sync = Arc::clone(&manager);
             let parent_for_sync = parent.clone();
             let storage = Arc::clone(&self.storage);
-            let activity = run_blocking(move || storage.list_assistant_activity(parent_session_id, 500)).await?;
+            let activity =
+                run_blocking(move || storage.list_assistant_activity(parent_session_id, 500))
+                    .await?;
             run_session_blocking(move || {
-                manager_for_sync.synchronize_legacy_shadow(&parent_for_sync, &shadow_prefix, &activity)
+                manager_for_sync.synchronize_legacy_shadow(
+                    &parent_for_sync,
+                    &shadow_prefix,
+                    &activity,
+                )
             })
             .await?;
             (request_message_id, request_text)
@@ -935,7 +946,9 @@ pub enum SessionError {
     ForkHistoryTooLarge,
     #[error("fork depth exceeds the format-2 branch bound")]
     ForkDepthExceeded,
-    #[error("branching blob-backed history is unavailable until the format-2 blob adapter is active")]
+    #[error(
+        "branching blob-backed history is unavailable until the format-2 blob adapter is active"
+    )]
     BranchPayloadUnsupported,
     #[error("draft attachments are unavailable for format-2 branch sessions until blob stores are unified")]
     DraftAttachmentUnavailable,

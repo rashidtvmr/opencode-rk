@@ -182,10 +182,7 @@ fn token_is_absolute(token: &str) -> bool {
         return true;
     }
     let b = token.as_bytes();
-    b.len() >= 3
-        && b[0].is_ascii_alphabetic()
-        && b[1] == b':'
-        && (b[2] == b'/' || b[2] == b'\\')
+    b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && (b[2] == b'/' || b[2] == b'\\')
 }
 
 /// True when the lossy-decoded args contain an absolute-path token.
@@ -193,8 +190,8 @@ fn token_is_absolute(token: &str) -> bool {
 fn args_contain_absolute(args: &[u8]) -> bool {
     let text = String::from_utf8_lossy(args);
     text.split([
-        ' ', '\t', '\n', '\r', '"', '\'', '`', '{', '}', '[', ']', '(', ')', ',', ';', '=',
-        '|', '&', '<', '>', '$',
+        ' ', '\t', '\n', '\r', '"', '\'', '`', '{', '}', '[', ']', '(', ')', ',', ';', '=', '|',
+        '&', '<', '>', '$',
     ])
     .filter(|t| !t.is_empty() && !t.contains("://"))
     .any(token_is_absolute)
@@ -348,9 +345,7 @@ pub fn check_binding(call: &ToolCall, intent_hash: &[u8; 32]) -> Result<(), Disp
     if &approval_digest(call) == intent_hash {
         Ok(())
     } else {
-        Err(DispatchError::Denied(
-            "approval digest mismatch".to_owned(),
-        ))
+        Err(DispatchError::Denied("approval digest mismatch".to_owned()))
     }
 }
 
@@ -364,7 +359,12 @@ mod tests {
     }
 
     fn benign() -> ToolCall {
-        call("c1", "read", br#"{"path":"notes/todo.md"}"#, "project:default")
+        call(
+            "c1",
+            "read",
+            br#"{"path":"notes/todo.md"}"#,
+            "project:default",
+        )
     }
 
     #[test]
@@ -385,7 +385,12 @@ mod tests {
 
     #[test]
     fn rejects_traversal_in_args() {
-        let c = call("c3", "read", br#"{"path":"a/../../etc/passwd"}"#, "project:default");
+        let c = call(
+            "c3",
+            "read",
+            br#"{"path":"a/../../etc/passwd"}"#,
+            "project:default",
+        );
         let err = validate(&c).unwrap_err();
         assert!(matches!(err, DispatchError::Denied(_)));
         assert!(err.to_string().contains("traversal"));
@@ -493,7 +498,12 @@ mod tests {
         let cases = [
             call("d1", "read", br#"{"path":"/abs"}"#, "project:default"),
             call("d2", "read", b"{}", "s/../escape"),
-            call("d3", "read", &vec![b'x'; MAX_ARGS_BYTES + 1], "project:default"),
+            call(
+                "d3",
+                "read",
+                &vec![b'x'; MAX_ARGS_BYTES + 1],
+                "project:default",
+            ),
         ];
         for c in &cases {
             let before = c.clone();

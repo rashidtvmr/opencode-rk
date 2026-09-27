@@ -18,10 +18,7 @@ use std::fs;
 use std::path::PathBuf;
 
 fn tmp_base(tag: &str) -> PathBuf {
-    std::env::temp_dir().join(format!(
-        "rk-sandbox-enforce-{}-{tag}",
-        std::process::id()
-    ))
+    std::env::temp_dir().join(format!("rk-sandbox-enforce-{}-{tag}", std::process::id()))
 }
 
 // ── Scenario A (allow): write under <tmp>/work is permitted ───────────────
@@ -33,11 +30,7 @@ fn scenario_a_allow_write_under_allowed_root() {
     let work = base.join("work");
     fs::create_dir_all(&work).expect("create allowed work dir");
 
-    let policy = SandboxPolicy::new(
-        vec![base.clone()],
-        vec![work.clone()],
-        Vec::new(),
-    );
+    let policy = SandboxPolicy::new(vec![base.clone()], vec![work.clone()], Vec::new());
     let checker = SandboxCheck::new(policy);
 
     let file = work.join("output.txt");
@@ -64,11 +57,7 @@ fn scenario_b_deny_write_outside_allowed_roots() {
     fs::create_dir_all(&work).expect("create work dir");
     fs::create_dir_all(&outside).expect("create outside dir");
 
-    let policy = SandboxPolicy::new(
-        vec![base.clone()],
-        vec![work.clone()],
-        Vec::new(),
-    );
+    let policy = SandboxPolicy::new(vec![base.clone()], vec![work.clone()], Vec::new());
     let checker = SandboxCheck::new(policy);
 
     let outside_file = outside.join("secret.txt");
@@ -102,11 +91,7 @@ fn scenario_c_empty_policy_denies_everything() {
     let policy = SandboxPolicy::new(Vec::new(), Vec::new(), Vec::new());
     let checker = SandboxCheck::new(policy);
 
-    let paths = [
-        "/tmp/some-file.txt",
-        "/etc/hosts",
-        "/home/user/data.csv",
-    ];
+    let paths = ["/tmp/some-file.txt", "/etc/hosts", "/home/user/data.csv"];
     for path_str in &paths {
         let err = checker
             .is_allowed(path_str, FileAction::Read)

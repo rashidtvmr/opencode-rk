@@ -60,11 +60,25 @@ pub struct DoctorCheckEntry {
 /// JSONL event emitted during CI runs.
 #[derive(Debug, Clone)]
 pub enum CiEvent {
-    TurnStarted { ts: u64 },
-    TurnFinished { ts: u64, exit: u8 },
-    ApprovalRequired { ts: u64, tool: String },
-    Step { ts: u64, n: u64 },
-    Doctor { ts: u64, checks: Vec<DoctorCheckEntry> },
+    TurnStarted {
+        ts: u64,
+    },
+    TurnFinished {
+        ts: u64,
+        exit: u8,
+    },
+    ApprovalRequired {
+        ts: u64,
+        tool: String,
+    },
+    Step {
+        ts: u64,
+        n: u64,
+    },
+    Doctor {
+        ts: u64,
+        checks: Vec<DoctorCheckEntry>,
+    },
 }
 
 const MAX_LINE_BYTES: usize = 8 * 1024;
@@ -120,10 +134,7 @@ impl CiEvent {
                             format!(r#""status":"{}""#, json_escape(&c.status)),
                         ];
                         if let Some(ref detail) = c.detail {
-                            parts.push(format!(
-                                r#""detail":"{}""#,
-                                json_escape(detail)
-                            ));
+                            parts.push(format!(r#""detail":"{}""#, json_escape(detail)));
                         }
                         format!("{{{}}}", parts.join(","))
                     })
@@ -246,7 +257,11 @@ mod tests {
             tool: r#"foo"bar\nbaz"#.to_string(),
         };
         let line = event.to_json_line();
-        assert!(line.contains(r#"foo\"bar\\nbaz"#), "escape failed: {}", line);
+        assert!(
+            line.contains(r#"foo\"bar\\nbaz"#),
+            "escape failed: {}",
+            line
+        );
         assert!(line.starts_with('{'));
         assert!(line.ends_with('}'));
     }
@@ -312,10 +327,7 @@ mod tests {
             assert!(
                 matches!(
                     parts[0],
-                    "turn_started"
-                        | "turn_finished"
-                        | "approval_required"
-                        | "step"
+                    "turn_started" | "turn_finished" | "approval_required" | "step"
                 ),
                 "bad first column: {}",
                 parts[0]

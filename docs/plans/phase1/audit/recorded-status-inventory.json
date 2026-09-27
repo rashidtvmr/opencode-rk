@@ -1,0 +1,4352 @@
+{
+  "schema_version": 1,
+  "revision": "767a86a84376a69b2814ea959bb2c94831783768",
+  "method": "Lossless ID/status projection reconstructed from the read-only audit output; not a copy of all original task prose. tools/refresh_inventory.py can regenerate full source records from the checkout.",
+  "records": [
+    {
+      "id": "ACP-001",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ACP-002",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-014",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-015",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-016",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-017",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-018",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-019",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-020",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-021",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-022",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-023",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-024",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-025",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-026",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-027",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-028",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-029",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-030",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AGENT-031",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-001",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-002",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-003",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-004",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-005",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-006",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-007",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-008",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-009",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-010",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-011",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "APP-012",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-001",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-002",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-003",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-004",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-004-ENTRY",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-005",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-006",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-007",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-008",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-008-LEDGER",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-009",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-010",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-011",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-012",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-013",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-014",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-015",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-016",
+      "recorded_statuses": {
+        "claim": "blocked"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-017",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-018",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-019",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUD-020",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "audit",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUTO-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUTO-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUTO-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUTO-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUTO-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUTO-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "AUTO-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "BASE-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "BASE-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "BASE-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "BASE-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "BASE-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "BASE-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "BASE-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "BASE-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "CAT-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "CAT-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "CAT-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "CAT-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "CAT-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "CAT-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "CAT-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "COORD-001",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "COORD-002",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "COORD-003",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "COORD-004",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "COORD-005",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "COORD-006",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "COORD-007",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "COORD-008",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-014",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-015",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-016",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-017",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DB-018",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-003",
+      "recorded_statuses": {},
+      "definition_kind": "card-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-101",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-102",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-103",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-104",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-105",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-106",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-107",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-108",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-109",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-110",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-111",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-112",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-113",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-114",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-115",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-116",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-117",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-118",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "DISC-119",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "EXT-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-CI-APPROVAL",
+      "recorded_statuses": {
+        "claim": "blocked"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-LOGROTATE",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-LOOP-RULES",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-MCP-STUBS",
+      "recorded_statuses": {
+        "claim": "blocked"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-NATIVE-DAEMON",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-PACKAGING",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-SANDBOX",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-SESSIONS-STUBS",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-SQLITE-GATE",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-STREAM",
+      "recorded_statuses": {
+        "claim": "blocked"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "FIX-TIMELINE",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "G6-CHAT-DATADIR",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "HEAD-001",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "HEAD-002",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "INT-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-AGENT-FILES",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-AGENTS-LOAD",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-APPSTART-VIEW",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-AUTH-401",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-AUTH-SETUP",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-AUTODRIVE-CLAMP",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-BOOTSTRAP",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CANVAS-RENDER",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CHAT-ORIGIN",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CI",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CI-CAPS",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CI-EXT",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CI-FLAG",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CI-TOKEN",
+      "recorded_statuses": {
+        "claim": "blocked"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CLI-ONCE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CMD-LOAD",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-COMMANDS-LIVE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CONTEXT-ACCOUNT",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-CONTEXT-CMD",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-DCLIENT-DOCS",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-DEFAULTTUI-FIX",
+      "recorded_statuses": {
+        "claim": "blocked"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-DESC-STALE",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-DISPATCH-DENY",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-FILE-AUTHZ",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-GLOBS",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-GLOBS-LIVE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-LOOP",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-LOOP-CAP",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-LOOP-LIVE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-MAIN-ONCE2",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-MCP-CONFIG",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-MCP-LIVE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-ONBOARD-SETUP",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-PROV-FALLBACK",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-RALPH-MAX2",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-RULES",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-RULES-INJECT",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-SANDBOX",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-SES-IMPORT",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-SHAPES",
+      "recorded_statuses": {
+        "claim": "blocked"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-SHELL-AUTHZ",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-SRV-ROUTER",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-STREAM-FIX",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-SUBAGENT-LIVE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-THEME-RENDER",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-THEMES",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TIMELINE-LAND",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TOOL-PERM",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TRANSCRIPT-LAND",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TUI-BEARER2",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TUI-GRAPH",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TUI-HOST",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TUI-LAND",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TUI-PAINT",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-TURN-SETTLE",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-ULTRA-CODEGEN",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-ULTRA-LIVE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-VALIDATE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-VERSION",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-WEB-ACTIONS",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-WEB-BEARER",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-WEB-CANVAS",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-WEB-HONEST",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-WF-CREATE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-WF-LIVE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "LANE-WF-TIMELINE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "MOB-001",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "MOB-002",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "MOB-003",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "MOB-004",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "MOB-005",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "MOB-006",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-001",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-002",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-003",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-004",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-005",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-006",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-007",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-008",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-009",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-010",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-011",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-012",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-013",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-014",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "NET-015",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "OPS-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-001",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-002",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-003",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-004",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-005",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-006",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-007",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-008",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-009",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PAR-010",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-014",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-015",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-016",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-017",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-018",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-019",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-020",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-021",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-022",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-023",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "PROV-024",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "RC-01",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "RC-02",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "RC-03",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "REL-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "REL-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "REL-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "REL-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "REL-005",
+      "recorded_statuses": {},
+      "definition_kind": "card-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "REL-006",
+      "recorded_statuses": {},
+      "definition_kind": "card-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "REL-007",
+      "recorded_statuses": {},
+      "definition_kind": "card-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "REL-008",
+      "recorded_statuses": {},
+      "definition_kind": "card-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "ROUTE-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "RUN-001",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SDK-001",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SDK-002",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-014",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-016",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-017",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-018",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-019",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SEC-020",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-014",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-015",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-016",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-017",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-018",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-019",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SESS-020",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHARE-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHARE-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHARE-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHARE-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHARE-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHIP-001",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHIP-002",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHIP-003",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHIP-004",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHIP-005",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHIP-006",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHIP-007",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SHIP-008",
+      "recorded_statuses": {},
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SYNC-001",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "SYNC-002",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-014",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-015",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-016",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-017",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-018",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-019",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-020",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-021",
+      "recorded_statuses": {},
+      "definition_kind": "card-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-022",
+      "recorded_statuses": {},
+      "definition_kind": "card-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TOOL-023",
+      "recorded_statuses": {},
+      "definition_kind": "card-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-001",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-002",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-003",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-004",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-005",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-006",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-007",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-008",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-009",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-010",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-010-CAPS",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "TUI-011",
+      "recorded_statuses": {
+        "claim": "completed"
+      },
+      "definition_kind": "completion",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-014",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-015",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-016",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-017",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-018",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "UI-019",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-001",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-002",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-003",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-004",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-005",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-006",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "in-progress"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-007",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-008",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-009",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-010",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-011",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-012",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-013",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-014",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-015",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-016",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-017",
+      "recorded_statuses": {
+        "ralph": "accepted",
+        "prd": "not-started"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-ARTIFACT-EXEC",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-ATTACH-TRANSMIT",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-EVENT-STREAM",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-HINT",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-LIBRARY",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-PINS-SEARCH",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-PLUGIN",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-TOOL-CHOOSER",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WEB-VOICE",
+      "recorded_statuses": {
+        "claim": "in-progress"
+      },
+      "definition_kind": "claim-only",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WSX-001",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    },
+    {
+      "id": "WSX-002",
+      "recorded_statuses": {
+        "ralph": "accepted"
+      },
+      "definition_kind": "legacy",
+      "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+      "product_verification": "not_independently_reexecuted_in_this_planning_pass"
+    }
+  ]
+}

@@ -100,7 +100,8 @@ pub const PLATFORM_MATRIX: [PlatformRow; 3] = [
         os: Os::Windows,
         required_backend: Backend::PlatformOptIn,
         isolated: false,
-        limits: "no Job-Object/AppContainer backend in this module; inherited capabilities not closed",
+        limits:
+            "no Job-Object/AppContainer backend in this module; inherited capabilities not closed",
     },
 ];
 
@@ -223,14 +224,30 @@ pub fn is_protected_path(path: &str) -> bool {
         return true;
     }
     const MARKERS: [&str; 12] = [
-        ".ssh/", ".aws/", ".gnupg/", ".kube/", ".docker/", "id_rsa", "id_ed25519", ".pem",
-        ".p12", "credential", "secret", "token",
+        ".ssh/",
+        ".aws/",
+        ".gnupg/",
+        ".kube/",
+        ".docker/",
+        "id_rsa",
+        "id_ed25519",
+        ".pem",
+        ".p12",
+        "credential",
+        "secret",
+        "token",
     ];
     if MARKERS.iter().any(|m| lower.contains(m)) {
         return true;
     }
     const PREFIXES: [&str; 8] = [
-        "/etc/", "/proc/", "/sys/", "/boot/", "c:/windows", "c:/program files", "/system/",
+        "/etc/",
+        "/proc/",
+        "/sys/",
+        "/boot/",
+        "c:/windows",
+        "c:/program files",
+        "/system/",
         "/private/etc/",
     ];
     if PREFIXES.iter().any(|p| lower.starts_with(p)) {

@@ -67,7 +67,9 @@ pub enum StopPolicy {
 impl StopPolicy {
     /// `Drain { max_items: DRAIN_ALL }` shorthand.
     pub fn drain_all() -> Self {
-        Self::Drain { max_items: DRAIN_ALL }
+        Self::Drain {
+            max_items: DRAIN_ALL,
+        }
     }
 
     /// True for [`StopPolicy::Drain`].
@@ -619,7 +621,10 @@ mod tests {
         ledger.acquire_port();
         reg.attach(1);
         reg.attach(2);
-        assert_eq!(decide_singleton_launch(true, true).unwrap(), SingletonLaunch::ReuseLive);
+        assert_eq!(
+            decide_singleton_launch(true, true).unwrap(),
+            SingletonLaunch::ReuseLive
+        );
         assert_eq!(svc.start(), Err(ServiceError::AlreadyRunning));
         let first = reg.detach(1).unwrap();
         assert!(first.daemon_running);

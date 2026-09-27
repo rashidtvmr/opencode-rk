@@ -370,20 +370,12 @@ mod tests {
 
         // Run 1: order A, B, C
         let mut rs1 = RuleSet::new(rules.clone());
-        let touches1 = vec![
-            "x.a".to_string(),
-            "y.b".to_string(),
-            "z.c".to_string(),
-        ];
+        let touches1 = vec!["x.a".to_string(), "y.b".to_string(), "z.c".to_string()];
         let d1 = rs1.evaluate(&touches1);
 
         // Run 2: order C, B, A
         let mut rs2 = RuleSet::new(rules);
-        let touches2 = vec![
-            "z.c".to_string(),
-            "y.b".to_string(),
-            "x.a".to_string(),
-        ];
+        let touches2 = vec!["z.c".to_string(), "y.b".to_string(), "x.a".to_string()];
         let d2 = rs2.evaluate(&touches2);
 
         assert_eq!(d1.load.len(), d2.load.len());

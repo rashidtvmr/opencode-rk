@@ -330,53 +330,83 @@ pub fn run_ci(
         Err(_error) => {
             let _ = emit(
                 writer,
-                &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::UsageError.code() },
+                &CiEvent::TurnFinished {
+                    ts: ts_now(),
+                    exit: CiExitCode::UsageError.code(),
+                },
                 format,
             );
-            return CiRunResult { exit_code: CiExitCode::UsageError.code() as i32 };
+            return CiRunResult {
+                exit_code: CiExitCode::UsageError.code() as i32,
+            };
         }
     };
 
     let (origin, _daemon_child) = ensure_daemon(Some(&bearer));
 
     let create_body = serde_json::json!({ "title": "ci-run" }).to_string();
-    let (status, body) =
-        match http_request(&origin, "POST", "/api/sessions", &create_body, Some(&bearer)) {
-            Ok(r) => r,
-            Err(_error) => {
-                let _ = emit(
-                    writer,
-                    &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::ProviderError.code() },
-                    format,
-                );
-                return CiRunResult { exit_code: CiExitCode::ProviderError.code() as i32 };
-            }
-        };
+    let (status, body) = match http_request(
+        &origin,
+        "POST",
+        "/api/sessions",
+        &create_body,
+        Some(&bearer),
+    ) {
+        Ok(r) => r,
+        Err(_error) => {
+            let _ = emit(
+                writer,
+                &CiEvent::TurnFinished {
+                    ts: ts_now(),
+                    exit: CiExitCode::ProviderError.code(),
+                },
+                format,
+            );
+            return CiRunResult {
+                exit_code: CiExitCode::ProviderError.code() as i32,
+            };
+        }
+    };
     if status == 401 || status == 403 {
         let _ = emit(
             writer,
-            &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::UsageError.code() },
+            &CiEvent::TurnFinished {
+                ts: ts_now(),
+                exit: CiExitCode::UsageError.code(),
+            },
             format,
         );
-        return CiRunResult { exit_code: CiExitCode::UsageError.code() as i32 };
+        return CiRunResult {
+            exit_code: CiExitCode::UsageError.code() as i32,
+        };
     }
     if status != 201 {
         let _ = emit(
             writer,
-            &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::ProviderError.code() },
+            &CiEvent::TurnFinished {
+                ts: ts_now(),
+                exit: CiExitCode::ProviderError.code(),
+            },
             format,
         );
-        return CiRunResult { exit_code: CiExitCode::ProviderError.code() as i32 };
+        return CiRunResult {
+            exit_code: CiExitCode::ProviderError.code() as i32,
+        };
     }
     let session_id = match serde_json::from_str::<serde_json::Value>(&body) {
         Ok(v) => v["session"]["id"].as_str().unwrap_or("").to_string(),
         Err(_) => {
             let _ = emit(
                 writer,
-                &CiEvent::TurnFinished { ts: ts_now(), exit: CiExitCode::ProviderError.code() },
+                &CiEvent::TurnFinished {
+                    ts: ts_now(),
+                    exit: CiExitCode::ProviderError.code(),
+                },
                 format,
             );
-            return CiRunResult { exit_code: CiExitCode::ProviderError.code() as i32 };
+            return CiRunResult {
+                exit_code: CiExitCode::ProviderError.code() as i32,
+            };
         }
     };
 
@@ -392,7 +422,14 @@ pub fn run_ci(
             }
         }
 
-        let _ = emit(writer, &CiEvent::Step { ts: ts_now(), n: step }, format);
+        let _ = emit(
+            writer,
+            &CiEvent::Step {
+                ts: ts_now(),
+                n: step,
+            },
+            format,
+        );
 
         let model =
             std::env::var("OPENCODE_RK_CI_MODEL").unwrap_or_else(|_| "openai/gpt-5.6".to_string());
@@ -429,11 +466,16 @@ pub fn run_ci(
 
     let _ = emit(
         writer,
-        &CiEvent::TurnFinished { ts: ts_now(), exit: last_exit.code() },
+        &CiEvent::TurnFinished {
+            ts: ts_now(),
+            exit: last_exit.code(),
+        },
         format,
     );
 
-    CiRunResult { exit_code: last_exit.code() as i32 }
+    CiRunResult {
+        exit_code: last_exit.code() as i32,
+    }
 }
 
 impl Drop for OwnedChild {
@@ -457,8 +499,18 @@ mod tests {
 
     #[test]
     fn t01_request_wire_carries_bearer() {
-        let wire = String::from_utf8(request_wire("POST", "127.0.0.1:4096", "/api/sessions", "{}", "Bearer abc")).unwrap();
-        assert!(wire.contains("authorization: Bearer abc"), "wire must carry bearer: {wire}");
+        let wire = String::from_utf8(request_wire(
+            "POST",
+            "127.0.0.1:4096",
+            "/api/sessions",
+            "{}",
+            "Bearer abc",
+        ))
+        .unwrap();
+        assert!(
+            wire.contains("authorization: Bearer abc"),
+            "wire must carry bearer: {wire}"
+        );
         assert!(wire.contains("content-length: 2"));
     }
 

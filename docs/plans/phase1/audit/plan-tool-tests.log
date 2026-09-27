@@ -1,0 +1,12 @@
+test_conflicting_one_file_owners_rejected (test_plan_tools.PlanToolTests.test_conflicting_one_file_owners_rejected) ... ok
+test_dependency_cycle_rejected (test_plan_tools.PlanToolTests.test_dependency_cycle_rejected) ... ok
+test_draft_valid_without_product_claim (test_plan_tools.PlanToolTests.test_draft_valid_without_product_claim) ... ok
+test_duplicate_id_rejected (test_plan_tools.PlanToolTests.test_duplicate_id_rejected) ... ok
+test_native_lane_packet_has_bounded_contract (test_plan_tools.PlanToolTests.test_native_lane_packet_has_bounded_contract) ... ok
+test_unknown_dependency_rejected (test_plan_tools.PlanToolTests.test_unknown_dependency_rejected) ... ok
+test_unknown_lane_does_not_dispatch (test_plan_tools.PlanToolTests.test_unknown_lane_does_not_dispatch) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.163s
+
+OK

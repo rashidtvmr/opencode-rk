@@ -1,0 +1,663 @@
+{
+  "schema_version": 1,
+  "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+  "source_file": "requirements/user-requirements.json",
+  "method": "All 47 observed requirement IDs retained; summaries are restatements. Wave 1 must compare the original text and attached tasks before approving scope.",
+  "requirements": [
+    {
+      "id": "REQ-001",
+      "summary": "Rust/Tokio and practical resource efficiency",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-08",
+        "P1-W5-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-002",
+      "summary": "Ralph plan, independent slices and autonomous loop",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-01",
+        "P1-W5-08"
+      ],
+      "proposed_disposition": "split_proposed",
+      "scope_decision": "SCOPE-07",
+      "note": "Safe task execution now; standalone full orchestration platform later.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-003",
+      "summary": "Every OpenCode V2 feature accounted for",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-10",
+        "P1-W5-09"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-004",
+      "summary": "Strict TDD and independent verification",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-05",
+        "P1-W1-10",
+        "P1-W6-09"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-005",
+      "summary": "OpenCode V2 plugins including UI behavior",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-05",
+        "P1-W1-01"
+      ],
+      "proposed_disposition": "split_proposed",
+      "scope_decision": "SCOPE-02",
+      "note": "Native contributions now; arbitrary Solid/TS UI compatibility needs explicit later disposition.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-006",
+      "summary": "Session management and persistent history",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-09",
+        "P1-W3-01"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-007",
+      "summary": "Session sharing",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-09"
+      ],
+      "proposed_disposition": "split_proposed",
+      "scope_decision": "SCOPE-10",
+      "note": "Local redacted/revocable sharing now; public deployment separate.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-008",
+      "summary": "Session forking",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-02"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-009",
+      "summary": "Multiple delegation types and custom agents",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-01"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-010",
+      "summary": "Cross-provider subagent delegation",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-01",
+        "P1-W4-02"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-011",
+      "summary": "Searchable models.dev-backed API",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-05",
+        "P1-W4-02"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-012",
+      "summary": "Foreground and background subagents",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-01"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-013",
+      "summary": "Navigate, resume and steer subagents",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-06",
+        "P1-W4-01"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-014",
+      "summary": "Subagent context and messages in database",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-01",
+        "P1-W2-09"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-015",
+      "summary": "Singleton serving multiple clients",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-07",
+        "P1-W2-09"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-016",
+      "summary": "Status panel",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-017",
+      "summary": "Skills, plugins and custom slash commands",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-05"
+      ],
+      "proposed_disposition": "split_proposed",
+      "scope_decision": "SCOPE-02",
+      "note": "Native skills/commands/plugins now; compatibility-host claims require separate decision.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-018",
+      "summary": "Independent main/child effort",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-05",
+        "P1-W4-01"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-019",
+      "summary": "Themes and common settings",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-020",
+      "summary": "Pre/post tool hooks",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-05",
+        "P1-W5-05"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-021",
+      "summary": "Permissions and mandatory human control",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W5-04"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-022",
+      "summary": "Built-in multi-account routing inspired by 9router",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-02"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-023",
+      "summary": "Response timestamps",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-03",
+        "P1-W4-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-024",
+      "summary": "Lightweight delegation on basic host/VPS",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-01",
+        "P1-W5-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-025",
+      "summary": "Deterministic destructive-command and SQL controls",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W5-04"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-026",
+      "summary": "Manual-only destructive instructions",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W5-04"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-027",
+      "summary": "OS-enforced sensitive-file and environment restrictions",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W5-04"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-028",
+      "summary": "Safe system-file reads without agent modification",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W5-04"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-029",
+      "summary": "Trusted user destructive-protection toggle",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W3-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-030",
+      "summary": "Permission wildcard cannot bypass mandatory controls",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W5-04"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-031",
+      "summary": "Explicit approval for other projects/user files",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W5-04"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-032",
+      "summary": "Configurable features with no hidden runtime cost when off",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-07",
+        "P1-W5-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-033",
+      "summary": "Embedded scalable storage without external database install",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-09",
+        "P1-W6-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-034",
+      "summary": "Safe large OpenCode history import",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-09",
+        "P1-W6-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-035",
+      "summary": "Safety and resource correctness over literal translation",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-04",
+        "P1-W5-04",
+        "P1-W5-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-036",
+      "summary": "Full child lifecycle, models, compression, handoff and settings",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-06",
+        "P1-W4-01"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-037",
+      "summary": "Typed tool contract, diagnostics and review discipline",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-05",
+        "P1-W3-07"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-038",
+      "summary": "Redacted provider observability and debug export",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-02",
+        "P1-W5-05"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-040",
+      "summary": "Local ChatGPT-class web experience including research, voice, Library and artifacts",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W4-06",
+        "P1-W4-07",
+        "P1-W4-08",
+        "P1-W4-09",
+        "P1-W5-01",
+        "P1-W5-02"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-041",
+      "summary": "Documented provider compatibility, OAuth/consent-based import and usage telemetry",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-09",
+        "P1-W2-04",
+        "P1-W3-05",
+        "P1-W4-02"
+      ],
+      "proposed_disposition": "included_with_authority_blockers",
+      "scope_decision": "SCOPE-09",
+      "note": "No invented OAuth authority; API-key/compatible setup required and each advertised official flow must be verified.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-042",
+      "summary": "Operational panel and searchable/toggleable MCP lifecycle",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W3-07",
+        "P1-W4-03"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-043",
+      "summary": "Versioned sync/replay and durable versus ephemeral events",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-09",
+        "P1-W5-06"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-044",
+      "summary": "Per-session busy rejection, shell lane and owned cancellation",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W2-05",
+        "P1-W5-06"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-045",
+      "summary": "ACP v1 JSON-lines bridge with explicit limits",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-08"
+      ],
+      "proposed_disposition": "scope_review_later_proposed",
+      "scope_decision": "SCOPE-11",
+      "note": "Retain original contract/regressions; external ACP breadth may be explicitly later, not silently complete.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-046",
+      "summary": "Workspace HTTP/WebSocket proxy and remote sync",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-08",
+        "P1-W2-09"
+      ],
+      "proposed_disposition": "split_proposed",
+      "scope_decision": "SCOPE-11",
+      "note": "Required local event/workspace authority now; remote proxy/sync deployment later.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-047",
+      "summary": "Typed SDK and process/TUI spawners with directory scoping",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-08",
+        "P1-W1-07"
+      ],
+      "proposed_disposition": "split_proposed",
+      "scope_decision": "SCOPE-11",
+      "note": "Internal shared client contracts now; external SDK/spawner compatibility requires explicit decision.",
+      "approval": "pending",
+      "verified": false
+    },
+    {
+      "id": "REQ-048",
+      "summary": "Headless execution and session export",
+      "verbatim": false,
+      "owner_packages": [
+        "P1-W1-08",
+        "P1-W3-09"
+      ],
+      "proposed_disposition": "included",
+      "scope_decision": null,
+      "note": "Retained as a Phase 1 local requirement; independent integrated proof required.",
+      "approval": "pending",
+      "verified": false
+    }
+  ]
+}

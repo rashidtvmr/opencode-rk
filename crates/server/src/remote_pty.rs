@@ -312,13 +312,7 @@ impl PtyGateway {
         }
     }
 
-    fn window_allows(
-        limits: &PtyLimits,
-        s: &Session,
-        used: usize,
-        n: usize,
-        now: u64,
-    ) -> bool {
+    fn window_allows(limits: &PtyLimits, s: &Session, used: usize, n: usize, now: u64) -> bool {
         let spent = if now.wrapping_sub(s.window_start) >= limits.window_ticks {
             0
         } else {
@@ -416,7 +410,10 @@ impl PtyGateway {
         }
         self.live(&input.session, now)?;
         let ok = {
-            let s = self.sessions.get(&input.session).ok_or(PtyError::UnknownSession)?;
+            let s = self
+                .sessions
+                .get(&input.session)
+                .ok_or(PtyError::UnknownSession)?;
             if s.grant != PtyGrant::Granted {
                 return Err(PtyError::Denied);
             }
@@ -427,7 +424,10 @@ impl PtyGateway {
         }
         let n = input.data.len();
         let limits = self.limits;
-        let s = self.sessions.get_mut(&input.session).ok_or(PtyError::UnknownSession)?;
+        let s = self
+            .sessions
+            .get_mut(&input.session)
+            .ok_or(PtyError::UnknownSession)?;
         Self::window_spend(&limits, s, true, n, now);
         s.pending_input.extend_from_slice(&input.data);
         Ok(n)
@@ -450,14 +450,21 @@ impl PtyGateway {
             Self::window_allows(&self.limits, s, s.out_used, kept.len(), now)
         };
         if !ok {
-            return Err(PtyError::RateLimited { direction: "output" });
+            return Err(PtyError::RateLimited {
+                direction: "output",
+            });
         }
         let n = kept.len();
         // Split-borrow limits for the spend bookkeeping.
         let limits = self.limits;
-        let (max_bytes, max_lines) =
-            (self.limits.max_scrollback_bytes, self.limits.max_scrollback_lines);
-        let s = self.sessions.get_mut(session).ok_or(PtyError::UnknownSession)?;
+        let (max_bytes, max_lines) = (
+            self.limits.max_scrollback_bytes,
+            self.limits.max_scrollback_lines,
+        );
+        let s = self
+            .sessions
+            .get_mut(session)
+            .ok_or(PtyError::UnknownSession)?;
         Self::window_spend(&limits, s, false, n, now);
         if n > 0 {
             // Keep line structure for the scrollback line cap.
@@ -475,12 +482,7 @@ impl PtyGateway {
         Ok(n)
     }
 
-    fn push_line_capped(
-        s: &mut Session,
-        line: &[u8],
-        max_bytes: usize,
-        max_lines: usize,
-    ) {
+    fn push_line_capped(s: &mut Session, line: &[u8], max_bytes: usize, max_lines: usize) {
         s.scrollback.push_back(line.to_vec());
         s.scrollback_bytes = s.scrollback_bytes.saturating_add(line.len());
         while s.scrollback.len() > max_lines || s.scrollback_bytes > max_bytes {
@@ -503,7 +505,10 @@ impl PtyGateway {
         Self::require_grant(caller)?;
         resize.check(&self.limits)?;
         self.live(session, now)?;
-        let s = self.sessions.get_mut(session).ok_or(PtyError::UnknownSession)?;
+        let s = self
+            .sessions
+            .get_mut(session)
+            .ok_or(PtyError::UnknownSession)?;
         if s.grant != PtyGrant::Granted {
             return Err(PtyError::Denied);
         }
@@ -513,11 +518,11 @@ impl PtyGateway {
     }
 
     /// Drain queued input (absence asserts no injection happened).
-    pub fn take_input(
-        &mut self,
-        session: &PtySessionId,
-    ) -> Result<Vec<u8>, PtyError> {
-        let s = self.sessions.get_mut(session).ok_or(PtyError::UnknownSession)?;
+    pub fn take_input(&mut self, session: &PtySessionId) -> Result<Vec<u8>, PtyError> {
+        let s = self
+            .sessions
+            .get_mut(session)
+            .ok_or(PtyError::UnknownSession)?;
         Ok(std::mem::take(&mut s.pending_input))
     }
 
@@ -553,7 +558,10 @@ impl PtyGateway {
         session: &PtySessionId,
         now: u64,
     ) -> Result<DisconnectOutcome, PtyError> {
-        let s = self.sessions.get_mut(session).ok_or(PtyError::UnknownSession)?;
+        let s = self
+            .sessions
+            .get_mut(session)
+            .ok_or(PtyError::UnknownSession)?;
         if !s.connected {
             return Ok(DisconnectOutcome::AlreadyClosed);
         }
@@ -566,13 +574,12 @@ impl PtyGateway {
 
     /// Reconnect inside the lease. Past expiry the session is reaped and
     /// [`PtyError::LeaseExpired`] is returned (never silently resumed).
-    pub fn reconnect(
-        &mut self,
-        session: &PtySessionId,
-        now: u64,
-    ) -> Result<(), PtyError> {
+    pub fn reconnect(&mut self, session: &PtySessionId, now: u64) -> Result<(), PtyError> {
         let remove = {
-            let s = self.sessions.get(session).ok_or_else(|| self.reconnect_unknown(session, now))?;
+            let s = self
+                .sessions
+                .get(session)
+                .ok_or_else(|| self.reconnect_unknown(session, now))?;
             if s.connected {
                 return Ok(());
             }
@@ -583,7 +590,10 @@ impl PtyGateway {
             self.mark_reaped(session, now);
             return Err(PtyError::LeaseExpired);
         }
-        let s = self.sessions.get_mut(session).ok_or(PtyError::UnknownSession)?;
+        let s = self
+            .sessions
+            .get_mut(session)
+            .ok_or(PtyError::UnknownSession)?;
         s.connected = true;
         s.lease_expires = None;
         Ok(())
@@ -595,9 +605,7 @@ impl PtyGateway {
         let dead: Vec<PtySessionId> = self
             .sessions
             .iter()
-            .filter(|(_, s)| {
-                !s.connected && !matches!(s.lease_expires, Some(t) if now <= t)
-            })
+            .filter(|(_, s)| !s.connected && !matches!(s.lease_expires, Some(t) if now <= t))
             .map(|(id, _)| id.clone())
             .collect();
         let n = dead.len();
@@ -657,10 +665,7 @@ pub fn sanitize_output(data: &[u8]) -> Vec<u8> {
                             i += 1;
                             break;
                         }
-                        if data[i] == 0x1B
-                            && i + 1 < data.len()
-                            && data[i + 1] == b'\\'
-                        {
+                        if data[i] == 0x1B && i + 1 < data.len() && data[i + 1] == b'\\' {
                             i += 2;
                             break;
                         }
@@ -704,19 +709,24 @@ mod tests {
     }
 
     fn open_granted(g: &mut PtyGateway, now: u64) -> PtySessionId {
-        g.open(PtyGrant::Granted, PtyResize::new(80, 24), now).unwrap()
+        g.open(PtyGrant::Granted, PtyResize::new(80, 24), now)
+            .unwrap()
     }
 
     #[test]
     fn granted_input_output_and_resize_roundtrip() {
         let mut g = gw();
         let id = open_granted(&mut g, 0);
-        g.resize(PtyGrant::Granted, &id, PtyResize::new(120, 40), 1).unwrap();
+        g.resize(PtyGrant::Granted, &id, PtyResize::new(120, 40), 1)
+            .unwrap();
         assert_eq!(g.geometry(&id).unwrap(), (120, 40));
         let n = g
             .push_input(
                 PtyGrant::Granted,
-                &PtyInput { session: id.clone(), data: b"ls\n".to_vec() },
+                &PtyInput {
+                    session: id.clone(),
+                    data: b"ls\n".to_vec(),
+                },
                 2,
             )
             .unwrap();
@@ -743,9 +753,18 @@ mod tests {
         // Neither class can inject input or resize a live session, and
         // rejected input leaves zero side effects.
         let id = open_granted(&mut g, 0);
-        let evil = PtyInput { session: id.clone(), data: b"rm -rf /\n".to_vec() };
-        assert_eq!(g.push_input(PtyGrant::Denied, &evil, 1), Err(PtyError::Denied));
-        assert_eq!(g.push_input(PtyGrant::ReadOnly, &evil, 1), Err(PtyError::ReadOnly));
+        let evil = PtyInput {
+            session: id.clone(),
+            data: b"rm -rf /\n".to_vec(),
+        };
+        assert_eq!(
+            g.push_input(PtyGrant::Denied, &evil, 1),
+            Err(PtyError::Denied)
+        );
+        assert_eq!(
+            g.push_input(PtyGrant::ReadOnly, &evil, 1),
+            Err(PtyError::ReadOnly)
+        );
         assert!(g.take_input(&id).unwrap().is_empty());
         assert_eq!(
             g.resize(PtyGrant::Denied, &id, PtyResize::new(10, 10), 1),
@@ -794,7 +813,10 @@ mod tests {
         g.disconnect(&id, 100).unwrap();
         assert_eq!(g.sweep(100 + grace + 1), 1);
         assert_eq!(g.session_count(), 0);
-        assert_eq!(g.reconnect(&id, 100 + grace + 2), Err(PtyError::LeaseExpired));
+        assert_eq!(
+            g.reconnect(&id, 100 + grace + 2),
+            Err(PtyError::LeaseExpired)
+        );
         assert_eq!(g.take_input(&id), Err(PtyError::UnknownSession));
     }
 
@@ -808,10 +830,16 @@ mod tests {
         assert_eq!(
             g.push_input(
                 PtyGrant::Granted,
-                &PtyInput { session: id.clone(), data: big },
+                &PtyInput {
+                    session: id.clone(),
+                    data: big
+                },
                 1
             ),
-            Err(PtyError::PayloadTooLarge { got: max_msg + 1, max: max_msg })
+            Err(PtyError::PayloadTooLarge {
+                got: max_msg + 1,
+                max: max_msg
+            })
         );
         assert!(g.take_input(&id).unwrap().is_empty());
         // Rate window: fill the budget, next byte is refused.
@@ -822,7 +850,10 @@ mod tests {
         while spent + max_msg <= window {
             g.push_input(
                 PtyGrant::Granted,
-                &PtyInput { session: id.clone(), data: chunk.clone() },
+                &PtyInput {
+                    session: id.clone(),
+                    data: chunk.clone(),
+                },
                 now,
             )
             .unwrap();
@@ -831,7 +862,10 @@ mod tests {
         assert_eq!(
             g.push_input(
                 PtyGrant::Granted,
-                &PtyInput { session: id.clone(), data: vec![b'z'; 8] },
+                &PtyInput {
+                    session: id.clone(),
+                    data: vec![b'z'; 8]
+                },
                 now
             ),
             Err(PtyError::RateLimited { direction: "input" })
@@ -841,7 +875,10 @@ mod tests {
         assert!(g
             .push_input(
                 PtyGrant::Granted,
-                &PtyInput { session: id.clone(), data: vec![b'z'; 8] },
+                &PtyInput {
+                    session: id.clone(),
+                    data: vec![b'z'; 8]
+                },
                 now
             )
             .is_ok());
@@ -874,7 +911,10 @@ mod tests {
         let text = String::from_utf8(clean.clone()).unwrap();
         assert!(text.contains("click"), "legit label must survive: {text:?}");
         assert!(text.contains("Hi"), "legit text must survive: {text:?}");
-        assert!(!text.contains("evil.example"), "OSC payload must go: {text:?}");
+        assert!(
+            !text.contains("evil.example"),
+            "OSC payload must go: {text:?}"
+        );
         // End to end: hostile process output stored sanitized.
         let mut g = gw();
         let id = open_granted(&mut g, 0);
@@ -893,7 +933,10 @@ mod tests {
         );
         assert_eq!(
             g.open(PtyGrant::Granted, PtyResize::new(80, 9999), 0),
-            Err(PtyError::InvalidResize { cols: 80, rows: 9999 })
+            Err(PtyError::InvalidResize {
+                cols: 80,
+                rows: 9999
+            })
         );
         let id = open_granted(&mut g, 0);
         assert!(g

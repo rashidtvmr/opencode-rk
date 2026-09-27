@@ -1,0 +1,700 @@
+{
+  "schema_version": 1,
+  "status": "draft_not_certification",
+  "source_revision": "767a86a84376a69b2814ea959bb2c94831783768",
+  "pins": {
+    "opencode_canonical": "95daf90670b7c039c436c85537da5fbfe2205b41",
+    "opencode_observed_tui_target": "45ad8dc38aa1d65480a9961a3ae1b3c95d46796c",
+    "opentui": "c01292fd0837bafd07ce458c74416b2b375a41ab"
+  },
+  "coverage_limit": "This is the proposed release-facing checklist, not proof that every upstream dynamic registration has been enumerated. W1-10 must inspect exact source and add any omitted surfaces without weakening scope.",
+  "surfaces": [
+    {
+      "id": "N01",
+      "client": "native",
+      "surface": "Fresh start, setup and home",
+      "owner_packages": [
+        "P1-W1-07",
+        "P1-W2-02",
+        "P1-W3-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Fresh disposable HOME opens setup/home; successful setup creates/opens actual workspace session.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N02",
+      "client": "native",
+      "surface": "Session transcript and composer",
+      "owner_packages": [
+        "P1-W2-03",
+        "P1-W3-03"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Multiline send streams a real turn with durable history and preserved drafts on failure.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N03",
+      "client": "native",
+      "surface": "Command palette and slash commands",
+      "owner_packages": [
+        "P1-W3-04",
+        "P1-W4-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Search, select and execute registered actions; no menu label without callback.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N04",
+      "client": "native",
+      "surface": "Provider connection and credential entry",
+      "owner_packages": [
+        "P1-W1-09",
+        "P1-W3-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Authorized configuration persists securely; invalid/cancelled setup leaves no leaked or half-committed credential.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N05",
+      "client": "native",
+      "surface": "Model, variant and effort selection",
+      "owner_packages": [
+        "P1-W3-05",
+        "P1-W4-02"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Next actual provider request uses exact selected model/effort; unsupported variants are honest.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N06",
+      "client": "native",
+      "surface": "Agent/plan/build selector",
+      "owner_packages": [
+        "P1-W3-06",
+        "P1-W4-01"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Mode changes effective execution policy; selecting plan cannot write files.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N07",
+      "client": "native",
+      "surface": "Session list/search/switch/new",
+      "owner_packages": [
+        "P1-W3-01"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Keyboard selection changes actual session; per-tab drafts/model/scroll remain isolated.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N08",
+      "client": "native",
+      "surface": "Rename/archive/delete/error confirmation",
+      "owner_packages": [
+        "P1-W3-01",
+        "P1-W4-06"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Mutations persist and synchronize; cancellation or denial changes nothing; failure is actionable.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N09",
+      "client": "native",
+      "surface": "Workspace list/create/move/unavailable",
+      "owner_packages": [
+        "P1-W3-01",
+        "P1-W4-06"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Actions affect scoped workspace authority and session membership; unavailable workspace does not silently redirect.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N10",
+      "client": "native",
+      "surface": "Message actions and timeline jump",
+      "owner_packages": [
+        "P1-W3-02",
+        "P1-W3-03"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Jump uses stable message identity under streaming/pagination, not stale indices.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N11",
+      "client": "native",
+      "surface": "Fork at message/timeline",
+      "owner_packages": [
+        "P1-W3-02"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Child history ends at selected immutable boundary; parent remains unchanged.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N12",
+      "client": "native",
+      "surface": "Undo/redo/rewind/compact/retry",
+      "owner_packages": [
+        "P1-W3-02"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Durable semantics distinguish pointer move, destructive rollback, context compaction and uncertain retries.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N13",
+      "client": "native",
+      "surface": "Child inspector, parent/sibling navigation",
+      "owner_packages": [
+        "P1-W3-06",
+        "P1-W4-01"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Inspect real running child, steer/cancel correct child and return without privilege escalation.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N14",
+      "client": "native",
+      "surface": "Tool permission and human-only confirmation",
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W5-04"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Exact operation/scope shown; denial prevents effects; stale/replayed grant is refused.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N15",
+      "client": "native",
+      "surface": "Question/elicitation/multi-choice/custom answer",
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W4-03"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Actual waiting tool/agent receives one scoped answer; cancellation and expiry settle safely.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N16",
+      "client": "native",
+      "surface": "Retry action, connection/error recovery",
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W5-06"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "No automatic repeat of ambiguous write; drafts/history remain recoverable.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N17",
+      "client": "native",
+      "surface": "Themes, mode and contrast settings",
+      "owner_packages": [
+        "P1-W3-07"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Selection changes native rendering, persists and has tested no-color/contrast behavior.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N18",
+      "client": "native",
+      "surface": "Keyboard help and configurable bindings",
+      "owner_packages": [
+        "P1-W2-01",
+        "P1-W3-07"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Displayed shortcuts match actual handlers; paste cannot activate shortcuts.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N19",
+      "client": "native",
+      "surface": "Status, debug and operational side panel",
+      "owner_packages": [
+        "P1-W3-07",
+        "P1-W4-02"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Shows actual provider/tool/queue/usage health; unknown values are not zeros or fake live states.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N20",
+      "client": "native",
+      "surface": "Context/memory inspection and unload",
+      "owner_packages": [
+        "P1-W3-07",
+        "P1-W4-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Displayed sources and unload/reload influence next real prompt under visibility policy.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N21",
+      "client": "native",
+      "surface": "MCP catalog/search/selection/toggles",
+      "owner_packages": [
+        "P1-W4-03"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Enable/disable affects process lifecycle, tool advertisement and dispatch atomically.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N22",
+      "client": "native",
+      "surface": "Skill picker, command completion and file mentions",
+      "owner_packages": [
+        "P1-W3-04",
+        "P1-W4-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Selected content reaches real turn with permissions and correct scoped precedence.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N23",
+      "client": "native",
+      "surface": "Prompt history/stash/tags",
+      "owner_packages": [
+        "P1-W2-03",
+        "P1-W3-01",
+        "P1-W3-04"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Drafts/history/stash round-trip without submitting or leaking into another workspace; tag behavior source-classified.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N24",
+      "client": "native",
+      "surface": "Code blocks, diff, selection/copy",
+      "owner_packages": [
+        "P1-W3-03",
+        "P1-W5-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Correct Unicode/cell widths, stable scroll, safe rendered controls and authorized clipboard action.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N25",
+      "client": "native",
+      "surface": "Local files and constrained terminal",
+      "owner_packages": [
+        "P1-W3-08",
+        "P1-W4-04"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Real scoped file/diff and approved process output; child/PTY teardown and denial verified.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N26",
+      "client": "native",
+      "surface": "Session export/import/local share",
+      "owner_packages": [
+        "P1-W3-09"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Redaction, size limits and revocation operate on actual durable session; original DB untouched.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N27",
+      "client": "native",
+      "surface": "Provider-specific organization dialog",
+      "owner_packages": [
+        "P1-W3-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Conditional account/organization selection exists only for verified authorized provider support.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N28",
+      "client": "native",
+      "surface": "Loading, missing plugin route, empty and offline states",
+      "owner_packages": [
+        "P1-W2-02",
+        "P1-W3-04",
+        "P1-W5-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Every state has truthful recovery/focus behavior; unsupported plugin route is not advertised as implemented.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N29",
+      "client": "native",
+      "surface": "Raw input, resize, suspend/resume and terminal restoration",
+      "owner_packages": [
+        "P1-W1-04",
+        "P1-W2-01",
+        "P1-W6-03"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Real PTY/console records split Unicode/paste/resize and exact restoration after normal/error/cancel exit.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "N30",
+      "client": "native",
+      "surface": "Plugin-contributed pages and bindings",
+      "owner_packages": [
+        "P1-W4-05",
+        "P1-W1-01"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Supported native contributions register real actions; arbitrary Solid/TS compatibility separately approved or deferred.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W01",
+      "client": "web",
+      "surface": "Embedded launch and authenticated session",
+      "owner_packages": [
+        "P1-W2-07"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Packaged daemon serves UI without Vite; authorization works without provider-secret disclosure.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W02",
+      "client": "web",
+      "surface": "Sidebar, pinned history and search",
+      "owner_packages": [
+        "P1-W4-06"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Pins/search/archive/page cursors persist and retrieve correct scoped sessions.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W03",
+      "client": "web",
+      "surface": "Projects/workspaces and context files",
+      "owner_packages": [
+        "P1-W4-06",
+        "P1-W4-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Grouping and disclosure match actual workspace session authority and next prompt context.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W04",
+      "client": "web",
+      "surface": "Full-width role-aligned conversation/actions",
+      "owner_packages": [
+        "P1-W4-07"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Action bars belong to correct durable message; keyboard/screen-reader behavior is tested.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W05",
+      "client": "web",
+      "surface": "Edit/retry/regenerate/fork/branch navigation",
+      "owner_packages": [
+        "P1-W4-07",
+        "P1-W3-02"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Original history preserved, branch boundary correct, retries do not duplicate effects.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W06",
+      "client": "web",
+      "surface": "Reasoning summary/tool activity/references",
+      "owner_packages": [
+        "P1-W4-07"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Provider-safe summaries only; actual tool events and retrieved sources separate from final answer.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W07",
+      "client": "web",
+      "surface": "Structured composer, mentions, slash actions, stop/queue",
+      "owner_packages": [
+        "P1-W2-08",
+        "P1-W4-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Structured input maps to actual request; drafts survive interruption and busy handling.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W08",
+      "client": "web",
+      "surface": "Providers/models/variants/effort/accounts",
+      "owner_packages": [
+        "P1-W3-05",
+        "P1-W4-02"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Selection reaches shared execution service; UI never receives credentials.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W09",
+      "client": "web",
+      "surface": "Files/images/screenshots, paste/drop and Library",
+      "owner_packages": [
+        "P1-W4-08"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Selected durable attachment reaches an authorized capable provider, not just upload storage.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W10",
+      "client": "web",
+      "surface": "Plugin/app/tool chooser and MCP settings",
+      "owner_packages": [
+        "P1-W4-03",
+        "P1-W4-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Selection changes actual advertised tools and respects permission/lifecycle rules.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W11",
+      "client": "web",
+      "surface": "Approval/question/retry dialogs",
+      "owner_packages": [
+        "P1-W2-06",
+        "P1-W4-03"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Same pending operation and decision state seen by native client; stale grant rejected.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W12",
+      "client": "web",
+      "surface": "Agent inspector, background jobs and settings",
+      "owner_packages": [
+        "P1-W4-01"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Real parent/child execution and cancel/steer/results are shared with TUI.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W13",
+      "client": "web",
+      "surface": "Writing/code artifacts and versions",
+      "owner_packages": [
+        "P1-W4-09"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Edit/undo/version state persists; preview isolated; run/apply invoke actual safe brokered operation.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W14",
+      "client": "web",
+      "surface": "File/diff/local terminal views",
+      "owner_packages": [
+        "P1-W3-08",
+        "P1-W4-04"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "No unrestricted host shell; output/source display sanitized, terminal lifetime bounded.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W15",
+      "client": "web",
+      "surface": "Search and deep research",
+      "owner_packages": [
+        "P1-W5-01"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Real source retrieval, plan/review/progress/steer/cancel and cited output; local grep not mislabelled web search.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W16",
+      "client": "web",
+      "surface": "Voice/dictation and microphone state",
+      "owner_packages": [
+        "P1-W5-02"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Opt-in actual adapter, visible transcript, stop/revoke/disconnect cleanup; no fake transcription.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W17",
+      "client": "web",
+      "surface": "Execution graph/canvas",
+      "owner_packages": [
+        "P1-W5-03"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Nodes/actions use real persisted agents/turns, not synthetic sample graph or generic workflow expansion.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W18",
+      "client": "web",
+      "surface": "Settings/themes/status/diagnostics",
+      "owner_packages": [
+        "P1-W3-07",
+        "P1-W5-05"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Persisted effective settings match backend and redact diagnostics.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W19",
+      "client": "web",
+      "surface": "Temporary chat, local share/export/import",
+      "owner_packages": [
+        "P1-W4-06",
+        "P1-W3-09"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Temporary retention is explicit, archive/share consent correct, no unexpected durable history loss.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    },
+    {
+      "id": "W20",
+      "client": "web",
+      "surface": "Responsive, accessibility and reconnect behavior",
+      "owner_packages": [
+        "P1-W4-10",
+        "P1-W6-04"
+      ],
+      "current_condition": "existing code or requirements present; full installed behavior unverified",
+      "observable_proof": "Real browser keyboard/screen reader geometry and cursor resync; slow clients bounded.",
+      "source_classification": "baseline/local requirement; exact source registration to confirm",
+      "status": "draft_unverified",
+      "release_required": true
+    }
+  ]
+}

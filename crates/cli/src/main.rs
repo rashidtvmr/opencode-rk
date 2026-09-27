@@ -38,11 +38,11 @@ mod native_host;
 mod native_layout;
 mod native_navigation;
 mod native_palette;
+mod native_shell;
 mod native_status;
 mod native_theme;
 mod native_timeline;
 mod native_transcript;
-mod native_shell;
 mod onboarding;
 mod pair;
 mod service_commands;
@@ -329,8 +329,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 _ => ci_output::OutputFormat::Jsonl,
             };
             let mut stdout = std::io::stdout();
-            let result =
-                ci_run::run_ci(&prompt, format, &mut stdout, args.max_steps, args.timeout);
+            let result = ci_run::run_ci(&prompt, format, &mut stdout, args.max_steps, args.timeout);
             if result.exit_code != 0 {
                 std::process::exit(result.exit_code as i32);
             }
@@ -693,7 +692,8 @@ async fn serve(
     // unavailable"). Mint the real daemon credential and publish it.
     //
     let credential = DaemonAuth::mint().map_err(|error| error.to_string())?;
-    let descriptor = publish_backend_descriptor_with_auth(&data, listen, credential.token().to_owned())?;
+    let descriptor =
+        publish_backend_descriptor_with_auth(&data, listen, credential.token().to_owned())?;
     println!("{}", descriptor.http_origin);
     if open_browser {
         open_web_browser(&descriptor.http_origin)?;
@@ -703,7 +703,11 @@ async fn serve(
     let control = tokio::spawn(async move {
         daemon_accept.accept_clients().await;
     });
-    let result = axum::serve(listener, router_with_auth(AppState { sessions, catalog }, Some(credential))).await;
+    let result = axum::serve(
+        listener,
+        router_with_auth(AppState { sessions, catalog }, Some(credential)),
+    )
+    .await;
     daemon.shutdown();
     let _ = control.await;
     result?;

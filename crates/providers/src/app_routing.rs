@@ -205,8 +205,13 @@ impl fmt::Debug for AccountBudget {
 /// Budget-holder failures.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum BudgetError {
-    UnknownAccount { account_id: String },
-    TooManyAccounts { max: usize, actual: usize },
+    UnknownAccount {
+        account_id: String,
+    },
+    TooManyAccounts {
+        max: usize,
+        actual: usize,
+    },
     BudgetExhausted {
         requested: u64,
         used: u64,
@@ -337,9 +342,11 @@ impl AccountBudgetHolder {
     }
 
     pub fn consume(&mut self, account: &AccountId, amount: u64) -> Result<u64, BudgetError> {
-        let slot = self.find_mut(account).ok_or_else(|| BudgetError::UnknownAccount {
-            account_id: account.as_str().to_owned(),
-        })?;
+        let slot = self
+            .find_mut(account)
+            .ok_or_else(|| BudgetError::UnknownAccount {
+                account_id: account.as_str().to_owned(),
+            })?;
         slot.consume(amount)
     }
 
@@ -349,9 +356,11 @@ impl AccountBudgetHolder {
         status: u16,
         error: &str,
     ) -> Result<FailureKind, BudgetError> {
-        let slot = self.find_mut(account).ok_or_else(|| BudgetError::UnknownAccount {
-            account_id: account.as_str().to_owned(),
-        })?;
+        let slot = self
+            .find_mut(account)
+            .ok_or_else(|| BudgetError::UnknownAccount {
+                account_id: account.as_str().to_owned(),
+            })?;
         slot.record_failure(status, error);
         Ok(slot
             .last_failure
@@ -388,10 +397,12 @@ impl AccountBudgetHolder {
     pub fn export_redacted(&self, secrets: &[&str]) -> String {
         let mut out = String::new();
         for budget in &self.budgets {
-            let (kind, status, reason) = budget.last_failure.as_ref().map_or(
-                ("none", String::new(), "none".to_owned()),
-                |fl| (fl.kind.as_str(), fl.status.to_string(), fl.reason.clone()),
-            );
+            let (kind, status, reason) = budget
+                .last_failure
+                .as_ref()
+                .map_or(("none", String::new(), "none".to_owned()), |fl| {
+                    (fl.kind.as_str(), fl.status.to_string(), fl.reason.clone())
+                });
             out.push_str(&format!(
                 "account id={:?} used={} limit={} remaining={} last={kind}:{status}:{reason}\n",
                 budget.account.as_str(),
@@ -448,17 +459,17 @@ pub fn decide_failover(
             FailoverDecision::RetryAfter { retry_at }
         }),
         FailureKind::QuotaExhausted => {
-            let denied: HashSet<&str> =
-                excluded.iter().map(AccountId::as_str).collect();
+            let denied: HashSet<&str> = excluded.iter().map(AccountId::as_str).collect();
             candidates
                 .iter()
                 .find(|candidate| {
-                    candidate.as_str() != current.as_str()
-                        && !denied.contains(candidate.as_str())
+                    candidate.as_str() != current.as_str() && !denied.contains(candidate.as_str())
                 })
-                .map_or(FailoverDecision::Exhausted, |to| FailoverDecision::Failover {
-                    from: current.clone(),
-                    to: to.clone(),
+                .map_or(FailoverDecision::Exhausted, |to| {
+                    FailoverDecision::Failover {
+                        from: current.clone(),
+                        to: to.clone(),
+                    }
                 })
         }
     }
@@ -574,17 +585,10 @@ mod tests {
         );
         assert_eq!(decision, FailoverDecision::Exhausted);
 
-        let decision = decide_failover(
-            &current,
-            &all,
-            &[],
-            FailureKind::RateLimited,
-            Some(9_999),
-        );
+        let decision = decide_failover(&current, &all, &[], FailureKind::RateLimited, Some(9_999));
         assert_eq!(decision, FailoverDecision::RetryAfter { retry_at: 9_999 });
 
-        let decision =
-            decide_failover(&current, &all, &[], FailureKind::Other, Some(1));
+        let decision = decide_failover(&current, &all, &[], FailureKind::Other, Some(1));
         assert_eq!(decision, FailoverDecision::Stay);
     }
 
@@ -594,7 +598,11 @@ mod tests {
         holder.insert(id("a"), 100).expect("insert");
         let secret = "sk-live-SECRET-123";
         holder
-            .record_failure(&id("a"), 429, &format!("rate limited, key {secret} rejected"))
+            .record_failure(
+                &id("a"),
+                429,
+                &format!("rate limited, key {secret} rejected"),
+            )
             .expect("record");
         // classify sanity: no quota marker present
         assert_eq!(
@@ -617,6 +625,9 @@ mod tests {
     #[test]
     fn reason_truncation_bounds_memory() {
         let long = "e".repeat(MAX_FAILURE_REASON_CHARS + 50);
-        assert_eq!(truncate_reason(&long).chars().count(), MAX_FAILURE_REASON_CHARS);
+        assert_eq!(
+            truncate_reason(&long).chars().count(),
+            MAX_FAILURE_REASON_CHARS
+        );
     }
 }

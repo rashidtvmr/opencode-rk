@@ -126,9 +126,8 @@ fn method_ok(s: &str) -> bool {
         Some(b) if b.is_ascii_alphabetic() => (),
         _ => return false,
     }
-    s.bytes().all(|b| {
-        b.is_ascii_alphanumeric() || b == b'/' || b == b'.' || b == b'_' || b == b'$'
-    })
+    s.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'/' || b == b'.' || b == b'_' || b == b'$')
 }
 
 fn root_ok(root: &str) -> bool {
@@ -253,8 +252,7 @@ fn balanced_len(s: &str, open: u8, close: u8) -> Option<usize> {
 
 fn find_id(body: &str) -> Result<u64, LspError> {
     let rest = raw_field(body, "id").ok_or_else(|| LspError::Malformed("missing-id".into()))?;
-    let (n, _) =
-        parse_number(rest).ok_or_else(|| LspError::Malformed("bad-id".into()))?;
+    let (n, _) = parse_number(rest).ok_or_else(|| LspError::Malformed("bad-id".into()))?;
     if n < 0 {
         return Err(LspError::Malformed("bad-id".into()));
     }
@@ -316,9 +314,7 @@ fn parse_response(body: &str) -> Result<(u64, Option<String>), LspError> {
                 || rest.starts_with("true")
                 || rest.starts_with("false")
             {
-                let n = rest
-                    .find(|c| c == ',' || c == '}')
-                    .unwrap_or(rest.len());
+                let n = rest.find(|c| c == ',' || c == '}').unwrap_or(rest.len());
                 Some(rest[..n].trim_end().to_string())
             } else {
                 return Err(LspError::Malformed("bad-result".into()));
@@ -432,8 +428,14 @@ impl Proc {
             .spawn()
             .map_err(|e| LspError::Io(io_label(&e)))?;
         let mut child = child;
-        let stdin = child.stdin.take().ok_or_else(|| LspError::Io("pipe".into()))?;
-        let stdout = child.stdout.take().ok_or_else(|| LspError::Io("pipe".into()))?;
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| LspError::Io("pipe".into()))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| LspError::Io("pipe".into()))?;
         Ok(Self {
             child,
             stdin,
@@ -527,7 +529,11 @@ impl LspClient {
         }
     }
 
-    fn ensure_spawned(&mut self, broker: &dyn LspPermissionBroker, method: &str) -> Result<(), LspError> {
+    fn ensure_spawned(
+        &mut self,
+        broker: &dyn LspPermissionBroker,
+        method: &str,
+    ) -> Result<(), LspError> {
         if self.proc_.is_some() {
             return Ok(());
         }
@@ -658,7 +664,9 @@ impl LspClient {
                     break Err(LspError::TransportClosed);
                 }
                 Ok(Ok(body)) => {
-                    let reader = reader_handle.join().map_err(|_| LspError::TransportClosed)?;
+                    let reader = reader_handle
+                        .join()
+                        .map_err(|_| LspError::TransportClosed)?;
                     if let Some(proc_) = proc_taken.as_mut() {
                         proc_.reader = Some(reader);
                     }
@@ -826,7 +834,10 @@ mod tests {
             std::fs::set_permissions(&script, perm).expect("chmod");
         }
         let _ = root;
-        ("sh".to_string(), vec![script.to_string_lossy().into_owned()])
+        (
+            "sh".to_string(),
+            vec![script.to_string_lossy().into_owned()],
+        )
     }
 
     #[test]
@@ -855,12 +866,9 @@ mod tests {
         let root = tmp_root("t02");
         let broker = deny();
         let cancel = AtomicBool::new(false);
-        let mut client = LspClient::new(
-            "definitely-not-a-real-lsp-server-binary-xyz",
-            vec![],
-            &root,
-        )
-        .expect("client builds before auth");
+        let mut client =
+            LspClient::new("definitely-not-a-real-lsp-server-binary-xyz", vec![], &root)
+                .expect("client builds before auth");
         let before = client.pending_len();
         let err = client
             .request("textDocument/hover", b"{}", &broker, &cancel)
@@ -908,8 +916,7 @@ mod tests {
         let (cmd, args) = fixture_server(&root, &frame, "slow");
         let broker = allow();
         let cancel = AtomicBool::new(true);
-        let mut client =
-            LspClient::new(cmd, args, &root).expect("client");
+        let mut client = LspClient::new(cmd, args, &root).expect("client");
         let err = client
             .request("textDocument/hover", b"{}", &broker, &cancel)
             .expect_err("pre-set cancel must win");
@@ -944,8 +951,10 @@ mod tests {
             LspError::Malformed("bad-error".into())
         );
         assert!(
-            parse_response("{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32600,\"message\":\"bad\"}}")
-                .expect_err("server err")
+            parse_response(
+                "{\"jsonrpc\":\"2.0\",\"id\":1,\"error\":{\"code\":-32600,\"message\":\"bad\"}}"
+            )
+            .expect_err("server err")
                 == LspError::Server {
                     code: -32600,
                     message: "bad".into()
@@ -972,8 +981,7 @@ mod tests {
         let root = tmp_root("t06");
         let broker = deny();
         let cancel = AtomicBool::new(false);
-        let mut client =
-            LspClient::new("no-spawn-needed", vec![], &root).expect("client");
+        let mut client = LspClient::new("no-spawn-needed", vec![], &root).expect("client");
         // Relative roots and bad methods rejected before broker/queue.
         assert_eq!(
             LspClient::new("x", vec![], Path::new("relative/path")).expect_err("rel"),

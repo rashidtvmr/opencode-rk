@@ -4,8 +4,8 @@ pub mod acp_bridge;
 pub mod acp_files;
 pub mod acp_session;
 pub mod admission_bounds;
-pub mod app_client;
 pub mod agent_loop;
+pub mod app_client;
 pub use agent_loop::{
     function_call_output as loop_function_call_output, truncate_tool_output, CallOutput,
     LoopController, RequestedCall, TurnStop, MAX_CALLS_PER_ROUND, MAX_TOOL_OUTPUT_CHARS,
@@ -18,6 +18,7 @@ pub mod auto_report;
 pub mod auto_window;
 pub mod chat_composer;
 pub mod clients;
+pub mod context_report;
 pub mod control_decode;
 pub mod control_plane_errors;
 pub mod control_plane_exposure;
@@ -25,24 +26,31 @@ pub mod control_plane_inputs;
 pub mod daemon;
 pub mod daemon_auth;
 pub mod desktop_bridge;
-pub mod loop_driver;
-pub mod rules_globs;
-pub mod rules_loader;
-pub mod context_report;
-pub mod runtime_wiring;
 pub mod enterprise_link;
 pub mod error_translate;
 pub mod event_bus;
 pub mod event_cursor;
 pub mod event_stream;
+pub mod loop_driver;
 pub mod origin_check;
 pub mod protocol_api;
 pub mod rel_stamp;
 pub mod rel_verify;
+pub mod remote_approvals;
+pub mod remote_connector;
+pub mod remote_files;
 pub mod remote_ledger;
+pub mod remote_pty;
+pub mod remote_recovery;
+pub mod remote_revocation;
+pub mod remote_sessions;
 pub mod remote_sync;
+pub mod remote_turns;
 pub mod repo_ops;
 pub mod route_table;
+pub mod rules_globs;
+pub mod rules_loader;
+pub mod runtime_wiring;
 pub mod sdk_client;
 pub mod sdk_spawns;
 pub mod sync_log;
@@ -62,16 +70,8 @@ pub mod web_host;
 pub mod web_route;
 pub mod web_suffix;
 pub mod web_tool_chooser;
-pub mod workspace_proxy;
-pub mod remote_approvals;
-pub mod remote_connector;
-pub mod remote_files;
-pub mod remote_pty;
-pub mod remote_recovery;
-pub mod remote_revocation;
-pub mod remote_sessions;
-pub mod remote_turns;
 pub mod web_turn_adapter;
+pub mod workspace_proxy;
 pub mod workspace_sessions;
 use axum::{
     body::{Body, Bytes},
@@ -82,10 +82,11 @@ use axum::{
     Json, Router,
 };
 use futures_util::stream;
+use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    ArtifactId, ArtifactKind, AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId,
-    MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
+    ArtifactId, ArtifactKind, AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef,
+    SessionId, MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
     OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesInput, ResponsesItem,
@@ -96,7 +97,6 @@ use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, Security
 use opencode_rk_sessions::{SessionError, SessionService};
 use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::registry::ToolRegistry;
-use opencode_rk_agents::agent_executor::AgentExecutor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
@@ -440,11 +440,7 @@ async fn list_history_page(
     Query(params): Query<HistoryPageParams>,
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&id)?;
-    let before = params
-        .before
-        .as_deref()
-        .map(parse_message_id)
-        .transpose()?;
+    let before = params.before.as_deref().map(parse_message_id).transpose()?;
     let (messages, next_before) = state
         .sessions
         .history_page(id, before, params.limit.unwrap_or(50).clamp(1, 100))
@@ -509,7 +505,9 @@ async fn upload_draft_attachment(
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
     let id = parse_session_id(&id)?;
     if body.is_empty() || body.len() > MAX_DRAFT_ATTACHMENT_BYTES {
-        return Err(ApiFailure::unprocessable("attachment exceeds the supported size bound"));
+        return Err(ApiFailure::unprocessable(
+            "attachment exceeds the supported size bound",
+        ));
     }
     let mime = headers
         .get(header::CONTENT_TYPE)
@@ -521,10 +519,7 @@ async fn upload_draft_attachment(
         .create_draft_attachment(id, params.name, mime, body.to_vec())
         .await
         .map_err(attachment_failure)?;
-    Ok((
-        StatusCode::CREATED,
-        Json(json!({"attachment":attachment})),
-    ))
+    Ok((StatusCode::CREATED, Json(json!({"attachment":attachment}))))
 }
 
 async fn list_draft_attachments(
@@ -986,7 +981,8 @@ async fn create_turn_stream(
                 opencode_rk_agents::agent_executor::LoopStep::ToolDispatch,
                 opencode_rk_agents::agent_executor::LoopStep::PolicyCheck,
                 opencode_rk_agents::agent_executor::LoopStep::Settle,
-            ]).expect("fixed 4-step turn plan fits agent executor capacity"),
+            ])
+            .expect("fixed 4-step turn plan fits agent executor capacity"),
         },
         |mut state| async move {
             loop {
@@ -1008,143 +1004,143 @@ async fn create_turn_stream(
                     TurnStreamStage::Provider => {
                         let event = state.provider.next_event().await;
                         match event {
-                        Ok(Some(ResponsesStreamEvent::OutputTextDelta(delta))) => {
-                            state.assistant_text.push_str(&delta);
-                            return Some((
-                                Ok::<Bytes, Infallible>(ndjson(json!({
-                                    "type": "assistant_delta",
-                                    "delta": delta,
-                                }))),
-                                state,
-                            ));
-                        }
-                        Ok(Some(ResponsesStreamEvent::ReasoningSummaryDelta(delta))) => {
-                            state.reasoning_summary.push_str(&delta);
-                            return Some((
-                                Ok::<Bytes, Infallible>(ndjson(json!({
-                                    "type": "reasoning_summary_delta",
-                                    "delta": delta,
-                                }))),
-                                state,
-                            ));
-                        }
-                        Ok(Some(ResponsesStreamEvent::FunctionCall {
-                            call_id,
-                            name,
-                            arguments,
-                        })) => {
-                            state.pending_calls.push(RequestedCall {
-                                call_id: call_id.clone(),
-                                name: name.clone(),
-                                arguments: arguments.clone(),
-                            });
-                            // Replay rule: the next round's input must contain
-                            // the model's function_call before its output.
-                            state
-                                .history_items
-                                .push(ResponsesItem::FunctionCall {
+                            Ok(Some(ResponsesStreamEvent::OutputTextDelta(delta))) => {
+                                state.assistant_text.push_str(&delta);
+                                return Some((
+                                    Ok::<Bytes, Infallible>(ndjson(json!({
+                                        "type": "assistant_delta",
+                                        "delta": delta,
+                                    }))),
+                                    state,
+                                ));
+                            }
+                            Ok(Some(ResponsesStreamEvent::ReasoningSummaryDelta(delta))) => {
+                                state.reasoning_summary.push_str(&delta);
+                                return Some((
+                                    Ok::<Bytes, Infallible>(ndjson(json!({
+                                        "type": "reasoning_summary_delta",
+                                        "delta": delta,
+                                    }))),
+                                    state,
+                                ));
+                            }
+                            Ok(Some(ResponsesStreamEvent::FunctionCall {
+                                call_id,
+                                name,
+                                arguments,
+                            })) => {
+                                state.pending_calls.push(RequestedCall {
                                     call_id: call_id.clone(),
                                     name: name.clone(),
                                     arguments: arguments.clone(),
                                 });
-                            return Some((
-                                Ok::<Bytes, Infallible>(ndjson(json!({
-                                    "type": "tool_call",
-                                    "call_id": call_id,
-                                    "name": name,
-                                    "arguments": arguments,
-                                }))),
-                                state,
-                            ));
-                        }
-                        Ok(Some(ResponsesStreamEvent::Completed { stop_reason })) => {
-                            // Terminal provider event: either the turn ends
-                            // here or the accumulated tool calls execute and
-                            // the loop continues with the next round.
-                            if !state.pending_calls.is_empty() {
-                                if !state.loop_control.can_start_next_round() {
-                                    let stop = TurnStop::MaxSteps {
-                                        steps: state.loop_control.max_steps(),
-                                    };
-                                    state.stage = TurnStreamStage::NextRound;
-                                    state.forced_stop = Some(stop);
+                                // Replay rule: the next round's input must contain
+                                // the model's function_call before its output.
+                                state.history_items.push(ResponsesItem::FunctionCall {
+                                    call_id: call_id.clone(),
+                                    name: name.clone(),
+                                    arguments: arguments.clone(),
+                                });
+                                return Some((
+                                    Ok::<Bytes, Infallible>(ndjson(json!({
+                                        "type": "tool_call",
+                                        "call_id": call_id,
+                                        "name": name,
+                                        "arguments": arguments,
+                                    }))),
+                                    state,
+                                ));
+                            }
+                            Ok(Some(ResponsesStreamEvent::Completed { stop_reason })) => {
+                                // Terminal provider event: either the turn ends
+                                // here or the accumulated tool calls execute and
+                                // the loop continues with the next round.
+                                if !state.pending_calls.is_empty() {
+                                    if !state.loop_control.can_start_next_round() {
+                                        let stop = TurnStop::MaxSteps {
+                                            steps: state.loop_control.max_steps(),
+                                        };
+                                        state.stage = TurnStreamStage::NextRound;
+                                        state.forced_stop = Some(stop);
+                                        continue;
+                                    }
+                                    state.stage = TurnStreamStage::Executing;
                                     continue;
                                 }
-                                state.stage = TurnStreamStage::Executing;
-                                continue;
+                                let stop = match stop_reason {
+                                    ResponsesStopReason::Completed => TurnStop::Completed,
+                                    ResponsesStopReason::Incomplete { reason } => {
+                                        TurnStop::Incomplete { reason }
+                                    }
+                                };
+                                let assistant_text = std::mem::take(&mut state.assistant_text);
+                                let reasoning_summary =
+                                    std::mem::take(&mut state.reasoning_summary);
+                                let stop_reason = stop.as_str();
+                                let persisted_summary =
+                                    (!reasoning_summary.is_empty()).then_some(reasoning_summary);
+                                match state
+                                    .sessions
+                                    .append_assistant_with_reasoning(
+                                        state.session_id,
+                                        assistant_text,
+                                        persisted_summary.clone(),
+                                    )
+                                    .await
+                                {
+                                    Ok(message) => {
+                                        state.stage = TurnStreamStage::Done;
+                                        return Some((
+                                            Ok::<Bytes, Infallible>(ndjson(json!({
+                                                "type": "assistant_message",
+                                                "message": message,
+                                                "reasoning_summary": persisted_summary,
+                                                "stop_reason": stop_reason,
+                                            }))),
+                                            state,
+                                        ));
+                                    }
+                                    Err(error) => {
+                                        state.stage = TurnStreamStage::Done;
+                                        return Some((
+                                            Ok::<Bytes, Infallible>(stream_error(
+                                                "internal_error",
+                                                error.to_string(),
+                                            )),
+                                            state,
+                                        ));
+                                    }
+                                }
                             }
-                            let stop = match stop_reason {
-                                ResponsesStopReason::Completed => TurnStop::Completed,
-                                ResponsesStopReason::Incomplete { reason } => {
-                                    TurnStop::Incomplete { reason }
-                                }
-                            };
-                            let assistant_text = std::mem::take(&mut state.assistant_text);
-                            let reasoning_summary = std::mem::take(&mut state.reasoning_summary);
-                            let stop_reason = stop.as_str();
-                            let persisted_summary = (!reasoning_summary.is_empty())
-                                .then_some(reasoning_summary);
-                            match state
-                                .sessions
-                                .append_assistant_with_reasoning(
-                                    state.session_id,
-                                    assistant_text,
-                                    persisted_summary.clone(),
-                                )
-                                .await
-                            {
-                                Ok(message) => {
-                                    state.stage = TurnStreamStage::Done;
-                                    return Some((
-                                        Ok::<Bytes, Infallible>(ndjson(json!({
-                                            "type": "assistant_message",
-                                            "message": message,
-                                            "reasoning_summary": persisted_summary,
-                                            "stop_reason": stop_reason,
-                                        }))),
-                                        state,
-                                    ));
-                                }
-                                Err(error) => {
-                                    state.stage = TurnStreamStage::Done;
-                                    return Some((
-                                        Ok::<Bytes, Infallible>(stream_error(
-                                            "internal_error",
-                                            error.to_string(),
-                                        )),
-                                        state,
-                                    ));
-                                }
+                            Ok(None) => {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        "bad_gateway",
+                                        "provider stream ended before completion",
+                                    )),
+                                    state,
+                                ));
+                            }
+                            Err(error) => {
+                                let failure = provider_failure(error);
+                                state.stage = TurnStreamStage::Done;
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        failure.code,
+                                        failure.message,
+                                    )),
+                                    state,
+                                ));
                             }
                         }
-                        Ok(None) => {
-                            state.stage = TurnStreamStage::Done;
-                            return Some((
-                                Ok::<Bytes, Infallible>(stream_error(
-                                    "bad_gateway",
-                                    "provider stream ended before completion",
-                                )),
-                                state,
-                            ));
-                        }
-                        Err(error) => {
-                            let failure = provider_failure(error);
-                            state.stage = TurnStreamStage::Done;
-                            return Some((
-                                Ok::<Bytes, Infallible>(stream_error(
-                                    failure.code,
-                                    failure.message,
-                                )),
-                                state,
-                            ));
-                        }
-                        }
-                    }                    TurnStreamStage::Executing => {
-                            // One round = one provider stream + at most one
-                            // tool dispatch batch. The budget was checked at
-                            // the completed event; consume it here.
-                            let _ = state.loop_control.begin_round();
-                            let executor = ToolExecutor::new();
+                    }
+                    TurnStreamStage::Executing => {
+                        // One round = one provider stream + at most one
+                        // tool dispatch batch. The budget was checked at
+                        // the completed event; consume it here.
+                        let _ = state.loop_control.begin_round();
+                        let executor = ToolExecutor::new();
                         let mut round_outputs: Vec<CallOutputItem> = Vec::new();
                         let mut batch = std::mem::take(&mut state.pending_calls);
                         // Truncate oversized batches with explicit error outputs.
@@ -1181,16 +1177,11 @@ async fn create_turn_stream(
                                         if result.success {
                                             result.output
                                         } else {
-                                            result
-                                                .error
-                                                .unwrap_or_else(|| "tool failed".to_owned())
+                                            result.error.unwrap_or_else(|| "tool failed".to_owned())
                                         }
                                     }
                                     Decision::Deny { reason } => {
-                                        format!(
-                                            "error: tool '{}' denied: {}",
-                                            call.name, reason
-                                        )
+                                        format!("error: tool '{}' denied: {}", call.name, reason)
                                     }
                                     Decision::RequireHuman { reason, .. } => {
                                         format!(
@@ -1217,23 +1208,23 @@ async fn create_turn_stream(
                         continue;
                     }
                     TurnStreamStage::EmitOutputs => {
-                            if state.emit_cursor < state.executed_outputs.len() {
-                                let item = state.executed_outputs[state.emit_cursor].clone();
-                                state.emit_cursor += 1;
-                                return Some((
-                                    Ok::<Bytes, Infallible>(ndjson(json!({
-                                        "type": "tool_output",
-                                        "call_id": item.call_id,
-                                        "name": item.name,
-                                        "output": item.output,
-                                    }))),
-                                    state,
-                                ));
-                            }
-                            state.emit_cursor = 0;
-                            state.stage = TurnStreamStage::NextRound;
-                            continue;
+                        if state.emit_cursor < state.executed_outputs.len() {
+                            let item = state.executed_outputs[state.emit_cursor].clone();
+                            state.emit_cursor += 1;
+                            return Some((
+                                Ok::<Bytes, Infallible>(ndjson(json!({
+                                    "type": "tool_output",
+                                    "call_id": item.call_id,
+                                    "name": item.name,
+                                    "output": item.output,
+                                }))),
+                                state,
+                            ));
                         }
+                        state.emit_cursor = 0;
+                        state.stage = TurnStreamStage::NextRound;
+                        continue;
+                    }
                     TurnStreamStage::NextRound => {
                         // Persist round outputs (tool transcript rows) and
                         // either start the next provider round or finalize
@@ -1265,8 +1256,7 @@ async fn create_turn_stream(
                         }
                         if let Some(stop) = state.forced_stop.take() {
                             let assistant_text = std::mem::take(&mut state.assistant_text);
-                            let reasoning_summary =
-                                std::mem::take(&mut state.reasoning_summary);
+                            let reasoning_summary = std::mem::take(&mut state.reasoning_summary);
                             let persisted_summary =
                                 (!reasoning_summary.is_empty()).then_some(reasoning_summary);
                             match state
@@ -1308,7 +1298,13 @@ async fn create_turn_stream(
                             Err(error) => {
                                 state.stage = TurnStreamStage::Done;
                                 let failure = provider_failure(error);
-                                return Some((Ok::<Bytes, Infallible>(stream_error(failure.code, failure.message)), state));
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        failure.code,
+                                        failure.message,
+                                    )),
+                                    state,
+                                ));
                             }
                         };
                         match client
@@ -1330,7 +1326,13 @@ async fn create_turn_stream(
                             Err(error) => {
                                 state.stage = TurnStreamStage::Done;
                                 let failure = provider_failure(error);
-                                return Some((Ok::<Bytes, Infallible>(stream_error(failure.code, failure.message)), state));
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        failure.code,
+                                        failure.message,
+                                    )),
+                                    state,
+                                ));
                             }
                         }
                     }
@@ -1539,7 +1541,10 @@ mod broker_gate_tests {
     fn tool_intent_deny_produces_denial_output_without_execute() {
         let broker = PermissionBroker::new(SecurityPolicy::lean_default("/work/project"))
             .with_permissions(opencode_rk_security::PermissionSet::new(vec![
-                opencode_rk_security::PermissionRule::new("blocked-tool", opencode_rk_security::RuleEffect::Deny),
+                opencode_rk_security::PermissionRule::new(
+                    "blocked-tool",
+                    opencode_rk_security::RuleEffect::Deny,
+                ),
             ]));
         let allowed = broker.authorize(&OperationIntent::Tool {
             name: "allowed-tool".to_owned(),

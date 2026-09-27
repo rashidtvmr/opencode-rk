@@ -77,7 +77,7 @@ fn parse_frontmatter(raw: &[u8]) -> (Option<String>, Vec<u8>) {
     if let Some(end_idx) = after_open.find("\n---") {
         let block = &after_open[..end_idx];
         let body_start = 3 + end_idx + 4; // skip first ---\n...\n---
-        // Find the newline after closing --- and skip it
+                                          // Find the newline after closing --- and skip it
         let body_raw = if body_start < text.len() {
             &text[body_start..]
         } else {
@@ -148,10 +148,7 @@ pub fn load_rules(workspace_root: &Path) -> Result<RulesSnapshot, RulesError> {
             .filter_map(|e| e.ok())
             .filter(|e| {
                 e.file_type().map(|ft| ft.is_file()).unwrap_or(false)
-                    && e.path()
-                        .extension()
-                        .map(|ext| ext == "md")
-                        .unwrap_or(false)
+                    && e.path().extension().map(|ext| ext == "md").unwrap_or(false)
             })
             .map(|e| e.path())
             .collect();
@@ -304,13 +301,7 @@ mod tests {
         let names: Vec<&str> = snap
             .entries
             .iter()
-            .map(|e| {
-                e.path
-                    .file_name()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-            })
+            .map(|e| e.path.file_name().unwrap().to_str().unwrap())
             .collect();
         // AGENTS.md < CLAUDE.md < a.md < b.md
         assert_eq!(names, vec!["AGENTS.md", "CLAUDE.md", "a.md", "b.md"]);

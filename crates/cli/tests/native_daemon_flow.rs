@@ -22,8 +22,10 @@ struct TestHome(PathBuf);
 impl TestHome {
     fn new() -> Self {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir()
-            .join(format!("opencode-rk-native-daemon-{}-{id}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "opencode-rk-native-daemon-{}-{id}",
+            std::process::id()
+        ));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -280,7 +282,9 @@ fn native_no_tty_still_takes_native_path() {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = command.output().expect("spawn --native --once with piped I/O");
+    let output = command
+        .output()
+        .expect("spawn --native --once with piped I/O");
     let stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
@@ -370,8 +374,11 @@ fn status_frame_carries_live_daemon_values() {
     // Write a proper descriptor with auth token under HOME
     let descriptor_path = home.path().join("runtime/backend.json");
     fs::create_dir_all(descriptor_path.parent().unwrap()).expect("runtime dir");
-    fs::write(&descriptor_path, serde_json::to_string(&descriptor_content()).unwrap())
-        .expect("write descriptor");
+    fs::write(
+        &descriptor_path,
+        serde_json::to_string(&descriptor_content()).unwrap(),
+    )
+    .expect("write descriptor");
 
     // Run --native --once to render a frame with live binding
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));

@@ -31,8 +31,7 @@ struct TestHome(PathBuf);
 impl TestHome {
     fn new() -> Self {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("opencode-rk-ci-{}-{id}", std::process::id()));
+        let path = std::env::temp_dir().join(format!("opencode-rk-ci-{}-{id}", std::process::id()));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -356,8 +355,7 @@ fn ci_t03_deterministic_jsonl_across_identical_runs() {
             .lines()
             .filter(|line| !line.trim().is_empty())
             .map(|line| {
-                let mut parsed: serde_json::Value =
-                    serde_json::from_str(line).expect("valid JSON");
+                let mut parsed: serde_json::Value = serde_json::from_str(line).expect("valid JSON");
                 if let Some(obj) = parsed.as_object_mut() {
                     obj.remove("ts");
                 }
@@ -374,5 +372,3 @@ fn ci_t03_deterministic_jsonl_across_identical_runs() {
         "two identical CI runs must produce byte-identical JSONL (timestamps excluded)"
     );
 }
-
-

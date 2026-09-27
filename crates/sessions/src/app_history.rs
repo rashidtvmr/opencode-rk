@@ -284,11 +284,7 @@ const MARKER_MAGIC: &str = "apphist-crash1";
 
 impl CrashRecoveryMarker {
     /// New pending-write marker; empty session ids are rejected.
-    pub fn new(
-        session_id: String,
-        last_applied_seq: u64,
-        epoch: u64,
-    ) -> Result<Self, MarkerError> {
+    pub fn new(session_id: String, last_applied_seq: u64, epoch: u64) -> Result<Self, MarkerError> {
         if session_id.is_empty() || session_id.contains(['\t', '\n']) {
             return Err(MarkerError::EmptySession);
         }

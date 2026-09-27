@@ -21,10 +21,11 @@
 #![forbid(unsafe_code)]
 
 use std::{
-    collections::VecDeque, fmt,
+    collections::VecDeque,
+    fmt,
     sync::{
-        Arc,
         atomic::{AtomicBool, Ordering},
+        Arc,
     },
 };
 
@@ -36,8 +37,8 @@ use opencode_rk_sessions::SessionService;
 use opencode_rk_tools::registry::ToolRegistry;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 
-use crate::{clients::ClientId, event_bus::EventBus, turn_service::CancelToken};
 use crate::event_bus::ServerEvent;
+use crate::{clients::ClientId, event_bus::EventBus, turn_service::CancelToken};
 
 /// Concurrent turns admitted by the engine. Matches `TURN_PERMITS` in
 /// `crates/server/src/lib.rs:73` (`Semaphore::const_new(2)`).
@@ -75,14 +76,9 @@ pub enum EngineError {
     /// Two clients observe turns in different sessions.
     SessionMismatch,
     /// Two clients observe different turns in the same session.
-    TurnMismatch {
-        expected: AgentId,
-        actual: AgentId,
-    },
+    TurnMismatch { expected: AgentId, actual: AgentId },
     /// An [`EnginePolicy`] rule list is at [`MAX_POLICY_RULES`].
-    PolicyFull {
-        max: usize,
-    },
+    PolicyFull { max: usize },
     /// Tool rule name is empty.
     InvalidToolName,
     /// `provider/model` reference is empty or over [`MAX_MODEL_REF_BYTES`].
@@ -803,7 +799,10 @@ impl fmt::Debug for EngineHandles {
             .field("providers", &self.providers.count())
             .field("policy", &self.policy)
             .field("tools", &self.tools.len())
-            .field("turn_permits_available", &self.turn_permits.available_permits())
+            .field(
+                "turn_permits_available",
+                &self.turn_permits.available_permits(),
+            )
             .field("subscribers", &self.events.subscriber_count())
             .field("client_limit", &MAX_ENGINE_CLIENTS)
             .finish()
@@ -883,10 +882,7 @@ mod tests {
         assert!(!owner.is_owned());
         let guard = owner.try_claim().expect("first claim");
         assert!(owner.is_owned());
-        assert_eq!(
-            owner.try_claim().unwrap_err(),
-            EngineError::AlreadyOwned
-        );
+        assert_eq!(owner.try_claim().unwrap_err(), EngineError::AlreadyOwned);
         drop(guard);
         assert!(!owner.is_owned());
         let _guard = owner.try_claim().expect("reclaim after release");
@@ -929,7 +925,10 @@ mod tests {
             session,
             turn,
         };
-        assert_eq!(assert_same_turn(&first, &second).expect("shared turn"), turn);
+        assert_eq!(
+            assert_same_turn(&first, &second).expect("shared turn"),
+            turn
+        );
     }
 
     #[test]
@@ -1120,7 +1119,10 @@ mod tests {
             .await
             .expect("deny is durable outcome, not error");
         assert!(!outcome.allowed);
-        assert!(!marker.exists(), "denied tool must not touch the filesystem");
+        assert!(
+            !marker.exists(),
+            "denied tool must not touch the filesystem"
+        );
         let transcript = engine
             .sessions
             .messages(session, MAX_TURN_HISTORY)
@@ -1133,7 +1135,10 @@ mod tests {
     async fn red_cancel_reclaims_permit_and_fires_token() {
         let engine = red_engine();
         let lease = engine.turn_permits.acquire().expect("permit");
-        assert_eq!(engine.turn_permits.available_permits(), MAX_CONCURRENT_TURNS - 1);
+        assert_eq!(
+            engine.turn_permits.available_permits(),
+            MAX_CONCURRENT_TURNS - 1
+        );
         lease.cancel();
         assert!(lease.is_cancelled());
         let session = red_session(&engine).await;
@@ -1172,6 +1177,9 @@ mod tests {
             session,
             turn: receipt.turn,
         };
-        assert_eq!(assert_same_turn(&first, &second).expect("shared turn"), receipt.turn);
+        assert_eq!(
+            assert_same_turn(&first, &second).expect("shared turn"),
+            receipt.turn
+        );
     }
 }

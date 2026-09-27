@@ -51,7 +51,9 @@ pub enum CommandGate {
     /// Human-only authority — the real broker decides, never the palette.
     HumanApprovalRequired,
     /// Feature disabled in this build/runtime.
-    Disabled { reason: String },
+    Disabled {
+        reason: String,
+    },
 }
 
 impl CommandGate {
@@ -278,7 +280,10 @@ impl fmt::Display for SelectionError {
         match self {
             Self::ModelEmpty => write!(f, "model marker is empty; pick a model or clear it"),
             Self::ModelTooLong { chars, limit } => {
-                write!(f, "model marker of {chars} chars exceeds {limit} char budget")
+                write!(
+                    f,
+                    "model marker of {chars} chars exceeds {limit} char budget"
+                )
             }
             Self::BadFormat => write!(f, "saved selection is malformed; keeping current selection"),
             Self::UnknownVersion(v) => write!(f, "saved selection version {v:?} is not supported"),
@@ -389,10 +394,7 @@ impl Selection {
     /// version, model (empty = none), main/child effort, theme.
     #[must_use]
     pub fn encode(&self) -> String {
-        let model = self
-            .model
-            .as_deref()
-            .map_or_else(String::new, escape_model);
+        let model = self.model.as_deref().map_or_else(String::new, escape_model);
         format!(
             "{SELECTION_VERSION}\nmodel={model}\nmain={}\nchild={}\ntheme={}\n",
             self.main_effort.as_str(),
@@ -424,8 +426,7 @@ impl Selection {
                     model = Some(if value.is_empty() {
                         None
                     } else {
-                        let decoded =
-                            unescape_model(value).ok_or(SelectionError::BadFormat)?;
+                        let decoded = unescape_model(value).ok_or(SelectionError::BadFormat)?;
                         if decoded.chars().count() > MAX_MODEL_CHARS {
                             return Err(SelectionError::ModelTooLong {
                                 chars: decoded.chars().count(),
@@ -436,28 +437,31 @@ impl Selection {
                     });
                 }
                 "main" => {
-                    main = Some(Effort::parse(value).ok_or_else(|| {
-                        SelectionError::UnknownValue {
-                            key: key.to_string(),
-                            value: value.to_string(),
-                        }
-                    })?);
+                    main =
+                        Some(
+                            Effort::parse(value).ok_or_else(|| SelectionError::UnknownValue {
+                                key: key.to_string(),
+                                value: value.to_string(),
+                            })?,
+                        );
                 }
                 "child" => {
-                    child = Some(Effort::parse(value).ok_or_else(|| {
-                        SelectionError::UnknownValue {
-                            key: key.to_string(),
-                            value: value.to_string(),
-                        }
-                    })?);
+                    child =
+                        Some(
+                            Effort::parse(value).ok_or_else(|| SelectionError::UnknownValue {
+                                key: key.to_string(),
+                                value: value.to_string(),
+                            })?,
+                        );
                 }
                 "theme" => {
-                    theme = Some(Theme::parse(value).ok_or_else(|| {
-                        SelectionError::UnknownValue {
-                            key: key.to_string(),
-                            value: value.to_string(),
-                        }
-                    })?);
+                    theme =
+                        Some(
+                            Theme::parse(value).ok_or_else(|| SelectionError::UnknownValue {
+                                key: key.to_string(),
+                                value: value.to_string(),
+                            })?,
+                        );
                 }
                 _ => return Err(SelectionError::BadFormat),
             }
@@ -569,12 +573,7 @@ impl Palette {
 mod tests {
     use super::*;
 
-    fn cmd(
-        id: &'static str,
-        title: &str,
-        action: CommandAction,
-        gate: CommandGate,
-    ) -> Command {
+    fn cmd(id: &'static str, title: &str, action: CommandAction, gate: CommandGate) -> Command {
         Command {
             id,
             title: title.to_string(),
@@ -652,7 +651,9 @@ mod tests {
             CommandAction::OpenSettings,
             CommandGate::HumanApprovalRequired,
         ));
-        let err = p.execute("remote.pair").expect_err("gated command must not dispatch");
+        let err = p
+            .execute("remote.pair")
+            .expect_err("gated command must not dispatch");
         assert_eq!(
             err,
             CommandGate::Disabled {
@@ -736,7 +737,10 @@ mod tests {
         assert!(contrast_ratio(black, white) > 20.0);
         assert!(meets_contrast(black, white));
         assert!(!meets_contrast(black, black));
-        assert!(!meets_contrast(Rgb::new(0x77, 0x77, 0x77), Rgb::new(0x88, 0x88, 0x88)));
+        assert!(!meets_contrast(
+            Rgb::new(0x77, 0x77, 0x77),
+            Rgb::new(0x88, 0x88, 0x88)
+        ));
     }
 
     #[test]

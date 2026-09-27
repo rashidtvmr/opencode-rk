@@ -400,10 +400,7 @@ mod tests {
             opencode_rk_security::SecurityPolicy::lean_default("/work/project"),
         )
         .with_permissions(opencode_rk_security::PermissionSet::new(vec![
-            opencode_rk_security::PermissionRule::new(
-                "*",
-                opencode_rk_security::RuleEffect::Deny,
-            ),
+            opencode_rk_security::PermissionRule::new("*", opencode_rk_security::RuleEffect::Deny),
         ]))
     }
 
@@ -417,8 +414,8 @@ mod tests {
     #[tokio::test]
     async fn broker_deny_spawns_no_process() {
         // Allowlisted but broker-denied: fail closed, no process runs.
-        let tool = ShellTool::new("echo".to_string(), vec!["hello".to_string()])
-            .broker(deny_all_broker());
+        let tool =
+            ShellTool::new("echo".to_string(), vec!["hello".to_string()]).broker(deny_all_broker());
         let res = tool.execute(cfg(&["echo"])).await;
         assert!(
             matches!(res, Err(ShellError::Denied(_))),

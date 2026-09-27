@@ -88,7 +88,12 @@ impl LoopPlan {
     /// Create a plan from an iterator of goals. Panics if > [`MAX_GOALS`].
     pub fn new(goals: impl IntoIterator<Item = LoopGoal>) -> Self {
         let goals: VecDeque<LoopGoal> = goals.into_iter().collect();
-        assert!(goals.len() <= MAX_GOALS, "plan has {} goals, max {}", goals.len(), MAX_GOALS);
+        assert!(
+            goals.len() <= MAX_GOALS,
+            "plan has {} goals, max {}",
+            goals.len(),
+            MAX_GOALS
+        );
         Self { goals }
     }
 
@@ -114,10 +119,7 @@ pub enum StepOutcome {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum LoopEvent {
     Start(LoopPlan),
-    StepResult {
-        goal_id: u32,
-        outcome: StepOutcome,
-    },
+    StepResult { goal_id: u32, outcome: StepOutcome },
     Steer(String),
     Checkpoint,
     Resume(Vec<u8>),
@@ -162,7 +164,9 @@ pub struct DriverState {
 impl DriverState {
     fn new() -> Self {
         Self {
-            plan: LoopPlan { goals: VecDeque::new() },
+            plan: LoopPlan {
+                goals: VecDeque::new(),
+            },
             current_index: 0,
             steps_taken: 0,
             replan_used: false,
@@ -302,8 +306,7 @@ pub fn resume(blob: &CheckpointBlob) -> Result<DriverState, String> {
         if buf.len() < pos + 4 {
             return Err("blob too short for amend len".into());
         }
-        let len =
-            u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]) as usize;
+        let len = u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]) as usize;
         pos += 4;
         if buf.len() < pos + len {
             return Err("blob too short for amend data".into());
@@ -336,8 +339,7 @@ pub fn resume(blob: &CheckpointBlob) -> Result<DriverState, String> {
             _ => return Err("invalid goal status tag".into()),
         };
         pos += 1;
-        let attempts =
-            u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]);
+        let attempts = u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]);
         pos += 4;
         let desc_len =
             u32::from_le_bytes([buf[pos], buf[pos + 1], buf[pos + 2], buf[pos + 3]]) as usize;
@@ -393,9 +395,7 @@ impl LoopDriver {
     pub fn send(&mut self, event: LoopEvent) -> LoopAction {
         match event {
             LoopEvent::Start(plan) => self.handle_start(plan),
-            LoopEvent::StepResult { goal_id, outcome } => {
-                self.handle_step_result(goal_id, outcome)
-            }
+            LoopEvent::StepResult { goal_id, outcome } => self.handle_step_result(goal_id, outcome),
             LoopEvent::Steer(note) => self.handle_steer(note),
             LoopEvent::Checkpoint => {
                 // Checkpoint is a query, state unchanged; caller reads blob via
@@ -472,9 +472,9 @@ impl LoopDriver {
             // Truncate to bound.
             let mut truncated = note.into_bytes();
             truncated.truncate(MAX_DESCRIPTION_BYTES);
-            self.state.amends.push_back(
-                String::from_utf8(truncated).unwrap_or_default(),
-            );
+            self.state
+                .amends
+                .push_back(String::from_utf8(truncated).unwrap_or_default());
         } else {
             self.state.amends.push_back(note);
         }
@@ -577,9 +577,7 @@ impl LoopDriver {
         if goal.status == GoalStatus::Pending {
             goal.status = GoalStatus::InProgress;
         }
-        LoopAction::Continue {
-            goal_id: goal.id,
-        }
+        LoopAction::Continue { goal_id: goal.id }
     }
 }
 
@@ -709,7 +707,11 @@ mod tests {
         d2.send(LoopEvent::Steer("note A".into()));
         d1.send(LoopEvent::Steer("note B".into()));
         d2.send(LoopEvent::Steer("note B".into()));
-        assert_eq!(d1.state(), d2.state(), "identical events must produce identical state");
+        assert_eq!(
+            d1.state(),
+            d2.state(),
+            "identical events must produce identical state"
+        );
         assert_eq!(d1.state().amends.len(), 2);
         assert_eq!(d1.state().amends[0], "note A");
         assert_eq!(d1.state().amends[1], "note B");

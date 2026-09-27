@@ -1,0 +1,78 @@
+{
+  "schema_version": 1,
+  "status": "draft",
+  "pro_models_required": false,
+  "automatic_pro_fallback": false,
+  "selection": "Resolve exact IDs from the actual connected harness/provider catalog before assignment; do not guess product/model names.",
+  "classes": {
+    "fast_non_pro_coder": {
+      "use": "Bounded ordinary implementation after interface/test freeze",
+      "resolved_model_id": null
+    },
+    "reasoning_non_pro": {
+      "use": "FFI, protocols, ownership/concurrency, persistence, security and integration",
+      "resolved_model_id": null
+    },
+    "reasoning_non_pro_test_author": {
+      "use": "Independent observable contracts, valid RED, adversarial fixtures",
+      "resolved_model_id": null
+    },
+    "reasoning_non_pro_reviewer": {
+      "use": "Independent code review and exact-revision test verification",
+      "resolved_model_id": null
+    }
+  },
+  "independence": "Separate implementer/test-author/verifier identities and file authority. Different model names alone do not prove independence.",
+  "default_active_chat_cap_proposed": 8,
+  "capacity_proposal": {
+    "implementation": 4,
+    "integration_review": 2,
+    "independent_test_verification": 2
+  },
+  "twenty_worker_capacity_rule": {
+    "integration_spine_reserved": 4,
+    "independent_test_verifier_reserved": 2,
+    "breadth_max": 14
+  },
+  "local_resource_budget": {
+    "host_gib": 8,
+    "reserve_gib_minimum": 2,
+    "heavy_validation_concurrency": 1,
+    "cargo_build_jobs_max": 2,
+    "rust_test_threads_default": 2,
+    "stop_on_available_gib_below": 1
+  },
+  "retry_policy": {
+    "same_assumption_retries_max": 2,
+    "stop_immediately": [
+      "authentication",
+      "security authority",
+      "signing permission",
+      "identity loss",
+      "resource or cost ceiling"
+    ],
+    "escalation": "Return minimal reproduction to a stronger authorized non-Pro reasoning role; no scope/test change by worker."
+  },
+  "live_canary": {
+    "base_url": "http://localhost:20128/v1",
+    "preferred_upstream_model": "vyce/deepseek-v4-flash",
+    "protocol": "must_probe_chat_completions_vs_responses",
+    "credential": "runtime approved environment or protected store only; never stored here",
+    "concurrency": 1,
+    "request_ceiling": null,
+    "token_ceiling": null,
+    "cost_ceiling": null,
+    "budget_approval": "pending; live dispatch blocked until set"
+  },
+  "context_packet": {
+    "max_source_excerpts_proposed": 8,
+    "max_task_context_tokens_proposed": 14000,
+    "must_include": [
+      "exact base SHA and owned file",
+      "frozen contract and test hashes",
+      "real caller and integration owner",
+      "resource/security constraints",
+      "expected handoff and blockers"
+    ]
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "checks": [
+    {
+      "name": "plan-validation",
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "tools/validate_plan.py"
+      ],
+      "exit_code": 0
+    },
+    {
+      "name": "plan-tool-tests",
+      "command": [
+        "/Library/Developer/CommandLineTools/usr/bin/python3",
+        "-m",
+        "unittest",
+        "discover",
+        "-s",
+        "tests",
+        "-p",
+        "test_plan_tools.py",
+        "-v"
+      ],
+      "exit_code": 0
+    }
+  ],
+  "product_verified": false
+}

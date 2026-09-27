@@ -145,8 +145,7 @@ impl Renderer {
         {
             // SAFETY: plain integers + null feed ptr (buffered backend);
             // handle checked below, destroyed in `release`.
-            let handle =
-                unsafe { createRenderer(cols, rows, dest, 0, std::ptr::null()) };
+            let handle = unsafe { createRenderer(cols, rows, dest, 0, std::ptr::null()) };
             if handle == INVALID_HANDLE {
                 CLAIMED.store(false, Ordering::Release);
                 return Err(BridgeError::CreateFailed);
@@ -530,9 +529,8 @@ impl Renderer {
             loop {
                 let mut out = vec![0u8; cap];
                 // SAFETY: `out` sized `cap`; native writes ≤ `outputLen` bytes.
-                let n = unsafe {
-                    bufferWriteResolvedChars(buf, out.as_mut_ptr(), cap as u32, true)
-                } as usize;
+                let n = unsafe { bufferWriteResolvedChars(buf, out.as_mut_ptr(), cap as u32, true) }
+                    as usize;
                 let n = n.min(cap);
                 if n < cap || cap >= SNAP_MAX {
                     out.truncate(n);

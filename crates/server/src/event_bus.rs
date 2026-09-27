@@ -3,8 +3,8 @@ use opencode_rk_contracts::SessionId;
 use std::{
     fmt,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
     },
 };
 use tokio::sync::mpsc;
@@ -92,7 +92,11 @@ impl EventBus {
         if !closed_ids.is_empty() {
             guard.retain(|e| !closed_ids.contains(&e.id))
         }
-        if full { Err(BusError::Full) } else { Ok(()) }
+        if full {
+            Err(BusError::Full)
+        } else {
+            Ok(())
+        }
     }
     #[must_use]
     pub fn subscribe(&self, filter: Option<EventKind>) -> Subscription {

@@ -11,7 +11,9 @@
 
 #![forbid(unsafe_code)]
 
-use opencode_rk_server::rules_globs::{LoadDecision, RuleSet, RuleWithGlob, HYSTERESIS_ROUNDS, MAX_LOADED};
+use opencode_rk_server::rules_globs::{
+    LoadDecision, RuleSet, RuleWithGlob, HYSTERESIS_ROUNDS, MAX_LOADED,
+};
 use opencode_rk_server::rules_loader::{self, RulesSnapshot};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -99,11 +101,20 @@ fn scenario_a_pipeline_discover_and_evaluate() {
 
     write_agents_md(&ws, Some("src/**"), "Rule: only load for src touches");
     write_rules_md(&ws, "rust.md", Some("**/*.rs"), "Rule: load on rust files");
-    write_rules_md(&ws, "python.md", Some("**/*.py"), "Rule: load on python files");
+    write_rules_md(
+        &ws,
+        "python.md",
+        Some("**/*.py"),
+        "Rule: load on python files",
+    );
     fs::write(ws.join("CLAUDE.md"), "Always-on rule").unwrap();
 
     let snap = rules_loader::load_rules(&ws).expect("load_rules should succeed");
-    assert!(snap.entries.len() >= 3, "expected >= 3 rule files, got {}", snap.entries.len());
+    assert!(
+        snap.entries.len() >= 3,
+        "expected >= 3 rule files, got {}",
+        snap.entries.len()
+    );
 
     let globs: Vec<Option<&str>> = snap.entries.iter().map(|e| e.glob.as_deref()).collect();
     assert!(globs.contains(&Some("src/**")), "AGENTS.md glob missing");
@@ -119,7 +130,9 @@ fn scenario_a_pipeline_discover_and_evaluate() {
 
     let loaded1: Vec<&str> = d1.load.iter().map(|s| s.as_str()).collect();
     assert!(
-        loaded1.iter().any(|n| n.contains("agents_md") || n.contains("AGENTS")),
+        loaded1
+            .iter()
+            .any(|n| n.contains("agents_md") || n.contains("AGENTS")),
         "AGENTS.md (src/**) rule should load on src/ touch, got: {:?}",
         loaded1
     );
@@ -166,7 +179,11 @@ fn scenario_a_pipeline_discover_and_evaluate() {
         .enumerate()
         .filter(|(_, e)| e.glob.is_none())
         .map(|(i, e)| {
-            let stem = e.path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+            let stem = e
+                .path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
             format!("rule_{}_{}", i, stem)
         })
         .collect();
@@ -181,7 +198,9 @@ fn scenario_a_pipeline_discover_and_evaluate() {
         final_loaded
     );
     assert!(
-        !final_loaded.iter().any(|n| n.contains("agents_md") || n.contains("AGENTS")),
+        !final_loaded
+            .iter()
+            .any(|n| n.contains("agents_md") || n.contains("AGENTS")),
         "AGENTS.md should also unload after hysteresis (not touched since round 1), loaded: {:?}",
         final_loaded
     );
@@ -248,10 +267,7 @@ fn scenario_b_bounds_max_loaded_no_deadlock_with_always() {
     for _ in 0..5 {
         let start_inner = std::time::Instant::now();
         rs.evaluate(&touches);
-        assert!(
-            start_inner.elapsed().as_millis() < 500,
-            "round deadlocked"
-        );
+        assert!(start_inner.elapsed().as_millis() < 500, "round deadlocked");
     }
 
     // The always rule must never appear in any unload list across all rounds
@@ -318,7 +334,11 @@ fn scenario_c_decision_transcript_replay() {
         .enumerate()
         .filter(|(_, e)| e.glob.is_none())
         .map(|(i, e)| {
-            let stem = e.path.file_stem().and_then(|s| s.to_str()).unwrap_or("unknown");
+            let stem = e
+                .path
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or("unknown");
             format!("rule_{}_{}", i, stem)
         })
         .collect();

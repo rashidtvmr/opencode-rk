@@ -2,6 +2,8 @@
 
 use std::time::Duration;
 
+use reqwest::header::ACCEPT;
+
 use opencode_rk_contracts::{MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES};
 use reqwest::redirect::Policy;
 use serde::Serialize;
@@ -257,7 +259,9 @@ pub enum ResponsesStreamEvent {
         arguments: String,
     },
     /// Terminal event. Every well-formed stream ends here exactly once.
-    Completed { stop_reason: ResponsesStopReason },
+    Completed {
+        stop_reason: ResponsesStopReason,
+    },
 }
 
 /// Pure SSE event parser shared by the live stream and tests.
@@ -486,6 +490,7 @@ impl OpenAiResponsesClient {
             .http
             .post(format!("{}/responses", self.base_url))
             .bearer_auth(&self.api_key)
+            .header(ACCEPT, "application/json")
             .json(&payload)
             .send()
             .await
@@ -532,6 +537,7 @@ impl OpenAiResponsesClient {
             .http
             .post(format!("{}/responses", self.base_url))
             .bearer_auth(&self.api_key)
+            .header(ACCEPT, "application/json")
             .json(&payload)
             .send()
             .await

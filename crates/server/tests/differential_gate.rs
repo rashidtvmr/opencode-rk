@@ -33,7 +33,10 @@ fn par010_t01_every_story_id_resolvable() {
         "PAR-001", "PAR-002", "PAR-003", "PAR-004", "PAR-005", "PAR-006", "PAR-007", "PAR-008",
         "PAR-009", "PAR-010",
     ] {
-        assert!(PARITY.contains(id), "story id missing from parity.json: {id}");
+        assert!(
+            PARITY.contains(id),
+            "story id missing from parity.json: {id}"
+        );
     }
 }
 
@@ -59,7 +62,11 @@ fn par010_t03_key_modules_present() {
     let root = workspace_root();
     let mut missing = Vec::new();
     for (krate, module) in MODULES {
-        let p = root.join("crates").join(krate).join("src").join(format!("{module}.rs"));
+        let p = root
+            .join("crates")
+            .join(krate)
+            .join("src")
+            .join(format!("{module}.rs"));
         if !p.is_file() {
             missing.push(p.display().to_string());
         }
@@ -77,7 +84,11 @@ fn par010_t04_evidence_parses_with_dispositions() {
     let allowed: BTreeSet<&str> = ["implemented", "unwired", "missing", "unverified"]
         .into_iter()
         .collect();
-    let surfaces = v.get("surfaces").expect("surfaces array").as_array().unwrap();
+    let surfaces = v
+        .get("surfaces")
+        .expect("surfaces array")
+        .as_array()
+        .unwrap();
     assert!(!surfaces.is_empty(), "no surfaces tracked");
     for s in surfaces {
         let d = s.get("disposition").and_then(|x| x.as_str()).unwrap_or("?");
@@ -89,7 +100,10 @@ fn par010_t04_evidence_parses_with_dispositions() {
         .get("certificationBlockers")
         .and_then(|b| b.as_array())
         .expect("blockers array");
-    assert!(!blockers.is_empty(), "blockers must be listed while uncertified");
+    assert!(
+        !blockers.is_empty(),
+        "blockers must be listed while uncertified"
+    );
 }
 
 #[test]
@@ -103,5 +117,8 @@ fn par010_t05_no_silent_implemented_claim() {
         .iter()
         .filter(|s| s.get("disposition").and_then(|d| d.as_str()) == Some("implemented"))
         .count();
-    assert_eq!(n, 0, "implemented claims require entrypoint traces; found {n}");
+    assert_eq!(
+        n, 0,
+        "implemented claims require entrypoint traces; found {n}"
+    );
 }

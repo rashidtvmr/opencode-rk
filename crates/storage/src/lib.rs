@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 pub mod admission_v2;
 pub mod approvals_v2;
+pub mod backup_v2;
 pub mod catalog_v2;
 pub mod content_addr_v2;
 pub mod execution_v2;
@@ -13,7 +14,6 @@ pub mod import_v2;
 pub mod migrations;
 pub mod quota_v2;
 pub mod retention_v2;
-pub mod backup_v2;
 pub mod rollout_v2;
 pub mod schema_v2;
 pub mod snapshot_v2;

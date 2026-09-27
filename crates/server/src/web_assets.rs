@@ -14,10 +14,10 @@
 
 use axum::{
     body::Body,
-    http::{StatusCode, Uri, header},
+    http::{header, StatusCode, Uri},
     response::{IntoResponse, Response},
 };
-use include_dir::{Dir, include_dir};
+use include_dir::{include_dir, Dir};
 
 static WEB_DIST: Dir<'_> = include_dir!("$CARGO_MANIFEST_DIR/web_dist");
 
@@ -142,12 +142,19 @@ mod tests {
     async fn missing_bundle_fails_closed_with_message() {
         for path in ["", "assets/app.js", "chat/abc"] {
             let response = serve_path(path, |_| None);
-            assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE, "path {path:?}");
+            assert_eq!(
+                response.status(),
+                StatusCode::SERVICE_UNAVAILABLE,
+                "path {path:?}"
+            );
             let body = axum::body::to_bytes(response.into_body(), 8 * 1024)
                 .await
                 .unwrap();
             let text = std::str::from_utf8(&body).unwrap();
-            assert!(text.contains("web_dist"), "message names bundle dir: {text:?}");
+            assert!(
+                text.contains("web_dist"),
+                "message names bundle dir: {text:?}"
+            );
             assert_eq!(text, BUNDLE_MISSING_MESSAGE);
         }
     }
@@ -172,10 +179,7 @@ mod tests {
             index.headers()[header::CONTENT_TYPE],
             "text/html; charset=utf-8"
         );
-        assert_eq!(
-            index.headers()[header::CACHE_CONTROL],
-            "no-cache"
-        );
+        assert_eq!(index.headers()[header::CACHE_CONTROL], "no-cache");
 
         let asset = serve_path("assets/app.js", fixture);
         assert_eq!(asset.status(), StatusCode::OK);

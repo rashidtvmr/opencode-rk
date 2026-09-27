@@ -93,7 +93,12 @@ impl Graph {
         if self.nodes.len() >= MAX_NODES {
             return Err(GraphError::NodeCap);
         }
-        self.nodes.push(Node { id, label: cap(label, MAX_LABEL_LEN), x, y });
+        self.nodes.push(Node {
+            id,
+            label: cap(label, MAX_LABEL_LEN),
+            x,
+            y,
+        });
         Ok(())
     }
 
@@ -105,7 +110,10 @@ impl Graph {
         if self.edges.len() >= MAX_EDGES {
             return Err(GraphError::EdgeCap);
         }
-        self.edges.push(Edge { from: from.to_string(), to: to.to_string() });
+        self.edges.push(Edge {
+            from: from.to_string(),
+            to: to.to_string(),
+        });
         Ok(())
     }
 
@@ -133,7 +141,9 @@ impl Graph {
             }
         };
         for e in &self.edges {
-            let (Some(a), Some(b)) = (self.get(&e.from), self.get(&e.to)) else { continue };
+            let (Some(a), Some(b)) = (self.get(&e.from), self.get(&e.to)) else {
+                continue;
+            };
             let (x0, y0, x1, y1) = (a.x, a.y, b.x, b.y);
             for x in x0.min(x1)..=x0.max(x1) {
                 put(x, y0, '-');

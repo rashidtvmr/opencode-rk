@@ -65,10 +65,7 @@ fn kernel_version_at_least_5_13() -> bool {
         Some(pos) => &version[pos + "Linux version ".len()..],
         None => return false,
     };
-    let version_str = after_linux_version
-        .split_whitespace()
-        .next()
-        .unwrap_or("");
+    let version_str = after_linux_version.split_whitespace().next().unwrap_or("");
     let major_minor: Vec<&str> = version_str.split('.').take(2).collect();
     if major_minor.len() < 2 {
         return false;
@@ -90,9 +87,7 @@ fn proc_filesystems_has_landlock() -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
-    content
-        .lines()
-        .any(|line| line.trim().contains("landlock"))
+    content.lines().any(|line| line.trim().contains("landlock"))
 }
 
 #[cfg(test)]

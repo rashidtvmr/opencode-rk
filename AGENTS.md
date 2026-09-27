@@ -37,10 +37,14 @@ or selector narrowing to obtain GREEN. A disputed frozen test is a blocked contr
 review, never an implementation edit.
 
 Parallelism is convergence-first: preserve integration and verifier capacity before
-filling all slots with leaf lanes. On a 20-worker harness reserve at least four
-integration-spine lanes and two independent test/verifier lanes; use at most fourteen
-for independent breadth. A wave containing only isolated modules is not a successful
-application-building wave.
+filling all slots with leaf lanes. When the user does not specify a delegation count,
+the default budget on a 20-worker harness is: reserve at least four integration-spine
+lanes and two independent test/verifier lanes, and use at most fourteen for
+independent breadth. An explicit user-requested count overrides these defaults: if
+the user asks for N parallel delegations, spawn N parallel lanes (role reservations
+are taken proportionally out of N, not substituted for it). The per-lane resource
+rules below still bind what each lane may run. A wave containing only isolated
+modules is not a successful application-building wave.
 
 ## Required workflow
 

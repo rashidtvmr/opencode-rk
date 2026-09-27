@@ -58,14 +58,22 @@ impl Rect {
 #[must_use]
 pub fn sidebar_width(width: u16) -> u16 {
     let third = width / 3;
-    let capped = if third < SIDEBAR_WIDTH { third } else { SIDEBAR_WIDTH };
+    let capped = if third < SIDEBAR_WIDTH {
+        third
+    } else {
+        SIDEBAR_WIDTH
+    };
     let floor = if SIDEBAR_MIN_WIDTH < width {
         SIDEBAR_MIN_WIDTH
     } else {
         width
     };
     let floored = if capped < floor { floor } else { capped };
-    if floored > width { width } else { floored }
+    if floored > width {
+        width
+    } else {
+        floored
+    }
 }
 
 /// Shell regions in paint order.
@@ -144,12 +152,7 @@ impl ShellLayout {
     /// True when any two non-empty regions intersect.
     #[must_use]
     pub fn has_overlap(self) -> bool {
-        let rs = [
-            self.transcript,
-            self.composer,
-            self.sidebar,
-            self.status,
-        ];
+        let rs = [self.transcript, self.composer, self.sidebar, self.status];
         let mut i = 0;
         while i < rs.len() {
             if rs[i].area() != 0 {
@@ -189,10 +192,30 @@ mod tests {
     #[test]
     fn overlap_is_detected() {
         let l = ShellLayout {
-            transcript: Rect { x: 0, y: 0, w: 50, h: 20 },
-            composer: Rect { x: 0, y: 10, w: 50, h: 10 },
-            sidebar: Rect { x: 0, y: 0, w: 0, h: 0 },
-            status: Rect { x: 0, y: 39, w: 50, h: 1 },
+            transcript: Rect {
+                x: 0,
+                y: 0,
+                w: 50,
+                h: 20,
+            },
+            composer: Rect {
+                x: 0,
+                y: 10,
+                w: 50,
+                h: 10,
+            },
+            sidebar: Rect {
+                x: 0,
+                y: 0,
+                w: 0,
+                h: 0,
+            },
+            status: Rect {
+                x: 0,
+                y: 39,
+                w: 50,
+                h: 1,
+            },
             compact: false,
         };
         assert!(l.has_overlap());

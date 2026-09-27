@@ -295,13 +295,9 @@ impl SetupError {
     #[must_use]
     pub fn action(&self) -> Option<SetupAction> {
         match self {
-            SetupError::InvalidCredential | SetupError::EndpointFailure => {
-                Some(SetupAction::Retry)
-            }
+            SetupError::InvalidCredential | SetupError::EndpointFailure => Some(SetupAction::Retry),
             SetupError::ModelUnavailable => Some(SetupAction::ChangeProvider),
-            SetupError::ConsentRequired
-            | SetupError::BadId
-            | SetupError::TooManyAccounts => None,
+            SetupError::ConsentRequired | SetupError::BadId | SetupError::TooManyAccounts => None,
         }
     }
 }

@@ -20,8 +20,8 @@ use std::{
     time::Duration,
 };
 
-use serde_json::Value;
 use fs2::FileExt;
+use serde_json::Value;
 
 use crate::daemon_client;
 use opencode_rk_server::daemon as server_daemon;
@@ -134,14 +134,9 @@ pub fn prepare_daemon(data_dir: &Path) -> DaemonLease {
 /// Entry bound from `main.rs` when no subcommand is given.
 pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     let lease = prepare_daemon(data_dir);
-    let origin_label = lease
-        .origin()
-        .unwrap_or("http://127.0.0.1:4096")
-        .to_owned();
+    let origin_label = lease.origin().unwrap_or("http://127.0.0.1:4096").to_owned();
     if !lease.attached() {
-        println!(
-            "[offline] daemon unavailable; start it manually with: opencode-rk serve"
-        );
+        println!("[offline] daemon unavailable; start it manually with: opencode-rk serve");
     }
     let mut chat = Chat {
         origin: lease.origin.clone(),
@@ -192,8 +187,7 @@ impl Chat {
     fn bind_recent_session(&mut self) {
         let Some(origin) = &self.origin else { return };
         let auth = self.auth.clone();
-        let Ok((status, body)) =
-            request(origin, "GET", "/api/sessions", None, auth.as_deref())
+        let Ok((status, body)) = request(origin, "GET", "/api/sessions", None, auth.as_deref())
         else {
             return;
         };
@@ -253,7 +247,13 @@ impl Chat {
         let title = if title.is_empty() { "Chat" } else { title };
         let body = serde_json::json!({ "title": title }).to_string();
         let auth = self.auth.clone();
-        match request(origin, "POST", "/api/sessions", Some(&body), auth.as_deref()) {
+        match request(
+            origin,
+            "POST",
+            "/api/sessions",
+            Some(&body),
+            auth.as_deref(),
+        ) {
             Ok((201, response)) => match serde_json::from_str::<Value>(&response) {
                 Ok(value) => {
                     let id = value
@@ -315,9 +315,7 @@ impl Chat {
             return;
         }
         let auth = self.auth.clone();
-        let Ok((200, body)) =
-            request(origin, "GET", "/api/sessions", None, auth.as_deref())
-        else {
+        let Ok((200, body)) = request(origin, "GET", "/api/sessions", None, auth.as_deref()) else {
             println!("[error] could not list sessions to resolve {prefix}");
             return;
         };
@@ -341,7 +339,10 @@ impl Chat {
             .collect();
         match matches.as_slice() {
             [session] => {
-                let id = session.get("id").and_then(Value::as_str).unwrap_or_default();
+                let id = session
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let title = session.get("title").and_then(Value::as_str).unwrap_or("?");
                 self.session = Some(id.to_owned());
                 println!("session: {id} ({title})");
@@ -372,8 +373,7 @@ impl Chat {
                         );
                     }
                     for model in models.iter().take(25) {
-                        let provider =
-                            model.get("provider").and_then(Value::as_str).unwrap_or("?");
+                        let provider = model.get("provider").and_then(Value::as_str).unwrap_or("?");
                         let id = model.get("id").and_then(Value::as_str).unwrap_or("?");
                         let name = model.get("name").and_then(Value::as_str).unwrap_or("?");
                         println!("{provider}/{id}  {name}");
@@ -494,10 +494,7 @@ fn message_text(message: &Value) -> Option<String> {
 /// be mistaken for the daemon. `/health` stays public (`daemon_auth.rs:1-7`):
 /// no bearer is sent here.
 fn probe_daemon(origin: &str) -> bool {
-    matches!(
-        request(origin, "GET", "/health", None, None),
-        Ok((200, _))
-    )
+    matches!(request(origin, "GET", "/health", None, None), Ok((200, _)))
 }
 
 /// Bearer for `/api/*` reuse, threaded from
@@ -672,7 +669,9 @@ fn build_request_wire(
     if path.starts_with("/api/") {
         let credential = auth.unwrap_or("").trim();
         if credential.is_empty() {
-            return Err("missing daemon credential: refusing unauthenticated /api/* request".to_owned());
+            return Err(
+                "missing daemon credential: refusing unauthenticated /api/* request".to_owned(),
+            );
         }
         return Ok(format!(
             "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: {credential}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",

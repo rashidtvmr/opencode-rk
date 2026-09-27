@@ -136,7 +136,11 @@ impl fmt::Display for SetupError {
                 write!(f, "oauth pkce challenge expired; next: {:?}", action)
             }
             SetupError::NoCachedSettings { action } => {
-                write!(f, "no cached settings for offline start; next: {:?}", action)
+                write!(
+                    f,
+                    "no cached settings for offline start; next: {:?}",
+                    action
+                )
             }
             SetupError::WrongStep { action } => {
                 write!(f, "setup step out of order; next: {:?}", action)
@@ -383,7 +387,9 @@ impl AccountStore for MemoryAccountStore {
     }
 
     fn stage_account(&mut self, provider_id: &str) {
-        self.accounts.entry(provider_id.to_string()).or_insert(false);
+        self.accounts
+            .entry(provider_id.to_string())
+            .or_insert(false);
     }
 
     fn commit_account(&mut self, provider_id: &str) {
@@ -907,9 +913,13 @@ mod tests {
 
     #[test]
     fn pkce_expiry_rejected() {
-        let expired =
-            PkceChallenge::new("openai", "opaque-abc".to_string(), "state-xyz".to_string(), 1)
-                .unwrap();
+        let expired = PkceChallenge::new(
+            "openai",
+            "opaque-abc".to_string(),
+            "state-xyz".to_string(),
+            1,
+        )
+        .unwrap();
         assert_eq!(expired.provider_id(), "openai");
         assert_eq!(expired.state(), "state-xyz");
         assert_eq!(expired.expires_at_unix(), 1);

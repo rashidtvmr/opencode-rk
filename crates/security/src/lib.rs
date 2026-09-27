@@ -1,7 +1,6 @@
 //! Deterministic authorization and destructive-operation classification.
 #![forbid(unsafe_code)]
 pub mod app_policy;
-pub mod platform_matrix;
 pub mod clarity_guard;
 pub mod cmd_patterns;
 pub mod credentials;
@@ -11,6 +10,7 @@ pub mod hook_bus_v2;
 pub mod hooks;
 pub mod manual_only;
 pub mod os_backend;
+pub mod platform_matrix;
 pub mod project_boundary;
 pub mod sandbox;
 pub mod sensitive;

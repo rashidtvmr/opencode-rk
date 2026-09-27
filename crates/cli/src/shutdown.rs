@@ -312,9 +312,7 @@ mod tests {
         drop(restore); // per-cycle closures below own their counter clone.
         for _ in 0..50u32 {
             let c = Rc::clone(&count);
-            let _guard = RestoreGuard::new(ShutdownReason::Explicit, move || {
-                c.set(c.get() + 1)
-            });
+            let _guard = RestoreGuard::new(ShutdownReason::Explicit, move || c.set(c.get() + 1));
         }
         assert_eq!(
             count.get(),

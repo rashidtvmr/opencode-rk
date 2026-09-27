@@ -22,3 +22,9 @@ __pycache__/
 # Autonomous controller state and lane worktrees - machine-local
 /state/
 /.worktrees/
+
+# Local test-account API keys - NEVER commit
+.test-account-api-keys
+
+# Plan transfer scratch (base64 packs, receipts) - machine-local
+/.phase1-plan-transfer-*/

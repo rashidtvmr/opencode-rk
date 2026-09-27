@@ -173,8 +173,7 @@ fn head_001_t01_inline_renders_answer_and_streams_prompt_uncompressed() {
     assert_eq!(exit.code, 0, "want ok, got {exit:?}");
     assert_eq!(sink.buf, b"hello\n", "inline must emit answer plus newline");
     assert_eq!(
-        model.seen_prompt,
-        b"hi-fixture",
+        model.seen_prompt, b"hi-fixture",
         "model port must observe raw prompt bytes"
     );
     assert!(
@@ -202,8 +201,7 @@ fn head_001_t02_block_wraps_answer_in_one_fenced_block() {
     );
     assert_eq!(exit.code, 0, "want ok, got {exit:?}");
     assert_eq!(
-        sink.buf,
-        b"```\nhello\n```\n",
+        sink.buf, b"```\nhello\n```\n",
         "block must wrap answer in one fenced block, byte-exact"
     );
     cleanup(&dir);
@@ -331,7 +329,10 @@ fn head_001_t05_exit_codes_leave_prior_state_untouched_on_failure() {
         &files,
     );
     assert_eq!(exit.code, 1, "empty prompt must be 1, got {exit:?}");
-    assert_eq!(sink.buf, b"prior", "failure must not touch prior sink bytes");
+    assert_eq!(
+        sink.buf, b"prior",
+        "failure must not touch prior sink bytes"
+    );
     assert_eq!(spill_list(&dir), before_list, "no spill on usage error");
     // Port failure => 2 with zero partial sink bytes.
     let mut failing = FixtureModel::failing();
@@ -345,7 +346,10 @@ fn head_001_t05_exit_codes_leave_prior_state_untouched_on_failure() {
         &files,
     );
     assert_eq!(exit2.code, 2, "port failure must be 2, got {exit2:?}");
-    assert_eq!(sink2.buf, b"prior", "port failure must emit no partial bytes");
+    assert_eq!(
+        sink2.buf, b"prior",
+        "port failure must emit no partial bytes"
+    );
     assert_eq!(spill_list(&dir), before_list, "no spill on port failure");
     // Ok => 0.
     let mut sink3 = VecSink::new();
@@ -411,7 +415,10 @@ fn head_001_spill_failure_is_internal_with_no_partial_render() {
         &files,
     );
     assert_eq!(exit.code, 2, "spill failure must be 2, got {exit:?}");
-    assert_eq!(sink.buf, b"prior", "spill failure must emit no partial bytes");
+    assert_eq!(
+        sink.buf, b"prior",
+        "spill failure must emit no partial bytes"
+    );
     let _ = fs::remove_file(&blocker);
 }
 

@@ -71,18 +71,27 @@ provider canaries, remote deployment, or device tests.
 
 Any main orchestrator may be used if it can provide these capabilities: native worker
 spawn, completion notifications, cancellation/join, isolated ownership, independent
-verification, and serialized integration. Target 20 workers, keep at least 15 useful
-workers when the harness/provider/resource budget supports it, and refill on individual
-completion rather than batch barriers.
+verification, and serialized integration. When the user does not specify a delegation
+count: target 20 workers, keep at least 15 useful workers when the
+harness/provider/resource budget supports it, and refill on individual completion
+rather than batch barriers.
 
-Reserve capacity by role rather than letting all twenty workers create leaves:
+The user's explicit count is authoritative. If the user asks for N parallel
+delegations, delegate exactly N parallel lanes; do not reduce N to the defaults below.
+Role reservations scale out of N rather than replacing it:
 
-- 4 integration-spine implementation lanes;
-- 2 independent test/verifier lanes;
-- up to 14 independent feature/audit lanes.
+- 20% (rounded up) integration-spine implementation lanes;
+- 10% (rounded up) independent test/verifier lanes;
+- the remainder independent feature/audit lanes.
 
-If fewer than 20 workers are available, preserve the integration/test lanes first.
-Twenty parallel planners with zero integration writer is a failure mode.
+So N=50 yields 10 integration-spine, 5 test/verifier, and 35 feature/audit lanes. At
+the default N=20 this reproduces the 4/2/14 split. If the harness cannot safely host N
+workers, report the achievable count and the blocker instead of silently delegating
+fewer; the per-lane resource budget still binds what each lane may run.
+
+Whether N defaults or is user-set, if fewer integration/test lanes than reserved are
+available, preserve the integration/test lanes first. Twenty parallel planners with
+zero integration writer is a failure mode.
 
 ## Immutable-test rule
 

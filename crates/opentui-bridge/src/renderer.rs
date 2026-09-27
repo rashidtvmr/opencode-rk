@@ -70,11 +70,7 @@ unsafe extern "C" {
     /// Safety: handle must be a live renderer.
     fn setCursorPosition(renderer_handle: NativeHandle, x: i32, y: i32, visible: bool);
     /// Safety: handle must be a live renderer; titlePtr null iff titleLen is 0.
-    fn setTerminalTitle(
-        renderer_handle: NativeHandle,
-        titlePtr: *const c_uchar,
-        titleLen: c_uint,
-    );
+    fn setTerminalTitle(renderer_handle: NativeHandle, titlePtr: *const c_uchar, titleLen: c_uint);
     /// Safety: handle must be a live renderer.
     fn getNextBuffer(renderer_handle: NativeHandle) -> NativeHandle;
     /// Safety: handle must be a live renderer.

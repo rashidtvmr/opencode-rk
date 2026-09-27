@@ -126,9 +126,8 @@ impl BlobImport {
              FROM messages WHERE session_id=?1 AND rowid>?2 \
              ORDER BY rowid ASC LIMIT ?3",
         )?;
-        let rows = statement.query_map(
-            params![session_id, after_rowid, IMPORT_PAGE_ROWS],
-            |row| {
+        let rows =
+            statement.query_map(params![session_id, after_rowid, IMPORT_PAGE_ROWS], |row| {
                 let rowid: i64 = row.get(0)?;
                 let role: String = row.get(1)?;
                 let inline: Option<String> = row.get(2)?;
@@ -136,8 +135,7 @@ impl BlobImport {
                 let byte_len: i64 = row.get(4)?;
                 let created_at: String = row.get(5)?;
                 Ok((rowid, role, inline, blob, byte_len, created_at))
-            },
-        )?;
+            })?;
 
         let mut inline_count: u64 = 0;
         let mut blob_count: u64 = 0;
@@ -158,10 +156,8 @@ impl BlobImport {
                     inline_count += 1;
                 }
                 None => {
-                    let hash =
-                        blob_hash.ok_or_else(|| {
-                            StorageError::Sqlite(rusqlite::Error::InvalidQuery)
-                        })?;
+                    let hash = blob_hash
+                        .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
                     let raw = source_blobs.get(&hash)?;
                     if raw.len() > MAX_BLOB_BYTES {
                         return Err(blob_quota_exceeded(raw.len()));
@@ -210,23 +206,17 @@ impl BlobImport {
     /// wrong markers, or a foreign legacy `_migrations` table with rows)
     /// fails the check.
     pub fn verify_migration_agreement(dest: &Connection) -> Result<(), StorageError> {
-        let user_version: i64 =
-            dest.pragma_query_value(None, "user_version", |row| row.get(0))?;
+        let user_version: i64 = dest.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if user_version != 2 {
-            return Err(StorageError::Sqlite(
-                rusqlite::Error::InvalidParameterName(format!(
-                    "user_version divergence: expected 2, got {user_version}"
-                )),
-            ));
+            return Err(StorageError::Sqlite(rusqlite::Error::InvalidParameterName(
+                format!("user_version divergence: expected 2, got {user_version}"),
+            )));
         }
-        let app_id: i64 =
-            dest.pragma_query_value(None, "application_id", |row| row.get(0))?;
+        let app_id: i64 = dest.pragma_query_value(None, "application_id", |row| row.get(0))?;
         if app_id != 0x4F525732 {
-            return Err(StorageError::Sqlite(
-                rusqlite::Error::InvalidParameterName(format!(
-                    "application_id divergence: got {app_id:#x}"
-                )),
-            ));
+            return Err(StorageError::Sqlite(rusqlite::Error::InvalidParameterName(
+                format!("application_id divergence: got {app_id:#x}"),
+            )));
         }
         let stored: Vec<u8> = dest
             .query_row(
@@ -240,11 +230,9 @@ impl BlobImport {
                 ))
             })?;
         if stored.as_slice() != SchemaV2::workspace_checksum().as_slice() {
-            return Err(StorageError::Sqlite(
-                rusqlite::Error::InvalidParameterName(
-                    "schema_migrations checksum divergence".into(),
-                ),
-            ));
+            return Err(StorageError::Sqlite(rusqlite::Error::InvalidParameterName(
+                "schema_migrations checksum divergence".into(),
+            )));
         }
         // Legacy `_migrations` runner table must not shadow the workspace:
         // any rows there mean a foreign runner wrote migration state.
@@ -256,15 +244,12 @@ impl BlobImport {
             )
             .optional()?;
         if legacy_table.is_some() {
-            let rows: i64 = dest.query_row("SELECT COUNT(*) FROM _migrations", [], |row| {
-                row.get(0)
-            })?;
+            let rows: i64 =
+                dest.query_row("SELECT COUNT(*) FROM _migrations", [], |row| row.get(0))?;
             if rows != 0 {
-                return Err(StorageError::Sqlite(
-                    rusqlite::Error::InvalidParameterName(format!(
-                        "_migrations divergence: {rows} foreign row(s)"
-                    )),
-                ));
+                return Err(StorageError::Sqlite(rusqlite::Error::InvalidParameterName(
+                    format!("_migrations divergence: {rows} foreign row(s)"),
+                )));
             }
         }
         Ok(())
@@ -558,18 +543,32 @@ mod tests {
         let dest_blobs = BlobStore::new(dest_blob_dir.path());
 
         // Page 1 bounded.
-        let (i1, b1, _, c1) =
-            BlobImport::import_page(&mut dest, &source, "src1", pk, 0, &source_blobs, &dest_blobs)
-                .unwrap();
+        let (i1, b1, _, c1) = BlobImport::import_page(
+            &mut dest,
+            &source,
+            "src1",
+            pk,
+            0,
+            &source_blobs,
+            &dest_blobs,
+        )
+        .unwrap();
         assert_eq!((i1, b1), (IMPORT_PAGE_ROWS as u64, 0));
         assert!(c1 > 0);
         // Resume to completion via import_all on a fresh session? No: resume
         // in place with the cursor loop.
         let mut cursor = c1;
         loop {
-            let (i, b, _, n) =
-                BlobImport::import_page(&mut dest, &source, "src1", pk, cursor, &source_blobs, &dest_blobs)
-                    .unwrap();
+            let (i, b, _, n) = BlobImport::import_page(
+                &mut dest,
+                &source,
+                "src1",
+                pk,
+                cursor,
+                &source_blobs,
+                &dest_blobs,
+            )
+            .unwrap();
             if i + b == 0 || n == cursor {
                 break;
             }
@@ -643,8 +642,16 @@ mod tests {
         let source_blobs = BlobStore::new(dir.path().join("source_blobs"));
         let dest_blob_dir = tempdir().unwrap();
         let dest_blobs = BlobStore::new(dest_blob_dir.path());
-        BlobImport::import_all(&mut dest, &source, "src1", &new_id, pk, &source_blobs, &dest_blobs)
-            .unwrap();
+        BlobImport::import_all(
+            &mut dest,
+            &source,
+            "src1",
+            &new_id,
+            pk,
+            &source_blobs,
+            &dest_blobs,
+        )
+        .unwrap();
         BlobImport::verify_migration_agreement(&dest).unwrap();
 
         // Tamper the checksum: agreement must fail.
@@ -688,17 +695,31 @@ mod tests {
         let dest_blobs = BlobStore::new(dest_blob_dir.path());
 
         // Simulate interruption: import exactly one bounded page then stop.
-        let (i1, b1, _, cursor) =
-            BlobImport::import_page(&mut dest, &source, "src1", pk, 0, &source_blobs, &dest_blobs)
-                .unwrap();
+        let (i1, b1, _, cursor) = BlobImport::import_page(
+            &mut dest,
+            &source,
+            "src1",
+            pk,
+            0,
+            &source_blobs,
+            &dest_blobs,
+        )
+        .unwrap();
         assert_eq!(i1 + b1, IMPORT_PAGE_ROWS as u64);
         assert_eq!(count(&dest, pk), IMPORT_PAGE_ROWS);
         // Resume from the cursor to completion: no half message, exact total.
         let mut c = cursor;
         loop {
-            let (i, b, _, n) =
-                BlobImport::import_page(&mut dest, &source, "src1", pk, c, &source_blobs, &dest_blobs)
-                    .unwrap();
+            let (i, b, _, n) = BlobImport::import_page(
+                &mut dest,
+                &source,
+                "src1",
+                pk,
+                c,
+                &source_blobs,
+                &dest_blobs,
+            )
+            .unwrap();
             if i + b == 0 || n == c {
                 break;
             }

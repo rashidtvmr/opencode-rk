@@ -355,7 +355,10 @@ impl NativeHost {
     }
 
     fn mark_frame(&mut self) {
-        self.pending_frames = self.pending_frames.saturating_add(1).min(MAX_PENDING_FRAMES);
+        self.pending_frames = self
+            .pending_frames
+            .saturating_add(1)
+            .min(MAX_PENDING_FRAMES);
     }
 
     /// True once a quit key has been stepped.
@@ -536,10 +539,7 @@ mod tests {
             host.step(HostEvent::TokenDelta { bytes: 0 }),
             HostAction::Ignored
         );
-        assert_eq!(
-            host.step(HostEvent::TimelineItem),
-            HostAction::RequestFrame
-        );
+        assert_eq!(host.step(HostEvent::TimelineItem), HostAction::RequestFrame);
         assert_eq!(host.routed_items(), 1);
         assert!(host.needs_render());
         assert!(host.take_frame());

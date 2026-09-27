@@ -316,9 +316,7 @@ struct Parser<'a> {
 }
 
 impl<'a> Parser<'a> {
-    fn parse_authed_descriptor(
-        &mut self,
-    ) -> Result<(BackendDescriptor, String), DescriptorReject> {
+    fn parse_authed_descriptor(&mut self) -> Result<(BackendDescriptor, String), DescriptorReject> {
         const MALFORMED: fn(String) -> DescriptorReject = DescriptorReject::Malformed;
         self.skip_ws();
         if !self.eat(b'{') {
@@ -368,8 +366,7 @@ impl<'a> Parser<'a> {
                 schema_version: schema_version
                     .ok_or_else(|| MALFORMED("missing field 'schema_version'".into()))?,
             },
-            auth_token
-                .ok_or_else(|| MALFORMED("missing field 'auth_token'".into()))?,
+            auth_token.ok_or_else(|| MALFORMED("missing field 'auth_token'".into()))?,
         ))
     }
 
@@ -813,7 +810,9 @@ pub fn decide_lifecycle_authed(
     valid_descriptor: Option<AuthenticatedDescriptor>,
     health_status: Option<u16>,
 ) -> (LifecycleAction, Option<String>) {
-    let inner = valid_descriptor.as_ref().map(|authed| authed.descriptor.clone());
+    let inner = valid_descriptor
+        .as_ref()
+        .map(|authed| authed.descriptor.clone());
     let action = decide_lifecycle(inner, health_status);
     let credential = match &action {
         LifecycleAction::Reuse(_) => {
@@ -1153,13 +1152,19 @@ mod tests {
     }
 
     fn authed(pid: u32) -> AuthenticatedDescriptor {
-        parse_authenticated_descriptor(&authed_json(pid, "http://127.0.0.1:4096", &hex_token(1)), alive)
-            .expect("fixture must validate")
+        parse_authenticated_descriptor(
+            &authed_json(pid, "http://127.0.0.1:4096", &hex_token(1)),
+            alive,
+        )
+        .expect("fixture must validate")
     }
 
     #[test]
     fn app002_t01_twenty_concurrent_launches_one_owner() {
-        use std::sync::{atomic::{AtomicBool, Ordering}, Arc};
+        use std::sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
+        };
         let claimed = Arc::new(AtomicBool::new(false));
         let mut handles = Vec::new();
         for _ in 0..20 {
@@ -1217,8 +1222,18 @@ mod tests {
     fn app002_t03_file_gate_runs_before_credential() {
         let bytes = authed_json(4242, "http://127.0.0.1:4096", &hex_token(1));
         for meta in [
-            DescriptorFileMeta { is_symlink: true, owner_uid: 1000, caller_uid: 1000, len_bytes: 64 },
-            DescriptorFileMeta { is_symlink: false, owner_uid: 0, caller_uid: 1000, len_bytes: 64 },
+            DescriptorFileMeta {
+                is_symlink: true,
+                owner_uid: 1000,
+                caller_uid: 1000,
+                len_bytes: 64,
+            },
+            DescriptorFileMeta {
+                is_symlink: false,
+                owner_uid: 0,
+                caller_uid: 1000,
+                len_bytes: 64,
+            },
             DescriptorFileMeta {
                 is_symlink: false,
                 owner_uid: 1000,
@@ -1226,9 +1241,17 @@ mod tests {
                 len_bytes: (MAX_DESCRIPTOR_BYTES + 1) as u64,
             },
         ] {
-            assert!(discover(&bytes, &meta, alive).is_err(), "bad meta must refuse: {meta:?}");
+            assert!(
+                discover(&bytes, &meta, alive).is_err(),
+                "bad meta must refuse: {meta:?}"
+            );
         }
-        let own = DescriptorFileMeta { is_symlink: false, owner_uid: 1000, caller_uid: 1000, len_bytes: 200 };
+        let own = DescriptorFileMeta {
+            is_symlink: false,
+            owner_uid: 1000,
+            caller_uid: 1000,
+            len_bytes: 200,
+        };
         let found = discover(&bytes, &own, alive).expect("own+valid must discover");
         assert_eq!(found.auth_token, hex_token(1));
     }
@@ -1240,7 +1263,10 @@ mod tests {
             matches!(action, LifecycleAction::RefuseOccupiedPort { .. }),
             "occupied port must be a safe error, got: {action:?}"
         );
-        assert_eq!(credential, None, "foreign listener must receive no credential");
+        assert_eq!(
+            credential, None,
+            "foreign listener must receive no credential"
+        );
         match &action {
             LifecycleAction::Reuse(_) | LifecycleAction::StartNew { .. } => {
                 panic!("occupied port must not reuse or start over a foreign listener")
@@ -1257,17 +1283,30 @@ mod tests {
             "compatible needs no error"
         );
         for decision in [
-            VersionDecision::ServerNewer { client: 1, server: 2 },
-            VersionDecision::ClientNewer { client: 3, server: 1 },
+            VersionDecision::ServerNewer {
+                client: 1,
+                server: 2,
+            },
+            VersionDecision::ClientNewer {
+                client: 3,
+                server: 1,
+            },
         ] {
             let text = version_action(&decision).expect("mismatch must explain itself");
             match decision {
                 VersionDecision::ServerNewer { client, server } => {
-                    assert!(text.contains(&client.to_string()) && text.contains(&server.to_string()));
-                    assert!(text.contains("upgrade"), "server-newer must say to upgrade: {text}");
+                    assert!(
+                        text.contains(&client.to_string()) && text.contains(&server.to_string())
+                    );
+                    assert!(
+                        text.contains("upgrade"),
+                        "server-newer must say to upgrade: {text}"
+                    );
                 }
                 VersionDecision::ClientNewer { client, server } => {
-                    assert!(text.contains(&client.to_string()) && text.contains(&server.to_string()));
+                    assert!(
+                        text.contains(&client.to_string()) && text.contains(&server.to_string())
+                    );
                     assert!(text.contains("restart") || text.contains("upgrade"));
                 }
                 VersionDecision::Compatible => unreachable!(),
@@ -1277,9 +1316,18 @@ mod tests {
 
     #[test]
     fn app002_t06_credential_policy_stop_restart() {
-        assert_eq!(resolve_credential(&CredentialPolicy::Rotate, Some(&hex_token(1)), || hex_token(9)), hex_token(9));
         assert_eq!(
-            resolve_credential(&CredentialPolicy::Preserve, Some(&hex_token(1)), || hex_token(9)),
+            resolve_credential(
+                &CredentialPolicy::Rotate,
+                Some(&hex_token(1)),
+                || hex_token(9)
+            ),
+            hex_token(9)
+        );
+        assert_eq!(
+            resolve_credential(&CredentialPolicy::Preserve, Some(&hex_token(1)), || {
+                hex_token(9)
+            }),
             hex_token(1),
             "preserve keeps a wellformed bearer so clients reconnect"
         );
@@ -1306,10 +1354,8 @@ mod tests {
 
     #[test]
     fn discover_from_path_roundtrip_and_refusals() {
-        let dir = std::env::temp_dir().join(format!(
-            "daemon_client_discover_{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("daemon_client_discover_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("backend.json");

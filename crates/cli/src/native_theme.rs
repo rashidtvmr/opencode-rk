@@ -137,8 +137,7 @@ impl ThemeDef {
     /// Whether this theme definition satisfies all bounds.
     #[must_use]
     pub fn is_valid(&self) -> bool {
-        !self.name.is_empty()
-            && self.name.len() <= MAX_NAME_LEN
+        !self.name.is_empty() && self.name.len() <= MAX_NAME_LEN
     }
 }
 
@@ -161,10 +160,7 @@ impl BoundedColorMap {
     /// Look up a color by semantic key.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<Rgba> {
-        self.entries
-            .iter()
-            .find(|(k, _)| k == key)
-            .map(|(_, v)| *v)
+        self.entries.iter().find(|(k, _)| k == key).map(|(_, v)| *v)
     }
 
     /// All keys present in the map.
@@ -268,7 +264,9 @@ impl Default for ThemeRegistry {
 // ── Theme engine ──────────────────────────────────────────────────────
 
 /// Semantic color keys emitted by [`ThemeEngine::apply`].
-const SEMANTIC_KEYS: [&str; COLOR_SLOTS] = ["fg", "bg", "accent", "success", "warning", "error", "muted", "border"];
+const SEMANTIC_KEYS: [&str; COLOR_SLOTS] = [
+    "fg", "bg", "accent", "success", "warning", "error", "muted", "border",
+];
 
 /// Stateless theme engine. Produces [`BoundedColorMap`] from a
 /// [`ThemeDef`].
@@ -288,11 +286,14 @@ impl ThemeEngine {
             ("error".to_string(), theme.error),
             ("muted".to_string(), theme.muted),
             // border defaults to the fg/bg midpoint (readable on both)
-            ("border".to_string(), Rgba::rgb(
-                ((u16::from(theme.fg.r) + u16::from(theme.bg.r)) / 2) as u8,
-                ((u16::from(theme.fg.g) + u16::from(theme.bg.g)) / 2) as u8,
-                ((u16::from(theme.fg.b) + u16::from(theme.bg.b)) / 2) as u8,
-            )),
+            (
+                "border".to_string(),
+                Rgba::rgb(
+                    ((u16::from(theme.fg.r) + u16::from(theme.bg.r)) / 2) as u8,
+                    ((u16::from(theme.fg.g) + u16::from(theme.bg.g)) / 2) as u8,
+                    ((u16::from(theme.fg.b) + u16::from(theme.bg.b)) / 2) as u8,
+                ),
+            ),
         ])
     }
 }
@@ -451,10 +452,7 @@ mod tests {
             reg.register(make_theme(&format!("t{i:02}"))).unwrap();
         }
         assert_eq!(reg.len(), MAX_THEMES);
-        assert_eq!(
-            reg.register(make_theme("overflow")),
-            Err(ThemeError::Full)
-        );
+        assert_eq!(reg.register(make_theme("overflow")), Err(ThemeError::Full));
     }
 
     #[test]
@@ -514,10 +512,7 @@ mod tests {
         let map = ThemeEngine::apply(&theme);
         assert_eq!(map.keys().len(), COLOR_SLOTS);
         for key in SEMANTIC_KEYS {
-            assert!(
-                map.get(key).is_some(),
-                "missing semantic key: {key}"
-            );
+            assert!(map.get(key).is_some(), "missing semantic key: {key}");
         }
     }
 

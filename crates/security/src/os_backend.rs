@@ -534,11 +534,18 @@ mod tests {
             .map(|c| c.lines().any(|l| l.trim().contains("landlock")))
             .unwrap_or(false);
         assert_eq!(sup.landlock_detected, has_entry);
-        assert!(!sup.enforcement_linked, "no syscall backend linked in this crate");
+        assert!(
+            !sup.enforcement_linked,
+            "no syscall backend linked in this crate"
+        );
         assert!(!sup.available);
         let err = require_supported().expect_err("must BLOCK, never silent-allow");
         assert!(format!("{err}").contains("BLOCKED"));
-        assert!(format!("{err}").contains("unsupported") || format!("{err}").contains("refusing") || format!("{err}").contains("no syscall"));
+        assert!(
+            format!("{err}").contains("unsupported")
+                || format!("{err}").contains("refusing")
+                || format!("{err}").contains("no syscall")
+        );
         // engage() agrees: always Err.
         let bogus = FsGrant {
             root: PathBuf::from("/tmp"),

@@ -52,9 +52,7 @@ impl DaemonAuth {
     /// Restore the credential the daemon published at startup. Rejects empty
     /// or malformed tokens so a legacy/blank descriptor never authenticates.
     pub fn from_published(token: &str) -> Result<Self, AuthError> {
-        if token.len() != TOKEN_HEX_LEN
-            || !token.bytes().all(|b| b.is_ascii_hexdigit())
-        {
+        if token.len() != TOKEN_HEX_LEN || !token.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Err(AuthError::MalformedToken);
         }
         Ok(Self {
@@ -82,7 +80,8 @@ impl DaemonAuth {
 
 /// Failures minting or restoring the daemon credential.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum AuthError {    /// No OS randomness available; caller must abort startup, not retry weak.
+pub enum AuthError {
+    /// No OS randomness available; caller must abort startup, not retry weak.
     NoRandomness(String),
     /// Published token is empty or not 64 hex chars.
     MalformedToken,
@@ -223,8 +222,7 @@ mod tests {
             Err(AuthError::MalformedToken)
         );
         let auth = DaemonAuth::mint().expect("mint");
-        let restored =
-            DaemonAuth::from_published(auth.token()).expect("roundtrip");
+        let restored = DaemonAuth::from_published(auth.token()).expect("roundtrip");
         assert!(restored.verify_bearer(Some(&format!("Bearer {}", auth.token()))));
     }
 }

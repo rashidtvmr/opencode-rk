@@ -15,15 +15,15 @@
 //! mode and degrades to an explicit offline banner interactively; live data is
 //! never fabricated.
 
+use crate::daemon_client;
 use clap::{Args, ValueEnum};
+#[cfg(feature = "native")]
+use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use opencode_rk_sessions::tui_state::{
     context_breakdown, footer_hints, keybinding_help, status_click, Composer, MemoryFile,
     MemoryViewer, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES,
     MAX_SOURCES,
 };
-use crate::daemon_client;
-#[cfg(feature = "native")]
-use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use std::{
     env, fs,
     io::{BufRead, IsTerminal as _, Read, Write},
@@ -163,7 +163,12 @@ fn http_request(
         .map_err(|e| format!("daemon unreachable at {origin}: {e}"))?;
     let payload = body.unwrap_or("");
     let auth_line = auth
-        .map(|token| format!("Authorization: {}\r\n", crate::daemon_client::authorization_header(token)))
+        .map(|token| {
+            format!(
+                "Authorization: {}\r\n",
+                crate::daemon_client::authorization_header(token)
+            )
+        })
         .unwrap_or_default();
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {origin}\r\n{auth_line}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
@@ -492,20 +497,24 @@ fn native_page_lines(
         }
         NativePage::Palette => {
             lines.push("Command palette".to_string());
-            lines.extend([
-                "  /new           New session",
-                "  /sessions      Switch/list sessions",
-                "  /model         Switch model",
-                "  /agents        Switch agent",
-                "  /mcps          MCP controls",
-                "  /status        Status",
-                "  /themes        Theme",
-                "  /fork          Fork session",
-                "  /undo /redo    Session history actions",
-                "  /share         Share session",
-                "  /export        Export transcript",
-                "  Esc            Back to chat",
-            ].into_iter().map(str::to_string));
+            lines.extend(
+                [
+                    "  /new           New session",
+                    "  /sessions      Switch/list sessions",
+                    "  /model         Switch model",
+                    "  /agents        Switch agent",
+                    "  /mcps          MCP controls",
+                    "  /status        Status",
+                    "  /themes        Theme",
+                    "  /fork          Fork session",
+                    "  /undo /redo    Session history actions",
+                    "  /share         Share session",
+                    "  /export        Export transcript",
+                    "  Esc            Back to chat",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            );
         }
         NativePage::Context => {
             lines.push("Context / status".to_string());
@@ -517,20 +526,26 @@ fn native_page_lines(
             } else {
                 lines.push("daemon: offline".to_string());
             }
-            lines.push("Usage and source-level context populate from live provider events.".to_string());
+            lines.push(
+                "Usage and source-level context populate from live provider events.".to_string(),
+            );
             lines.push("Esc returns to chat.".to_string());
         }
         NativePage::Help => {
             lines.push("Keyboard help".to_string());
-            lines.extend([
-                "Enter        submit current draft",
-                "Backspace    delete previous character",
-                "Ctrl+P       command palette",
-                "Ctrl+T       context/status page",
-                "?            help",
-                "Esc          close page",
-                "Ctrl+C       quit and restore terminal",
-            ].into_iter().map(str::to_string));
+            lines.extend(
+                [
+                    "Enter        submit current draft",
+                    "Backspace    delete previous character",
+                    "Ctrl+P       command palette",
+                    "Ctrl+T       context/status page",
+                    "?            help",
+                    "Esc          close page",
+                    "Ctrl+C       quit and restore terminal",
+                ]
+                .into_iter()
+                .map(str::to_string),
+            );
         }
     }
     lines.truncate(height);
@@ -647,16 +662,12 @@ fn native_interactive_loop(
                 transcript.push(format!("you: {text}"));
                 let _ = host.step(crate::native_host::HostEvent::Submit(text.clone()));
                 match live {
-                    Some(snapshot) => match execute_submit(
-                        snapshot,
-                        &text,
-                        model,
-                        reasoning_effort,
-                        auth,
-                    ) {
-                        Ok(reply) => transcript.push(format!("assistant: {reply}")),
-                        Err(error) => transcript.push(format!("error: {error}")),
-                    },
+                    Some(snapshot) => {
+                        match execute_submit(snapshot, &text, model, reasoning_effort, auth) {
+                            Ok(reply) => transcript.push(format!("assistant: {reply}")),
+                            Err(error) => transcript.push(format!("error: {error}")),
+                        }
+                    }
                     None => transcript.push("offline: turn not executed".to_string()),
                 }
                 const MAX_NATIVE_TRANSCRIPT: usize = 500;
@@ -716,18 +727,17 @@ fn interactive_loop(
                     Ok(opencode_rk_sessions::tui_state::SubmitOutcome::Sent(sent)) => {
                         println!("you: {sent}");
                         match live {
-                            Some(snapshot) => match execute_submit(
-                                snapshot,
-                                &sent,
-                                model,
-                                reasoning_effort,
-                                auth,
-                            ) {
-                                Ok(reply) => println!("assistant: {reply}"),
-                                Err(error) => println!("[error] turn failed: {error}"),
-                            },
+                            Some(snapshot) => {
+                                match execute_submit(snapshot, &sent, model, reasoning_effort, auth)
+                                {
+                                    Ok(reply) => println!("assistant: {reply}"),
+                                    Err(error) => println!("[error] turn failed: {error}"),
+                                }
+                            }
                             None => {
-                                println!("[offline: turn not executed; pass --origin to bind a daemon]")
+                                println!(
+                                    "[offline: turn not executed; pass --origin to bind a daemon]"
+                                )
                             }
                         }
                         while let Some(next) = composer.finish_turn() {
@@ -863,7 +873,10 @@ pub fn run_with_dir(
             }
         }
     } else if args.once {
-        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, &args.model, None)));
+        print!(
+            "{}",
+            print_native_or_legacy(&render_frame(keymap, &memory, &args.model, None))
+        );
         return Ok(());
     }
     if !std::io::stdin().is_terminal() {
@@ -872,18 +885,13 @@ pub fn run_with_dir(
         // empty only after poll) or hang scripts. `--once`/`--follow` are the
         // scriptable paths.
         return Err(
-            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY".into(),
+            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY"
+                .into(),
         );
     }
     #[cfg(feature = "native")]
     {
-        native_interactive_loop(
-            &memory,
-            None,
-            &args.model,
-            &args.reasoning_effort,
-            auth,
-        )
+        native_interactive_loop(&memory, None, &args.model, &args.reasoning_effort, auth)
     }
     #[cfg(not(feature = "native"))]
     {
@@ -912,8 +920,7 @@ fn resolve_origin_bearer(origin: Option<&str>, data_dir: Option<&Path>) -> Optio
             &owned
         }
     };
-    let descriptor =
-        opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
+    let descriptor = opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
     if descriptor.http_origin != origin {
         return None;
     }

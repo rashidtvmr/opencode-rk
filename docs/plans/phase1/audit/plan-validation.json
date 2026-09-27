@@ -1,0 +1,20 @@
+{
+  "plan_valid": true,
+  "product_verified": false,
+  "application_tests_executed_by_this_check": 0,
+  "counts": {
+    "packages": 60,
+    "one_file_role_assignments": 263,
+    "gates": 6,
+    "dag_nodes": 329,
+    "original_ids": 468,
+    "requirements": 47,
+    "surface_rows": 50
+  },
+  "errors": [],
+  "limitations": [
+    "Structural checks do not execute application features.",
+    "Semantic task mappings and scope decisions remain pending.",
+    "Suggested source/test paths require checkout preflight before activation."
+  ]
+}

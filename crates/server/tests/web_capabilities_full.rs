@@ -93,11 +93,17 @@ async fn web_cap_full_t04_surfaces_pinned() {
         );
     }
     assert!(
-        value["plugins"]["reason"].as_str().unwrap().contains("plugin host"),
+        value["plugins"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("plugin host"),
         "plugins reason must name the plugin-host gap"
     );
     assert!(
-        value["approvals"]["reason"].as_str().unwrap().contains("approval"),
+        value["approvals"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("approval"),
         "approvals reason must name the approval gap"
     );
     assert!(
