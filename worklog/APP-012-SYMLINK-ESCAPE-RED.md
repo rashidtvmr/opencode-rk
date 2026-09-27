@@ -31,6 +31,7 @@ Ownership is test-local: `TempDir` removes the lexical fixture and outside senti
 - Frozen test SHA-256: `fe8d24946c8ce98aae095b6a2f92b7f3c19cc32532ae6263f9898d8a5699753c`.
 - Status: blocked. Product implementation required; no product files touched.
 - Ledger: `blocked` via `tools/completion_claims.py`; verifier must keep test frozen and implement symlink-target denial in broker/file layer.
+- Resources: `CARGO_BUILD_JOBS=1`, `RUST_TEST_THREADS=1`; focused test completed in approximately 0.01s; no memory pressure observed or broad test run attempted.
 
 ## Unknowns
 
