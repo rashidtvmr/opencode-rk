@@ -238,6 +238,12 @@
       "session": "ses_f215e9103ffeQRrS4n5lI5Ceyr",
       "status": "blocked"
     },
+    "AUTHWEB-REFRESH-RED": {
+      "blockedNote": "RED-only: 3 pass / 1 fail exit 1 at web/src/lib/api.refresh-auth.test.mjs; genuine RED = post-consume full reload silently sends unauthenticated /api/sessions. Frozen SHA c7e9e7fdcd05371b261e01778060b44ff9a13e2a0ae481d85ce3778fcb295f5c. No product edits; no GREEN.",
+      "scratchpad": "worklog/AUTHWEB-REFRESH-RED.md",
+      "session": "ses_f1ea84890ffeWDi1uPCTQyFR4F",
+      "status": "blocked"
+    },
     "BASE-004": {
       "completedNote": "SHA-256 repair GREEN: daemon_long_path 1/1; daemon lib 24/24 incl sha256 abc vector; daemon_auth_api 5/5; cargo check clean. web_singleton_lock 1/2, unrelated legacy empty-token failure.",
       "scratchpad": "worklog/BASE-004.md",

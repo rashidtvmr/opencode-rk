@@ -1,0 +1,24 @@
+# AUTHWEB-REFRESH-RED
+
+- Claim: `AUTHWEB-REFRESH-RED`, session `ses_f1ea84890ffeWDi1uPCTQyFR4F`; claimed from `not-started` with `cc.claim(...)` (HAS_ROW was False before claim -> CLAIMED). Route is the assigned test-author route; no user allowlist provided (canonical N/A).
+- Worktree/branch: `/private/var/folders/.../red-authweb-refresh-w2`, branch `red/AUTHWEB-REFRESH-W2`, base browser candidate `ecec045`.
+- Source evidence (base `ecec045`):
+  - `web/src/lib/api.ts:171-184` — `consumeBrowserCredential()` reads `#oc2-token=<64 hex>`, clears it via `window.history.replaceState`, and caches it in a module-scoped `bearerToken` only. The credential therefore lives purely in this tab's in-memory module state and is NOT persisted anywhere durable.
+  - `web/src/lib/api.ts:186-193` — `apiHeaders()` attaches `authorization: Bearer <token>` only when `path.startsWith('/api/')`.
+  - `web/src/lib/api.ts:195-211` — `request()` calls `fetch(path, ...)`; on non-ok it throws `ApiError`.
+  - `web/src/lib/api.ts:484-487` — `listSessions()` -> `request('/api/sessions')`.
+  - `crates/server/src/daemon_auth.rs:3-7,150-175` — `/api/*` requires a bearer credential and returns 401 for missing credentials (current native server auth; confirmed by prior AUTHWEB-BROWSER-RED / AUTHWEB-DIRECT-FETCH worklogs at `crates/server/src/daemon_auth.rs:150-175`).
+- Classification: current client behavior already consumes the fragment and clears it (landed by AUTHWEB-BROWSER-CLIENT-IMPL). The NEW required behavior under test here is the post-consume lifecycle: after a full reload the fragment is gone and the in-memory credential no longer exists, so the client must EITHER regain a usable credential through an explicit secure relaunch contract OR fail with a clear re-auth state — it must never silently emit unauthenticated `/api/*` requests.
+- Observable contract (real bounded loopback HTTP):
+  - Real Node HTTP server binds `127.0.0.1:0` and enforces `Bearer <token>` on `/api/sessions` (401 without it), matching the native daemon contract. It records every request URL + Authorization header.
+  - (1) same-tab: a consumed fragment keeps authenticating later `listSessions()` calls; the token never appears in query, history-replacement URLs, storage writes, console output, or the raw fetch input/URL (the Authorization header is the sanctioned carrier and is excluded from the leak scan).
+  - (2) simulated full reload: fresh module instance with no fragment must not emit unauthenticated `/api/*`; it must either complete an explicit relaunch/refresh contract then authenticate, or throw a clear re-auth error.
+  - (3) malformed fragment (`#oc2-token=` + 32 hex): ignored, no Authorization, real 401 from the live endpoint, no token leak.
+  - (4) bearer never attached to non-`/api` (`/health`) or remote/absolute paths; only relative local paths are fetched.
+- Resource/security bounds: one loopback server per test, ephemeral port, one request at a time, no external network, no real credential/DB. Fake 64-hex token is test-only. Server + globals restored in `finally`.
+- Test: `web/src/lib/api.refresh-auth.test.mjs` (new, owned). Node `v24.21.0`. Command: `node --experimental-strip-types --test web/src/lib/api.refresh-auth.test.mjs`.
+- RED result (frozen): **3 pass / 1 fail, exit 1**. Genuine RED is test 2 (simulated full reload): after the fragment is consumed/cleared, a fresh module issues an unauthenticated `/api/sessions` request (`observed` records 1 unauthenticated `/api/*` hit) instead of a clear re-auth failure or an explicit relaunch. Tests 1/3/4 pass and document the already-landed consume-and-clear behavior plus the security negatives.
+- Regression: existing frozen `web/src/lib/api.auth.test.mjs` and `web/src/lib/api.direct-auth.test.mjs` re-run unchanged and pass (see run tail below).
+- Frozen test SHA-256: `c7e9e7fdcd05371b261e01778060b44ff9a13e2a0ae481d85ce3778fcb295f5c` (`web/src/lib/api.refresh-auth.test.mjs`). No test edits after freeze.
+- Status: RED-only candidate; NOT acceptance. No product code edited; no GREEN attempted.
+- Remaining / handoff to implementer: add an explicit secure relaunch/refresh contract (or a clear re-auth error state) for the post-consume full-reload path so unauthenticated `/api/*` requests are never sent. Implementer must fix product code only; this test is frozen.
