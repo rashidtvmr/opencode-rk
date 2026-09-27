@@ -392,9 +392,10 @@
       "status": "completed"
     },
     "GAP-RELEASE-34-W1": {
+      "blockedNote": "Validator residual: validate_backlog_exhaustion.py exit=1, 93 findings; REL lines 31-39. Classifier :1229-1358 hardcodes old projection; repair needs integration proposal. 224/34 re-verified; REL ownership retained unresolved.",
       "scratchpad": "worklog/GAP-RELEASE-34-W1.md",
       "session": "ses_f1d6b37ebffePBiKYvS0pvlqKF",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
