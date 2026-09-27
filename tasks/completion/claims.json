@@ -229,6 +229,12 @@
       "session": "ses_f21315667ffeO0KsxS0LtKsvtK",
       "status": "blocked"
     },
+    "AUTHWEB-REFRESH-RED": {
+      "blockedNote": "RED-only: 3 pass / 1 fail exit 1 at web/src/lib/api.refresh-auth.test.mjs; genuine RED = post-consume full reload silently sends unauthenticated /api/sessions. Frozen SHA c7e9e7fdcd05371b261e01778060b44ff9a13e2a0ae481d85ce3778fcb295f5c. No product edits; no GREEN.",
+      "scratchpad": "worklog/AUTHWEB-REFRESH-RED.md",
+      "session": "ses_f1ea84890ffeWDi1uPCTQyFR4F",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
