@@ -89,6 +89,12 @@
       "session": "ses_f1df5aeefffeC0qRrzE38et5TH",
       "status": "blocked"
     },
+    "APP-012-RUSTIX-WORKSPACE-W1": {
+      "completedNote": "Workspace rustix=1.1.4 added alphabetically, no workspace features; tools workspace+fs resolves structurally vs Cargo.lock 1.1.4; python structural check OK; cargo/lock untouched",
+      "scratchpad": "worklog/APP-012-RUSTIX-WORKSPACE-W1.md",
+      "session": "ses_f1dd641fdffeTq0Iq1REw6D2kr",
+      "status": "completed"
+    },
     "APP-012-SECURE-DISPATCH-W1": {
       "completedNote": "Candidate GREEN: frozen live_file_tool_dispatch, live_file_tool_allowed_inroot, live_file_tool_symlink_escape, and agent_loop_turns each passed serially with CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1; frozen hashes unchanged; parent APP-012 TOCTOU repair remains open.",
       "scratchpad": "worklog/APP-012-SECURE-DISPATCH-W1.md",
