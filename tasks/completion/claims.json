@@ -244,6 +244,12 @@
       "session": "ses_f380c4bc9ffei2XDG2DStCM92e",
       "status": "completed"
     },
+    "CUSTOM-PROVIDER-CLIENT-W1": {
+      "blockedNote": "Provider-client candidate implemented and 3 source-local tests pass; parent journey remains unwired pending distinct server caller lane. Workspace fmt check detects pre-existing diffs outside owned file; crate fmt check also detects existing unrelated provider files.",
+      "scratchpad": "worklog/CUSTOM-PROVIDER-CLIENT-W1.md",
+      "session": "ses_f1e6e3ab4ffeG84rY5B3BEoBaT",
+      "status": "blocked"
+    },
     "CUSTOM-PROVIDER-LIVE-W1": {
       "blockedNote": "RED frozen, genuine: 3/3 fail on lib.rs:920 non-openai guard; needs from_env_for(provider_id) + 503 credential mapping",
       "scratchpad": "worklog/CUSTOM-PROVIDER-LIVE-W1.md",
