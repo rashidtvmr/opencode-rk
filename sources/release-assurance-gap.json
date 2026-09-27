@@ -17,6 +17,25 @@
     "REL-002": [],
     "REL-003": []
   },
+  "currentProjection": {
+    "revision": "f21a01e21a4a82b57dae641c032472585f84b2c4",
+    "ledgerPath": "sources/backlog-exhaustion.json",
+    "storyCount": 258,
+    "controllerAccepted": 224,
+    "nonAccepted": 34,
+    "controllerStatusCounts": {
+      "accepted": 224,
+      "in-progress": 23,
+      "not-started": 11
+    },
+    "acceptedReleaseStoriesExcludedFromNonAcceptedRows": [
+      "REL-001",
+      "REL-002",
+      "REL-003"
+    ],
+    "releaseOwnershipRemainsUnresolved": true,
+    "interpretation": "The accepted controller projection classifies no REL story among the active 34 nonaccepted exhaustion rows. Controller acceptance does not resolve or remove the separate release-assurance ownership gap recorded here."
+  },
   "taskBindingState": {
     "REL-001": {
       "ralphStory": "TBD - see source audit",
