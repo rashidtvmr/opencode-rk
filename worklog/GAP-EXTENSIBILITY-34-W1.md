@@ -1,0 +1,8 @@
+# GAP-EXTENSIBILITY-34-W1
+
+claim: reclaim ses_f1dd6415cffd7KDcIzt0yz7Ivo (stopped, uncommitted claim-only, no worklog) + claim ses_f1d3ebf56ffe2o5YHyoE6pMOEr; branch reconcile/GAP-EXTENSIBILITY-34-W1 base f21a01e.
+source: ralph.json@f21a01e EXT-004/006/009/010/011/012 accepted, EXT-005 in-progress REQ-005, EXT-008 not-started REQ-020; ledger sources/backlog-exhaustion.json summary 258/224/34 (23 in-progress,11 not-started), active EXT rows only EXT-005/008 explicit-blocker; tasks+worklog exist for EXT-004/005/006/007/008/009/010/011/012.
+target: reconcile sources/extensibility-remaining-ownership-gap.json only. taskBindingState controllerStatus -> accepted for 6 residual rows (evidence preservation). ownershipDecision null retained. storyIds/groups/partitions/designGaps/closure/exclusions untouched. controllerBacklogProjection appended: 224/34 verified, acceptedResidual=[EXT-004,006,009,010,011,012], active rows EXT-005+EXT-008 from live ledger. validator tools/validate_backlog_exhaustion.py byte-identical HEAD (diff clean).
+tests: python3 -m json.tool manifest OK; git diff --check clean; validator exit1 EXPECTED stale: 93 errors, incl 15 extensibility lines (6 stale-after-Ralph + 6 projection-drifted + EXT-003/007 implemented-exclusion + UI-012 dependency-exclusion drifted; frozen validator assumes in-progress controllers/legacy ledger placement, assumptions conflict forbidden to edit).
+decisions: binding accepted mirrors controller only, not source ownership; projection records as-is.
+unknowns: cross-family validator residuals require integrator-owned companion lanes; no acceptance.
