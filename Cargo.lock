@@ -975,6 +975,7 @@ dependencies = [
  "opencode-rk-contracts",
  "opencode-rk-security",
  "reqwest",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",

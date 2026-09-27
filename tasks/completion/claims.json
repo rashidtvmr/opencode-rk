@@ -12,6 +12,11 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-FILE0600-BACKEND-W1": {
+      "scratchpad": "worklog/APP-001-FILE0600-BACKEND-W1.md",
+      "session": "ses_f1e155739ffegbiABLsnphsCMH",
+      "status": "in-progress"
+    },
     "APP-001-FILE0600-RED": {
       "blockedNote": "RED frozen: crates/cli/tests/installed_setup_file0600.rs sha256 c99b15bc (288L) base 798cbff; rustc --test clean; run FAILED 2 passed/3 failed (t01/t02 missing <data_dir>/credentials, t04 symlink not rejected). No product code touched; impl is separate lane.",
       "scratchpad": "worklog/APP-001-FILE0600-RED.md",
