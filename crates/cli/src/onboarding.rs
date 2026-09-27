@@ -898,11 +898,39 @@ mod tests {
         // Error values carry no secret bytes either.
         let mut store = MemoryAccountStore::new();
         let mut session = session_to_credential(&mut store);
-        let bad = SecretString::new("zz9-bad-key".to_string()).unwrap();
+        // Re-frozen fixture: unique invalid credential that violates the
+        // upstream-neutral invariant (whitespace control below MIN_CREDENTIAL_LEN).
+        // Exact secret bytes must never appear in error/debug output.
+        let bad_raw = "x\t\n y"; // contains whitespace + control bytes, below MIN length
+        let bad = SecretString::new(bad_raw.to_string()).unwrap();
         let err = session.submit_credential(&bad).unwrap_err();
         let rendered = format!("{} {:?}", err, err);
-        assert!(!rendered.contains("zz9-bad-key"));
+        assert!(!rendered.contains(bad_raw));
         let _ = session.cancel();
+    }
+
+    // APP-001-CREDENTIAL-SEMANTICS: upstream OpenCode V2 accepts arbitrary
+    // bounded non-whitespace credentials, not only `sk-`-prefixed tokens.
+    // This test must be RED until submit_credential drops the `sk-` prefix
+    // gate and accepts non-whitespace credentials.
+    #[test]
+    fn credential_semantics_accepts_non_sk_credential() {
+        let mut store = MemoryAccountStore::new();
+        let mut session = session_to_credential(&mut store);
+        // Bounded non-whitespace credential, no `sk-` prefix.
+        let cred = "rk-e2e-secret-never-log-0600".to_string();
+        let secret = SecretString::new(cred.clone()).unwrap();
+        // Must transition to ModelSelect/store-committed behavior.
+        session.submit_credential(&secret).unwrap();
+        assert_eq!(session.step(), SetupStep::ModelSelect);
+        session.select_model("gpt-4o-mini").unwrap();
+        assert_eq!(session.step(), SetupStep::Done);
+        assert!(session.committed());
+        // Exact secret bytes must never appear in error/debug output.
+        let rendered = format!("{:?}", session);
+        assert!(!rendered.contains(&cred));
+        drop(session);
+        assert!(store.is_committed("openai"));
     }
 
     #[test]
