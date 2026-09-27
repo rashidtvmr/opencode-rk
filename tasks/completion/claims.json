@@ -391,6 +391,12 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
+    "GAP-SHARING-34-W1": {
+      "blockedNote": "BLOCKED: JSON/projection/diff-check PASS; SHARE-001/002 bindings mirror accepted Ralph rows, SHARE-003/004/005 remain unresolved-decomposition with null ownership, exact evidence and empty pins. python3 tools/validate_backlog_exhaustion.py exits 1 with 98 companion-manifest/projection errors; convergence_gate blocked by 60 pre-existing ledger findings. See worklog/GAP-SHARING-34-W1.md",
+      "scratchpad": "worklog/GAP-SHARING-34-W1.md",
+      "session": "ses_f1df1916affec88XP5rRxPv3vB",
+      "status": "blocked"
+    },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
       "scratchpad": "worklog/LANE-AGENT-FILES.md",
