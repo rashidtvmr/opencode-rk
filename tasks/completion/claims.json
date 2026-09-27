@@ -415,6 +415,12 @@
       "session": "ses_f1dd6415cffeV8brkRPYhk2ou0",
       "status": "blocked"
     },
+    "GAP-INTEGRATIONS-34-W1": {
+      "blockedNote": "JSON/projection/diff-check pass; backlog validator blocked by pre-existing companion-gap drift; convergence blocked by pre-existing ledger findings. See worklog/GAP-INTEGRATIONS-34-W1.md",
+      "scratchpad": "worklog/GAP-INTEGRATIONS-34-W1.md",
+      "session": "ses_f1dd6415bffeZua02FslhGKLss",
+      "status": "blocked"
+    },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
       "scratchpad": "worklog/LANE-AGENT-FILES.md",

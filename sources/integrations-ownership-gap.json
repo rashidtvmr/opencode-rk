@@ -25,9 +25,9 @@
       "INT-005": "in-progress",
       "INT-006": "in-progress",
       "INT-007": "in-progress",
-      "INT-009": "not-started"
+      "INT-009": "in-progress"
     },
-    "conclusion": "INT-009's controller status differs, but all six rows have the identical generic DISC-002 story, no requirements, no task/worklog receipts and the same surface. Controller status alone is not semantic ownership."
+    "conclusion": "All six residual rows have the identical generic DISC-002 story, no requirements and the same surface. Their current controller status does not establish semantic ownership."
   },
   "ownershipDecision": {
     "INT-001": null,
@@ -38,12 +38,12 @@
     "INT-009": null
   },
   "taskBindingState": {
-    "INT-001": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-003": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-005": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-007": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null},
-    "INT-009": {"controllerStatus":"not-started","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":null,"worklog":null}
+    "INT-001": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-001.md","worklog":"worklog/INT-001.md"},
+    "INT-003": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-003.md","worklog":"worklog/INT-003.md"},
+    "INT-005": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-005.md","worklog":"worklog/INT-005.md"},
+    "INT-006": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-006.md","worklog":"worklog/INT-006.md"},
+    "INT-007": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-007.md","worklog":"worklog/INT-007.md"},
+    "INT-009": {"controllerStatus":"in-progress","ralphStory":"Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json","requirementIds":[],"taskCard":"tasks/INT-009.md","worklog":"worklog/INT-009.md"}
   },
   "surfaceRulePatterns": [
     "packages/core/src/integration.ts",
@@ -390,4 +390,278 @@
     "Executable integration-auth behavior remains closed to residual INT ownership unless new task-specific evidence both distinguishes an owner from the fully accounted integration-auth surface and explicitly grants secret storage, process-environment, provider callback/refresh, event and network/browser authority with bounded concurrent attempt resources and specified lifecycle constants.",
     "All reviewed and unresolved rule partitions must receive source-grounded task dispositions or remain blocked before the integrations family can be called decomposed."
   ]
+,
+  "canonicalBacklogProjection": {
+  "source": "sources/backlog-exhaustion.json",
+  "controllerSource": "ralph.json",
+  "observedAtRevision": "f21a01e21a4a82b57dae641c032472585f84b2c4",
+  "summary": {
+    "classificationCounts": {
+      "explicit-blocker": 9,
+      "local-implemented-stale": 2,
+      "unresolved-decomposition": 17,
+      "user-directed-product": 6
+    },
+    "controllerAccepted": 224,
+    "nonAccepted": 34,
+    "ralphStatusCounts": {
+      "accepted": 224,
+      "in-progress": 23,
+      "not-started": 11
+    },
+    "storyCount": 258
+  },
+  "acceptedIntegrationStoryIds": [
+    "INT-004",
+    "INT-008"
+  ],
+  "unresolvedIntegrationRows": [
+    {
+      "category": "unresolved-decomposition",
+      "controllerStatus": "in-progress",
+      "evidenceIds": [
+        "OC-CLIENT-CONTRACT",
+        "OC-SERVER-API",
+        "OC-INTEGRATION-HTTP-HANDLER",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-CLIENT-EVENT-TEST",
+        "OC-CLIENT-SPEC"
+      ],
+      "id": "INT-001",
+      "implementationCommits": [],
+      "localEvidencePaths": [
+        "tasks/INT-001.md",
+        "worklog/INT-001.md"
+      ],
+      "reasonKey": "integration-family-not-decomposed",
+      "reopenPolicy": "source-grounded-task-decomposition-required",
+      "requirementIds": [],
+      "surfaceEvidenceGaps": [],
+      "surfaceIds": [
+        "opencode.integrations"
+      ],
+      "taskCard": "tasks/INT-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-001.md"
+    },
+    {
+      "category": "unresolved-decomposition",
+      "controllerStatus": "in-progress",
+      "evidenceIds": [
+        "OC-CLIENT-CONTRACT",
+        "OC-SERVER-API",
+        "OC-INTEGRATION-HTTP-HANDLER",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-CLIENT-EVENT-TEST",
+        "OC-CLIENT-SPEC"
+      ],
+      "id": "INT-003",
+      "implementationCommits": [],
+      "localEvidencePaths": [
+        "tasks/INT-003.md",
+        "worklog/INT-003.md"
+      ],
+      "reasonKey": "integration-family-not-decomposed",
+      "reopenPolicy": "source-grounded-task-decomposition-required",
+      "requirementIds": [],
+      "surfaceEvidenceGaps": [],
+      "surfaceIds": [
+        "opencode.integrations"
+      ],
+      "taskCard": "tasks/INT-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-003.md"
+    },
+    {
+      "category": "unresolved-decomposition",
+      "controllerStatus": "in-progress",
+      "evidenceIds": [
+        "OC-CLIENT-CONTRACT",
+        "OC-SERVER-API",
+        "OC-INTEGRATION-HTTP-HANDLER",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-CLIENT-EVENT-TEST",
+        "OC-CLIENT-SPEC"
+      ],
+      "id": "INT-005",
+      "implementationCommits": [],
+      "localEvidencePaths": [
+        "tasks/INT-005.md",
+        "worklog/INT-005.md"
+      ],
+      "reasonKey": "integration-family-not-decomposed",
+      "reopenPolicy": "source-grounded-task-decomposition-required",
+      "requirementIds": [],
+      "surfaceEvidenceGaps": [],
+      "surfaceIds": [
+        "opencode.integrations"
+      ],
+      "taskCard": "tasks/INT-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-005.md"
+    },
+    {
+      "category": "unresolved-decomposition",
+      "controllerStatus": "in-progress",
+      "evidenceIds": [
+        "OC-CLIENT-CONTRACT",
+        "OC-SERVER-API",
+        "OC-INTEGRATION-HTTP-HANDLER",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-CLIENT-EVENT-TEST",
+        "OC-CLIENT-SPEC"
+      ],
+      "id": "INT-006",
+      "implementationCommits": [],
+      "localEvidencePaths": [
+        "tasks/INT-006.md",
+        "worklog/INT-006.md"
+      ],
+      "reasonKey": "integration-family-not-decomposed",
+      "reopenPolicy": "source-grounded-task-decomposition-required",
+      "requirementIds": [],
+      "surfaceEvidenceGaps": [],
+      "surfaceIds": [
+        "opencode.integrations"
+      ],
+      "taskCard": "tasks/INT-006.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-006.md"
+    },
+    {
+      "category": "unresolved-decomposition",
+      "controllerStatus": "in-progress",
+      "evidenceIds": [
+        "OC-CLIENT-CONTRACT",
+        "OC-SERVER-API",
+        "OC-INTEGRATION-HTTP-HANDLER",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-CLIENT-EVENT-TEST",
+        "OC-CLIENT-SPEC"
+      ],
+      "id": "INT-007",
+      "implementationCommits": [],
+      "localEvidencePaths": [
+        "tasks/INT-007.md",
+        "worklog/INT-007.md"
+      ],
+      "reasonKey": "integration-family-not-decomposed",
+      "reopenPolicy": "source-grounded-task-decomposition-required",
+      "requirementIds": [],
+      "surfaceEvidenceGaps": [],
+      "surfaceIds": [
+        "opencode.integrations"
+      ],
+      "taskCard": "tasks/INT-007.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-007.md"
+    },
+    {
+      "category": "unresolved-decomposition",
+      "controllerStatus": "in-progress",
+      "evidenceIds": [
+        "OC-CLIENT-CONTRACT",
+        "OC-SERVER-API",
+        "OC-INTEGRATION-HTTP-HANDLER",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-CLIENT-EVENT-TEST",
+        "OC-CLIENT-SPEC"
+      ],
+      "id": "INT-009",
+      "implementationCommits": [],
+      "localEvidencePaths": [
+        "tasks/INT-009.md",
+        "worklog/INT-009.md"
+      ],
+      "reasonKey": "integration-family-not-decomposed",
+      "reopenPolicy": "source-grounded-task-decomposition-required",
+      "requirementIds": [],
+      "surfaceEvidenceGaps": [],
+      "surfaceIds": [
+        "opencode.integrations"
+      ],
+      "taskCard": "tasks/INT-009.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-009.md"
+    },
+    {
+      "category": "unresolved-decomposition",
+      "controllerStatus": "in-progress",
+      "evidenceIds": [
+        "OC-ENTERPRISE-SHARE",
+        "OC-FUNCTION-REMOTE",
+        "OC-ENTERPRISE-SHARE-ROUTE",
+        "OC-ENTERPRISE-SHARE-TEST",
+        "OC-FUNCTION-GITHUB-TEST",
+        "OC-CLIENT-CONTRACT",
+        "OC-SERVER-API",
+        "OC-INTEGRATION-HTTP-HANDLER",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-CLIENT-EVENT-TEST",
+        "OC-CLIENT-SPEC"
+      ],
+      "id": "INT-010",
+      "implementationCommits": [],
+      "localEvidencePaths": [
+        "tasks/INT-010.md",
+        "worklog/INT-010.md"
+      ],
+      "reasonKey": "integration-family-not-decomposed",
+      "reopenPolicy": "source-grounded-task-decomposition-required",
+      "requirementIds": [],
+      "surfaceEvidenceGaps": [
+        {
+          "missingKinds": [
+            "spec"
+          ],
+          "surfaceId": "opencode.enterprise-remote"
+        }
+      ],
+      "surfaceIds": [
+        "opencode.enterprise-remote",
+        "opencode.integrations"
+      ],
+      "taskCard": "tasks/INT-010.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-010.md"
+    }
+  ],
+  "explicitBlockerIntegrationRows": [
+    {
+      "category": "explicit-blocker",
+      "controllerStatus": "in-progress",
+      "evidenceIds": [
+        "OC-CLIENT-CONTRACT",
+        "OC-SERVER-API",
+        "OC-INTEGRATION-HTTP-HANDLER",
+        "OC-CLIENT-CONTRACT-TEST",
+        "OC-CLIENT-EVENT-TEST",
+        "OC-CLIENT-SPEC",
+        "OC-REPOSITORY-RUNTIME",
+        "OC-REPOSITORY-CACHE",
+        "OC-REFERENCE-RUNTIME",
+        "OC-REPOSITORY-TEST",
+        "OC-REPOSITORY-CACHE-TEST",
+        "OC-CONFIG-REFERENCE-SPEC"
+      ],
+      "id": "INT-002",
+      "implementationCommits": [],
+      "localEvidencePaths": [
+        "tasks/INT-002.md",
+        "worklog/INT-002.md"
+      ],
+      "reasonKey": "repository-contract-mixes-side-effects",
+      "reopenPolicy": "material-new-pinned-evidence-required",
+      "requirementIds": [],
+      "surfaceEvidenceGaps": [],
+      "surfaceIds": [
+        "opencode.integrations",
+        "opencode.repository-operations"
+      ],
+      "taskCard": "tasks/INT-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-002.md"
+    }
+  ]
+}
 }
