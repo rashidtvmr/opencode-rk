@@ -12,6 +12,28 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-FILE0600-BACKEND-W1": {
+      "scratchpad": "worklog/APP-001-FILE0600-BACKEND-W1.md",
+      "session": "ses_f1e155739ffegbiABLsnphsCMH",
+      "status": "in-progress"
+    },
+    "APP-001-FILE0600-RED": {
+      "blockedNote": "RED frozen: crates/cli/tests/installed_setup_file0600.rs sha256 c99b15bc (288L) base 798cbff; rustc --test clean; run FAILED 2 passed/3 failed (t01/t02 missing <data_dir>/credentials, t04 symlink not rejected). No product code touched; impl is separate lane.",
+      "scratchpad": "worklog/APP-001-FILE0600-RED.md",
+      "session": "ses_f1e6ac10bffekPrR3HVz5M4alC",
+      "status": "blocked"
+    },
+    "APP-001-FILE0600-SETUP-BASE-W1": {
+      "scratchpad": "worklog/APP-001-FILE0600-SETUP-BASE-W1.md",
+      "session": "ses_f1a1c1349ffepkhimlj6Jn4qNj",
+      "status": "in-progress"
+    },
+    "APP-001-INSTALLED-SETUP-REPAIR": {
+      "completedNote": "Frozen tests 3/3 PASS in 30.26s post-fix. Durability gap documented.",
+      "scratchpad": "worklog/APP-001-INSTALLED-SETUP-REPAIR.md",
+      "session": "vyce/deepseek-v41",
+      "status": "completed"
+    },
     "APP-001-REPAIR-RED": {
       "scratchpad": "worklog/APP-001-REPAIR-RED.md",
       "session": "ses_f2ec4da52ffeqvBmjXifr2Bx28",
