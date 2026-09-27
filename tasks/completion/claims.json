@@ -30,6 +30,12 @@
       "session": "ses_f1c36f94affe7JqD2IHy9c5jzK",
       "status": "blocked"
     },
+    "APP-001-CREDENTIAL-SEMANTICS-W1": {
+      "completedNote": "GREEN: 14/14 standalone rustc --test pass; frozen block hashes match (03d1623e..., 9b1225c2...); diff only comment+sk- removal; OpenTUI Cargo blocker recorded",
+      "scratchpad": "worklog/APP-001-CREDENTIAL-SEMANTICS-W1.md",
+      "session": "ses_im_w1_impl",
+      "status": "completed"
+    },
     "APP-001-FILE0600-BACKEND-VERIFY-W1": {
       "completedNote": "backend provider checks green; frozen CLI caller remains unwired: 2/5 pass, t01/t02 missing credentials dir, t04 symlink not rejected; CLI SHA c99b15bc unchanged",
       "scratchpad": "worklog/APP-001-FILE0600-BACKEND-VERIFY-W1.md",
