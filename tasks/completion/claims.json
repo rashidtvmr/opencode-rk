@@ -83,6 +83,12 @@
       "session": "ses_f1dfb40b8ffedbfukYQM6uYy5B",
       "status": "blocked"
     },
+    "APP-012-RUSTIX-LOCK-W1": {
+      "completedNote": "LOCK CANDIDATE: base ce97e8d8be1 (reported ...be9 wrong). cargo check -p opencode-rk-tools refreshed Cargo.lock +1 line rustix in tools deps; rustix unchanged 1.1.4; --locked exit 0; no source/test/manifest edits; no security claim.",
+      "scratchpad": "worklog/APP-012-RUSTIX-LOCK-W1.md",
+      "session": "ses_f1d90ef0fffeFSWs1ngA8dky18",
+      "status": "completed"
+    },
     "APP-012-RUSTIX-PREWIRE-W1": {
       "blockedNote": "tools line added per card; root [workspace.dependencies] has no rustix @3ecee10 (transitive lock entry only); root manifest not owned here; workspace=true unresolvable until companion root-lane adds rustix = { version = \"1\" }. tomllib OK, Cargo.lock untouched, exactly one product-file diff.",
       "scratchpad": "worklog/APP-012-RUSTIX-PREWIRE-W1.md",
