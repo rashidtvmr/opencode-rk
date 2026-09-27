@@ -12,6 +12,12 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-CREDENTIAL-PERSISTENCE-RED3": {
+      "blockedNote": "compile blocked: crates/opentui-bridge/build.rs:58 requires missing native libopentui.a/libopentui.dylib for aarch64-apple-darwin; no valid RED or frozen hash",
+      "scratchpad": "worklog/APP-001-CREDENTIAL-PERSISTENCE-RED3.md",
+      "session": "ses_f1e9e2dbcffe7Vq1tKm1jIoKXc",
+      "status": "blocked"
+    },
     "APP-001-INSTALLED-SETUP-REPAIR": {
       "completedNote": "Frozen tests 3/3 PASS in 30.26s post-fix. Durability gap documented.",
       "scratchpad": "worklog/APP-001-INSTALLED-SETUP-REPAIR.md",
