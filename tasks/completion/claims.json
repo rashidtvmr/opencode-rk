@@ -12,6 +12,12 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-FILE0600-BACKEND-VERIFY-W1": {
+      "completedNote": "backend provider checks green; frozen CLI caller remains unwired: 2/5 pass, t01/t02 missing credentials dir, t04 symlink not rejected; CLI SHA c99b15bc unchanged",
+      "scratchpad": "worklog/APP-001-FILE0600-BACKEND-VERIFY-W1.md",
+      "session": "ses_f1d90ef0affe926gs4aZd3RUhM",
+      "status": "completed"
+    },
     "APP-001-FILE0600-BACKEND-W1": {
       "scratchpad": "worklog/APP-001-FILE0600-BACKEND-W1.md",
       "session": "ses_f1e155739ffegbiABLsnphsCMH",
