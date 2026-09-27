@@ -12,6 +12,12 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-CREDENTIAL-DESIGN-W3": {
+      "blockedNote": "Artifact-only credential design written to worklog/APP-001-CREDENTIAL-DESIGN-W3.md; awaits integration-authority policy decisions (keyring vs File0600, human-only intents, env bootstrap removal, slice E scope). No product code attempted.",
+      "scratchpad": "worklog/APP-001-CREDENTIAL-DESIGN-W3.md",
+      "session": "ses_f1e7b773affeh0ykrz22diqVIj",
+      "status": "blocked"
+    },
     "APP-001-INSTALLED-SETUP-REPAIR": {
       "completedNote": "Frozen tests 3/3 PASS in 30.26s post-fix. Durability gap documented.",
       "scratchpad": "worklog/APP-001-INSTALLED-SETUP-REPAIR.md",
