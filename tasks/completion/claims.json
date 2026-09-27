@@ -397,6 +397,12 @@
       "session": "ses_f1df19246ffeHZhaVSzTCipJiP",
       "status": "blocked"
     },
+    "GAP-OPERATIONS-34-W1": {
+      "blockedNote": "BLOCKED: JSON/projection and diff-check pass; validate_backlog_exhaustion.py exits 1 with 93 errors including operations ownership-gap stale semantics/task-card checks plus unrelated companion manifest/classifier drift; see worklog/GAP-OPERATIONS-34-W1.md. OPS-009 retained solely as explicit blocker recorder-cross-surface-side-effects; 224/34 projection preserved.",
+      "scratchpad": "worklog/GAP-OPERATIONS-34-W1.md",
+      "session": "ses_f1df1923ffferEJ51vptxRseR4",
+      "status": "blocked"
+    },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
       "scratchpad": "worklog/LANE-AGENT-FILES.md",

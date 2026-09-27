@@ -519,5 +519,302 @@
     "The candidate must have direct task-specific source, caller, test and genuine specification evidence with explicit inputs, outputs, failure semantics, state/resource lifetime and bounded authority.",
     "Accepted BASE owners and frozen INT-002/OPS-007/OPS-009 contracts must remain excluded; no candidate may silently require network, credentials, user-DB mutation, UI/browser state, process mutation or unapproved dependencies.",
     "Every unresolved partition and unresolved rule remainder must receive a source-grounded task disposition or remain explicitly blocked before an operations family can be called exhausted."
-  ]
+  ],
+  "canonicalBacklogProjection": {
+    "source": "sources/backlog-exhaustion.json",
+    "controllerSource": "ralph.json",
+    "observedAtRevision": "f21a01e21a4a82b57dae641c032472585f84b2c4",
+    "summary": {
+      "classificationCounts": {
+        "explicit-blocker": 9,
+        "local-implemented-stale": 2,
+        "unresolved-decomposition": 17,
+        "user-directed-product": 6
+      },
+      "controllerAccepted": 224,
+      "nonAccepted": 34,
+      "ralphStatusCounts": {
+        "accepted": 224,
+        "in-progress": 23,
+        "not-started": 11
+      },
+      "storyCount": 258
+    },
+    "operationsRows": [
+      {
+        "id": "OPS-001",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "operations-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [
+          "REQ-001",
+          "REQ-024",
+          "REQ-032"
+        ],
+        "surfaceIds": [
+          "opencode.configuration-runtime"
+        ],
+        "evidenceIds": [
+          "OC-CONFIG-RUNTIME",
+          "OC-STATE-RUNTIME",
+          "OC-LOCATION-SERVICES",
+          "OC-GLOBAL-RUNTIME",
+          "OC-NPM-CONFIG",
+          "OC-INSTALLATION-VERSION",
+          "OC-APP-NODE-BUILDER",
+          "OC-CONFIG-RUNTIME-TEST",
+          "OC-STATE-RUNTIME-TEST",
+          "OC-LOCATION-LAYER-TEST",
+          "OC-SESSION-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-001.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-001.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "OPS-002",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "operations-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [],
+        "surfaceIds": [
+          "opencode.repository-operations"
+        ],
+        "evidenceIds": [
+          "OC-REPOSITORY-RUNTIME",
+          "OC-REPOSITORY-CACHE",
+          "OC-REFERENCE-RUNTIME",
+          "OC-REPOSITORY-TEST",
+          "OC-REPOSITORY-CACHE-TEST",
+          "OC-CONFIG-REFERENCE-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-002.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-002.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "OPS-003",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "operations-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [],
+        "surfaceIds": [
+          "opencode.repository-operations"
+        ],
+        "evidenceIds": [
+          "OC-REPOSITORY-RUNTIME",
+          "OC-REPOSITORY-CACHE",
+          "OC-REFERENCE-RUNTIME",
+          "OC-REPOSITORY-TEST",
+          "OC-REPOSITORY-CACHE-TEST",
+          "OC-CONFIG-REFERENCE-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-003.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-003.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "OPS-004",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "operations-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [],
+        "surfaceIds": [
+          "opencode.configuration-runtime",
+          "opencode.repository-operations"
+        ],
+        "evidenceIds": [
+          "OC-CONFIG-RUNTIME",
+          "OC-STATE-RUNTIME",
+          "OC-LOCATION-SERVICES",
+          "OC-GLOBAL-RUNTIME",
+          "OC-NPM-CONFIG",
+          "OC-INSTALLATION-VERSION",
+          "OC-APP-NODE-BUILDER",
+          "OC-CONFIG-RUNTIME-TEST",
+          "OC-STATE-RUNTIME-TEST",
+          "OC-LOCATION-LAYER-TEST",
+          "OC-SESSION-SPEC",
+          "OC-REPOSITORY-RUNTIME",
+          "OC-REPOSITORY-CACHE",
+          "OC-REFERENCE-RUNTIME",
+          "OC-REPOSITORY-TEST",
+          "OC-REPOSITORY-CACHE-TEST",
+          "OC-CONFIG-REFERENCE-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-004.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-004.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "OPS-005",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "operations-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [],
+        "surfaceIds": [
+          "opencode.configuration-runtime"
+        ],
+        "evidenceIds": [
+          "OC-CONFIG-RUNTIME",
+          "OC-STATE-RUNTIME",
+          "OC-LOCATION-SERVICES",
+          "OC-GLOBAL-RUNTIME",
+          "OC-NPM-CONFIG",
+          "OC-INSTALLATION-VERSION",
+          "OC-APP-NODE-BUILDER",
+          "OC-CONFIG-RUNTIME-TEST",
+          "OC-STATE-RUNTIME-TEST",
+          "OC-LOCATION-LAYER-TEST",
+          "OC-SESSION-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-005.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-005.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "OPS-006",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "operations-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [],
+        "surfaceIds": [
+          "opencode.repository-operations"
+        ],
+        "evidenceIds": [
+          "OC-REPOSITORY-RUNTIME",
+          "OC-REPOSITORY-CACHE",
+          "OC-REFERENCE-RUNTIME",
+          "OC-REPOSITORY-TEST",
+          "OC-REPOSITORY-CACHE-TEST",
+          "OC-CONFIG-REFERENCE-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-006.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-006.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "OPS-007",
+        "category": "explicit-blocker",
+        "controllerStatus": "in-progress",
+        "reasonKey": "effect-runtime-cross-surface-ownership",
+        "reopenPolicy": "material-new-pinned-evidence-required",
+        "requirementIds": [
+          "REQ-001",
+          "REQ-024"
+        ],
+        "surfaceIds": [
+          "opencode.effect-runtime",
+          "opencode.repository-operations"
+        ],
+        "evidenceIds": [
+          "OC-EFFECT-LAYER-NODE",
+          "OC-EFFECT-RUNTIME",
+          "OC-EFFECT-DRIZZLE",
+          "OC-APP-NODE-BUILDER",
+          "OC-EFFECT-LAYER-NODE-TEST",
+          "OC-EFFECT-SQLITE-TEST",
+          "OC-EFFECT-SQLITE-SPEC",
+          "OC-REPOSITORY-RUNTIME",
+          "OC-REPOSITORY-CACHE",
+          "OC-REFERENCE-RUNTIME",
+          "OC-REPOSITORY-TEST",
+          "OC-REPOSITORY-CACHE-TEST",
+          "OC-CONFIG-REFERENCE-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-007.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-007.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "OPS-008",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "operations-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [],
+        "surfaceIds": [
+          "opencode.configuration-runtime",
+          "opencode.repository-operations"
+        ],
+        "evidenceIds": [
+          "OC-CONFIG-RUNTIME",
+          "OC-STATE-RUNTIME",
+          "OC-LOCATION-SERVICES",
+          "OC-GLOBAL-RUNTIME",
+          "OC-NPM-CONFIG",
+          "OC-INSTALLATION-VERSION",
+          "OC-APP-NODE-BUILDER",
+          "OC-CONFIG-RUNTIME-TEST",
+          "OC-STATE-RUNTIME-TEST",
+          "OC-LOCATION-LAYER-TEST",
+          "OC-SESSION-SPEC",
+          "OC-REPOSITORY-RUNTIME",
+          "OC-REPOSITORY-CACHE",
+          "OC-REFERENCE-RUNTIME",
+          "OC-REPOSITORY-TEST",
+          "OC-REPOSITORY-CACHE-TEST",
+          "OC-CONFIG-REFERENCE-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-008.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-008.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "OPS-009",
+        "category": "explicit-blocker",
+        "controllerStatus": "in-progress",
+        "reasonKey": "recorder-cross-surface-side-effects",
+        "reopenPolicy": "material-new-pinned-evidence-required",
+        "requirementIds": [],
+        "surfaceIds": [
+          "opencode.provider-recording",
+          "opencode.repository-operations"
+        ],
+        "evidenceIds": [
+          "OC-HTTP-RECORDER-API",
+          "OC-HTTP-RECORDER-STATE",
+          "OC-HTTP-RECORDER-REDACTION",
+          "OC-HTTP-RECORDER-CALLER",
+          "OC-HTTP-RECORDER-TEST",
+          "OC-HTTP-RECORDER-SPEC",
+          "OC-REPOSITORY-RUNTIME",
+          "OC-REPOSITORY-CACHE",
+          "OC-REFERENCE-RUNTIME",
+          "OC-REPOSITORY-TEST",
+          "OC-REPOSITORY-CACHE-TEST",
+          "OC-CONFIG-REFERENCE-SPEC"
+        ],
+        "surfaceEvidenceGaps": [],
+        "taskCard": "tasks/OPS-009.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/OPS-009.md",
+        "implementationCommits": []
+      }
+    ],
+    "classificationNote": "Seven residual source-ownership candidates remain unresolved: OPS-001..006 and OPS-008. OPS-007 and OPS-009 appear once each as their existing explicit-blocker rows; OPS-009 remains reasonKey recorder-cross-surface-side-effects and is not duplicated in storyIds or reclassified."
+  },
+  "taskBindingStateRole": "Original source-audit extraction binding only. Null taskCard/worklog values record that DISC-002 lacked an exact upstream task-to-path binding; they are not claims that no later local task card exists. See canonicalBacklogProjection for current Ralph, task-card, worklog and exhaustion-ledger state."
 }
