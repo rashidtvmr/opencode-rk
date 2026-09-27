@@ -249,29 +249,102 @@ fn read_file(
 
 /// Writes content to a file at the given path.
 fn write_file(path: &Path, content: &str, append: bool) -> Result<FileResult, ToolError> {
+    if path_has_symlink_component(path)? {
+        return Ok(FileResult::failure(
+            "write denied: path contains a symlink component",
+        ));
+    }
+
     if let Some(parent) = path.parent() {
         if !parent.exists() {
             fs::create_dir_all(parent).map_err(ToolError::IoError)?;
         }
     }
 
+    let mut options = fs::OpenOptions::new();
+    options.write(true).create(true);
     if append {
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(ToolError::IoError)?;
-        file.write_all(content.as_bytes())
-            .map_err(ToolError::IoError)?;
+        options.append(true);
     } else {
-        fs::write(path, content).map_err(ToolError::IoError)?;
+        options.truncate(true);
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+
+        #[cfg(target_os = "linux")]
+        options.custom_flags(0o400000); // O_NOFOLLOW
+        #[cfg(any(
+            target_os = "macos",
+            target_os = "ios",
+            target_os = "freebsd",
+            target_os = "openbsd",
+            target_os = "netbsd",
+            target_os = "dragonfly"
+        ))]
+        options.custom_flags(0x100); // O_NOFOLLOW
+    }
+    let mut file = options.open(path).map_err(ToolError::IoError)?;
+    file.write_all(content.as_bytes())
+        .map_err(ToolError::IoError)?;
 
     Ok(FileResult::success(format!(
         "Successfully wrote {} bytes to {:?}",
         content.len(),
         path
     )))
+}
+
+/// Checks every existing component without following symlinks.
+///
+/// This closes the ordinary symlink escape before any write or parent creation.
+/// A concurrent rename can still change a path after this metadata walk; a
+/// descriptor-relative no-follow open would be required for a race-free
+/// guarantee and is not available through this cross-platform API.
+fn path_has_symlink_component(path: &Path) -> Result<bool, ToolError> {
+    let cwd = normalize_platform_path(&std::env::current_dir().map_err(ToolError::IoError)?);
+    let absolute = if path.is_absolute() {
+        normalize_platform_path(path)
+    } else {
+        cwd.join(path)
+    };
+    let mut current = PathBuf::new();
+
+    for component in absolute.components() {
+        current.push(component.as_os_str());
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if metadata.file_type().is_symlink() => {
+                return Ok(true);
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => {
+                return Err(ToolError::FileError(
+                    "write denied: unable to inspect path".to_owned(),
+                ));
+            }
+        }
+    }
+
+    Ok(false)
+}
+
+#[cfg(target_os = "macos")]
+fn normalize_platform_path(path: &Path) -> PathBuf {
+    for (alias, physical) in [
+        (Path::new("/var"), Path::new("/private/var")),
+        (Path::new("/tmp"), Path::new("/private/tmp")),
+    ] {
+        if let Ok(relative) = path.strip_prefix(alias) {
+            return physical.join(relative);
+        }
+    }
+    path.to_path_buf()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn normalize_platform_path(path: &Path) -> PathBuf {
+    path.to_path_buf()
 }
 
 /// Lists the contents of a directory.
