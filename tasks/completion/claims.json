@@ -262,6 +262,12 @@
       "session": "ses_f1e6e3ab4ffeG84rY5B3BEoBaT",
       "status": "blocked"
     },
+    "CUSTOM-PROVIDER-CONFIG-E2E-RED-W1": {
+      "blockedNote": "Host compile blocked before test compilation: aarch64-apple-darwin vendored native libopentui.a/.dylib missing; opentui-bridge build.rs exits 101. x86_64-unknown-linux-gnu cross retry cannot run because target not installed (E0463). Cannot establish compile or RED/freeze. rustfmt --check passes; candidate test file retained.",
+      "scratchpad": "worklog/CUSTOM-PROVIDER-CONFIG-E2E-RED-W1.md",
+      "session": "ses_f1d0ba4a2ffeR6AmmRKIjfgUkN",
+      "status": "blocked"
+    },
     "CUSTOM-PROVIDER-LIVE-W1": {
       "blockedNote": "RED frozen, genuine: 3/3 fail on lib.rs:920 non-openai guard; needs from_env_for(provider_id) + 503 credential mapping",
       "scratchpad": "worklog/CUSTOM-PROVIDER-LIVE-W1.md",
