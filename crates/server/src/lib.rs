@@ -919,11 +919,6 @@ async fn create_turn(
         .split_once('/')
         .filter(|(provider, model)| !provider.is_empty() && !model.is_empty())
         .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
-    if provider_id != "openai" {
-        return Err(ApiFailure::bad_request(format!(
-            "provider '{provider_id}' does not have a native turn adapter yet"
-        )));
-    }
     if !matches!(
         body.reasoning_effort.as_str(),
         "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -931,7 +926,7 @@ async fn create_turn(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
-    let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
+    let provider = OpenAiResponsesClient::from_env_for(provider_id).map_err(provider_failure)?;
     let user_message = sessions
         .append_text(id, MessageRole::User, body.text)
         .await
@@ -1005,6 +1000,7 @@ struct TurnStreamState {
     executed_outputs: Vec<CallOutputItem>,
     emit_cursor: usize,
     model: String,
+    provider_id: String,
     reasoning_effort: String,
     /// Set when the loop must finalize with this stop reason (step cap hit).
     forced_stop: Option<TurnStop>,
@@ -1163,11 +1159,6 @@ async fn create_turn_stream(
         .split_once('/')
         .filter(|(provider, model)| !provider.is_empty() && !model.is_empty())
         .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
-    if provider_id != "openai" {
-        return Err(ApiFailure::bad_request(format!(
-            "provider '{provider_id}' does not have a native turn adapter yet"
-        )));
-    }
     if !matches!(
         body.reasoning_effort.as_str(),
         "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
@@ -1175,7 +1166,7 @@ async fn create_turn_stream(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
-    let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
+    let provider = OpenAiResponsesClient::from_env_for(provider_id).map_err(provider_failure)?;
     let user_message = sessions
         .append_text(id, MessageRole::User, body.text)
         .await
@@ -1271,6 +1262,7 @@ async fn create_turn_stream(
             executed_outputs: Vec::new(),
             emit_cursor: 0,
             model: model_id.to_owned(),
+            provider_id: provider_id.to_owned(),
             reasoning_effort: body.reasoning_effort.clone(),
             forced_stop: None,
             agent_plan: AgentExecutor::new(vec![
@@ -1742,7 +1734,7 @@ async fn create_turn_stream(
                             }
                         }
                         // Next provider round with the grown typed history.
-                        let client = match OpenAiResponsesClient::from_env() {
+                        let client = match OpenAiResponsesClient::from_env_for(&state.provider_id) {
                             Ok(client) => client,
                             Err(error) => {
                                 state.stage = TurnStreamStage::Done;
