@@ -268,6 +268,12 @@
       "session": "ses_f1d0ba4a2ffeR6AmmRKIjfgUkN",
       "status": "blocked"
     },
+    "CUSTOM-PROVIDER-CONFIG-E2E-W1": {
+      "blockedNote": "Standalone rustc passed; real binary test timed out 60s max, failed at line 365: missing acme/model-key in /api/models; provider never called. SHA256 6803ed3d094a6ce5127c1e3e0e41fe3c6f8c34d280897c8a471dae05b1b74964.",
+      "scratchpad": "worklog/CUSTOM-PROVIDER-CONFIG-E2E-W1.md",
+      "session": "ses_f1c5c790fffem57G3U9DJR05Q6",
+      "status": "blocked"
+    },
     "CUSTOM-PROVIDER-LIVE-W1": {
       "blockedNote": "RED frozen, genuine: 3/3 fail on lib.rs:920 non-openai guard; needs from_env_for(provider_id) + 503 credential mapping",
       "scratchpad": "worklog/CUSTOM-PROVIDER-LIVE-W1.md",

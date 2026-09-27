@@ -22,6 +22,15 @@ const CUSTOM_BODY_KEY: &str = "acme_extension";
 const CUSTOM_BODY_VALUE: &str = "body-from-project-config";
 const WIRE_MODEL: &str = "wire-model-2026";
 
+fn opencode_rk_bin() -> String {
+    std::env::var_os("OPENCODE_RK_BIN")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_file())
+        .expect("OPENCODE_RK_BIN must name the built opencode-rk binary")
+        .to_string_lossy()
+        .into_owned()
+}
+
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
 struct TestHome {
@@ -32,10 +41,7 @@ struct TestHome {
 impl TestHome {
     fn new() -> Self {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let root = std::env::temp_dir().join(format!(
-            "opencode-rk-custom-provider-e2e-{}-{id}",
-            std::process::id()
-        ));
+        let root = std::env::temp_dir().join(format!("rk-{}-{id}", std::process::id()));
         let data = root.join("data");
         let project = root.join("project");
         fs::create_dir_all(&data).expect("create disposable data dir");
@@ -56,7 +62,7 @@ struct ChildGuard(Child);
 
 impl ChildGuard {
     fn spawn(home: &TestHome, listen: SocketAddr) -> Self {
-        let child = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
+        let child = Command::new(opencode_rk_bin())
             .env_clear()
             .env("OPENCODE_RK_HOME", &home.data)
             // Deliberately leave ACME_PRIMARY_KEY unset. Only the second ordered
