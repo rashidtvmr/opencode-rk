@@ -521,11 +521,10 @@ impl<'a, S: AccountStore> OnboardingSession<'a, S> {
         }
         let mut ok = false;
         secret.with_exposed(|raw| {
-            // Fixture provider rule: keys are `sk-`-prefixed tokens without
-            // whitespace/control bytes, within the size bound.
+            // Upstream-neutral credential semantics: accept bounded
+            // non-whitespace credentials without a universal prefix.
             ok = raw.len() >= MIN_CREDENTIAL_LEN
                 && raw.len() <= MAX_SECRET_LEN
-                && raw.starts_with("sk-")
                 && !raw.chars().any(|c| c.is_control() || c.is_whitespace());
         });
         if !ok {
