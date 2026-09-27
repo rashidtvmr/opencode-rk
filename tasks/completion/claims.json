@@ -244,6 +244,12 @@
       "session": "ses_f380c4bc9ffei2XDG2DStCM92e",
       "status": "completed"
     },
+    "CUSTOM-PROVIDER-LIVE-W1": {
+      "blockedNote": "RED frozen, genuine: 3/3 fail on lib.rs:920 non-openai guard; needs from_env_for(provider_id) + 503 credential mapping",
+      "scratchpad": "worklog/CUSTOM-PROVIDER-LIVE-W1.md",
+      "session": "ses_f1e83487affeDZ3TOh0BBq8kiY",
+      "status": "blocked"
+    },
     "DISC-003": {
       "blockedNote": "Integrated candidate has 80 findings: prior 51 aliases + 27 origin/main aliases + AUD-017/AUD-020. Exact 78-row retirement/two-demotion simulation makes convergence gate GREEN; controller authority still required and parent acceptance unchanged. See worklog/DISC-003-INTEGRATED-REMAP-ADDENDUM.md.",
       "scratchpad": "worklog/DISC-003-INTEGRATED-REMAP-ADDENDUM.md",
