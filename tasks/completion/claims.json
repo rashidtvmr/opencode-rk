@@ -94,6 +94,12 @@
       "session": "ses_f1e82e6afffe1jJD5WeWFPt2Ou",
       "status": "blocked"
     },
+    "APP-012-SYMLINK-ESCAPE-RED": {
+      "blockedNote": "Compiling RED failed as expected: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test live_file_tool_symlink_escape -- --test-threads=1; exit 101 at line 323 because symlink target changed from exact sentinel bytes to write content. Frozen test SHA256 fe8d24946c8ce98aae095b6a2f92b7f3c19cc32532ae6263f9898d8a5699753c. Product implementation required.",
+      "scratchpad": "worklog/APP-012-SYMLINK-ESCAPE-RED.md",
+      "session": "ses_f1e631f27ffeLJXTzYwIN2erOi",
+      "status": "blocked"
+    },
     "APP-012-TOOL-RED": {
       "scratchpad": "worklog/APP-012-TOOL-RED.md",
       "session": "ses_f2ec3a38fffer2ivp1cowx22WB",
