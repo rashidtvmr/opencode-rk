@@ -83,6 +83,12 @@
       "session": "ses_f1e631f27ffeLJXTzYwIN2erOi",
       "status": "blocked"
     },
+    "APP-012-SYMLINK-FIX-W1": {
+      "completedNote": "Candidate GREEN: focused symlink HTTP 1 passed; file_ops unit 5 passed; frozen SHA fe8d24946c8ce98aae095b6a2f92b7f3c19cc32532ae6263f9898d8a5699753c unchanged; implementation hash pending commit; residual concurrent rename race documented.",
+      "scratchpad": "worklog/APP-012-SYMLINK-FIX-W1.md",
+      "session": "ses_f1e4ee663ffecv8YN3eSpQF1x9",
+      "status": "completed"
+    },
     "APP-012-TOOL-RED": {
       "scratchpad": "worklog/APP-012-TOOL-RED.md",
       "session": "ses_f2ec3a38fffer2ivp1cowx22WB",
