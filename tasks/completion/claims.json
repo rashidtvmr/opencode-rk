@@ -66,6 +66,17 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP-012-LIVE-FILE-TOOL-RED2": {
+      "blockedNote": "Compiling RED passed; focused live_file_tool_dispatch RED failed as expected at line 310: output was `Unknown tool: write`, proving current generic ToolExecutor path. Frozen SHA256 0366416c4863940221c74aac08deeeba3c9404cd92ff18c9411d2cab5b570829. Command: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test live_file_tool_dispatch -- --test-threads=1",
+      "scratchpad": "worklog/APP-012-LIVE-FILE-TOOL-RED2.md",
+      "session": "ses_f1e82e6afffe1jJD5WeWFPt2Ou",
+      "status": "blocked"
+    },
+    "APP-012-TOOL-RED": {
+      "scratchpad": "worklog/APP-012-TOOL-RED.md",
+      "session": "ses_f2ec3a38fffer2ivp1cowx22WB",
+      "status": "in-progress"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
