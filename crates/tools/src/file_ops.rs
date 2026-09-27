@@ -145,17 +145,38 @@ impl FileOperation {
 }
 
 /// FileTool for performing file system operations.
-pub struct FileTool;
+pub struct FileTool {
+    /// Lexically normalized, approved project root. A rooted tool never uses
+    /// the process working directory to resolve an operation path.
+    project_root: Option<PathBuf>,
+}
 
 impl FileTool {
     /// Creates a new FileTool instance.
+    ///
+    /// This is the legacy compatibility constructor. Its write path is scoped
+    /// to the target's nearest existing parent and is not server authority.
     pub fn new() -> Self {
-        Self
+        Self { project_root: None }
+    }
+
+    /// Creates a FileTool scoped to one project root.
+    ///
+    /// The root is captured and lexically normalized once. Callers should pass
+    /// an absolute project directory; relative roots are rejected when used so
+    /// a later working-directory change cannot change the authority boundary.
+    pub fn with_project_root(root: impl Into<PathBuf>) -> Self {
+        Self {
+            project_root: Some(normalize_project_root(root.into())),
+        }
     }
 
     /// Executes a file operation and returns the result.
     pub fn execute(&self, op: FileOperation) -> Result<FileResult, ToolError> {
-        execute(op)
+        match self.project_root.as_deref() {
+            Some(root) => execute_rooted(root, op),
+            None => execute(op),
+        }
     }
 
     /// Executes a file operation after broker authorization.
@@ -167,7 +188,24 @@ impl FileTool {
         op: FileOperation,
         broker: &PermissionBroker,
     ) -> Result<FileResult, ToolError> {
-        execute_authorized(op, broker)
+        if let FileOperation::Write { ref path, .. } = op {
+            let intent = OperationIntent::File {
+                action: FileAction::Write,
+                path: path.clone(),
+            };
+            match broker.authorize(&intent) {
+                Decision::Allow => (),
+                Decision::Deny { reason } => {
+                    return Ok(FileResult::failure(format!("write denied: {reason}")));
+                }
+                Decision::RequireHuman { reason, .. } => {
+                    return Ok(FileResult::failure(format!(
+                        "write requires human approval: {reason}"
+                    )));
+                }
+            }
+        }
+        self.execute(op)
     }
 }
 
@@ -286,15 +324,90 @@ fn write_file(
     }
 }
 
+fn execute_rooted(root: &Path, op: FileOperation) -> Result<FileResult, ToolError> {
+    if !root.is_absolute() {
+        return Ok(FileResult::failure(
+            "file operation denied: project root must be absolute",
+        ));
+    }
+    match op {
+        FileOperation::Read {
+            path,
+            offset,
+            limit,
+        } => {
+            let path = rooted_path(root, &path)?;
+            read_file(&path, offset, limit)
+        }
+        FileOperation::Write {
+            path,
+            content,
+            append,
+        } => write_file_rooted(root, &path, &content, append, None),
+        FileOperation::List { path } => {
+            let path = rooted_path(root, &path)?;
+            list_dir(&path)
+        }
+        FileOperation::CreateDir { path, recursive } => {
+            let path = rooted_path(root, &path)?;
+            create_directory(&path, recursive)
+        }
+    }
+}
+
+fn normalize_project_root(root: PathBuf) -> PathBuf {
+    normalize_lexical_path(&root)
+}
+
+fn normalize_lexical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            std::path::Component::CurDir => {}
+            std::path::Component::ParentDir => {
+                if !normalized.pop() {
+                    normalized.push(component.as_os_str());
+                }
+            }
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    normalize_platform_path(&normalized)
+}
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn path_has_symlink_component(path: &Path) -> Result<bool, ToolError> {
-    let cwd = normalize_platform_path(&std::env::current_dir().map_err(ToolError::IoError)?);
-    let joined = if path.is_absolute() {
-        path.to_path_buf()
+fn rooted_path(root: &Path, path: &Path) -> Result<PathBuf, ToolError> {
+    let normalized = normalize_rooted_path(root, path)?;
+    Ok(normalized_path(root, &normalized))
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn rooted_path(root: &Path, path: &Path) -> Result<PathBuf, ToolError> {
+    let mut joined = if path.is_absolute() {
+        let root = normalize_lexical_path(root);
+        let path = normalize_lexical_path(path);
+        path.strip_prefix(&root)
+            .map_err(|_| ToolError::FileError("path outside project root".to_owned()))?
+            .to_path_buf()
     } else {
-        cwd.join(path)
+        path.to_path_buf()
     };
-    let absolute = normalize_platform_path(&joined);
+    for component in joined.components() {
+        if !matches!(component, std::path::Component::Normal(_)) {
+            return Err(ToolError::FileError("write denied: invalid path".to_owned()));
+        }
+    }
+    joined = root.join(joined);
+    Ok(joined)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn path_has_symlink_component_from(root: &Path, path: &Path) -> Result<bool, ToolError> {
+    let absolute = if path.is_absolute() {
+        normalize_platform_path(path)
+    } else {
+        normalize_platform_path(&root.join(path))
+    };
     let mut current = PathBuf::new();
     for component in absolute.components() {
         current.push(component.as_os_str());
@@ -329,18 +442,58 @@ fn write_file_descriptor_relative(
     append: bool,
     hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
 ) -> Result<FileResult, ToolError> {
-    let normalized = normalize_write_path(path)?;
-    if path_has_symlink_component(path)? {
+    let (anchor, normalized) = legacy_write_anchor(path)?;
+    if path_has_symlink_component_from(&anchor, &normalized_path(&anchor, &normalized))? {
         return Ok(FileResult::failure(
             "write denied: path contains a symlink component",
         ));
     }
+    write_file_descriptor_at(&anchor, &normalized, path, content, append, hook)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn write_file_rooted(
+    root: &Path,
+    path: &Path,
+    content: &str,
+    append: bool,
+    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+) -> Result<FileResult, ToolError> {
+    let normalized = normalize_rooted_path(root, path)?;
+    if path_has_symlink_component_from(root, &normalized_path(root, &normalized))? {
+        return Ok(FileResult::failure(
+            "write denied: path contains a symlink component",
+        ));
+    }
+    write_file_descriptor_at(root, &normalized, path, content, append, hook)
+}
+
+#[cfg(not(any(target_os = "linux", target_os = "macos")))]
+fn write_file_rooted(
+    _root: &Path,
+    _path: &Path,
+    _content: &str,
+    _append: bool,
+    _hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+) -> Result<FileResult, ToolError> {
+    Ok(FileResult::failure("write denied: unsupported platform"))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn write_file_descriptor_at(
+    root_path: &Path,
+    normalized: &NormalizedWritePath,
+    display_path: &Path,
+    content: &str,
+    append: bool,
+    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+) -> Result<FileResult, ToolError> {
     let leaf = normalized
         .components
         .last()
         .ok_or_else(|| ToolError::FileError("write denied: path has no leaf".to_owned()))?;
     let parent_components = &normalized.components[..normalized.components.len() - 1];
-    let root = open_write_root()?;
+    let root = open_write_root_at(root_path, None)?;
     let pinned = match traverse_write_parent(&root, parent_components, true) {
         Ok(descriptors) => descriptors,
         Err(ToolError::IoError(error)) if is_symlink_error(&error) => {
@@ -354,7 +507,7 @@ fn write_file_descriptor_relative(
     // Pre-open seam: traversal and parent creation are complete; descriptor-relative
     // re-traversal below catches parent swaps before opening the leaf.
     if let Some(hook) = hook {
-        hook(path, append)?;
+        hook(display_path, append)?;
     }
 
     let current = traverse_write_parent(&root, parent_components, false)
@@ -376,38 +529,42 @@ fn write_file_descriptor_relative(
 
     Ok(FileResult::success(format!(
         "Successfully wrote {} bytes to {:?}",
-        content.len(),
-        path
+        content.len(), display_path
     )))
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn normalize_write_path(path: &Path) -> Result<NormalizedWritePath, ToolError> {
+fn normalized_path(root: &Path, path: &NormalizedWritePath) -> PathBuf {
+    root.join(path.components.iter().collect::<PathBuf>())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn normalize_rooted_path(root: &Path, path: &Path) -> Result<NormalizedWritePath, ToolError> {
     if path.as_os_str().len() > MAX_WRITE_PATH_BYTES {
         return Err(ToolError::FileError("write denied: path too long".to_owned()));
     }
-    let cwd = std::env::current_dir().map_err(ToolError::IoError)?;
-    let joined = if path.is_absolute() {
-        path.to_path_buf()
+    let root = root.to_path_buf();
+    let relative = if path.is_absolute() {
+        let absolute = normalize_absolute_path_without_parent(path)?;
+        absolute
+            .strip_prefix(&root)
+            .map_err(|_| {
+            ToolError::FileError("write denied: path outside project root".to_owned())
+            })?
+            .to_path_buf()
     } else {
-        cwd.join(path)
+        path.to_path_buf()
     };
-    let absolute = normalize_platform_path(&joined);
     let mut components = Vec::new();
-    for component in absolute.components() {
+    for component in relative.components() {
         match component {
-            std::path::Component::RootDir => {}
-            std::path::Component::CurDir => {}
             std::path::Component::Normal(name) => components.push(name.to_owned()),
+            std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                return Err(ToolError::FileError(
-                    "write denied: path traversal".to_owned(),
-                ));
+                return Err(ToolError::FileError("write denied: path traversal".to_owned()))
             }
-            std::path::Component::Prefix(_) => {
-                return Err(ToolError::FileError(
-                    "write denied: unsupported path prefix".to_owned(),
-                ));
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                return Err(ToolError::FileError("write denied: invalid path".to_owned()))
             }
         }
     }
@@ -420,6 +577,58 @@ fn normalize_write_path(path: &Path) -> Result<NormalizedWritePath, ToolError> {
         ));
     }
     Ok(NormalizedWritePath { components })
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn normalize_absolute_path_without_parent(path: &Path) -> Result<PathBuf, ToolError> {
+    let mut normalized = PathBuf::new();
+    for component in normalize_platform_path(path).components() {
+        match component {
+            std::path::Component::ParentDir => {
+                return Err(ToolError::FileError("write denied: path traversal".to_owned()))
+            }
+            std::path::Component::CurDir => {}
+            _ => normalized.push(component.as_os_str()),
+        }
+    }
+    Ok(normalized)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn legacy_write_anchor(path: &Path) -> Result<(PathBuf, NormalizedWritePath), ToolError> {
+    let cwd = if path.is_absolute() {
+        None
+    } else {
+        Some(normalize_platform_path(
+            &std::env::current_dir().map_err(ToolError::IoError)?,
+        ))
+    };
+    let absolute = if let Some(cwd) = cwd {
+        cwd.join(path)
+    } else {
+        path.to_path_buf()
+    };
+    let absolute = normalize_absolute_path_without_parent(&absolute)?;
+    let mut anchor = absolute
+        .parent()
+        .ok_or_else(|| ToolError::FileError("write denied: path has no parent".to_owned()))?
+            .to_path_buf();
+    while !anchor.exists() {
+        anchor = anchor
+            .parent()
+            .ok_or_else(|| ToolError::FileError("write denied: no existing target parent".to_owned()))?
+            .to_path_buf();
+    }
+    if anchor.parent().is_none() {
+        return Err(ToolError::FileError(
+            "write denied: filesystem root is not a compatibility anchor".to_owned(),
+        ));
+    }
+    let relative = absolute
+        .strip_prefix(&anchor)
+        .map_err(|_| ToolError::FileError("write denied: invalid target parent".to_owned()))?;
+    let normalized = normalize_rooted_path(&anchor, relative)?;
+    Ok((anchor, normalized))
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -439,9 +648,32 @@ pub(crate) fn open_write_root_with_observer(
         &mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>,
     >,
 ) -> Result<std::os::fd::OwnedFd, ToolError> {
+    open_write_root_at(
+        &normalize_platform_path(&std::env::current_dir().map_err(ToolError::IoError)?),
+        observer,
+    )
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn open_write_root_at(
+    root: &Path,
+    mut observer: Option<
+        &mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>,
+    >,
+) -> Result<std::os::fd::OwnedFd, ToolError> {
+    if !root.is_absolute() {
+        return Err(ToolError::FileError(
+            "write denied: project root must be absolute".to_owned(),
+        ));
+    }
+    if root.parent().is_none() {
+        return Err(ToolError::FileError(
+            "write denied: filesystem root is not an approved project root".to_owned(),
+        ));
+    }
     let fd = openat(
         rustix_fs::CWD,
-        Path::new("/"),
+        root,
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
         Mode::empty(),
     )
@@ -964,6 +1196,47 @@ assert_eq!(
             (none_stat.st_dev, none_stat.st_ino),
             "production wrapper must retain the None observer behavior"
         );
+    }
+
+    #[test]
+    fn rooted_file_tool_writes_only_inside_project_root() {
+        let project = tempdir().expect("project dir");
+        let outside = tempdir().expect("outside dir");
+        let tool = FileTool::with_project_root(project.path().to_path_buf());
+
+        let inside = tool
+            .execute(FileOperation::write(
+                PathBuf::from("nested/in-project.txt"),
+                "rooted".to_owned(),
+            ))
+            .expect("rooted write result");
+        assert!(inside.success);
+        assert_eq!(
+            fs::read_to_string(project.path().join("nested/in-project.txt")).expect("inside"),
+            "rooted"
+        );
+
+        let outside_path = outside.path().join("escape.txt");
+        assert!(tool
+            .execute(FileOperation::write(outside_path.clone(), "escape".to_owned()))
+            .is_err());
+        assert!(!outside_path.exists());
+    }
+
+    #[test]
+    fn rooted_file_tool_rejects_parent_traversal_without_side_effects() {
+        let project = tempdir().expect("project dir");
+        let outside = project.path().parent().expect("project parent");
+        let escaped = outside.join("rooted-traversal-denied.txt");
+        let tool = FileTool::with_project_root(project.path().to_path_buf());
+
+        assert!(tool
+            .execute(FileOperation::write(
+                PathBuf::from("../rooted-traversal-denied.txt"),
+                "escape".to_owned(),
+            ))
+            .is_err());
+        assert!(!escaped.exists());
     }
 
     // --- APP-012-ROOT-ANCHOR-RED-W1: frozen RED root anchor contract ---

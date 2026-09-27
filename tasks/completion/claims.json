@@ -89,6 +89,12 @@
       "session": "ses_f1dfb40b8ffedbfukYQM6uYy5B",
       "status": "blocked"
     },
+    "APP-012-ROOT-ANCHOR-FIX-W1": {
+      "completedNote": "GREEN root anchor + file_ops 17/17 + server dispatch/inroot/symlink 1/1 each; frozen RED hash unchanged; next lane wires server rooted constructor",
+      "scratchpad": "worklog/APP-012-ROOT-ANCHOR-FIX-W1.md",
+      "session": "ses_f1cdc2bcaffezARyXwSQ2BKdXP",
+      "status": "completed"
+    },
     "APP-012-ROOT-ANCHOR-RED-W1": {
       "blockedNote": "RED frozen file_ops.rs:1031 observer mismatch: opened (16777231,2) vs project (16777231,8893283); existing 14/14 serial pass; block L969-1043 SHA256 c3c81f71; base 68bd351; cmd cargo test -p opencode-rk-tools --lib root_anchor_red -- --test-threads=1 jobs/threads=1; impl must anchor project dir not /",
       "scratchpad": "worklog/APP-012-ROOT-ANCHOR-RED-W1.md",
