@@ -13,9 +13,9 @@
       "status": "completed"
     },
     "APP-001-CREDENTIAL-PERSISTENCE-RED3": {
-      "blockedNote": "compile blocked: crates/opentui-bridge/build.rs:58 requires missing native libopentui.a/libopentui.dylib for aarch64-apple-darwin; no valid RED or frozen hash",
+      "blockedNote": "Compiling installed PTY RED 3/5 pass, 2 fail at actual missing durable state; exact binary commit 798cbff; provider HTTP consumption unresolved due no endpoint/store integration surface.",
       "scratchpad": "worklog/APP-001-CREDENTIAL-PERSISTENCE-RED3.md",
-      "session": "ses_f1e9e2dbcffe7Vq1tKm1jIoKXc",
+      "session": "ses_f1e83a82cffetAPyDeg3senPdl",
       "status": "blocked"
     },
     "APP-001-INSTALLED-SETUP-REPAIR": {
