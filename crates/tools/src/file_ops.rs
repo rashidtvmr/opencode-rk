@@ -965,4 +965,80 @@ assert_eq!(
             "production wrapper must retain the None observer behavior"
         );
     }
+
+    // --- APP-012-ROOT-ANCHOR-RED-W1: frozen RED root anchor contract ---
+    #[cfg(unix)]
+    mod root_anchor_red {
+        use super::*;
+        use std::os::fd::{AsFd, OwnedFd};
+
+        /// RAII cwd swap mirroring the serialized CwdGuard pattern in
+        /// `crates/server/tests/live_file_tool_symlink_escape.rs:74-89`.
+        /// Safe under the lane convention `--test-threads=1`.
+        struct CwdGuard {
+            original: std::path::PathBuf,
+        }
+
+        impl CwdGuard {
+            fn set(path: &Path) -> std::io::Result<Self> {
+                let original = std::env::current_dir()?;
+                std::env::set_current_dir(path)?;
+                Ok(Self { original })
+            }
+        }
+
+        impl Drop for CwdGuard {
+            fn drop(&mut self) {
+                let _ = std::env::set_current_dir(&self.original);
+            }
+        }
+
+        /// Frozen RED contract: the write-root descriptor must be anchored on
+        /// the approved project directory (the current working directory), not
+        /// the filesystem root. The observer fstats the actually opened fd and
+        /// compares device/inode against the approved project directory, whose
+        /// identity is derived inside the callback. Setup failures panic with a
+        /// distinct `setup:` prefix; the expected failure is a genuine
+        /// observer-produced `ToolError` from `open_write_root_with_observer`.
+        #[test]
+        fn open_write_root_anchors_opened_fd_on_approved_project_dir() {
+            let dir = tempdir().expect("setup: disposable approved project dir");
+            let _guard = CwdGuard::set(dir.path()).expect("setup: set current_dir");
+
+            let mut observer = |fd: &OwnedFd| -> Result<(), ToolError> {
+                let opened = fstat(fd.as_fd()).map_err(|e| ToolError::IoError(e.into()))?;
+                let cwd = std::env::current_dir()
+                    .map_err(|e| ToolError::IoError(e.into()))?;
+                let project = std::fs::File::open(&cwd)
+                    .map_err(|e| ToolError::IoError(e.into()))?;
+                let wanted = fstat(project.as_fd())
+                    .map_err(|e| ToolError::IoError(e.into()))?;
+                if (opened.st_dev, opened.st_ino) == (wanted.st_dev, wanted.st_ino) {
+                    Ok(())
+                } else {
+                    Err(ToolError::FileError(format!(
+                        "root anchor descriptor mismatch: opened fd is ({}, {}), approved project dir {} is ({}, {})",
+                        opened.st_dev,
+                        opened.st_ino,
+                        cwd.display(),
+                        wanted.st_dev,
+                        wanted.st_ino,
+                    )))
+                }
+            };
+
+            let root = open_write_root_with_observer(Some(&mut observer))
+                .expect("root anchor must equal approved project root");
+            let opened = fstat(root.as_fd()).expect("setup: fstat returned root fd");
+            let project_file =
+                std::fs::File::open(dir.path()).expect("setup: open approved project dir");
+            let wanted = fstat(project_file.as_fd()).expect("setup: fstat approved project dir");
+            assert_eq!(
+                (opened.st_dev, opened.st_ino),
+                (wanted.st_dev, wanted.st_ino),
+                "opened root fd identity must equal the approved project directory"
+            );
+        }
+    }
+    // --- END APP-012-ROOT-ANCHOR-RED-W1 ---
 }
