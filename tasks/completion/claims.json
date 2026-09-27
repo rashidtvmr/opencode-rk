@@ -95,6 +95,12 @@
       "session": "ses_f1e4ee663ffecv8YN3eSpQF1x9",
       "status": "completed"
     },
+    "APP-012-TOCTOU-SEAM-W1": {
+      "completedNote": "GREEN seam only: pre-open hook pub(crate), fires after symlink check+parent creation, pre-leaf-open; execute None default unchanged. file_ops 12/12 serial; frozen dispatch/inroot/symlink pass, SHA unchanged; zero test edits. Parent TOCTOU OPEN, no fix claimed.",
+      "scratchpad": "worklog/APP-012-TOCTOU-SEAM-W1.md",
+      "session": "ses_f1e0b18b7ffeMqcSNyFxOJ8QV4",
+      "status": "completed"
+    },
     "APP-012-TOOL-RED": {
       "scratchpad": "worklog/APP-012-TOOL-RED.md",
       "session": "ses_f2ec3a38fffer2ivp1cowx22WB",

@@ -201,6 +201,18 @@ pub fn execute_authorized(
 
 /// Executes a file operation and returns the result.
 pub fn execute(op: FileOperation) -> Result<FileResult, ToolError> {
+    execute_with_preopen_hook(op, None)
+}
+
+/// Internal testability seam: [`execute`] with an optional write pre-open hook.
+///
+/// The hook is invoked once per write that passes the symlink check, after any
+/// parent-directory creation and immediately before the leaf open. It cannot
+/// bypass broker authorization (that runs earlier in [`execute_authorized`]).
+pub(crate) fn execute_with_preopen_hook(
+    op: FileOperation,
+    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+) -> Result<FileResult, ToolError> {
     match op {
         FileOperation::Read {
             path,
@@ -211,7 +223,7 @@ pub fn execute(op: FileOperation) -> Result<FileResult, ToolError> {
             path,
             content,
             append,
-        } => write_file(&path, &content, append),
+        } => write_file(&path, &content, append, hook),
         FileOperation::List { path } => list_dir(&path),
         FileOperation::CreateDir { path, recursive } => create_directory(&path, recursive),
     }
@@ -248,7 +260,12 @@ fn read_file(
 }
 
 /// Writes content to a file at the given path.
-fn write_file(path: &Path, content: &str, append: bool) -> Result<FileResult, ToolError> {
+fn write_file(
+    path: &Path,
+    content: &str,
+    append: bool,
+    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+) -> Result<FileResult, ToolError> {
     if path_has_symlink_component(path)? {
         return Ok(FileResult::failure(
             "write denied: path contains a symlink component",
@@ -261,6 +278,17 @@ fn write_file(path: &Path, content: &str, append: bool) -> Result<FileResult, To
         }
     }
 
+    // Pre-open seam: after all component checks and parent creation,
+    // immediately before the actual leaf open. Production default: None.
+    if let Some(hook) = hook {
+        hook(path, append)?;
+    }
+
+    open_and_write(path, content, append)
+}
+
+/// Opens the leaf file (no-follow) and writes the bytes.
+fn open_and_write(path: &Path, content: &str, append: bool) -> Result<FileResult, ToolError> {
     let mut options = fs::OpenOptions::new();
     options.write(true).create(true);
     if append {
@@ -481,5 +509,197 @@ mod tests {
         assert!(!result.success);
         assert!(result.error.is_some());
         assert!(result.error.unwrap().contains("File not found"));
+    }
+
+    // --- APP-012-TOCTOU-SEAM-W1: pre-open seam tests -----------------------
+    // Hooks are plain non-capturing fn pointers: no global mutable state, no
+    // sleeps, no unsafe. Observation happens via deterministic files derived
+    // from the hook's own path argument inside the disposable tempdir.
+
+    /// Records that the hook ran at the pre-open boundary and with which flag.
+    fn hook_record(path: &Path, append: bool) -> Result<(), ToolError> {
+        let parent = path.parent().expect("hook: path has parent");
+        assert!(parent.exists(), "hook must run after parent creation");
+        let marker = parent.join(if append { "hook_append_true" } else { "hook_append_false" });
+        fs::write(&marker, b"seen").map_err(ToolError::IoError)?;
+        Ok(())
+    }
+
+    /// Cancels the write from the hook.
+    fn hook_cancel(_path: &Path, _append: bool) -> Result<(), ToolError> {
+        Err(ToolError::FileError("pre-open canceled by test hook".to_owned()))
+    }
+
+    /// Deterministic disposable-fixture mutation: swap the leaf for a symlink
+    /// just before the real open, simulating a concurrent TOCTOU race.
+    #[cfg(unix)]
+    fn hook_swap_leaf_to_symlink(path: &Path, _append: bool) -> Result<(), ToolError> {
+        let target = path.with_extension("sentinel_target");
+        fs::write(&target, b"external sentinel").map_err(ToolError::IoError)?;
+        assert!(path.symlink_metadata().is_err(), "leaf must not exist pre-open");
+        std::os::unix::fs::symlink(&target, path).map_err(ToolError::IoError)?;
+        Ok(())
+    }
+
+    /// Test that symlink write is denied before any file open.
+    #[test]
+    fn write_file_symlink_denied() {
+        let dir = tempdir().expect("Failed to create temp dir");
+        let outside_dir = tempdir().expect("outside sentinel dir");
+        let sentinel = outside_dir.path().join("sentinel.txt");
+        std::fs::write(&sentinel, "sentinel content").expect("write sentinel");
+
+        // Create symlink in fixture dir pointing outside
+        let symlink_path = dir.path().join("symlink_to_outside.txt");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&sentinel, &symlink_path).expect("create symlink");
+
+        // Attempt write through the symlink target
+        let op = FileOperation::write(&symlink_path, "ATTACK".to_string());
+        let result = execute(op).expect("execute should succeed");
+
+        // Write must be denied
+        assert!(!result.success, "symlink write should be denied");
+        assert!(
+            result.error.unwrap_or_default().contains("symlink"),
+            "error should mention symlink"
+        );
+
+        // Sentinel must be unchanged (no write through symlink)
+        assert_eq!(
+            std::fs::read_to_string(&sentinel).expect("read sentinel"),
+            "sentinel content"
+        );
+    }
+
+    /// Hook is invoked exactly once per write, receives the correct path and
+    /// append=false for a truncate write, and the write completes normally.
+    #[test]
+    fn write_file_preopen_hook_invoked() {
+        let dir = tempdir().expect("temp dir");
+        let file_path = dir.path().join("hook_test.txt");
+        let content = "hook test content";
+
+        let result = execute_with_preopen_hook(
+            FileOperation::write(&file_path, content.to_owned()),
+            Some(hook_record),
+        )
+        .expect("execute ok");
+
+        assert!(result.success);
+        assert_eq!(fs::read_to_string(&file_path).expect("read file"), content);
+        assert!(dir.path().join("hook_append_false").exists());
+        assert!(!dir.path().join("hook_append_true").exists());
+    }
+
+    /// Hook observes append=true for an append write and the append lands.
+    #[test]
+    fn write_file_append_hook_sees_flag() {
+        let dir = tempdir().expect("temp dir");
+        let file_path = dir.path().join("append_test.txt");
+        fs::write(&file_path, "initial").expect("write initial");
+
+        let result = execute_with_preopen_hook(
+            FileOperation::write_append(&file_path, "more".to_owned()),
+            Some(hook_record),
+        )
+        .expect("execute ok");
+
+        assert!(result.success);
+        assert_eq!(fs::read_to_string(&file_path).expect("read"), "initialmore");
+        assert!(dir.path().join("hook_append_true").exists());
+        assert!(!dir.path().join("hook_append_false").exists());
+    }
+
+    /// No hook (production default via `execute`): write proceeds with
+    /// identical behavior; parent dirs are created.
+    #[test]
+    fn write_file_no_hook_production_default() {
+        let dir = tempdir().expect("temp dir");
+        let file_path = dir.path().join("nested/deep/prod.txt");
+
+        let result = execute(FileOperation::write(&file_path, "prod".to_owned())).expect("ok");
+
+        assert!(result.success);
+        assert_eq!(fs::read_to_string(&file_path).expect("read"), "prod");
+    }
+
+    /// Symlink denial happens BEFORE the hook: hook error (which would also
+    /// fail the write) must never run, proving seam ordering.
+    #[test]
+    fn write_file_symlink_denied_before_hook() {
+        let dir = tempdir().expect("temp dir");
+        let outside = tempdir().expect("outside dir");
+        let sentinel = outside.path().join("sentinel.txt");
+        fs::write(&sentinel, "sentinel content").expect("write sentinel");
+        let link = dir.path().join("link.txt");
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(&sentinel, &link).expect("create symlink");
+
+        let err = execute_with_preopen_hook(
+            FileOperation::write(&link, "ATTACK".to_owned()),
+            Some(hook_cancel),
+        )
+        .expect("denial is Ok(failure), not Err");
+
+        assert!(!err.success);
+        assert!(err.error.unwrap_or_default().contains("symlink"));
+        // cancel hook would have errored instead; symlink denial won => hook never ran
+        assert_eq!(fs::read_to_string(&sentinel).expect("read"), "sentinel content");
+        assert!(!dir.path().join("hook_append_false").exists());
+    }
+
+    /// Hook Err aborts the write BEFORE open: no file is created.
+    #[test]
+    fn write_file_hook_cancel_aborts_before_open() {
+        let dir = tempdir().expect("temp dir");
+        let file_path = dir.path().join("never_created.txt");
+
+        let result = execute_with_preopen_hook(
+            FileOperation::write(&file_path, "bytes".to_owned()),
+            Some(hook_cancel),
+        );
+
+        match result {
+            Err(ToolError::FileError(msg)) => assert!(msg.contains("test hook")),
+            other => panic!("expected hook ToolError::FileError, got {other:?}"),
+        }
+        assert!(!file_path.exists(), "cancelled write must not create the file");
+    }
+
+    /// Seam supports deterministic disposable-fixture mutation without
+    /// globals: hook swaps the leaf for a symlink just before open; the
+    /// O_NOFOLLOW leaf open then fails the write instead of following it.
+    /// Documents the boundary only; NOT a TOCTOU fix claim.
+    #[test]
+    #[cfg(unix)]
+    fn write_file_hook_fixture_mutation_leaf_open_rejects_symlink() {
+        let dir = tempdir().expect("temp dir");
+        let file_path = dir.path().join("raceme.txt");
+
+        let result = execute_with_preopen_hook(
+            FileOperation::write(&file_path, "ATTACK".to_owned()),
+            Some(hook_swap_leaf_to_symlink),
+        );
+
+        match result {
+            Err(ToolError::IoError(e)) => {
+                // O_NOFOLLOW open on a symlink leaf fails: ELOOP on Linux,
+                // EFTYPE on macOS/BSD. Accept either; the key is the open
+                // failed rather than following the link.
+                assert!(
+                    matches!(e.raw_os_error(), Some(62) | Some(40) | Some(79)),
+                    "expected ELOOP/EFTYPE from O_NOFOLLOW open, got {e:?}"
+                );
+            }
+            other => panic!("expected io error from O_NOFOLLOW open, got {other:?}"),
+        }
+        let meta = fs::symlink_metadata(&file_path).expect("leaf still symlink");
+        assert!(meta.file_type().is_symlink(), "leaf must remain a symlink, not be written through");
+        assert_eq!(
+            fs::read_to_string(file_path.with_extension("sentinel_target")).expect("sentinel"),
+            "external sentinel",
+            "sentinel must be untouched"
+        );
     }
 }
