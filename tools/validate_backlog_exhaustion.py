@@ -171,33 +171,23 @@ UNRESOLVED_COVERAGE_GAP_PATHS = (
 )
 
 CATEGORY_IDS = {
-    "local-implemented-stale": {
-        "AUTO-003", "AUTO-007", "EXT-003", "EXT-007", "EXT-013", "INT-004", "INT-008",
-        "OPS-010", "PROV-014", "REL-004", "ROUTE-001", "ROUTE-002", "ROUTE-003",
-        "ROUTE-004", "ROUTE-005", "ROUTE-007", "ROUTE-011", "ROUTE-012", "SESS-019",
-        "SESS-020", "TOOL-015",
-    },
+    "local-implemented-stale": {"WEB-007", "WEB-008"},
     "explicit-blocker": {
-        "AUTO-004", "AUTO-005", "AUTO-006", "EXT-008", "INT-002", "OPS-007", "OPS-009",
-        "ROUTE-006", "ROUTE-008",
+        "AUTO-004", "AUTO-005", "AUTO-006", "EXT-005", "EXT-008", "INT-002",
+        "OPS-007", "OPS-009", "PROV-016",
     },
-    "dependency-constrained": {
-        *(f"UI-{number:03d}" for number in range(1, 19)),
-        "WEB-001", "WEB-002", "WEB-003", "WEB-005",
-    },
-    "user-directed-product": {
-        *(f"WEB-{number:03d}" for number in range(6, 18)),
-    },
+    "dependency-constrained": set(),
+    "user-directed-product": {"WEB-009", "WEB-010", "WEB-011", "WEB-012", "WEB-013", "WEB-015"},
     "unresolved-decomposition": {
-        "EXT-001", "EXT-002", "EXT-004", "EXT-005", "EXT-006", "EXT-009", "EXT-010",
-        "EXT-011", "EXT-012", "INT-001", "INT-003", "INT-005", "INT-006", "INT-007",
-        "INT-009", "INT-010", "OPS-001", "OPS-002", "OPS-003", "OPS-004", "OPS-005",
-        "OPS-006", "OPS-008", "REL-001", "REL-002", "REL-003", "ROUTE-009", "ROUTE-010",
-        "SHARE-001", "SHARE-002", "SHARE-003", "SHARE-004", "SHARE-005", "WEB-004",
+        "INT-001", "INT-003", "INT-005", "INT-006", "INT-007", "INT-009", "INT-010",
+        "OPS-001", "OPS-002", "OPS-003", "OPS-004", "OPS-005", "OPS-006", "OPS-008",
+        "SHARE-003", "SHARE-004", "SHARE-005",
     },
 }
 
 STALE_IMPLEMENTATION_COMMITS = {
+    "WEB-007": ["3db740249b4727719da89c26904bf69754d09ec8"],
+    "WEB-008": ["3db740249b4727719da89c26904bf69754d09ec8"],
     "AUTO-003": ["d8436e62b0fc18712cb803fa440dd7ae2084cecc"],
     "AUTO-007": ["3be4d3c7329da6870fcc979c078de4b780f6c75d"],
     "EXT-003": ["31a5adec20d0e70a2e02f4fdc1d626c14c5098b6"],
@@ -231,7 +221,10 @@ for _id in CATEGORY_IDS["local-implemented-stale"]:
 for _id in {"AUTO-004", "AUTO-005", "AUTO-006"}:
     REASON_BY_ID[_id] = "automation-ownership-undefined"
 REASON_BY_ID.update({
+    "AUTO-005": "controller-frozen-tdd-evidence-incomplete",
+    "EXT-005": "manifest-validation-frozen-red-evidence-incomplete",
     "EXT-008": "plugin-hook-contract-mismatch",
+    "PROV-016": "provider-auth-caller-path-unwired",
     "INT-002": "repository-contract-mixes-side-effects",
     "OPS-007": "effect-runtime-cross-surface-ownership",
     "OPS-009": "recorder-cross-surface-side-effects",
@@ -284,10 +277,26 @@ def _local_evidence_paths(root: pathlib.Path, story_id: str, category: str, surf
         paths.append(f"tasks/{story_id}.md")
     if worklog.is_file():
         paths.append(f"worklog/{story_id}.md")
+    if story_id == "AUTO-005":
+        paths.extend(["tools/check_tdd_pipeline.py", "tools/ralph_loop.py", "tools/lane_gate.py", "docs/TDD.md"])
+    elif story_id == "EXT-005":
+        paths.extend([
+            "crates/tools/src/ext_manifest_lane.rs", "crates/tools/src/lib.rs",
+            "sources/routing-ownership-gap.json", "sources/extensibility-remaining-ownership-gap.json",
+        ])
+    elif story_id == "EXT-008":
+        paths.extend(["crates/tools/src/plugin_hook_boundary.rs", "sources/extensibility-remaining-ownership-gap.json"])
+    elif story_id == "PROV-016":
+        paths.extend([
+            "crates/providers/src/codex_oauth.rs", "crates/providers/src/lib.rs",
+            "crates/providers/src/provider_dispatch.rs", "sources/integrations-ownership-gap.json", "docs/SECURITY.md",
+        ])
     if surface_ids:
-        return paths
+        return list(dict.fromkeys(paths))
     if story_id in {"AUTO-004", "AUTO-005", "AUTO-006"}:
-        paths.extend(["requirements/user-requirements.json", "FEATURES.md", "worklog/AUTO-003.md"])
+        paths.extend(["requirements/user-requirements.json", "FEATURES.md"])
+        if story_id != "AUTO-005":
+            paths.append("worklog/AUTO-003.md")
     elif story_id.startswith("REL-"):
         paths.extend(["requirements/user-requirements.json", "FEATURES.md", "PLAN.md", "docs/TDD.md", "docs/SECURITY.md"])
     elif story_id.startswith("UI-"):
@@ -924,10 +933,28 @@ def routing_ownership_gap_errors(
             if item.get("surfaceIds") != live_surface_ids:
                 errors.append(f"{story_id}: adjacent singleton surface signature drifted")
             ledger_row = row_by_id.get(story_id)
-            if not isinstance(ledger_row, Mapping) or ledger_row.get("category") != "unresolved-decomposition":
+            legacy_unresolved = (
+                story_id == "EXT-005"
+                and isinstance(ledger_row, Mapping)
+                and ledger_row.get("category") == "unresolved-decomposition"
+                and ledger_row.get("taskCard") is None
+                and ledger_row.get("worklog") is None
+            )
+            explicit_blocker = (
+                story_id == "EXT-005"
+                and isinstance(ledger_row, Mapping)
+                and ledger_row.get("category") == "explicit-blocker"
+                and ledger_row.get("reasonKey") == "manifest-validation-frozen-red-evidence-incomplete"
+                and ledger_row.get("taskCard") == "tasks/EXT-005.md"
+                and ledger_row.get("worklog") == "worklog/EXT-005.md"
+                and (root / "tasks/EXT-005.md").is_file()
+                and (root / "worklog/EXT-005.md").is_file()
+            )
+            expected_unresolved = story_id != "EXT-005" and isinstance(ledger_row, Mapping) and ledger_row.get("category") == "unresolved-decomposition"
+            if not (legacy_unresolved or explicit_blocker or expected_unresolved):
                 errors.append(f"{story_id}: adjacent singleton classification drifted")
                 continue
-            if ledger_row.get("taskCard") is not None or ledger_row.get("worklog") is not None:
+            if expected_unresolved and (ledger_row.get("taskCard") is not None or ledger_row.get("worklog") is not None):
                 errors.append(f"{story_id}: adjacent singleton gained task evidence and must be deliberately reconciled")
 
             if story_id == "EXT-005":
@@ -1977,8 +2004,8 @@ def extensibility_remaining_gap_errors(rows: list[object], root: pathlib.Path = 
         ext005 = row_by_id.get("EXT-005")
         routing_gap = _load(root / "sources/routing-ownership-gap.json")
         adjacent = next((item for item in routing_gap.get("adjacentSingletonChecks", []) if isinstance(item, Mapping) and item.get("storyId") == "EXT-005"), None)
-        if not isinstance(ext005, Mapping) or ext005.get("category") != "unresolved-decomposition" or not isinstance(adjacent, Mapping) or adjacent.get("ownershipEstablished") is not False:
-            errors.append("EXT-005: remaining extensibility compatibility ambiguity guard drifted")
+        if not isinstance(ext005, Mapping) or ext005.get("category") != "explicit-blocker" or ext005.get("reasonKey") != "manifest-validation-frozen-red-evidence-incomplete" or not isinstance(adjacent, Mapping) or adjacent.get("ownershipEstablished") is not False:
+            errors.append("EXT-005: frozen RED evidence blocker or adjacent compatibility ambiguity guard drifted")
 
     inventory, inventory_errors = _inventory_index(root, "opencode")
     errors.extend(inventory_errors)
