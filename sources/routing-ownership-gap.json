@@ -31,8 +31,8 @@
     "ROUTE-010": null
   },
   "taskBindingState": {
-    "ROUTE-009": "generic-disc-002-placeholder-no-task-card-or-worklog",
-    "ROUTE-010": "generic-disc-002-placeholder-no-task-card-or-worklog"
+    "ROUTE-009": "controller-accepted-generic-disc-002-no-task-card-or-worklog; source ownership unresolved",
+    "ROUTE-010": "controller-accepted-generic-disc-002-no-task-card-or-worklog; source ownership unresolved"
   },
   "surfaceAmbiguity": {
     "indistinguishablePair": [
@@ -467,5 +467,34 @@
     "The candidate must have task-specific source, direct caller, direct test and genuine specification evidence with explicit inputs, outputs, failure semantics, state/resource lifetime and bounded authority.",
     "The candidate must exclude all locally implemented and frozen routing ownership above and must not require hidden JS runtime, credentials, user-DB mutation, network, UI/browser state, process environment mutation or an unapproved dependency.",
     "Every unresolved partition must be assigned by source-grounded decomposition or remain explicitly blocked; no singleton surface is sufficient by itself."
-  ]
+  ],
+  "controllerBacklogProjection": {
+    "source": "ralph.json:userStories",
+    "totalStories": 258,
+    "statusCounts": {
+      "accepted": 224,
+      "in-progress": 23,
+      "not-started": 11
+    },
+    "nonAcceptedCount": 34,
+    "stories": {
+      "ROUTE-009": {
+        "controllerStatus": "accepted",
+        "requirementIds": [],
+        "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+        "taskCard": null,
+        "worklog": null,
+        "sourceOwnershipDecision": null
+      },
+      "ROUTE-010": {
+        "controllerStatus": "accepted",
+        "requirementIds": [],
+        "userStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
+        "taskCard": null,
+        "worklog": null,
+        "sourceOwnershipDecision": null
+      }
+    },
+    "interpretation": "Controller-accepted status is recorded as-is; it does not establish source ownership or bind a task contract."
+  }
 }

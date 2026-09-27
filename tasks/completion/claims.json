@@ -391,6 +391,12 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
+    "GAP-ROUTING-34-W1": {
+      "blockedNote": "JSON/projection/diff checks pass. validate_backlog_exhaustion: 93 errors; routing accepted-vs-not-started + missing rows persist; frozen validator/backlog/controller excluded. See worklog/GAP-ROUTING-34-W1.md.",
+      "scratchpad": "worklog/GAP-ROUTING-34-W1.md",
+      "session": "ses_f1d90eefcffeqHIqwpYZ6KRAze",
+      "status": "blocked"
+    },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
       "scratchpad": "worklog/LANE-AGENT-FILES.md",
