@@ -257,7 +257,9 @@ pub enum ResponsesStreamEvent {
         arguments: String,
     },
     /// Terminal event. Every well-formed stream ends here exactly once.
-    Completed { stop_reason: ResponsesStopReason },
+    Completed {
+        stop_reason: ResponsesStopReason,
+    },
 }
 
 /// Pure SSE event parser shared by the live stream and tests.
@@ -453,7 +455,14 @@ pub struct OpenAiResponsesClient {
 
 impl OpenAiResponsesClient {
     pub fn from_env() -> Result<Self, ResponsesError> {
-        let config = ProviderConfig::from_env("openai");
+        Self::from_env_for("openai")
+    }
+
+    /// Build a client from the environment configuration for a provider ID.
+    ///
+    /// The credential itself is never included in errors or debug output.
+    pub fn from_env_for(provider_id: &str) -> Result<Self, ResponsesError> {
+        let config = ProviderConfig::from_env(provider_id);
         config.validate().map_err(ResponsesError::InvalidConfig)?;
         let api_key = config
             .get_api_key()
@@ -733,4 +742,47 @@ fn upstream_message(body: &[u8]) -> String {
                 .map(str::to_owned)
         })
         .unwrap_or_else(|| "provider request failed".to_owned())
+}
+
+#[cfg(test)]
+mod client_config_tests {
+    use super::{OpenAiResponsesClient, ResponsesError};
+    use std::sync::Mutex;
+
+    static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn custom_provider_configuration_builds_client() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        std::env::set_var("LANE_TEST_BASE_URL", "https://example.invalid/v1/");
+        std::env::set_var("LANE_TEST_API_KEY_ENV", "LANE_TEST_KEY");
+        std::env::set_var("LANE_TEST_KEY", "fake-test-credential");
+        let result = OpenAiResponsesClient::from_env_for("lane_test");
+        std::env::remove_var("LANE_TEST_BASE_URL");
+        std::env::remove_var("LANE_TEST_API_KEY_ENV");
+        std::env::remove_var("LANE_TEST_KEY");
+        let client = result.expect("configured custom provider client");
+        assert_eq!(client.base_url, "https://example.invalid/v1");
+        assert_eq!(client.max_output_tokens, 4096);
+    }
+
+    #[test]
+    fn custom_provider_missing_credential_is_redacted() {
+        let _guard = ENV_LOCK.lock().expect("env lock");
+        std::env::set_var("LANE_TEST_API_KEY_ENV", "LANE_TEST_MISSING_KEY");
+        std::env::remove_var("LANE_TEST_MISSING_KEY");
+        let result = OpenAiResponsesClient::from_env_for("lane_test");
+        std::env::remove_var("LANE_TEST_API_KEY_ENV");
+        assert!(
+            matches!(result, Err(ResponsesError::MissingCredential(name)) if name == "LANE_TEST_MISSING_KEY")
+        );
+    }
+
+    #[test]
+    fn empty_provider_id_is_rejected_by_config_validation() {
+        assert!(matches!(
+            OpenAiResponsesClient::from_env_for(""),
+            Err(ResponsesError::InvalidConfig(_))
+        ));
+    }
 }
