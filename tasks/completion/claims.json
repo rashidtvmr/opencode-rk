@@ -803,6 +803,12 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "RALPH-REOPEN-32-W1": {
+      "blockedNote": "validate_plan/repository fail pending serialized FEATURES/backlog reconciliation; exact 32 statuses changed; cannot claim green before cross-file gate passes",
+      "scratchpad": "worklog/RALPH-REOPEN-32-W1.md",
+      "session": "ses_f1e4e6058ffesfXnGzxlpZBGJ3",
+      "status": "blocked"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",
