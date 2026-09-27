@@ -18,6 +18,12 @@
       "session": "ses_f1d3ebf5cffen1x70lfx5n7Xp9",
       "status": "completed"
     },
+    "APP-001-CLI-PROVIDERS-LOCK-W1": {
+      "completedNote": "check+locked green: CARGO_BUILD_JOBS=1 cargo check -p opencode-rk-cli --bin oc2 0err; Cargo.lock +1 providers dep; zero test edits",
+      "scratchpad": "worklog/APP-001-CLI-PROVIDERS-LOCK-W1.md",
+      "session": "ses_f1d348372ffeJh1UMgKYL3i9FL",
+      "status": "completed"
+    },
     "APP-001-FILE0600-BACKEND-VERIFY-W1": {
       "completedNote": "backend provider checks green; frozen CLI caller remains unwired: 2/5 pass, t01/t02 missing credentials dir, t04 symlink not rejected; CLI SHA c99b15bc unchanged",
       "scratchpad": "worklog/APP-001-FILE0600-BACKEND-VERIFY-W1.md",
