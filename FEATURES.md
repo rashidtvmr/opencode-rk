@@ -4,12 +4,12 @@ Generated from `ralph.json` (canonical extended plan) and `requirements/user-req
 Every story is mandatory to the declared full release even when its feature is off by default at runtime (PLAN.md section 1).
 `prd.json` is the flat conventional Ralph export of the same data. Dependency eligibility is decided by `ralph.json` plus the milestone ranks in PLAN.md section 4; see `tools/plan_model.py`.
 
-Stories: 258. Requirements: 47. Test obligations: 1290.
+Stories: 258. Requirements: 47. Test obligations: 1290. Statuses: 224 accepted, 23 in-progress, 11 not-started.
 
 ## Historical acceptance proposal - controller wave b60ceda (2026-09-16)
 
 Historical candidate proposal and evidence snapshot only; not current acceptance.
-Current Ralph status mirror: 226 accepted, 23 in-progress, 9 not-started (258 total).
+Current Ralph status mirror: 224 accepted, 23 in-progress, 11 not-started (258 total).
 The following 82-row proposal and cited gates do not override current statuses,
 unresolved caveats, or independent acceptance requirements. This reconciliation
 does not newly accept any of the proposed 50.
@@ -43,14 +43,14 @@ lanes; NOT-ACCEPTED-stands recorded per row.
 | # | id | status | evidence | caveat |
 |---|---|---|---|---|
 | 1 | `AUTO-004` | in-progress | I18 s7 r1, gate a | tokio-mechanism PROPOSAL2 unapplied |
-| 2 | `AUTO-005` | accepted | I18 s7 r2, gate a | evidence conflict unresolved: `worklog/AUTO-005.md` says no controller-frozen tests, compiled RED, or independent verifier rerun; do not treat candidate receipts as acceptance proof |
+| 2 | `AUTO-005` | not-started | I18 s7 r2, gate a | evidence conflict unresolved: `worklog/AUTO-005.md` says no controller-frozen tests, compiled RED, or independent verifier rerun; do not treat candidate receipts as acceptance proof |
 | 3 | `AUTO-006` | in-progress | I18 s7 r3, gate a | same tokio-pool caveat |
 | 4 | `EXT-001` | accepted | I18 s7 r4, gate d |  |
 | 5 | `EXT-002` | accepted | I18 s7 r5, gate d |  |
 | 6 | `EXT-004` | accepted | I18 s7 r6, gate d |  |
 | 7 | `EXT-005` | in-progress | I18 s7 r7, gate d | keep-or-revert `pub mod ext_manifest_lane` (tools/lib.rs:19) |
 | 8 | `EXT-006` | accepted | I18 s7 r8, gate d |  |
-| 9 | `EXT-008` | accepted | I18 s7 r9, gate d | evidence conflict unresolved: `worklog/DISC-003.md` records plugin-hook-contract mismatch and explicit blocker; candidate receipts do not resolve ownership/semantics or acceptance |
+| 9 | `EXT-008` | not-started | I18 s7 r9, gate d | evidence conflict unresolved: `worklog/DISC-003.md` records plugin-hook-contract mismatch and explicit blocker; candidate receipts do not resolve ownership/semantics or acceptance |
 | 10 | `EXT-009` | accepted | I18 s7 r10, gate d |  |
 | 11 | `EXT-010` | accepted | I18 s7 r11, gate d |  |
 | 12 | `EXT-011` | accepted | I18 s7 r12, gate d |  |
@@ -202,7 +202,7 @@ untouched. Their actual row statuses are checked against current `ralph.json`.
 - `AUTO-002` (accepted): TBD - see source audit Obligations: `AUTO-002-T01`, `AUTO-002-T02`, `AUTO-002-T03`, `AUTO-002-T04`, `AUTO-002-T05`
 - `AUTO-003` (accepted): TBD - see source audit Obligations: `AUTO-003-T01`, `AUTO-003-T02`, `AUTO-003-T03`, `AUTO-003-T04`, `AUTO-003-T05`
 - `AUTO-004` (in-progress): TBD - see source audit Obligations: `AUTO-004-T01`, `AUTO-004-T02`, `AUTO-004-T03`, `AUTO-004-T04`, `AUTO-004-T05`
-- `AUTO-005` (accepted): TBD - see source audit Obligations: `AUTO-005-T01`, `AUTO-005-T02`, `AUTO-005-T03`, `AUTO-005-T04`, `AUTO-005-T05`
+- `AUTO-005` (not-started): TBD - see source audit Obligations: `AUTO-005-T01`, `AUTO-005-T02`, `AUTO-005-T03`, `AUTO-005-T04`, `AUTO-005-T05`
 - `AUTO-006` (in-progress): TBD - see source audit Obligations: `AUTO-006-T01`, `AUTO-006-T02`, `AUTO-006-T03`, `AUTO-006-T04`, `AUTO-006-T05`
 - `AUTO-007` (accepted): Turn submission state machine Obligations: `AUTO-007-T01`..`T05`
 
@@ -215,7 +215,7 @@ untouched. Their actual row statuses are checked against current `ralph.json`.
 ### REQ-004 - Strict TDD and independent verification
 
 - `AUTO-002` (accepted): TBD - see source audit Obligations: `AUTO-002-T01`, `AUTO-002-T02`, `AUTO-002-T03`, `AUTO-002-T04`, `AUTO-002-T05`
-- `AUTO-005` (accepted): TBD - see source audit Obligations: `AUTO-005-T01`, `AUTO-005-T02`, `AUTO-005-T03`, `AUTO-005-T04`, `AUTO-005-T05`
+- `AUTO-005` (not-started): TBD - see source audit Obligations: `AUTO-005-T01`, `AUTO-005-T02`, `AUTO-005-T03`, `AUTO-005-T04`, `AUTO-005-T05`
 - `REL-002` (accepted): TBD - see source audit Obligations: `REL-002-T01`, `REL-002-T02`, `REL-002-T03`, `REL-002-T04`, `REL-002-T05`
 
 ### REQ-005 - OpenCode V2 plugins including UI behavior
@@ -323,7 +323,7 @@ untouched. Their actual row statuses are checked against current `ralph.json`.
 - `SEC-010` (accepted): TBD - see source audit Obligations: `SEC-010-T01`, `SEC-010-T02`, `SEC-010-T03`, `SEC-010-T04`, `SEC-010-T05`
 - `SEC-011` (accepted): TBD - see source audit Obligations: `SEC-011-T01`, `SEC-011-T02`, `SEC-011-T03`, `SEC-011-T04`, `SEC-011-T05`
 - `SEC-020` (accepted): Bounded hook bus Obligations: `SEC-020-T01`..`T05`
-- `EXT-008` (accepted): TBD - see source audit Obligations: `EXT-008-T01`, `EXT-008-T02`, `EXT-008-T03`, `EXT-008-T04`, `EXT-008-T05`
+- `EXT-008` (not-started): TBD - see source audit Obligations: `EXT-008-T01`, `EXT-008-T02`, `EXT-008-T03`, `EXT-008-T04`, `EXT-008-T05`
 
 ### REQ-021 - Permissions and mandatory human-in-the-loop
 
@@ -560,7 +560,7 @@ untouched. Their actual row statuses are checked against current `ralph.json`.
 | `AUTO-002` | `REQ-002`, `REQ-004` | accepted | TBD - see source audit |
 | `AUTO-003` | `REQ-002` | accepted | TBD - see source audit |
 | `AUTO-004` | `REQ-002` | in-progress | TBD - see source audit |
-| `AUTO-005` | `REQ-002`, `REQ-004` | accepted | TBD - see source audit |
+| `AUTO-005` | `REQ-002`, `REQ-004` | not-started | TBD - see source audit |
 | `AUTO-006` | `REQ-002` | in-progress | TBD - see source audit |
 
 ### BASE (8 stories)
@@ -628,7 +628,7 @@ untouched. Their actual row statuses are checked against current `ralph.json`.
 | `EXT-005` | `REQ-005` | in-progress | TBD - see source audit |
 | `EXT-006` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `EXT-007` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `EXT-008` | `REQ-020` | accepted | TBD - see source audit |
+| `EXT-008` | `REQ-020` | not-started | TBD - see source audit |
 | `EXT-009` | `REQ-005` | accepted | TBD - see source audit |
 | `EXT-010` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `EXT-011` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |

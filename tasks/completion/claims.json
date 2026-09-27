@@ -295,6 +295,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "FEATURES-REOPEN-2-W1": {
+      "completedNote": "FEATURES status mirrors match Ralph; 224/23/11 count assertion and _features_status_errors passed; git diff --check passed; validate_plan/repository remain blocked by 54 pre-existing backlog/classifier errors; convergence gate had 59 existing claim blockers.",
+      "scratchpad": "worklog/FEATURES-REOPEN-2-W1.md",
+      "session": "ses_f1e141a27ffebqsvOedkWx02eF",
+      "status": "completed"
+    },
     "FEATURES-REOPEN-32-W1": {
       "completedNote": "FEATURES status mirrors match all 258 Ralph statuses; only authorized 32 IDs changed. `python3 tools/validate_plan.py` and `python3 tools/validate_repository.py` stop on 54 pre-existing/cross-file backlog evidence reconciliation errors; no FEATURES stale-status errors. See worklog/FEATURES-REOPEN-32-W1.md. Independent acceptance remains external.",
       "scratchpad": "worklog/FEATURES-REOPEN-32-W1.md",
