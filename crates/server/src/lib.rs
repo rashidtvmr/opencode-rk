@@ -97,6 +97,7 @@ use opencode_rk_providers::responses::{
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{SessionError, SessionService};
 use opencode_rk_tools::executor::ToolExecutor;
+use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::shell_tool::{ShellConfig, ShellError, ShellResult, ShellTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use opencode_rk_agents::agent_executor::AgentExecutor;
@@ -120,6 +121,7 @@ static NEXT_SHELL_ARTIFACT: AtomicU64 = AtomicU64::new(1);
 const SHELL_STARTUP_WRAPPER: &str =
     "tmp=\"$1.tmp.$$\"; printf '%s\\n' \"$$\" > \"$tmp\"; mv -f \"$tmp\" \"$1\"; exec bash -c \"$2\"";
 const MAX_SHELL_COMMAND_BYTES: usize = 64 * 1024;
+const MAX_FILE_WRITE_ARGUMENT_BYTES: usize = 1024 * 1024;
 const MAX_SHELL_ERROR_BYTES: usize = 1024;
 const MAX_SHELL_ARTIFACT_ATTEMPTS: u64 = 8;
 
@@ -1060,6 +1062,28 @@ fn shell_command(arguments: &str) -> Result<String, String> {
     Ok(command.to_owned())
 }
 
+/// Parse a provider's builtin write request with strict types and byte bounds.
+fn file_write_operation(arguments: &str) -> Result<FileOperation, String> {
+    if arguments.len() > MAX_FILE_WRITE_ARGUMENT_BYTES {
+        return Err("write arguments exceed size limit".to_owned());
+    }
+    let parsed: Value = serde_json::from_str(arguments)
+        .map_err(|_| "write arguments are not valid JSON".to_owned())?;
+    let path = parsed
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "write arguments require a non-empty string path".to_owned())?;
+    let content = parsed
+        .get("content")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "write arguments require string content".to_owned())?;
+    if path.len() > 4096 || content.len() > MAX_FILE_WRITE_ARGUMENT_BYTES {
+        return Err("write path or content exceeds size limit".to_owned());
+    }
+    Ok(FileOperation::write(PathBuf::from(path), content.to_owned()))
+}
+
 fn new_shell_execution(command: String) -> Result<ShellExecutionGuard, String> {
     let artifact = ShellArtifact::create()?;
     let (startup_tx, startup_rx) = mpsc::channel(1);
@@ -1397,12 +1421,17 @@ async fn create_turn_stream(
                                     name: name.clone(),
                                     arguments: arguments.clone(),
                                 });
+                            let public_arguments = if name == "write" {
+                                "{}"
+                            } else {
+                                arguments.as_str()
+                            };
                             return Some((
                                 Ok::<Bytes, Infallible>(ndjson(json!({
                                     "type": "tool_call",
                                     "call_id": call_id,
                                     "name": name,
-                                    "arguments": arguments,
+                                    "arguments": public_arguments,
                                 }))),
                                 state,
                             ));
@@ -1535,8 +1564,21 @@ async fn create_turn_stream(
                                     } else {
                                         "error: shell execution was not prepared".to_owned()
                                     }
-                                } else {
-                                    match state.broker.authorize(&OperationIntent::Tool {
+                            } else if call.name == "write" {
+                                match file_write_operation(&call.arguments) {
+                                    Ok(operation) => match FileTool::new()
+                                        .execute_authorized(operation, &state.broker)
+                                    {
+                                        Ok(result) if result.success => result.content,
+                                        Ok(result) => result
+                                            .error
+                                            .unwrap_or_else(|| "write failed".to_owned()),
+                                        Err(error) => error.to_string(),
+                                    },
+                                    Err(error) => format!("error: {error}"),
+                                }
+                            } else {
+                                match state.broker.authorize(&OperationIntent::Tool {
                                         name: call.name.clone(),
                                         description: "turn tool call".to_owned(),
                                     }) {
