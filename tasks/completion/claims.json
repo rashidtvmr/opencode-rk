@@ -82,6 +82,12 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP-012-LIVE-FILE-TOOL-ALLOW-RED": {
+      "blockedNote": "RED-only task authored/frozen; compiling server test fails exactly Unknown tool: write (exit 101), SHA256 c914953e4566b21eaa0960c2b249039adfb0c8ae68c031a67082c9251e230910; implementation explicitly out of scope.",
+      "scratchpad": "worklog/APP-012-LIVE-FILE-TOOL-ALLOW-RED.md",
+      "session": "ses_f1e6bf0f1ffeM9hWxOz8POJK6v",
+      "status": "blocked"
+    },
     "APP-012-TOOL-RED": {
       "scratchpad": "worklog/APP-012-TOOL-RED.md",
       "session": "ses_f2ec3a38fffer2ivp1cowx22WB",
