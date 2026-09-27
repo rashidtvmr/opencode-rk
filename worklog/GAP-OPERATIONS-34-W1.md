@@ -1,0 +1,109 @@
+# GAP-OPERATIONS-34-W1
+
+- Claim: `sources/operations-ownership-gap.json`; session `ses_f1df1923ffferEJ51vptxRseR4`; branch `reconcile/GAP-OPERATIONS-34-W1`; exact base `f21a01e21a4a82b57dae641c032472585f84b2c4`.
+- Scope: owned source gap plus this scratchpad and this task's claim row only. No edits to controller, canonical backlog ledger, validators, tests, or evidence sources.
+- Authority/evidence: `AGENTS.md:8-21,34-37,89-102` limits ownership and keeps tests/policy immutable; `docs/REPOSITORY_PROTECTION.md:27-33` requires canonical validation and keeps platform claims separate; `PLAN.md:28-57,113-120,241-251` defines mandatory backlog and non-acceptance; `docs/TDD.md:21-83` requires source-grounded evidence and independent acceptance; `docs/SECURITY.md:57-60` protects verifier/config scope. Repowise returned no-index; source files are authority.
+- Current exact source evidence at base: `tools/validate_backlog_exhaustion.py:49-83,1003-1226` expects seven residual ownership candidates and treats `OPS-007`/`OPS-009` as frozen blockers; `sources/backlog-exhaustion.json:411-701` contains the canonical OPS rows; its summary records 224 accepted / 34 nonaccepted / 258 total, with 9 explicit blockers; `ralph.json:1171-1291` has OPS-001..009 `in-progress`; `sources/behavior-surface-rules.json` maps OPS-007 to effect-runtime+repository-operations and OPS-009 to provider-recording+repository-operations. `tasks/OPS-001.md:11-57` is a newer, narrower native resource-ledger outcome, not evidence assigning OpenCode config paths; `tasks/OPS-009.md:11-39` scopes in-memory offline replay and explicitly excludes the original recorder/persistence/live side effects. `worklog/OPS-009.md` reports 5/5 local tests; not independent acceptance.
+- Observed blocker: the ownership-gap record predates current controller/card projection. Seven gap candidates have live task/worklog files; their stories remain controller `in-progress`. `OPS-007` and `OPS-009` remain explicit-blocker ledger rows, not unresolved ownership candidates. Their blockers must not be duplicated as residual ownership entries or reclassified by this lane.
+- Reconciliation target: preserve all pinned reviewed partition/candidate evidence and seven unresolved ownership decisions; record exact 224/34 canonical OPS-001..009 projection. Keep `OPS-009` solely in its existing frozen explicit-blocker representation (`recorder-cross-surface-side-effects`) while preserving its source-family signature and narrower card as non-acceptance context.
+- Validation: JSON parse and exact OPS live-ledger projection assertions PASS; `git diff --check` PASS; `python3 tools/validate_backlog_exhaustion.py` exits 1 with 93 exact errors. OPS-related errors remain: OPS-001..006/008 task-card staleness against current Ralph semantics, task/worklog presence checks, local task ownership checks. Remaining unrelated errors: enterprise remote expected evidence gaps; stale/missing routing rows and ROUTE-006/008 frozen classification plus WEB-004; REL-001..003 missing/stale; EXT-001/002 and REQ-017 exclusions; SHARE-001..005 stale/missing; EXT-004/006/009..012 and EXT-003/007/UI-012; INT-001/003/005/006/007/009 projection and INT-004/008/EXT-007 auth receipts; rows no longer unresolved (EXT-001/002/004/005/006/009..012, REL-001..003, ROUTE-009/010, SHARE-001/002, WEB-004). Validator cannot pass without shared companion/controller reconciliation outside lane scope.
+- Remaining unknowns: task-specific pinned upstream source/caller/test/spec mapping for residual config/repository ownership is still absent. No ownership assignment, source evidence, implementation commit, or acceptance will be fabricated.
+
+## Exact canonical validator output
+
+```text
+validate_backlog_exhaustion: 93 error(s)
+  - residual per-surface evidence gaps must remain exactly INT-010/SHARE-003/WEB-004 -> enterprise-remote spec
+  - ROUTE-009: routing ownership-gap is stale after Ralph task semantics changed
+  - ROUTE-010: routing ownership-gap is stale after Ralph task semantics changed
+  - routing ownership-gap story missing from exhaustion ledger: ROUTE-009
+  - routing ownership-gap story missing from exhaustion ledger: ROUTE-010
+  - ROUTE-006: routing ownership-gap frozen blocker classification drifted
+  - ROUTE-008: routing ownership-gap frozen blocker classification drifted
+  - WEB-004: adjacent singleton classification drifted
+  - OPS-001: operations ownership-gap is stale after Ralph task semantics changed
+  - OPS-001: task/worklog appeared; operations ownership gap needs deliberate review
+  - OPS-002: operations ownership-gap is stale after Ralph task semantics changed
+  - OPS-002: task/worklog appeared; operations ownership gap needs deliberate review
+  - OPS-003: operations ownership-gap is stale after Ralph task semantics changed
+  - OPS-003: task/worklog appeared; operations ownership gap needs deliberate review
+  - OPS-004: operations ownership-gap is stale after Ralph task semantics changed
+  - OPS-004: task/worklog appeared; operations ownership gap needs deliberate review
+  - OPS-005: operations ownership-gap is stale after Ralph task semantics changed
+  - OPS-005: task/worklog appeared; operations ownership gap needs deliberate review
+  - OPS-006: operations ownership-gap is stale after Ralph task semantics changed
+  - OPS-006: task/worklog appeared; operations ownership gap needs deliberate review
+  - OPS-008: operations ownership-gap is stale after Ralph task semantics changed
+  - OPS-008: task/worklog appeared; operations ownership gap needs deliberate review
+  - OPS-001: local task ownership appeared; operations ownership gap needs deliberate review
+  - OPS-002: local task ownership appeared; operations ownership gap needs deliberate review
+  - OPS-003: local task ownership appeared; operations ownership gap needs deliberate review
+  - OPS-004: local task ownership appeared; operations ownership gap needs deliberate review
+  - OPS-005: local task ownership appeared; operations ownership gap needs deliberate review
+  - OPS-006: local task ownership appeared; operations ownership gap needs deliberate review
+  - OPS-008: local task ownership appeared; operations ownership gap needs deliberate review
+  - REL-001: release assurance gap is stale after Ralph semantics changed
+  - REL-001: task/worklog appeared; release assurance gap needs deliberate review
+  - release assurance story missing from exhaustion ledger: REL-001
+  - REL-002: release assurance gap is stale after Ralph semantics changed
+  - REL-002: task/worklog appeared; release assurance gap needs deliberate review
+  - release assurance story missing from exhaustion ledger: REL-002
+  - REL-003: release assurance gap is stale after Ralph semantics changed
+  - REL-003: task/worklog appeared; release assurance gap needs deliberate review
+  - release assurance story missing from exhaustion ledger: REL-003
+  - EXT-001: REQ-017 ownership gap is stale after Ralph semantics changed
+  - EXT-001: task/worklog appeared; REQ-017 ownership gap needs deliberate review
+  - EXT-002: REQ-017 ownership gap is stale after Ralph semantics changed
+  - EXT-002: task/worklog appeared; REQ-017 ownership gap needs deliberate review
+  - REQ-017 residual story missing from exhaustion ledger: EXT-001
+  - REQ-017 residual story missing from exhaustion ledger: EXT-002
+  - UI-010: REQ-017 dependency-constrained exclusion drifted
+  - EXT-013: REQ-017 implemented exclusion drifted
+  - SHARE-001: sharing ownership-gap is stale after Ralph semantics changed
+  - SHARE-001: task/worklog appeared; sharing ownership gap needs deliberate review
+  - SHARE-002: sharing ownership-gap is stale after Ralph semantics changed
+  - SHARE-002: task/worklog appeared; sharing ownership gap needs deliberate review
+  - SHARE-003: sharing ownership-gap is stale after Ralph semantics changed
+  - SHARE-003: task/worklog appeared; sharing ownership gap needs deliberate review
+  - SHARE-004: sharing ownership-gap is stale after Ralph semantics changed
+  - SHARE-004: task/worklog appeared; sharing ownership gap needs deliberate review
+  - SHARE-005: sharing ownership-gap is stale after Ralph semantics changed
+  - SHARE-005: task/worklog appeared; sharing ownership gap needs deliberate review
+  - sharing ownership-gap story missing from exhaustion ledger: SHARE-001
+  - sharing ownership-gap story missing from exhaustion ledger: SHARE-002
+  - SHARE-003: local sharing task ownership appeared; gap needs deliberate review
+  - SHARE-004: local sharing task ownership appeared; gap needs deliberate review
+  - SHARE-005: local sharing task ownership appeared; gap needs deliberate review
+  - EXT-004: remaining extensibility gap is stale after Ralph semantics changed
+  - EXT-006: remaining extensibility gap is stale after Ralph semantics changed
+  - EXT-009: remaining extensibility gap is stale after Ralph semantics changed
+  - EXT-010: remaining extensibility gap is stale after Ralph semantics changed
+  - EXT-011: remaining extensibility gap is stale after Ralph semantics changed
+  - EXT-012: remaining extensibility gap is stale after Ralph semantics changed
+  - EXT-004: remaining extensibility exhaustion projection drifted
+  - EXT-006: remaining extensibility exhaustion projection drifted
+  - EXT-009: remaining extensibility exhaustion projection drifted
+  - EXT-010: remaining extensibility exhaustion projection drifted
+  - EXT-011: remaining extensibility exhaustion projection drifted
+  - EXT-012: remaining extensibility exhaustion projection drifted
+  - EXT-003: remaining extensibility implemented exclusion drifted
+  - EXT-007: remaining extensibility implemented exclusion drifted
+  - UI-012: remaining extensibility dependency exclusion drifted
+  - INT-001: task/worklog appeared; integrations gap needs deliberate review
+  - INT-003: task/worklog appeared; integrations gap needs deliberate review
+  - INT-005: task/worklog appeared; integrations gap needs deliberate review
+  - INT-006: task/worklog appeared; integrations gap needs deliberate review
+  - INT-007: task/worklog appeared; integrations gap needs deliberate review
+  - INT-009: integrations ownership-gap is stale after Ralph semantics changed
+  - INT-001: integrations exhaustion projection drifted
+  - INT-003: integrations exhaustion projection drifted
+  - INT-005: integrations exhaustion projection drifted
+  - INT-006: integrations exhaustion projection drifted
+  - INT-007: integrations exhaustion projection drifted
+  - INT-009: integrations exhaustion projection drifted
+  - INT-004: integrations implemented exclusion drifted
+  - INT-008: integrations event compatibility exclusion drifted
+  - EXT-007: dedicated integration-auth local implementation receipt drifted
+  - INT-004: dedicated integration-auth local implementation receipt drifted
+  - gap records cover rows no longer unresolved-decomposition: ['EXT-001', 'EXT-002', 'EXT-004', 'EXT-005', 'EXT-006', 'EXT-009', 'EXT-010', 'EXT-011', 'EXT-012', 'REL-001', 'REL-002', 'REL-003', 'ROUTE-009', 'ROUTE-010', 'SHARE-001', 'SHARE-002', 'WEB-004']
+```

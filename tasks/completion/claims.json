@@ -697,7 +697,7 @@
       "status": "completed"
     },
     "LANE-TUI-LAND": {
-      "blockedNote": "DIAGNOSE: native_launch 2/2 FAIL @767a86a \u2014 plan_default_launch gate app_start.rs:295 routes piped stdio to Headless/exit-2 vs frozen seam; needs APP-001 vs TUI-LAND ruling",
+      "blockedNote": "DIAGNOSE: native_launch 2/2 FAIL @767a86a — plan_default_launch gate app_start.rs:295 routes piped stdio to Headless/exit-2 vs frozen seam; needs APP-001 vs TUI-LAND ruling",
       "scratchpad": "worklog/LANE-TUI-LAND.md",
       "session": "ses_complete_app_21sep",
       "status": "blocked"
@@ -987,6 +987,12 @@
       "blockedNote": "DIAGNOSE: scratchpad missing, owned file unknown; needs lane definition",
       "scratchpad": "worklog/WEB-VOICE.md",
       "session": "ses_complete_app_21sep",
+      "status": "blocked"
+    },
+    "GAP-OPERATIONS-34-W1": {
+      "blockedNote": "BLOCKED: JSON/projection and diff-check pass; validate_backlog_exhaustion.py exits 1 with 93 errors including operations ownership-gap stale semantics/task-card checks plus unrelated companion manifest/classifier drift; see worklog/GAP-OPERATIONS-34-W1.md. OPS-009 retained solely as explicit blocker recorder-cross-surface-side-effects; 224/34 projection preserved.",
+      "scratchpad": "worklog/GAP-OPERATIONS-34-W1.md",
+      "session": "ses_f1df1923ffferEJ51vptxRseR4",
       "status": "blocked"
     }
   },
