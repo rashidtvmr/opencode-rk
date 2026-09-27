@@ -434,9 +434,10 @@
       "status": "blocked"
     },
     "GAP-ROUTING-34-W2": {
+      "blockedNote": "Landing-only halted: cherry-pick 98de33b added no tracked changes and cleared CHERRY_PICK_HEAD; avoid altering other candidate manifests. Validator/plan/convergence gates not passed. See worklog/GAP-ROUTING-34-W2.md.",
       "scratchpad": "worklog/GAP-ROUTING-34-W2.md",
       "session": "ses_f1c182bcbffedhBCE6Aq07t5MR",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "GAP-SHARING-34-W1": {
       "blockedNote": "BLOCKED: JSON/projection/diff-check PASS; SHARE-001/002 bindings mirror accepted Ralph rows, SHARE-003/004/005 remain unresolved-decomposition with null ownership, exact evidence and empty pins. python3 tools/validate_backlog_exhaustion.py exits 1 with 98 companion-manifest/projection errors; convergence_gate blocked by 60 pre-existing ledger findings. See worklog/GAP-SHARING-34-W1.md",
