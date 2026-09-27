@@ -5,6 +5,7 @@ pub mod acp_files;
 pub mod acp_session;
 pub mod admission_bounds;
 pub mod agent_loop;
+pub mod agent_roles;
 pub mod app_client;
 pub use agent_loop::{
     function_call_output as loop_function_call_output, truncate_tool_output, CallOutput,
@@ -734,6 +735,10 @@ struct CreateTurnBody {
     text: String,
     model: String,
     reasoning_effort: String,
+    /// Optional agent name resolved against `<workspace>/.agents/agents`.
+    /// Absent or empty means an ordinary turn (no role prompting).
+    #[serde(default)]
+    agent: Option<String>,
 }
 
 async fn create_turn(
@@ -900,6 +905,20 @@ async fn create_turn_stream(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
+    // Agent role resolution happens before any transcript writes so an
+    // unknown agent fails the request without orphaning a user message.
+    let turn_tools = turn_tool_config();
+    let turn_tools_ref: Vec<&str> = turn_tools.iter().map(String::as_str).collect();
+    let agent_role = crate::agent_roles::resolve_agent_role(
+        &std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
+        body.agent.as_deref(),
+        &turn_tools_ref,
+    )
+    .map_err(|error| match error {
+        crate::agent_roles::RoleError::UnknownAgent(_) => ApiFailure::bad_request(error.to_string()),
+        other => ApiFailure::internal(other.to_string()),
+    })?;
+
     let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
     let user_message = state
         .sessions
@@ -926,13 +945,20 @@ async fn create_turn_stream(
 
     // Agentic loop setup: advertise tools only when turn-tool execution is
     // explicitly enabled (OPENCODE_RK_TURN_TOOLS). The list is deny-by-default:
-    // an advertised tool is executable, an unadvertised one is not.
-    let turn_tools = turn_tool_config();
+    // an advertised tool is executable, an unadvertised one is not. When the
+    // turn runs as a named agent, the agent file's allowlist narrows this set
+    // further and its role prompt is prepended as a System item.
     let registry = ToolRegistry::new();
     let tools: Vec<ResponsesTool> = registry
         .list()
         .into_iter()
-        .filter(|tool| turn_tools.iter().any(|name| *name == tool.id))
+        .filter(|tool| {
+            agent_role
+                .as_ref()
+                .map_or_else(|| turn_tools.iter().any(|name| *name == tool.id), |role| {
+                    role.tools.iter().any(|name| name == &tool.id)
+                })
+        })
         .map(|tool| {
             ResponsesTool::function(
                 tool.id.clone(),
@@ -946,7 +972,16 @@ async fn create_turn_stream(
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|steps| *steps > 0)
         .unwrap_or(MAX_TURN_STEPS);
-    let history_items: Vec<ResponsesItem> = input.into_iter().map(Into::into).collect();
+    let mut history_items: Vec<ResponsesItem> = input.into_iter().map(Into::into).collect();
+    if let Some(role) = &agent_role {
+        history_items.insert(
+            0,
+            ResponsesItem::Text {
+                role: opencode_rk_providers::responses::ResponsesRole::System,
+                content: role.role_prompt.clone(),
+            },
+        );
+    }
 
     let provider = provider
         .stream_with_tools(model_id, &body.reasoning_effort, &history_items, &tools)

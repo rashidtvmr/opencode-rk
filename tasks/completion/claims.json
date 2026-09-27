@@ -6,6 +6,12 @@
       "session": "ses_f384fedeaffeiMPH6Dl2h3q5Ox",
       "status": "completed"
     },
+    "AGENT-MODE-ROLE": {
+      "completedNote": "GREEN: agents --test agent_role 5/5 (RED: compile fail, methods missing, frozen sha 5fa5e648) + server --test agent_roles 5/5 (behavioral RED stub 2pass/3fail, frozen sha a1745c51, zero test edits); no-regress agents 131/131, server lib 208/208, agent_loop_turns 1/1; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 cargo test -p opencode-rk-agents && cargo test -p opencode-rk-server --test agent_roles",
+      "scratchpad": "worklog/AGENT-MODE-ROLE.md",
+      "session": "ses_f1ea760dcffehvM9O8UnrIdRxf",
+      "status": "completed"
+    },
     "APP-001": {
       "completedNote": "GREEN 13/13 app_start (8 existing + 5 APP-001 T1-T05); RED sha256 6f41ab6f, GREEN sha256 38454ed3; zero test edits; cmd: CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin opencode-rk app_start; log /tmp/opencode/app001.log",
       "scratchpad": "worklog/APP-001.md",

@@ -37,10 +37,59 @@ pub struct AgentDef {
     pub path: PathBuf,
 }
 
+impl AgentDef {
+    /// System/role prompt derived from this definition: a mode directive for
+    /// `plan` agents plus the file body. Non-plan modes contribute the body
+    /// only, decoded lossily so invalid UTF-8 bodies still yield a prompt.
+    #[must_use]
+    pub fn role_prompt(&self) -> String {
+        let body = String::from_utf8_lossy(&self.body).into_owned();
+        if self.mode.as_deref() == Some("plan") {
+            let mut prompt = String::from(
+                "You are in plan mode: read and analyze only. Do not modify \
+                 files or run side-effecting commands.\n\n",
+            );
+            prompt.push_str(&body);
+            prompt
+        } else {
+            body
+        }
+    }
+
+    /// Tool ids to advertise to the provider when running as this agent.
+    ///
+    /// Intersection rules: an explicit `tools` allowlist restricts to listed
+    /// ids that are also enabled (allowlist order preserved). An empty
+    /// allowlist passes all enabled tools, except in `plan` mode where it is
+    /// fail-closed: no executable tools are advertised at all.
+    #[must_use]
+    pub fn advertised_tools(&self, enabled: &[String]) -> Vec<String> {
+        if self.tools.is_empty() {
+            if self.mode.as_deref() == Some("plan") {
+                return Vec::new();
+            }
+            return enabled.to_vec();
+        }
+        self.tools
+            .iter()
+            .filter(|tool| enabled.iter().any(|e| e == *tool))
+            .cloned()
+            .collect()
+    }
+}
+
 /// A snapshot of all loaded agent definitions, in deterministic order.
 #[derive(Debug, Clone, PartialEq)]
 pub struct AgentFileSnapshot {
     pub defs: Vec<AgentDef>,
+}
+
+impl AgentFileSnapshot {
+    /// Find a definition by exact agent name.
+    #[must_use]
+    pub fn find(&self, name: &str) -> Option<&AgentDef> {
+        self.defs.iter().find(|d| d.name == name)
+    }
 }
 
 /// Errors that can occur during agent file loading.
