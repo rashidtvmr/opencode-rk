@@ -6,6 +6,12 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-CLI-PROVIDERS-DEP-W1": {
+      "completedNote": "prewire one-line path dep e068f0b on prewire/APP-001-CLI-PROVIDERS-W1; manifest-inspection verified, no cycle; no cargo run per lane bounds",
+      "scratchpad": "worklog/APP-001-CLI-PROVIDERS-DEP-W1.md",
+      "session": "ses_prewire_W1",
+      "status": "completed"
+    },
     "APP-002": {
       "completedNote": "GREEN 20/20 daemon_client (13 existing + 7 APP-002) rustc --test + cargo test -p opencode-rk-cli --bin opencode-rk daemon_client; zero test edits post-freeze; log /tmp/opencode/app002.log",
       "scratchpad": "worklog/APP-002.md",
@@ -76,6 +82,11 @@
       "scratchpad": "worklog/APP-012-LIVE-FILE-TOOL-RED2.md",
       "session": "ses_f1e82e6afffe1jJD5WeWFPt2Ou",
       "status": "blocked"
+    },
+    "APP-012-RUSTIX-LOCK-W1": {
+      "scratchpad": "worklog/APP-012-RUSTIX-LOCK-W1.md",
+      "session": "ses_f1d90ef0fffeFSWs1ngA8dky18",
+      "status": "in-progress"
     },
     "APP-012-SECURE-DISPATCH-W1": {
       "completedNote": "Candidate GREEN: frozen live_file_tool_dispatch, live_file_tool_allowed_inroot, live_file_tool_symlink_escape, and agent_loop_turns each passed serially with CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1; frozen hashes unchanged; parent APP-012 TOCTOU repair remains open.",
@@ -400,6 +411,11 @@
       "scratchpad": "worklog/G6-CHAT-DATADIR.md",
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
+    },
+    "GAP-EXTENSIBILITY-34-W1": {
+      "scratchpad": "worklog/GAP-EXTENSIBILITY-34-W1.md",
+      "session": "",
+      "status": "not-started"
     },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
