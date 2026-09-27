@@ -83,6 +83,12 @@
       "session": "ses_f1dfb40b8ffedbfukYQM6uYy5B",
       "status": "blocked"
     },
+    "APP-012-RUSTIX-PREWIRE-W1": {
+      "blockedNote": "tools line added per card; root [workspace.dependencies] has no rustix @3ecee10 (transitive lock entry only); root manifest not owned here; workspace=true unresolvable until companion root-lane adds rustix = { version = \"1\" }. tomllib OK, Cargo.lock untouched, exactly one product-file diff.",
+      "scratchpad": "worklog/APP-012-RUSTIX-PREWIRE-W1.md",
+      "session": "ses_f1df5aeefffeC0qRrzE38et5TH",
+      "status": "blocked"
+    },
     "APP-012-SECURE-DISPATCH-W1": {
       "completedNote": "Candidate GREEN: frozen live_file_tool_dispatch, live_file_tool_allowed_inroot, live_file_tool_symlink_escape, and agent_loop_turns each passed serially with CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1; frozen hashes unchanged; parent APP-012 TOCTOU repair remains open.",
       "scratchpad": "worklog/APP-012-SECURE-DISPATCH-W1.md",
