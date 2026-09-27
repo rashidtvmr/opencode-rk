@@ -32,22 +32,22 @@
   },
   "taskBindingState": {
     "EXT-001": {
-      "controllerStatus": "in-progress",
+      "controllerStatus": "accepted",
       "ralphStory": "TBD - see source audit",
       "requirementIds": [
         "REQ-017"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-001.md",
+      "worklog": "worklog/EXT-001.md"
     },
     "EXT-002": {
-      "controllerStatus": "in-progress",
+      "controllerStatus": "accepted",
       "ralphStory": "TBD - see source audit",
       "requirementIds": [
         "REQ-017"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-002.md",
+      "worklog": "worklog/EXT-002.md"
     }
   },
   "surfaceRulePatterns": [
@@ -65,7 +65,8 @@
       "id": "UI-010",
       "category": "dependency-constrained",
       "reasonKey": "client-architecture-dependency",
-      "note": "Client/UI ownership remains dependency-constrained and is not reassigned to EXT-001/002."
+      "note": "Client/UI ownership remains dependency-constrained and is not reassigned to EXT-001/002.",
+      "controllerStatus": "accepted"
     },
     {
       "id": "EXT-013",
@@ -73,7 +74,8 @@
       "implementationCommit": "accb2e919fe3e02ac34aa4b42851ec710f8ca282",
       "taskCard": "tasks/EXT-013.md",
       "worklog": "worklog/EXT-013.md",
-      "ownedPartition": "bounded safe bundled-skill file extraction and materialization"
+      "ownedPartition": "bounded safe bundled-skill file extraction and materialization",
+      "controllerStatus": "accepted"
     },
     {
       "id": "TOOL-007",
