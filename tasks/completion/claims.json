@@ -821,6 +821,12 @@
       "session": "ses_f1d0ba49cffecWjUhXbmWjiMXR",
       "status": "blocked"
     },
+    "POLICY-MANDATORY-DELEGATION-W4": {
+      "blockedNote": "Canonical validate_repository and convergence gates fail on pre-existing backlog exhaustion (51/58 findings); independent verifier verdict pending.",
+      "scratchpad": "worklog/POLICY-MANDATORY-DELEGATION-W4.md",
+      "session": "ses_f1c8afbdaffeRqH2nt6eM5EFHw",
+      "status": "blocked"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",

@@ -156,7 +156,7 @@ These apply to the main agent AND every delegated subagent.
 - All repository research and source inspection MUST be delegated unconditionally to a subagent. No exception for size, urgency, or claimed triviality. If delegation is unavailable (depth limit, capacity, routing failure), that is a blocker to record and escalate, never a trigger for self-execution.
 - The subagent one-product-file ownership in the mandatory-delegation section above applies to this rule without exception: no integration lease, lease loophole, or multi-file ownership for orchestrator-dispatched or gate repair work. A failed, missing, interrupted or blocked lane is redelegated after recording evidence and reclaiming through `tools/completion_claims.py`, not performed by the main agent.
 - Every receipt for delegated work produced under this rule MUST record the exact commands and results, frozen test hash(es) or `N/A` with reason, candidate commit hash, pushed branch/ref, scratchpad path, resource notes, and the independent verifier verdict, per the mandatory-delegation receipt fields.
-- The only shell the main agent may run are the harness-sanctioned orchestration duties that policy itself assigns to the orchestrator: `tools/completion_claims.py` claim/reclaim/release bookkeeping, and landing a completed delegated lane (commit, push, rebase per `### Landing work`). These are session/claim bookkeeping, not task execution: research, validation, gates, tests and builds remain delegated.
+- The only shell the main agent may run are the harness-sanctioned claim duties that policy itself assigns to the orchestrator: `tools/completion_claims.py` claim/reclaim/release bookkeeping. Landing, committing, pushing, rebasing, validation, gates, tests and builds are delegated; the main agent reviews the resulting receipts and artifacts only.
 - Delegation does not relax any existing worker contract: retain TDD frozen-RED discipline, security policy, convergence gates, resource budgets, one-file ownership, task-claim ledger rules, and OpenCode V2 behavior parity in `PLAN.md` sections 1-2.
 
 ### 8 GB interactive test budget
@@ -215,8 +215,10 @@ These apply to the main agent AND every delegated subagent.
   `python3 tools/validate_repository.py`. It checks backlog exhaustion, the
   checked-in DISC-003 reconciliation manifest, and plan structure before any
   lane-specific verification.
-- Give each delegated lane exactly ONE owned file. Pre-wire shared files
-  (`lib.rs`) yourself before fan-out so concurrent lanes never race.
+- Give each delegated lane exactly ONE owned file. Assign shared files
+  (`lib.rs`) to a subagent under one-product-file ownership; serialize writes to
+  that file so concurrent lanes never race. The main agent does not pre-wire or
+  integrate shared files.
 - A lane is only done when its artifact passes `python3 tools/lane_gate.py`.
   That gate re-checks the file on disk and runs the Rust test target - it does
   not read the subagent's self-report.
@@ -247,15 +249,20 @@ These apply to the main agent AND every delegated subagent.
   integration/abandonment; reclaiming a foreign claim requires recorded
   evidence via `cc.reclaim(root, tid, session, evidence)`.
 
-### Landing work: commit and push per feature (mandatory)
-- Every completed lane is LANDED, not left green in a working tree: commit the
-  lane's files (owned file, scratchpad, `tasks/completion/claims.json`,
-  authored RED tests) and push. If `main` advanced, rebase, re-run the frozen
-  tests on the integrated tree, then push. Never force-push.
+### Landing work: delegated-worker responsibility (mandatory)
+- Each completed delegated lane is LANDED, not left green in a working tree:
+  its subagent commits only its lane files (owned file, scratchpad,
+  `tasks/completion/claims.json`, authored RED tests) and pushes. If `main`
+  advanced, the responsible delegated worker rebases, reruns frozen tests on
+  the integrated tree, then pushes. Never force-push. The main agent does not
+  commit, push, rebase, or integrate repository work; it reviews the resulting
+  receipt and artifact only.
 - Larger or race-prone lanes use a git worktree on a branch `lane/<TASK-ID>`:
-  push the branch to the remote FIRST (it must persist as a reference), merge
-  into `main`, re-run frozen tests on the merged tree, push, then remove the
-  WORKTREE only. Remote lane branches are never deleted by workers; branch
-  deletion on the remote is an orchestrator/human decision.
+  the responsible delegated worker pushes the branch to the remote FIRST (it
+  must persist as a reference), merges into `main`, reruns frozen tests on the
+  merged tree, pushes, then removes the WORKTREE only. Remote lane branches are
+  never deleted by workers; branch deletion on the remote is an
+  orchestrator/human decision. The main agent does not perform these steps.
 - A lane is not integrated until its commit/merge hash is on `origin/main` and
-  the frozen tests pass on that exact integrated revision.
+  the frozen tests pass on that exact integrated revision; the main agent only
+  reviews the independent verification receipt for that revision.
