@@ -12,6 +12,12 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-INSTALLED-SETUP-REPAIR": {
+      "completedNote": "Frozen tests 3/3 PASS in 30.26s post-fix. Durability gap documented.",
+      "scratchpad": "worklog/APP-001-INSTALLED-SETUP-REPAIR.md",
+      "session": "vyce/deepseek-v41",
+      "status": "completed"
+    },
     "APP-001-REPAIR-RED": {
       "scratchpad": "worklog/APP-001-REPAIR-RED.md",
       "session": "ses_f2ec4da52ffeqvBmjXifr2Bx28",

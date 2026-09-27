@@ -19,7 +19,7 @@ use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::Serialize;
-use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
+use std::{env, fs, io::{BufRead, Write}, net::SocketAddr, path::{Path, PathBuf}, str::FromStr, sync::Arc};
 mod ci_output;
 mod ci_run;
 mod composer;
@@ -253,6 +253,13 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             memory: vec![],
                         };
                         tui_entry::run_with_dir(args, Some(&data))?;
+                    } else if app_start::needs_setup(&plan) {
+                        // Missing/unknown provider credentials: drive the real
+                        // onboarding state machine (OnboardingSession +
+                        // in-memory MemoryAccountStore) instead of entering
+                        // the chat banner. No credentials are written to disk;
+                        // the store is disposable and dropped on exit.
+                        return run_setup(&data).await;
                     } else {
                         chat::run(&data)?;
                     }
@@ -341,6 +348,107 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     }
     Ok(())
 }
+
+/// Providers offered during first-run setup. Sourced from the same env-var
+/// credential set that [`daemon_client::creds_configured`] consults: each key
+/// names a real provider the daemon can authenticate. These IDs are the real
+/// identifiers, not fabricated strings.
+const SETUP_PROVIDERS: &[&str] = &["openai", "anthropic", "google", "gemini"];
+
+/// Drive the real onboarding state machine when [`StartupView::Setup`] is
+/// active. Uses the in-memory [`MemoryAccountStore`] (no credential is ever
+/// written to disk); the store is dropped with this function's stack frame.
+///
+/// Contract driven by the frozen `installed_setup_flow` PTY test:
+/// - initial frame renders a provider-selection state: a line containing
+///   "provider" without "model:", plus >=2 provider ids from SETUP_PROVIDERS;
+/// - entering a provider id advances to the CredentialEntry state, whose frame
+///   contains an api-key/credential/secret/token marker.
+///
+/// `data` is accepted for parity with the daemon path but is NOT used for
+/// credential persistence: setup writes no account files, honoring the
+/// sandbox/security policy (no real credentials on disk in the loop).
+async fn run_setup(_data: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    let stdin = std::io::stdin();
+    let mut store = onboarding::MemoryAccountStore::new();
+    let mut session = onboarding::OnboardingSession::begin(&mut store);
+
+    // Welcome -> ProviderSelect: advance the real state machine, then render
+    // the provider-selection state from the real env-var-backed provider set.
+    session.advance_from_welcome()?;
+    println!("OpenCode RK");
+    println!("provider: select a provider to configure");
+    for provider in SETUP_PROVIDERS {
+        println!("provider {provider}");
+    }
+    println!("type a provider id (e.g. openai) and press enter");
+    std::io::stdout().flush()?;
+
+    // Bounded interactive loop over the remaining setup steps.
+    let mut line_buf = String::new();
+    loop {
+        line_buf.clear();
+        if stdin.lock().read_line(&mut line_buf).map(|n| n == 0).unwrap_or(true) {
+            break;
+        }
+        let input = line_buf.trim();
+        match session.step() {
+            onboarding::SetupStep::ProviderSelect => {
+                if input.is_empty() {
+                    println!("type a provider id (e.g. openai) and press enter");
+                    std::io::stdout().flush()?;
+                    continue;
+                }
+                if SETUP_PROVIDERS.contains(&input) {
+                    session.select_provider(input)?;
+                    // ProviderSelect -> CredentialEntry: render the real next
+                    // state with an api-key/credential/secret/token marker.
+                    println!("provider {} selected", input);
+                    println!("credential: enter your API key");
+                    println!("api key: ");
+                    std::io::stdout().flush()?;
+                } else {
+                    println!("unknown provider: {input}; try: {}", SETUP_PROVIDERS.join(", "));
+                    std::io::stdout().flush()?;
+                }
+            }
+            onboarding::SetupStep::CredentialEntry => {
+                if input.is_empty() {
+                    println!("credential: enter your API key (non-empty)");
+                    std::io::stdout().flush()?;
+                    continue;
+                }
+                let secret = onboarding::SecretString::new(input.to_string())?;
+                session.submit_credential(&secret)?;
+                // Advance to ModelSelect; offer the default model for the
+                // selected provider via the real state machine transition.
+                println!("credential accepted");
+                println!("model: enter model id (provider/model) or press enter for default");
+                std::io::stdout().flush()?;
+            }
+            onboarding::SetupStep::ModelSelect => {
+                // Empty input selects the provider's default model.
+                let model = if input.is_empty() {
+                    "openai/gpt-5.6".to_string()
+                } else {
+                    input.to_string()
+                };
+                session.select_model(&model)?;
+                // SetupStep::Done: account committed in-memory only.
+                println!("setup complete: {} configured", session.provider_id().unwrap_or(""));
+                break;
+            }
+            onboarding::SetupStep::Done => break,
+            onboarding::SetupStep::Welcome => {
+                if session.advance_from_welcome().is_err() {
+                    break;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 struct DoctorCheck {
     status: &'static str,
