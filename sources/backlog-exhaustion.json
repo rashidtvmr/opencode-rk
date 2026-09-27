@@ -4,35 +4,14 @@
   "status": "in-progress-not-release-evidence",
   "stories": [
     {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "AUTO-003",
-      "implementationCommits": [
-        "d8436e62b0fc18712cb803fa440dd7ae2084cecc"
-      ],
-      "localEvidencePaths": [
-        "tasks/AUTO-003.md",
-        "worklog/AUTO-003.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-002"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/AUTO-003.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/AUTO-003.md"
-    },
-    {
       "category": "explicit-blocker",
       "controllerStatus": "in-progress",
       "evidenceIds": [],
       "id": "AUTO-004",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/AUTO-004.md",
+        "worklog/AUTO-004.md",
         "requirements/user-requirements.json",
         "FEATURES.md",
         "worklog/AUTO-003.md"
@@ -44,22 +23,27 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/AUTO-004.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/AUTO-004.md"
     },
     {
       "category": "explicit-blocker",
-      "controllerStatus": "in-progress",
+      "controllerStatus": "not-started",
       "evidenceIds": [],
       "id": "AUTO-005",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/AUTO-005.md",
+        "worklog/AUTO-005.md",
+        "tools/check_tdd_pipeline.py",
+        "tools/ralph_loop.py",
+        "tools/lane_gate.py",
+        "docs/TDD.md",
         "requirements/user-requirements.json",
-        "FEATURES.md",
-        "worklog/AUTO-003.md"
+        "FEATURES.md"
       ],
-      "reasonKey": "automation-ownership-undefined",
+      "reasonKey": "controller-frozen-tdd-evidence-incomplete",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [
         "REQ-002",
@@ -67,9 +51,9 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/AUTO-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/AUTO-005.md"
     },
     {
       "category": "explicit-blocker",
@@ -78,6 +62,8 @@
       "id": "AUTO-006",
       "implementationCommits": [],
       "localEvidencePaths": [
+        "tasks/AUTO-006.md",
+        "worklog/AUTO-006.md",
         "requirements/user-requirements.json",
         "FEATURES.md",
         "worklog/AUTO-003.md"
@@ -89,120 +75,12 @@
       ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/AUTO-006.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/AUTO-006.md"
     },
     {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE"
-      ],
-      "id": "EXT-001",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [
-        "REQ-017"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE"
-      ],
-      "id": "EXT-002",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [
-        "REQ-017"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE",
-        "OC-REFERENCE-RUNTIME",
-        "OC-REFERENCE-GUIDANCE",
-        "OC-SESSION-CONTEXT-CALLER",
-        "OC-REFERENCE-TEST",
-        "OC-REFERENCE-GUIDANCE-TEST",
-        "OC-SESSION-SPEC"
-      ],
-      "id": "EXT-003",
-      "implementationCommits": [
-        "31a5adec20d0e70a2e02f4fdc1d626c14c5098b6"
-      ],
-      "localEvidencePaths": [
-        "tasks/EXT-003.md",
-        "worklog/EXT-003.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility",
-        "opencode.prompt-context"
-      ],
-      "taskCard": "tasks/EXT-003.md",
-      "taskStatus": "IMPLEMENTED (candidate; verifier/controller acceptance remains external)",
-      "worklog": "worklog/EXT-003.md"
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE"
-      ],
-      "id": "EXT-004",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
+      "category": "explicit-blocker",
       "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-PLUGIN-RUNTIME",
@@ -218,9 +96,16 @@
       ],
       "id": "EXT-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
+      "localEvidencePaths": [
+        "tasks/EXT-005.md",
+        "worklog/EXT-005.md",
+        "crates/tools/src/ext_manifest_lane.rs",
+        "crates/tools/src/lib.rs",
+        "sources/routing-ownership-gap.json",
+        "sources/extensibility-remaining-ownership-gap.json"
+      ],
+      "reasonKey": "manifest-validation-frozen-red-evidence-incomplete",
+      "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [
         "REQ-005"
       ],
@@ -229,69 +114,13 @@
         "opencode.extensibility",
         "opencode.legacy-compatibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE"
-      ],
-      "id": "EXT-006",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE",
-        "OC-INTEGRATION-AUTH",
-        "OC-INTEGRATION-HTTP",
-        "OC-INTEGRATION-TEST",
-        "OC-PROVIDER"
-      ],
-      "id": "EXT-007",
-      "implementationCommits": [
-        "b76d6126c97f928b5145dd19b6bdec1c4e70aa83"
-      ],
-      "localEvidencePaths": [
-        "tasks/EXT-007.md",
-        "worklog/EXT-007.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility",
-        "opencode.integration-auth"
-      ],
-      "taskCard": "tasks/EXT-007.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/EXT-007.md"
+      "taskCard": "tasks/EXT-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-005.md"
     },
     {
       "category": "explicit-blocker",
-      "controllerStatus": "in-progress",
+      "controllerStatus": "not-started",
       "evidenceIds": [
         "OC-PLUGIN-RUNTIME",
         "OC-PLUGIN-INTERNAL",
@@ -300,7 +129,12 @@
       ],
       "id": "EXT-008",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/EXT-008.md",
+        "worklog/EXT-008.md",
+        "crates/tools/src/plugin_hook_boundary.rs",
+        "sources/extensibility-remaining-ownership-gap.json"
+      ],
       "reasonKey": "plugin-hook-contract-mismatch",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [
@@ -310,105 +144,9 @@
       "surfaceIds": [
         "opencode.extensibility"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE"
-      ],
-      "id": "EXT-009",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [
-        "REQ-005"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE"
-      ],
-      "id": "EXT-010",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE"
-      ],
-      "id": "EXT-011",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-PLUGIN-RUNTIME",
-        "OC-PLUGIN-INTERNAL",
-        "OC-PLUGIN-TEST",
-        "OC-PLUGIN-LIFECYCLE"
-      ],
-      "id": "EXT-012",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "extensibility-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [
-        "REQ-005"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.extensibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/EXT-008.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/EXT-008.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -423,7 +161,10 @@
       ],
       "id": "INT-001",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-001.md",
+        "worklog/INT-001.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -431,9 +172,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-001.md"
     },
     {
       "category": "explicit-blocker",
@@ -454,7 +195,10 @@
       ],
       "id": "INT-002",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-002.md",
+        "worklog/INT-002.md"
+      ],
       "reasonKey": "repository-contract-mixes-side-effects",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [],
@@ -463,9 +207,9 @@
         "opencode.integrations",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-002.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -480,7 +224,10 @@
       ],
       "id": "INT-003",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-003.md",
+        "worklog/INT-003.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -488,44 +235,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [
-        "OC-INTEGRATION-AUTH",
-        "OC-INTEGRATION-HTTP",
-        "OC-INTEGRATION-TEST",
-        "OC-PROVIDER",
-        "OC-CLIENT-CONTRACT",
-        "OC-SERVER-API",
-        "OC-INTEGRATION-HTTP-HANDLER",
-        "OC-CLIENT-CONTRACT-TEST",
-        "OC-CLIENT-EVENT-TEST",
-        "OC-CLIENT-SPEC"
-      ],
-      "id": "INT-004",
-      "implementationCommits": [
-        "d8fa4854fcd680e5fe3dfe2b05c6a2151a340056"
-      ],
-      "localEvidencePaths": [
-        "tasks/INT-004.md",
-        "worklog/INT-004.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.integration-auth",
-        "opencode.integrations"
-      ],
-      "taskCard": "tasks/INT-004.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/INT-004.md"
+      "taskCard": "tasks/INT-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-003.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -540,7 +252,10 @@
       ],
       "id": "INT-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-005.md",
+        "worklog/INT-005.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -548,9 +263,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-005.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -565,7 +280,10 @@
       ],
       "id": "INT-006",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-006.md",
+        "worklog/INT-006.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -573,9 +291,9 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-006.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-006.md"
     },
     {
       "category": "unresolved-decomposition",
@@ -590,7 +308,10 @@
       ],
       "id": "INT-007",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-007.md",
+        "worklog/INT-007.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -598,64 +319,13 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-SCHEMA-EVENT",
-        "OC-SCHEMA-EVENT-MANIFEST",
-        "OC-PUBLIC-EVENT-MANIFEST",
-        "OC-PROTOCOL-EVENT-CALLER",
-        "OC-SCHEMA-EVENT-MANIFEST-TEST",
-        "OC-SCHEMA-CONTRACT-HYGIENE-TEST",
-        "OC-SCHEMA-PACKAGE-SPEC",
-        "OC-CLIENT-CONTRACT",
-        "OC-SERVER-API",
-        "OC-INTEGRATION-HTTP-HANDLER",
-        "OC-CLIENT-CONTRACT-TEST",
-        "OC-CLIENT-EVENT-TEST",
-        "OC-CLIENT-SPEC",
-        "OC-EVENT-V2-BRIDGE",
-        "OC-CONFIG-V2-COMPAT",
-        "OC-CONTROL-PLANE-HANDLER",
-        "OC-LEGACY-EVENT-TEST",
-        "OC-LEGACY-SCHEMA-IDENTITY-TEST",
-        "OC-V2-BOUNDARY-SPEC",
-        "OC-CONTROL-PLANE-MOVE",
-        "OC-CONTROL-PLANE-TEST",
-        "OC-HTTPAPI-ROUTE-SPEC"
-      ],
-      "id": "INT-008",
-      "implementationCommits": [
-        "b496878d8192dc3b10d56c00e68597354f99ea32",
-        "4e779bedd3018b97ccb981c2edeb6163b0181f83",
-        "39887dda97eb7163c8d8725a5a9ecfddc00a9234"
-      ],
-      "localEvidencePaths": [
-        "tasks/INT-008.md",
-        "worklog/INT-008.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.contracts-schema",
-        "opencode.integrations",
-        "opencode.legacy-compatibility",
-        "opencode.server-control-plane"
-      ],
-      "taskCard": "tasks/INT-008.md",
-      "taskStatus": "IMPLEMENTED (candidate; verifier/controller acceptance remains external)",
-      "worklog": "worklog/INT-008.md"
+      "taskCard": "tasks/INT-007.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-007.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-CLIENT-CONTRACT",
         "OC-SERVER-API",
@@ -666,7 +336,10 @@
       ],
       "id": "INT-009",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-009.md",
+        "worklog/INT-009.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -674,13 +347,13 @@
       "surfaceIds": [
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-009.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-009.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-ENTERPRISE-SHARE",
         "OC-FUNCTION-REMOTE",
@@ -696,7 +369,10 @@
       ],
       "id": "INT-010",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/INT-010.md",
+        "worklog/INT-010.md"
+      ],
       "reasonKey": "integration-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -712,13 +388,13 @@
         "opencode.enterprise-remote",
         "opencode.integrations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/INT-010.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/INT-010.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-CONFIG-RUNTIME",
         "OC-STATE-RUNTIME",
@@ -734,7 +410,10 @@
       ],
       "id": "OPS-001",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-001.md",
+        "worklog/OPS-001.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -746,13 +425,13 @@
       "surfaceIds": [
         "opencode.configuration-runtime"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-001.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-001.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-REPOSITORY-RUNTIME",
         "OC-REPOSITORY-CACHE",
@@ -763,7 +442,10 @@
       ],
       "id": "OPS-002",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-002.md",
+        "worklog/OPS-002.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -771,13 +453,13 @@
       "surfaceIds": [
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-002.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-002.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-REPOSITORY-RUNTIME",
         "OC-REPOSITORY-CACHE",
@@ -788,7 +470,10 @@
       ],
       "id": "OPS-003",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-003.md",
+        "worklog/OPS-003.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -796,13 +481,13 @@
       "surfaceIds": [
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-003.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-CONFIG-RUNTIME",
         "OC-STATE-RUNTIME",
@@ -824,7 +509,10 @@
       ],
       "id": "OPS-004",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-004.md",
+        "worklog/OPS-004.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -833,13 +521,13 @@
         "opencode.configuration-runtime",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-004.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-004.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-CONFIG-RUNTIME",
         "OC-STATE-RUNTIME",
@@ -855,7 +543,10 @@
       ],
       "id": "OPS-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-005.md",
+        "worklog/OPS-005.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -863,13 +554,13 @@
       "surfaceIds": [
         "opencode.configuration-runtime"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-005.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-005.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-REPOSITORY-RUNTIME",
         "OC-REPOSITORY-CACHE",
@@ -880,7 +571,10 @@
       ],
       "id": "OPS-006",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-006.md",
+        "worklog/OPS-006.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -888,13 +582,13 @@
       "surfaceIds": [
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-006.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-006.md"
     },
     {
       "category": "explicit-blocker",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-EFFECT-LAYER-NODE",
         "OC-EFFECT-RUNTIME",
@@ -912,7 +606,10 @@
       ],
       "id": "OPS-007",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-007.md",
+        "worklog/OPS-007.md"
+      ],
       "reasonKey": "effect-runtime-cross-surface-ownership",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [
@@ -924,13 +621,13 @@
         "opencode.effect-runtime",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-007.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-007.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-CONFIG-RUNTIME",
         "OC-STATE-RUNTIME",
@@ -952,7 +649,10 @@
       ],
       "id": "OPS-008",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-008.md",
+        "worklog/OPS-008.md"
+      ],
       "reasonKey": "operations-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -961,13 +661,13 @@
         "opencode.configuration-runtime",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-008.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-008.md"
     },
     {
       "category": "explicit-blocker",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-HTTP-RECORDER-API",
         "OC-HTTP-RECORDER-STATE",
@@ -984,7 +684,10 @@
       ],
       "id": "OPS-009",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/OPS-009.md",
+        "worklog/OPS-009.md"
+      ],
       "reasonKey": "recorder-cross-surface-side-effects",
       "reopenPolicy": "material-new-pinned-evidence-required",
       "requirementIds": [],
@@ -993,513 +696,13 @@
         "opencode.provider-recording",
         "opencode.repository-operations"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/OPS-009.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/OPS-009.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "REL-001",
-      "implementationCommits": [],
-      "localEvidencePaths": [
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md",
-        "docs/TDD.md",
-        "docs/SECURITY.md"
-      ],
-      "reasonKey": "release-assurance-not-product-owner",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [
-        "REQ-003"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "REL-002",
-      "implementationCommits": [],
-      "localEvidencePaths": [
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md",
-        "docs/TDD.md",
-        "docs/SECURITY.md"
-      ],
-      "reasonKey": "release-assurance-not-product-owner",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [
-        "REQ-004",
-        "REQ-035"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "REL-003",
-      "implementationCommits": [],
-      "localEvidencePaths": [
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md",
-        "docs/TDD.md",
-        "docs/SECURITY.md"
-      ],
-      "reasonKey": "release-assurance-not-product-owner",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [
-        "REQ-035"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-CONNECTIONS-REPO",
-        "NR-AUTH-ROUTING",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-ARCHITECTURE",
-        "NR-MODEL-AVAILABILITY-API",
-        "NR-PROVIDERS-API",
-        "NR-MODEL-AVAILABILITY-BADGE",
-        "NR-PROVIDERS-DASHBOARD",
-        "NR-PROVIDERS-STATUS-TEST",
-        "NR-CHAT"
-      ],
-      "id": "ROUTE-001",
-      "implementationCommits": [
-        "5e1c98ef6133f414dd9311a831dd20126cdbe3bf"
-      ],
-      "localEvidencePaths": [
-        "tasks/ROUTE-001.md",
-        "worklog/ROUTE-001.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-022"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.account-storage",
-        "9router.dashboard-api",
-        "9router.routing"
-      ],
-      "taskCard": "tasks/ROUTE-001.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/ROUTE-001.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-AUTH-ROUTING",
-        "NR-CHAT",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-ARCHITECTURE"
-      ],
-      "id": "ROUTE-002",
-      "implementationCommits": [
-        "2d1a47d7caad2b1ef044cb4f963a112c969623ea"
-      ],
-      "localEvidencePaths": [
-        "tasks/ROUTE-002.md",
-        "worklog/ROUTE-002.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-022"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.routing"
-      ],
-      "taskCard": "tasks/ROUTE-002.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/ROUTE-002.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-CONNECTIONS-REPO",
-        "NR-AUTH-ROUTING",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-ARCHITECTURE",
-        "NR-CHAT",
-        "NR-TOKEN-REFRESH",
-        "NR-CODEX-EXECUTOR",
-        "NR-CODEX-REFRESH-TEST"
-      ],
-      "id": "ROUTE-003",
-      "implementationCommits": [
-        "dabf09d16e3989ac1835b736a8a684d226d4bb84"
-      ],
-      "localEvidencePaths": [
-        "tasks/ROUTE-003.md",
-        "worklog/ROUTE-003.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.account-storage",
-        "9router.routing",
-        "9router.token-refresh"
-      ],
-      "taskCard": "tasks/ROUTE-003.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/ROUTE-003.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-CONNECTIONS-REPO",
-        "NR-AUTH-ROUTING",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-ARCHITECTURE",
-        "NR-CHAT",
-        "NR-TOKEN-REFRESH",
-        "NR-CODEX-EXECUTOR",
-        "NR-CODEX-REFRESH-TEST"
-      ],
-      "id": "ROUTE-004",
-      "implementationCommits": [
-        "47d749cfd62c66718d0ad58e8512c871bc91a121"
-      ],
-      "localEvidencePaths": [
-        "tasks/ROUTE-004.md",
-        "worklog/ROUTE-004.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.account-storage",
-        "9router.routing",
-        "9router.token-refresh"
-      ],
-      "taskCard": "tasks/ROUTE-004.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/ROUTE-004.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-MODEL-ROUTING",
-        "NR-CHAT",
-        "NR-MODEL-ROUTING-TEST",
-        "NR-ARCHITECTURE",
-        "NR-AUTH-ROUTING",
-        "NR-GITHUB-LOCK-TEST"
-      ],
-      "id": "ROUTE-005",
-      "implementationCommits": [
-        "116ef477b4489a22aa4edd9ec6525bcea2b9c3d5"
-      ],
-      "localEvidencePaths": [
-        "tasks/ROUTE-005.md",
-        "worklog/ROUTE-005.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-022"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.model-combos",
-        "9router.routing"
-      ],
-      "taskCard": "tasks/ROUTE-005.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/ROUTE-005.md"
-    },
-    {
-      "category": "explicit-blocker",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-OUTBOUND-PROXY",
-        "NR-CONNECTION-PROXY",
-        "NR-SETTINGS-API",
-        "NR-PROXY-SECURITY-TEST",
-        "NR-ARCHITECTURE",
-        "NR-AUTH-ROUTING",
-        "NR-CHAT",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-TOKEN-REFRESH",
-        "NR-CODEX-EXECUTOR",
-        "NR-CODEX-REFRESH-TEST",
-        "NR-RESPONSES-TRANSLATOR",
-        "NR-RESPONSES-TRANSLATION-TEST",
-        "NR-CODEX-TOOL-NORMALIZATION-TEST"
-      ],
-      "id": "ROUTE-006",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "proxy-authority-and-platform-boundary",
-      "reopenPolicy": "material-new-pinned-evidence-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.network-proxy",
-        "9router.routing",
-        "9router.token-refresh",
-        "9router.translation-proxy"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-MODEL-ROUTING",
-        "NR-CHAT",
-        "NR-MODEL-ROUTING-TEST",
-        "NR-ARCHITECTURE",
-        "NR-OUTBOUND-PROXY",
-        "NR-CONNECTION-PROXY",
-        "NR-SETTINGS-API",
-        "NR-PROXY-SECURITY-TEST",
-        "NR-AUTH-ROUTING",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-RESPONSES-TRANSLATOR",
-        "NR-CODEX-EXECUTOR",
-        "NR-RESPONSES-TRANSLATION-TEST",
-        "NR-CODEX-TOOL-NORMALIZATION-TEST"
-      ],
-      "id": "ROUTE-007",
-      "implementationCommits": [
-        "79448b709f32939f76a7f2b8b64d439ff0325625"
-      ],
-      "localEvidencePaths": [
-        "tasks/ROUTE-007.md",
-        "worklog/ROUTE-007.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.model-combos",
-        "9router.network-proxy",
-        "9router.routing",
-        "9router.translation-proxy"
-      ],
-      "taskCard": "tasks/ROUTE-007.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/ROUTE-007.md"
-    },
-    {
-      "category": "explicit-blocker",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-CONNECTIONS-REPO",
-        "NR-AUTH-ROUTING",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-ARCHITECTURE",
-        "NR-MODEL-AVAILABILITY-API",
-        "NR-PROVIDERS-API",
-        "NR-MODEL-AVAILABILITY-BADGE",
-        "NR-PROVIDERS-DASHBOARD",
-        "NR-PROVIDERS-STATUS-TEST",
-        "NR-SETTINGS-API",
-        "NR-SETTINGS-DASHBOARD",
-        "NR-SETTINGS-DB-TEST",
-        "NR-SETTINGS-E2E-TEST",
-        "NR-CHAT"
-      ],
-      "id": "ROUTE-008",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "routing-dashboard-ownership-overlap",
-      "reopenPolicy": "material-new-pinned-evidence-required",
-      "requirementIds": [
-        "REQ-016"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.account-storage",
-        "9router.dashboard-api",
-        "9router.dashboard-settings",
-        "9router.routing"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-CONNECTIONS-REPO",
-        "NR-AUTH-ROUTING",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-ARCHITECTURE",
-        "NR-MODEL-AVAILABILITY-API",
-        "NR-PROVIDERS-API",
-        "NR-MODEL-AVAILABILITY-BADGE",
-        "NR-PROVIDERS-DASHBOARD",
-        "NR-PROVIDERS-STATUS-TEST",
-        "NR-SETTINGS-API",
-        "NR-SETTINGS-DASHBOARD",
-        "NR-SETTINGS-DB-TEST",
-        "NR-SETTINGS-E2E-TEST",
-        "NR-CHAT"
-      ],
-      "id": "ROUTE-009",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "routing-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.account-storage",
-        "9router.dashboard-api",
-        "9router.dashboard-settings",
-        "9router.routing"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-AUTH-ROUTING",
-        "NR-CHAT",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-ARCHITECTURE"
-      ],
-      "id": "ROUTE-010",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "routing-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.routing"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-AUTH-ROUTING",
-        "NR-CHAT",
-        "NR-GITHUB-LOCK-TEST",
-        "NR-ARCHITECTURE"
-      ],
-      "id": "ROUTE-011",
-      "implementationCommits": [
-        "20155fed4de0bf97853e7a022a121672f8d8dd2f"
-      ],
-      "localEvidencePaths": [
-        "tasks/ROUTE-011.md",
-        "worklog/ROUTE-011.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-022"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.routing"
-      ],
-      "taskCard": "tasks/ROUTE-011.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/ROUTE-011.md"
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-SHARE-SQL",
-        "OC-ENTERPRISE-SHARE",
-        "OC-ENTERPRISE-SHARE-ROUTE",
-        "OC-SHARE-NEXT-CALLER",
-        "OC-ENTERPRISE-SHARE-TEST",
-        "OC-SHARE-NEXT-TEST",
-        "OC-STORAGE-REMOVE-DB-SPEC"
-      ],
-      "id": "SHARE-001",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "sharing-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [
-        "REQ-007"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.sharing"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-SHARE-SQL",
-        "OC-ENTERPRISE-SHARE",
-        "OC-ENTERPRISE-SHARE-ROUTE",
-        "OC-SHARE-NEXT-CALLER",
-        "OC-ENTERPRISE-SHARE-TEST",
-        "OC-SHARE-NEXT-TEST",
-        "OC-STORAGE-REMOVE-DB-SPEC"
-      ],
-      "id": "SHARE-002",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "sharing-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.sharing"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-ENTERPRISE-SHARE",
         "OC-FUNCTION-REMOTE",
@@ -1513,7 +716,10 @@
       ],
       "id": "SHARE-003",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/SHARE-003.md",
+        "worklog/SHARE-003.md"
+      ],
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [],
@@ -1529,13 +735,13 @@
         "opencode.enterprise-remote",
         "opencode.sharing"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-003.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/SHARE-003.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-SHARE-SQL",
         "OC-ENTERPRISE-SHARE",
@@ -1547,7 +753,10 @@
       ],
       "id": "SHARE-004",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/SHARE-004.md",
+        "worklog/SHARE-004.md"
+      ],
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -1557,13 +766,13 @@
       "surfaceIds": [
         "opencode.sharing"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-004.md",
+      "taskStatus": "NOT STARTED",
+      "worklog": "worklog/SHARE-004.md"
     },
     {
       "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "evidenceIds": [
         "OC-SHARE-SQL",
         "OC-ENTERPRISE-SHARE",
@@ -1575,7 +784,10 @@
       ],
       "id": "SHARE-005",
       "implementationCommits": [],
-      "localEvidencePaths": [],
+      "localEvidencePaths": [
+        "tasks/SHARE-005.md",
+        "worklog/SHARE-005.md"
+      ],
       "reasonKey": "sharing-family-not-decomposed",
       "reopenPolicy": "source-grounded-task-decomposition-required",
       "requirementIds": [
@@ -1585,934 +797,55 @@
       "surfaceIds": [
         "opencode.sharing"
       ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "TOOL-015",
-      "implementationCommits": [
-        "2780889f1182ea65bb61e18e939a6c2ab037caca"
-      ],
-      "localEvidencePaths": [
-        "tasks/TOOL-015.md",
-        "worklog/TOOL-015.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-037"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/TOOL-015.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/TOOL-015.md"
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-001",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-002",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-APP-SERVER-PROTOCOL",
-        "OC-APP-TERMINAL-WS",
-        "OC-APP-CLIENT-ROOT",
-        "OC-APP-SERVER-PROTOCOL-TEST",
-        "OC-APP-TERMINAL-WS-TEST",
-        "OC-APP-MODEL-SELECTION-E2E",
-        "OC-APP-V1-MIGRATION-SPEC",
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-003",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-023"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.app-client",
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-004",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-008"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-005",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-013"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-SETTINGS-API",
-        "NR-SETTINGS-DASHBOARD",
-        "NR-SETTINGS-DB-TEST",
-        "NR-SETTINGS-E2E-TEST",
-        "NR-ARCHITECTURE",
-        "OC-APP-SERVER-PROTOCOL",
-        "OC-APP-TERMINAL-WS",
-        "OC-APP-CLIENT-ROOT",
-        "OC-APP-SERVER-PROTOCOL-TEST",
-        "OC-APP-TERMINAL-WS-TEST",
-        "OC-APP-MODEL-SELECTION-E2E",
-        "OC-APP-V1-MIGRATION-SPEC",
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-006",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-016"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.dashboard-settings",
-        "opencode.app-client",
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-007",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-018"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC",
-        "OC-PERMISSION-RUNTIME",
-        "OC-BASH-TOOL",
-        "OC-PERMISSION-TEST",
-        "OC-TOOLS-SPEC"
-      ],
-      "id": "UI-008",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-021"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui",
-        "opencode.permission-runtime"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-APP-SERVER-PROTOCOL",
-        "OC-APP-TERMINAL-WS",
-        "OC-APP-CLIENT-ROOT",
-        "OC-APP-SERVER-PROTOCOL-TEST",
-        "OC-APP-TERMINAL-WS-TEST",
-        "OC-APP-MODEL-SELECTION-E2E",
-        "OC-APP-V1-MIGRATION-SPEC",
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-009",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-019"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.app-client",
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-010",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-017"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "NR-SETTINGS-API",
-        "NR-SETTINGS-DASHBOARD",
-        "NR-SETTINGS-DB-TEST",
-        "NR-SETTINGS-E2E-TEST",
-        "NR-ARCHITECTURE",
-        "OC-APP-SERVER-PROTOCOL",
-        "OC-APP-TERMINAL-WS",
-        "OC-APP-CLIENT-ROOT",
-        "OC-APP-SERVER-PROTOCOL-TEST",
-        "OC-APP-TERMINAL-WS-TEST",
-        "OC-APP-MODEL-SELECTION-E2E",
-        "OC-APP-V1-MIGRATION-SPEC",
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-011",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-029",
-        "REQ-032"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "9router.dashboard-settings",
-        "opencode.app-client",
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC",
-        "OC-EVENT-V2-BRIDGE",
-        "OC-CONFIG-V2-COMPAT",
-        "OC-CONTROL-PLANE-HANDLER",
-        "OC-LEGACY-EVENT-TEST",
-        "OC-LEGACY-SCHEMA-IDENTITY-TEST",
-        "OC-V2-BOUNDARY-SPEC"
-      ],
-      "id": "UI-012",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-005"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui",
-        "opencode.legacy-compatibility"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "UI-013",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-APP-SERVER-PROTOCOL",
-        "OC-APP-TERMINAL-WS",
-        "OC-APP-CLIENT-ROOT",
-        "OC-APP-SERVER-PROTOCOL-TEST",
-        "OC-APP-TERMINAL-WS-TEST",
-        "OC-APP-MODEL-SELECTION-E2E",
-        "OC-APP-V1-MIGRATION-SPEC",
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "WEB-001",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.app-client",
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-APP-SERVER-PROTOCOL",
-        "OC-APP-TERMINAL-WS",
-        "OC-APP-CLIENT-ROOT",
-        "OC-APP-SERVER-PROTOCOL-TEST",
-        "OC-APP-TERMINAL-WS-TEST",
-        "OC-APP-MODEL-SELECTION-E2E",
-        "OC-APP-V1-MIGRATION-SPEC",
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC"
-      ],
-      "id": "WEB-002",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.app-client",
-        "opencode.clients-ui"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC",
-        "OC-DESKTOP-MAIN",
-        "OC-DESKTOP-SERVER",
-        "OC-DESKTOP-WSL-SERVERS",
-        "OC-DESKTOP-PRELOAD",
-        "OC-DESKTOP-MAIN-TEST",
-        "OC-DESKTOP-WSL-TEST",
-        "OC-DESKTOP-PACKAGE-SPEC"
-      ],
-      "id": "WEB-003",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.clients-ui",
-        "opencode.desktop-client"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "unresolved-decomposition",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-ENTERPRISE-SHARE",
-        "OC-FUNCTION-REMOTE",
-        "OC-ENTERPRISE-SHARE-ROUTE",
-        "OC-ENTERPRISE-SHARE-TEST",
-        "OC-FUNCTION-GITHUB-TEST",
-        "OC-SERVER-API",
-        "OC-CONTROL-PLANE-MOVE",
-        "OC-CONTROL-PLANE-HANDLER",
-        "OC-CONTROL-PLANE-TEST",
-        "OC-CLIENT-CONTRACT-TEST",
-        "OC-HTTPAPI-ROUTE-SPEC"
-      ],
-      "id": "WEB-004",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "hosted-remote-family-not-decomposed",
-      "reopenPolicy": "source-grounded-task-decomposition-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [
-        {
-          "missingKinds": [
-            "spec"
-          ],
-          "surfaceId": "opencode.enterprise-remote"
-        }
-      ],
-      "surfaceIds": [
-        "opencode.enterprise-remote",
-        "opencode.server-control-plane"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [
-        "OC-APP-SERVER-PROTOCOL",
-        "OC-APP-TERMINAL-WS",
-        "OC-APP-CLIENT-ROOT",
-        "OC-APP-SERVER-PROTOCOL-TEST",
-        "OC-APP-TERMINAL-WS-TEST",
-        "OC-APP-MODEL-SELECTION-E2E",
-        "OC-APP-V1-MIGRATION-SPEC",
-        "OC-TUI-RUNTIME",
-        "OC-CLI-TUI-BRIDGE",
-        "OC-TUI-LIFECYCLE-TEST",
-        "OC-TUI-PACKAGE-SPEC",
-        "OC-DESKTOP-MAIN",
-        "OC-DESKTOP-SERVER",
-        "OC-DESKTOP-WSL-SERVERS",
-        "OC-DESKTOP-PRELOAD",
-        "OC-DESKTOP-MAIN-TEST",
-        "OC-DESKTOP-WSL-TEST",
-        "OC-DESKTOP-PACKAGE-SPEC"
-      ],
-      "id": "WEB-005",
-      "implementationCommits": [],
-      "localEvidencePaths": [],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [
-        "opencode.app-client",
-        "opencode.clients-ui",
-        "opencode.desktop-client"
-      ],
-      "taskCard": null,
-      "taskStatus": null,
-      "worklog": null
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "AUTO-007",
-      "implementationCommits": [
-        "3be4d3c7329da6870fcc979c078de4b780f6c75d"
-      ],
-      "localEvidencePaths": [
-        "tasks/AUTO-007.md",
-        "worklog/AUTO-007.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-002",
-        "REQ-012"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/AUTO-007.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/AUTO-007.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "PROV-014",
-      "implementationCommits": [
-        "9800d0bc1a339d5a8fa1b2a60c53ae4a5f67d058"
-      ],
-      "localEvidencePaths": [
-        "tasks/PROV-014.md",
-        "worklog/PROV-014.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-038"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/PROV-014.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/PROV-014.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "OPS-010",
-      "implementationCommits": [
-        "01e22f7f73599e4b487a273cd58eba206f38eb09"
-      ],
-      "localEvidencePaths": [
-        "tasks/OPS-010.md",
-        "worklog/OPS-010.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-037"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/OPS-010.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/OPS-010.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "EXT-013",
-      "implementationCommits": [
-        "accb2e919fe3e02ac34aa4b42851ec710f8ca282"
-      ],
-      "localEvidencePaths": [
-        "tasks/EXT-013.md",
-        "worklog/EXT-013.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-017",
-        "REQ-027"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/EXT-013.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/EXT-013.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "SESS-019",
-      "implementationCommits": [
-        "29bfeb7086d88092cf2ccf5337da97b5e6d9b9e8"
-      ],
-      "localEvidencePaths": [
-        "tasks/SESS-019.md",
-        "worklog/SESS-019.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-008"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/SESS-019.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/SESS-019.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "SESS-020",
-      "implementationCommits": [
-        "d9a771492c085bed0b3a1e404abccee6a65553c6"
-      ],
-      "localEvidencePaths": [
-        "tasks/SESS-020.md",
-        "worklog/SESS-020.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-006"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/SESS-020.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/SESS-020.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "ROUTE-012",
-      "implementationCommits": [
-        "caf050398a84a6aced49b72c1c2bba9b5bb5555e"
-      ],
-      "localEvidencePaths": [
-        "tasks/ROUTE-012.md",
-        "worklog/ROUTE-012.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-018"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/ROUTE-012.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/ROUTE-012.md"
-    },
-    {
-      "category": "local-implemented-stale",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "REL-004",
-      "implementationCommits": [
-        "ba57eafd21facf9df2cb85300d8db87da62a1b75"
-      ],
-      "localEvidencePaths": [
-        "tasks/REL-004.md",
-        "worklog/REL-004.md",
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md",
-        "docs/TDD.md",
-        "docs/SECURITY.md"
-      ],
-      "reasonKey": "local-implemented-controller-stale",
-      "reopenPolicy": "controller-verifier-acceptance-external",
-      "requirementIds": [
-        "REQ-016"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/REL-004.md",
-      "taskStatus": "IMPLEMENTED",
-      "worklog": "worklog/REL-004.md"
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "UI-014",
-      "implementationCommits": [],
-      "localEvidencePaths": [
-        "tasks/UI-014.md",
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md"
-      ],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-016",
-        "REQ-018"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/UI-014.md",
+      "taskCard": "tasks/SHARE-005.md",
       "taskStatus": "NOT STARTED",
-      "worklog": null
+      "worklog": "worklog/SHARE-005.md"
     },
     {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "UI-015",
-      "implementationCommits": [],
-      "localEvidencePaths": [
-        "tasks/UI-015.md",
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md"
-      ],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-016"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/UI-015.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "UI-016",
-      "implementationCommits": [],
-      "localEvidencePaths": [
-        "tasks/UI-016.md",
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md"
-      ],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-016"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/UI-016.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "UI-017",
-      "implementationCommits": [],
-      "localEvidencePaths": [
-        "tasks/UI-017.md",
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md"
-      ],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-006",
-        "REQ-016"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/UI-017.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "dependency-constrained",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "UI-018",
-      "implementationCommits": [],
-      "localEvidencePaths": [
-        "tasks/UI-018.md",
-        "requirements/user-requirements.json",
-        "FEATURES.md",
-        "PLAN.md"
-      ],
-      "reasonKey": "client-architecture-dependency",
-      "reopenPolicy": "approved-client-architecture-and-dependencies-required",
-      "requirementIds": [
-        "REQ-019"
-      ],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/UI-018.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "in-progress",
-      "evidenceIds": [],
-      "id": "WEB-006",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-006.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-006.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
+      "category": "local-implemented-stale",
       "controllerStatus": "not-started",
       "evidenceIds": [],
       "id": "WEB-007",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-007.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "implementationCommits": [
+        "3db740249b4727719da89c26904bf69754d09ec8"
+      ],
+      "localEvidencePaths": [
+        "tasks/WEB-007.md",
+        "worklog/WEB-007.md"
+      ],
+      "reasonKey": "local-implemented-controller-stale",
+      "reopenPolicy": "controller-verifier-acceptance-external",
+      "requirementIds": [
+        "REQ-040"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/WEB-007.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "taskStatus": "IMPLEMENTED / NOT ACCEPTED",
+      "worklog": "worklog/WEB-007.md"
     },
     {
-      "category": "user-directed-product",
+      "category": "local-implemented-stale",
       "controllerStatus": "not-started",
       "evidenceIds": [],
       "id": "WEB-008",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-008.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "implementationCommits": [
+        "3db740249b4727719da89c26904bf69754d09ec8"
+      ],
+      "localEvidencePaths": [
+        "tasks/WEB-008.md",
+        "worklog/WEB-008.md"
+      ],
+      "reasonKey": "local-implemented-controller-stale",
+      "reopenPolicy": "controller-verifier-acceptance-external",
+      "requirementIds": [
+        "REQ-040"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/WEB-008.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "taskStatus": "IMPLEMENTED / NOT ACCEPTED",
+      "worklog": "worklog/WEB-008.md"
     },
     {
       "category": "user-directed-product",
@@ -2520,15 +853,23 @@
       "evidenceIds": [],
       "id": "WEB-009",
       "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-009.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
+      "localEvidencePaths": [
+        "tasks/WEB-009.md",
+        "worklog/WEB-009.md",
+        "requirements/user-requirements.json",
+        "FEATURES.md",
+        "docs/features/chatgpt-web-parity.md"
+      ],
       "reasonKey": "explicit-user-web-parity-requirement",
       "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/WEB-009.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "taskStatus": "IN PROGRESS / NOT ACCEPTED",
+      "worklog": "worklog/WEB-009.md"
     },
     {
       "category": "user-directed-product",
@@ -2536,15 +877,23 @@
       "evidenceIds": [],
       "id": "WEB-010",
       "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-010.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
+      "localEvidencePaths": [
+        "tasks/WEB-010.md",
+        "worklog/WEB-010.md",
+        "requirements/user-requirements.json",
+        "FEATURES.md",
+        "docs/features/chatgpt-web-parity.md"
+      ],
       "reasonKey": "explicit-user-web-parity-requirement",
       "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/WEB-010.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "taskStatus": "IN PROGRESS / NOT ACCEPTED",
+      "worklog": "worklog/WEB-010.md"
     },
     {
       "category": "user-directed-product",
@@ -2552,15 +901,23 @@
       "evidenceIds": [],
       "id": "WEB-011",
       "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-011.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
+      "localEvidencePaths": [
+        "tasks/WEB-011.md",
+        "worklog/WEB-011.md",
+        "requirements/user-requirements.json",
+        "FEATURES.md",
+        "docs/features/chatgpt-web-parity.md"
+      ],
       "reasonKey": "explicit-user-web-parity-requirement",
       "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/WEB-011.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "taskStatus": "IN PROGRESS / NOT ACCEPTED",
+      "worklog": "worklog/WEB-011.md"
     },
     {
       "category": "user-directed-product",
@@ -2568,15 +925,23 @@
       "evidenceIds": [],
       "id": "WEB-012",
       "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-012.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
+      "localEvidencePaths": [
+        "tasks/WEB-012.md",
+        "worklog/WEB-012.md",
+        "requirements/user-requirements.json",
+        "FEATURES.md",
+        "docs/features/chatgpt-web-parity.md"
+      ],
       "reasonKey": "explicit-user-web-parity-requirement",
       "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/WEB-012.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "taskStatus": "IN PROGRESS / NOT ACCEPTED",
+      "worklog": "worklog/WEB-012.md"
     },
     {
       "category": "user-directed-product",
@@ -2584,31 +949,23 @@
       "evidenceIds": [],
       "id": "WEB-013",
       "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-013.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
+      "localEvidencePaths": [
+        "tasks/WEB-013.md",
+        "worklog/WEB-013.md",
+        "requirements/user-requirements.json",
+        "FEATURES.md",
+        "docs/features/chatgpt-web-parity.md"
+      ],
       "reasonKey": "explicit-user-web-parity-requirement",
       "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/WEB-013.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-014",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-014.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-014.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "taskStatus": "IN PROGRESS / NOT ACCEPTED",
+      "worklog": "worklog/WEB-013.md"
     },
     {
       "category": "user-directed-product",
@@ -2616,64 +973,67 @@
       "evidenceIds": [],
       "id": "WEB-015",
       "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-015.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
+      "localEvidencePaths": [
+        "tasks/WEB-015.md",
+        "worklog/WEB-015.md",
+        "requirements/user-requirements.json",
+        "FEATURES.md",
+        "docs/features/chatgpt-web-parity.md"
+      ],
       "reasonKey": "explicit-user-web-parity-requirement",
       "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "requirementIds": [
+        "REQ-040"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
       "taskCard": "tasks/WEB-015.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "taskStatus": "IN PROGRESS / NOT ACCEPTED",
+      "worklog": "worklog/WEB-015.md"
     },
     {
-      "category": "user-directed-product",
+      "category": "explicit-blocker",
       "controllerStatus": "not-started",
       "evidenceIds": [],
-      "id": "WEB-016",
+      "id": "PROV-016",
       "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-016.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
+      "localEvidencePaths": [
+        "tasks/PROV-016.md",
+        "worklog/PROV-016.md",
+        "crates/providers/src/codex_oauth.rs",
+        "crates/providers/src/lib.rs",
+        "crates/providers/src/provider_dispatch.rs",
+        "sources/integrations-ownership-gap.json",
+        "docs/SECURITY.md",
+        "ralph.json",
+        "FEATURES.md"
+      ],
+      "reasonKey": "provider-auth-caller-path-unwired",
+      "reopenPolicy": "material-new-pinned-evidence-required",
+      "requirementIds": [
+        "REQ-041"
+      ],
       "surfaceEvidenceGaps": [],
       "surfaceIds": [],
-      "taskCard": "tasks/WEB-016.md",
+      "taskCard": "tasks/PROV-016.md",
       "taskStatus": "NOT STARTED",
-      "worklog": null
-    },
-    {
-      "category": "user-directed-product",
-      "controllerStatus": "not-started",
-      "evidenceIds": [],
-      "id": "WEB-017",
-      "implementationCommits": [],
-      "localEvidencePaths": ["tasks/WEB-017.md", "requirements/user-requirements.json", "FEATURES.md", "docs/features/chatgpt-web-parity.md"],
-      "reasonKey": "explicit-user-web-parity-requirement",
-      "reopenPolicy": "active-user-directed-product-work",
-      "requirementIds": ["REQ-040"],
-      "surfaceEvidenceGaps": [],
-      "surfaceIds": [],
-      "taskCard": "tasks/WEB-017.md",
-      "taskStatus": "NOT STARTED",
-      "worklog": null
+      "worklog": "worklog/PROV-016.md"
     }
   ],
   "summary": {
     "classificationCounts": {
-      "dependency-constrained": 22,
       "explicit-blocker": 9,
-      "local-implemented-stale": 21,
-      "unresolved-decomposition": 34,
-      "user-directed-product": 12
+      "local-implemented-stale": 2,
+      "unresolved-decomposition": 17,
+      "user-directed-product": 6
     },
-    "controllerAccepted": 133,
-    "nonAccepted": 98,
+    "controllerAccepted": 224,
+    "nonAccepted": 34,
     "ralphStatusCounts": {
-      "accepted": 133,
-      "in-progress": 31,
-      "not-started": 67
+      "accepted": 224,
+      "in-progress": 23,
+      "not-started": 11
     },
-    "storyCount": 231
+    "storyCount": 258
   }
 }

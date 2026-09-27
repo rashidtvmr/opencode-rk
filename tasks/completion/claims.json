@@ -205,6 +205,12 @@
       "session": "ses_f1e0fd968ffegSSu0Ya8MeX11z",
       "status": "blocked"
     },
+    "BACKLOG-LEDGER-34-W1": {
+      "blockedNote": "Ledger canonical: build_expected_ledger byte-equal to checked-in candidate; 34 unique IDs; categories exact (stale2/blockers9/directed6/unresolved17); no accepted IDs; no fabricated pins; parse+diff-check PASS. 93 validator errors = companion gap-manifest/frozen expectations (ROUTE/OPS/SHARE/release/legacy), not ledger drift. Blocked candidate landed; detail: worklog/BACKLOG-LEDGER-34-W1.md",
+      "scratchpad": "worklog/BACKLOG-LEDGER-34-W1.md",
+      "session": "ses_f1df6d405ffeEwEc7tXLigt1rR",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
