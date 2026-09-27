@@ -12,6 +12,12 @@
       "session": "ses_orch_APP001",
       "status": "completed"
     },
+    "APP-001-CLI-PROVIDERS-DEP-CLEAN-W1": {
+      "completedNote": "crates/cli/Cargo.toml:27 path dep; verify-project ok; DFS cycle none; diff vs e068f0b empty",
+      "scratchpad": "worklog/APP-001-CLI-PROVIDERS-DEP-CLEAN-W1.md",
+      "session": "ses_f1d3ebf5cffen1x70lfx5n7Xp9",
+      "status": "completed"
+    },
     "APP-001-FILE0600-BACKEND-VERIFY-W1": {
       "completedNote": "backend provider checks green; frozen CLI caller remains unwired: 2/5 pass, t01/t02 missing credentials dir, t04 symlink not rejected; CLI SHA c99b15bc unchanged",
       "scratchpad": "worklog/APP-001-FILE0600-BACKEND-VERIFY-W1.md",
