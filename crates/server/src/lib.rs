@@ -101,7 +101,7 @@ use opencode_rk_tools::registry::ToolRegistry;
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
+use std::{convert::Infallible, path::{Path as FsPath, PathBuf}, str::FromStr, sync::Arc};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
 static TURN_PERMITS: Semaphore = Semaphore::const_new(2);
@@ -830,6 +830,9 @@ struct TurnStreamState {
     enabled_tools: Vec<String>,
     /// Permission broker consulted before every tool execution.
     broker: PermissionBroker,
+    /// One root shared by file-write authorization and rooted writer.
+    project_root: PathBuf,
+    file_tool: FileTool,
     history_items: Vec<ResponsesItem>,
     loop_control: LoopController,
     pending_calls: Vec<RequestedCall>,
@@ -866,7 +869,7 @@ struct CallOutputItem {
 const MAX_FILE_WRITE_ARGUMENT_BYTES: usize = 1024 * 1024;
 
 /// Parse a provider write request without touching the filesystem.
-fn file_write_operation(arguments: &str) -> Result<FileOperation, String> {
+fn file_write_operation(arguments: &str, project_root: &FsPath) -> Result<FileOperation, String> {
     if arguments.len() > MAX_FILE_WRITE_ARGUMENT_BYTES {
         return Err("write arguments exceed size limit".to_owned());
     }
@@ -890,8 +893,13 @@ fn file_write_operation(arguments: &str) -> Result<FileOperation, String> {
     if path.len() > 4096 || content.len() > MAX_FILE_WRITE_ARGUMENT_BYTES {
         return Err("write path or content exceeds size limit".to_owned());
     }
+    let path = PathBuf::from(path);
     Ok(FileOperation::Write {
-        path: PathBuf::from(path),
+        path: if path.is_absolute() {
+            path
+        } else {
+            project_root.join(path)
+        },
         content: content.to_owned(),
         append,
     })
@@ -900,12 +908,17 @@ fn file_write_operation(arguments: &str) -> Result<FileOperation, String> {
 /// Dispatch the builtin write only through the file capability broker.
 ///
 /// The public/provider result deliberately contains no path or file payload.
-fn execute_write(arguments: &str, broker: &PermissionBroker) -> String {
-    let operation = match file_write_operation(arguments) {
+fn execute_write(
+    arguments: &str,
+    broker: &PermissionBroker,
+    project_root: &FsPath,
+    file_tool: &FileTool,
+) -> String {
+    let operation = match file_write_operation(arguments, project_root) {
         Ok(operation) => operation,
         Err(error) => return format!("error: {error}"),
     };
-    match FileTool::new().execute_authorized(operation, broker) {
+    match file_tool.execute_authorized(operation, broker) {
         Ok(result) if result.success => "write success".to_owned(),
         Ok(result) => {
             let error = result.error.unwrap_or_default();
@@ -964,6 +977,9 @@ async fn create_turn_stream(
     ) {
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
+
+    let project_root = std::env::current_dir()
+        .map_err(|_| ApiFailure::internal("unable to determine project root"))?;
 
     let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
     let user_message = state
@@ -1030,9 +1046,9 @@ async fn create_turn_stream(
             _permit: permit,
             tools,
             enabled_tools: turn_tools,
-            broker: PermissionBroker::new(SecurityPolicy::lean_default(
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
-            )),
+            broker: PermissionBroker::new(SecurityPolicy::lean_default(project_root.clone())),
+            project_root: project_root.clone(),
+            file_tool: FileTool::with_project_root(project_root),
             history_items,
             loop_control: LoopController::with_cap(max_steps),
             pending_calls: Vec::new(),
@@ -1224,7 +1240,12 @@ async fn create_turn_stream(
                                 .any(|enabled| *enabled == call.name);
                             let raw_output = if permitted {
                                 if call.name == "write" {
-                                    execute_write(&call.arguments, &state.broker)
+                                    execute_write(
+                                        &call.arguments,
+                                        &state.broker,
+                                        &state.project_root,
+                                        &state.file_tool,
+                                    )
                                 } else {
                                     match state.broker.authorize(&OperationIntent::Tool {
                                         name: call.name.clone(),
