@@ -9,6 +9,13 @@ use std::path::{Path, PathBuf};
 use std::{fs, io::Write};
 use thiserror::Error;
 
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use rustix::fs::{self as rustix_fs, fstat, mkdirat, openat, Mode, OFlags};
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::ffi::OsStr;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::os::fd::AsFd;
+
 /// Error type for file operations.
 #[derive(Debug, Error)]
 pub enum ToolError {
@@ -207,8 +214,8 @@ pub fn execute(op: FileOperation) -> Result<FileResult, ToolError> {
 /// Internal testability seam: [`execute`] with an optional write pre-open hook.
 ///
 /// The hook is invoked once per write that passes the symlink check, after any
-/// parent-directory creation and immediately before the leaf open. It cannot
-/// bypass broker authorization (that runs earlier in [`execute_authorized`]).
+/// parent-directory creation and immediately before the final parent recheck and
+/// leaf open. It cannot bypass broker authorization (earlier in [`execute_authorized`]).
 pub(crate) fn execute_with_preopen_hook(
     op: FileOperation,
     hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
@@ -266,84 +273,33 @@ fn write_file(
     append: bool,
     hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
 ) -> Result<FileResult, ToolError> {
-    if path_has_symlink_component(path)? {
-        return Ok(FileResult::failure(
-            "write denied: path contains a symlink component",
-        ));
-    }
-
-    if let Some(parent) = path.parent() {
-        if !parent.exists() {
-            fs::create_dir_all(parent).map_err(ToolError::IoError)?;
-        }
-    }
-
-    // Pre-open seam: after all component checks and parent creation,
-    // immediately before the actual leaf open. Production default: None.
-    if let Some(hook) = hook {
-        hook(path, append)?;
-    }
-
-    open_and_write(path, content, append)
-}
-
-/// Opens the leaf file (no-follow) and writes the bytes.
-fn open_and_write(path: &Path, content: &str, append: bool) -> Result<FileResult, ToolError> {
-    let mut options = fs::OpenOptions::new();
-    options.write(true).create(true);
-    if append {
-        options.append(true);
-    } else {
-        options.truncate(true);
-    }
-    #[cfg(unix)]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        use std::os::unix::fs::OpenOptionsExt;
-
-        #[cfg(target_os = "linux")]
-        options.custom_flags(0o400000); // O_NOFOLLOW
-        #[cfg(any(
-            target_os = "macos",
-            target_os = "ios",
-            target_os = "freebsd",
-            target_os = "openbsd",
-            target_os = "netbsd",
-            target_os = "dragonfly"
-        ))]
-        options.custom_flags(0x100); // O_NOFOLLOW
+        return write_file_descriptor_relative(path, content, append, hook);
     }
-    let mut file = options.open(path).map_err(ToolError::IoError)?;
-    file.write_all(content.as_bytes())
-        .map_err(ToolError::IoError)?;
-
-    Ok(FileResult::success(format!(
-        "Successfully wrote {} bytes to {:?}",
-        content.len(),
-        path
-    )))
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = (path, content, append, hook);
+        Ok(FileResult::failure(
+            "write denied: unsupported platform",
+        ))
+    }
 }
 
-/// Checks every existing component without following symlinks.
-///
-/// This closes the ordinary symlink escape before any write or parent creation.
-/// A concurrent rename can still change a path after this metadata walk; a
-/// descriptor-relative no-follow open would be required for a race-free
-/// guarantee and is not available through this cross-platform API.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn path_has_symlink_component(path: &Path) -> Result<bool, ToolError> {
     let cwd = normalize_platform_path(&std::env::current_dir().map_err(ToolError::IoError)?);
-    let absolute = if path.is_absolute() {
-        normalize_platform_path(path)
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
     } else {
         cwd.join(path)
     };
+    let absolute = normalize_platform_path(&joined);
     let mut current = PathBuf::new();
-
     for component in absolute.components() {
         current.push(component.as_os_str());
         match fs::symlink_metadata(&current) {
-            Ok(metadata) if metadata.file_type().is_symlink() => {
-                return Ok(true);
-            }
+            Ok(metadata) if metadata.file_type().is_symlink() => return Ok(true),
             Ok(_) => {}
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
             Err(_) => {
@@ -353,8 +309,179 @@ fn path_has_symlink_component(path: &Path) -> Result<bool, ToolError> {
             }
         }
     }
-
     Ok(false)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const MAX_WRITE_COMPONENTS: usize = 256;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+const MAX_WRITE_PATH_BYTES: usize = 4096;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+struct NormalizedWritePath {
+    components: Vec<std::ffi::OsString>,
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn write_file_descriptor_relative(
+    path: &Path,
+    content: &str,
+    append: bool,
+    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+) -> Result<FileResult, ToolError> {
+    let normalized = normalize_write_path(path)?;
+    if path_has_symlink_component(path)? {
+        return Ok(FileResult::failure(
+            "write denied: path contains a symlink component",
+        ));
+    }
+    let leaf = normalized
+        .components
+        .last()
+        .ok_or_else(|| ToolError::FileError("write denied: path has no leaf".to_owned()))?;
+    let parent_components = &normalized.components[..normalized.components.len() - 1];
+    let root = open_write_root()?;
+    let pinned = match traverse_write_parent(&root, parent_components, true) {
+        Ok(descriptors) => descriptors,
+        Err(ToolError::IoError(error)) if is_symlink_error(&error) => {
+            return Ok(FileResult::failure(
+                "write denied: path contains a symlink component",
+            ));
+        }
+        Err(error) => return Err(error),
+    };
+
+    // Pre-open seam: traversal and parent creation are complete; descriptor-relative
+    // re-traversal below catches parent swaps before opening the leaf.
+    if let Some(hook) = hook {
+        hook(path, append)?;
+    }
+
+    let current = traverse_write_parent(&root, parent_components, false)
+        .map_err(|_| ToolError::FileError("write denied: parent changed during write".to_owned()))?;
+    if !same_descriptor_path(&pinned, &current)? {
+        return Ok(FileResult::failure(
+            "write denied: parent changed during write",
+        ));
+    }
+    let parent = pinned
+        .last()
+        .ok_or_else(|| ToolError::FileError("write denied: missing parent".to_owned()))?;
+    let mut flags = OFlags::WRONLY | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    flags |= if append { OFlags::APPEND } else { OFlags::TRUNC };
+    let fd = openat(parent.as_fd(), OsStr::new(leaf), flags, Mode::from(0o600))
+        .map_err(|error| ToolError::IoError(error.into()))?;
+    let mut file = std::fs::File::from(fd);
+    file.write_all(content.as_bytes()).map_err(ToolError::IoError)?;
+
+    Ok(FileResult::success(format!(
+        "Successfully wrote {} bytes to {:?}",
+        content.len(),
+        path
+    )))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn normalize_write_path(path: &Path) -> Result<NormalizedWritePath, ToolError> {
+    if path.as_os_str().len() > MAX_WRITE_PATH_BYTES {
+        return Err(ToolError::FileError("write denied: path too long".to_owned()));
+    }
+    let cwd = std::env::current_dir().map_err(ToolError::IoError)?;
+    let joined = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        cwd.join(path)
+    };
+    let absolute = normalize_platform_path(&joined);
+    let mut components = Vec::new();
+    for component in absolute.components() {
+        match component {
+            std::path::Component::RootDir => {}
+            std::path::Component::CurDir => {}
+            std::path::Component::Normal(name) => components.push(name.to_owned()),
+            std::path::Component::ParentDir => {
+                return Err(ToolError::FileError(
+                    "write denied: path traversal".to_owned(),
+                ));
+            }
+            std::path::Component::Prefix(_) => {
+                return Err(ToolError::FileError(
+                    "write denied: unsupported path prefix".to_owned(),
+                ));
+            }
+        }
+    }
+    if components.is_empty() {
+        return Err(ToolError::FileError("write denied: path has no leaf".to_owned()));
+    }
+    if components.len() > MAX_WRITE_COMPONENTS {
+        return Err(ToolError::FileError(
+            "write denied: too many path components".to_owned(),
+        ));
+    }
+    Ok(NormalizedWritePath { components })
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn is_symlink_error(error: &std::io::Error) -> bool {
+    error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error())
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn open_write_root() -> Result<std::os::fd::OwnedFd, ToolError> {
+    openat(
+        rustix_fs::CWD,
+        Path::new("/"),
+        OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
+        Mode::empty(),
+    )
+    .map_err(|error| ToolError::IoError(error.into()))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn traverse_write_parent(
+    root: &std::os::fd::OwnedFd,
+    components: &[std::ffi::OsString],
+    create: bool,
+) -> Result<Vec<std::os::fd::OwnedFd>, ToolError> {
+    let mut descriptors = vec![rustix::io::dup(root).map_err(|error| ToolError::IoError(error.into()))?];
+    for component in components {
+        let parent = descriptors
+            .last()
+            .ok_or_else(|| ToolError::FileError("write denied: missing parent".to_owned()))?;
+        let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+        let next = match openat(parent.as_fd(), component.as_os_str(), flags, Mode::empty()) {
+            Ok(fd) => fd,
+            Err(error)
+                if create && error == rustix::io::Errno::NOENT => {
+                    mkdirat(parent.as_fd(), component.as_os_str(), Mode::from(0o700))
+                        .map_err(|error| ToolError::IoError(error.into()))?;
+                    openat(parent.as_fd(), component.as_os_str(), flags, Mode::empty())
+                        .map_err(|error| ToolError::IoError(error.into()))?
+                }
+            Err(error) => return Err(ToolError::IoError(error.into())),
+        };
+        descriptors.push(next);
+    }
+    Ok(descriptors)
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn same_descriptor_path(
+    expected: &[std::os::fd::OwnedFd],
+    current: &[std::os::fd::OwnedFd],
+) -> Result<bool, ToolError> {
+    if expected.len() != current.len() {
+        return Ok(false);
+    }
+    for (left, right) in expected.iter().zip(current) {
+        let left_stat = fstat(left).map_err(|error| ToolError::IoError(error.into()))?;
+        let right_stat = fstat(right).map_err(|error| ToolError::IoError(error.into()))?;
+        if left_stat.st_dev != right_stat.st_dev || left_stat.st_ino != right_stat.st_ino {
+            return Ok(false);
+        }
+    }
+    Ok(true)
 }
 
 #[cfg(target_os = "macos")]
@@ -370,7 +497,7 @@ fn normalize_platform_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "linux")]
 fn normalize_platform_path(path: &Path) -> PathBuf {
     path.to_path_buf()
 }
