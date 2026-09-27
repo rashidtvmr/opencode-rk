@@ -391,6 +391,12 @@
       "session": "ses_f425545f6ffe4N8Iq6BNvdwYSC",
       "status": "completed"
     },
+    "GAP-REQ017-34-W1": {
+      "blockedNote": "REQ-017 validator contradiction: 95 errors; hardcodes EXT-001/002 in-progress + null paths, requires stale backlog rows; UI-010/EXT-013 checks reject accepted states. Manifest assertions and diff checks pass. No authority to edit validator/Ralph/backlog.",
+      "scratchpad": "worklog/GAP-REQ017-34-W1.md",
+      "session": "ses_f1dd6415cffeV8brkRPYhk2ou0",
+      "status": "blocked"
+    },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
       "scratchpad": "worklog/LANE-AGENT-FILES.md",
