@@ -928,6 +928,7 @@ dependencies = [
  "opencode-rk-catalog",
  "opencode-rk-contracts",
  "opencode-rk-opentui-bridge",
+ "opencode-rk-providers",
  "opencode-rk-server",
  "opencode-rk-sessions",
  "opencode-rk-storage",
