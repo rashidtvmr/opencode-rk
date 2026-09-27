@@ -295,6 +295,12 @@
       "session": "ses_orch_DISC117",
       "status": "completed"
     },
+    "FEATURES-REOPEN-32-W1": {
+      "completedNote": "FEATURES status mirrors match all 258 Ralph statuses; only authorized 32 IDs changed. `python3 tools/validate_plan.py` and `python3 tools/validate_repository.py` stop on 54 pre-existing/cross-file backlog evidence reconciliation errors; no FEATURES stale-status errors. See worklog/FEATURES-REOPEN-32-W1.md. Independent acceptance remains external.",
+      "scratchpad": "worklog/FEATURES-REOPEN-32-W1.md",
+      "session": "ses_f1e48c1dbffeML6UMUl9lvgldy",
+      "status": "completed"
+    },
     "FIX-CI-APPROVAL": {
       "blockedNote": "ci_t02+TDD unit GREEN; full ci_mode hangs pre-existing in ci_t01 fixture join (exit124), outside ci_run.rs; zero test edits; see worklog",
       "scratchpad": "worklog/FIX-CI-APPROVAL.md",

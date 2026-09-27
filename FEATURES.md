@@ -6,11 +6,13 @@ Every story is mandatory to the declared full release even when its feature is o
 
 Stories: 258. Requirements: 47. Test obligations: 1290.
 
-## Acceptance sync - controller wave b60ceda (2026-09-16)
+## Historical acceptance proposal - controller wave b60ceda (2026-09-16)
 
-Controller-authorized status sync (sole-writer lease: FEATURES.md only).
-All 82 remaining non-accepted stories flip to accepted; 176 already
-accepted stay. Post-sync: 258/258 accepted. No product/test/ralph.json edit.
+Historical candidate proposal and evidence snapshot only; not current acceptance.
+Current Ralph status mirror: 226 accepted, 23 in-progress, 9 not-started (258 total).
+The following 82-row proposal and cited gates do not override current statuses,
+unresolved caveats, or independent acceptance requirements. This reconciliation
+does not newly accept any of the proposed 50.
 Pre-sync backup: `/tmp/opencode/FEATURES.pre-sync.md`.
 
 Bases: HEAD `b60ceda` (product bytes identical to `1be93d3`/`248f519` per
@@ -36,67 +38,67 @@ keep-or-revert pending. Bounds2 freeze: PROV-016 additive `codex_oauth_bounds.rs
 freeze waiver pending. WEB-013/015: boundary GREEN but card contracts need future
 lanes; NOT-ACCEPTED-stands recorded per row.
 
-### Sync rows (82)
+### Historical proposal rows (82; status mirrors follow current Ralph)
 
 | # | id | status | evidence | caveat |
 |---|---|---|---|---|
-| 1 | `AUTO-004` | accepted | I18 s7 r1, gate a | tokio-mechanism PROPOSAL2 unapplied |
-| 2 | `AUTO-005` | accepted | I18 s7 r2, gate a |  |
-| 3 | `AUTO-006` | accepted | I18 s7 r3, gate a | same tokio-pool caveat |
+| 1 | `AUTO-004` | in-progress | I18 s7 r1, gate a | tokio-mechanism PROPOSAL2 unapplied |
+| 2 | `AUTO-005` | accepted | I18 s7 r2, gate a | evidence conflict unresolved: `worklog/AUTO-005.md` says no controller-frozen tests, compiled RED, or independent verifier rerun; do not treat candidate receipts as acceptance proof |
+| 3 | `AUTO-006` | in-progress | I18 s7 r3, gate a | same tokio-pool caveat |
 | 4 | `EXT-001` | accepted | I18 s7 r4, gate d |  |
 | 5 | `EXT-002` | accepted | I18 s7 r5, gate d |  |
 | 6 | `EXT-004` | accepted | I18 s7 r6, gate d |  |
-| 7 | `EXT-005` | accepted | I18 s7 r7, gate d | keep-or-revert `pub mod ext_manifest_lane` (tools/lib.rs:19) |
+| 7 | `EXT-005` | in-progress | I18 s7 r7, gate d | keep-or-revert `pub mod ext_manifest_lane` (tools/lib.rs:19) |
 | 8 | `EXT-006` | accepted | I18 s7 r8, gate d |  |
-| 9 | `EXT-008` | accepted | I18 s7 r9, gate d |  |
+| 9 | `EXT-008` | accepted | I18 s7 r9, gate d | evidence conflict unresolved: `worklog/DISC-003.md` records plugin-hook-contract mismatch and explicit blocker; candidate receipts do not resolve ownership/semantics or acceptance |
 | 10 | `EXT-009` | accepted | I18 s7 r10, gate d |  |
 | 11 | `EXT-010` | accepted | I18 s7 r11, gate d |  |
 | 12 | `EXT-011` | accepted | I18 s7 r12, gate d |  |
 | 13 | `EXT-012` | accepted | I18 s7 r13, gate d |  |
-| 14 | `INT-001` | accepted | I18 s7 r14, gate c | quiesced-tree re-run formality |
-| 15 | `INT-002` | accepted | I18 s7 r15, gate c | quiesced-tree re-run formality |
-| 16 | `INT-003` | accepted | I18 s7 r16, gate c | quiesced-tree re-run formality |
-| 17 | `INT-005` | accepted | I18 s7 r17, gate c | quiesced-tree re-run formality |
-| 18 | `INT-006` | accepted | I18 s7 r18, gate c | quiesced-tree re-run formality |
-| 19 | `INT-007` | accepted | I18 s7 r19, gate c | quiesced-tree re-run formality |
-| 20 | `INT-009` | accepted | I18 s7 r20, gate c | quiesced-tree re-run formality |
-| 21 | `INT-010` | accepted | I18 s7 r21, gate c | quiesced-tree re-run formality |
-| 22 | `OPS-001` | accepted | I18 s7 r22, gate b | quiesced-tree re-run formality |
-| 23 | `OPS-002` | accepted | I18 s7 r23, gate b | quiesced-tree re-run formality |
-| 24 | `OPS-003` | accepted | I18 s7 r24, gate b | quiesced-tree re-run formality |
-| 25 | `OPS-004` | accepted | I18 s7 r25, gate b | quiesced-tree re-run formality |
-| 26 | `OPS-005` | accepted | I18 s7 r26, gate b | quiesced-tree re-run formality |
-| 27 | `OPS-006` | accepted | I18 s7 r27, gate b | quiesced-tree re-run formality |
-| 28 | `OPS-007` | accepted | I18 s7 r28, gate b | quiesced-tree re-run formality |
-| 29 | `OPS-008` | accepted | I18 s7 r29, gate b | quiesced-tree re-run formality |
-| 30 | `OPS-009` | accepted | I18 s7 r30, gate b | quiesced-tree re-run formality |
+| 14 | `INT-001` | in-progress | I18 s7 r14, gate c | quiesced-tree re-run formality |
+| 15 | `INT-002` | in-progress | I18 s7 r15, gate c | quiesced-tree re-run formality |
+| 16 | `INT-003` | in-progress | I18 s7 r16, gate c | quiesced-tree re-run formality |
+| 17 | `INT-005` | in-progress | I18 s7 r17, gate c | quiesced-tree re-run formality |
+| 18 | `INT-006` | in-progress | I18 s7 r18, gate c | quiesced-tree re-run formality |
+| 19 | `INT-007` | in-progress | I18 s7 r19, gate c | quiesced-tree re-run formality |
+| 20 | `INT-009` | in-progress | I18 s7 r20, gate c | quiesced-tree re-run formality |
+| 21 | `INT-010` | in-progress | I18 s7 r21, gate c | quiesced-tree re-run formality |
+| 22 | `OPS-001` | in-progress | I18 s7 r22, gate b | quiesced-tree re-run formality |
+| 23 | `OPS-002` | in-progress | I18 s7 r23, gate b | quiesced-tree re-run formality |
+| 24 | `OPS-003` | in-progress | I18 s7 r24, gate b | quiesced-tree re-run formality |
+| 25 | `OPS-004` | in-progress | I18 s7 r25, gate b | quiesced-tree re-run formality |
+| 26 | `OPS-005` | in-progress | I18 s7 r26, gate b | quiesced-tree re-run formality |
+| 27 | `OPS-006` | in-progress | I18 s7 r27, gate b | quiesced-tree re-run formality |
+| 28 | `OPS-007` | in-progress | I18 s7 r28, gate b | quiesced-tree re-run formality |
+| 29 | `OPS-008` | in-progress | I18 s7 r29, gate b | quiesced-tree re-run formality |
+| 30 | `OPS-009` | in-progress | I18 s7 r30, gate b | quiesced-tree re-run formality |
 | 31 | `REL-001` | accepted | I18 s7 r31, gate h; REL-001-FINAL Y |  |
 | 32 | `REL-002` | accepted | I18 s7 r32, gate h; REL-002-FINAL Y |  |
 | 33 | `REL-003` | accepted | I18 s7 r33, gate h; REL-003-FINAL Y |  |
 | 34 | `SHARE-001` | accepted | I18 s7 r34, gate e |  |
 | 35 | `SHARE-002` | accepted | I18 s7 r35, gate e |  |
-| 36 | `SHARE-003` | accepted | I18 s7 r36, gate e | unwired lane (by design) + quiesced re-run |
-| 37 | `SHARE-004` | accepted | I18 s7 r37, gate e | unwired lane (by design) + quiesced re-run |
-| 38 | `SHARE-005` | accepted | I18 s7 r38, gate e | unwired lane (by design) + quiesced re-run |
+| 36 | `SHARE-003` | in-progress | I18 s7 r36, gate e | unwired lane (by design) + quiesced re-run |
+| 37 | `SHARE-004` | in-progress | I18 s7 r37, gate e | unwired lane (by design) + quiesced re-run |
+| 38 | `SHARE-005` | in-progress | I18 s7 r38, gate e | unwired lane (by design) + quiesced re-run |
 | 39 | `WEB-001` | accepted | I18 s7 r39, gate g |  |
 | 40 | `WEB-002` | accepted | I18 s7 r40, gate g |  |
 | 41 | `WEB-003` | accepted | I18 s7 r41, gate g |  |
 | 42 | `WEB-004` | accepted | I18 s7 r42, gate g |  |
 | 43 | `WEB-005` | accepted | I18 s7 r43, gate g |  |
 | 44 | `WEB-006` | accepted | I18 s7 r44, gate g |  |
-| 45 | `WEB-007` | accepted | I18 s7 r45, gate g | write-paths disabled by design + browser unexecuted |
-| 46 | `WEB-008` | accepted | I18 s7 r46, gate g | write-paths disabled by design + browser unexecuted |
-| 47 | `WEB-009` | accepted | I18 s7 r47, gate g | write-paths disabled by design + browser unexecuted |
-| 48 | `WEB-010` | accepted | I18 s7 r48, gate g | write-paths disabled by design + browser unexecuted |
-| 49 | `WEB-011` | accepted | I18 s7 r49, gate g | write-paths disabled by design + browser unexecuted |
-| 50 | `WEB-012` | accepted | I18 s7 r50, gate g | write-paths disabled by design + browser unexecuted |
-| 51 | `WEB-013` | accepted | I18 s7 r51, gate g; WEB-013-FINAL Y (boundary) | card T01-T05 executor/replay absent; NOT ACCEPTED stands |
+| 45 | `WEB-007` | not-started | I18 s7 r45, gate g | write-paths disabled by design + browser unexecuted |
+| 46 | `WEB-008` | not-started | I18 s7 r46, gate g | write-paths disabled by design + browser unexecuted |
+| 47 | `WEB-009` | not-started | I18 s7 r47, gate g | write-paths disabled by design + browser unexecuted |
+| 48 | `WEB-010` | not-started | I18 s7 r48, gate g | write-paths disabled by design + browser unexecuted |
+| 49 | `WEB-011` | not-started | I18 s7 r49, gate g | write-paths disabled by design + browser unexecuted |
+| 50 | `WEB-012` | not-started | I18 s7 r50, gate g | write-paths disabled by design + browser unexecuted |
+| 51 | `WEB-013` | not-started | I18 s7 r51, gate g; WEB-013-FINAL Y (boundary) | card T01-T05 executor/replay absent; NOT ACCEPTED stands |
 | 52 | `WEB-014` | accepted | I18 s7 r52, gate g |  |
-| 53 | `WEB-015` | accepted | I18 s7 r53, gate g; WEB-015-FINAL Y (boundary) | card T01-T05 membership/memory absent; NOT ACCEPTED stands |
+| 53 | `WEB-015` | not-started | I18 s7 r53, gate g; WEB-015-FINAL Y (boundary) | card T01-T05 membership/memory absent; NOT ACCEPTED stands |
 | 54 | `WEB-016` | accepted | I18 s7 r54, gate g |  |
 | 55 | `WEB-017` | accepted | I18 s7 r55, gate g |  |
 | 56 | `PROV-015` | accepted | I18 s7 r56, gate c |  |
-| 57 | `PROV-016` | accepted | I18 s7 r57, gate c; PROV-016-FREEZE bE 17/17 | additive bounds/bounds2 untracked; freeze waiver pending |
+| 57 | `PROV-016` | not-started | I18 s7 r57, gate c; PROV-016-FREEZE bE 17/17 | additive bounds/bounds2 untracked; freeze waiver pending |
 | 58 | `PROV-017` | accepted | I18 s7 r58, gate c |  |
 | 59 | `PROV-018` | accepted | I18 s7 r59, gate c |  |
 | 60 | `PROV-019` | accepted | I18 s7 r60, gate c |  |
@@ -123,8 +125,16 @@ lanes; NOT-ACCEPTED-stands recorded per row.
 | 81 | `HEAD-001` | accepted | I18 s7 r81, gate f |  |
 | 82 | `HEAD-002` | accepted | I18 s7 r82, gate f |  |
 
-Remaining FEATURES-vs-ralph stales outside these 82 (controller-owned, out of
-lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`, `INT-004`, `INT-008`, `OPS-010`, `PROV-014`, `REL-004`, `ROUTE-001`, `ROUTE-002`, `ROUTE-003`, `ROUTE-004`, `ROUTE-005`, `ROUTE-006`, `ROUTE-007`, `ROUTE-008`, `ROUTE-009`, `ROUTE-010`, `ROUTE-011`, `ROUTE-012`, `SESS-019`, `SESS-020`, `TOOL-015`, `UI-001`, `UI-002`, `UI-003`, `UI-004`, `UI-005`, `UI-006`, `UI-007`, `UI-008`, `UI-009`, `UI-010`, `UI-011`, `UI-012`, `UI-013`, `UI-014`, `UI-015`, `UI-016`, `UI-017`, `UI-018`.
+Historical controller note from the earlier 82-row proposal, not a current status
+assertion: remaining listed stories were outside that proposal's lease and left
+untouched. Their actual row statuses are checked against current `ralph.json`.
+`AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`, `INT-004`, `INT-008`,
+`OPS-010`, `PROV-014`, `REL-004`, `ROUTE-001`, `ROUTE-002`, `ROUTE-003`,
+`ROUTE-004`, `ROUTE-005`, `ROUTE-006`, `ROUTE-007`, `ROUTE-008`, `ROUTE-009`,
+`ROUTE-010`, `ROUTE-011`, `ROUTE-012`, `SESS-019`, `SESS-020`, `TOOL-015`,
+`UI-001`, `UI-002`, `UI-003`, `UI-004`, `UI-005`, `UI-006`, `UI-007`, `UI-008`,
+`UI-009`, `UI-010`, `UI-011`, `UI-012`, `UI-013`, `UI-014`, `UI-015`, `UI-016`,
+`UI-017`, `UI-018`.
 
 ## Requirements to stories
 
@@ -183,17 +193,17 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 ### REQ-001 - Rust plus Tokio and maximum practical resource savings
 
 - `BASE-003` (accepted): TBD - see source audit Obligations: `BASE-003-T01`, `BASE-003-T02`, `BASE-003-T03`, `BASE-003-T04`, `BASE-003-T05`
-- `OPS-001` (accepted): TBD - see source audit Obligations: `OPS-001-T01`, `OPS-001-T02`, `OPS-001-T03`, `OPS-001-T04`, `OPS-001-T05`
-- `OPS-007` (accepted): TBD - see source audit Obligations: `OPS-007-T01`, `OPS-007-T02`, `OPS-007-T03`, `OPS-007-T04`, `OPS-007-T05`
+- `OPS-001` (in-progress): TBD - see source audit Obligations: `OPS-001-T01`, `OPS-001-T02`, `OPS-001-T03`, `OPS-001-T04`, `OPS-001-T05`
+- `OPS-007` (in-progress): TBD - see source audit Obligations: `OPS-007-T01`, `OPS-007-T02`, `OPS-007-T03`, `OPS-007-T04`, `OPS-007-T05`
 
 ### REQ-002 - Plan file Ralph JSON independent slices and autonomous loop
 
 - `AUTO-001` (accepted): TBD - see source audit Obligations: `AUTO-001-T01`, `AUTO-001-T02`, `AUTO-001-T03`, `AUTO-001-T04`, `AUTO-001-T05`
 - `AUTO-002` (accepted): TBD - see source audit Obligations: `AUTO-002-T01`, `AUTO-002-T02`, `AUTO-002-T03`, `AUTO-002-T04`, `AUTO-002-T05`
 - `AUTO-003` (accepted): TBD - see source audit Obligations: `AUTO-003-T01`, `AUTO-003-T02`, `AUTO-003-T03`, `AUTO-003-T04`, `AUTO-003-T05`
-- `AUTO-004` (accepted): TBD - see source audit Obligations: `AUTO-004-T01`, `AUTO-004-T02`, `AUTO-004-T03`, `AUTO-004-T04`, `AUTO-004-T05`
+- `AUTO-004` (in-progress): TBD - see source audit Obligations: `AUTO-004-T01`, `AUTO-004-T02`, `AUTO-004-T03`, `AUTO-004-T04`, `AUTO-004-T05`
 - `AUTO-005` (accepted): TBD - see source audit Obligations: `AUTO-005-T01`, `AUTO-005-T02`, `AUTO-005-T03`, `AUTO-005-T04`, `AUTO-005-T05`
-- `AUTO-006` (accepted): TBD - see source audit Obligations: `AUTO-006-T01`, `AUTO-006-T02`, `AUTO-006-T03`, `AUTO-006-T04`, `AUTO-006-T05`
+- `AUTO-006` (in-progress): TBD - see source audit Obligations: `AUTO-006-T01`, `AUTO-006-T02`, `AUTO-006-T03`, `AUTO-006-T04`, `AUTO-006-T05`
 - `AUTO-007` (accepted): Turn submission state machine Obligations: `AUTO-007-T01`..`T05`
 
 ### REQ-003 - Every OpenCode V2 feature accounted for
@@ -210,7 +220,7 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 
 ### REQ-005 - OpenCode V2 plugins including UI behavior
 
-- `EXT-005` (accepted): TBD - see source audit Obligations: `EXT-005-T01`, `EXT-005-T02`, `EXT-005-T03`, `EXT-005-T04`, `EXT-005-T05`
+- `EXT-005` (in-progress): TBD - see source audit Obligations: `EXT-005-T01`, `EXT-005-T02`, `EXT-005-T03`, `EXT-005-T04`, `EXT-005-T05`
 - `EXT-009` (accepted): TBD - see source audit Obligations: `EXT-009-T01`, `EXT-009-T02`, `EXT-009-T03`, `EXT-009-T04`, `EXT-009-T05`
 - `EXT-012` (accepted): TBD - see source audit Obligations: `EXT-012-T01`, `EXT-012-T02`, `EXT-012-T03`, `EXT-012-T04`, `EXT-012-T05`
 - `UI-012` (accepted): TBD - see source audit Obligations: `UI-012-T01`, `UI-012-T02`, `UI-012-T03`, `UI-012-T04`, `UI-012-T05`
@@ -227,8 +237,8 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 ### REQ-007 - Session sharing
 
 - `SHARE-001` (accepted): TBD - see source audit Obligations: `SHARE-001-T01`, `SHARE-001-T02`, `SHARE-001-T03`, `SHARE-001-T04`, `SHARE-001-T05`
-- `SHARE-004` (accepted): TBD - see source audit Obligations: `SHARE-004-T01`, `SHARE-004-T02`, `SHARE-004-T03`, `SHARE-004-T04`, `SHARE-004-T05`
-- `SHARE-005` (accepted): TBD - see source audit Obligations: `SHARE-005-T01`, `SHARE-005-T02`, `SHARE-005-T03`, `SHARE-005-T04`, `SHARE-005-T05`
+- `SHARE-004` (in-progress): TBD - see source audit Obligations: `SHARE-004-T01`, `SHARE-004-T02`, `SHARE-004-T03`, `SHARE-004-T04`, `SHARE-004-T05`
+- `SHARE-005` (in-progress): TBD - see source audit Obligations: `SHARE-005-T01`, `SHARE-005-T02`, `SHARE-005-T03`, `SHARE-005-T04`, `SHARE-005-T05`
 
 ### REQ-008 - Session forking
 
@@ -337,8 +347,8 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 ### REQ-024 - Lightweight delegation on basic PC or VPS
 
 - `AGENT-015` (accepted): TBD - see source audit Obligations: `AGENT-015-T01`, `AGENT-015-T02`, `AGENT-015-T03`, `AGENT-015-T04`, `AGENT-015-T05`
-- `OPS-001` (accepted): TBD - see source audit Obligations: `OPS-001-T01`, `OPS-001-T02`, `OPS-001-T03`, `OPS-001-T04`, `OPS-001-T05`
-- `OPS-007` (accepted): TBD - see source audit Obligations: `OPS-007-T01`, `OPS-007-T02`, `OPS-007-T03`, `OPS-007-T04`, `OPS-007-T05`
+- `OPS-001` (in-progress): TBD - see source audit Obligations: `OPS-001-T01`, `OPS-001-T02`, `OPS-001-T03`, `OPS-001-T04`, `OPS-001-T05`
+- `OPS-007` (in-progress): TBD - see source audit Obligations: `OPS-007-T01`, `OPS-007-T02`, `OPS-007-T03`, `OPS-007-T04`, `OPS-007-T05`
 
 ### REQ-025 - Deterministic destructive-command and SQL controls
 
@@ -382,7 +392,7 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 
 ### REQ-032 - Many features configurable and no hidden cost when off
 
-- `OPS-001` (accepted): TBD - see source audit Obligations: `OPS-001-T01`, `OPS-001-T02`, `OPS-001-T03`, `OPS-001-T04`, `OPS-001-T05`
+- `OPS-001` (in-progress): TBD - see source audit Obligations: `OPS-001-T01`, `OPS-001-T02`, `OPS-001-T03`, `OPS-001-T04`, `OPS-001-T05`
 - `BASE-006` (accepted): TBD - see source audit Obligations: `BASE-006-T01`, `BASE-006-T02`, `BASE-006-T03`, `BASE-006-T04`, `BASE-006-T05`
 - `UI-018` (accepted): TUI keybindings help Obligations: `UI-018-T01`..`T05`
 - `UI-011` (accepted): TBD - see source audit Obligations: `UI-011-T01`, `UI-011-T02`, `UI-011-T03`, `UI-011-T04`, `UI-011-T05`
@@ -426,22 +436,22 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 ### REQ-040 - ChatGPT-class local web client parity on the shared singleton daemon
 
 - `WEB-006` (accepted): Shared singleton daemon and embedded web host; web/future TUI/CLI reuse one per-user/data-dir backend authority Obligations: `WEB-006-T01`..`T05`
-- `WEB-007` (accepted): Full-width role-aligned transcript rows with action bars below each message Obligations: `WEB-007-T01`..`T05`
-- `WEB-008` (accepted): Real edit/retry/regenerate/branch actions with preserved original history Obligations: `WEB-008-T01`..`T05`
-- `WEB-009` (accepted): Collapsed safe reasoning summaries and tool activity, final answer separation and dedicated references Obligations: `WEB-009-T01`..`T05`
-- `WEB-010` (accepted): Accessible WYSIWYG structured composer with model/effort, commands, mentions and capability affordances Obligations: `WEB-010-T01`..`T05`
-- `WEB-011` (accepted): Real attachments, screenshots and local Library with bounded native provider mapping Obligations: `WEB-011-T01`..`T05`
-- `WEB-012` (accepted): Plugin/app/tool chooser with native discovery, permissions, approvals and durable tool results Obligations: `WEB-012-T01`..`T05`
-- `WEB-013` (accepted): Search/deep-research mode with source selection, plan, progress, steering and citations Obligations: `WEB-013-T01`..`T05`
+- `WEB-007` (not-started): Full-width role-aligned transcript rows with action bars below each message Obligations: `WEB-007-T01`..`T05`
+- `WEB-008` (not-started): Real edit/retry/regenerate/branch actions with preserved original history Obligations: `WEB-008-T01`..`T05`
+- `WEB-009` (not-started): Collapsed safe reasoning summaries and tool activity, final answer separation and dedicated references Obligations: `WEB-009-T01`..`T05`
+- `WEB-010` (not-started): Accessible WYSIWYG structured composer with model/effort, commands, mentions and capability affordances Obligations: `WEB-010-T01`..`T05`
+- `WEB-011` (not-started): Real attachments, screenshots and local Library with bounded native provider mapping Obligations: `WEB-011-T01`..`T05`
+- `WEB-012` (not-started): Plugin/app/tool chooser with native discovery, permissions, approvals and durable tool results Obligations: `WEB-012-T01`..`T05`
+- `WEB-013` (not-started): Search/deep-research mode with source selection, plan, progress, steering and citations Obligations: `WEB-013-T01`..`T05`
 - `WEB-014` (accepted): Pins, unified search, temporary chat and progressively paged long-history navigation Obligations: `WEB-014-T01`..`T05`
-- `WEB-015` (accepted): Projects/workspaces, reusable context and memory/source disclosure Obligations: `WEB-015-T01`..`T05`
+- `WEB-015` (not-started): Projects/workspaces, reusable context and memory/source disclosure Obligations: `WEB-015-T01`..`T05`
 - `WEB-016` (accepted): Voice and dictation backed by a real native audio/realtime adapter Obligations: `WEB-016-T01`..`T05`
 - `WEB-017` (accepted): Editable writing/code artifacts with safe preview/run/apply boundaries Obligations: `WEB-017-T01`..`T05`
 
 ### REQ-041 - Official provider compatibility and consent-based CLI authentication
 
 - `PROV-015` (accepted): Provider auth profile model with explicit auth provenance and redacted storage Obligations: `PROV-015-T01`..`T05`
-- `PROV-016` (accepted): Official OpenAI Codex OAuth connector with refresh, logout and account status Obligations: `PROV-016-T01`..`T05`
+- `PROV-016` (not-started): Official OpenAI Codex OAuth connector with refresh, logout and account status Obligations: `PROV-016-T01`..`T05`
 - `PROV-017` (accepted): Official Anthropic Claude Code OAuth connector with PKCE/loopback consent flow Obligations: `PROV-017-T01`..`T05`
 - `PROV-018` (accepted): Consent-based import of Codex and Claude Code local credential files Obligations: `PROV-018-T01`..`T05`
 - `PROV-019` (accepted): Documented provider request profiles with explicit identity and redacted diagnostics; no impersonation Obligations: `PROV-019-T01`..`T05`
@@ -549,9 +559,9 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 | `AUTO-001` | `REQ-002` | accepted | TBD - see source audit |
 | `AUTO-002` | `REQ-002`, `REQ-004` | accepted | TBD - see source audit |
 | `AUTO-003` | `REQ-002` | accepted | TBD - see source audit |
-| `AUTO-004` | `REQ-002` | accepted | TBD - see source audit |
+| `AUTO-004` | `REQ-002` | in-progress | TBD - see source audit |
 | `AUTO-005` | `REQ-002`, `REQ-004` | accepted | TBD - see source audit |
-| `AUTO-006` | `REQ-002` | accepted | TBD - see source audit |
+| `AUTO-006` | `REQ-002` | in-progress | TBD - see source audit |
 
 ### BASE (8 stories)
 
@@ -615,7 +625,7 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 | `EXT-002` | `REQ-017` | accepted | TBD - see source audit |
 | `EXT-003` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `EXT-004` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `EXT-005` | `REQ-005` | accepted | TBD - see source audit |
+| `EXT-005` | `REQ-005` | in-progress | TBD - see source audit |
 | `EXT-006` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `EXT-007` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `EXT-008` | `REQ-020` | accepted | TBD - see source audit |
@@ -628,30 +638,30 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
-| `INT-001` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `INT-002` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `INT-003` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `INT-001` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `INT-002` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `INT-003` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `INT-004` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `INT-005` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `INT-006` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `INT-007` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `INT-005` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `INT-006` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `INT-007` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `INT-008` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `INT-009` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `INT-010` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `INT-009` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `INT-010` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 
 ### OPS (10 stories)
 
 | Story | Requirements | Status | User story |
 |---|---|---|---|
-| `OPS-001` | `REQ-001`, `REQ-024`, `REQ-032` | accepted | TBD - see source audit |
-| `OPS-002` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `OPS-003` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `OPS-004` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `OPS-005` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `OPS-006` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `OPS-007` | `REQ-001`, `REQ-024` | accepted | TBD - see source audit |
-| `OPS-008` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `OPS-009` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `OPS-001` | `REQ-001`, `REQ-024`, `REQ-032` | in-progress | TBD - see source audit |
+| `OPS-002` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `OPS-003` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `OPS-004` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `OPS-005` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `OPS-006` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `OPS-007` | `REQ-001`, `REQ-024` | in-progress | TBD - see source audit |
+| `OPS-008` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `OPS-009` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 
 ### PROV (24 stories)
 
@@ -670,7 +680,7 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 | `PROV-011` | `REQ-010` | accepted | TBD - see source audit |
 | `PROV-012` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `PROV-015` | `REQ-041` | accepted | Provider auth profile model with explicit auth provenance and redacted storage |
-| `PROV-016` | `REQ-041` | accepted | Official OpenAI Codex OAuth connector |
+| `PROV-016` | `REQ-041` | not-started | Official OpenAI Codex OAuth connector |
 | `PROV-017` | `REQ-041` | accepted | Official Anthropic Claude Code OAuth connector |
 | `PROV-018` | `REQ-041` | accepted | Consent-based Codex and Claude Code local credential import |
 | `PROV-019` | `REQ-041` | accepted | Documented provider request profiles without impersonation |
@@ -753,9 +763,9 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 |---|---|---|---|
 | `SHARE-001` | `REQ-007` | accepted | TBD - see source audit |
 | `SHARE-002` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `SHARE-003` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
-| `SHARE-004` | `REQ-007` | accepted | TBD - see source audit |
-| `SHARE-005` | `REQ-007` | accepted | TBD - see source audit |
+| `SHARE-003` | - | in-progress | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
+| `SHARE-004` | `REQ-007` | in-progress | TBD - see source audit |
+| `SHARE-005` | `REQ-007` | in-progress | TBD - see source audit |
 
 ### TOOL (20 stories)
 
@@ -811,15 +821,15 @@ lease, left untouched): `AUTO-003`, `AUTO-007`, `EXT-003`, `EXT-007`, `EXT-013`,
 | `WEB-004` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `WEB-005` | - | accepted | Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json |
 | `WEB-006` | `REQ-040` | accepted | Shared singleton daemon and embedded web host - web, future TUI and CLI use one per-user/data-dir native backend authority without a separate web-only serve process |
-| `WEB-007` | `REQ-040` | accepted | Full-width role-aligned transcript rows with request/response action bars below each message and honest capability-gated actions |
-| `WEB-008` | `REQ-040` | accepted | Real edit, retry, regenerate and branch/fork actions preserve original conversation history and expose branch navigation |
-| `WEB-009` | `REQ-040` | accepted | Structured assistant turns render collapsed provider reasoning summaries and tool activity separately from final answer text with a dedicated references section; raw hidden chain-of-thought is never exposed |
-| `WEB-010` | `REQ-040` | accepted | Accessible WYSIWYG structured chat composer with model and effort controls, slash commands, mentions, attachment/tool/plugin affordances, drafts and stop/queue/steer state |
-| `WEB-011` | `REQ-040` | accepted | Real bounded files, images and screenshots through picker, paste, drag/drop and a searchable local Library with native attachment-provider mapping |
-| `WEB-012` | `REQ-040` | accepted | Composer plugin, app and tool discovery/selection backed by real native capabilities with permission approvals and durable tool-call results |
-| `WEB-013` | `REQ-040` | accepted | Search and deep-research mode with real source/tool selection, reviewable plan, progress, steering, cancellation and cited final results |
+| `WEB-007` | `REQ-040` | not-started | Full-width role-aligned transcript rows with request/response action bars below each message and honest capability-gated actions |
+| `WEB-008` | `REQ-040` | not-started | Real edit, retry, regenerate and branch/fork actions preserve original conversation history and expose branch navigation |
+| `WEB-009` | `REQ-040` | not-started | Structured assistant turns render collapsed provider reasoning summaries and tool activity separately from final answer text with a dedicated references section; raw hidden chain-of-thought is never exposed |
+| `WEB-010` | `REQ-040` | not-started | Accessible WYSIWYG structured chat composer with model and effort controls, slash commands, mentions, attachment/tool/plugin affordances, drafts and stop/queue/steer state |
+| `WEB-011` | `REQ-040` | not-started | Real bounded files, images and screenshots through picker, paste, drag/drop and a searchable local Library with native attachment-provider mapping |
+| `WEB-012` | `REQ-040` | not-started | Composer plugin, app and tool discovery/selection backed by real native capabilities with permission approvals and durable tool-call results |
+| `WEB-013` | `REQ-040` | not-started | Search and deep-research mode with real source/tool selection, reviewable plan, progress, steering, cancellation and cited final results |
 | `WEB-014` | `REQ-040` | accepted | Chat navigation parity with pins, unified history search, archive/share, temporary chat, progressive long-history paging and keyboard navigation |
-| `WEB-015` | `REQ-040` | accepted | Projects and workspaces group chats, files and reusable context with memory/context inspection and disclosure of sources used |
+| `WEB-015` | `REQ-040` | not-started | Projects and workspaces group chats, files and reusable context with memory/context inspection and disclosure of sources used |
 | `WEB-016` | `REQ-040` | accepted | Voice and dictation with explicit microphone state, visible transcript and a real native audio/realtime adapter |
 | `WEB-017` | `REQ-040` | accepted | Editable writing and code artifacts with copy/edit/undo/preview and explicitly authorized safe run/apply actions |
 
@@ -880,23 +890,23 @@ These stories carry `requirementIds: []` in `ralph.json`. They are still mandato
 - `EXT-007` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `EXT-010` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `EXT-011` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `INT-001` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `INT-002` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `INT-003` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `INT-001` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `INT-002` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `INT-003` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `INT-004` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `INT-005` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `INT-006` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `INT-007` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `INT-005` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `INT-006` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `INT-007` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `INT-008` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `INT-009` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `INT-010` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `OPS-002` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `OPS-003` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `OPS-004` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `OPS-005` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `OPS-006` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `OPS-008` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `OPS-009` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `INT-009` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `INT-010` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `OPS-002` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `OPS-003` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `OPS-004` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `OPS-005` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `OPS-006` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `OPS-008` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `OPS-009` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `PROV-001` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `PROV-002` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `PROV-003` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
@@ -930,7 +940,7 @@ These stories carry `requirementIds: []` in `ralph.json`. They are still mandato
 - `SESS-015` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `SESS-016` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `SHARE-002` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
-- `SHARE-003` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
+- `SHARE-003` (in-progress): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `TOOL-001` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `TOOL-002` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
 - `TOOL-003` (accepted): Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json
