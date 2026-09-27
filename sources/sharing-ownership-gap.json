@@ -39,45 +39,45 @@
   },
   "taskBindingState": {
     "SHARE-001": {
-      "controllerStatus": "not-started",
+      "controllerStatus": "accepted",
       "ralphStory": "TBD - see source audit",
       "requirementIds": [
         "REQ-007"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-001.md",
+      "worklog": "worklog/SHARE-001.md"
     },
     "SHARE-002": {
-      "controllerStatus": "not-started",
+      "controllerStatus": "accepted",
       "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "requirementIds": [],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-002.md",
+      "worklog": "worklog/SHARE-002.md"
     },
     "SHARE-003": {
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "ralphStory": "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json",
       "requirementIds": [],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-003.md",
+      "worklog": "worklog/SHARE-003.md"
     },
     "SHARE-004": {
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "ralphStory": "TBD - see source audit",
       "requirementIds": [
         "REQ-007"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-004.md",
+      "worklog": "worklog/SHARE-004.md"
     },
     "SHARE-005": {
-      "controllerStatus": "not-started",
+      "controllerStatus": "in-progress",
       "ralphStory": "TBD - see source audit",
       "requirementIds": [
         "REQ-007"
       ],
-      "taskCard": null,
-      "worklog": null
+      "taskCard": "tasks/SHARE-005.md",
+      "worklog": "worklog/SHARE-005.md"
     }
   },
   "requirementTopology": {
@@ -373,5 +373,121 @@
     "SHARE-003 cannot close until its enterprise-remote missing-spec/decomposition state is resolved or deliberately replaced by narrower source-grounded ownership without weakening the existing negative evidence.",
     "Any native queue/subscriber contract must define item/byte/session bounds, backpressure or coalescing policy, retry/loss behavior, scope/finalizer lifetime and slow/failing transport semantics before implementation.",
     "Any persistence/network implementation must explicitly own secret lifetime, user-DB mutation, external credentials/auth, deletion guarantees and remote resource lifetime; otherwise those partitions remain blocked."
-  ]
+  ],
+  "canonicalBacklogProjection": {
+    "source": "sources/backlog-exhaustion.json",
+    "controllerSource": "ralph.json",
+    "observedAtRevision": "f21a01e21a4a82b57dae641c032472585f84b2c4",
+    "summary": {
+      "classificationCounts": {
+        "explicit-blocker": 9,
+        "local-implemented-stale": 2,
+        "unresolved-decomposition": 17,
+        "user-directed-product": 6
+      },
+      "controllerAccepted": 224,
+      "nonAccepted": 34,
+      "ralphStatusCounts": {
+        "accepted": 224,
+        "in-progress": 23,
+        "not-started": 11
+      },
+      "storyCount": 258
+    },
+    "acceptedSharingStoryIds": [
+      "SHARE-001",
+      "SHARE-002"
+    ],
+    "unresolvedSharingRows": [
+      {
+        "id": "SHARE-003",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "sharing-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [],
+        "surfaceIds": [
+          "opencode.enterprise-remote",
+          "opencode.sharing"
+        ],
+        "surfaceEvidenceGaps": [
+          {
+            "missingKinds": [
+              "spec"
+            ],
+            "surfaceId": "opencode.enterprise-remote"
+          }
+        ],
+        "evidenceIds": [
+          "OC-ENTERPRISE-SHARE",
+          "OC-FUNCTION-REMOTE",
+          "OC-ENTERPRISE-SHARE-ROUTE",
+          "OC-ENTERPRISE-SHARE-TEST",
+          "OC-FUNCTION-GITHUB-TEST",
+          "OC-SHARE-SQL",
+          "OC-SHARE-NEXT-CALLER",
+          "OC-SHARE-NEXT-TEST",
+          "OC-STORAGE-REMOVE-DB-SPEC"
+        ],
+        "taskCard": "tasks/SHARE-003.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/SHARE-003.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "SHARE-004",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "sharing-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [
+          "REQ-007"
+        ],
+        "surfaceIds": [
+          "opencode.sharing"
+        ],
+        "surfaceEvidenceGaps": [],
+        "evidenceIds": [
+          "OC-SHARE-SQL",
+          "OC-ENTERPRISE-SHARE",
+          "OC-ENTERPRISE-SHARE-ROUTE",
+          "OC-SHARE-NEXT-CALLER",
+          "OC-ENTERPRISE-SHARE-TEST",
+          "OC-SHARE-NEXT-TEST",
+          "OC-STORAGE-REMOVE-DB-SPEC"
+        ],
+        "taskCard": "tasks/SHARE-004.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/SHARE-004.md",
+        "implementationCommits": []
+      },
+      {
+        "id": "SHARE-005",
+        "category": "unresolved-decomposition",
+        "controllerStatus": "in-progress",
+        "reasonKey": "sharing-family-not-decomposed",
+        "reopenPolicy": "source-grounded-task-decomposition-required",
+        "requirementIds": [
+          "REQ-007"
+        ],
+        "surfaceIds": [
+          "opencode.sharing"
+        ],
+        "surfaceEvidenceGaps": [],
+        "evidenceIds": [
+          "OC-SHARE-SQL",
+          "OC-ENTERPRISE-SHARE",
+          "OC-ENTERPRISE-SHARE-ROUTE",
+          "OC-SHARE-NEXT-CALLER",
+          "OC-ENTERPRISE-SHARE-TEST",
+          "OC-SHARE-NEXT-TEST",
+          "OC-STORAGE-REMOVE-DB-SPEC"
+        ],
+        "taskCard": "tasks/SHARE-005.md",
+        "taskStatus": "NOT STARTED",
+        "worklog": "worklog/SHARE-005.md",
+        "implementationCommits": []
+      }
+    ]
+  }
 }
