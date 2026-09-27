@@ -428,14 +428,36 @@ fn is_symlink_error(error: &std::io::Error) -> bool {
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn open_write_root() -> Result<std::os::fd::OwnedFd, ToolError> {
-    openat(
+/// Root directory file descriptor opened for descriptor-relative operations.
+///
+/// The root FD is opened ONCE per write operation with O_NOFOLLOW|O_DIRECTORY,
+/// providing a stable anchor for traversing paths without following symlinks.
+/// This observer seam allows tests to observe the root descriptor's metadata
+/// (device/inode identity) for verification without modifying production behavior.
+pub(crate) fn open_write_root_with_observer(
+    mut observer: Option<
+        &mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>,
+    >,
+) -> Result<std::os::fd::OwnedFd, ToolError> {
+    let fd = openat(
         rustix_fs::CWD,
         Path::new("/"),
         OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC,
         Mode::empty(),
     )
-    .map_err(|error| ToolError::IoError(error.into()))
+    .map_err(|error| ToolError::IoError(error.into()))?;
+    if let Some(obs) = observer.as_mut() {
+        obs(&fd)?;
+    }
+    Ok(fd)
+}
+
+/// Opens the root directory as a file descriptor for descriptor-relative operations.
+///
+/// This is the production entry point: calls `open_write_root_with_observer` with
+/// no observer, preserving exact byte-for-byte behavior.
+pub(crate) fn open_write_root() -> Result<std::os::fd::OwnedFd, ToolError> {
+    open_write_root_with_observer(None)
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -905,5 +927,42 @@ assert_eq!(
             let _ = fs::remove_file(&parent);
             let _ = fs::rename(&backup, &parent);
         }
+    }
+
+    // --- APP-012-ROOT-ANCHOR-SEAM-W1: root FD observer seam tests ----
+
+    /// Observer sees the opened root descriptor exactly once; None keeps the
+    /// existing wrapper path and descriptor identity unchanged.
+    #[test]
+    #[cfg(unix)]
+    fn open_write_root_observes_actual_fd_once_and_none_is_unchanged() {
+        let mut calls = 0;
+        let mut observed_identity = None;
+        let mut observer = |fd: &std::os::fd::OwnedFd| {
+            calls += 1;
+            let stat = fstat(fd).map_err(|error| ToolError::IoError(error.into()))?;
+            observed_identity = Some((stat.st_dev, stat.st_ino));
+            Ok(())
+        };
+        let observed_fd = open_write_root_with_observer(Some(&mut observer))
+            .expect("observer root open should succeed");
+        assert_eq!(calls, 1, "observer must run once for the opened fd");
+        let observed_stat = fstat(&observed_fd).expect("fstat observed fd");
+        assert_eq!(
+            observed_identity,
+            Some((observed_stat.st_dev, observed_stat.st_ino)),
+            "observer must receive the actual returned root fd"
+        );
+
+        let default_fd = open_write_root().expect("default root open should succeed");
+        let explicit_none_fd = open_write_root_with_observer(None)
+            .expect("None-observer root open should succeed");
+        let default_stat = fstat(&default_fd).expect("fstat default fd");
+        let none_stat = fstat(&explicit_none_fd).expect("fstat None fd");
+        assert_eq!(
+            (default_stat.st_dev, default_stat.st_ino),
+            (none_stat.st_dev, none_stat.st_ino),
+            "production wrapper must retain the None observer behavior"
+        );
     }
 }

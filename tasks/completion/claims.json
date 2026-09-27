@@ -89,6 +89,12 @@
       "session": "ses_f1dfb40b8ffedbfukYQM6uYy5B",
       "status": "blocked"
     },
+    "APP-012-ROOT-ANCHOR-SEAM-W1": {
+      "completedNote": "GREEN 14/14 file_ops, observer test 1/1, server dispatch/inroot/symlink 1/1 each; serial CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1; no frozen test edits; convergence pre-existing blocked findings; no project-root/security claim.",
+      "scratchpad": "worklog/APP-012-ROOT-ANCHOR-SEAM-W1.md",
+      "session": "ses_f1cfa0acd3ffe2cOcevISAKEx8r",
+      "status": "completed"
+    },
     "APP-012-RUSTIX-LOCK-W1": {
       "completedNote": "LOCK CANDIDATE: base ce97e8d8be1 (reported ...be9 wrong). cargo check -p opencode-rk-tools refreshed Cargo.lock +1 line rustix in tools deps; rustix unchanged 1.1.4; --locked exit 0; no source/test/manifest edits; no security claim.",
       "scratchpad": "worklog/APP-012-RUSTIX-LOCK-W1.md",
