@@ -397,16 +397,16 @@
       "session": "ses_f1df19246ffeHZhaVSzTCipJiP",
       "status": "blocked"
     },
+    "GAP-INTEGRATIONS-34-W1": {
+      "blockedNote": "JSON/projection/diff-check pass; backlog validator blocked by pre-existing companion-gap drift; convergence blocked by pre-existing ledger findings. See worklog/GAP-INTEGRATIONS-34-W1.md",
+      "scratchpad": "worklog/GAP-INTEGRATIONS-34-W1.md",
+      "session": "ses_f1dd6415bffeZua02FslhGKLss",
+      "status": "blocked"
+    },
     "GAP-OPERATIONS-34-W1": {
       "blockedNote": "BLOCKED: JSON/projection and diff-check pass; validate_backlog_exhaustion.py exits 1 with 93 errors including operations ownership-gap stale semantics/task-card checks plus unrelated companion manifest/classifier drift; see worklog/GAP-OPERATIONS-34-W1.md. OPS-009 retained solely as explicit blocker recorder-cross-surface-side-effects; 224/34 projection preserved.",
       "scratchpad": "worklog/GAP-OPERATIONS-34-W1.md",
       "session": "ses_f1df1923ffferEJ51vptxRseR4",
-      "status": "blocked"
-    },
-    "GAP-SHARING-34-W1": {
-      "blockedNote": "BLOCKED: JSON/projection/diff-check PASS; SHARE-001/002 bindings mirror accepted Ralph rows, SHARE-003/004/005 remain unresolved-decomposition with null ownership, exact evidence and empty pins. python3 tools/validate_backlog_exhaustion.py exits 1 with 98 companion-manifest/projection errors; convergence_gate blocked by 60 pre-existing ledger findings. See worklog/GAP-SHARING-34-W1.md",
-      "scratchpad": "worklog/GAP-SHARING-34-W1.md",
-      "session": "ses_f1df1916affec88XP5rRxPv3vB",
       "status": "blocked"
     },
     "GAP-REQ017-34-W1": {
@@ -415,10 +415,21 @@
       "session": "ses_f1dd6415cffeV8brkRPYhk2ou0",
       "status": "blocked"
     },
-    "GAP-INTEGRATIONS-34-W1": {
-      "blockedNote": "JSON/projection/diff-check pass; backlog validator blocked by pre-existing companion-gap drift; convergence blocked by pre-existing ledger findings. See worklog/GAP-INTEGRATIONS-34-W1.md",
-      "scratchpad": "worklog/GAP-INTEGRATIONS-34-W1.md",
-      "session": "ses_f1dd6415bffeZua02FslhGKLss",
+    "GAP-ROUTING-34-W1": {
+      "blockedNote": "JSON/projection/diff checks pass. validate_backlog_exhaustion: 93 errors; routing accepted-vs-not-started + missing rows persist; frozen validator/backlog/controller excluded. See worklog/GAP-ROUTING-34-W1.md.",
+      "scratchpad": "worklog/GAP-ROUTING-34-W1.md",
+      "session": "ses_f1d90eefcffeqHIqwpYZ6KRAze",
+      "status": "blocked"
+    },
+    "GAP-ROUTING-34-W2": {
+      "scratchpad": "worklog/GAP-ROUTING-34-W2.md",
+      "session": "ses_f1c182bcbffedhBCE6Aq07t5MR",
+      "status": "in-progress"
+    },
+    "GAP-SHARING-34-W1": {
+      "blockedNote": "BLOCKED: JSON/projection/diff-check PASS; SHARE-001/002 bindings mirror accepted Ralph rows, SHARE-003/004/005 remain unresolved-decomposition with null ownership, exact evidence and empty pins. python3 tools/validate_backlog_exhaustion.py exits 1 with 98 companion-manifest/projection errors; convergence_gate blocked by 60 pre-existing ledger findings. See worklog/GAP-SHARING-34-W1.md",
+      "scratchpad": "worklog/GAP-SHARING-34-W1.md",
+      "session": "ses_f1df1916affec88XP5rRxPv3vB",
       "status": "blocked"
     },
     "LANE-AGENT-FILES": {
