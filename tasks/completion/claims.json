@@ -410,9 +410,10 @@
       "status": "blocked"
     },
     "GAP-RELEASE-34-W1": {
+      "blockedNote": "Validator residual: validate_backlog_exhaustion.py exit=1, 93 findings; REL lines 31-39. Classifier :1229-1358 hardcodes old projection; repair needs integration proposal. 224/34 re-verified; REL ownership retained unresolved.",
       "scratchpad": "worklog/GAP-RELEASE-34-W1.md",
       "session": "ses_f1d6b37ebffePBiKYvS0pvlqKF",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "GAP-REQ017-34-W1": {
       "blockedNote": "REQ-017 validator contradiction: 95 errors; hardcodes EXT-001/002 in-progress + null paths, requires stale backlog rows; UI-010/EXT-013 checks reject accepted states. Manifest assertions and diff checks pass. No authority to edit validator/Ralph/backlog.",
