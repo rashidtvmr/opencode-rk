@@ -830,6 +830,8 @@ struct TurnStreamState {
     enabled_tools: Vec<String>,
     /// Permission broker consulted before every tool execution.
     broker: PermissionBroker,
+    /// File capability rooted at the turn's captured project directory.
+    file_tool: FileTool,
     history_items: Vec<ResponsesItem>,
     loop_control: LoopController,
     pending_calls: Vec<RequestedCall>,
@@ -900,12 +902,12 @@ fn file_write_operation(arguments: &str) -> Result<FileOperation, String> {
 /// Dispatch the builtin write only through the file capability broker.
 ///
 /// The public/provider result deliberately contains no path or file payload.
-fn execute_write(arguments: &str, broker: &PermissionBroker) -> String {
+fn execute_write(arguments: &str, broker: &PermissionBroker, file_tool: &FileTool) -> String {
     let operation = match file_write_operation(arguments) {
         Ok(operation) => operation,
         Err(error) => return format!("error: {error}"),
     };
-    match FileTool::new().execute_authorized(operation, broker) {
+    match file_tool.execute_authorized(operation, broker) {
         Ok(result) if result.success => "write success".to_owned(),
         Ok(result) => {
             let error = result.error.unwrap_or_default();
@@ -942,6 +944,10 @@ async fn create_turn_stream(
     let permit = TURN_PERMITS
         .try_acquire()
         .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let project_root = std::env::current_dir()
+        .map_err(|_| ApiFailure::internal("could not determine project root"))?;
+    let file_tool = FileTool::with_project_root(project_root.clone());
+    let broker = PermissionBroker::new(SecurityPolicy::lean_default(project_root));
     let id = parse_session_id(&id)?;
     state.sessions.get(id).await.map_err(ApiFailure::internal)?;
 
@@ -1030,9 +1036,8 @@ async fn create_turn_stream(
             _permit: permit,
             tools,
             enabled_tools: turn_tools,
-            broker: PermissionBroker::new(SecurityPolicy::lean_default(
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
-            )),
+            broker,
+            file_tool,
             history_items,
             loop_control: LoopController::with_cap(max_steps),
             pending_calls: Vec::new(),
@@ -1224,7 +1229,7 @@ async fn create_turn_stream(
                                 .any(|enabled| *enabled == call.name);
                             let raw_output = if permitted {
                                 if call.name == "write" {
-                                    execute_write(&call.arguments, &state.broker)
+                                    execute_write(&call.arguments, &state.broker, &state.file_tool)
                                 } else {
                                     match state.broker.authorize(&OperationIntent::Tool {
                                         name: call.name.clone(),
