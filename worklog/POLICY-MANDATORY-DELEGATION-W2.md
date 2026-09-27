@@ -9,4 +9,5 @@
 - Tests: docs-only; no new/frozen test edits. Required verification: `git diff --check`, `python3 tools/validate_repository.py`.
 - Resource notes: no resource-intensive build/test run.
 - Verification: `rtk git diff --check` passed. `rtk python3 tools/validate_repository.py` failed at baseline and candidate with the same 51 backlog-exhaustion errors (accepted/unknown classifications and stale ownership-gap manifests, including OPS/REL/EXT/INT/SHARE/ROUTE findings); protection-policy checks passed. Baseline reproduced in detached worktree at the exact requested commit. No policy safeguard weakened.
-- Remaining: commit/push hash/ref, independent verifier verdict or exact blocker.
+- Receipt: docs-only, frozen tests N/A (reason: no tests changed/added); `rtk git diff --check` passed; `rtk python3 tools/validate_repository.py` failed, 51 backlog-exhaustion errors reproduced on baseline; candidate commit `f643a3a18a052a97932bc51197b56d3bfe616c3c`, pushed ref `origin/policy/MANDATORY-SUBAGENT-DELEGATION-W2`; scratchpad `worklog/POLICY-MANDATORY-DELEGATION-W2.md`; resource-intensive tests not run; independent verifier verdict pending.
+- Remaining: independent verifier verdict and repository-guard backlog repair are outside this lane.
