@@ -696,10 +696,87 @@ mod tests {
         }
         let meta = fs::symlink_metadata(&file_path).expect("leaf still symlink");
         assert!(meta.file_type().is_symlink(), "leaf must remain a symlink, not be written through");
-        assert_eq!(
+assert_eq!(
             fs::read_to_string(file_path.with_extension("sentinel_target")).expect("sentinel"),
             "external sentinel",
             "sentinel must be untouched"
         );
+    }
+
+    /// Parent-directory TOCTOU: hook swaps an intermediate parent directory
+    /// for a symlink pointing outside the fixture tree AFTER the symlink
+    /// precheck passed but BEFORE open_and_write. The vulnerable code follows
+    /// the swapped parent and writes into the outside directory.
+    /// Contract: operation must fail/deny before outside I/O; outside sentinel
+    /// bytes must remain exact. This test MUST RED on the current seam because
+    /// open_and_write uses a path-based open that resolves through the swapped
+    /// parent symlink.
+    #[cfg(unix)]
+    fn hook_swap_parent_to_symlink(path: &Path, _append: bool) -> Result<(), ToolError> {
+        // Derive deterministic fixture paths from the target path argument.
+        // path = <tempdir>/real_parent/target.txt
+        let parent = path.parent().expect("hook: path has parent");
+        let leaf_name = path.file_name().expect("hook: path has leaf");
+        let grandparent = parent.parent().unwrap_or_else(|| Path::new("/"));
+
+        // Outside directory: sibling of grandparent, deterministically named.
+        let outside_dir = grandparent.join("outside_escape_dir");
+        fs::create_dir_all(&outside_dir).map_err(ToolError::IoError)?;
+
+        // Sentinel file in outside dir with same leaf name so path resolution
+        // through the swapped parent lands exactly here.
+        let sentinel = outside_dir.join(leaf_name);
+        fs::write(&sentinel, b"SENTINEL_UNCHANGED").map_err(ToolError::IoError)?;
+
+        // Rename the real parent aside (atomic on same filesystem).
+        let backup = parent.with_extension("real_parent_bak");
+        fs::rename(parent, &backup).map_err(ToolError::IoError)?;
+
+        // Replace the parent path with a symlink to the outside directory.
+        std::os::unix::fs::symlink(&outside_dir, parent).map_err(ToolError::IoError)?;
+
+        Ok(())
+    }
+
+    /// Proves the parent-directory TOCTOU vulnerability via the pre-open seam.
+    /// The hook atomically replaces the checked intermediate parent with a
+    /// symlink to an outside directory. The vulnerable open_and_write follows
+    /// the swapped parent and overwrites the outside sentinel. A correct
+    /// implementation must deny or fail before any outside I/O.
+    #[test]
+    #[cfg(unix)]
+    fn write_file_parent_toctou_symlink_swap_must_not_escape() {
+        let dir = tempdir().expect("temp dir");
+        // Target: <tempdir>/real_parent/target.txt
+        // The intermediate parent "real_parent" will be swapped by the hook.
+        let file_path = dir.path().join("real_parent").join("target.txt");
+
+        let result = execute_with_preopen_hook(
+            FileOperation::write(&file_path, "ATTACK_PAYLOAD".to_owned()),
+            Some(hook_swap_parent_to_symlink),
+        );
+
+        // Derive the outside sentinel path identically to the hook.
+        let outside_dir = dir.path().join("outside_escape_dir");
+        let sentinel = outside_dir.join("target.txt");
+
+        // Contract: the operation must fail or deny before writing outside.
+        // If it succeeded, the sentinel was overwritten -- that is the bug.
+        let sentinel_bytes = fs::read(&sentinel).expect("sentinel must exist");
+        assert_eq!(
+            sentinel_bytes,
+            b"SENTINEL_UNCHANGED",
+            "PARENT TOCTOU: outside sentinel was modified through swapped parent symlink; \
+             write_file must re-validate or use fd-relative open to prevent escape. \
+             result={result:?}"
+        );
+
+        // Cleanup: restore real parent so tempdir cleanup works.
+        let parent = dir.path().join("real_parent");
+        let backup = dir.path().join("real_parent.real_parent_bak");
+        if backup.exists() && parent.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+            let _ = fs::remove_file(&parent);
+            let _ = fs::rename(&backup, &parent);
+        }
     }
 }

@@ -77,6 +77,12 @@
       "session": "ses_f1e82e6afffe1jJD5WeWFPt2Ou",
       "status": "blocked"
     },
+    "APP-012-PARENT-TOCTOU-RED-W1": {
+      "blockedNote": "RED compiled and failed as expected: sentinel assertion panicked at file_ops.rs:766, left=[65,84,84,65,...] right=[83,69,78,84,...]. Existing 12/12 tests pass. Frozen hook SHA c792c88f. Command: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --lib file_ops::tests::write_file_parent_toctou_symlink_swap_must_not_escape. Implementation required for GREEN.",
+      "scratchpad": "worklog/APP-012-PARENT-TOCTOU-RED-W1.md",
+      "session": "ses_f1dfb40b8ffedbfukYQM6uYy5B",
+      "status": "blocked"
+    },
     "APP-012-SECURE-DISPATCH-W1": {
       "completedNote": "Candidate GREEN: frozen live_file_tool_dispatch, live_file_tool_allowed_inroot, live_file_tool_symlink_escape, and agent_loop_turns each passed serially with CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1; frozen hashes unchanged; parent APP-012 TOCTOU repair remains open.",
       "scratchpad": "worklog/APP-012-SECURE-DISPATCH-W1.md",
