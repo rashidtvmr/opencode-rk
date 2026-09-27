@@ -809,6 +809,12 @@
       "session": "ses_f1d482e05ffe74n1HfhQ6HMsK8",
       "status": "blocked"
     },
+    "POLICY-MANDATORY-DELEGATION-W2": {
+      "blockedNote": "Blocked: policy docs candidate diff-check passes; validate_repository.py fails with 51 pre-existing backlog-exhaustion errors reproduced at baseline cb64da11ea8afe675890bd799c6062daee989d8f. No frozen tests apply (documentation policy change); no independent verifier verdict yet. Exact commands/results, hashes/ref and resource notes in worklog/POLICY-MANDATORY-DELEGATION-W2.md",
+      "scratchpad": "worklog/POLICY-MANDATORY-DELEGATION-W2.md",
+      "session": "ses_f1d348324ffeMfncDKYS10pGVB",
+      "status": "blocked"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",

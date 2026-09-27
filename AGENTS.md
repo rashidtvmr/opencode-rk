@@ -107,25 +107,40 @@ This section is a user-mandated policy and takes priority over conflicting
 worker or orchestrator guidance below. Policy updates themselves must be
 delegated to a subagent; the main agent must not edit policy files.
 
-- The main agent is an orchestrator only. It may define execution plans and
-  vertical slices, dispatch and sequence subagents, ask necessary authority
-  questions, and review read-only evidence and reports. It must delegate every
-  other task, including repository research that can be delegated.
+- The main agent is an orchestrator only. It may split and assign tasks, dispatch
+  and sequence subagents, ask necessary authority questions, manage claims and
+  concurrency, and review worker-produced receipts and artifacts. It MUST NOT
+  conduct task research or inspect repository sources, including through search,
+  read, shell, build, test or validation commands. All repository research and
+  source inspection MUST be delegated unconditionally to a subagent. Reviewing
+  the resulting receipts and artifacts is orchestration, not permission to
+  investigate their source evidence independently.
 - The main agent MUST NOT perform repository edits, implementation, test
-  authoring, shell/build/test/validation commands, worktree or branch
-  integration, conflict resolution, commits, or pushes. Each such task MUST be
-  assigned to a subagent.
+  authoring, worktree or branch integration, conflict resolution, commits, or
+  pushes. Each such task MUST be assigned to a subagent.
 - Every subagent MUST read `.agents/WORKER.md` first, claim its task before
-  touching files, own exactly one product or protected file unless explicitly
-  given an integration lease, and maintain its append-only `worklog/<TASK-ID>.md`
-  scratchpad. Subagents MUST follow frozen RED TDD, security, and resource
-  limits; commit and push candidate work; and provide exact evidence receipts.
-- The main agent MUST independently review reports and artifacts and delegate
-  independent verification. It MUST NOT trust self-report, silently take over a
-  failed lane, or touch a held task. Reclaim a stopped claim only with recorded
-  evidence, then re-delegate the work.
+  touching files, own exactly ONE product file, and maintain its
+  `worklog/<TASK-ID>.md` scratchpad. There is no integration-lease or multi-file
+  ownership exception. Serialize work on shared files; other subagents submit
+  evidence or proposals without editing the held file. Subagents MUST follow
+  frozen RED TDD, security and resource limits, commit and push candidate work,
+  and provide the exact completion receipt below.
+- A failed, missing or interrupted lane MUST NOT be taken over by the main agent.
+  For every `MISSING`, `STUB`, `INCOMPLETE`, `FAIL`, `blocked`, `route-error` or
+  `max-steps` outcome, the orchestrator records the outcome and evidence that
+  the prior worker stopped, reclaims/reassigns the claim through
+  `tools/completion_claims.py` (including `cc.reclaim(...)` for a foreign claim),
+  and delegates the repair or bounded diagnosis to a subagent. Never touch a
+  held task or silently continue its implementation. If no safe eligible worker
+  or repair exists, preserve the blocked state and stop or escalate; do not take
+  over or mark the lane complete.
+- Every completion receipt MUST record: exact commands and results; frozen test
+  hash(es), or `N/A` with reason when no frozen tests apply; candidate commit
+  hash; pushed branch/ref; scratchpad path; resource measurements/notes; and the
+  independent verifier's explicit verdict and evidence. The verifier, not the
+  worker or orchestrator, decides acceptance.
 - Maintain safe concurrency and refill lanes as capacity permits. Resource,
-  security, ownership, and integration limits override speed or throughput.
+  security, ownership and integration limits override speed or throughput.
 - OpenCode V2 behavior remains the default per user direction; see `PLAN.md`
   section 1 and `sources/upstream.lock.json`. This cross-reference does not
   define additional upstream behavior.
