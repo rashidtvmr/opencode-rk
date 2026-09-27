@@ -815,6 +815,12 @@
       "session": "ses_f1d348324ffeMfncDKYS10pGVB",
       "status": "blocked"
     },
+    "POLICY-MANDATORY-DELEGATION-W3": {
+      "blockedNote": "Reclaimed stopped claim ses_f1d173aa2ffeTZ9cBbO22h3d0g and landed W3 candidate (commit+push per orchestrator directive). Still blocked: validate_repository 51 pre-existing backlog-exhaustion errors reproduce at baseline 8e8679d; independent verifier verdict pending; no guard bypass. Receipt in worklog/POLICY-MANDATORY-DELEGATION-W3.md",
+      "scratchpad": "worklog/POLICY-MANDATORY-DELEGATION-W3.md",
+      "session": "ses_f1d0ba49cffecWjUhXbmWjiMXR",
+      "status": "blocked"
+    },
     "RC-01": {
       "completedNote": "VERIFY server lib 205/205 + daemon_auth_api 5/5 @767a86a, zero test edits",
       "scratchpad": "worklog/RC-01.md",

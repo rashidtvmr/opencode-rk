@@ -149,6 +149,16 @@ delegated to a subagent; the main agent must not edit policy files.
 
 These apply to the main agent AND every delegated subagent.
 
+### Mandatory delegation: all execution goes to subagents (fail-closed)
+- This section operationalizes `## Highest-priority user policy: mandatory delegation` above; that section keeps priority on conflict. It is not a separate or narrower rule.
+- The main agent is a session orchestrator only. Its allowed actions are: invoke delegation and orchestration tools; dispatch, route, sequence, receive completion notifications, cancel or join delegated work; manage claims and concurrency; ask the relevant authority questions; and review verification receipts and artifacts produced by subagents or already present on disk. Receipt review is not permission to conduct repository research or run commands.
+- The main agent MUST NOT execute any task command: tests, builds, formatters, linters, validators, repository/lane/convergence gates, installers, browser runs, or any shell command that constitutes task work. This includes reading source files to investigate behavior and routing a prohibited action through another tool, MCP server, code-mode/execute runtime, or wrapper. If a lane is already running such a command, review its receipt instead of running the command.
+- All repository research and source inspection MUST be delegated unconditionally to a subagent. No exception for size, urgency, or claimed triviality. If delegation is unavailable (depth limit, capacity, routing failure), that is a blocker to record and escalate, never a trigger for self-execution.
+- The subagent one-product-file ownership in the mandatory-delegation section above applies to this rule without exception: no integration lease, lease loophole, or multi-file ownership for orchestrator-dispatched or gate repair work. A failed, missing, interrupted or blocked lane is redelegated after recording evidence and reclaiming through `tools/completion_claims.py`, not performed by the main agent.
+- Every receipt for delegated work produced under this rule MUST record the exact commands and results, frozen test hash(es) or `N/A` with reason, candidate commit hash, pushed branch/ref, scratchpad path, resource notes, and the independent verifier verdict, per the mandatory-delegation receipt fields.
+- The only shell the main agent may run are the harness-sanctioned orchestration duties that policy itself assigns to the orchestrator: `tools/completion_claims.py` claim/reclaim/release bookkeeping, and landing a completed delegated lane (commit, push, rebase per `### Landing work`). These are session/claim bookkeeping, not task execution: research, validation, gates, tests and builds remain delegated.
+- Delegation does not relax any existing worker contract: retain TDD frozen-RED discipline, security policy, convergence gates, resource budgets, one-file ownership, task-claim ledger rules, and OpenCode V2 behavior parity in `PLAN.md` sections 1-2.
+
 ### 8 GB interactive test budget
 - Treat 8 GiB of RAM as the hard host budget for the implementation loop. Keep
   at least 2 GiB available for the OS, editor, agent harness, and database
