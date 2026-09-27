@@ -669,7 +669,7 @@ async fn web(data: PathBuf, args: WebArgs) -> Result<(), Box<dyn std::error::Err
     if let Some(descriptor) = read_backend_descriptor(&data)? {
         println!("{}", descriptor.http_origin);
         if !args.no_open {
-            open_web_browser(&descriptor.http_origin)?;
+            open_web_browser(&descriptor.http_origin, &descriptor.auth_token)?;
         }
         return Ok(());
     }
@@ -705,7 +705,7 @@ async fn serve(
             })?;
             println!("{}", descriptor.http_origin);
             if open_browser {
-                open_web_browser(&descriptor.http_origin)?;
+                open_web_browser(&descriptor.http_origin, &descriptor.auth_token)?;
             }
             return Ok(());
         }
@@ -743,7 +743,7 @@ async fn serve(
     let descriptor = publish_backend_descriptor_with_auth(&data, listen, credential.token().to_owned())?;
     println!("{}", descriptor.http_origin);
     if open_browser {
-        open_web_browser(&descriptor.http_origin)?;
+        open_web_browser(&descriptor.http_origin, &descriptor.auth_token)?;
     }
     tracing::info!(listen=%listen,"native singleton server listening");
     let daemon_accept = Arc::clone(&daemon);
@@ -758,23 +758,28 @@ async fn serve(
     result?;
     Ok(())
 }
-fn open_web_browser(origin: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn open_web_browser(origin: &str, auth_token: &str) -> Result<(), Box<dyn std::error::Error>> {
+    // Keep the credential out of stdout/logs while handing the browser the
+    // exact same-origin URL it needs to bootstrap authenticated API calls.
+    // `Command::arg` is used for every platform so the URL is one argv value;
+    // no shell interpolation or concatenated command string is involved.
+    let browser_url = format!("{origin}#oc2-token={auth_token}");
     #[cfg(target_os = "windows")]
     let mut command = {
         let mut command = std::process::Command::new("cmd");
-        command.args(["/C", "start", "", origin]);
+        command.args(["/C", "start", "", &browser_url]);
         command
     };
     #[cfg(target_os = "macos")]
     let mut command = {
         let mut command = std::process::Command::new("open");
-        command.arg(origin);
+        command.arg(&browser_url);
         command
     };
     #[cfg(all(unix, not(target_os = "macos")))]
     let mut command = {
         let mut command = std::process::Command::new("xdg-open");
-        command.arg(origin);
+        command.arg(&browser_url);
         command
     };
     #[cfg(not(any(target_os = "windows", target_os = "macos", unix)))]
