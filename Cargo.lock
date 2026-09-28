@@ -1007,6 +1007,7 @@ dependencies = [
  "opencode-rk-sessions",
  "opencode-rk-storage",
  "opencode-rk-tools",
+ "rustix",
  "serde",
  "serde_json",
  "tempfile",
