@@ -18,6 +18,7 @@ opencode-rk-providers = { path = "../providers" }
 opencode-rk-security = { path = "../security" }
 opencode-rk-sessions = { path = "../sessions" }
 opencode-rk-tools = { path = "../tools" }
+rustix = { workspace = true, features = ["process"] }
 serde.workspace = true
 serde_json.workspace = true
 tokio.workspace = true
