@@ -1379,6 +1379,12 @@
       "scratchpad": "worklog/WEB-VOICE.md",
       "session": "ses_complete_app_21sep",
       "status": "blocked"
+    },
+    "CUSTOM-PROVIDER-CATALOG-RESOLVER-W1": {
+      "status": "completed",
+      "scratchpad": "worklog/CUSTOM-PROVIDER-CATALOG-RESOLVER-W1.md",
+      "session": "ses_f1a1c12a9ffeHcv1IUvPYzRl39",
+      "completedNote": "GREEN: 43/43 catalog lib tests pass (6 frozen CRS + 37 existing); cargo fmt clean; all 6 RED test hashes frozen at pre-impl sha256; body retains serde_json::Value with depth/container bounds; ModelSummary excludes npm/env/base_url/headers/body; zero test edits after RED"
     }
   },
   "schemaVersion": 1
