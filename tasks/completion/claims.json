@@ -54,9 +54,10 @@
       "status": "blocked"
     },
     "APP-001-FILE0600-SETUP-BASE-W1": {
+      "blockedNote": "Base assembled at d59c0d1; frozen test hash verified; onboarding 14-test harness green; no-default CLI check/build green; frozen installed setup 2/5 as expected, caller wiring remains next lane.",
       "scratchpad": "worklog/APP-001-FILE0600-SETUP-BASE-W1.md",
       "session": "ses_f1a1c1349ffepkhimlj6Jn4qNj",
-      "status": "in-progress"
+      "status": "blocked"
     },
     "APP-001-INSTALLED-SETUP-REPAIR": {
       "completedNote": "Frozen tests 3/3 PASS in 30.26s post-fix. Durability gap documented.",
