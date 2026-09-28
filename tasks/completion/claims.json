@@ -274,6 +274,12 @@
       "session": "ses_f1c5c790fffem57G3U9DJR05Q6",
       "status": "blocked"
     },
+    "CUSTOM-PROVIDER-CONFIG-INGEST-W1": {
+      "blockedNote": "parent E2E RED at turn POST 503 ACME_API_KEY not in configured env list; unwired RuntimeWiring resolver outside main.rs scope. /api/models PASS acme/model-key. Frozen SHA 6803ed3d.",
+      "scratchpad": "worklog/CUSTOM-PROVIDER-CONFIG-INGEST-W1.md",
+      "session": "ses_current_recovery",
+      "status": "blocked"
+    },
     "CUSTOM-PROVIDER-LIVE-W1": {
       "blockedNote": "RED frozen, genuine: 3/3 fail on lib.rs:920 non-openai guard; needs from_env_for(provider_id) + 503 credential mapping",
       "scratchpad": "worklog/CUSTOM-PROVIDER-LIVE-W1.md",

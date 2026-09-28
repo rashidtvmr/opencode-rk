@@ -19,7 +19,8 @@ use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::Serialize;
-use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
+use serde_json::{Map as JsonMap, Value as JsonValue};
+use std::{env, fs, io::Read, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
 mod ci_output;
 mod ci_run;
 mod composer;
@@ -41,11 +42,11 @@ mod native_host;
 mod native_layout;
 mod native_navigation;
 mod native_palette;
+mod native_shell;
 mod native_status;
 mod native_theme;
 mod native_timeline;
 mod native_transcript;
-mod native_shell;
 mod onboarding;
 mod pair;
 mod service_commands;
@@ -332,8 +333,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                 _ => ci_output::OutputFormat::Jsonl,
             };
             let mut stdout = std::io::stdout();
-            let result =
-                ci_run::run_ci(&prompt, format, &mut stdout, args.max_steps, args.timeout);
+            let result = ci_run::run_ci(&prompt, format, &mut stdout, args.max_steps, args.timeout);
             if result.exit_code != 0 {
                 std::process::exit(result.exit_code as i32);
             }
@@ -392,7 +392,10 @@ async fn doctor(args: DoctorArgs) -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("OpenCode RK {}", output.report.version);
-        println!("native core: yes\nembedded sqlite: yes\njavascript compatibility host: disabled\nos sandbox: {}", diagnostics::sandbox_backend_name());
+        println!(
+            "native core: yes\nembedded sqlite: yes\njavascript compatibility host: disabled\nos sandbox: {}",
+            diagnostics::sandbox_backend_name()
+        );
         println!("auth: {}", output.checks.auth.status);
         println!("connectivity: {}", output.checks.connectivity.status);
         println!("tools: {}", output.checks.tools.status);
@@ -685,11 +688,320 @@ async fn web(data: PathBuf, args: WebArgs) -> Result<(), Box<dyn std::error::Err
     .await
 }
 
+const MAX_CONFIG_BYTES: usize = 64 * 1024;
+const MAX_CONFIG_DEPTH: usize = 64;
+const MAX_CONFIG_NODES: usize = 8192;
+const MAX_CONFIG_CONTAINER_ITEMS: usize = 4096;
+
+fn invalid_config() -> Box<dyn std::error::Error> {
+    std::io::Error::new(std::io::ErrorKind::InvalidData, "invalid configuration").into()
+}
+
+fn config_file_path(directory: &std::path::Path) -> Result<PathBuf, Box<dyn std::error::Error>> {
+    let json = directory.join("opencode.json");
+    match fs::symlink_metadata(&json) {
+        Ok(_) => Ok(json),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Ok(directory.join("opencode.jsonc"))
+        }
+        Err(_) => Err(invalid_config()),
+    }
+}
+
+fn normalize_jsonc(input: &str) -> Result<String, Box<dyn std::error::Error>> {
+    #[derive(Clone, Copy, PartialEq)]
+    enum State {
+        Normal,
+        String,
+        LineComment,
+        BlockComment,
+    }
+
+    let bytes = input.as_bytes();
+    let mut output = Vec::with_capacity(bytes.len());
+    let mut state = State::Normal;
+    let mut escaped = false;
+    let mut depth = 0usize;
+    let mut index = 0usize;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        match state {
+            State::String => {
+                output.push(byte);
+                if escaped {
+                    escaped = false;
+                } else if byte == b'\\' {
+                    escaped = true;
+                } else if byte == b'"' {
+                    state = State::Normal;
+                }
+                index += 1;
+            }
+            State::LineComment => {
+                if byte == b'\n' || byte == b'\r' {
+                    output.push(byte);
+                    state = State::Normal;
+                } else {
+                    output.push(b' ');
+                }
+                index += 1;
+            }
+            State::BlockComment => {
+                if byte == b'*' && bytes.get(index + 1) == Some(&b'/') {
+                    output.extend_from_slice(b"  ");
+                    state = State::Normal;
+                    index += 2;
+                } else {
+                    output.push(if byte == b'\n' || byte == b'\r' {
+                        byte
+                    } else {
+                        b' '
+                    });
+                    index += 1;
+                }
+            }
+            State::Normal => match byte {
+                b'"' => {
+                    output.push(byte);
+                    state = State::String;
+                    index += 1;
+                }
+                b'/' if bytes.get(index + 1) == Some(&b'/') => {
+                    output.extend_from_slice(b"  ");
+                    state = State::LineComment;
+                    index += 2;
+                }
+                b'/' if bytes.get(index + 1) == Some(&b'*') => {
+                    output.extend_from_slice(b"  ");
+                    state = State::BlockComment;
+                    index += 2;
+                }
+                b',' => {
+                    let mut next = index + 1;
+                    loop {
+                        while matches!(bytes.get(next), Some(b' ' | b'\t' | b'\r' | b'\n')) {
+                            next += 1;
+                        }
+                        if bytes.get(next..next + 2) == Some(b"//") {
+                            next += 2;
+                            while !matches!(bytes.get(next), None | Some(b'\n' | b'\r')) {
+                                next += 1;
+                            }
+                        } else if bytes.get(next..next + 2) == Some(b"/*") {
+                            let Some(end) = bytes[next + 2..]
+                                .windows(2)
+                                .position(|window| window == b"*/")
+                            else {
+                                break;
+                            };
+                            next += end + 4;
+                        } else {
+                            break;
+                        }
+                    }
+                    if matches!(bytes.get(next), Some(b']' | b'}')) {
+                        index += 1;
+                    } else {
+                        output.push(byte);
+                        index += 1;
+                    }
+                }
+                b'{' | b'[' => {
+                    depth += 1;
+                    if depth > MAX_CONFIG_DEPTH {
+                        return Err(invalid_config());
+                    }
+                    output.push(byte);
+                    index += 1;
+                }
+                b'}' | b']' => {
+                    depth = depth.saturating_sub(1);
+                    output.push(byte);
+                    index += 1;
+                }
+                _ => {
+                    output.push(byte);
+                    index += 1;
+                }
+            },
+        }
+    }
+    if state == State::String || state == State::BlockComment {
+        return Err(invalid_config());
+    }
+    String::from_utf8(output).map_err(|_| invalid_config())
+}
+
+fn validate_config_value(value: &JsonValue) -> Result<(), Box<dyn std::error::Error>> {
+    fn visit(
+        value: &JsonValue,
+        depth: usize,
+        nodes: &mut usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        *nodes = nodes.checked_add(1).ok_or_else(invalid_config)?;
+        if *nodes > MAX_CONFIG_NODES || depth > MAX_CONFIG_DEPTH {
+            return Err(invalid_config());
+        }
+        match value {
+            JsonValue::Array(items) => {
+                if items.len() > MAX_CONFIG_CONTAINER_ITEMS {
+                    return Err(invalid_config());
+                }
+                for item in items {
+                    visit(item, depth + 1, nodes)?;
+                }
+            }
+            JsonValue::Object(items) => {
+                if items.len() > MAX_CONFIG_CONTAINER_ITEMS {
+                    return Err(invalid_config());
+                }
+                for item in items.values() {
+                    visit(item, depth + 1, nodes)?;
+                }
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+    visit(value, 0, &mut 0)
+}
+
+fn parse_config(bytes: &[u8]) -> Result<JsonValue, Box<dyn std::error::Error>> {
+    if bytes.len() > MAX_CONFIG_BYTES {
+        return Err(invalid_config());
+    }
+    let source = std::str::from_utf8(bytes).map_err(|_| invalid_config())?;
+    let normalized = normalize_jsonc(source)?;
+    let value: JsonValue = serde_json::from_str(&normalized).map_err(|_| invalid_config())?;
+    if !value.is_object() {
+        return Err(invalid_config());
+    }
+    validate_config_value(&value)?;
+    Ok(value)
+}
+
+fn merge_config(target: &mut JsonValue, incoming: JsonValue) {
+    match (target, incoming) {
+        (JsonValue::Object(target), JsonValue::Object(incoming)) => {
+            for (key, value) in incoming {
+                match target.get_mut(&key) {
+                    Some(existing) => merge_config(existing, value),
+                    None => {
+                        target.insert(key, value);
+                    }
+                }
+            }
+        }
+        (target, incoming) => *target = incoming,
+    }
+}
+
+fn load_config_directory(
+    directory: &std::path::Path,
+) -> Result<JsonValue, Box<dyn std::error::Error>> {
+    // JSONC is the documented alternate and takes precedence if both names exist.
+    let path = config_file_path(directory)?;
+    let path_metadata = match fs::symlink_metadata(&path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(JsonValue::Object(JsonMap::new()));
+        }
+        Err(_) => return Err(invalid_config()),
+    };
+    if path_metadata.file_type().is_symlink() || !path_metadata.is_file() {
+        return Err(invalid_config());
+    }
+    let mut file = fs::File::open(&path).map_err(|_| invalid_config())?;
+    let mut bytes = Vec::with_capacity(MAX_CONFIG_BYTES.min(4096));
+    file.by_ref()
+        .take((MAX_CONFIG_BYTES + 1) as u64)
+        .read_to_end(&mut bytes)
+        .map_err(|_| invalid_config())?;
+    if bytes.len() > MAX_CONFIG_BYTES {
+        return Err(invalid_config());
+    }
+    parse_config(&bytes)
+}
+
+fn load_effective_config(
+    data: &std::path::Path,
+    cwd: &std::path::Path,
+) -> Result<JsonValue, Box<dyn std::error::Error>> {
+    let mut merged = load_config_directory(data)?;
+    merge_config(&mut merged, load_config_directory(cwd)?);
+    validate_config_value(&merged)?;
+    Ok(merged)
+}
+
+fn project_custom_providers(config: &JsonValue) -> Result<JsonValue, Box<dyn std::error::Error>> {
+    let source = config.get("provider").or_else(|| config.get("providers"));
+    let Some(source) = source else {
+        return Ok(JsonValue::Object(JsonMap::new()));
+    };
+    let providers = source.as_object().ok_or_else(invalid_config)?;
+    let mut result = JsonMap::new();
+    for (provider_id, provider) in providers {
+        let mut projected = provider.as_object().cloned().ok_or_else(invalid_config)?;
+        if !projected.get("name").is_some_and(JsonValue::is_string) {
+            return Err(invalid_config());
+        }
+        let models = projected
+            .get_mut("models")
+            .and_then(JsonValue::as_object_mut)
+            .ok_or_else(invalid_config)?;
+        for (model_key, model) in models.iter_mut() {
+            let model = model.as_object_mut().ok_or_else(invalid_config)?;
+            let id = model
+                .entry("id".to_owned())
+                .or_insert_with(|| JsonValue::String(model_key.clone()));
+            if !id.is_string() {
+                return Err(invalid_config());
+            }
+        }
+        projected.insert("id".to_owned(), JsonValue::String(provider_id.clone()));
+        result.insert(provider_id.clone(), JsonValue::Object(projected));
+    }
+    Ok(JsonValue::Object(result))
+}
+
+fn merged_catalog_json(
+    path: &std::path::Path,
+    config: &JsonValue,
+) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    let mut catalog = if path.exists() {
+        let metadata = fs::metadata(path)?;
+        if metadata.len() > 16 * 1024 * 1024 {
+            return Err("models.dev catalog exceeds 16 MiB".into());
+        }
+        let bytes = fs::read(path)?;
+        let parsed: JsonValue = serde_json::from_slice(&bytes)?;
+        if !parsed.is_object() {
+            return Err("models.dev catalog must be an object".into());
+        }
+        parsed
+    } else {
+        JsonValue::Object(JsonMap::new())
+    };
+    let configured = project_custom_providers(config)?;
+    let catalog = catalog.as_object_mut().ok_or_else(invalid_config)?;
+    for (provider_id, provider) in configured.as_object().ok_or_else(invalid_config)? {
+        catalog.insert(provider_id.clone(), provider.clone());
+    }
+    serde_json::to_vec(&catalog).map_err(Into::into)
+}
+
 async fn serve(
     data: PathBuf,
     args: ServeArgs,
     open_browser: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let cwd = env::current_dir()?;
+    let effective_config = load_effective_config(&data, &cwd)?;
+    let path = args
+        .models_file
+        .unwrap_or_else(|| catalog_cache_path(&data));
+    let catalog_json = merged_catalog_json(&path, &effective_config)?;
+    let catalog = Arc::new(Catalog::from_models_dev_api_json(&catalog_json)?);
     let daemon_paths = DaemonPaths::for_data_dir(&data);
     let daemon = match SingletonDaemon::bind(&daemon_paths.socket, &daemon_paths.pid) {
         Ok(daemon) => Arc::new(daemon),
@@ -723,14 +1035,6 @@ async fn serve(
         runtime_policy.allow_tool(name.to_owned())?;
     }
     let runtime = RuntimeWiring::for_daemon(sessions.clone(), ToolRegistry::new(), runtime_policy);
-    let path = args
-        .models_file
-        .unwrap_or_else(|| catalog_cache_path(&data));
-    let catalog = if path.exists() {
-        Arc::new(Catalog::from_models_dev_api_json(&fs::read(path)?)?)
-    } else {
-        Arc::new(Catalog::default())
-    };
     let listener = tokio::net::TcpListener::bind(args.listen).await?;
     let listen = listener.local_addr()?;
     // Integration fix (wave-3): the RC-01-hardened `read_backend_descriptor`
@@ -740,7 +1044,8 @@ async fn serve(
     // unavailable"). Mint the real daemon credential and publish it.
     //
     let credential = DaemonAuth::mint().map_err(|error| error.to_string())?;
-    let descriptor = publish_backend_descriptor_with_auth(&data, listen, credential.token().to_owned())?;
+    let descriptor =
+        publish_backend_descriptor_with_auth(&data, listen, credential.token().to_owned())?;
     println!("{}", descriptor.http_origin);
     if open_browser {
         open_web_browser(&descriptor.http_origin)?;
@@ -790,6 +1095,114 @@ fn open_web_browser(origin: &str) -> Result<(), Box<dyn std::error::Error>> {
 fn catalog_cache_path(data: &std::path::Path) -> PathBuf {
     data.join("catalog/models.dev.api.json")
 }
+
+#[cfg(test)]
+mod config_ingest_tests {
+    use super::*;
+
+    #[test]
+    fn jsonc_comments_trailing_commas_preserve_string_bytes() {
+        let source = r#"{"url":"https://example.test/a//b","text":"comma, } // /* still text","items":[1,2,],/* removed */"ok":true,}"#;
+        let normalized = normalize_jsonc(source).expect("normalize valid JSONC");
+        let escaped_source = r#"{"escape":"quote: \" // still string"}"#;
+        let escaped = normalize_jsonc(escaped_source).expect("normalize escaped string");
+        assert_eq!(
+            serde_json::from_str::<JsonValue>(&escaped).expect("parse escaped string")["escape"],
+            "quote: \" // still string"
+        );
+        let value: JsonValue = serde_json::from_str(&normalized).expect("parse normalized JSON");
+        assert_eq!(value["url"], "https://example.test/a//b");
+        assert_eq!(value["text"], "comma, } // /* still text");
+        assert_eq!(value["items"], serde_json::json!([1, 2]));
+    }
+
+    #[test]
+    fn project_config_deep_merges_over_global_and_array_replaces() {
+        let root = std::env::temp_dir().join(format!("config-ingest-{}", std::process::id()));
+        let data = root.join("data");
+        let project = root.join("project");
+        fs::create_dir_all(&data).expect("create global config dir");
+        fs::create_dir_all(&project).expect("create project config dir");
+        fs::write(
+            data.join("opencode.json"),
+            br#"{"provider":{"acme":{"options":{"headers":{"a":"global","b":"keep"},"body":{"global":true}},"env":["A","B"]}}}"#,
+        )
+        .expect("write global config");
+        fs::write(
+            project.join("opencode.json"),
+            br#"{"provider":{"acme":{"options":{"headers":{"a":"project"}},"env":["C"]}}}"#,
+        )
+        .expect("write project config");
+        let config = load_effective_config(&data, &project).expect("merge global then project");
+        assert_eq!(
+            config["provider"]["acme"]["options"]["headers"]["a"],
+            "project"
+        );
+        assert_eq!(
+            config["provider"]["acme"]["options"]["headers"]["b"],
+            "keep"
+        );
+        assert_eq!(
+            config["provider"]["acme"]["options"]["body"]["global"],
+            true
+        );
+        assert_eq!(config["provider"]["acme"]["env"], serde_json::json!(["C"]));
+        fs::remove_dir_all(root).expect("remove config fixture");
+    }
+
+    #[test]
+    fn json_config_wins_when_both_config_names_exist() {
+        let root = std::env::temp_dir().join(format!("config-precedence-{}", std::process::id()));
+        fs::create_dir_all(&root).expect("create config dir");
+        fs::write(root.join("opencode.json"), b"{}").expect("write JSON config");
+        fs::write(root.join("opencode.jsonc"), b"{}").expect("write JSONC config");
+        assert_eq!(
+            config_file_path(&root).expect("select JSON"),
+            root.join("opencode.json")
+        );
+        fs::remove_dir_all(root).expect("remove config fixture");
+    }
+
+    #[test]
+    fn oversized_and_deep_config_rejected() {
+        assert!(parse_config(&vec![b' '; MAX_CONFIG_BYTES + 1]).is_err());
+        assert!(validate_config_value(&JsonValue::Array(vec![
+            JsonValue::Null;
+            MAX_CONFIG_CONTAINER_ITEMS + 1
+        ]))
+        .is_err());
+        let oversized_map: JsonMap<String, JsonValue> = (0..=MAX_CONFIG_NODES)
+            .map(|index| (index.to_string(), JsonValue::Null))
+            .collect();
+        assert!(validate_config_value(&JsonValue::Object(oversized_map)).is_err());
+        let nested = format!(
+            "{}0{}",
+            "[".repeat(MAX_CONFIG_DEPTH + 1),
+            "]".repeat(MAX_CONFIG_DEPTH + 1)
+        );
+        assert!(parse_config(nested.as_bytes()).is_err());
+        assert!(normalize_jsonc(r#"{"x":/* unfinished"#).is_err());
+    }
+
+    #[test]
+    fn provider_projection_keeps_configured_keys_and_wire_model_id() {
+        let config: JsonValue = serde_json::from_str(
+            r#"{"provider":{"acme":{"name":"Acme","npm":"@ai-sdk/openai-compatible","env":["FIRST","SECOND"],"options":{"headers":{"x":"y"},"body":{"k":1}},"models":{"model-key":{"name":"Model","id":"wire-model","extra":true}}}}}"#,
+        )
+        .expect("provider config");
+        let projected = project_custom_providers(&config).expect("project provider");
+        assert_eq!(projected["acme"]["id"], "acme");
+        assert_eq!(
+            projected["acme"]["env"],
+            serde_json::json!(["FIRST", "SECOND"])
+        );
+        assert_eq!(projected["acme"]["options"]["headers"]["x"], "y");
+        assert_eq!(projected["acme"]["options"]["body"]["k"], 1);
+        assert_eq!(projected["acme"]["models"]["model-key"]["id"], "wire-model");
+        assert_eq!(projected["acme"]["models"]["model-key"]["extra"], true);
+    }
+}
+
 fn resolve_data_dir(override_dir: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Some(path) = override_dir {
         return Ok(path);
