@@ -168,9 +168,10 @@
       "status": "completed"
     },
     "APP-014": {
+      "completedNote": "Independent reviewer ses_f18024fb8ffe659guYyoAyOCDX scoped PASS on 5893d3f: cargo metadata --locked --offline --filter-platform aarch64-apple-darwin exit 0 (187 pkgs); server direct rustix 1.1.4 process; only server lock record changed of 231; 194 foreign rows identical; guard PASS. Lock prewire only, not APP-002 parent acceptance; corrections+archived diagnostics in worklog.",
       "scratchpad": "worklog/APP-014.md",
       "session": "ses_f17895ba2ffe3QDJkjDa3773g2",
-      "status": "in-progress"
+      "status": "completed"
     },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",

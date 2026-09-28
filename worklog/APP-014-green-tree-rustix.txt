@@ -1,4 +1,0 @@
-rustix v1.1.4
-├── opencode-rk-server v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP-014/crates/server)
-└── opencode-rk-tools v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP-014/crates/tools)
-    └── opencode-rk-server v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP-014/crates/server)
