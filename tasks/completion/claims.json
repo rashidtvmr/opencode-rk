@@ -311,6 +311,48 @@
       "session": "ses_f41f2c26cffeFFRai2y6T8LbZo",
       "status": "completed"
     },
+    "AUTHWEB-BROWSER-CLIENT-IMPL": {
+      "blockedNote": "Unchanged browser RED tests 2/2 GREEN with actual loopback HTTP; scoped TypeScript check and 2/2 focused Vitest pass; full typecheck has five baseline TS6133 in unchanged canvas-model.test.ts. CLI opens bare origin, browser refresh loses in-memory bearer, disputed direct-test claim and canonical 51-error guard remain. Candidate only, no parent acceptance.",
+      "scratchpad": "worklog/AUTHWEB-BROWSER-CLIENT-IMPL.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "AUTHWEB-BROWSER-RED": {
+      "blockedNote": "RED-only test-author candidate: Node 24 test compiled/executed and failed at real listSessions request with server 401 because browser client omitted Authorization; frozen SHA-256 f007aa291204204d366506c2c8b5149099317bb103da6fe915f8e4409e5a6a62. Not implementation completion or acceptance.",
+      "scratchpad": "worklog/AUTHWEB-BROWSER-RED.md",
+      "session": "ses_f216878cfffeiiHQHFrHhDp5Bb",
+      "status": "blocked"
+    },
+    "AUTHWEB-CLI-HANDOFF-IMPL": {
+      "completedNote": "Frozen browser credential launch test compiled and passed against locally built oc2; source SHA unchanged.",
+      "scratchpad": "worklog/AUTHWEB-CLI-HANDOFF-IMPL.md",
+      "session": "ses_f1ea90f38ffeOBYPTdwG0FAKvP",
+      "status": "completed"
+    },
+    "AUTHWEB-CLI-HANDOFF-RED": {
+      "blockedNote": "RED confirmed: rustc --test exit0; fails: bare origin captured, no #oc2-token fragment (main.rs:761-789). SHA256 3c8eea31 frozen. Impl not in scope; blocked pending AUTHWEB-CLI-HANDOFF impl lane.",
+      "scratchpad": "worklog/AUTHWEB-CLI-HANDOFF-RED.md",
+      "session": "ses_f21315667ffeO0KsxS0LtKsvtK",
+      "status": "blocked"
+    },
+    "AUTHWEB-DIRECT-FETCH": {
+      "blockedNote": "RED-only: test compiles and fails with genuine HTTP 401 from local fixture (deleteDraftAttachment sends no bearer at api.ts:599-612). No implementation attempted per RED-only task scope. Frozen sha256 4c7201da9246717ccea089ddcf4f7c0befe749403be985e9d3a630926e3a879c.",
+      "scratchpad": "worklog/AUTHWEB-DIRECT-FETCH-RED.md",
+      "session": "ses_f215e9103ffeQRrS4n5lI5Ceyr",
+      "status": "blocked"
+    },
+    "AUTHWEB-REFRESH-IMPL": {
+      "completedNote": "Frozen refresh 4/4 and auth/direct 2/2 pass; scoped web typecheck blocked by pre-existing canvas-model.test.ts unused declarations",
+      "scratchpad": "worklog/AUTHWEB-REFRESH-IMPL.md",
+      "session": "ses_f1ea35c6fffemxzSnOGZHiYSd8",
+      "status": "completed"
+    },
+    "AUTHWEB-REFRESH-RED": {
+      "blockedNote": "RED-only: 3 pass / 1 fail exit 1 at web/src/lib/api.refresh-auth.test.mjs; genuine RED = post-consume full reload silently sends unauthenticated /api/sessions. Frozen SHA c7e9e7fdcd05371b261e01778060b44ff9a13e2a0ae481d85ce3778fcb295f5c. No product edits; no GREEN.",
+      "scratchpad": "worklog/AUTHWEB-REFRESH-RED.md",
+      "session": "ses_f1ea84890ffeWDi1uPCTQyFR4F",
+      "status": "blocked"
+    },
     "BACKLOG-CLASSIFIER-34-W1": {
       "blockedNote": "Frozen tests/source ledger retain old 86 classifier; validators 211 errors; convergence 60 unrelated ledger findings. Exact 224/34 set passes; no test edits.",
       "scratchpad": "worklog/BACKLOG-CLASSIFIER-34-W1.md",
