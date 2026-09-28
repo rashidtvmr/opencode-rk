@@ -162,9 +162,10 @@
       "status": "in-progress"
     },
     "APP-013": {
+      "completedNote": "Independent reviewer ses_f18024fb8ffe659guYyoAyOCDX scoped PASS on exact 9609fe3: one-line server manifest rustix workspace process only; guard PASS; Cargo.lock blob 804e8416cb41902180828d0e2142ce28741d5fa7cff74ad1249cba1b38456886 unchanged; all 193 foreign rows identical. Structural prewire only, no Cargo/test run; not APP-002 parent acceptance. APP-014 lock edge pending.",
       "scratchpad": "worklog/APP-013.md",
       "session": "ses_f179ddbafffeblWSE7UT4pzdsF",
-      "status": "in-progress"
+      "status": "completed"
     },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
