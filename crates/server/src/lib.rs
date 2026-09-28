@@ -96,6 +96,7 @@ use opencode_rk_providers::responses::{
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{SessionError, SessionService};
 use opencode_rk_tools::executor::ToolExecutor;
+use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use serde::{Deserialize, Serialize};
@@ -829,6 +830,8 @@ struct TurnStreamState {
     enabled_tools: Vec<String>,
     /// Permission broker consulted before every tool execution.
     broker: PermissionBroker,
+    /// File capability rooted at the turn's captured project directory.
+    file_tool: FileTool,
     history_items: Vec<ResponsesItem>,
     loop_control: LoopController,
     pending_calls: Vec<RequestedCall>,
@@ -862,6 +865,64 @@ struct CallOutputItem {
     output: String,
 }
 
+const MAX_FILE_WRITE_ARGUMENT_BYTES: usize = 1024 * 1024;
+
+/// Parse a provider write request without touching the filesystem.
+fn file_write_operation(arguments: &str) -> Result<FileOperation, String> {
+    if arguments.len() > MAX_FILE_WRITE_ARGUMENT_BYTES {
+        return Err("write arguments exceed size limit".to_owned());
+    }
+    let parsed: Value = serde_json::from_str(arguments)
+        .map_err(|_| "write arguments are not valid JSON".to_owned())?;
+    let path = parsed
+        .get("path")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| "write arguments require a non-empty string path".to_owned())?;
+    let content = parsed
+        .get("content")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "write arguments require string content".to_owned())?;
+    let append = match parsed.get("append") {
+        None => false,
+        Some(value) => value
+            .as_bool()
+            .ok_or_else(|| "write arguments require a boolean append flag".to_owned())?,
+    };
+    if path.len() > 4096 || content.len() > MAX_FILE_WRITE_ARGUMENT_BYTES {
+        return Err("write path or content exceeds size limit".to_owned());
+    }
+    Ok(FileOperation::Write {
+        path: PathBuf::from(path),
+        content: content.to_owned(),
+        append,
+    })
+}
+
+/// Dispatch the builtin write only through the file capability broker.
+///
+/// The public/provider result deliberately contains no path or file payload.
+fn execute_write(arguments: &str, broker: &PermissionBroker, file_tool: &FileTool) -> String {
+    let operation = match file_write_operation(arguments) {
+        Ok(operation) => operation,
+        Err(error) => return format!("error: {error}"),
+    };
+    match file_tool.execute_authorized(operation, broker) {
+        Ok(result) if result.success => "write success".to_owned(),
+        Ok(result) => {
+            let error = result.error.unwrap_or_default();
+            if error.contains("requires human approval") {
+                "write requires human approval".to_owned()
+            } else if error.contains("denied") {
+                "write denied".to_owned()
+            } else {
+                "write failed".to_owned()
+            }
+        }
+        Err(_) => "write failed".to_owned(),
+    }
+}
+
 #[derive(Clone, Copy, PartialEq)]
 enum TurnStreamStage {
     User,
@@ -883,6 +944,10 @@ async fn create_turn_stream(
     let permit = TURN_PERMITS
         .try_acquire()
         .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let project_root = std::env::current_dir()
+        .map_err(|_| ApiFailure::internal("could not determine project root"))?;
+    let file_tool = FileTool::with_project_root(project_root.clone());
+    let broker = PermissionBroker::new(SecurityPolicy::lean_default(project_root));
     let id = parse_session_id(&id)?;
     state.sessions.get(id).await.map_err(ApiFailure::internal)?;
 
@@ -971,9 +1036,8 @@ async fn create_turn_stream(
             _permit: permit,
             tools,
             enabled_tools: turn_tools,
-            broker: PermissionBroker::new(SecurityPolicy::lean_default(
-                std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/")),
-            )),
+            broker,
+            file_tool,
             history_items,
             loop_control: LoopController::with_cap(max_steps),
             pending_calls: Vec::new(),
@@ -1053,7 +1117,7 @@ async fn create_turn_stream(
                                     "type": "tool_call",
                                     "call_id": call_id,
                                     "name": name,
-                                    "arguments": arguments,
+                                    "arguments": if name == "write" { "{}" } else { arguments.as_str() },
                                 }))),
                                 state,
                             ));
@@ -1164,40 +1228,44 @@ async fn create_turn_stream(
                                 .iter()
                                 .any(|enabled| *enabled == call.name);
                             let raw_output = if permitted {
-                                match state.broker.authorize(&OperationIntent::Tool {
-                                    name: call.name.clone(),
-                                    description: "turn tool call".to_owned(),
-                                }) {
-                                    Decision::Allow => {
-                                        let arguments: Value =
-                                            serde_json::from_str(&call.arguments)
-                                                .unwrap_or_else(|_| json!({}));
-                                        let result = executor
-                                            .execute(opencode_rk_tools::executor::ToolCall::new(
-                                                call.call_id.clone(),
-                                                call.name.clone(),
-                                                arguments,
-                                            ))
-                                            .await;
-                                        if result.success {
-                                            result.output
-                                        } else {
-                                            result
-                                                .error
-                                                .unwrap_or_else(|| "tool failed".to_owned())
+                                if call.name == "write" {
+                                    execute_write(&call.arguments, &state.broker, &state.file_tool)
+                                } else {
+                                    match state.broker.authorize(&OperationIntent::Tool {
+                                        name: call.name.clone(),
+                                        description: "turn tool call".to_owned(),
+                                    }) {
+                                        Decision::Allow => {
+                                            let arguments: Value =
+                                                serde_json::from_str(&call.arguments)
+                                                    .unwrap_or_else(|_| json!({}));
+                                            let result = executor
+                                                .execute(opencode_rk_tools::executor::ToolCall::new(
+                                                    call.call_id.clone(),
+                                                    call.name.clone(),
+                                                    arguments,
+                                                ))
+                                                .await;
+                                            if result.success {
+                                                result.output
+                                            } else {
+                                                result
+                                                    .error
+                                                    .unwrap_or_else(|| "tool failed".to_owned())
+                                            }
                                         }
-                                    }
-                                    Decision::Deny { reason } => {
-                                        format!(
-                                            "error: tool '{}' denied: {}",
-                                            call.name, reason
-                                        )
-                                    }
-                                    Decision::RequireHuman { reason, .. } => {
-                                        format!(
-                                            "error: tool '{}' requires human approval: {}",
-                                            call.name, reason
-                                        )
+                                        Decision::Deny { reason } => {
+                                            format!(
+                                                "error: tool '{}' denied: {}",
+                                                call.name, reason
+                                            )
+                                        }
+                                        Decision::RequireHuman { reason, .. } => {
+                                            format!(
+                                                "error: tool '{}' requires human approval: {}",
+                                                call.name, reason
+                                            )
+                                        }
                                     }
                                 }
                             } else {

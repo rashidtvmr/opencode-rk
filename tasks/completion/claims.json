@@ -66,6 +66,101 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP-012-LIVE-FILE-TOOL-INROOT-W3": {
+      "scratchpad": "worklog/APP-012-LIVE-FILE-TOOL-INROOT-W3.md",
+      "session": "ses_f1e63517dffePCNFlr4qGy6zP4",
+      "status": "in-progress"
+    },
+    "APP-012-LIVE-FILE-TOOL-RED2": {
+      "blockedNote": "Compiling RED passed; focused live_file_tool_dispatch RED failed as expected at line 310: output was `Unknown tool: write`, proving current generic ToolExecutor path. Frozen SHA256 0366416c4863940221c74aac08deeeba3c9404cd92ff18c9411d2cab5b570829. Command: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test live_file_tool_dispatch -- --test-threads=1",
+      "scratchpad": "worklog/APP-012-LIVE-FILE-TOOL-RED2.md",
+      "session": "ses_f1e82e6afffe1jJD5WeWFPt2Ou",
+      "status": "blocked"
+    },
+    "APP-012-PARENT-TOCTOU-FIX-W1": {
+      "completedNote": "GREEN: tools check; frozen parent swap 1/1; file_ops 13/13; server dispatch/inroot/symlink each 1/1, serial jobs/threads=1. Frozen hashes unchanged. No test edits. Dirfd no-follow traversal, parent identity recheck after seam reviewed; parent APP-012 acceptance remains open.",
+      "scratchpad": "worklog/APP-012-PARENT-TOCTOU-FIX-W1.md",
+      "session": "ses_f1d34837bffefFx9AcPpuZuOlR",
+      "status": "completed"
+    },
+    "APP-012-PARENT-TOCTOU-RED-W1": {
+      "blockedNote": "RED compiled and failed as expected: sentinel assertion panicked at file_ops.rs:766, left=[65,84,84,65,...] right=[83,69,78,84,...]. Existing 12/12 tests pass. Frozen hook SHA c792c88f. Command: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-tools --lib file_ops::tests::write_file_parent_toctou_symlink_swap_must_not_escape. Implementation required for GREEN.",
+      "scratchpad": "worklog/APP-012-PARENT-TOCTOU-RED-W1.md",
+      "session": "ses_f1dfb40b8ffedbfukYQM6uYy5B",
+      "status": "blocked"
+    },
+    "APP-012-ROOT-ANCHOR-FIX-W1": {
+      "completedNote": "GREEN root anchor + file_ops 17/17 + server dispatch/inroot/symlink 1/1 each; frozen RED hash unchanged; next lane wires server rooted constructor",
+      "scratchpad": "worklog/APP-012-ROOT-ANCHOR-FIX-W1.md",
+      "session": "ses_f1cdc2bcaffezARyXwSQ2BKdXP",
+      "status": "completed"
+    },
+    "APP-012-ROOT-ANCHOR-RED-W1": {
+      "blockedNote": "RED frozen file_ops.rs:1031 observer mismatch: opened (16777231,2) vs project (16777231,8893283); existing 14/14 serial pass; block L969-1043 SHA256 c3c81f71; base 68bd351; cmd cargo test -p opencode-rk-tools --lib root_anchor_red -- --test-threads=1 jobs/threads=1; impl must anchor project dir not /",
+      "scratchpad": "worklog/APP-012-ROOT-ANCHOR-RED-W1.md",
+      "session": "ses_f1ce2d44dffevpTWDqxvnObCFW",
+      "status": "blocked"
+    },
+    "APP-012-ROOT-ANCHOR-SEAM-W1": {
+      "completedNote": "GREEN 14/14 file_ops, observer test 1/1, server dispatch/inroot/symlink 1/1 each; serial CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1; no frozen test edits; convergence pre-existing blocked findings; no project-root/security claim.",
+      "scratchpad": "worklog/APP-012-ROOT-ANCHOR-SEAM-W1.md",
+      "session": "ses_f1cfa0acd3ffe2cOcevISAKEx8r",
+      "status": "completed"
+    },
+    "APP-012-RUSTIX-LOCK-W1": {
+      "completedNote": "LOCK CANDIDATE: base ce97e8d8be1 (reported ...be9 wrong). cargo check -p opencode-rk-tools refreshed Cargo.lock +1 line rustix in tools deps; rustix unchanged 1.1.4; --locked exit 0; no source/test/manifest edits; no security claim.",
+      "scratchpad": "worklog/APP-012-RUSTIX-LOCK-W1.md",
+      "session": "ses_f1d90ef0fffeFSWs1ngA8dky18",
+      "status": "completed"
+    },
+    "APP-012-RUSTIX-PREWIRE-W1": {
+      "blockedNote": "tools line added per card; root [workspace.dependencies] has no rustix @3ecee10 (transitive lock entry only); root manifest not owned here; workspace=true unresolvable until companion root-lane adds rustix = { version = \"1\" }. tomllib OK, Cargo.lock untouched, exactly one product-file diff.",
+      "scratchpad": "worklog/APP-012-RUSTIX-PREWIRE-W1.md",
+      "session": "ses_f1df5aeefffeC0qRrzE38et5TH",
+      "status": "blocked"
+    },
+    "APP-012-RUSTIX-WORKSPACE-W1": {
+      "completedNote": "Workspace rustix=1.1.4 added alphabetically, no workspace features; tools workspace+fs resolves structurally vs Cargo.lock 1.1.4; python structural check OK; cargo/lock untouched",
+      "scratchpad": "worklog/APP-012-RUSTIX-WORKSPACE-W1.md",
+      "session": "ses_f1dd641fdffeTq0Iq1REw6D2kr",
+      "status": "completed"
+    },
+    "APP-012-SECURE-DISPATCH-W1": {
+      "completedNote": "Candidate GREEN: frozen live_file_tool_dispatch, live_file_tool_allowed_inroot, live_file_tool_symlink_escape, and agent_loop_turns each passed serially with CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1; frozen hashes unchanged; parent APP-012 TOCTOU repair remains open.",
+      "scratchpad": "worklog/APP-012-SECURE-DISPATCH-W1.md",
+      "session": "ses_f1e281c6cffeB1mW1cW4Lde0dT",
+      "status": "completed"
+    },
+    "APP-012-SERVER-ROOT-W2": {
+      "blockedNote": "Tests GREEN in supplied worktree; actual branch is lane/APP-012-SERVER-ROOT-W2, while requested clean branch is checked out at /Users/mymac/Projects/opencode-rk-phase1-restored; no commit/push to wrong branch.",
+      "completedNote": "GREEN: server check, frozen dispatch/inroot/symlink + agent_loop_turns, tools file_ops/root_anchor; continuation server check + inroot 1/1. Frozen hashes unchanged. Committing on lane/APP-012-SERVER-ROOT-W2-LUNA-LAND.",
+      "scratchpad": "worklog/APP-012-SERVER-ROOT-W2.md",
+      "session": "ses_f1ca4079dffej6LEVHxZ2GFzYU",
+      "status": "completed"
+    },
+    "APP-012-SYMLINK-ESCAPE-RED": {
+      "blockedNote": "Compiling RED failed as expected: CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 cargo test -p opencode-rk-server --test live_file_tool_symlink_escape -- --test-threads=1; exit 101 at line 323 because symlink target changed from exact sentinel bytes to write content. Frozen test SHA256 fe8d24946c8ce98aae095b6a2f92b7f3c19cc32532ae6263f9898d8a5699753c. Product implementation required.",
+      "scratchpad": "worklog/APP-012-SYMLINK-ESCAPE-RED.md",
+      "session": "ses_f1e631f27ffeLJXTzYwIN2erOi",
+      "status": "blocked"
+    },
+    "APP-012-SYMLINK-FIX-W1": {
+      "completedNote": "Candidate GREEN: focused symlink HTTP 1 passed; file_ops unit 5 passed; frozen SHA fe8d24946c8ce98aae095b6a2f92b7f3c19cc32532ae6263f9898d8a5699753c unchanged; implementation hash pending commit; residual concurrent rename race documented.",
+      "scratchpad": "worklog/APP-012-SYMLINK-FIX-W1.md",
+      "session": "ses_f1e4ee663ffecv8YN3eSpQF1x9",
+      "status": "completed"
+    },
+    "APP-012-TOCTOU-SEAM-W1": {
+      "completedNote": "GREEN seam only: pre-open hook pub(crate), fires after symlink check+parent creation, pre-leaf-open; execute None default unchanged. file_ops 12/12 serial; frozen dispatch/inroot/symlink pass, SHA unchanged; zero test edits. Parent TOCTOU OPEN, no fix claimed.",
+      "scratchpad": "worklog/APP-012-TOCTOU-SEAM-W1.md",
+      "session": "ses_f1e0b18b7ffeMqcSNyFxOJ8QV4",
+      "status": "completed"
+    },
+    "APP-012-TOOL-RED": {
+      "scratchpad": "worklog/APP-012-TOOL-RED.md",
+      "session": "ses_f2ec3a38fffer2ivp1cowx22WB",
+      "status": "in-progress"
+    },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
       "completedNote": "AUD-001 repairs verified landed: RC-01 auth (daemon_auth_api 5/5 green), RC-02 descriptor validation (rc02 7/7 green), RC-03 singleton reclaim (service_commands 14/14 green); commits 022577c/ae9d6fb/cea9557; owned files present; zero test edits by verifier",
