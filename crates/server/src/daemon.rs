@@ -40,11 +40,27 @@ impl From<std::io::Error> for DaemonError {
     }
 }
 pub type Result<T> = std::result::Result<T, DaemonError>;
+/// PID liveness through the native `kill(pid, 0)` probe (no `/proc`, no
+/// shell process). `0` and any value above `i32::MAX` are dead before any
+/// process operation; `Pid::from_raw` is the checked, safe constructor.
+/// `Ok` means signalable => alive; `ESRCH` means no such process => dead;
+/// `EPERM` means the process exists but is not ours => alive, so a live
+/// foreign owner is never mistaken for stale or taken over. Any other error
+/// is conservative: it fails closed and is not treated as alive.
 fn pid_alive(pid: u32) -> bool {
-    if pid == 0 {
+    let raw = match i32::try_from(pid) {
+        Ok(raw) if raw > 0 => raw,
+        _ => return false,
+    };
+    let Some(pid) = rustix::process::Pid::from_raw(raw) else {
         return false;
+    };
+    match rustix::process::test_kill_process(pid) {
+        Ok(()) => true,
+        Err(rustix::io::Errno::SRCH) => false,
+        Err(rustix::io::Errno::PERM) => true,
+        Err(_) => false,
     }
-    Path::new(&format!("/proc/{pid}")).exists()
 }
 pub struct PidLock {
     path: PathBuf,
@@ -213,24 +229,18 @@ fn owner_uid(meta: &std::fs::Metadata) -> u32 {
     meta.uid()
 }
 
-/// Effective UID of this process, parsed std-only from /proc/self/status
-/// (`Uid: real effective saved fs`). Unparseable means fail-closed Err.
+/// Effective UID of this process from the native `geteuid` syscall. The
+/// descriptor owner guard compares the file owner against the caller's
+/// effective identity, so this reports euid (not real uid) and never spawns
+/// a shell `id -u`. Non-unix targets have no euid and fail closed.
 #[cfg(unix)]
 fn current_uid() -> Result<u32> {
-    let status = std::fs::read_to_string("/proc/self/status").map_err(DaemonError::from)?;
-    for line in status.lines() {
-        if let Some(rest) = line.strip_prefix("Uid:") {
-            return rest
-                .split_whitespace()
-                .nth(1)
-                .and_then(|field| field.parse::<u32>().ok())
-                .ok_or_else(|| {
-                    DaemonError::Descriptor("cannot parse euid from /proc/self/status".to_owned())
-                });
-        }
-    }
+    Ok(rustix::process::geteuid().as_raw())
+}
+#[cfg(not(unix))]
+fn current_uid() -> Result<u32> {
     Err(DaemonError::Descriptor(
-        "no Uid line in /proc/self/status".to_owned(),
+        "no effective uid on this platform".to_owned(),
     ))
 }
 
