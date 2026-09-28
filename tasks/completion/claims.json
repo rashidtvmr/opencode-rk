@@ -415,6 +415,12 @@
       "session": "ses_f1df1923ffferEJ51vptxRseR4",
       "status": "blocked"
     },
+    "GAP-OPERATIONS-RECONCILE-W2": {
+      "blockedNote": "BLOCKED: validator :1053-68 hard-codes not-started/null task paths and rejects extant evidence, while Ralph has 7 OPS rows in-progress. Clearing OPS findings needs prohibited validator/controller edits. Ownership remains null; 258/224/34 preserved. Full validator 107 errors; see worklog/GAP-OPERATIONS-RECONCILE-W2.md",
+      "scratchpad": "worklog/GAP-OPERATIONS-RECONCILE-W2.md",
+      "session": "ses_f1a7f49d6ffe7dtQBNi5gqdfV2",
+      "status": "blocked"
+    },
     "GAP-RELEASE-34-W1": {
       "blockedNote": "Validator residual: validate_backlog_exhaustion.py exit=1, 93 findings; REL lines 31-39. Classifier :1229-1358 hardcodes old projection; repair needs integration proposal. 224/34 re-verified; REL ownership retained unresolved.",
       "scratchpad": "worklog/GAP-RELEASE-34-W1.md",
