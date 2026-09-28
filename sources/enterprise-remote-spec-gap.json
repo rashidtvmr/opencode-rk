@@ -11,7 +11,8 @@
   ],
   "residualStoryIds": [
     "INT-010",
-    "SHARE-003"
+    "SHARE-003",
+    "WEB-004"
   ],
   "missingKinds": [
     "spec"

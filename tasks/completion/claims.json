@@ -397,6 +397,23 @@
       "session": "ses_f1df19246ffeHZhaVSzTCipJiP",
       "status": "blocked"
     },
+    "GAP-ENTERPRISE-RECONCILE-W2": {
+      "blockedNote": "Cross-file: ralph marks WEB-004 accepted so backlog-exhaustion non-accepted ledger lacks WEB-004 row; validator line 591 requires its enterprise-remote surface gap row. Cannot edit backlog-exhaustion.json or ralph.json (out of scope). Manifest fix committed restores WEB-004 to residualStoryIds (line 532 passes). 1 enterprise error remains.",
+      "scratchpad": "worklog/GAP-ENTERPRISE-RECONCILE-W2.md",
+      "session": "ses_sub_gap_ent_w2",
+      "status": "blocked"
+    },
+    "GAP-INTEGRATIONS-RECONCILE-W2": {
+      "scratchpad": "worklog/GAP-INTEGRATIONS-RECONCILE-W2.md",
+      "session": "ses_subagent_GAP_INT_RECON_W2",
+      "status": "in-progress"
+    },
+    "GAP-OPERATIONS-34-W1": {
+      "blockedNote": "BLOCKED: JSON/projection and diff-check pass; validate_backlog_exhaustion.py exits 1 with 93 errors including operations ownership-gap stale semantics/task-card checks plus unrelated companion manifest/classifier drift; see worklog/GAP-OPERATIONS-34-W1.md. OPS-009 retained solely as explicit blocker recorder-cross-surface-side-effects; 224/34 projection preserved.",
+      "scratchpad": "worklog/GAP-OPERATIONS-34-W1.md",
+      "session": "ses_f1df1923ffferEJ51vptxRseR4",
+      "status": "blocked"
+    },
     "LANE-AGENT-FILES": {
       "completedNote": "VERIFY 14/14 agent_files + crate 126 @767a86a, zero test edits",
       "scratchpad": "worklog/LANE-AGENT-FILES.md",
@@ -697,7 +714,7 @@
       "status": "completed"
     },
     "LANE-TUI-LAND": {
-      "blockedNote": "DIAGNOSE: native_launch 2/2 FAIL @767a86a — plan_default_launch gate app_start.rs:295 routes piped stdio to Headless/exit-2 vs frozen seam; needs APP-001 vs TUI-LAND ruling",
+      "blockedNote": "DIAGNOSE: native_launch 2/2 FAIL @767a86a \u2014 plan_default_launch gate app_start.rs:295 routes piped stdio to Headless/exit-2 vs frozen seam; needs APP-001 vs TUI-LAND ruling",
       "scratchpad": "worklog/LANE-TUI-LAND.md",
       "session": "ses_complete_app_21sep",
       "status": "blocked"
@@ -987,12 +1004,6 @@
       "blockedNote": "DIAGNOSE: scratchpad missing, owned file unknown; needs lane definition",
       "scratchpad": "worklog/WEB-VOICE.md",
       "session": "ses_complete_app_21sep",
-      "status": "blocked"
-    },
-    "GAP-OPERATIONS-34-W1": {
-      "blockedNote": "BLOCKED: JSON/projection and diff-check pass; validate_backlog_exhaustion.py exits 1 with 93 errors including operations ownership-gap stale semantics/task-card checks plus unrelated companion manifest/classifier drift; see worklog/GAP-OPERATIONS-34-W1.md. OPS-009 retained solely as explicit blocker recorder-cross-surface-side-effects; 224/34 projection preserved.",
-      "scratchpad": "worklog/GAP-OPERATIONS-34-W1.md",
-      "session": "ses_f1df1923ffferEJ51vptxRseR4",
       "status": "blocked"
     }
   },
