@@ -174,9 +174,10 @@
       "status": "completed"
     },
     "APP-015": {
+      "completedNote": "reviews PASS: sg18024 source b29cc0e (rustix cfg(unix) only; not(unix) conservative alive; no Win runtime); combined runtime sg18481 on 5b9172c7 tree304b3095 (daemon sha cce2f4c8 matches lane; binary c19891e0 retained; frozen 3c8eea31 1/1; daemon 21/21; guard PASS; Node 6/6 prior f188). Scoped daemon repair; NOT APP-002 acceptance/release-ready.",
       "scratchpad": "worklog/APP-015.md",
       "session": "ses_f1830cdaaffeVW5pglEN1lOQAZ",
-      "status": "in-progress"
+      "status": "completed"
     },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
