@@ -40,26 +40,38 @@ impl From<std::io::Error> for DaemonError {
     }
 }
 pub type Result<T> = std::result::Result<T, DaemonError>;
-/// PID liveness through the native `kill(pid, 0)` probe (no `/proc`, no
-/// shell process). `0` and any value above `i32::MAX` are dead before any
-/// process operation; `Pid::from_raw` is the checked, safe constructor.
+/// PID liveness through the native `kill(pid, 0)` probe on unix (no `/proc`,
+/// no shell process). `0` and any value above `i32::MAX` are rejected before
+/// any possible probe; `Pid::from_raw` is the checked, safe constructor.
 /// `Ok` means signalable => alive; `ESRCH` means no such process => dead;
 /// `EPERM` means the process exists but is not ours => alive, so a live
-/// foreign owner is never mistaken for stale or taken over. Any other error
-/// is conservative: it fails closed and is not treated as alive.
+/// foreign owner is never mistaken for stale or taken over. Any unexpected
+/// error is treated conservatively as alive/refuse rather than dead, so an
+/// unprobeable owner is never replaced. Non-unix targets have no rustix
+/// process module, so a valid positive PID is conservatively reported alive
+/// (liveness is not implemented for Windows runtime here); this path compiles
+/// everywhere and pairs with `current_uid`'s fail-closed unsupported error.
 fn pid_alive(pid: u32) -> bool {
     let raw = match i32::try_from(pid) {
         Ok(raw) if raw > 0 => raw,
         _ => return false,
     };
-    let Some(pid) = rustix::process::Pid::from_raw(raw) else {
-        return false;
-    };
-    match rustix::process::test_kill_process(pid) {
-        Ok(()) => true,
-        Err(rustix::io::Errno::SRCH) => false,
-        Err(rustix::io::Errno::PERM) => true,
-        Err(_) => false,
+    #[cfg(unix)]
+    {
+        let Some(pid) = rustix::process::Pid::from_raw(raw) else {
+            return false;
+        };
+        match rustix::process::test_kill_process(pid) {
+            Ok(()) => true,
+            Err(rustix::io::Errno::SRCH) => false,
+            Err(rustix::io::Errno::PERM) => true,
+            Err(_) => true,
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = raw;
+        true
     }
 }
 pub struct PidLock {
