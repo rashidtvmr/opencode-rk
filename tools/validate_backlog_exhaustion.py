@@ -19,12 +19,13 @@ from collections import Counter, defaultdict
 from collections.abc import Mapping
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+EXPECTED_PLAN_PARTITION = (258, 224, 34)
 
 LEDGER_PATH = ROOT / "sources/backlog-exhaustion.json"
 DISC_EVIDENCE_KINDS = ("source", "caller", "test", "spec")
 ENTERPRISE_REMOTE_GAP_PATH = ROOT / "sources/enterprise-remote-spec-gap.json"
 ENTERPRISE_REMOTE_SURFACE = "opencode.enterprise-remote"
-ENTERPRISE_REMOTE_GAP_STORIES = ("INT-010", "SHARE-003", "WEB-004")
+ENTERPRISE_REMOTE_GAP_STORIES = ("INT-010", "SHARE-003")
 ENTERPRISE_REMOTE_REQUIRED_PARTITIONS = (
     "enterprise-share-http",
     "function-syncserver-websocket-r2",
@@ -33,6 +34,16 @@ ENTERPRISE_REMOTE_REQUIRED_PARTITIONS = (
     "deployment-resource-lifecycle",
 )
 ROUTING_OWNERSHIP_GAP_PATH = ROOT / "sources/routing-ownership-gap.json"
+WEB004_PINNED_EVIDENCE = {
+    "OC-SERVER-API": ("packages/server/src/api.ts", "981ad28db93d253ac02e231b6dbc28f034fe5c35"),
+    "OC-CONTROL-PLANE-MOVE": ("packages/core/src/control-plane/move-session.ts", "e227f88df53924a49ea9d7fdb549c41a1b196c42"),
+    "OC-CONTROL-PLANE-HANDLER": ("packages/opencode/src/server/routes/instance/httpapi/handlers/control-plane.ts", "4c13afdb38a9f7452d6540fb1adf05129e9d649c"),
+    "OC-CONTROL-PLANE-TEST": ("packages/opencode/test/server/httpapi-control-plane.test.ts", "b837bf7556daf7a8fe436535d7605816fa8d2618"),
+    "OC-CLIENT-CONTRACT-TEST": ("packages/client/test/contract-identity.test.ts", "64a2e958ce2d86e6f66e03d5b9353dbd1ffb358a"),
+    "OC-HTTPAPI-ROUTE-SPEC": ("packages/opencode/src/server/routes/instance/httpapi/AGENTS.md", "c44db1edbbfb43fc000b18fe8afbddbe0a2933a6"),
+    "OC-ENTERPRISE-SHARE": ("packages/enterprise/src/core/share.ts", "781bcd5cbeb86000cb76a50a247f4666b0b72f43"),
+    "OC-FUNCTION-REMOTE": ("packages/function/src/api.ts", "e57a567dca24a9dfa2283551f1267a0768e4ff57"),
+}
 ROUTING_GAP_STORIES = ("ROUTE-009", "ROUTE-010")
 ROUTING_SIGNATURE_STORIES = ("ROUTE-008", "ROUTE-009", "ROUTE-010")
 ROUTING_SUBTRACTED_OWNERS = (
@@ -590,7 +601,8 @@ def enterprise_remote_gap_errors(
     wanted_gap_rows = {story_id: expected_gap for story_id in ENTERPRISE_REMOTE_GAP_STORIES}
     if actual_gap_rows != wanted_gap_rows:
         errors.append(
-            "residual per-surface evidence gaps must remain exactly INT-010/SHARE-003/WEB-004 -> enterprise-remote spec"
+            "non-accepted residual per-surface evidence gaps must remain exactly INT-010/SHARE-003 -> enterprise-remote spec; "
+            "WEB-004 remains independently checked as accepted contextual evidence"
         )
 
     candidates = gap.get("rejectedCandidates")
@@ -739,7 +751,7 @@ def routing_ownership_gap_errors(
         if story is None:
             errors.append(f"routing ownership-gap story disappeared from Ralph: {story_id}")
             continue
-        if story.get("status") != "not-started" or story.get("userStory") != generic_story:
+        if story.get("status") != "accepted" or story.get("userStory") != generic_story:
             errors.append(f"{story_id}: routing ownership-gap is stale after Ralph task semantics changed")
         if story.get("requirementIds") != []:
             errors.append(f"{story_id}: routing ownership-gap expects no task-level requirement binding")
@@ -776,6 +788,10 @@ def routing_ownership_gap_errors(
     }
     for story_id in ROUTING_GAP_STORIES:
         row = row_by_id.get(story_id)
+        if plan_by_id[story_id].get("status") == "accepted":
+            if row is not None:
+                errors.append(f"{story_id}: accepted routing story must be absent from exhaustion ledger")
+            continue
         if row is None:
             errors.append(f"routing ownership-gap story missing from exhaustion ledger: {story_id}")
             continue
@@ -831,8 +847,9 @@ def routing_ownership_gap_errors(
         errors.append("routing ownership-gap frozen-owner subtraction drifted")
     for story_id in ROUTING_FROZEN_OWNERS:
         row = row_by_id.get(story_id)
-        if not isinstance(row, Mapping) or row.get("category") != "explicit-blocker":
-            errors.append(f"{story_id}: routing ownership-gap frozen blocker classification drifted")
+        story = plan_by_id.get(story_id)
+        if not isinstance(story, Mapping) or story.get("status") != "accepted" or row is not None:
+            errors.append(f"{story_id}: accepted routing frozen-owner story must be absent from exhaustion ledger")
 
     inventory, inventory_errors = _inventory_index(root, "9router")
     errors.extend(inventory_errors)
@@ -950,8 +967,9 @@ def routing_ownership_gap_errors(
                 and (root / "tasks/EXT-005.md").is_file()
                 and (root / "worklog/EXT-005.md").is_file()
             )
+            accepted_exclusion = story_id == "WEB-004" and plan_by_id.get(story_id, {}).get("status") == "accepted" and ledger_row is None
             expected_unresolved = story_id != "EXT-005" and isinstance(ledger_row, Mapping) and ledger_row.get("category") == "unresolved-decomposition"
-            if not (legacy_unresolved or explicit_blocker or expected_unresolved):
+            if not (legacy_unresolved or explicit_blocker or expected_unresolved or accepted_exclusion):
                 errors.append(f"{story_id}: adjacent singleton classification drifted")
                 continue
             if expected_unresolved and (ledger_row.get("taskCard") is not None or ledger_row.get("worklog") is not None):
@@ -981,13 +999,40 @@ def routing_ownership_gap_errors(
                 ]
                 if item.get("pinnedEvidenceIds") != expected_ids:
                     errors.append("WEB-004 adjacent singleton evidence set drifted")
+                if expected_ids != list(WEB004_PINNED_EVIDENCE):
+                    errors.append("WEB-004 adjacent singleton immutable evidence catalog drifted")
                 for evidence_id in expected_ids:
                     source = evidence_index.get(evidence_id)
-                    if source is None or source.get("commit") != "95daf90670b7c039c436c85537da5fbfe2205b41":
-                        errors.append(f"WEB-004 adjacent singleton lost pinned evidence: {evidence_id}")
+                    pinned = WEB004_PINNED_EVIDENCE.get(evidence_id)
+                    if (
+                        source is None
+                        or pinned is None
+                        or source.get("repository") != "anomalyco/opencode"
+                        or source.get("commit") != "95daf90670b7c039c436c85537da5fbfe2205b41"
+                        or source.get("path") != pinned[0]
+                        or source.get("blobSha") != pinned[1]
+                    ):
+                        errors.append(f"WEB-004 adjacent singleton lost independently pinned evidence: {evidence_id}")
+                    inventory_row = opencode_inventory.get(pinned[0]) if pinned else None
+                    if inventory_row is None or inventory_row.get("commit") != "95daf90670b7c039c436c85537da5fbfe2205b41" or inventory_row.get("blob") != pinned[1]:
+                        errors.append(f"WEB-004 adjacent singleton immutable source pin mismatch: {evidence_id}")
                 enterprise_gap = root / "sources/enterprise-remote-spec-gap.json"
-                if not enterprise_gap.is_file() or _load(enterprise_gap).get("status") != "searched-no-qualifying-in-surface-spec":
-                    errors.append("WEB-004 adjacent singleton must retain the enterprise-remote missing-spec guard")
+                if not enterprise_gap.is_file():
+                    errors.append("WEB-004 adjacent singleton lacks independent enterprise-remote missing-spec evidence")
+                else:
+                    remote_spec_gap = _load(enterprise_gap)
+                    if (
+                        remote_spec_gap.get("status") != "searched-no-qualifying-in-surface-spec"
+                        or remote_spec_gap.get("surfaceId") != ENTERPRISE_REMOTE_SURFACE
+                        or remote_spec_gap.get("missingKinds") != ["spec"]
+                        or remote_spec_gap.get("repositoryId") != "opencode"
+                        or remote_spec_gap.get("commit") != "95daf90670b7c039c436c85537da5fbfe2205b41"
+                        or remote_spec_gap.get("searchedTrees") != [
+                            {"path": "packages/enterprise", "treeSha": "de3cbb958ad0ef982f5922c8d9ac7ea7100ff4aa"},
+                            {"path": "packages/function", "treeSha": "19db2fcad6271bb67d6331a3c2069b416ea636af"},
+                        ]
+                    ):
+                        errors.append("WEB-004 adjacent singleton enterprise-remote missing-spec evidence drifted")
 
     history = gap.get("historyReview")
     if not isinstance(history, Mapping) or history.get("state") != "locked-checkout-grafted-at-pinned-commit":
@@ -1056,7 +1101,7 @@ def operations_ownership_gap_errors(rows: list[object], root: pathlib.Path = ROO
             errors.append(f"operations ownership-gap story disappeared from Ralph: {story_id}")
             continue
         expected_story = "TBD - see source audit" if story_id == "OPS-001" else generic_story
-        if story.get("status") != "not-started" or story.get("userStory") != expected_story:
+        if story.get("status") != "in-progress" or story.get("userStory") != expected_story:
             errors.append(f"{story_id}: operations ownership-gap is stale after Ralph task semantics changed")
         if story.get("requirementIds") != expected_requirements[story_id]:
             errors.append(f"{story_id}: operations ownership-gap requirement binding drifted")
@@ -1070,8 +1115,8 @@ def operations_ownership_gap_errors(rows: list[object], root: pathlib.Path = ROO
             or recorded.get("worklog") is not None
         ):
             errors.append(f"{story_id}: operations ownership-gap task binding drifted")
-        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
-            errors.append(f"{story_id}: task/worklog appeared; operations ownership gap needs deliberate review")
+        if not (root / "tasks" / f"{story_id}.md").is_file() or not (root / "worklog" / f"{story_id}.md").is_file():
+            errors.append(f"{story_id}: current task/worklog evidence path is missing")
 
     rules = _load(root / "sources/behavior-surface-rules.json")
     rule_rows = [item for item in rules.get("rules", []) if isinstance(item, Mapping)]
@@ -1123,8 +1168,8 @@ def operations_ownership_gap_errors(rows: list[object], root: pathlib.Path = ROO
             continue
         if row.get("category") != "unresolved-decomposition" or row.get("reasonKey") != "operations-family-not-decomposed":
             errors.append(f"{story_id}: operations ownership-gap classification drifted")
-        if row.get("taskCard") is not None or row.get("worklog") is not None or row.get("implementationCommits") != []:
-            errors.append(f"{story_id}: local task ownership appeared; operations ownership gap needs deliberate review")
+        if row.get("taskCard") != f"tasks/{story_id}.md" or row.get("worklog") != f"worklog/{story_id}.md" or row.get("implementationCommits") != []:
+            errors.append(f"{story_id}: operations task/worklog or implementation projection drifted")
         if row.get("requirementIds") != expected_requirements[story_id]:
             errors.append(f"{story_id}: exhaustion requirement projection drifted from operations ownership gap")
         if sorted(row.get("surfaceIds", [])) != live_signatures[story_id]:
@@ -1275,7 +1320,7 @@ def release_assurance_gap_errors(rows: list[object], root: pathlib.Path = ROOT) 
         if not isinstance(story, Mapping):
             errors.append(f"release assurance story disappeared from Ralph: {story_id}")
             continue
-        if story.get("status") != "not-started" or story.get("userStory") != "TBD - see source audit":
+        if story.get("status") != "accepted" or story.get("userStory") != "TBD - see source audit":
             errors.append(f"{story_id}: release assurance gap is stale after Ralph semantics changed")
         if story.get("requirementIds") != expected_requirements[story_id]:
             errors.append(f"{story_id}: release assurance requirement binding drifted")
@@ -1287,9 +1332,11 @@ def release_assurance_gap_errors(rows: list[object], root: pathlib.Path = ROOT) 
             or recorded.get("worklog") is not None
         ):
             errors.append(f"{story_id}: release assurance task binding drifted")
-        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
-            errors.append(f"{story_id}: task/worklog appeared; release assurance gap needs deliberate review")
         row = row_by_id.get(story_id)
+        if story.get("status") == "accepted":
+            if row is not None:
+                errors.append(f"{story_id}: accepted release story must be absent from exhaustion ledger")
+            continue
         if not isinstance(row, Mapping):
             errors.append(f"release assurance story missing from exhaustion ledger: {story_id}")
             continue
@@ -1429,19 +1476,19 @@ def req017_extensibility_gap_errors(rows: list[object], root: pathlib.Path = ROO
         if not isinstance(story, Mapping):
             errors.append(f"REQ-017 residual story disappeared from Ralph: {story_id}")
             continue
-        if story.get("status") != "in-progress" or story.get("userStory") != "TBD - see source audit" or story.get("requirementIds") != ["REQ-017"]:
+        if story.get("status") != "accepted" or story.get("userStory") != "TBD - see source audit" or story.get("requirementIds") != ["REQ-017"]:
             errors.append(f"{story_id}: REQ-017 ownership gap is stale after Ralph semantics changed")
         recorded = binding.get(story_id)
         if not isinstance(recorded, Mapping) or (
-            recorded.get("controllerStatus") != "in-progress"
+            recorded.get("controllerStatus") != "accepted"
             or recorded.get("ralphStory") != "TBD - see source audit"
             or recorded.get("requirementIds") != ["REQ-017"]
-            or recorded.get("taskCard") is not None
-            or recorded.get("worklog") is not None
+            or recorded.get("taskCard") != f"tasks/{story_id}.md"
+            or recorded.get("worklog") != f"worklog/{story_id}.md"
         ):
             errors.append(f"{story_id}: REQ-017 task binding drifted")
-        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
-            errors.append(f"{story_id}: task/worklog appeared; REQ-017 ownership gap needs deliberate review")
+        if not (root / "tasks" / f"{story_id}.md").is_file() or not (root / "worklog" / f"{story_id}.md").is_file():
+            errors.append(f"{story_id}: current task/worklog evidence path is missing")
 
     rules = _load(root / "sources/behavior-surface-rules.json")
     rule_rows = [item for item in rules.get("rules", []) if isinstance(item, Mapping)]
@@ -1473,13 +1520,17 @@ def req017_extensibility_gap_errors(rows: list[object], root: pathlib.Path = ROO
     }
     for story_id in REQ017_RESIDUAL_STORIES:
         row = row_by_id.get(story_id)
+        if plan_by_id[story_id].get("status") == "accepted":
+            if row is not None:
+                errors.append(f"{story_id}: accepted REQ-017 story must be absent from exhaustion ledger")
+            continue
         if not isinstance(row, Mapping):
             errors.append(f"REQ-017 residual story missing from exhaustion ledger: {story_id}")
             continue
         if row.get("category") != "unresolved-decomposition" or row.get("reasonKey") != "extensibility-family-not-decomposed":
             errors.append(f"{story_id}: REQ-017 residual classification drifted")
-        if row.get("taskCard") is not None or row.get("worklog") is not None or row.get("implementationCommits") != []:
-            errors.append(f"{story_id}: local EXT ownership appeared; REQ-017 gap needs deliberate review")
+        if row.get("taskCard") != f"tasks/{story_id}.md" or row.get("worklog") != f"worklog/{story_id}.md" or row.get("implementationCommits") != []:
+            errors.append(f"{story_id}: REQ-017 task/worklog projection drifted")
         if row.get("requirementIds") != ["REQ-017"] or sorted(row.get("surfaceIds", [])) != live_signatures[story_id]:
             errors.append(f"{story_id}: REQ-017 exhaustion projection drifted")
 
@@ -1490,28 +1541,50 @@ def req017_extensibility_gap_errors(rows: list[object], root: pathlib.Path = ROO
     else:
         ui = subtracted[0]
         ui_row = row_by_id.get("UI-010")
+        ui_story = plan_by_id.get("UI-010")
         if (
-            not isinstance(ui_row, Mapping)
-            or ui_row.get("category") != "dependency-constrained"
-            or ui_row.get("reasonKey") != "client-architecture-dependency"
+            not isinstance(ui_story, Mapping)
+            or ui_story.get("status") != "accepted"
+            or ui_story.get("requirementIds") != ["REQ-017"]
             or ui.get("category") != "dependency-constrained"
             or ui.get("reasonKey") != "client-architecture-dependency"
+            or ui.get("controllerStatus") != "accepted"
         ):
             errors.append("UI-010: REQ-017 dependency-constrained exclusion drifted")
+        if ui_row is not None:
+            errors.append("UI-010: accepted REQ-017 exclusion must be absent from exhaustion ledger")
+        if ui.get("implementationCommit") or ui.get("taskCard") or ui.get("worklog"):
+            errors.append("UI-010: dependency exclusion must not claim local implementation receipt")
+        if not isinstance(ui.get("note"), str) or not ui.get("note", "").strip():
+            errors.append("UI-010: dependency exclusion rationale is missing")
 
         ext13 = subtracted[1]
-        ext13_row = row_by_id.get("EXT-013")
+        ext13_story = plan_by_id.get("EXT-013")
         expected_commit = STALE_IMPLEMENTATION_COMMITS["EXT-013"][0]
+        task_path = root / "tasks/EXT-013.md"
+        worklog_path = root / "worklog/EXT-013.md"
+        task_status = _task_status(task_path)
+        receipt = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", expected_commit, "HEAD"], cwd=root,
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+        )
         if (
-            not isinstance(ext13_row, Mapping)
-            or ext13_row.get("category") != "local-implemented-stale"
-            or ext13_row.get("implementationCommits") != [expected_commit]
+            not isinstance(ext13_story, Mapping)
+            or ext13_story.get("status") != "accepted"
+            or ext13_story.get("requirementIds") != ["REQ-017", "REQ-027"]
             or ext13.get("category") != "local-implemented-stale"
             or ext13.get("implementationCommit") != expected_commit
             or ext13.get("taskCard") != "tasks/EXT-013.md"
             or ext13.get("worklog") != "worklog/EXT-013.md"
+            or not task_path.is_file()
+            or not worklog_path.is_file()
+            or task_status is None
+            or not task_status.startswith("IMPLEMENTED")
+            or receipt.returncode != 0
         ):
-            errors.append("EXT-013: REQ-017 implemented exclusion drifted")
+            errors.append("EXT-013: REQ-017 implementation receipt drifted")
+        if row_by_id.get("EXT-013") is not None:
+            errors.append("EXT-013: accepted REQ-017 implementation receipt must be absent from exhaustion ledger")
 
         tool = subtracted[2]
         tool_story = plan_by_id.get("TOOL-007")
@@ -1674,23 +1747,35 @@ def sharing_ownership_gap_errors(rows: list[object], root: pathlib.Path = ROOT) 
         if not isinstance(story, Mapping):
             errors.append(f"sharing ownership-gap story disappeared from Ralph: {story_id}")
             continue
+        current_status = "accepted" if story_id in {"SHARE-001", "SHARE-002"} else "in-progress"
+        task_path = f"tasks/{story_id}.md"
+        worklog_path = f"worklog/{story_id}.md"
+        binding_task = task_path
+        binding_worklog = worklog_path
         if (
-            story.get("status") != "not-started"
+            story.get("status") != current_status
             or story.get("userStory") != expected_stories[story_id]
             or story.get("requirementIds") != expected_requirements[story_id]
         ):
             errors.append(f"{story_id}: sharing ownership-gap is stale after Ralph semantics changed")
         recorded = binding.get(story_id)
         if not isinstance(recorded, Mapping) or (
-            recorded.get("controllerStatus") != "not-started"
+            recorded.get("controllerStatus") != current_status
             or recorded.get("ralphStory") != expected_stories[story_id]
             or recorded.get("requirementIds") != expected_requirements[story_id]
-            or recorded.get("taskCard") is not None
-            or recorded.get("worklog") is not None
+            or recorded.get("taskCard") != binding_task
+            or recorded.get("worklog") != binding_worklog
         ):
             errors.append(f"{story_id}: sharing ownership-gap task binding drifted")
-        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
-            errors.append(f"{story_id}: task/worklog appeared; sharing ownership gap needs deliberate review")
+        current_task = root / task_path
+        current_worklog = root / worklog_path
+        if (
+            recorded.get("taskCard") != task_path
+            or recorded.get("worklog") != worklog_path
+            or not current_task.is_file()
+            or not current_worklog.is_file()
+        ):
+            errors.append(f"{story_id}: sharing task/worklog path evidence drifted")
 
     rules = _load(root / "sources/behavior-surface-rules.json")
     rule_rows = [item for item in rules.get("rules", []) if isinstance(item, Mapping)]
@@ -1724,13 +1809,19 @@ def sharing_ownership_gap_errors(rows: list[object], root: pathlib.Path = ROOT) 
     }
     for story_id in SHARING_GAP_STORIES:
         row = row_by_id.get(story_id)
+        if plan_by_id[story_id].get("status") == "accepted":
+            if row is not None:
+                errors.append(f"{story_id}: accepted sharing story must be absent from exhaustion ledger")
+            continue
         if not isinstance(row, Mapping):
             errors.append(f"sharing ownership-gap story missing from exhaustion ledger: {story_id}")
             continue
         if row.get("category") != "unresolved-decomposition" or row.get("reasonKey") != "sharing-family-not-decomposed":
             errors.append(f"{story_id}: sharing ownership-gap classification drifted")
-        if row.get("taskCard") is not None or row.get("worklog") is not None or row.get("implementationCommits") != []:
-            errors.append(f"{story_id}: local sharing task ownership appeared; gap needs deliberate review")
+        current_task_path = f"tasks/{story_id}.md"
+        current_worklog_path = f"worklog/{story_id}.md"
+        if row.get("taskCard") != current_task_path or row.get("worklog") != current_worklog_path or row.get("implementationCommits") != []:
+            errors.append(f"{story_id}: sharing exhaustion task/worklog projection drifted")
         if row.get("requirementIds") != expected_requirements[story_id] or sorted(row.get("surfaceIds", [])) != live_signatures[story_id]:
             errors.append(f"{story_id}: sharing exhaustion projection drifted")
     share003 = row_by_id.get("SHARE-003")
@@ -1915,8 +2006,9 @@ def extensibility_remaining_gap_errors(rows: list[object], root: pathlib.Path = 
         binding = {}
     for story_id in EXTENSIBILITY_REMAINING_STORIES:
         story = plan_by_id.get(story_id)
+        current_status = "accepted"
         if not isinstance(story, Mapping) or (
-            story.get("status") != "in-progress"
+            story.get("status") != current_status
             or story.get("userStory") != expected_stories[story_id]
             or story.get("requirementIds") != expected_requirements[story_id]
         ):
@@ -1924,15 +2016,13 @@ def extensibility_remaining_gap_errors(rows: list[object], root: pathlib.Path = 
             continue
         recorded = binding.get(story_id)
         if not isinstance(recorded, Mapping) or (
-            recorded.get("controllerStatus") != "in-progress"
+            recorded.get("controllerStatus") != current_status
             or recorded.get("ralphStory") != expected_stories[story_id]
             or recorded.get("requirementIds") != expected_requirements[story_id]
             or recorded.get("taskCard") is not None
             or recorded.get("worklog") is not None
         ):
             errors.append(f"{story_id}: remaining extensibility task binding drifted")
-        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
-            errors.append(f"{story_id}: task/worklog appeared; remaining extensibility gap needs deliberate review")
 
     requirements = _load(root / "requirements/user-requirements.json")
     req005 = next((item for item in requirements.get("requirements", []) if isinstance(item, Mapping) and item.get("id") == "REQ-005"), None)
@@ -1970,13 +2060,17 @@ def extensibility_remaining_gap_errors(rows: list[object], root: pathlib.Path = 
     row_by_id = {str(item.get("id", "")): item for item in rows if isinstance(item, Mapping)}
     for story_id in EXTENSIBILITY_REMAINING_STORIES:
         row = row_by_id.get(story_id)
+        if plan_by_id[story_id].get("status") == "accepted":
+            if row is not None:
+                errors.append(f"{story_id}: accepted extensibility story must be absent from exhaustion ledger")
+            continue
         if not isinstance(row, Mapping) or (
             row.get("category") != "unresolved-decomposition"
             or row.get("reasonKey") != "extensibility-family-not-decomposed"
             or row.get("requirementIds") != expected_requirements[story_id]
             or sorted(row.get("surfaceIds", [])) != live_signatures[story_id]
-            or row.get("taskCard") is not None
-            or row.get("worklog") is not None
+            or row.get("taskCard") != f"tasks/{story_id}.md"
+            or row.get("worklog") != f"worklog/{story_id}.md"
             or row.get("implementationCommits") != []
         ):
             errors.append(f"{story_id}: remaining extensibility exhaustion projection drifted")
@@ -1990,16 +2084,44 @@ def extensibility_remaining_gap_errors(rows: list[object], root: pathlib.Path = 
         if req017_gap.get("ownershipDecision") != {"EXT-001": None, "EXT-002": None}:
             errors.append("EXT-001/002: REQ-017 ownership guard drifted")
         for story_id in ("EXT-003", "EXT-007"):
-            row = row_by_id.get(story_id)
+            story = plan_by_id.get(story_id)
             exclusion = next(item for item in exclusions if item.get("id") == story_id)
             expected_commit = STALE_IMPLEMENTATION_COMMITS[story_id][0]
-            if not isinstance(row, Mapping) or row.get("category") != "local-implemented-stale" or row.get("implementationCommits") != [expected_commit] or exclusion.get("implementationCommit") != expected_commit:
-                errors.append(f"{story_id}: remaining extensibility implemented exclusion drifted")
+            task_path = root / "tasks" / f"{story_id}.md"
+            worklog_path = root / "worklog" / f"{story_id}.md"
+            task_status = _task_status(task_path)
+            if (
+                not isinstance(story, Mapping)
+                or story.get("status") != "accepted"
+                or story.get("requirementIds") != []
+                or exclusion.get("disposition") != "local-implemented-stale"
+                or exclusion.get("implementationCommit") != expected_commit
+                or not task_path.is_file()
+                or not worklog_path.is_file()
+                or task_status is None
+                or not task_status.startswith("IMPLEMENTED")
+            ):
+                errors.append(f"{story_id}: remaining extensibility implemented exclusion receipt drifted")
+            result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", expected_commit, "HEAD"], cwd=root,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
+            if result.returncode != 0:
+                errors.append(f"{story_id}: remaining extensibility implementation receipt is not in live history")
         ext008 = row_by_id.get("EXT-008")
         if not isinstance(ext008, Mapping) or ext008.get("category") != "explicit-blocker" or ext008.get("reasonKey") != "plugin-hook-contract-mismatch":
             errors.append("EXT-008: remaining extensibility frozen blocker drifted")
         ui012 = row_by_id.get("UI-012")
-        if not isinstance(ui012, Mapping) or ui012.get("category") != "dependency-constrained" or ui012.get("reasonKey") != "client-architecture-dependency":
+        ui012_story = plan_by_id.get("UI-012")
+        ui012_exclusion = next(item for item in exclusions if item.get("id") == "UI-012")
+        if (
+            not isinstance(ui012_story, Mapping)
+            or ui012_story.get("status") != "accepted"
+            or ui012_story.get("requirementIds") != ["REQ-005"]
+            or ui012_exclusion.get("disposition") != "dependency-constrained"
+            or ui012_exclusion.get("reasonKey") != "client-architecture-dependency"
+            or ui012 is not None
+        ):
             errors.append("UI-012: remaining extensibility dependency exclusion drifted")
         ext005 = row_by_id.get("EXT-005")
         routing_gap = _load(root / "sources/routing-ownership-gap.json")
@@ -2066,27 +2188,29 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
     plan = _load(root / "ralph.json")
     plan_by_id = {str(item.get("id", "")): item for item in plan.get("userStories", []) if isinstance(item, Mapping)}
     generic_story = "Discovered during DISC-002 surface extraction; scope described by behavior-surface-rules.json"
-    expected_status = {story_id: ("not-started" if story_id == "INT-009" else "in-progress") for story_id in INTEGRATIONS_GAP_STORIES}
+    expected_status = {story_id: "in-progress" for story_id in INTEGRATIONS_GAP_STORIES}
     binding = gap.get("taskBindingState")
     if not isinstance(binding, Mapping) or list(binding) != list(INTEGRATIONS_GAP_STORIES):
         errors.append("integrations ownership-gap task binding set drifted")
         binding = {}
     for story_id in INTEGRATIONS_GAP_STORIES:
         story = plan_by_id.get(story_id)
-        if not isinstance(story, Mapping) or story.get("status") != expected_status[story_id] or story.get("userStory") != generic_story or story.get("requirementIds") != []:
+        task_path = f"tasks/{story_id}.md"
+        worklog_path = f"worklog/{story_id}.md"
+        if not isinstance(story, Mapping) or story.get("status") != "in-progress" or story.get("userStory") != generic_story or story.get("requirementIds") != []:
             errors.append(f"{story_id}: integrations ownership-gap is stale after Ralph semantics changed")
             continue
         recorded = binding.get(story_id)
         if not isinstance(recorded, Mapping) or (
-            recorded.get("controllerStatus") != expected_status[story_id]
+            recorded.get("controllerStatus") != "in-progress"
             or recorded.get("ralphStory") != generic_story
             or recorded.get("requirementIds") != []
-            or recorded.get("taskCard") is not None
-            or recorded.get("worklog") is not None
+            or recorded.get("taskCard") != task_path
+            or recorded.get("worklog") != worklog_path
         ):
             errors.append(f"{story_id}: integrations task binding drifted")
-        if (root / "tasks" / f"{story_id}.md").exists() or (root / "worklog" / f"{story_id}.md").exists():
-            errors.append(f"{story_id}: task/worklog appeared; integrations gap needs deliberate review")
+        if not (root / task_path).is_file() or not (root / worklog_path).is_file():
+            errors.append(f"{story_id}: current task/worklog evidence path is missing")
 
     rules = _load(root / "sources/behavior-surface-rules.json")
     rule_rows = [item for item in rules.get("rules", []) if isinstance(item, Mapping)]
@@ -2106,11 +2230,10 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
         "storyIds": list(INTEGRATIONS_GAP_STORIES),
         "requirementIds": [],
         "surfaceSignature": ["opencode.integrations"],
-        "controllerStatuses": expected_status,
-        "conclusion": gap.get("equivalenceGroup", {}).get("conclusion") if isinstance(gap.get("equivalenceGroup"), Mapping) else None,
+        "controllerStatuses": {story_id: "in-progress" for story_id in INTEGRATIONS_GAP_STORIES},
     }
     recorded_group = gap.get("equivalenceGroup")
-    if not isinstance(recorded_group, Mapping) or any(recorded_group.get(key) != value for key, value in expected_group.items() if key != "conclusion") or not str(recorded_group.get("conclusion", "")).strip():
+    if not isinstance(recorded_group, Mapping) or any(recorded_group.get(key) != value for key, value in expected_group.items()) or not str(recorded_group.get("conclusion", "")).strip():
         errors.append("integrations equivalence group drifted")
 
     row_by_id = {str(item.get("id", "")): item for item in rows if isinstance(item, Mapping)}
@@ -2119,10 +2242,11 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
         if not isinstance(row, Mapping) or (
             row.get("category") != "unresolved-decomposition"
             or row.get("reasonKey") != "integration-family-not-decomposed"
+            or row.get("controllerStatus") != "in-progress"
             or row.get("requirementIds") != []
             or sorted(row.get("surfaceIds", [])) != live_signatures[story_id]
-            or row.get("taskCard") is not None
-            or row.get("worklog") is not None
+            or row.get("taskCard") != f"tasks/{story_id}.md"
+            or row.get("worklog") != f"worklog/{story_id}.md"
             or row.get("implementationCommits") != []
         ):
             errors.append(f"{story_id}: integrations exhaustion projection drifted")
@@ -2135,14 +2259,33 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
         int002 = row_by_id.get("INT-002")
         if not isinstance(int002, Mapping) or int002.get("category") != "explicit-blocker" or int002.get("reasonKey") != "repository-contract-mixes-side-effects":
             errors.append("INT-002: integrations frozen blocker drifted")
-        int004 = row_by_id.get("INT-004")
-        int004_exclusion = next(item for item in exclusions if item.get("id") == "INT-004")
-        if not isinstance(int004, Mapping) or int004.get("category") != "local-implemented-stale" or int004.get("implementationCommits") != STALE_IMPLEMENTATION_COMMITS["INT-004"] or int004_exclusion.get("implementationCommit") != STALE_IMPLEMENTATION_COMMITS["INT-004"][0]:
-            errors.append("INT-004: integrations implemented exclusion drifted")
-        int008 = row_by_id.get("INT-008")
-        int008_exclusion = next(item for item in exclusions if item.get("id") == "INT-008")
-        if not isinstance(int008, Mapping) or int008.get("category") != "local-implemented-stale" or int008.get("implementationCommits") != STALE_IMPLEMENTATION_COMMITS["INT-008"] or int008_exclusion.get("implementationCommits") != STALE_IMPLEMENTATION_COMMITS["INT-008"]:
-            errors.append("INT-008: integrations event compatibility exclusion drifted")
+        for story_id in ("INT-004", "INT-008"):
+            story = plan_by_id.get(story_id)
+            exclusion = next(item for item in exclusions if item.get("id") == story_id)
+            commits = STALE_IMPLEMENTATION_COMMITS[story_id]
+            task_path = root / "tasks" / f"{story_id}.md"
+            worklog_path = root / "worklog" / f"{story_id}.md"
+            task_status = _task_status(task_path)
+            receipt_matches = exclusion.get("implementationCommit") == commits[0] if story_id == "INT-004" else exclusion.get("implementationCommits") == commits
+            if (
+                not isinstance(story, Mapping)
+                or story.get("status") != "accepted"
+                or story.get("requirementIds") != []
+                or exclusion.get("disposition") not in {"local-implemented-stale", "local-implemented-stale-event-wire-compatibility"}
+                or not receipt_matches
+                or not task_path.is_file()
+                or not worklog_path.is_file()
+                or task_status is None
+                or not task_status.startswith("IMPLEMENTED")
+            ):
+                errors.append(f"{story_id}: integrations implemented exclusion receipt drifted")
+            for commit in commits:
+                result = subprocess.run(
+                    ["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd=root,
+                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+                )
+                if result.returncode != 0:
+                    errors.append(f"{story_id}: integrations implementation receipt is not in live history: {commit}")
         int010 = row_by_id.get("INT-010")
         enterprise_gap = _load(root / "sources/enterprise-remote-spec-gap.json")
         if not isinstance(int010, Mapping) or int010.get("category") != "unresolved-decomposition" or "INT-010" not in enterprise_gap.get("residualStoryIds", []) or enterprise_gap.get("status") != "searched-no-qualifying-in-surface-spec":
@@ -2389,12 +2532,33 @@ def integrations_ownership_gap_errors(rows: list[object], root: pathlib.Path = R
         if not isinstance(story, Mapping) or story.get("status") != "accepted":
             errors.append(f"{story_id}: dedicated integration-auth accepted owner drifted")
     for story_id in INTEGRATIONS_AUTH_LOCAL_FEATURES:
-        row = row_by_id.get(story_id)
-        if not isinstance(row, Mapping) or (
-            row.get("category") != "local-implemented-stale"
-            or row.get("implementationCommits") != list(STALE_IMPLEMENTATION_COMMITS[story_id])
+        story = plan_by_id.get(story_id)
+        task_path = root / "tasks" / f"{story_id}.md"
+        worklog_path = root / "worklog" / f"{story_id}.md"
+        task_status = _task_status(task_path)
+        commits = STALE_IMPLEMENTATION_COMMITS[story_id]
+        if (
+            not isinstance(story, Mapping)
+            or story.get("status") != "accepted"
+            or story.get("requirementIds") != []
+            or not task_path.is_file()
+            or not worklog_path.is_file()
+            or task_status is None
+            or not task_status.startswith("IMPLEMENTED")
+            or auth_overlap.get("localImplementedFeatureCommits", {}).get(story_id) != commits[0]
         ):
-            errors.append(f"{story_id}: dedicated integration-auth local implementation receipt drifted")
+            errors.append(f"{story_id}: dedicated integration-auth implementation receipt drifted")
+        for commit in commits:
+            result = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", commit, "HEAD"], cwd=root,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False,
+            )
+            if result.returncode != 0:
+                errors.append(f"{story_id}: dedicated integration-auth implementation receipt is not in live history: {commit}")
+        if story_id not in INTEGRATIONS_AUTH_LOCAL_FEATURES:
+            errors.append(f"{story_id}: invalid dedicated integration-auth local receipt owner")
+        if row_by_id.get(story_id) is not None:
+            errors.append(f"{story_id}: accepted integration-auth owner must be absent from exhaustion ledger")
 
     auth_partition = next(
         (
@@ -2443,6 +2607,12 @@ def unresolved_gap_coverage_errors(rows: list[object], root: pathlib.Path = ROOT
         for item in rows
         if isinstance(item, Mapping) and item.get("category") == "unresolved-decomposition"
     }
+    plan = _load(root / "ralph.json")
+    accepted_ids = {
+        str(item.get("id", ""))
+        for item in plan.get("userStories", [])
+        if isinstance(item, Mapping) and item.get("status") == "accepted"
+    }
     coverage: dict[str, set[str]] = defaultdict(set)
 
     for relative in UNRESOLVED_COVERAGE_GAP_PATHS:
@@ -2461,11 +2631,10 @@ def unresolved_gap_coverage_errors(rows: list[object], root: pathlib.Path = ROOT
             value = gap.get(key)
             if isinstance(value, list):
                 story_ids.update(str(item) for item in value)
-        adjacent = gap.get("adjacentSingletonChecks")
-        if isinstance(adjacent, list):
-            for item in adjacent:
-                if isinstance(item, Mapping) and item.get("storyId"):
-                    story_ids.add(str(item.get("storyId")))
+        # Adjacent singleton checks document ownership ambiguity, not a row's
+        # current unresolved-decomposition classification. EXT-005's explicit
+        # blocker guard is checked independently by routing_ownership_gap_errors.
+
 
         if not story_ids:
             errors.append(f"unresolved coverage record has no story ids: {relative}")
@@ -2477,13 +2646,25 @@ def unresolved_gap_coverage_errors(rows: list[object], root: pathlib.Path = ROOT
     if missing:
         errors.append(f"unresolved rows lack machine-checkable decomposition coverage: {missing}")
 
-    extraneous = sorted(set(coverage) - unresolved_ids)
+    context_only_accepted = accepted_ids - unresolved_ids
+    extraneous = sorted(set(coverage) - unresolved_ids - context_only_accepted)
     if extraneous:
-        errors.append(f"gap records cover rows no longer unresolved-decomposition: {extraneous}")
+        errors.append(f"gap records cover rows neither unresolved nor accepted context: {extraneous}")
 
     expected = set(CATEGORY_IDS["unresolved-decomposition"])
     if unresolved_ids != expected:
         errors.append("unresolved coverage baseline drifted from canonical category set")
+    ext005 = next((item for item in rows if isinstance(item, Mapping) and item.get("id") == "EXT-005"), None)
+    if (
+        not isinstance(ext005, Mapping)
+        or ext005.get("category") != "explicit-blocker"
+        or ext005.get("reasonKey") != "manifest-validation-frozen-red-evidence-incomplete"
+        or ext005.get("taskCard") != "tasks/EXT-005.md"
+        or ext005.get("worklog") != "worklog/EXT-005.md"
+        or not (root / "tasks/EXT-005.md").is_file()
+        or not (root / "worklog/EXT-005.md").is_file()
+    ):
+        errors.append("EXT-005 explicit blocker evidence/classification drifted")
     return errors
 
 def sync_features_status(root: pathlib.Path = ROOT) -> None:
@@ -2516,8 +2697,15 @@ def validate_ledger(document: Mapping[str, object], root: pathlib.Path = ROOT) -
 
     plan = _load(root / "ralph.json")
     plan_by_id = {str(row["id"]): row for row in plan.get("userStories", [])}
+    total, accepted_count, nonaccepted_count = EXPECTED_PLAN_PARTITION
     nonaccepted = {story_id for story_id, row in plan_by_id.items() if row.get("status") != "accepted"}
     accepted = set(plan_by_id) - nonaccepted
+    if (len(plan_by_id), len(accepted), len(nonaccepted)) != (total, accepted_count, nonaccepted_count):
+        errors.append(
+            "Ralph accounting partition drifted: "
+            f"expected {total}/{accepted_count}/{nonaccepted_count}, "
+            f"got {len(plan_by_id)}/{len(accepted)}/{len(nonaccepted)}"
+        )
 
     rows = document.get("stories")
     if not isinstance(rows, list):
@@ -2685,7 +2873,7 @@ def main() -> int:
         "validate_backlog_exhaustion: OK  "
         f"stories={summary['storyCount']} accepted={summary['controllerAccepted']} "
         f"stale={counts['local-implemented-stale']} blockers={counts['explicit-blocker']} "
-        f"dependency={counts['dependency-constrained']} unresolved={counts['unresolved-decomposition']} "
+        f"unresolved={counts['unresolved-decomposition']} "
         f"user_directed={counts.get('user-directed-product', 0)}"
     )
     return 0

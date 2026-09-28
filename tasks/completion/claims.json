@@ -211,6 +211,12 @@
       "session": "ses_f1df6d405ffeEwEc7tXLigt1rR",
       "status": "blocked"
     },
+    "BACKLOG-VALIDATOR-CURRENT-EVIDENCE-RED-W1": {
+      "blockedNote": "Scoped reviewer PASS exact validator SHA ceff1088485c6c626bb4014659388bb0f279db57b7e91a683ddba06a454d771f; canonical repository guard fails DISC-003 reconciliation manifest inputs; convergence reports 60 findings. Candidate may land only as protected review candidate, not acceptance.",
+      "scratchpad": "worklog/BACKLOG-VALIDATOR-CURRENT-EVIDENCE-RED-W1.md",
+      "session": "ses_f1a169bd0ffeP8SptMFPpJCtvq",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
