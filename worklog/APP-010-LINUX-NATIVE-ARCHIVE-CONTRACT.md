@@ -62,6 +62,14 @@ Concrete case map after schema approval:
 
 ## Tests, guards, and status
 
+### Unfrozen source-only compile-defect correction
+
+- Independent review input: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/LINUX-PORTABLE-TEST-INDEPENDENT-REVIEW.md`, SHA-256 `0dbdf8dc86bfd22313889bca7a9b8234b43d928a4d76d5bb228126226778662b`.
+- At the reviewed candidate, `unsafe_archive_members_are_rejected_without_destination_mutation_or_escape` had an E0425 compile-plausibility defect: the absolute-member `TarEntry` in the `for` iterable referenced `sandbox.path()` before `sandbox` was declared in the loop body.
+- Minimal correction: iterate the existing case labels (`traversal`, `absolute`, `symlink`, `fifo`) and construct the corresponding unsafe entry only after each fresh `Sandbox` is created. The absolute member remains a path uniquely inside that sandbox. Existing cases, entry bytes, assertions, snapshot checks, and fixture-cleanup behavior are retained; no assertion is removed or weakened.
+- The review notes a macOS arm64 native library artifact may exist. That does not establish test compilation or native fixture availability on any particular runner; no library is staged here. Native fixture provisioning/execution stays with the independent verifier and authorized heavy slot.
+- Source-only lexical/manual inspection confirms sandbox binding now precedes `sandbox.path()` use in that scenario. No compilation or test execution is claimed.
+
 ### Resume from the approved author-ready subset
 
 - The contract-independent subset is authorized by `LINUX-RED-FIXTURE-BLUEPRINT-CORRECTIONS.md:140-165`; its source-only constraints and itemized coverage are incorporated above. This supersedes the earlier original-blocker conclusion for the safe subset only, not the remaining linkage questions.

@@ -761,30 +761,31 @@ fn invalid_invocation_and_checksum_fail_without_destination_mutation() {
 #[test]
 fn unsafe_archive_members_are_rejected_without_destination_mutation_or_escape() {
     for installer in INSTALLERS {
-        for (case, unsafe_entry) in [
-            (
-                "traversal",
-                TarEntry::file("../escaped-marker", b"must not escape staging".to_vec(), 0o600),
-            ),
-            (
-                "absolute",
-                TarEntry::file(
-                    sandbox.path().join("absolute-escape-marker").to_string_lossy().into_owned(),
-                    b"must not escape staging".to_vec(),
-                    0o600,
-                ),
-            ),
-            (
-                "symlink",
-                TarEntry::symlink("payload-link", "../../symlink-escape"),
-            ),
-            ("fifo", TarEntry::fifo("payload-pipe")),
-        ] {
+        for case in ["traversal", "absolute", "symlink", "fifo"] {
             let sandbox = Sandbox::new(&format!("unsafe-{case}"));
             let install_dir = sandbox.path().join("unsafe install/bin");
             fs::create_dir_all(&install_dir).unwrap();
             fs::write(install_dir.join("marker"), b"pre-existing destination").unwrap();
             let before = snapshot_tree(&install_dir);
+            let unsafe_entry = match case {
+                "traversal" => TarEntry::file(
+                    "../escaped-marker",
+                    b"must not escape staging".to_vec(),
+                    0o600,
+                ),
+                "absolute" => TarEntry::file(
+                    sandbox
+                        .path()
+                        .join("absolute-escape-marker")
+                        .to_string_lossy()
+                        .into_owned(),
+                    b"must not escape staging".to_vec(),
+                    0o600,
+                ),
+                "symlink" => TarEntry::symlink("payload-link", "../../symlink-escape"),
+                "fifo" => TarEntry::fifo("payload-pipe"),
+                _ => unreachable!("case list above is exhaustive"),
+            };
             let mut entries = vec![
                 TarEntry::file(
                     installer.binary,
