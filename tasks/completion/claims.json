@@ -833,6 +833,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "SHIP-001": {
+      "blockedNote": "RED 5FAIL/1ok frozen-pending: python3 -m unittest release.test_release_contract; sha256 eb7bd3d6; blockers: no release.yml impl lane, no signing authority, no CODEOWNERS/protection coverage",
+      "scratchpad": "worklog/SHIP-001.md",
+      "session": "ses_f1157ff71ffeNAozn0MSD4Ifsx",
+      "status": "blocked"
+    },
     "SHIP-004": {
       "blockedNote": "Corrected satisfiable RED sha256 429ee2cd; 5/5 fail on missing release evidence, no errors; implementation and controller freeze authority pending.",
       "scratchpad": "worklog/SHIP-004.md",
