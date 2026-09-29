@@ -365,7 +365,7 @@ impl Storage {
                 )?;
                 let expected_count = usize::try_from(expected).ok().and_then(|v| v.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
                 let mut record_count = 0usize;
-                for row in typed.query_map(params![round_id, lim], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?, row.get::<_, i64>(6)?)))? {
+                for row in typed.query_map(params![shared_round_id.as_ref(), lim], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?, row.get::<_, i64>(6)?)))? {
                     record_count = record_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
                     if record_count > expected_count { return Err(StorageError::TypedHistoryIncomplete); }
                     let (typed_rowid, pair_index, kind_code, call_len, name_len, message_len, byte_len) = row?;
@@ -376,9 +376,9 @@ impl Storage {
                     let metadata_bytes = call_len.checked_add(name_len).and_then(|v| v.checked_add(message_len)).ok_or(StorageError::TypedHistoryLimit)?;
                     used = used.checked_add(metadata_bytes).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
                     if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
-                    let (call_id, name, record_message): (String, String, String) = tx.query_row("SELECT call_id,name,message_id FROM typed_tool_records WHERE rowid=?1", params![typed_rowid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+                    let (call_id, name, _record_message): (String, String, String) = tx.query_row("SELECT call_id,name,message_id FROM typed_tool_records WHERE rowid=?1", params![typed_rowid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
                     let kind = if kind_code == 0 { "call".to_string() } else { "output".to_string() };
-                    let payload: String = tx.query_row("SELECT payload FROM typed_tool_records WHERE round_id=?1 AND pair_index=?2 AND kind=?3 AND byte_len=length(CAST(payload AS BLOB))", params![round_id, pair_index, kind], |row| row.get(0))?;
+                    let payload: String = tx.query_row("SELECT payload FROM typed_tool_records WHERE round_id=?1 AND pair_index=?2 AND kind=?3 AND byte_len=length(CAST(payload AS BLOB))", params![shared_round_id.as_ref(), pair_index, kind], |row| row.get(0))?;
                     if payload.len() != actual { return Err(StorageError::TypedHistoryIncomplete); }
                     result.push(HistoryItem::Tool(ToolHistoryItem { round_id: Arc::clone(&shared_round_id), pair_index: u64::try_from(pair_index).map_err(|_| StorageError::TypedHistoryIncomplete)?, kind, call_id, name, payload, message_id }));
                 }
