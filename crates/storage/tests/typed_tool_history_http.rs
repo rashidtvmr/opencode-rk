@@ -236,8 +236,78 @@ fn installed_http_tool_writer_preserves_typed_round_and_rolls_back_failed_pair()
     assert_eq!(first_tool_messages, 1, "first typed pair must retain its ordinary Tool message");
 
     connection.execute_batch("CREATE TRIGGER db022_abort BEFORE INSERT ON typed_tool_records BEGIN SELECT RAISE(ABORT, 'DB-022 fixture fault'); END;").unwrap();
-    let (failed_status, _) = request(&origin, &token, "POST", &format!("/api/sessions/{session}/turns/stream"), body);
-    assert_ne!(failed_status, 201, "faulted typed write must fail closed");
+    let (failed_status, failed_response) = request(&origin, &token, "POST", &format!("/api/sessions/{session}/turns/stream"), body);
+    assert_eq!(failed_status, 201, "streaming late persistence faults retain committed HTTP status");
+    let failed_head_end = failed_response.windows(4).position(|w| w == b"\r\n\r\n")
+        .expect("faulted stream HTTP headers");
+    let headers = String::from_utf8_lossy(&failed_response[..failed_head_end]);
+    let chunked = headers.lines().any(|line| {
+        line.split_once(':').is_some_and(|(name, value)| {
+            name.eq_ignore_ascii_case("transfer-encoding")
+                && value.split(',').any(|coding| coding.trim().eq_ignore_ascii_case("chunked"))
+        })
+    });
+    assert!(chunked, "streaming response must use HTTP/1.1 chunked framing: {headers:?}");
+    let wire_body = &failed_response[failed_head_end + 4..];
+    let decoded_body = (|| -> Result<Vec<u8>, String> {
+        let mut decoded = Vec::new();
+        let mut cursor = 0usize;
+        loop {
+            let line_end = wire_body.get(cursor..).and_then(|rest| {
+                rest.windows(2).position(|w| w == b"\r\n")
+            }).ok_or_else(|| "missing chunk-size CRLF".to_owned())?;
+            let line = std::str::from_utf8(&wire_body[cursor..cursor + line_end])
+                .map_err(|_| "non-ASCII chunk-size line".to_owned())?;
+            let size_text = line.split(';').next().unwrap_or("").trim();
+            let size = usize::from_str_radix(size_text, 16)
+                .map_err(|_| format!("invalid chunk size {size_text:?}"))?;
+            cursor = cursor.checked_add(line_end + 2)
+                .ok_or_else(|| "chunk cursor overflow".to_owned())?;
+            if size == 0 {
+                if wire_body.get(cursor..).is_some_and(|rest| rest.starts_with(b"\r\n")) {
+                    cursor += 2;
+                } else {
+                    let trailer_end = wire_body.get(cursor..).and_then(|rest| {
+                        rest.windows(4).position(|w| w == b"\r\n\r\n")
+                    }).ok_or_else(|| "missing end of chunk trailers".to_owned())?;
+                    cursor = cursor.checked_add(trailer_end + 4)
+                        .ok_or_else(|| "trailer cursor overflow".to_owned())?;
+                }
+                if cursor != wire_body.len() {
+                    return Err("bytes follow terminal HTTP chunk".to_owned());
+                }
+                return Ok(decoded);
+            }
+            let end = cursor.checked_add(size)
+                .ok_or_else(|| "chunk length overflow".to_owned())?;
+            let framed_end = end.checked_add(2)
+                .ok_or_else(|| "chunk framing overflow".to_owned())?;
+            if framed_end > wire_body.len() || wire_body.get(end..framed_end) != Some(&b"\r\n"[..]) {
+                return Err("truncated chunk data or missing chunk CRLF".to_owned());
+            }
+            if decoded.len() > LIMIT || size > LIMIT - decoded.len() {
+                return Err("decoded stream exceeds fixture bound".to_owned());
+            }
+            decoded.extend_from_slice(&wire_body[cursor..end]);
+            cursor = framed_end;
+        }
+    })().unwrap_or_else(|error| panic!("invalid/incomplete HTTP chunk framing: {error}"));
+    assert!(!decoded_body.is_empty() && decoded_body.ends_with(b"\n"),
+        "faulted stream must contain complete NDJSON records");
+    let events: Vec<Value> = decoded_body[..decoded_body.len() - 1]
+        .split(|byte| *byte == b'\n')
+        .map(|line| {
+            assert!(!line.is_empty(), "faulted stream contains an empty NDJSON record");
+            serde_json::from_slice(line).expect("faulted stream contains malformed NDJSON")
+        })
+        .collect();
+    assert!(!events.is_empty(), "faulted stream must contain an NDJSON event");
+    assert!(events.iter().all(|event| event.get("type").and_then(Value::as_str).is_some()),
+        "every stream record must carry a string type: {events:?}");
+    let error_event = events.last().expect("nonempty event list checked above");
+    assert_eq!(error_event.get("type").and_then(Value::as_str), Some("error"), "terminal event of the faulted stream must be the failure: {error_event:?}");
+    assert_eq!(error_event.get("code").and_then(Value::as_str), Some("internal_error"), "late persistence failure must surface as internal_error: {error_event:?}");
+    assert!(error_event.get("message").and_then(Value::as_str).is_some_and(|message| !message.is_empty()), "persistence error event must carry a non-empty message: {error_event:?}");
     let after: i64 = connection.query_row("SELECT count(*) FROM typed_tool_records", [], |row| row.get(0)).unwrap();
     assert_eq!(after, count, "failed pair leaked typed rows");
     let second_request = requests.recv_timeout(DEADLINE).expect("faulted turn's initial provider request");
