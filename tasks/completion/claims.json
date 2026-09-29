@@ -834,9 +834,9 @@
       "status": "completed"
     },
     "SHIP-001": {
-      "blockedNote": "RED 5FAIL/1ok T01-absent T02-absent T03-no-codesign T04-preserve-deleted T05-no-restore; sha 825af0da; needs installer-restore impl + freeze + signing authority",
+      "blockedNote": "RED 5FAIL/1ok T01,02 yml absent T03 codesign missing T04 foreign-arch deletes preexist T05 v1 not restored; sha 2decf1d2; impl/freeze/signing pending",
       "scratchpad": "worklog/SHIP-001.md",
-      "session": "ses_f114d864dffeS1B1RP9Oz8xMbh",
+      "session": "ses_f114747d5ffe4NBs8gtP1q3PDv",
       "status": "blocked"
     },
     "SHIP-004": {

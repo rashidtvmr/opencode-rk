@@ -176,10 +176,14 @@ class T03RealSigningOrFailClosed(unittest.TestCase):
 
 class T04ArchCorruptRejected(unittest.TestCase):
     def test_t04_wrong_arch_and_corrupt_rejected(self):
-        # Dynamic FIRST: a nonempty platform-mismatched executable whose
-        # --version/--help identity is intentionally non-oc2 must be
-        # rejected, and rejection must leave a preexisting destination
-        # binary byte-identical (current installer gap: rm -f destroys it).
+        # Dynamic FIRST: a deterministic nonempty executable in a genuine
+        # foreign binary format (magic bytes of a non-host object format)
+        # must be rejected, and rejection must leave a preexisting
+        # destination binary byte-identical (current installer gap: rm -f
+        # destroys it). A host shell script with a foreign --version string
+        # is NOT wrong architecture (it executes natively), so the fixture
+        # below uses real foreign magic: ELF x86_64 on Darwin, Mach-O
+        # ARM64 on Linux/other.
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             dest = tmp / "dest"
@@ -191,14 +195,31 @@ class T04ArchCorruptRejected(unittest.TestCase):
             pre_len = len(pre.read_bytes())
             self.assertGreater(pre_len, 0, "preexisting fixture must be nonempty")
             foreign = tmp / "oc2"
-            foreign.write_text(
-                "#!/usr/bin/env sh\n"
-                'if [ "$1" = "--version" ]; then echo "foreign-tool 9.9.9"; exit 0; fi\n'
-                'if [ "$1" = "--help" ]; then echo "foreign-tool 9.9.9 usage help"; exit 0; fi\n'
-                'echo "foreign-tool 9.9.9"; exit 0\n',
-                encoding="utf-8",
-            )
+            host_sys = os.uname().sysname
+            if host_sys == "Darwin":
+                # ELF64, LE, v1, SYSV ABI; e_type EXEC, e_machine X86_64 (62).
+                foreign.write_bytes(
+                    b"\x7fELF\x02\x01\x01\x00" + b"\x00" * 8
+                    + b"\x02\x00\x3e\x00\x01\x00\x00\x00" + b"\x00" * 40
+                )
+            else:
+                # Mach-O 64-bit LE, cputype ARM64, filetype MH_EXECUTE.
+                foreign.write_bytes(
+                    b"\xcf\xfa\xed\xfe\x0c\x00\x00\x01"
+                    b"\x00\x00\x00\x00\x02\x00\x00\x00" + b"\x00" * 16
+                )
             foreign.chmod(foreign.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+            magic = foreign.read_bytes()[:4]
+            self.assertGreater(len(foreign.read_bytes()), 0, "foreign fixture must be nonempty")
+            if host_sys == "Darwin":
+                self.assertEqual(magic, b"\x7fELF", "fixture must carry ELF magic on Darwin")
+                self.assertNotIn(
+                    magic, (b"\xcf\xfa\xed\xfe", b"\xca\xfe\xba\xbe"),
+                    "fixture magic must mismatch host Mach-O",
+                )
+            else:
+                self.assertEqual(magic, b"\xcf\xfa\xed\xfe", "fixture must carry Mach-O magic off Darwin")
+                self.assertNotEqual(magic, b"\x7fELF", "fixture magic must mismatch host ELF")
             wrong = make_archive(tmp, "wrong-arch.tar.gz", foreign)
             r0 = install(wrong, dest)
             self.assertNotEqual(r0.returncode, 0, "platform-mismatched binary must be rejected")
