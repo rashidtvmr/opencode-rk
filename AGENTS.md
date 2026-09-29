@@ -36,6 +36,18 @@ delete, rename, move, skip/ignore, expected-output regeneration, assertion weake
 or selector narrowing to obtain GREEN. A disputed frozen test is a blocked contract
 review, never an implementation edit.
 
+**Protected one-time exception (review-gated, not a general permission):** The
+repository owner may authorize one import-specifier-only cleanup in one named test
+file when an otherwise valid build is blocked solely by unused-import diagnostics.
+The exception is effective only after a protected review branch records the exact
+old file SHA, the named owner and independent reviewer, and the exact prospective
+new SHA; the diff must remove only the explicitly approved unused import specifiers
+and preserve every test body, assertion, comment, string, selector, test name,
+compiler setting, dependency and other file byte-for-byte. It expires immediately
+after that one reviewed artifact is landed and does not authorize any other test
+edit, refreeze, acceptance flag, or policy bypass. Historical RED provenance is not
+retroactively fabricated by this exception.
+
 Parallelism is convergence-first: preserve integration and verifier capacity before
 filling all slots with leaf lanes. On a 20-worker harness reserve at least four
 integration-spine lanes and two independent test/verifier lanes; use at most fourteen
