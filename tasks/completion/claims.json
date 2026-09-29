@@ -821,6 +821,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "SHIP-001": {
+      "blockedNote": "RED 5FAIL/1ok frozen-pending: python3 -m unittest release.test_release_contract; sha256 eb7bd3d6; blockers: no release.yml impl lane, no signing authority, no CODEOWNERS/protection coverage",
+      "scratchpad": "worklog/SHIP-001.md",
+      "session": "ses_f1157ff71ffeNAozn0MSD4Ifsx",
+      "status": "blocked"
+    },
     "TUI-001": {
       "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
       "scratchpad": "worklog/TUI-001.md",
