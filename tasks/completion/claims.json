@@ -1168,10 +1168,9 @@
       "status": "in-progress"
     },
     "TUI-015": {
-      "reclaimedBy": "ses_f1470e000ffe05sEJE0CDQfi1p",
       "scratchpad": "worklog/TUI-015.md",
-      "session": "",
-      "status": "not-started"
+      "session": "ses_f1470e000ffe05sEJE0CDQfi1p",
+      "status": "in-progress"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
