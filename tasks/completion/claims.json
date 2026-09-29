@@ -372,6 +372,18 @@
       "session": "ses_f1a169bd0ffeP8SptMFPpJCtvq",
       "status": "blocked"
     },
+    "DB-021": {
+      "blockedNote": "RED de77c37 frozen typed_history sha 7291dd0d97b65d5c131086e67bc8372a98c26c136a6dd9a6566f3f25067e2aef; freeze af9453d25efc8fb62dcd747d6177dc002b59d1ce24ad52a71006f1ee0c797713 red/frozen pass; GREEN pending DB-019; never complete RED",
+      "scratchpad": "worklog/DB-021.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
+    "DB-022": {
+      "blockedNote": "RED 2e73e42 frozen typed_tool_history_http sha b767bf2fb5647ca3065b6f3c922a5197c372763f45a7abbf6c15db31139ffcdf; freeze af9453d25efc8fb62dcd747d6177dc002b59d1ce24ad52a71006f1ee0c797713 red/frozen pass; GREEN pending DB-019/APP-016; never complete",
+      "scratchpad": "worklog/DB-022.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
@@ -1143,6 +1155,12 @@
       "scratchpad": "worklog/TUI-011.md",
       "session": "ses_orch_TUI011b",
       "status": "completed"
+    },
+    "TUI-012": {
+      "blockedNote": "RED 5a9db78 frozen native_interactive_pty sha 02d0e7fd0211fa138594fc5633f32597af17261ec16d15e3fc54cf5c6c387342; freeze d27464beba48b5ef99c5b7af6831cca636b068cf7780d5b2c70fc9674c5d3ff7 red/frozen pass; GREEN pending implementation; never complete",
+      "scratchpad": "worklog/TUI-012.md",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
     },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
