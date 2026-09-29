@@ -832,6 +832,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "SHIP-004": {
+      "blockedNote": "RED 5/5 fail missing release evidence; sha256 a567d2f5; pending implementation/freeze authority",
+      "scratchpad": "worklog/SHIP-004.md",
+      "session": "ses_f115896b4fferTfuqdQsIe3y6Q",
+      "status": "blocked"
+    },
     "TUI-001": {
       "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
       "scratchpad": "worklog/TUI-001.md",
