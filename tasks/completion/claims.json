@@ -67,10 +67,10 @@
       "status": "completed"
     },
     "APP-012": {
-      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "Approved tests/e2e path is not a Cargo target; real installed-process RED requires out-of-scope crates/cli/tests path amendment plus artifact/PTY/provider fixture. Rejected receipt-only test removed pre-freeze.",
       "scratchpad": "worklog/APP-012.md",
-      "session": "",
-      "status": "not-started"
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
     },
     "AUD-001": {
       "blockedNote": "audit refreshed at 7b2ba00: 271+5+8 tests green; validate_repository PASS via convergence gate fix",
