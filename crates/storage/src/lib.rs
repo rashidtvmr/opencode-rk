@@ -1011,13 +1011,13 @@ impl Storage {
                 if sql.to_ascii_lowercase().split_whitespace().collect::<String>() != expected.to_ascii_lowercase().split_whitespace().collect::<String>() { return Err(StorageError::TypedHistorySchema); }
             } else { connection.execute_batch(expected)?; }
         }
-        validate_typed_index(&connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
-        validate_typed_index(&connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
-        validate_typed_index(&connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
+        validate_typed_index(connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
+        validate_typed_index(connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
+        validate_typed_index(connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
         connection.execute_batch("CREATE INDEX IF NOT EXISTS tool_rounds_session_idx ON tool_rounds(session_id,created_at,round_id); CREATE INDEX IF NOT EXISTS typed_tool_round_idx ON typed_tool_records(round_id,pair_index,kind); CREATE UNIQUE INDEX IF NOT EXISTS tool_rounds_identity_idx ON tool_rounds(round_id,turn_message_id,round_ordinal);")?;
-        validate_typed_index(&connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
-        validate_typed_index(&connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
-        validate_typed_index(&connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
+        validate_typed_index(connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
+        validate_typed_index(connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
+        validate_typed_index(connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
         connection.execute("INSERT INTO feature_migrations(feature,version,applied_at) VALUES(?1,1,?2) ON CONFLICT(feature) DO NOTHING", params![TYPED_HISTORY_FEATURE, Timestamp::now().to_string()])?;
         Ok(())
         })();
