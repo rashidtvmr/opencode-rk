@@ -338,7 +338,8 @@ impl Storage {
             let (message_rowid, id_len, role_len, inline_len, _has_blob, byte_len) = row?;
             let id_len = usize::try_from(id_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
             let role_len = usize::try_from(role_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
-            let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let _validated_byte_len =
+                usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
             let metadata_bytes = id_len.checked_add(role_len).ok_or(StorageError::TypedHistoryLimit)?;
             used = used.checked_add(metadata_bytes).ok_or(StorageError::TypedHistoryLimit)?;
             if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
