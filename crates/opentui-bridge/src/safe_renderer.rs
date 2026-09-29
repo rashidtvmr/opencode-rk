@@ -12,6 +12,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::cell::Cell;
 use std::marker::PhantomData;
 #[cfg(feature = "native")]
 use std::os::raw::c_void;
@@ -79,6 +80,13 @@ pub struct Renderer {
     handle: NativeHandle,
     cols: u32,
     rows: u32,
+    /// Whether setupTerminal has successfully been entered and therefore
+    /// restoreTerminalModes is valid for this handle.  The native API has no
+    /// status return, so this is owned state rather than inferred from the
+    /// handle.
+    terminal_active: Cell<bool>,
+    mouse_enabled: Cell<bool>,
+    kitty_keyboard_enabled: Cell<bool>,
     _no_send: PhantomData<*const ()>,
 }
 
@@ -155,6 +163,9 @@ impl Renderer {
                 handle,
                 cols,
                 rows,
+                terminal_active: Cell::new(false),
+                mouse_enabled: Cell::new(false),
+                kitty_keyboard_enabled: Cell::new(false),
                 _no_send: PhantomData,
             })
         }
@@ -189,11 +200,18 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         // SAFETY: live handle owned by self; terminal mode helpers are
-        // idempotent in OpenTUI and run before the exactly-once destroy.
+        // called only for state this wrapper initialized, then destroy runs
+        // exactly once.
         unsafe {
-            disableMouse(self.handle);
-            disableKittyKeyboard(self.handle);
-            restoreTerminalModes(self.handle);
+            if self.mouse_enabled.replace(false) {
+                disableMouse(self.handle);
+            }
+            if self.kitty_keyboard_enabled.replace(false) {
+                disableKittyKeyboard(self.handle);
+            }
+            if self.terminal_active.replace(false) {
+                restoreTerminalModes(self.handle);
+            }
             destroyRenderer(self.handle, true);
         }
         self.handle = INVALID_HANDLE;
@@ -224,6 +242,7 @@ impl Renderer {
         {
             // SAFETY: live handle; plain integers only.
             unsafe { setupTerminal(handle, true) };
+            self.terminal_active.set(true);
             Ok(())
         }
     }
@@ -239,8 +258,11 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            // SAFETY: live renderer handle owned by self.
-            unsafe { restoreTerminalModes(handle) };
+            if self.terminal_active.replace(false) {
+                // SAFETY: setupTerminal was called successfully for this
+                // live handle and has not yet been restored.
+                unsafe { restoreTerminalModes(handle) };
+            }
             Ok(())
         }
     }
@@ -289,6 +311,7 @@ impl Renderer {
         {
             // SAFETY: live renderer handle; plain boolean argument.
             unsafe { enableMouse(handle, movement) };
+            self.mouse_enabled.set(true);
             Ok(())
         }
     }
@@ -303,8 +326,10 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            // SAFETY: live renderer handle.
-            unsafe { disableMouse(handle) };
+            if self.mouse_enabled.replace(false) {
+                // SAFETY: enableMouse was called for this live handle.
+                unsafe { disableMouse(handle) };
+            }
             Ok(())
         }
     }
@@ -321,6 +346,7 @@ impl Renderer {
         {
             // SAFETY: live renderer handle; flags are forwarded unchanged.
             unsafe { enableKittyKeyboard(handle, flags) };
+            self.kitty_keyboard_enabled.set(true);
             Ok(())
         }
     }
@@ -335,8 +361,10 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            // SAFETY: live renderer handle.
-            unsafe { disableKittyKeyboard(handle) };
+            if self.kitty_keyboard_enabled.replace(false) {
+                // SAFETY: enableKittyKeyboard was called for this live handle.
+                unsafe { disableKittyKeyboard(handle) };
+            }
             Ok(())
         }
     }
@@ -606,6 +634,9 @@ mod tests {
             handle: 0xC10C,
             cols,
             rows,
+            terminal_active: Cell::new(false),
+            mouse_enabled: Cell::new(false),
+            kitty_keyboard_enabled: Cell::new(false),
             _no_send: PhantomData,
         }
     }
