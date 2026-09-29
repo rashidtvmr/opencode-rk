@@ -12,6 +12,7 @@
 
 use std::error::Error;
 use std::fmt;
+use std::cell::Cell;
 use std::marker::PhantomData;
 #[cfg(feature = "native")]
 use std::os::raw::c_void;
@@ -79,6 +80,9 @@ pub struct Renderer {
     handle: NativeHandle,
     cols: u32,
     rows: u32,
+    terminal_active: Cell<bool>,
+    mouse_enabled: Cell<bool>,
+    kitty_keyboard_enabled: Cell<bool>,
     _no_send: PhantomData<*const ()>,
 }
 
@@ -94,6 +98,14 @@ extern "C" {
     ) -> NativeHandle;
     fn destroyRenderer(renderer_handle: NativeHandle, flush_input: bool);
     fn setupTerminal(renderer_handle: NativeHandle, useAlternateScreen: bool);
+    fn restoreTerminalModes(renderer_handle: NativeHandle);
+    fn suspendRenderer(renderer_handle: NativeHandle);
+    fn resumeRenderer(renderer_handle: NativeHandle);
+    fn enableMouse(renderer_handle: NativeHandle, enableMovement: bool);
+    fn disableMouse(renderer_handle: NativeHandle);
+    fn enableKittyKeyboard(renderer_handle: NativeHandle, flags: u8);
+    fn disableKittyKeyboard(renderer_handle: NativeHandle);
+    fn clearTerminal(renderer_handle: NativeHandle);
     fn resizeRenderer(renderer_handle: NativeHandle, width: u32, height: u32);
     fn setCursorPosition(renderer_handle: NativeHandle, x: i32, y: i32, visible: bool);
     fn setTerminalTitle(renderer_handle: NativeHandle, titlePtr: *const u8, titleLen: u32);
@@ -147,6 +159,9 @@ impl Renderer {
                 handle,
                 cols,
                 rows,
+                terminal_active: Cell::new(false),
+                mouse_enabled: Cell::new(false),
+                kitty_keyboard_enabled: Cell::new(false),
                 _no_send: PhantomData,
             })
         }
@@ -180,8 +195,18 @@ impl Renderer {
             return;
         }
         #[cfg(feature = "native")]
-        // SAFETY: live handle owned by self; zeroed below so destroy runs once.
+        // SAFETY: live handle owned by self; only wrapper-enabled modes are
+        // restored before the exactly-once destroy.
         unsafe {
+            if self.mouse_enabled.replace(false) {
+                disableMouse(self.handle);
+            }
+            if self.kitty_keyboard_enabled.replace(false) {
+                disableKittyKeyboard(self.handle);
+            }
+            if self.terminal_active.replace(false) {
+                restoreTerminalModes(self.handle);
+            }
             destroyRenderer(self.handle, true);
         }
         self.handle = INVALID_HANDLE;
@@ -212,6 +237,140 @@ impl Renderer {
         {
             // SAFETY: live handle; plain integers only.
             unsafe { setupTerminal(handle, true) };
+            self.terminal_active.set(true);
+            Ok(())
+        }
+    }
+
+    /// Restore terminal modes without destroying the renderer. Repeated calls
+    /// are harmless and only the first call reaches the native API.
+    pub fn restore_terminal_modes(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            if self.terminal_active.replace(false) {
+                // SAFETY: setupTerminal initialized the terminal state for
+                // this live handle and it has not already been restored.
+                unsafe { restoreTerminalModes(handle) };
+            }
+            Ok(())
+        }
+    }
+
+    /// Suspend terminal rendering while retaining renderer ownership.
+    pub fn suspend(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live handle owned by self.
+            unsafe { suspendRenderer(handle) };
+            Ok(())
+        }
+    }
+
+    /// Resume a previously suspended renderer.
+    pub fn resume(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live handle owned by self.
+            unsafe { resumeRenderer(handle) };
+            Ok(())
+        }
+    }
+
+    pub fn enable_mouse(&self, movement: bool) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (handle, movement);
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live handle and plain boolean argument.
+            unsafe { enableMouse(handle, movement) };
+            self.mouse_enabled.set(true);
+            Ok(())
+        }
+    }
+
+    pub fn disable_mouse(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            if self.mouse_enabled.replace(false) {
+                // SAFETY: this wrapper previously enabled mouse reporting.
+                unsafe { disableMouse(handle) };
+            }
+            Ok(())
+        }
+    }
+
+    pub fn enable_kitty_keyboard(&self, flags: u8) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (handle, flags);
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live handle and native keyboard flags.
+            unsafe { enableKittyKeyboard(handle, flags) };
+            self.kitty_keyboard_enabled.set(true);
+            Ok(())
+        }
+    }
+
+    pub fn disable_kitty_keyboard(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            if self.kitty_keyboard_enabled.replace(false) {
+                // SAFETY: this wrapper previously enabled Kitty keyboard mode.
+                unsafe { disableKittyKeyboard(handle) };
+            }
+            Ok(())
+        }
+    }
+
+    pub fn clear_terminal(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live handle owned by self.
+            unsafe { clearTerminal(handle) };
             Ok(())
         }
     }
@@ -464,6 +623,9 @@ mod tests {
             handle: 0xC10C,
             cols,
             rows,
+            terminal_active: Cell::new(false),
+            mouse_enabled: Cell::new(false),
+            kitty_keyboard_enabled: Cell::new(false),
             _no_send: PhantomData,
         }
     }
