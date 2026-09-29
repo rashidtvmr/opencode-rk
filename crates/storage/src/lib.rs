@@ -351,10 +351,10 @@ impl Storage {
                     params![id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
                 let Some((round_rowid, round_id_len, expected)) = round else { return Err(StorageError::UnlinkedToolHistory); };
                 let round_id_len = usize::try_from(round_id_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
-                if used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)? > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
-                used = used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)?;
                 let round_id: String = tx.query_row("SELECT round_id FROM tool_rounds WHERE rowid=?1", params![round_rowid], |r| r.get(0))?;
                 if !emitted_rounds.insert(round_id.clone()) { continue; }
+                if used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)? > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+                used = used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)?;
                 let expected = u32::try_from(expected).map_err(|_| StorageError::TypedHistoryIncomplete)?;
                 let pair_items = usize::try_from(expected).ok().and_then(|n| n.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
                 items_used = items_used.checked_add(pair_items).ok_or(StorageError::TypedHistoryLimit)?;
@@ -372,7 +372,7 @@ impl Storage {
                     let name_len = usize::try_from(name_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
                     let message_len = usize::try_from(message_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
                     let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
-                    let metadata_bytes = round_id.len().checked_add(call_len).and_then(|v| v.checked_add(name_len)).and_then(|v| v.checked_add(message_len)).ok_or(StorageError::TypedHistoryLimit)?;
+                    let metadata_bytes = call_len.checked_add(name_len).and_then(|v| v.checked_add(message_len)).ok_or(StorageError::TypedHistoryLimit)?;
                     used = used.checked_add(metadata_bytes).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
                     if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
                     let (call_id, name, record_message): (String, String, String) = tx.query_row("SELECT call_id,name,message_id FROM typed_tool_records WHERE rowid=?1", params![typed_rowid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
