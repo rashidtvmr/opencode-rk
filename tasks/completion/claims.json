@@ -822,9 +822,9 @@
       "status": "completed"
     },
     "SHIP-004": {
-      "blockedNote": "RED 5/5 fail missing release evidence; sha256 a567d2f5; pending implementation/freeze authority",
+      "blockedNote": "Corrected satisfiable RED sha256 429ee2cd; 5/5 fail on missing release evidence, no errors; implementation and controller freeze authority pending.",
       "scratchpad": "worklog/SHIP-004.md",
-      "session": "ses_f115896b4fferTfuqdQsIe3y6Q",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "TUI-001": {
