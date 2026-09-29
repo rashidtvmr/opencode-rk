@@ -20,7 +20,8 @@ use std::{
     time::{Duration, Instant},
 };
 
-const MAX_CAPTURE: usize = 64 * 1024;
+// Keep the driver's combined code and transcript below ordinary pipe capacity.
+const MAX_CAPTURE: usize = 32 * 1024;
 const PYTHON_PATH: &str = "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin";
 const TEST_TOKEN: &str = "ab";
 
@@ -135,6 +136,13 @@ impl HttpFixture {
             .collect()
     }
 
+    fn health_requests(&self) -> Vec<ObservedRequest> {
+        self.requests()
+            .into_iter()
+            .filter(|request| request.path == "/health")
+            .collect()
+    }
+
     fn health_still_responds(&self) -> bool {
         let Ok(mut stream) = TcpStream::connect_timeout(
             &self.address.parse().expect("fixture socket address"),
@@ -220,25 +228,40 @@ fn serve_one(stream: &mut TcpStream, log: &Mutex<Vec<ObservedRequest>>, health_s
 /// PTY adapter; all launch, descriptor reads, health probes, requests and
 /// lifecycle ownership under test execute in the compiled Rust CLI binary.
 /// The child environment is reconstructed from a tiny explicit allowlist and
-/// the PTY transcript is byte-capped. A 12-second Python alarm bounds even a
+/// the PTY transcript is byte-capped. A 25-second Python alarm bounds even a
 /// stuck CLI and its `finally` block kills/reaps the PTY session process group.
-fn run_default_cli(root: &FixtureRoot, address: &str) -> (i32, String) {
+fn run_default_cli(root: &FixtureRoot, address: &str) -> (i32, String, String) {
     const DRIVER: &str = r#"
 import errno, os, pty, select, signal, sys, time
 
 binary, data_dir, home, address = sys.argv[1:]
 pid = None
+pgid = None
 master = None
 captured = bytearray()
+ready_marker = b"OpenCode RK"
+capture_limit = 32768
+
+def infra(message):
+    sys.stderr.write("PTY_INFRA_BLOCKER: " + message + "\n")
+    sys.stderr.flush()
+    raise SystemExit(90)
 
 def alarm(_signum, _frame):
-    raise TimeoutError("PTY CLI exceeded the 12-second test bound")
+    infra("PTY driver reached its 25-second hard alarm")
 
 signal.signal(signal.SIGALRM, alarm)
-signal.alarm(12)
+signal.alarm(25)
 try:
-    pid, master = pty.fork()
+    try:
+        pid, master = pty.fork()
+        pgid = pid
+    except BaseException as error:
+        infra("pty.fork failed: " + repr(error))
     if pid == 0:
+        # The driver's hard alarm belongs to the parent supervisor, not the
+        # exec'd CLI (which has its own independently asserted deadlines).
+        signal.alarm(0)
         env = {
             "HOME": home,
             "OPENCODE_RK_HOME": data_dir,
@@ -246,7 +269,38 @@ try:
             "PATH": "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin",
             "TMPDIR": home,
         }
-        os.execve(binary, [binary, "--data-dir", data_dir], env)
+        try:
+            os.execve(binary, [binary, "--data-dir", data_dir], env)
+        except BaseException as error:
+            os.write(2, ("PTY_EXEC_FAILED: " + repr(error) + "\n").encode())
+            os._exit(90)
+
+    # Await output from the actual CLI before sending commands. This prevents
+    # empty transcripts from satisfying the negative attachment assertions.
+    # chat::spawn_daemon has a ten-second readiness bound; allow one extra
+    # second for the CLI banner after successful child publication.
+    ready_deadline = time.monotonic() + 11.0
+    while ready_marker not in captured and time.monotonic() < ready_deadline:
+        ready, _, _ = select.select([master], [], [], 0.05)
+        if ready:
+            try:
+                block = os.read(master, 4096)
+            except OSError as error:
+                if error.errno == errno.EIO:
+                    block = b""
+                else:
+                    infra("PTY readiness read failed: " + repr(error))
+            if block:
+                if len(captured) + len(block) > capture_limit:
+                    infra("PTY transcript exceeded 32768-byte cap before banner")
+                captured.extend(block)
+        waited, child_status = os.waitpid(pid, os.WNOHANG)
+        if waited == pid:
+            pid = None
+            infra("CLI exited before startup banner; status=" + repr(child_status))
+    if ready_marker not in captured:
+        infra("PTY_NOT_READY: CLI startup banner absent within eleven seconds")
+
     # Canonical TTY input remains queued until the real chat loop reads it.
     os.write(master, b"/sessions\n/exit\n")
     deadline = time.monotonic() + 10.5
@@ -262,25 +316,46 @@ try:
                 else:
                     raise
             if block:
-                if len(captured) + len(block) > 65536:
-                    raise RuntimeError("PTY transcript exceeded 65536-byte cap")
+                if len(captured) + len(block) > capture_limit:
+                    infra("PTY transcript exceeded 32768-byte cap")
                 captured.extend(block)
         waited, child_status = os.waitpid(pid, os.WNOHANG)
         if waited == pid:
             status = child_status
+            pid = None
             break
     if status is None:
-        raise TimeoutError("CLI did not exit after /exit within 10.5 seconds")
+        infra("CLI did not exit after /exit within 10.5 seconds")
+
+    # Drain the PTY after waitpid: the child may exit while its final output is
+    # still buffered in the PTY master. Stop at EOF/EIO or a bounded quiet read.
+    drain_deadline = time.monotonic() + 0.5
+    while time.monotonic() < drain_deadline:
+        ready, _, _ = select.select([master], [], [], 0.025)
+        if not ready:
+            continue
+        try:
+            block = os.read(master, 4096)
+        except OSError as error:
+            if error.errno == errno.EIO:
+                break
+            infra("PTY drain failed: " + repr(error))
+        if not block:
+            break
+        if len(captured) + len(block) > capture_limit:
+            infra("PTY transcript exceeded 32768-byte cap during drain")
+        captured.extend(block)
     code = os.waitstatus_to_exitcode(status)
     sys.stdout.buffer.write((str(code) + "\n").encode() + captured)
     sys.stdout.buffer.flush()
 finally:
     signal.alarm(0)
-    if pid is not None:
+    if pgid is not None:
         try:
-            os.killpg(pid, signal.SIGKILL)
+            os.killpg(pgid, signal.SIGKILL)
         except ProcessLookupError:
             pass
+    if pid is not None:
         try:
             os.waitpid(pid, 0)
         except ChildProcessError:
@@ -308,7 +383,7 @@ finally:
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = driver.spawn().expect("launch stdlib PTY driver");
-    let deadline = Instant::now() + Duration::from_secs(15);
+    let deadline = Instant::now() + Duration::from_secs(30);
     let status = loop {
         if let Some(status) = child.try_wait().expect("poll PTY driver") {
             break status;
@@ -316,11 +391,17 @@ finally:
         if Instant::now() >= deadline {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("PTY driver exceeded 15-second outer bound");
+            panic!("PTY driver exceeded 30-second outer bound");
         }
         thread::sleep(Duration::from_millis(10));
     };
     let output = child.wait_with_output().expect("collect bounded PTY driver output");
+    if status.code() == Some(90) {
+        panic!(
+            "infrastructure blocker: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
     assert!(
         status.success(),
         "PTY driver failed: {}",
@@ -337,7 +418,8 @@ finally:
         .parse::<i32>()
         .expect("PTY child exit code");
     let transcript = String::from_utf8_lossy(&output.stdout[split + 1..]).into_owned();
-    (code, transcript)
+    let driver_stderr = String::from_utf8_lossy(&output.stderr).into_owned();
+    (code, transcript, driver_stderr)
 }
 
 fn assert_no_token_output(transcript: &str) {
@@ -354,11 +436,13 @@ fn app017_t01_matching_descriptor_and_healthy_peer_attach_with_its_bearer() {
     let origin = fixture.origin();
     root.publish(&origin, std::process::id(), &TEST_TOKEN.repeat(32), 1);
 
-    let (code, transcript) = run_default_cli(&root, &fixture.address);
+    let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
 
     assert_eq!(code, 0, "real no-subcommand CLI should exit cleanly: {transcript}");
     assert!(transcript.contains(&format!("daemon: {origin}")), "real chat attach banner: {transcript}");
+    assert!(!fixture.health_requests().is_empty(), "fixture must observe public readiness probe");
     assert_no_token_output(&transcript);
+    assert_no_token_output(&driver_stderr);
     let api = fixture.api_requests();
     assert!(!api.is_empty(), "the actual CLI must reach the fixture API after attach");
     assert!(
@@ -373,20 +457,30 @@ fn app017_t02_healthy_foreign_listener_without_descriptor_is_not_attached_or_kil
     let root = FixtureRoot::new("foreign");
     let fixture = HttpFixture::start();
 
-    let (code, transcript) = run_default_cli(&root, &fixture.address);
+    let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
 
     assert_eq!(code, 0, "foreign listener is a refusal, not a CLI crash: {transcript}");
     assert!(
         !transcript.contains(&format!("daemon: {}", fixture.origin())),
         "public liveness alone must not yield an attached lease: {transcript}"
     );
+    assert!(!fixture.health_requests().is_empty(), "CLI must make a public health probe");
     assert!(fixture.api_requests().is_empty(), "no descriptor means no API activity");
     assert!(fixture.health_still_responds(), "refusal must leave the foreign listener alive");
+    assert_no_token_output(&driver_stderr);
 }
 
 #[test]
 fn app017_t03_bad_descriptor_shapes_never_authorize_foreign_api_requests() {
-    let cases = ["empty-token", "malformed-token", "schema-mismatch", "origin-mismatch", "symlink"];
+    let cases = [
+        "empty-token",
+        "malformed-token",
+        "malformed-json",
+        "oversized",
+        "schema-mismatch",
+        "origin-mismatch",
+        "symlink",
+    ];
     for case in cases {
         let root = FixtureRoot::new(case);
         let configured = HttpFixture::start();
@@ -395,6 +489,16 @@ fn app017_t03_bad_descriptor_shapes_never_authorize_foreign_api_requests() {
         match case {
             "empty-token" => root.publish(&configured_origin, std::process::id(), "", 1),
             "malformed-token" => root.publish(&configured_origin, std::process::id(), "not-hex", 1),
+            "malformed-json" => {
+                let path = root.descriptor_path();
+                fs::create_dir_all(path.parent().expect("runtime parent")).expect("runtime dir");
+                fs::write(path, b"{ this is not valid JSON").expect("malformed descriptor");
+            }
+            "oversized" => {
+                let path = root.descriptor_path();
+                fs::create_dir_all(path.parent().expect("runtime parent")).expect("runtime dir");
+                fs::write(path, vec![b'x'; 8 * 1024 + 1]).expect("oversized descriptor");
+            }
             "schema-mismatch" => root.publish(&configured_origin, std::process::id(), &TEST_TOKEN.repeat(32), 77),
             "origin-mismatch" => root.publish(&other.origin(), std::process::id(), &TEST_TOKEN.repeat(32), 1),
             "symlink" => {
@@ -420,12 +524,13 @@ fn app017_t03_bad_descriptor_shapes_never_authorize_foreign_api_requests() {
             _ => unreachable!("closed fixture case list"),
         }
 
-        let (code, transcript) = run_default_cli(&root, &configured.address);
+        let (code, transcript, driver_stderr) = run_default_cli(&root, &configured.address);
         assert_eq!(code, 0, "invalid descriptor {case} must fail closed: {transcript}");
         assert!(
             !transcript.contains(&format!("daemon: {configured_origin}")),
             "invalid descriptor {case} must not be presented as an attached daemon: {transcript}"
         );
+        assert!(!configured.health_requests().is_empty(), "CLI must probe configured health origin");
         assert!(
             configured.api_requests().is_empty(),
             "invalid descriptor {case} must not authorize API requests"
@@ -435,6 +540,7 @@ fn app017_t03_bad_descriptor_shapes_never_authorize_foreign_api_requests() {
             "mismatched descriptor origin must never receive API requests"
         );
         assert_no_token_output(&transcript);
+        assert_no_token_output(&driver_stderr);
     }
 }
 
@@ -470,20 +576,24 @@ fn app017_t07_wrong_owner_descriptor_is_refused_or_explicitly_classified_unsuppo
             "unexpected wrong-owner fixture setup failure (not a skip): {diagnostic}"
         );
         eprintln!(
-            "APP017 WRONG-OWNER UNSUPPORTED: effective user cannot chown its disposable descriptor; API-owned uid comparison is unit-covered at daemon_client.rs::discover_from_path_roundtrip_and_refusals"
+            "APP017 WRONG-OWNER UNSUPPORTED: effective user cannot chown its disposable descriptor; chat uses server::daemon owner gate, unit-covered at daemon.rs::rc02_foreign_owner_refused"
         );
+        assert!(fixture.health_still_responds(), "unsupported fixture leaves listener intact");
+        assert!(fixture.api_requests().is_empty(), "unsupported fixture sends no API requests");
         return;
     }
 
-    let (code, transcript) = run_default_cli(&root, &fixture.address);
+    let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
     assert_eq!(code, 0, "wrong-owner descriptor must fail closed: {transcript}");
     assert!(
         !transcript.contains(&format!("daemon: {}", fixture.origin())),
         "wrong-owner descriptor must not establish an attached lease"
     );
+    assert!(!fixture.health_requests().is_empty(), "CLI must probe wrong-owner listener");
     assert!(fixture.api_requests().is_empty(), "wrong-owner token must never authorize API traffic");
     assert!(fixture.health_still_responds(), "wrong-owner refusal must not kill its listener");
     assert_no_token_output(&transcript);
+    assert_no_token_output(&driver_stderr);
 }
 
 #[test]
@@ -497,16 +607,18 @@ fn app017_t06_non_200_public_health_never_yields_an_authenticated_lease() {
         1,
     );
 
-    let (code, transcript) = run_default_cli(&root, &fixture.address);
+    let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
 
     assert_eq!(code, 0, "failed health must be handled as startup failure: {transcript}");
     assert!(
         !transcript.contains(&format!("daemon: {}", fixture.origin())),
         "non-200 readiness must not attach an authenticated lease"
     );
+    assert!(!fixture.health_requests().is_empty(), "CLI must receive the non-200 health response");
     assert!(fixture.api_requests().is_empty(), "health failure must precede any API request");
     assert!(fixture.health_still_responds(), "the pre-existing 503 listener must remain untouched");
     assert_no_token_output(&transcript);
+    assert_no_token_output(&driver_stderr);
 }
 
 #[test]
@@ -521,9 +633,10 @@ fn app017_t04_actual_spawn_waits_for_published_readiness_and_reaps_only_its_chil
     // not a mocked readiness future. No health server owns the port initially.
     drop(TcpListener::bind(&address).expect("reacquire reserved loopback address"));
 
-    let (code, transcript) = run_default_cli(&root, &address);
+    let (code, transcript, driver_stderr) = run_default_cli(&root, &address);
 
     assert_eq!(code, 0, "real child startup should complete: {transcript}");
+    assert!(transcript.contains("OpenCode RK"), "real chat startup banner observed: {transcript}");
     assert!(root.descriptor_path().is_file(), "owned daemon published its descriptor");
     let descriptor: serde_json::Value = serde_json::from_slice(
         &fs::read(root.descriptor_path()).expect("read published descriptor"),
@@ -531,7 +644,15 @@ fn app017_t04_actual_spawn_waits_for_published_readiness_and_reaps_only_its_chil
     .expect("valid published descriptor");
     let pid = descriptor["pid"].as_u64().expect("published child PID") as u32;
     assert_ne!(pid, 0, "published daemon PID is positive");
-    assert_no_token_output(&transcript);
+    let actual_bearer = descriptor["auth_token"].as_str().expect("serve-minted bearer");
+    assert!(
+        !transcript.contains(actual_bearer),
+        "actual daemon bearer must not appear in PTY output"
+    );
+    assert!(
+        !driver_stderr.contains(actual_bearer),
+        "actual daemon bearer must not appear in PTY-driver diagnostics"
+    );
     // `chat::run` owns this child and kills/reaps it before it returns. A
     // post-exit health probe must therefore fail while the independent
     // synthetic fixture path above remains untouched.
@@ -554,15 +675,18 @@ fn app017_t05_valid_existing_service_is_reused_without_descriptor_replacement() 
     root.publish(&origin, std::process::id(), &TEST_TOKEN.repeat(32), 1);
     let before = fs::read(root.descriptor_path()).expect("pre-existing descriptor");
 
-    let (code, transcript) = run_default_cli(&root, &fixture.address);
+    let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
 
     assert_eq!(code, 0, "existing healthy daemon must be reusable: {transcript}");
+    assert!(transcript.contains(&format!("daemon: {origin}")), "existing service attach observed: {transcript}");
     assert_eq!(
         fs::read(root.descriptor_path()).expect("descriptor after CLI exit"),
         before,
         "attach must not republish/replace the existing daemon descriptor"
     );
     assert!(fixture.health_still_responds(), "attaching client must not stop a pre-existing service");
+    assert!(!fixture.health_requests().is_empty(), "fixture observed existing-service health probe");
     assert!(!fixture.api_requests().is_empty(), "existing valid service saw real API requests");
     assert_no_token_output(&transcript);
+    assert_no_token_output(&driver_stderr);
 }
