@@ -1,13 +1,14 @@
-# APP-010-LINUX-NATIVE-ARCHIVE-CONTRACT — blocked test-author scratchpad
+# APP-010-LINUX-NATIVE-ARCHIVE-CONTRACT — source candidate scratchpad
 
 ## Claim and exact base
 
 - Owner session: `ses_f134383b8ffezMTq9WFzZu6ACR` (assigned route verified as `tokenharbor/gpt-6-luna`; no user allowlist supplied).
 - Task: `APP-010-LINUX-NATIVE-ARCHIVE-CONTRACT`, test-author, one owned test path: `crates/cli/tests/linux_native_installer_contract.rs`.
 - Worktree: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/LINUX-archive-contract-author`.
-- Exact base/revision: `1c1a64f677b537319a110063ef6289f8225d41b9`; tree `0bfc45ad04f17bb1e4e8b9cbb09964ad473c16a9`.
+- Exact parent candidate: `a16b50daf9ea7ecbe0a9e0088174d9704f8e3299`; parent `1c1a64f677b537319a110063ef6289f8225d41b9`; parent tree `0bfc45ad04f17bb1e4e8b9cbb09964ad473c16a9`.
 - Confirmed published `origin/wave/1-staging` points to that exact revision. Base publication receipt: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/LINUX-REGISTRATION-PUBLICATION-RESUME.md`; independent review: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/LINUX-REGISTRATION-INDEPENDENT-RESUME.md`.
-- Claim taken through `tools/completion_claims.py`; subsequent exact-schema blocker was set via `cc.update(..., 'blocked', ...)`. No foreign claim collision.
+- Blueprint corrections input verified SHA-256 `8d74a5e1dc545428c284ea858aa746ea299f9e330cb6e62e0a8fed1583e9b0b2`; original blueprint SHA-256 `0910a0a7d7d59885c110545fc30a3b347d7f145a56bbd0a3c59fa435db8816a3`.
+- Existing claim was `blocked` for absent schema. The corrections explicitly authorize a contract-independent subset and defer linkage-dependent cases, so transitioned only this owned claim to `in-progress` via `tools/completion_claims.py`. No foreign claim collision.
 
 ## Contract and source evidence
 
@@ -19,9 +20,17 @@
 - `LINUX-REGISTRATION-INDEPENDENT-RESUME.md:63-90` confirms conditional linkage and explicitly leaves manifest/linkage schema integrator-owned; per-component digest is not approved. `LINUX-REGISTRATION-PUBLICATION-RESUME.md:50-54` requires compiling real behavioral RED and controller freeze before implementation, with no implementation/acceptance claim from publication.
 - The registered `LINUX-RED-FIXTURE-BLUEPRINT.md` was searched under the approved `/private/var/folders/.../T/opencode` root and is not yet available.
 
-## Blocker / safe boundary
+## Implemented contract-independent test source
 
-The contract calls for tests constructing valid and invalid linkage declarations, but the published source has no archive manifest file path, encoding/schema version, target field, linkage enum/literals, library member naming/location, duplicate-definition semantics, or safe-member grammar. The current scripts consume flat tar.gz files containing `oc2`; the existing release source has no producer/validator contract. A test that invents such a declaration would become authority for an unapproved packaging schema and could freeze behavior contrary to the integrator's approved design. Therefore no owned Rust test file was created, and no test was run or frozen.
+Created `crates/cli/tests/linux_native_installer_contract.rs`. It invokes both real installers with argv, cleared environment and disposable HOME/TMPDIR/minimal PATH; generates bounded ustar+gzip bytes without a new crate dependency; computes outer SHA-256 with host utilities; drains output with a 64 KiB cap per stream; applies a 30-second child deadline; and removes only its unique temp root. The shell executable fixture is packaging-only, not native application, ELF, or loader evidence.
+
+Assertions authored for both scripts: byte-identical install under paths with spaces and non-ASCII; mode 0755; preserve an `opencode` sentinel outside the install directory and a disposable user-data marker; upgrade replaces executable while retaining markers; uninstall removes only executable; existing in-directory `opencode` refusal preserves full destination snapshot; bad outer checksum preserves destination and leaves no TMPDIR residue; argument errors preserve destination; and traversal, absolute path, symlink, FIFO, and duplicate executable archive members are rejected without observed escape or destination mutation.
+
+These are authored but uncompiled/unexecuted. Nothing is reported as executed RED or frozen. Against the registered task base, unsafe-member tests are source-predicted to fail only; no execution evidence exists.
+
+## Deferred linkage-dependent coverage
+
+No linkage metadata/schema is invented. Still deferred: dynamic library member placement and byte identity; dynamic-missing-library rejection (requires deciding structural versus staged-launch predicate); static archive positive; wrong-target detection; shared library replacement/uninstall ownership; and actual ELF loader/rpath proof. Genuine loader proof belongs to independent Ubuntu acceptance. No component digest, `readelf`, `ldd`, native-library mock, or fake-native launch is introduced.
 
 Before authoring, obtain an integrator-approved schema receipt covering at minimum:
 
@@ -34,7 +43,7 @@ Before authoring, obtain an integrator-approved schema receipt covering at minim
 
 ## Safe test harness proposal (not executable source; schema gated)
 
-Once the above is approved, implement one std-only Rust integration target that drives **both actual scripts** via `Command` using argv (never a shell command string), with per-test unique directories under `std::env::temp_dir`, disposable `HOME`, isolated `OC2_INSTALL_DIR`/`OPENCODE2_INSTALL_DIR`, cleared environment plus only an explicit minimal `PATH`/`HOME`, and no network. Build archive bytes locally using deterministic fixtures and compute the checksum from the archive file as production scripts require. Use executable fixture bytes that are actual tiny shell scripts, not mock success of the installer; dynamic execution fixture should use a native sibling library only if required to exercise that code path, while packaging-only tests assert exact installed library bytes and do not imply ELF runtime proof. On Unix, use `tar` as an argv process to create archive fixtures and an RAII `Drop` guard for temp cleanup; require bounded child completion with `try_wait` polling/kill+wait under a fixed deadline and retain at most 64 KiB combined stdout/stderr. Avoid invoking unrelated binaries through global PATH where possible; provide only system utilities scripts need (`uname`, `tar`, `sha256sum`/`shasum`, `cut`, `mktemp`, `mkdir`, `cp`, `chmod`, `rm`). Verify no destination mutation by snapshotting the isolated install tree and sentinel bytes before rejection.
+The harness design is materialized in the test file. It writes deterministic ustar entries in-process and invokes gzip, digest tools, and real scripts only. Child stdout/stderr are concurrently drained into capped buffers. Each sandbox owns a unique temp root and Drop cleanup. The integration test target is Unix-only because both installer scripts are POSIX sh. No network, user HOME, database, or real installation path is used.
 
 Concrete case map after schema approval:
 
@@ -53,7 +62,16 @@ Concrete case map after schema approval:
 
 ## Tests, guards, and status
 
-- No Cargo, rustc, installer, runtime, listener, browser or VM command executed, per SOURCE ONLY grant.
+### Resume from the approved author-ready subset
+
+- The contract-independent subset is authorized by `LINUX-RED-FIXTURE-BLUEPRINT-CORRECTIONS.md:140-165`; its source-only constraints and itemized coverage are incorporated above. This supersedes the earlier original-blocker conclusion for the safe subset only, not the remaining linkage questions.
+- Actual authored test functions: `checksum_mismatch_preserves_existing_destination_for_both_installers`; `positive_packaging_install_preserves_existing_data_and_handles_unicode_paths`; `upgrade_replaces_only_packaged_executable_and_preserves_user_markers`; `uninstall_removes_only_installed_binary_and_preserves_other_files`; `legacy_opencode_refusal_preserves_destination_for_both_installers`; `invalid_invocation_and_checksum_fail_without_destination_mutation`; `unsafe_archive_members_are_rejected_without_destination_mutation_or_escape`.
+- Fixture architecture: in-process bounded ustar writer covers regular, symlink and FIFO entries; gzip makes real `.tar.gz` archive bytes; outer archive checksum computed from fixture file; scripts invoked as real `sh <script> argv...` children. Every suite case creates its own disposable temp root and captures pre/post snapshots where rejection/non-destructive behavior is contractual.
+- Source-level correction: test target is `#![cfg(unix)]`; no platform-specific ELF assertion. Assertions on 64/65/66/73 are only existing argument/checksum/legacy gates documented in the correction appendix, not invented codes for new archive contract rejections. Unsafe-member tests require rejection and no side effects, not a newly assigned status code.
+- No link library member is tested, copied, or expected by this subset. Tests do not claim static/dynamic classification, safe sibling library placement, native ELF launch or Ubuntu proof.
+
+- No Cargo, rustc, installer, runtime, listener, browser or VM command executed, per SOURCE ONLY grant. No RED was demonstrated and no freeze hash/command manifest was produced.
 - Lightweight source-only observations: `rtk git diff --check` passed before worklog creation; current required base and published ref were verified. `rtk python3 tools/convergence_gate.py` returned `CONVERGENCE BLOCKED total=2` with AUD-017 and AUD-020 notes admitting no acceptance; do not repeat or attribute to this lane.
-- No test SHA/frozen RED exists. The prerequisite for resumption is approved archive schema/fixture blueprint and a later heavy-slot grant for independent compile+real-script RED, then controller freeze. This is not completed and makes no acceptance claim.
-- Remaining tasks after schema: author only the registered test path, compile and independently run the real scripts in a disposable fixture, capture expected behavioral RED (including missing dynamic library), hash source and command manifest, submit to controller for freeze. Only after that checkpoint may script implementation lanes begin.
+- Lightweight follow-up checks are limited to diff/check/hash/status. The prior convergence count was two unrelated AUD-017/AUD-020 ledger blockers; the corrections receipt records later staging advancement.
+- Test source is uncompiled; lane remains in-progress, not completed. Heavy-slot grant is required for focused compile plus real-script RED against a known script revision and controller freeze.
+- Future focused command: `CARGO_BUILD_JOBS=1 RUST_TEST_THREADS=1 timeout 120 cargo test -p opencode-rk-cli --test linux_native_installer_contract -- --test-threads=1`. Execute only after heavy-slot grant. Capture command, output/log, source hash and exact script revision before freeze. Linkage-dependent missing-library/static/wrong-target/native-loader cases remain deferred regardless.
