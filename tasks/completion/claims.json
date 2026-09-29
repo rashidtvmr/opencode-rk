@@ -1162,6 +1162,11 @@
       "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
+    "TUI-013": {
+      "scratchpad": "worklog/TUI-013.md",
+      "session": "ses_f14d95dccffe20Pr2g66zdFpE6",
+      "status": "in-progress"
+    },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
       "scratchpad": "worklog/WEB-ARTIFACT-EXEC.md",
