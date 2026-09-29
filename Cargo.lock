@@ -966,6 +966,9 @@ dependencies = [
 [[package]]
 name = "opencode-rk-opentui-bridge"
 version = "0.1.0-alpha.1"
+dependencies = [
+ "rustix",
+]
 
 [[package]]
 name = "opencode-rk-providers"
