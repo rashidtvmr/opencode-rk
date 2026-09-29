@@ -690,3 +690,194 @@ fn app017_t05_valid_existing_service_is_reused_without_descriptor_replacement() 
     assert_no_token_output(&transcript);
     assert_no_token_output(&driver_stderr);
 }
+
+/// Exercises two independent no-subcommand clients against one real `serve`
+/// process whose lifetime is owned by this test, not either chat client.
+/// Source contract: `main.rs::serve` publishes an authenticated descriptor and
+/// runs `router_with_auth`; `chat.rs::bind_recent_session` prints the empty
+/// sessions marker only after its authenticated GET /api/sessions succeeds.
+/// This proves two-client reuse of this daemon/origin, not absence of unrelated
+/// process starts elsewhere on the host.
+#[test]
+fn app017_t08_two_clients_reuse_one_live_authenticated_serve_daemon() {
+    use std::process::Child;
+
+    struct ServeGuard(Child);
+
+    impl ServeGuard {
+        fn stop(&mut self) {
+            // Drop can run during an assertion unwind; cleanup must not panic
+            // and turn a useful assertion into a double-panic abort.
+            // On a polling error, still try to kill before the bounded-process
+            // owner waits below; never assume an error means the child exited.
+            if !matches!(self.0.try_wait(), Ok(Some(_))) {
+                let _ = self.0.kill();
+            }
+            let _ = self.0.wait();
+        }
+    }
+
+    impl Drop for ServeGuard {
+        fn drop(&mut self) {
+            self.stop();
+        }
+    }
+
+    fn healthy(address: &str) -> bool {
+        let Ok(socket) = address.parse() else {
+            return false;
+        };
+        let Ok(mut stream) = TcpStream::connect_timeout(&socket, Duration::from_millis(200)) else {
+            return false;
+        };
+        if stream
+            .set_read_timeout(Some(Duration::from_millis(300)))
+            .is_err()
+        {
+            return false;
+        }
+        if write!(
+            stream,
+            "GET /health HTTP/1.1\r\nhost: {address}\r\nconnection: close\r\n\r\n"
+        )
+        .is_err()
+        {
+            return false;
+        }
+        let mut response = Vec::new();
+        stream.take(2048).read_to_end(&mut response).is_ok()
+            && response.starts_with(b"HTTP/1.1 200 ")
+    }
+
+    let root = FixtureRoot::new("two-client-reuse");
+    // Reserve an ephemeral loopback address, then release it for the real
+    // server. The unique test data dir and descriptor PID below disambiguate
+    // the explicitly owned process from any unrelated service.
+    let reservation = TcpListener::bind("127.0.0.1:0").expect("reserve loopback address");
+    let address = reservation
+        .local_addr()
+        .expect("reserved listener address")
+        .to_string();
+    drop(reservation);
+    let origin = format!("http://{address}");
+
+    let serve = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
+        .env_clear()
+        .env("HOME", root.data_dir())
+        .env("TMPDIR", root.data_dir())
+        .env("PATH", PYTHON_PATH)
+        .arg("--data-dir")
+        .arg(root.data_dir())
+        .arg("serve")
+        .arg("--listen")
+        .arg(&address)
+        .current_dir(root.data_dir())
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn explicitly-owned real serve process");
+    let serve_pid = serve.id();
+    let mut serve = ServeGuard(serve);
+
+    // Read only descriptor limit + 1 bytes; reject excess before parsing or
+    // retaining an attacker-controlled file of arbitrary size.
+    let descriptor_path = root.descriptor_path();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    let (descriptor_before, descriptor): (Vec<u8>, serde_json::Value) = loop {
+        assert!(
+            serve.0.try_wait().expect("poll owned serve process").is_none(),
+            "real serve exited before becoming ready"
+        );
+        if let Ok(file) = fs::File::open(&descriptor_path) {
+            let mut bytes = Vec::with_capacity(8 * 1024 + 1);
+            file.take((8 * 1024 + 1) as u64)
+                .read_to_end(&mut bytes)
+                .expect("bounded descriptor read");
+            assert!(
+                bytes.len() <= 8 * 1024,
+                "real serve descriptor exceeded the production 8 KiB bound"
+            );
+            if healthy(&address) {
+                // Publication can become visible just before listener
+                // readiness; treat an incomplete transient read as pending
+                // rather than misclassifying it as a product failure.
+                if let Ok(value) = serde_json::from_slice(&bytes) {
+                    break (bytes, value);
+                }
+            }
+        }
+        assert!(Instant::now() < deadline, "real serve readiness exceeded 10 seconds");
+        thread::sleep(Duration::from_millis(20));
+    };
+
+    assert_eq!(
+        descriptor["pid"].as_u64(),
+        Some(u64::from(serve_pid)),
+        "descriptor PID must identify the live test-owned serve child"
+    );
+    assert_eq!(
+        descriptor["http_origin"].as_str(),
+        Some(origin.as_str()),
+        "both CLI clients must use the real server's published origin"
+    );
+    let bearer = descriptor["auth_token"]
+        .as_str()
+        .expect("real serve must publish its bearer")
+        .to_owned();
+    assert_eq!(bearer.len(), 64, "real daemon bearer has expected shape");
+    assert!(
+        bearer.bytes().all(|byte| byte.is_ascii_hexdigit()),
+        "real daemon bearer must have the expected hexadecimal encoding"
+    );
+
+    for client_number in 1..=2 {
+        let (code, transcript, driver_stderr) = run_default_cli(&root, &address);
+        assert_eq!(
+            code, 0,
+            "client {client_number} must exit cleanly: {transcript}"
+        );
+        assert!(
+            transcript.contains("OpenCode RK"),
+            "client {client_number} must reach real interactive startup: {transcript}"
+        );
+        assert!(
+            transcript.contains(&format!("daemon: {origin}")),
+            "client {client_number} must attach to the same live origin: {transcript}"
+        );
+        assert!(
+            transcript.contains("no sessions yet; type /new to start one"),
+            "client {client_number} must receive the authenticated empty-session result: {transcript}"
+        );
+        assert!(
+            !transcript.contains("session list failed: 401")
+                && !transcript.contains("session list failed: 403"),
+            "client {client_number} API access must not be rejected: {transcript}"
+        );
+        assert_no_token_output(&transcript);
+        assert!(
+            !transcript.contains(&bearer) && !driver_stderr.contains(&bearer),
+            "real daemon bearer must not appear in client output or diagnostics"
+        );
+        assert!(
+            serve.0.try_wait().expect("poll owned serve after client").is_none(),
+            "client {client_number} must not stop the separately-owned daemon"
+        );
+        assert!(
+            healthy(&address),
+            "the same server origin must remain healthy after client {client_number} exits"
+        );
+        assert_eq!(
+            fs::read(&descriptor_path).expect("read unchanged live descriptor"),
+            descriptor_before,
+            "client {client_number} must not replace the real owner's descriptor"
+        );
+    }
+
+    // Explicit test ownership: terminate and reap only the Child we spawned.
+    serve.stop();
+    assert!(
+        !healthy(&address),
+        "the test-owned daemon listener must stop after explicit cleanup"
+    );
+}
