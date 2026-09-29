@@ -175,15 +175,17 @@ fn provider_round(calls: &[(&str, &str, &str)], text: &str) -> Vec<u8> {
         });
         events.push(format!("event: response.output_item.done\ndata: {event}\n\n"));
     }
+    if !text.is_empty() {
+        let delta = json!({"delta": text});
+        events.push(format!("event: response.output_text.delta\ndata: {delta}\n\n"));
+    }
+    // The pinned Responses parser marks itself exhausted at response.completed;
+    // therefore any text delta must precede this terminal provider event.
     let completed = json!({
         "type": "response.completed",
         "response": {"id": "same-batch-fixture", "status": "completed"}
     });
     events.push(format!("event: response.completed\ndata: {completed}\n\n"));
-    if !text.is_empty() {
-        let delta = json!({"delta": text});
-        events.push(format!("event: response.output_text.delta\ndata: {delta}\n\n"));
-    }
     let body = events.concat();
     format!(
         "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
@@ -410,7 +412,11 @@ fn first_pair_persistence_failure_stops_second_call_in_the_same_provider_batch()
     assert_eq!(control_status, 201, "positive-control stream keeps HTTP 201");
     let control_events = ndjson_events(&control_response);
     assert!(control_events.iter().any(|event| event["type"] == "tool_output" && event["call_id"] == "control-call"));
-    assert!(control_events.iter().any(|event| event["type"] == "assistant_message"), "positive control must reach real assistant completion");
+    let control_assistant = control_events.iter()
+        .find(|event| event["type"] == "assistant_message")
+        .expect("positive control must reach real assistant completion");
+    assert!(control_assistant["message"]["body"]["text"].as_str() == Some("positive control complete"),
+        "positive control assistant text did not match the scripted constant");
     assert_eq!(std::fs::read_to_string(&control_path).expect("positive control file effect"), "positive control effect");
 
     let database = state_db(home.path());
