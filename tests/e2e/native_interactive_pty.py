@@ -165,16 +165,16 @@ class NativeInteractivePTY(unittest.TestCase):
             os.write(self.master, b"\x03")
             self.child.wait(timeout=DEADLINE)
             self.assertEqual(self.child.returncode, 0, "Ctrl-C must terminate the owned interactive session")
+            restored = termios.tcgetattr(self.master)
+            terminal_mask = termios.ICANON | termios.ECHO | termios.ISIG
+            self.assertEqual(
+                restored[3] & terminal_mask,
+                self.saved_attrs[3] & terminal_mask,
+                "successful native exit must restore the caller's terminal flags",
+            )
         finally:
-            # Restore the PTY before closing it; this assertion must not be
-            # masked by cleanup of the descriptor or by a forced kill.
-            if self.master is not None:
-                termios.tcsetattr(self.master, termios.TCSANOW, self.saved_attrs)
-                restored = termios.tcgetattr(self.master)
-                self.assertEqual(
-                    restored[3] & (termios.ICANON | termios.ECHO),
-                    termios.ICANON | termios.ECHO,
-                )
+            # Cleanup restores the fixture PTY only for host hygiene. The
+            # product restoration assertion above runs first on normal exit.
             self._cleanup()
             self.child = None
 
