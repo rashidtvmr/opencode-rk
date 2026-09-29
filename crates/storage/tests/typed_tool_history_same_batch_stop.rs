@@ -51,6 +51,10 @@ impl HttpTask {
     fn join(mut self) -> (u16, Vec<u8>) {
         self.0.take().expect("owned HTTP task").join().expect("HTTP worker panicked")
     }
+
+    fn is_finished(&self) -> bool {
+        self.0.as_ref().expect("owned HTTP task").is_finished()
+    }
 }
 impl Drop for HttpTask {
     fn drop(&mut self) {
@@ -70,11 +74,14 @@ fn installed_binary() -> PathBuf {
 
 /// Read a bounded HTTP request through its complete Content-Length body.
 fn read_provider_request(stream: &mut TcpStream) -> Vec<u8> {
-    stream.set_read_timeout(Some(SOCKET_TIMEOUT)).expect("provider read timeout");
+    let deadline = Instant::now() + DEADLINE;
     let mut bytes = Vec::new();
     let mut buffer = [0_u8; 4096];
     let mut expected_total = None;
     loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(!remaining.is_zero(), "provider request exceeded its absolute fixture deadline");
+        stream.set_read_timeout(Some(remaining.min(SOCKET_TIMEOUT))).expect("provider read timeout");
         let count = stream.read(&mut buffer).expect("read provider request");
         if count == 0 {
             break;
@@ -114,10 +121,12 @@ fn spawn_provider() -> (String, Receiver<Vec<u8>>, SyncSender<Vec<u8>>, Provider
     let (request_tx, request_rx) = mpsc::sync_channel::<Vec<u8>>(8);
     let (response_tx, response_rx) = mpsc::sync_channel::<Vec<u8>>(4);
     let join = thread::spawn(move || {
+        let accept_deadline = Instant::now() + DEADLINE;
         loop {
             if thread_stopping.load(Ordering::Acquire) {
                 return;
             }
+            assert!(Instant::now() < accept_deadline, "provider accept exceeded its absolute fixture deadline");
             let accepted = match listener.accept() {
                 Ok(pair) => pair,
                 Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
@@ -183,10 +192,13 @@ fn provider_round(calls: &[(&str, &str, &str)], text: &str) -> Vec<u8> {
 }
 
 fn read_http_response(stream: &mut TcpStream) -> Vec<u8> {
-    stream.set_read_timeout(Some(SOCKET_TIMEOUT)).expect("daemon read timeout");
+    let deadline = Instant::now() + DEADLINE;
     let mut bytes = Vec::new();
     let mut buffer = [0_u8; 4096];
     loop {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        assert!(!remaining.is_zero(), "HTTP response exceeded its absolute fixture deadline");
+        stream.set_read_timeout(Some(remaining.min(SOCKET_TIMEOUT))).expect("daemon read timeout");
         let count = stream.read(&mut buffer).expect("read daemon response");
         if count == 0 {
             break;
@@ -200,6 +212,7 @@ fn read_http_response(stream: &mut TcpStream) -> Vec<u8> {
 fn request(origin: &str, token: &str, method: &str, path: &str, body: &str) -> (u16, Vec<u8>) {
     let mut stream = TcpStream::connect(origin).expect("connect to fixture daemon");
     stream.set_read_timeout(Some(SOCKET_TIMEOUT)).expect("daemon client timeout");
+    stream.set_write_timeout(Some(SOCKET_TIMEOUT)).expect("daemon client write timeout");
     let wire = format!(
         "{method} {path} HTTP/1.1\r\nhost: localhost\r\nauthorization: Bearer {token}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
         body.len()
@@ -445,15 +458,24 @@ fn first_pair_persistence_failure_stops_second_call_in_the_same_provider_batch()
     // persistence error. If the legacy untyped path asks for a follow-up, answer
     // it so the client stream can terminate and report the actual outcome rather
     // than hanging the test on a bad implementation.
-    let unexpected_followup = match provider_requests.recv_timeout(Duration::from_secs(2)) {
-        Ok(request) => {
-            assert!(!request.is_empty(), "unexpected follow-up provider request must be captured");
-            send_provider_response(&provider_responses, provider_round(&[], "unexpected follow-up completed"));
-            true
+    let followup_deadline = Instant::now() + DEADLINE;
+    let mut observed_followups = 0usize;
+    while !failed_task.is_finished() && Instant::now() < followup_deadline {
+        match provider_requests.recv_timeout(Duration::from_millis(25)) {
+            Ok(request) => {
+                assert!(!request.is_empty(), "unexpected follow-up provider request must be captured");
+                observed_followups = observed_followups.checked_add(1).expect("bounded follow-up count");
+                assert!(observed_followups <= 4, "provider follow-up count exceeds fixture bound");
+                // Answer only to drive an incorrect implementation to a
+                // terminal event; the nonzero count remains an assertion
+                // failure after the owned HTTP request has completed.
+                send_provider_response(&provider_responses, provider_round(&[], "unexpected follow-up completed"));
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(mpsc::RecvTimeoutError::Disconnected) => panic!("provider fixture disconnected before turn ended"),
         }
-        Err(mpsc::RecvTimeoutError::Timeout) => false,
-        Err(mpsc::RecvTimeoutError::Disconnected) => panic!("provider fixture disconnected before turn ended"),
-    };
+    }
+    assert!(failed_task.is_finished(), "stream request exceeded bounded turn deadline");
     let (failed_status, failed_response) = failed_task.join();
     assert_eq!(failed_status, 201, "late stream persistence faults retain committed HTTP status");
 
@@ -477,7 +499,7 @@ fn first_pair_persistence_failure_stops_second_call_in_the_same_provider_batch()
         "B must not emit a tool output after A persistence failure");
     assert!(!events.iter().any(|event| event["type"] == "assistant_message"),
         "failed tool-pair persistence is not successful assistant completion");
-    assert!(!unexpected_followup, "provider received a later request after A pair persistence failure");
+    assert_eq!(observed_followups, 0, "provider received a later request after A pair persistence failure");
     assert!(matches!(provider_requests.try_recv(), Err(mpsc::TryRecvError::Empty)),
         "no provider request may arrive after the failed turn body terminates");
 
