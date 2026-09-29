@@ -60,6 +60,12 @@
       "session": "ses_f42269ebaffejbo6GG4ng10o5V",
       "status": "completed"
     },
+    "APP-010-LINUX-NATIVE-ARCHIVE-CONTRACT": {
+      "blockedNote": "Blocked: no linkage manifest schema or producer exists at 1c1a64f. Contract asks tests for valid/invalid linkage declaration and dynamic-vs-static, but no format to build real archive fixtures. Need integrator decision on manifest path/format/version, target/linkage values, library path/name and duplicate/unsafe-member rules. No tests/scripts run under source-only budget; details in worklog.",
+      "scratchpad": "worklog/APP-010-LINUX-NATIVE-ARCHIVE-CONTRACT.md",
+      "session": "ses_f134383b8ffezMTq9WFzZu6ACR",
+      "status": "blocked"
+    },
     "APP-011": {
       "completedNote": "diagnostics 6/6 + doctor 5+4 green; runtime_settings not needed in design; zero test edits",
       "scratchpad": "worklog/APP-011.md",
