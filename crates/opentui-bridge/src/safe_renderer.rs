@@ -15,9 +15,9 @@ use std::fmt;
 use std::marker::PhantomData;
 #[cfg(feature = "native")]
 use std::os::raw::c_void;
-#[cfg(feature = "native")]
-use std::cell::RefCell;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "native")]
+use std::sync::atomic::{AtomicU32, AtomicU8};
 
 use crate::buffer::NativeHandle;
 use crate::color::Rgba;
@@ -28,23 +28,19 @@ const INVALID_HANDLE: NativeHandle = 0;
 /// Global single-owner claim. Held while a [`Renderer`] is live.
 static CLAIMED: AtomicBool = AtomicBool::new(false);
 
-/// Native terminal/input state for the one renderer owned by this thread.
-/// `Renderer` is deliberately `!Send`/`!Sync`, and `CLAIMED` permits only one
-/// live renderer process-wide, so a single bounded TLS slot avoids changing
-/// the frozen test-only struct literal or retaining a global handle map.
+/// Native terminal/input state for the one renderer owned by this process.
+/// `CLAIMED` permits only one live renderer, so one bounded atomic slot avoids
+/// changing the frozen test-only struct literal or retaining a handle map.
 #[cfg(feature = "native")]
-#[derive(Debug, Default)]
-struct LifecycleState {
-    handle: NativeHandle,
-    terminal_active: bool,
-    mouse_enabled: bool,
-    kitty_keyboard_enabled: bool,
-}
-
+static LIFECYCLE_HANDLE: AtomicU32 = AtomicU32::new(INVALID_HANDLE);
 #[cfg(feature = "native")]
-thread_local! {
-    static LIFECYCLE: RefCell<LifecycleState> = RefCell::new(LifecycleState::default());
-}
+static LIFECYCLE_FLAGS: AtomicU8 = AtomicU8::new(0);
+#[cfg(feature = "native")]
+const TERMINAL_ACTIVE: u8 = 1;
+#[cfg(feature = "native")]
+const MOUSE_ENABLED: u8 = 2;
+#[cfg(feature = "native")]
+const KITTY_KEYBOARD_ENABLED: u8 = 4;
 
 /// Byte cap for one [`Renderer::draw_text`] call.
 pub const MAX_TEXT_BYTES: usize = 64 * 1024;
@@ -168,9 +164,13 @@ impl Renderer {
             let handle =
                 unsafe { createRenderer(cols, rows, dest, 0, std::ptr::null()) };
             if handle == INVALID_HANDLE {
+                LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
+                LIFECYCLE_FLAGS.store(0, Ordering::Release);
                 CLAIMED.store(false, Ordering::Release);
                 return Err(BridgeError::CreateFailed);
             }
+            LIFECYCLE_FLAGS.store(0, Ordering::Release);
+            LIFECYCLE_HANDLE.store(handle, Ordering::Release);
             Ok(Self {
                 handle,
                 cols,
@@ -203,17 +203,6 @@ impl Renderer {
         Ok(self.handle)
     }
 
-    #[cfg(feature = "native")]
-    fn begin_lifecycle(&self) {
-        LIFECYCLE.with(|slot| {
-            let mut state = slot.borrow_mut();
-            *state = LifecycleState {
-                handle: self.handle,
-                ..LifecycleState::default()
-            };
-        });
-    }
-
     fn release(&mut self) {
         if self.handle == INVALID_HANDLE {
             return;
@@ -222,24 +211,24 @@ impl Renderer {
         // SAFETY: live handle owned by self; owned terminal/input modes are
         // restored before the exactly-once destroy.
         unsafe {
-            LIFECYCLE.with(|slot| {
-                let mut state = slot.borrow_mut();
-                if state.handle == self.handle {
-                    if state.mouse_enabled {
-                        disableMouse(self.handle);
-                        state.mouse_enabled = false;
-                    }
-                    if state.kitty_keyboard_enabled {
-                        disableKittyKeyboard(self.handle);
-                        state.kitty_keyboard_enabled = false;
-                    }
-                    if state.terminal_active {
-                        restoreTerminalModes(self.handle);
-                        state.terminal_active = false;
-                    }
-                    state.handle = INVALID_HANDLE;
-                }
-            });
+            let owned = LIFECYCLE_HANDLE.load(Ordering::Acquire) == self.handle;
+            let flags = if owned {
+                LIFECYCLE_FLAGS.swap(0, Ordering::AcqRel)
+            } else {
+                0
+            };
+            if owned && flags & MOUSE_ENABLED != 0 {
+                disableMouse(self.handle);
+            }
+            if owned && flags & KITTY_KEYBOARD_ENABLED != 0 {
+                disableKittyKeyboard(self.handle);
+            }
+            if owned && flags & TERMINAL_ACTIVE != 0 {
+                restoreTerminalModes(self.handle);
+            }
+            if owned {
+                LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
+            }
             destroyRenderer(self.handle, true);
         }
         self.handle = INVALID_HANDLE;
@@ -270,16 +259,9 @@ impl Renderer {
         {
             // SAFETY: live handle; plain integers only.
             unsafe { setupTerminal(handle, true) };
-            LIFECYCLE.with(|slot| {
-                let mut state = slot.borrow_mut();
-                if state.handle != handle {
-                    *state = LifecycleState {
-                        handle,
-                        ..LifecycleState::default()
-                    };
-                }
-                state.terminal_active = true;
-            });
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle {
+                LIFECYCLE_FLAGS.fetch_or(TERMINAL_ACTIVE, Ordering::AcqRel);
+            }
             Ok(())
         }
     }
@@ -293,15 +275,13 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            LIFECYCLE.with(|slot| {
-                let mut state = slot.borrow_mut();
-                if state.handle == handle && state.terminal_active {
-                    // SAFETY: this wrapper initialized terminal state for the
-                    // same live handle and has not restored it yet.
-                    unsafe { restoreTerminalModes(handle) };
-                    state.terminal_active = false;
-                }
-            });
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel)
+                    & TERMINAL_ACTIVE
+                    != 0
+            {
+                unsafe { restoreTerminalModes(handle) };
+            }
             Ok(())
         }
     }
@@ -346,12 +326,9 @@ impl Renderer {
         #[cfg(feature = "native")]
         {
             unsafe { enableMouse(handle, movement) };
-            LIFECYCLE.with(|slot| {
-                let mut state = slot.borrow_mut();
-                if state.handle == handle {
-                    state.mouse_enabled = true;
-                }
-            });
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle {
+                LIFECYCLE_FLAGS.fetch_or(MOUSE_ENABLED, Ordering::AcqRel);
+            }
             Ok(())
         }
     }
@@ -365,13 +342,13 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            LIFECYCLE.with(|slot| {
-                let mut state = slot.borrow_mut();
-                if state.handle == handle && state.mouse_enabled {
-                    unsafe { disableMouse(handle) };
-                    state.mouse_enabled = false;
-                }
-            });
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.fetch_and(!MOUSE_ENABLED, Ordering::AcqRel)
+                    & MOUSE_ENABLED
+                    != 0
+            {
+                unsafe { disableMouse(handle) };
+            }
             Ok(())
         }
     }
@@ -386,12 +363,9 @@ impl Renderer {
         #[cfg(feature = "native")]
         {
             unsafe { enableKittyKeyboard(handle, flags) };
-            LIFECYCLE.with(|slot| {
-                let mut state = slot.borrow_mut();
-                if state.handle == handle {
-                    state.kitty_keyboard_enabled = true;
-                }
-            });
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle {
+                LIFECYCLE_FLAGS.fetch_or(KITTY_KEYBOARD_ENABLED, Ordering::AcqRel);
+            }
             Ok(())
         }
     }
@@ -405,13 +379,13 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            LIFECYCLE.with(|slot| {
-                let mut state = slot.borrow_mut();
-                if state.handle == handle && state.kitty_keyboard_enabled {
-                    unsafe { disableKittyKeyboard(handle) };
-                    state.kitty_keyboard_enabled = false;
-                }
-            });
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.fetch_and(!KITTY_KEYBOARD_ENABLED, Ordering::AcqRel)
+                    & KITTY_KEYBOARD_ENABLED
+                    != 0
+            {
+                unsafe { disableKittyKeyboard(handle) };
+            }
             Ok(())
         }
     }
