@@ -1,0 +1,175 @@
+warning: crates/cli/Cargo.toml: file `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB019-integration/crates/cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `oc2`
+  * `bin` target `opencode-rk`
+warning: `opencode-rk-cli` (manifest) generated 1 warning
+   Compiling opencode-rk-storage v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB019-integration/crates/storage)
+warning: variable does not need to be mutable
+   --> crates/storage/src/catalog_v2.rs:295:13
+    |
+295 |         let mut conn = CatalogV2::initialize_catalog(&path, [7_u8; 16], 10).unwrap();
+    |             ----^^^^
+    |             |
+    |             help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `parent_pk`
+   --> crates/storage/src/fork_v2.rs:466:13
+    |
+466 |         let parent_pk = create_parent(&mut conn, parent);
+    |             ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_parent_pk`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+   --> crates/storage/src/quota_v2.rs:186:13
+    |
+186 |         let mut connection = Connection::open(&path).unwrap();
+    |             ----^^^^^^^^^^
+    |             |
+    |             help: remove this `mut`
+
+warning: unused variable: `watermark`
+   --> crates/storage/src/snapshot_v2.rs:683:27
+    |
+683 |         let (export_rows, watermark) = SnapshotV2::export_page(&conn, session_pk, 0, 10).unwrap();
+    |                           ^^^^^^^^^ help: if this is intentional, prefix it with an underscore: `_watermark`
+
+warning: function `insert_session_message_parts` is never used
+   --> crates/storage/src/gc_v2.rs:443:8
+    |
+443 |     fn insert_session_message_parts(connection: &Connection) -> (i64, i64, i64) {
+    |        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: `opencode-rk-storage` (lib test) generated 5 warnings (run `cargo fix --lib -p opencode-rk-storage --tests` to apply 4 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 1.52s
+     Running unittests src/lib.rs (target/debug/deps/opencode_rk_storage-582b3393ce2ae96a)
+
+running 122 tests
+test admission_v2::tests::expired_receipt_returns_none ... ok
+test admission_v2::tests::oversize_inline_rejected ... ok
+test admission_v2::tests::promote_shares_payload_pk_and_marks_input ... ok
+test admission_v2::tests::promote_twice_or_missing_rejected ... ok
+test admission_v2::tests::receipt_roundtrip_ok ... ok
+test admission_v2::tests::receipt_validation_rejected ... ok
+test admission_v2::tests::seq_allocates_1_then_2 ... ok
+test admission_v2::tests::submit_validation_rejected ... ok
+test approvals_v2::tests::add_resource_rejects_bad_bounds ... ok
+test approvals_v2::tests::double_resolve_errors ... ok
+test approvals_v2::tests::mandatory_without_human_errors ... ok
+test approvals_v2::tests::request_ok_starts_pending ... ok
+test approvals_v2::tests::request_rejects_bad_window_action_policy ... ok
+test approvals_v2::tests::resolve_denied_and_consumed_ok ... ok
+test approvals_v2::tests::resolve_to_0_or_3_errors ... ok
+test approvals_v2::tests::sweep_only_due ... ok
+test backup_v2::tests::over_quota_rejected ... ok
+test backup_v2::tests::restore_requires_verify ... ok
+test backup_v2::tests::round_trip_manifest ... ok
+test backup_v2::tests::sha256_known_vector ... ok
+test backup_v2::tests::tampered_data_detected_corrupt ... ok
+test backup_v2::tests::tampered_manifest_bytes_detected_corrupt ... ok
+test backup_v2::tests::unsupported_version_rejected ... ok
+test catalog_v2::tests::catalog_smoke ... ok
+test content_addr_v2::tests::dedup_same_content ... ok
+test content_addr_v2::tests::gc_removes_orphans ... ok
+test content_addr_v2::tests::hash_deterministic ... ok
+test content_addr_v2::tests::reference_counting ... ok
+test content_addr_v2::tests::store_and_get ... ok
+test execution_v2::tests::duplicate_owner_rejected ... ok
+test execution_v2::tests::finish_attempt_rejects_terminal_rewrite ... ok
+test execution_v2::tests::finish_tool_rejects_terminal_rewrite ... ok
+test execution_v2::tests::illegal_transition_errs ... ok
+test execution_v2::tests::input_validation_rejects ... ok
+test execution_v2::tests::legal_transition ... ok
+test execution_v2::tests::record_and_finish_attempt_ok ... ok
+test execution_v2::tests::record_attempt_rejected_on_terminal_execution ... ok
+test execution_v2::tests::start_ok ... ok
+test execution_v2::tests::tool_failure_without_error_rejected ... ok
+test execution_v2::tests::tool_success_without_output_rejected ... ok
+test execution_v2::tests::uncertain_to_complete_releases_owner ... ok
+test facade::tests::concurrent_access ... ok
+test facade::tests::open_and_init ... ok
+test facade::tests::open_memory_works ... ok
+test facade::tests::reopen_persists ... ok
+test facade::tests::write_and_read ... ok
+test fork_v2::tests::fork_beyond_cap_errors ... ok
+test fork_v2::tests::fork_copies_metadata_and_shares_payload_pk ... ok
+test fork_v2::tests::fork_depth_bounded ... ok
+test fork_v2::tests::fork_inherits_history ... ok
+test fork_v2::tests::fork_provenance_cols_set ... ok
+test fork_v2::tests::parent_delete_keeps_fork_payloads ... ok
+test fork_v2::tests::verify_copy_detects_tamper ... ok
+test gc_v2::tests::claim_is_fail_closed_when_referenced ... ok
+test gc_v2::tests::claim_orphan_payloads_deletes_old_orphan_keeps_referenced ... ok
+test gc_v2::tests::claim_respects_age_and_limit ... ok
+test gc_v2::tests::claim_skips_referenced_blob ... ok
+test gc_v2::tests::claim_takes_old_unreferenced_blob ... ok
+test gc_v2::tests::finish_deletes_only_tombstoned_unreferenced ... ok
+test gc_v2::tests::prune_advances_floor_not_head ... ok
+test gc_v2::tests::retention_counts_correct ... ok
+test import_blobs::tests::t01_large_history_imports_incrementally_source_untouched ... ok
+test import_blobs::tests::t02_blob_payload_copies_out_of_band_byte_identical ... ok
+test import_blobs::tests::t03_migration_agreement_holds_then_rejects_divergence ... ok
+test import_blobs::tests::t04_interrupted_import_resumes_with_no_half_message ... ok
+test import_blobs::tests::t05_oversized_blob_rejects_with_quota_error_leaving_state ... ok
+test import_v2::tests::db016_oversize_inline_skipped ... ok
+test import_v2::tests::db016_paged_import_bounded ... ok
+test import_v2::tests::import_copies_messages ... ok
+test import_v2::tests::import_rejects_blob_backed_row ... ok
+test import_v2::tests::import_rejects_oversize_inline_row ... ok
+test import_v2::tests::resumable_pages ... ok
+test import_v2::tests::source_is_unchanged ... ok
+test import_v2::tests::verify_counts_detects_mismatch ... ok
+test import_v2::tests::verify_payload_bytes_accepts_exact_sum_rejects_others ... ok
+test migrations::tests::checksum_mismatch_fails ... ok
+test migrations::tests::empty_db_runs_all ... ok
+test migrations::tests::ordered_execution ... ok
+test migrations::tests::partial_failure_rolls_back ... ok
+test migrations::tests::skip_already_applied ... ok
+test quota_v2::tests::admit_ok_under_limit ... ok
+test quota_v2::tests::admit_rejects_over_db_limit ... ok
+test quota_v2::tests::admit_rejects_over_wal_limit ... ok
+test quota_v2::tests::measure_returns_sane_non_negative ... ok
+test quota_v2::tests::reclaim_frees_space ... ok
+test quota_v2::tests::reclaim_runs ... ok
+test quota_v2::tests::wal_quota_rejection ... ok
+test retention_v2::tests::backlog_counts_correct ... ok
+test retention_v2::tests::sweep_expired_receipts_deletes_expired_keeps_fresh ... ok
+test retention_v2::tests::sweep_expired_receipts_respects_limit_clamp ... ok
+test retention_v2::tests::sweep_orphan_inline_payloads_deletes_old_keeps_new ... ok
+test retention_v2::tests::sweep_orphan_keeps_referenced_payload ... ok
+test retention_v2::tests::sweep_resolved_approvals_deletes_terminal_keeps_pending_and_cascades ... ok
+test rollout_v2::tests::append_and_query ... ok
+test rollout_v2::tests::consistency_check ... ok
+test rollout_v2::tests::jsonl_is_truth ... ok
+test rollout_v2::tests::query_by_type_filters ... ok
+test rollout_v2::tests::replay_matches ... ok
+test schema_v2::tests::checksum_tamper_detected ... ok
+test schema_v2::tests::init_then_reopen_roundtrip ... ok
+test schema_v2::tests::nonempty_file_rejected ... ok
+test schema_v2::tests::reopen_validates_markers ... ok
+test schema_v2::tests::tampered_checksum_rejected ... ok
+test snapshot_v2::tests::checkpoint_bad_seq_errs_at_commit ... ok
+test snapshot_v2::tests::close_then_reopen_increments_epoch ... ok
+test snapshot_v2::tests::closed_epoch_shows_closed_at_us ... ok
+test snapshot_v2::tests::empty_export_watermark_eq_after_seq ... ok
+test snapshot_v2::tests::epoch_boundary_respected ... ok
+test snapshot_v2::tests::export_includes_all_tables ... ok
+test snapshot_v2::tests::export_page_keyset_paging ... ok
+test snapshot_v2::tests::latest_checkpoint_none_then_some ... ok
+test snapshot_v2::tests::list_epochs_newest_first_and_limit ... ok
+test snapshot_v2::tests::list_pins_empty_then_populated ... ok
+test snapshot_v2::tests::outbox_page_bounded_by_head_and_session ... ok
+test snapshot_v2::tests::pin_unpin_roundtrip ... ok
+test snapshot_v2::tests::second_open_epoch_rejected ... ok
+test tests::blob_store_deduplicates ... ok
+test tests::event_payloads_bounded ... ok
+test tests::large_message_requires_blob ... ok
+test tests::session_round_trip_and_archive ... ok
+test writer_v2::tests::checked_append_generous_budget_inserts_same_rows_as_plain ... ok
+test writer_v2::tests::checked_append_zero_db_budget_rejects_and_writes_nothing ... ok
+
+test result: ok. 122 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.88s
+

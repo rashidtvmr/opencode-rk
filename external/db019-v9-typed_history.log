@@ -1,0 +1,77 @@
+warning: crates/cli/Cargo.toml: file `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB019-integration/crates/cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `oc2`
+  * `bin` target `opencode-rk`
+warning: `opencode-rk-cli` (manifest) generated 1 warning
+   Compiling libc v0.2.189
+   Compiling jobserver v0.1.35
+   Compiling shlex v2.0.1
+   Compiling find-msvc-tools v0.1.12
+   Compiling cc v1.4.6
+   Compiling pkg-config v0.3.34
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.24
+   Compiling quote v1.0.47
+   Compiling serde_core v1.0.229
+   Compiling syn v3.0.5
+   Compiling zstd-sys v2.1.0+zstd.1.5.7
+   Compiling autocfg v1.5.1
+   Compiling getrandom v0.4.3
+   Compiling cfg-if v1.0.4
+   Compiling num-traits v0.2.19
+   Compiling serde v1.0.229
+   Compiling zmij v1.0.23
+   Compiling vcpkg v0.2.15
+   Compiling libsqlite3-sys v0.38.2
+   Compiling serde_derive v1.0.229
+   Compiling core-foundation-sys v0.8.7
+   Compiling bitflags v2.13.2
+   Compiling zstd-safe v7.3.0
+   Compiling foldhash v0.2.0
+   Compiling serde_json v1.0.151
+   Compiling thiserror v2.0.20
+   Compiling hashbrown v0.17.1
+   Compiling iana-time-zone v0.1.65
+   Compiling thiserror-impl v2.0.20
+   Compiling blake3 v1.8.7
+   Compiling itoa v1.0.18
+   Compiling rustix v1.1.4
+   Compiling memchr v2.8.3
+   Compiling chrono v0.4.45
+   Compiling hashlink v0.12.2
+   Compiling uuid v1.26.1
+   Compiling errno v0.3.14
+   Compiling smallvec v1.16.1
+   Compiling fallible-streaming-iterator v0.1.9
+   Compiling constant_time_eq v0.4.2
+   Compiling fallible-iterator v0.3.0
+   Compiling arrayvec v0.7.8
+   Compiling rusqlite v0.40.2
+   Compiling opencode-rk-contracts v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB019-integration/crates/contracts)
+   Compiling zstd v0.13.3
+   Compiling fastrand v2.5.0
+   Compiling once_cell v1.21.4
+   Compiling tempfile v3.27.0
+   Compiling opencode-rk-storage v0.1.0-alpha.1 (/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB019-integration/crates/storage)
+warning: unused variable: `created`
+   --> crates/storage/tests/typed_history.rs:431:34
+    |
+431 |     let (role, inline, byte_len, created): (String, Option<String>, i64, String) = raw
+    |                                  ^^^^^^^ help: if this is intentional, prefix it with an underscore: `_created`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: `opencode-rk-storage` (test "typed_history") generated 1 warning (run `cargo fix --test "typed_history" -p opencode-rk-storage` to apply 1 suggestion)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 20.37s
+     Running tests/typed_history.rs (target/debug/deps/typed_history-069751da48f5f73c)
+
+running 7 tests
+test conflicting_preexisting_tool_rounds_object_fails_closed_atomically ... ok
+test conflicting_preexisting_typed_records_object_fails_closed_atomically ... ok
+test fixed_keying_and_foreign_keys_are_present ... ok
+test fresh_open_creates_typed_schema_and_feature_ledger_and_keeps_format1 ... ok
+test legacy_rows_survive_migrated_reopen_byte_identical ... ok
+test reopen_is_idempotent_and_preserves_marker_and_schema ... ok
+test typed_ddl_uses_blob_byte_accounting_and_has_no_512_call_id_cap ... ok
+
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.03s
+
