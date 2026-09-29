@@ -1,5 +1,5 @@
 # SHIP-004 scratchpad: Full legacy and source-parity release proof (test-author lane)
-# Session: ses_f115896b4fferTfuqdQsIe3y6Q (resume) | Status: blocked pending implementation/freeze authority
+# Session: ses_f115281ddffeE1BEuNdse6l5d8 (resume) | Status: blocked pending implementation/freeze authority
 
 ## Claim
 - Ledger tasks/completion/claims.json: SHIP-004 reclaimed not-started (orchestrator evidence) then claimed in-progress session ses_f115896b4fferTfuqdQsIe3y6Q, scratchpad worklog/SHIP-004.md.
@@ -71,6 +71,14 @@
   define it. Lane stays blocked pending implementation/freeze authority.
 - Whether controller wants this RED frozen as-is or re-authored under its
   own freeze manifest; no acceptance claimed by this lane.
+
+## Resume 2026-09-30 (ses_f115281ddffeE1BEuNdse6l5d8, controller pre-freeze rejection)
+- Prior owner stopped; orchestrator reclaimed SHIP-004 to not-started (evidence: reclaimedBy ses_f3c4de578ffelQv59xDXmOs03B, prior blocked row preserved in scratchpad history below). This session claimed via tools/completion_claims.py claim -> in-progress (session ses_f115281ddffeE1BEuNdse6l5d8, scratchpad worklog/SHIP-004.md) BEFORE any edit, per .agents/WORKER.md.
+- Controller pre-freeze rejection: old T04 required committed evidence files to contain the exact HEAD hash of the commit containing themselves (pins == HEAD). Unsatisfiable by construction: a blob cannot contain its own commit hash; any evidence-commit would fail its own assertion. Prior owner stopped before re-authoring; T04 unsatisfiable as frozen.
+- T04 re-authored to satisfiable revision-specific proof contract (test-author only; NOT frozen/accepted): release evidence commit may follow a tested candidate, but tested candidate (release-ledger.json testedCommit) must exist (cat-file -e), must be a valid ancestor of HEAD (merge-base --is-ancestor), and diff (candidate..HEAD] must touch no non-exempt path. Only tests/release/full_scope/ exempt (attestation must not self-invalidate). Source evidence ledgers, requirements, ledgers, worklogs, product code all count as stale product changes and fail. Audited T01-T03/T05: satisfiable through actual evidence/product work (release ledger coverage, certified surface ledger with test mappings, zero TBD/blockers/record-only, mandatory REQ coverage with no optional-excluded mandatory). None asserts its own commit hash; no self-reference.
+- Satisfiability probes (throwaway release-ledger.json, removed after): testedCommit=HEAD (committed) -> T04 OK alone; bogus hash -> T04 FAIL (unresolvable); testedCommit=HEAD~1 with claims.json+worklog touched after -> T04 FAIL listing stale paths. Evidence-only follow-up (tests/release/full_scope/ only) passes freshness clause. Genuine missing release evidence fails closed; stale product changes fail.
+- New RED: tests/release/full_scope/test_full_scope.py sha256 429ee2cd8366a4a9db80e91164e7a9ba1155da1df7ac419f2522aa9061cbe732. py_compile OK. Bounded RED: python3 tests/release/full_scope/test_full_scope.py -> Ran 5 tests, FAILED failures=5 (T01 0/258 legacy + 47 reqs missing; T02 0/32 mapped certified=False; T03 82 TBD/32 non-impl/5 blockers/258 record-only; T04 no release ledger binds HEAD 1b72b19; T05 47 mandatory uncovered). Zero import/syntax/path errors. No evidence ledgers or implementation touched (read-only asserts).
+- Status set blocked pending implementation/freeze authority (freeze acceptance belongs to controller/verifier; lane records hash, does not self-freeze/accept). Commit only owned test + scratchpad + own claim row; push lane/SHIP-004-phase1.
 
 ## Resume 2026-09-30 (ses_f115896b4fferTfuqdQsIe3y6Q)
 - Reclaimed SHIP-004 via tools/completion_claims.py claim (prior row not-started). Claim verified in-progress.

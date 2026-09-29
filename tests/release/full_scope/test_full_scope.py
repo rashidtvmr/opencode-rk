@@ -7,16 +7,29 @@ Asserts the releasable end-state on the integrated tree:
   T01 every legacy ID + original requirement represented in evidence set.
   T02 all required source surfaces have test mappings + verified behavior.
   T03 accepted-but-unwired code, TBD descriptions, missing evidence block cert.
-  T04 post-candidate changes invalidate stale revision-specific proof.
+  T04 a release evidence commit may follow a tested candidate, but the tested
+      candidate must be a valid ancestor of HEAD and no product/source change
+      may land after it (only release evidence/test-attestation paths under
+      tests/release/full_scope/ are exempt, so the attestation commit itself
+      does not self-invalidate); stale product changes fail.
   T05 no optional-runtime flag removes a mandatory feature from accounting.
 
 Stdlib unittest only. Read-only: no network, no wall-clock in verdict, no DB
-mutation, no secret access. HEAD resolved via bounded `git rev-parse HEAD`.
+mutation, no secret access. HEAD resolved via bounded `git rev-parse HEAD`;
+ancestry/diff vetted via bounded read-only git plumbing
+(`cat-file -e`, `merge-base --is-ancestor`, `diff --name-only`).
+
+Controller pre-freeze rejection (prior owner stopped; orchestrator reclaimed
+to not-started): old T04 required committed evidence files to contain the
+exact HEAD hash of the commit containing themselves (pins == HEAD), which is
+unsatisfiable by construction (a blob cannot contain its own commit hash).
+This revision re-authors T04 to the satisfiable ancestor + no-post-candidate-
+product-change contract above.
 
 RED expectation: all 5 FAIL now for real missing release evidence:
-stale pins (legacy 5af7884 / surface 1f7640a vs HEAD), certified=False,
-32/32 surfaces without executable test or entrypoint trace, 82 TBD rows,
-0/258 legacy IDs in any release evidence set, no release ledger.
+no release ledger, certified=False, 32/32 surfaces without executable test
+or entrypoint trace, 82 TBD rows, 0/258 legacy IDs in any release evidence
+set, no tested candidate.
 """
 from __future__ import annotations
 
@@ -30,23 +43,60 @@ LEGACY_LEDGER = ROOT / "sources" / "completion" / "legacy-evidence.json"
 SURFACE_LEDGER = ROOT / "sources" / "completion" / "surface-evidence.json"
 REQUIREMENTS = ROOT / "requirements" / "user-requirements.json"
 RELEASE_LEDGER = ROOT / "tests" / "release" / "full_scope" / "release-ledger.json"
+# Paths exempt from T04 post-candidate product-change detection: writing the
+# release evidence / test attestation itself must not self-invalidate proof.
+# Everything else (product code, source evidence ledgers, requirements,
+# task ledgers, worklogs, tooling) invalidates stale proof.
+EVIDENCE_EXEMPT_PREFIXES = ("tests/release/full_scope/",)
 
 
 def load_json(path: pathlib.Path):
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def head_rev() -> str:
-    proc = subprocess.run(
-        ["git", "rev-parse", "HEAD"],
+def git_run(args: list[str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        ["git"] + args,
         cwd=str(ROOT),
         capture_output=True,
         text=True,
         timeout=15,
     )
+
+
+def head_rev() -> str:
+    proc = git_run(["rev-parse", "HEAD"])
     if proc.returncode != 0:
         raise AssertionError("cannot resolve HEAD revision")
     return proc.stdout.strip().split()[0]
+
+
+def commit_exists(rev: str) -> bool:
+    if not rev or len(rev) < 7:
+        return False
+    return git_run(["cat-file", "-e", f"{rev}^{{commit}}"]).returncode == 0
+
+
+def is_ancestor(candidate: str, tip: str) -> bool:
+    return git_run(["merge-base", "--is-ancestor", candidate, tip]).returncode == 0
+
+
+def post_candidate_product_changes(candidate: str, tip: str) -> list[str]:
+    """Non-exempt paths changed in (candidate, tip].
+
+    Exempts only the release evidence / test-attestation paths needed to
+    avoid self-reference. Any other change (product code, source evidence
+    ledgers, requirements, tooling) after the tested candidate fails T04.
+    """
+    proc = git_run(["diff", "--name-only", f"{candidate}..{tip}"])
+    if proc.returncode != 0:
+        raise AssertionError("cannot diff tested candidate against HEAD")
+    changed = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
+
+    def exempt(path: str) -> bool:
+        return any(path.startswith(p) for p in EVIDENCE_EXEMPT_PREFIXES)
+
+    return sorted(p for p in changed if not exempt(p))
 
 
 class FullScopeReleaseProofTests(unittest.TestCase):
@@ -122,25 +172,40 @@ class FullScopeReleaseProofTests(unittest.TestCase):
         )
 
     def test_t04_post_candidate_changes_invalidate_stale_proof(self):
-        """T04: stale revision-specific proof invalid after tree changes."""
+        """T04: tested candidate is a valid ancestor; no product change after it.
+
+        Satisfiable revision-specific proof contract (re-authored after
+        controller pre-freeze rejection of the pins==HEAD self-reference):
+        the release evidence commit may follow the tested candidate, but the
+        tested candidate must exist, must be an ancestor of HEAD, and the
+        diff (candidate..HEAD] must touch no non-exempt path. Stale product
+        changes fail; evidence-only follow-ups pass the freshness clause
+        (T01-T03 still gate certification independently).
+        """
         head = head_rev()
-        legacy = load_json(LEGACY_LEDGER)
-        surface = load_json(SURFACE_LEDGER)
-        pins = {
-            "legacy": legacy.get("inspectedCommit", ""),
-            "surface": surface.get("inspectedCommit", ""),
-        }
-        if RELEASE_LEDGER.is_file():
-            release = load_json(RELEASE_LEDGER)
-            tested = release.get("testedCommit", "")
-        else:
-            tested = ""
+        if not RELEASE_LEDGER.is_file():
+            self.fail(
+                f"T04 no release ledger; no tested candidate binds HEAD {head[:7]}"
+            )
+            return
+        release = load_json(RELEASE_LEDGER)
+        tested = release.get("testedCommit", "") or ""
+        self.assertTrue(
+            commit_exists(tested),
+            f"T04 tested candidate {tested[:7] if tested else 'absent'} "
+            f"is not a resolvable commit (HEAD {head[:7]})",
+        )
+        self.assertTrue(
+            is_ancestor(tested, head),
+            f"T04 tested candidate {tested[:7]} is not an ancestor "
+            f"of HEAD {head[:7]} (rebased/orphaned proof)",
+        )
+        stale = post_candidate_product_changes(tested, head)
         self.assertEqual(
-            (pins["legacy"], pins["surface"], tested),
-            (head, head, head),
-            f"T04 stale pins (legacy {pins['legacy'][:7] if pins['legacy'] else '?'}"
-            f", surface {pins['surface'][:7] if pins['surface'] else '?'}"
-            f", release {tested[:7] if tested else 'absent'}) vs HEAD {head[:7]}",
+            stale,
+            [],
+            f"T04 stale product/source change after tested candidate "
+            f"{tested[:7]} (HEAD {head[:7]}): e.g. {stale[:5]}",
         )
 
     def test_t05_no_optional_flag_removes_mandatory_feature(self):
