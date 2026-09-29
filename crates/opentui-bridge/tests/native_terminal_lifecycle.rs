@@ -28,8 +28,11 @@ data = bytearray(); deadline = time.monotonic() + 8.0
 def read_until(needle):
     while needle not in data:
         if time.monotonic() >= deadline: raise RuntimeError("PTY handshake deadline")
-        chunk = os.read(master, 65536)
-        if chunk: data.extend(chunk)
+        try:
+            chunk = os.read(master, 65536)
+            if chunk: data.extend(chunk)
+        except BlockingIOError:
+            time.sleep(.001)
         if len(data) > 1024 * 1024: raise RuntimeError("PTY output exceeded 1 MiB")
 def raw_flags(attrs):
     lflag = attrs[3]
