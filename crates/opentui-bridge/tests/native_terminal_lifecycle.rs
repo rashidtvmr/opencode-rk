@@ -10,14 +10,17 @@ const READY: &[u8] = b"TUI015_READY_7f31\n";
 const RESTORED: &[u8] = b"TUI015_RESTORED_7f31\n";
 const ACK: u8 = b'K';
 const PYTHON_DRIVER: &str = r#"
-import fcntl, json, os, pty, signal, subprocess, tempfile, termios, time
-exe, case = os.environ["TUI015_EXE"], os.environ["TUI015_CASE"]
+import fcntl, json, os, pathlib, pty, signal, subprocess, tempfile, termios, time
+exe, case, native_dir = os.environ["TUI015_EXE"], os.environ["TUI015_CASE"], os.environ["TUI015_NATIVE_LIB_DIR"]
+native_path = pathlib.Path(native_dir) / "libopentui.dylib"
+if not native_path.is_file(): raise RuntimeError("native fixture missing: %s" % native_path)
 master, slave = pty.openpty()
 flags = fcntl.fcntl(master, fcntl.F_GETFL)
 fcntl.fcntl(master, fcntl.F_SETFL, flags | os.O_NONBLOCK)
 before = termios.tcgetattr(slave)
-env = os.environ.copy(); env["TUI015_CHILD"] = "1"
-env["HOME"] = tempfile.mkdtemp(prefix="tui015-home-"); env.pop("RUST_BACKTRACE", None)
+env = {key: os.environ[key] for key in ("PATH", "TERM") if key in os.environ}
+env["TUI015_CHILD"] = "1"; env["HOME"] = tempfile.mkdtemp(prefix="tui015-home-")
+env["DYLD_LIBRARY_PATH"] = native_dir; env["DYLD_FALLBACK_LIBRARY_PATH"] = native_dir
 def controlling_tty():
     # Popen(start_new_session=True) performs setsid exactly once; this hook
     # performs the required POSIX TIOCSCTTY in that new session.
@@ -35,6 +38,8 @@ def read_until(needle):
         except BlockingIOError:
             time.sleep(.001)
         if len(data) > 1024 * 1024: raise RuntimeError("PTY output exceeded 1 MiB")
+        if proc.poll() is not None:
+            raise RuntimeError("child exited %d before handshake: %r" % (proc.returncode, bytes(data[-4096:])))
 def raw_flags(attrs):
     lflag = attrs[3]
     return (lflag & (termios.ICANON | termios.ECHO | termios.ISIG)) == 0
@@ -83,9 +88,14 @@ finally:
 
 #[cfg(feature = "native")]
 fn run_case(case: &str) {
+    let native_dir = std::env::var("TUI015_NATIVE_LIB_DIR")
+        .expect("TUI015_NATIVE_LIB_DIR must name the staged native fixture directory");
+    assert!(std::path::Path::new(&native_dir).join("libopentui.dylib").is_file(),
+        "native fixture missing at {native_dir}/libopentui.dylib");
     let output = Command::new("python3").arg("-c").arg(PYTHON_DRIVER)
         .env("TUI015_EXE", std::env::current_exe().expect("current test executable"))
-        .env("TUI015_CASE", case).output().expect("python3 PTY supervisor");
+        .env("TUI015_CASE", case).env("TUI015_NATIVE_LIB_DIR", native_dir)
+        .output().expect("python3 PTY supervisor");
     assert!(output.status.success(), "PTY supervisor failed for {case}: {}{}",
         String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
     assert!(String::from_utf8_lossy(&output.stdout).contains("\"exit\": 0"));
