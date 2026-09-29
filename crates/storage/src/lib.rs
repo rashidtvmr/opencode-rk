@@ -323,14 +323,15 @@ impl Storage {
         let rows = messages.query_map(params![session_id.to_string(), lim], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<i64>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, i64>(4)?, row.get::<_, String>(5)?))
         })?;
-        let metadata: Vec<_> = rows.collect::<Result<_, _>>()?;
-        if metadata.len() > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
-        drop(messages);
         let mut result = Vec::new();
         let mut used = 0usize;
         let mut emitted_rounds = std::collections::HashSet::new();
         let mut items_used = 0usize;
-        for (id, role, inline_len, blob, byte_len, created) in metadata {
+        let mut message_count = 0usize;
+        for row in rows {
+            message_count = message_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
+            if message_count > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
+            let (id, role, inline_len, blob, byte_len, created) = row?;
             let message_id = MessageId::from_str(&id).map_err(|_| StorageError::TypedHistoryIdentity)?;
             if role == "tool" {
                 let round: Option<(String, i64)> = tx.query_row(
@@ -345,11 +346,12 @@ impl Storage {
                 let mut typed = tx.prepare(
                     "SELECT pair_index,kind,call_id,name,message_id,byte_len FROM typed_tool_records WHERE round_id=?1 ORDER BY CASE kind WHEN 'call' THEN 0 ELSE 1 END,pair_index LIMIT ?2",
                 )?;
-                let rows = typed.query_map(params![round_id, lim], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?)))?;
-                let records: Vec<_> = rows.collect::<Result<_, _>>()?;
                 let expected_count = usize::try_from(expected).ok().and_then(|v| v.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
-                if records.len() != expected_count { return Err(StorageError::TypedHistoryIncomplete); }
-                for (pair_index, kind, call_id, name, record_message, byte_len) in records {
+                let mut record_count = 0usize;
+                for row in typed.query_map(params![round_id, lim], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?)))? {
+                    record_count = record_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
+                    if record_count > expected_count { return Err(StorageError::TypedHistoryIncomplete); }
+                    let (pair_index, kind, call_id, name, record_message, byte_len) = row?;
                     let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
                     let metadata_bytes = round_id.len().checked_add(call_id.len()).and_then(|v| v.checked_add(name.len())).and_then(|v| v.checked_add(record_message.len())).ok_or(StorageError::TypedHistoryLimit)?;
                     used = used.checked_add(metadata_bytes).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
@@ -358,6 +360,7 @@ impl Storage {
                     if payload.len() != actual { return Err(StorageError::TypedHistoryIncomplete); }
                     result.push(HistoryItem::Tool(ToolHistoryItem { round_id: round_id.clone(), pair_index: u64::try_from(pair_index).map_err(|_| StorageError::TypedHistoryIncomplete)?, kind, call_id, name, payload, message_id }));
                 }
+                if record_count != expected_count { return Err(StorageError::TypedHistoryIncomplete); }
                 continue;
             }
             items_used = items_used.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
@@ -383,6 +386,7 @@ impl Storage {
             let role = decode_role(&role).map_err(StorageError::Sqlite)?;
             result.push(HistoryItem::Message(MessageRecord { id: message_id, session_id, role, body, created_at: parse_timestamp(created)? }));
         }
+        drop(messages);
         tx.commit()?;
         Ok(result)
     }
