@@ -44,13 +44,50 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     str::FromStr,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 use thiserror::Error;
 pub use writer_v2::{NewMessage, NewSession, V2Writer};
 pub const DEFAULT_MAX_EVENTS_PER_SESSION: usize = 10_000;
 pub const MAX_EVENT_PAYLOAD_BYTES: usize = 64 * 1024;
 pub const BLOB_COMPRESSION_LEVEL: i32 = 3;
+const TYPED_HISTORY_FEATURE: &str = "typed_tool_history";
+const TYPED_FIELD_LIMIT: usize = 1024 * 1024;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolRound {
+    pub round_id: String,
+    pub session_id: SessionId,
+    pub turn_message_id: MessageId,
+    pub round_ordinal: u32,
+    pub expected_pairs: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolPair {
+    pub call_id: String,
+    pub name: String,
+    pub input: PayloadRef,
+    pub output: PayloadRef,
+    pub message: MessageRecord,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolHistoryItem {
+    pub round_id: Arc<str>,
+    pub pair_index: u64,
+    pub kind: String,
+    pub call_id: String,
+    pub name: String,
+    pub payload: String,
+    pub message_id: MessageId,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HistoryItem {
+    Message(MessageRecord),
+    Tool(ToolHistoryItem),
+}
 #[derive(Debug, Error)]
 pub enum StorageError {
     #[error("sqlite error: {0}")]
@@ -83,6 +120,16 @@ pub enum StorageError {
         "unsupported SQLite engine {version} (source id {source_id}): WAL-reset race fix requires >= 3.51.3 or audited backport 3.44.6+/3.50.7+; refusing WAL mode fail-closed"
     )]
     UnsupportedSqliteEngine { version: String, source_id: String },
+    #[error("typed tool history schema is incompatible")]
+    TypedHistorySchema,
+    #[error("typed tool history identity is invalid")]
+    TypedHistoryIdentity,
+    #[error("typed tool history pair is incomplete or inconsistent")]
+    TypedHistoryIncomplete,
+    #[error("typed tool history bound exceeded")]
+    TypedHistoryLimit,
+    #[error("typed tool history contains an unlinked legacy tool message")]
+    UnlinkedToolHistory,
 }
 /// Minimum bundled engine for the WAL path.
 ///
@@ -150,6 +197,219 @@ impl Storage {
     pub fn blob_store(&self) -> &BlobStore {
         &self.blobs
     }
+
+    pub fn begin_tool_round(
+        &self,
+        session_id: SessionId,
+        turn_message_id: MessageId,
+        round_id: &str,
+        round_ordinal: u32,
+        expected_pairs: u32,
+    ) -> Result<ToolRound, StorageError> {
+        validate_typed_text(round_id)?;
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let role: String = tx
+            .query_row(
+                "SELECT role FROM messages WHERE id=?1 AND session_id=?2",
+                params![turn_message_id.to_string(), session_id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?
+            .ok_or(StorageError::TypedHistoryIdentity)?;
+        if role != "user" {
+            return Err(StorageError::TypedHistoryIdentity);
+        }
+        tx.execute(
+            "INSERT INTO tool_rounds(round_id,session_id,turn_message_id,round_ordinal,expected_pairs,created_at) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![round_id, session_id.to_string(), turn_message_id.to_string(), checked_i64(round_ordinal as u64)?, checked_i64(expected_pairs as u64)?, Timestamp::now().to_string()],
+        )?;
+        tx.commit()?;
+        Ok(ToolRound { round_id: round_id.to_owned(), session_id, turn_message_id, round_ordinal, expected_pairs })
+    }
+
+    pub fn append_tool_pair(
+        &self,
+        round: &ToolRound,
+        pair_index: u64,
+        pair: &ToolPair,
+    ) -> Result<(), StorageError> {
+        validate_typed_text(&pair.call_id)?;
+        validate_typed_text(&pair.name)?;
+        let input = payload_text_bounded(&self.blobs, &pair.input, TYPED_FIELD_LIMIT)?;
+        let output = payload_text_bounded(&self.blobs, &pair.output, TYPED_FIELD_LIMIT)?;
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (session,): (String,) = tx
+            .query_row("SELECT session_id FROM tool_rounds WHERE round_id=?1", params![round.round_id], |row| Ok((row.get(0)?,)))
+            .optional()?
+            .ok_or(StorageError::TypedHistoryIdentity)?;
+        if session != round.session_id.to_string() {
+            return Err(StorageError::TypedHistoryIdentity);
+        }
+        if pair.message.role != MessageRole::Tool || pair.message.session_id.to_string() != session {
+            return Err(StorageError::TypedHistoryIdentity);
+        }
+        let count: i64 = tx.query_row("SELECT count(*) FROM typed_tool_records WHERE round_id=?1 AND pair_index=?2", params![round.round_id, checked_i64(pair_index)?], |row| row.get(0))?;
+        if count != 0 || pair_index >= round.expected_pairs as u64 {
+            return Err(StorageError::TypedHistoryIncomplete);
+        }
+        let now = Timestamp::now().to_string();
+        let message_text = match &pair.message.body { PayloadRef::Inline { text } if text.len() <= MAX_INLINE_PAYLOAD_BYTES => text, _ => return Err(StorageError::InlinePayloadTooLarge) };
+        tx.execute(
+            "INSERT INTO messages(id,session_id,role,inline_text,blob_hash,byte_len,created_at) VALUES(?1,?2,'tool',?3,NULL,?4,?5)",
+            params![pair.message.id.to_string(), pair.message.session_id.to_string(), message_text, checked_i64(message_text.len() as u64)?, pair.message.created_at.to_string()],
+        )?;
+        for (kind, payload) in [("call", input), ("output", output)] {
+            tx.execute(
+                "INSERT INTO typed_tool_records(round_id,pair_index,kind,message_id,call_id,name,payload,byte_len,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
+                params![round.round_id, checked_i64(pair_index)?, kind, pair.message.id.to_string(), pair.call_id, pair.name, payload, payload.len() as i64, now],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    pub fn bounded_history(
+        &self,
+        session_id: SessionId,
+        max_provider_items: usize,
+        max_provider_bytes: usize,
+    ) -> Result<Vec<HistoryItem>, StorageError> {
+        if max_provider_items == 0 || max_provider_bytes == 0 { return Ok(Vec::new()); }
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        let header_limit = i64::try_from(max_provider_items.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?)
+            .map_err(|_| StorageError::TypedHistoryLimit)?;
+        let mut headers = tx.prepare(
+            "SELECT rowid,length(CAST(round_id AS BLOB)),expected_pairs FROM tool_rounds WHERE session_id=?1 ORDER BY created_at,round_id LIMIT ?2",
+        )?;
+        let header_rows = headers.query_map(params![session_id.to_string(), header_limit], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
+        })?;
+        let mut header_count = 0usize;
+        let mut header_items = 0usize;
+        for row in header_rows {
+            header_count = header_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
+            if header_count > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
+            let (round_rowid, round_id_len, expected_raw) = row?;
+            let round_id_len = usize::try_from(round_id_len).map_err(|_| StorageError::TypedHistoryLimit)?;
+            if round_id_len > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+            let round_id: String = tx.query_row("SELECT round_id FROM tool_rounds WHERE rowid=?1", params![round_rowid], |r| r.get(0))?;
+            let expected = u32::try_from(expected_raw).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let pair_items = usize::try_from(expected).ok().and_then(|n| n.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
+            header_items = header_items.checked_add(pair_items).ok_or(StorageError::TypedHistoryLimit)?;
+            if header_items > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
+            let (count, bad_domain, bad_identity): (i64, i64, i64) = tx.query_row(
+                "SELECT count(*),
+                        sum(CASE WHEN pair_index < 0 OR pair_index >= ?2 THEN 1 ELSE 0 END),
+                        sum(CASE WHEN kind NOT IN ('call','output') THEN 1 ELSE 0 END)
+                 FROM typed_tool_records WHERE round_id=?1",
+                params![round_id, i64::from(expected)],
+                |r| Ok((r.get(0)?, r.get::<_, Option<i64>>(1)?.unwrap_or(0), r.get::<_, Option<i64>>(2)?.unwrap_or(0))),
+            )?;
+            if expected > 0 && count == 0 { return Err(StorageError::TypedHistoryIncomplete); }
+            if bad_domain != 0 || bad_identity != 0 || count != i64::from(expected) * 2 { return Err(StorageError::TypedHistoryIncomplete); }
+            let mismatches: i64 = tx.query_row(
+                "SELECT count(*) FROM (SELECT pair_index FROM typed_tool_records WHERE round_id=?1 GROUP BY pair_index HAVING count(*) != 2 OR count(DISTINCT kind) != 2 OR count(DISTINCT call_id) != 1 OR count(DISTINCT name) != 1 OR count(DISTINCT message_id) != 1)",
+                params![round_id], |r| r.get(0),
+            )?;
+            if mismatches != 0 { return Err(StorageError::TypedHistoryIncomplete); }
+        }
+        drop(headers);
+        let mut messages = tx.prepare(
+            "SELECT rowid,length(CAST(id AS BLOB)),length(CAST(role AS BLOB)),length(CAST(inline_text AS BLOB)),blob_hash IS NOT NULL,byte_len
+             FROM messages WHERE session_id=?1 ORDER BY rowid LIMIT ?2",
+        )?;
+        let lim = i64::try_from(max_provider_items.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?)
+            .map_err(|_| StorageError::TypedHistoryLimit)?;
+        let rows = messages.query_map(params![session_id.to_string(), lim], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, Option<i64>>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?))
+        })?;
+        let mut result = Vec::new();
+        let mut used = 0usize;
+        let mut emitted_rounds = std::collections::HashSet::new();
+        let mut items_used = 0usize;
+        let mut message_count = 0usize;
+        for row in rows {
+            message_count = message_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
+            if message_count > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
+            let (message_rowid, id_len, role_len, inline_len, _has_blob, byte_len) = row?;
+            let id_len = usize::try_from(id_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let role_len = usize::try_from(role_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let metadata_bytes = id_len.checked_add(role_len).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
+            used = used.checked_add(metadata_bytes).ok_or(StorageError::TypedHistoryLimit)?;
+            if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+            let (id, role, blob, created): (String, String, Option<String>, String) = tx.query_row(
+                "SELECT id,role,blob_hash,created_at FROM messages WHERE rowid=?1", params![message_rowid],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
+            let message_id = MessageId::from_str(&id).map_err(|_| StorageError::TypedHistoryIdentity)?;
+            if role == "tool" {
+                let round: Option<(i64, i64, i64)> = tx.query_row(
+                    "SELECT DISTINCT r.rowid,length(CAST(r.round_id AS BLOB)),r.expected_pairs FROM typed_tool_records t JOIN tool_rounds r ON r.round_id=t.round_id WHERE t.message_id=?1",
+                    params![id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
+                let Some((round_rowid, round_id_len, expected)) = round else { return Err(StorageError::UnlinkedToolHistory); };
+                let round_id_len = usize::try_from(round_id_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                let round_id: String = tx.query_row("SELECT round_id FROM tool_rounds WHERE rowid=?1", params![round_rowid], |r| r.get(0))?;
+                if !emitted_rounds.insert(round_id.clone()) { continue; }
+                if used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)? > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+                used = used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)?;
+                let shared_round_id: Arc<str> = Arc::from(round_id);
+                let expected = u32::try_from(expected).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                let pair_items = usize::try_from(expected).ok().and_then(|n| n.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
+                items_used = items_used.checked_add(pair_items).ok_or(StorageError::TypedHistoryLimit)?;
+                if items_used > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
+                let mut typed = tx.prepare(
+                    "SELECT rowid,pair_index,CASE kind WHEN 'call' THEN 0 ELSE 1 END,length(CAST(call_id AS BLOB)),length(CAST(name AS BLOB)),length(CAST(message_id AS BLOB)),byte_len FROM typed_tool_records WHERE round_id=?1 ORDER BY CASE kind WHEN 'call' THEN 0 ELSE 1 END,pair_index LIMIT ?2",
+                )?;
+                let expected_count = usize::try_from(expected).ok().and_then(|v| v.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
+                let mut record_count = 0usize;
+                for row in typed.query_map(params![shared_round_id.as_ref(), lim], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?, row.get::<_, i64>(6)?)))? {
+                    record_count = record_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
+                    if record_count > expected_count { return Err(StorageError::TypedHistoryIncomplete); }
+                    let (typed_rowid, pair_index, kind_code, call_len, name_len, message_len, byte_len) = row?;
+                    let call_len = usize::try_from(call_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                    let name_len = usize::try_from(name_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                    let message_len = usize::try_from(message_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                    let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                    let metadata_bytes = call_len.checked_add(name_len).and_then(|v| v.checked_add(message_len)).ok_or(StorageError::TypedHistoryLimit)?;
+                    used = used.checked_add(metadata_bytes).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
+                    if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+                    let (call_id, name, _record_message): (String, String, String) = tx.query_row("SELECT call_id,name,message_id FROM typed_tool_records WHERE rowid=?1", params![typed_rowid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+                    let kind = if kind_code == 0 { "call".to_string() } else { "output".to_string() };
+                    let payload: String = tx.query_row("SELECT payload FROM typed_tool_records WHERE round_id=?1 AND pair_index=?2 AND kind=?3 AND byte_len=length(CAST(payload AS BLOB))", params![shared_round_id.as_ref(), pair_index, kind], |row| row.get(0))?;
+                    if payload.len() != actual { return Err(StorageError::TypedHistoryIncomplete); }
+                    result.push(HistoryItem::Tool(ToolHistoryItem { round_id: Arc::clone(&shared_round_id), pair_index: u64::try_from(pair_index).map_err(|_| StorageError::TypedHistoryIncomplete)?, kind, call_id, name, payload, message_id }));
+                }
+                if record_count != expected_count { return Err(StorageError::TypedHistoryIncomplete); }
+                continue;
+            }
+            items_used = items_used.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
+            if items_used > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
+            let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let declared = inline_len.or_else(|| blob.as_ref().map(|_| i64::try_from(actual).unwrap_or(-1))).ok_or(StorageError::TypedHistoryIncomplete)?;
+            if declared < 0 || declared != byte_len { return Err(StorageError::TypedHistoryIncomplete); }
+            let body = match (inline_len, blob) {
+                (Some(_), None) => {
+                    let text: String = tx.query_row("SELECT inline_text FROM messages WHERE id=?1 AND length(CAST(inline_text AS BLOB))=?2 AND byte_len=length(CAST(inline_text AS BLOB))", params![id, actual as i64], |row| row.get(0))?;
+                    PayloadRef::Inline { text }
+                }
+                (None, Some(hash)) => {
+                    let bytes = self.blobs.get_bounded(&hash, max_provider_bytes.saturating_sub(used))?;
+                    if bytes.len() != actual { return Err(StorageError::TypedHistoryIncomplete); }
+                    PayloadRef::Blob { hash, bytes: actual as u64 }
+                }
+                _ => return Err(StorageError::TypedHistoryIncomplete),
+            };
+            let role = decode_role(&role).map_err(StorageError::Sqlite)?;
+            result.push(HistoryItem::Message(MessageRecord { id: message_id, session_id, role, body, created_at: parse_timestamp(created)? }));
+        }
+        drop(messages);
+        tx.commit()?;
+        Ok(result)
+    }
+
     pub fn create_session(&self, session: &SessionSummary) -> Result<(), StorageError> {
         session
             .validate()
@@ -723,7 +983,39 @@ impl Storage {
                 PRIMARY KEY(artifact_id,version)
             );",
         )?;
+        Self::migrate_typed_history(connection)?;
         Ok(())
+    }
+
+    fn migrate_typed_history(connection: &Connection) -> Result<(), StorageError> {
+        connection.execute_batch("BEGIN IMMEDIATE;")?;
+        let result = (|| -> Result<(), StorageError> {
+        if let Some((kind, sql)) = connection.query_row("SELECT type,sql FROM sqlite_master WHERE name=?1", params!["feature_migrations"], |row| Ok((row.get::<_,String>(0)?, row.get::<_,Option<String>>(1)?))).optional()? {
+            if kind != "table" || sql.as_deref().unwrap_or("").to_ascii_lowercase().replace(' ', "") != "createtablefeature_migrations(featuretextprimarykey,versionintegernotnullcheck(version>=1),applied_attextnotnull)" { return Err(StorageError::TypedHistorySchema); }
+        } else { connection.execute_batch("CREATE TABLE feature_migrations(feature TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version >= 1),applied_at TEXT NOT NULL);")?; }
+        if let Some(version) = connection.query_row("SELECT version FROM feature_migrations WHERE feature=?1", params![TYPED_HISTORY_FEATURE], |row| row.get::<_, i64>(0)).optional()? {
+            if version != 1 { return Err(StorageError::TypedHistorySchema); }
+        }
+        let ledger_type: Option<String> = connection.query_row("SELECT typeof(version) FROM feature_migrations WHERE feature=?1", params![TYPED_HISTORY_FEATURE], |row| row.get(0)).optional()?;
+        if ledger_type.as_deref().is_some_and(|kind| kind != "integer") { return Err(StorageError::TypedHistorySchema); }
+        let expected_round = "CREATE TABLE tool_rounds(round_id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,turn_message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,round_ordinal INTEGER NOT NULL CHECK(round_ordinal >= 0),expected_pairs INTEGER NOT NULL CHECK(expected_pairs >= 0),created_at TEXT NOT NULL,UNIQUE(turn_message_id,round_ordinal))";
+        let expected_record = "CREATE TABLE typed_tool_records(round_id TEXT NOT NULL REFERENCES tool_rounds(round_id) ON DELETE CASCADE,pair_index INTEGER NOT NULL CHECK(pair_index >= 0),kind TEXT NOT NULL CHECK(kind IN ('call','output')),message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,call_id TEXT NOT NULL CHECK(typeof(call_id)='text' AND length(CAST(call_id AS BLOB)) BETWEEN 1 AND 1048576),name TEXT NOT NULL CHECK(typeof(name)='text' AND length(CAST(name AS BLOB)) BETWEEN 1 AND 1048576),payload TEXT NOT NULL CHECK(typeof(payload)='text' AND length(CAST(payload AS BLOB)) BETWEEN 0 AND 1048576),byte_len INTEGER NOT NULL CHECK(byte_len >= 0 AND byte_len = length(CAST(payload AS BLOB))),created_at TEXT NOT NULL,PRIMARY KEY(round_id,pair_index,kind),UNIQUE(round_id,kind,call_id))";
+        for (name, expected) in [("tool_rounds", expected_round), ("typed_tool_records", expected_record)] {
+            if let Some(sql) = connection.query_row("SELECT sql FROM sqlite_master WHERE type='table' AND name=?1", params![name], |row| row.get::<_, String>(0)).optional()? {
+                if sql.to_ascii_lowercase().split_whitespace().collect::<String>() != expected.to_ascii_lowercase().split_whitespace().collect::<String>() { return Err(StorageError::TypedHistorySchema); }
+            } else { connection.execute_batch(expected)?; }
+        }
+        validate_typed_index(&connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
+        validate_typed_index(&connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
+        validate_typed_index(&connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
+        connection.execute_batch("CREATE INDEX IF NOT EXISTS tool_rounds_session_idx ON tool_rounds(session_id,created_at,round_id); CREATE INDEX IF NOT EXISTS typed_tool_round_idx ON typed_tool_records(round_id,pair_index,kind); CREATE UNIQUE INDEX IF NOT EXISTS tool_rounds_identity_idx ON tool_rounds(round_id,turn_message_id,round_ordinal);")?;
+        validate_typed_index(&connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
+        validate_typed_index(&connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
+        validate_typed_index(&connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
+        connection.execute("INSERT INTO feature_migrations(feature,version,applied_at) VALUES(?1,1,?2) ON CONFLICT(feature) DO NOTHING", params![TYPED_HISTORY_FEATURE, Timestamp::now().to_string()])?;
+        Ok(())
+        })();
+        match result { Ok(()) => { connection.execute_batch("COMMIT")?; Ok(()) }, Err(error) => { let _ = connection.execute_batch("ROLLBACK"); Err(error) } }
     }
 }
 #[derive(Clone, Debug)]
@@ -778,6 +1070,16 @@ impl BlobStore {
         }
         Ok(bytes)
     }
+    pub fn get_bounded(&self, hash: &str, limit: usize) -> Result<Vec<u8>, StorageError> {
+        let path = self.path_for(hash)?;
+        let file = fs::File::open(path)?;
+        let decoder = zstd::Decoder::new(file)?;
+        let mut bytes = Vec::new();
+        decoder.take(u64::try_from(limit.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?).map_err(|_| StorageError::TypedHistoryLimit)?).read_to_end(&mut bytes)?;
+        if bytes.len() > limit { return Err(StorageError::TypedHistoryLimit); }
+        if blake3::hash(&bytes).to_hex().as_str() != hash { return Err(StorageError::BlobHashMismatch); }
+        Ok(bytes)
+    }
     pub fn path_for(&self, hash: &str) -> Result<PathBuf, StorageError> {
         if hash.len() != 64 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(StorageError::InvalidBlobHash);
@@ -790,6 +1092,38 @@ pub struct BlobInfo {
     pub hash: String,
     pub raw_bytes: u64,
     pub stored_bytes: u64,
+}
+fn checked_i64(value: u64) -> Result<i64, StorageError> { i64::try_from(value).map_err(|_| StorageError::TypedHistoryLimit) }
+fn validate_typed_text(value: &str) -> Result<(), StorageError> {
+    if value.is_empty() || value.len() > TYPED_FIELD_LIMIT { return Err(StorageError::TypedHistoryLimit); }
+    Ok(())
+}
+fn payload_text_bounded(blobs: &BlobStore, payload: &PayloadRef, limit: usize) -> Result<String, StorageError> {
+    match payload {
+        PayloadRef::Inline { text } => { if text.len() > limit { return Err(StorageError::TypedHistoryLimit); } Ok(text.clone()) }
+        PayloadRef::Blob { hash, bytes } => {
+            if *bytes > limit as u64 { return Err(StorageError::TypedHistoryLimit); }
+            let data = blobs.get_bounded(hash, limit)?;
+            if data.len() as u64 != *bytes { return Err(StorageError::BlobHashMismatch); }
+            String::from_utf8(data).map_err(|_| StorageError::TypedHistoryIdentity)
+        }
+    }
+}
+fn validate_typed_index(connection: &Connection, name: &str, unique: bool, columns: &[&str]) -> Result<(), StorageError> {
+    let table = if name == "typed_tool_round_idx" { "typed_tool_records" } else { "tool_rounds" };
+    let existing: Option<(String, String)> = connection.query_row("SELECT type,tbl_name FROM sqlite_master WHERE name=?1", params![name], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
+    if let Some((kind, table_name)) = existing {
+        if kind != "index" || table_name != table { return Err(StorageError::TypedHistorySchema); }
+    }
+    let found: Option<i64> = connection.query_row("SELECT `unique` FROM pragma_index_list(?1) WHERE name=?2", params![table, name], |row| row.get(0)).optional()?;
+    if let Some(flag) = found {
+        let mut statement = connection.prepare("SELECT name FROM pragma_index_info(?1) ORDER BY seqno")?;
+        let mut actual: Vec<String> = statement.query_map(params![name], |row| row.get(0))?.collect::<Result<_, _>>()?;
+        let mut expected: Vec<String> = columns.iter().map(|s| (*s).to_owned()).collect();
+        actual.sort(); expected.sort();
+        if (flag != 0) != unique || actual != expected { return Err(StorageError::TypedHistorySchema); }
+    }
+    Ok(())
 }
 fn encode_state(state: SessionState) -> &'static str {
     match state {
