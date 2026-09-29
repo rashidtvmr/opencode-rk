@@ -1054,6 +1054,11 @@
       "session": "ses_take_par010",
       "status": "completed"
     },
+    "PROV-030": {
+      "scratchpad": "worklog/PROV-030.md",
+      "session": "ses_f12ac72c6fferNdqACHVVBN6qd",
+      "status": "in-progress"
+    },
     "RALPH-REOPEN-2-W1": {
       "blockedNote": "Exact 2-status diff/counts pass. validate_plan.py and validate_repository.py exit 1 with 56 serialized backlog/classifier errors, incl stale FEATURES AUTO-005/EXT-008; scope forbids companion edits. Candidate pushed for integration.",
       "scratchpad": "worklog/RALPH-REOPEN-2-W1.md",
