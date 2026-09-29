@@ -62,6 +62,7 @@ class NativeInteractivePTY(unittest.TestCase):
         self.master = None
         self.child = None
         self.saved_attrs = None
+        self.cleaned = False
         self.temp = tempfile.TemporaryDirectory(prefix="oc2-tui012-")
         self.root = self.temp.name
         self.home = os.path.join(self.root, "home")
@@ -84,6 +85,9 @@ class NativeInteractivePTY(unittest.TestCase):
         atexit.register(self._cleanup)
 
     def _cleanup(self):
+        if self.cleaned:
+            return
+        self.cleaned = True
         child = self.child
         if child is not None and child.poll() is None:
             try:
@@ -132,26 +136,32 @@ class NativeInteractivePTY(unittest.TestCase):
             os.makedirs(path)
         captured = bytearray()
         try:
-            self.child = subprocess.Popen(
-                [self.executable, "--native", "--data-dir", self.data],
-                stdin=slave,
-                stdout=slave,
-                stderr=slave,
-                env=env,
-                start_new_session=True,
-                close_fds=True,
-            )
-            os.close(slave)
+            try:
+                self.child = subprocess.Popen(
+                    [self.executable, "--native", "--data-dir", self.data],
+                    stdin=slave,
+                    stdout=slave,
+                    stderr=slave,
+                    env=env,
+                    cwd=self.project,
+                    start_new_session=True,
+                    close_fds=True,
+                )
+            finally:
+                os.close(slave)
             read_until(self.master, time.monotonic() + DEADLINE, captured)
             self.assertIsNone(self.child.poll(), "native interactive child exited before input")
 
             attrs = termios.tcgetattr(self.master)
             self.assertFalse(attrs[3] & termios.ICANON, "native TUI must enter raw/noncanonical mode")
             self.assertFalse(attrs[3] & termios.ECHO, "native TUI must disable terminal echo")
+            self.assertFalse(attrs[3] & termios.ISIG, "raw native input must deliver Ctrl-C as a byte")
             before = bytes(captured)
             os.write(self.master, b"x")
             read_until(self.master, time.monotonic() + DEADLINE, captured)
-            self.assertNotEqual(bytes(captured), before, "one byte without newline must drive a frame/event")
+            update = bytes(captured)[len(before) :]
+            self.assertTrue(update, "one byte without newline must drive a frame/event")
+            self.assertIn(b"x", update, "the frame update must represent the submitted character")
             os.write(self.master, b"\x03")
             self.child.wait(timeout=DEADLINE)
             self.assertEqual(self.child.returncode, 0, "Ctrl-C must terminate the owned interactive session")
