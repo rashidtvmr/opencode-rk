@@ -1144,6 +1144,12 @@
       "session": "ses_orch_TUI011b",
       "status": "completed"
     },
+    "TUI-012": {
+      "blockedNote": "RED author artifact created; py_compile passed; real binary test fails first missing raw-mode contract (ICANON remains set) after bounded startup. Controller must freeze and implementation lane must repair native loop; not GREEN/completed.",
+      "scratchpad": "worklog/TUI-012.md",
+      "session": "ses_f150304b4ffeeh5kmQ5AhuabCZ",
+      "status": "blocked"
+    },
     "WEB-ARTIFACT-EXEC": {
       "blockedNote": "DIAGNOSE: web_artifact_executor.rs + 7/7 suite absent @767a86a (5+2+5 green, not contract); needs rebuild lane",
       "scratchpad": "worklog/WEB-ARTIFACT-EXEC.md",
