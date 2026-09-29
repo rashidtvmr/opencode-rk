@@ -44,7 +44,7 @@ use std::{
     io::{Read, Write},
     path::PathBuf,
     str::FromStr,
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 use thiserror::Error;
 pub use writer_v2::{NewMessage, NewSession, V2Writer};
@@ -74,7 +74,7 @@ pub struct ToolPair {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolHistoryItem {
-    pub round_id: String,
+    pub round_id: Arc<str>,
     pub pair_index: u64,
     pub kind: String,
     pub call_id: String,
@@ -355,6 +355,7 @@ impl Storage {
                 if !emitted_rounds.insert(round_id.clone()) { continue; }
                 if used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)? > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
                 used = used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)?;
+                let shared_round_id: Arc<str> = Arc::from(round_id);
                 let expected = u32::try_from(expected).map_err(|_| StorageError::TypedHistoryIncomplete)?;
                 let pair_items = usize::try_from(expected).ok().and_then(|n| n.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
                 items_used = items_used.checked_add(pair_items).ok_or(StorageError::TypedHistoryLimit)?;
@@ -379,7 +380,7 @@ impl Storage {
                     let kind = if kind_code == 0 { "call".to_string() } else { "output".to_string() };
                     let payload: String = tx.query_row("SELECT payload FROM typed_tool_records WHERE round_id=?1 AND pair_index=?2 AND kind=?3 AND byte_len=length(CAST(payload AS BLOB))", params![round_id, pair_index, kind], |row| row.get(0))?;
                     if payload.len() != actual { return Err(StorageError::TypedHistoryIncomplete); }
-                    result.push(HistoryItem::Tool(ToolHistoryItem { round_id: round_id.clone(), pair_index: u64::try_from(pair_index).map_err(|_| StorageError::TypedHistoryIncomplete)?, kind, call_id, name, payload, message_id }));
+                    result.push(HistoryItem::Tool(ToolHistoryItem { round_id: Arc::clone(&shared_round_id), pair_index: u64::try_from(pair_index).map_err(|_| StorageError::TypedHistoryIncomplete)?, kind, call_id, name, payload, message_id }));
                 }
                 if record_count != expected_count { return Err(StorageError::TypedHistoryIncomplete); }
                 continue;
