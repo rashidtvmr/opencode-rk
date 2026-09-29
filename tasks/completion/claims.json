@@ -372,6 +372,12 @@
       "session": "ses_f1a169bd0ffeP8SptMFPpJCtvq",
       "status": "blocked"
     },
+    "DB-021": {
+      "blockedNote": "Compiling RED verified: typed_history SHA256 7291dd0d97b65d5c131086e67bc8372a98c26c136a6dd9a6566f3f25067e2aef; cargo test -p opencode-rk-storage --test typed_history --offline --no-fail-fast -- --test-threads=1 exit 101, 7 ran/1 pass/6 expected missing-migration failures; awaiting independent freeze/verifier and integrator DDL freeze.",
+      "scratchpad": "worklog/DB-021.md",
+      "session": "ses_f1523aefaffexKjNw4Xo4c40lo",
+      "status": "blocked"
+    },
     "DISC-102": {
       "completedNote": "GREEN 5/5 install_commands (T01-T05) zero test edits; cmd CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 timeout 180 cargo test -p opencode-rk-cli --bin oc2 install_commands; log /tmp/opencode/disc102-green.log; docs-only wiring-contract repair, main.rs caller patch left to integrator",
       "scratchpad": "worklog/DISC-102.md",
