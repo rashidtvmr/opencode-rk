@@ -282,17 +282,20 @@ impl Storage {
         let header_limit = i64::try_from(max_provider_items.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?)
             .map_err(|_| StorageError::TypedHistoryLimit)?;
         let mut headers = tx.prepare(
-            "SELECT round_id,expected_pairs FROM tool_rounds WHERE session_id=?1 ORDER BY created_at,round_id LIMIT ?2",
+            "SELECT rowid,length(CAST(round_id AS BLOB)),expected_pairs FROM tool_rounds WHERE session_id=?1 ORDER BY created_at,round_id LIMIT ?2",
         )?;
         let header_rows = headers.query_map(params![session_id.to_string(), header_limit], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?))
         })?;
         let mut header_count = 0usize;
         let mut header_items = 0usize;
         for row in header_rows {
             header_count = header_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
             if header_count > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
-            let (round_id, expected_raw) = row?;
+            let (round_rowid, round_id_len, expected_raw) = row?;
+            let round_id_len = usize::try_from(round_id_len).map_err(|_| StorageError::TypedHistoryLimit)?;
+            if round_id_len > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+            let round_id: String = tx.query_row("SELECT round_id FROM tool_rounds WHERE rowid=?1", params![round_rowid], |r| r.get(0))?;
             let expected = u32::try_from(expected_raw).map_err(|_| StorageError::TypedHistoryIncomplete)?;
             let pair_items = usize::try_from(expected).ok().and_then(|n| n.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
             header_items = header_items.checked_add(pair_items).ok_or(StorageError::TypedHistoryLimit)?;
@@ -315,13 +318,13 @@ impl Storage {
         }
         drop(headers);
         let mut messages = tx.prepare(
-            "SELECT id,role,length(CAST(inline_text AS BLOB)),blob_hash,byte_len,created_at
+            "SELECT rowid,length(CAST(id AS BLOB)),length(CAST(role AS BLOB)),length(CAST(inline_text AS BLOB)),blob_hash IS NOT NULL,byte_len
              FROM messages WHERE session_id=?1 ORDER BY rowid LIMIT ?2",
         )?;
         let lim = i64::try_from(max_provider_items.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?)
             .map_err(|_| StorageError::TypedHistoryLimit)?;
         let rows = messages.query_map(params![session_id.to_string(), lim], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, Option<i64>>(2)?, row.get::<_, Option<String>>(3)?, row.get::<_, i64>(4)?, row.get::<_, String>(5)?))
+            Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, Option<i64>>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?))
         })?;
         let mut result = Vec::new();
         let mut used = 0usize;
@@ -331,31 +334,49 @@ impl Storage {
         for row in rows {
             message_count = message_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
             if message_count > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
-            let (id, role, inline_len, blob, byte_len, created) = row?;
+            let (message_rowid, id_len, role_len, inline_len, _has_blob, byte_len) = row?;
+            let id_len = usize::try_from(id_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let role_len = usize::try_from(role_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let metadata_bytes = id_len.checked_add(role_len).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
+            used = used.checked_add(metadata_bytes).ok_or(StorageError::TypedHistoryLimit)?;
+            if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+            let (id, role, blob, created): (String, String, Option<String>, String) = tx.query_row(
+                "SELECT id,role,blob_hash,created_at FROM messages WHERE rowid=?1", params![message_rowid],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
             let message_id = MessageId::from_str(&id).map_err(|_| StorageError::TypedHistoryIdentity)?;
             if role == "tool" {
-                let round: Option<(String, i64)> = tx.query_row(
-                    "SELECT DISTINCT r.round_id,r.expected_pairs FROM typed_tool_records t JOIN tool_rounds r ON r.round_id=t.round_id WHERE t.message_id=?1",
-                    params![id], |row| Ok((row.get(0)?, row.get(1)?))).optional()?;
-                let Some((round_id, expected)) = round else { return Err(StorageError::UnlinkedToolHistory); };
+                let round: Option<(i64, i64, i64)> = tx.query_row(
+                    "SELECT DISTINCT r.rowid,length(CAST(r.round_id AS BLOB)),r.expected_pairs FROM typed_tool_records t JOIN tool_rounds r ON r.round_id=t.round_id WHERE t.message_id=?1",
+                    params![id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?))).optional()?;
+                let Some((round_rowid, round_id_len, expected)) = round else { return Err(StorageError::UnlinkedToolHistory); };
+                let round_id_len = usize::try_from(round_id_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                if used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)? > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+                used = used.checked_add(round_id_len).ok_or(StorageError::TypedHistoryLimit)?;
+                let round_id: String = tx.query_row("SELECT round_id FROM tool_rounds WHERE rowid=?1", params![round_rowid], |r| r.get(0))?;
                 if !emitted_rounds.insert(round_id.clone()) { continue; }
                 let expected = u32::try_from(expected).map_err(|_| StorageError::TypedHistoryIncomplete)?;
                 let pair_items = usize::try_from(expected).ok().and_then(|n| n.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
                 items_used = items_used.checked_add(pair_items).ok_or(StorageError::TypedHistoryLimit)?;
                 if items_used > max_provider_items { return Err(StorageError::TypedHistoryLimit); }
                 let mut typed = tx.prepare(
-                    "SELECT pair_index,kind,call_id,name,message_id,byte_len FROM typed_tool_records WHERE round_id=?1 ORDER BY CASE kind WHEN 'call' THEN 0 ELSE 1 END,pair_index LIMIT ?2",
+                    "SELECT rowid,pair_index,CASE kind WHEN 'call' THEN 0 ELSE 1 END,length(CAST(call_id AS BLOB)),length(CAST(name AS BLOB)),length(CAST(message_id AS BLOB)),byte_len FROM typed_tool_records WHERE round_id=?1 ORDER BY CASE kind WHEN 'call' THEN 0 ELSE 1 END,pair_index LIMIT ?2",
                 )?;
                 let expected_count = usize::try_from(expected).ok().and_then(|v| v.checked_mul(2)).ok_or(StorageError::TypedHistoryLimit)?;
                 let mut record_count = 0usize;
-                for row in typed.query_map(params![round_id, lim], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?, row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, i64>(5)?)))? {
+                for row in typed.query_map(params![round_id, lim], |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?, row.get::<_, i64>(4)?, row.get::<_, i64>(5)?, row.get::<_, i64>(6)?)))? {
                     record_count = record_count.checked_add(1).ok_or(StorageError::TypedHistoryLimit)?;
                     if record_count > expected_count { return Err(StorageError::TypedHistoryIncomplete); }
-                    let (pair_index, kind, call_id, name, record_message, byte_len) = row?;
+                    let (typed_rowid, pair_index, kind_code, call_len, name_len, message_len, byte_len) = row?;
+                    let call_len = usize::try_from(call_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                    let name_len = usize::try_from(name_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+                    let message_len = usize::try_from(message_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
                     let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
-                    let metadata_bytes = round_id.len().checked_add(call_id.len()).and_then(|v| v.checked_add(name.len())).and_then(|v| v.checked_add(record_message.len())).ok_or(StorageError::TypedHistoryLimit)?;
+                    let metadata_bytes = round_id.len().checked_add(call_len).and_then(|v| v.checked_add(name_len)).and_then(|v| v.checked_add(message_len)).ok_or(StorageError::TypedHistoryLimit)?;
                     used = used.checked_add(metadata_bytes).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
                     if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
+                    let (call_id, name, record_message): (String, String, String) = tx.query_row("SELECT call_id,name,message_id FROM typed_tool_records WHERE rowid=?1", params![typed_rowid], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?;
+                    let kind = if kind_code == 0 { "call".to_string() } else { "output".to_string() };
                     let payload: String = tx.query_row("SELECT payload FROM typed_tool_records WHERE round_id=?1 AND pair_index=?2 AND kind=?3 AND byte_len=length(CAST(payload AS BLOB))", params![round_id, pair_index, kind], |row| row.get(0))?;
                     if payload.len() != actual { return Err(StorageError::TypedHistoryIncomplete); }
                     result.push(HistoryItem::Tool(ToolHistoryItem { round_id: round_id.clone(), pair_index: u64::try_from(pair_index).map_err(|_| StorageError::TypedHistoryIncomplete)?, kind, call_id, name, payload, message_id }));
@@ -368,9 +389,6 @@ impl Storage {
             let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
             let declared = inline_len.or_else(|| blob.as_ref().map(|_| i64::try_from(actual).unwrap_or(-1))).ok_or(StorageError::TypedHistoryIncomplete)?;
             if declared < 0 || declared != byte_len { return Err(StorageError::TypedHistoryIncomplete); }
-            let metadata_bytes = id.len().checked_add(role.len()).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
-            used = used.checked_add(metadata_bytes).ok_or(StorageError::TypedHistoryLimit)?;
-            if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
             let body = match (inline_len, blob) {
                 (Some(_), None) => {
                     let text: String = tx.query_row("SELECT inline_text FROM messages WHERE id=?1 AND length(CAST(inline_text AS BLOB))=?2 AND byte_len=length(CAST(inline_text AS BLOB))", params![id, actual as i64], |row| row.get(0))?;
