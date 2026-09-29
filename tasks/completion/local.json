@@ -483,6 +483,27 @@
       ]
     },
     {
+      "id": "APP-016-SAME-BATCH-STOP-REGRESSION",
+      "title": "APP-016 supplemental same-batch stop regression registration",
+      "deps": [
+        "APP-016",
+        "DB-020",
+        "APP-008"
+      ],
+      "paths": [
+        "crates/storage/tests/typed_tool_history_same_batch_stop.rs"
+      ],
+      "journey": "Independently register one additive installed-binary HTTP regression for APP-016: when same-round pair A executes but its typed/message append aborts, stop before dispatching B; make no A-absence or late non-201 claim.",
+      "tests": [
+        "Use the exact verifier-supplied OC2_TEST_BINARY in the existing storage HTTP fixture, disposable synthetic HOME/project, real broker-authorized writes A and B, and assert A executes while B is never dispatched.",
+        "Open the daemon's file-backed state.db through an independent rusqlite connection (same file), install a deterministic BEFORE INSERT ON typed_tool_records RAISE(ABORT) trigger before the provider response is released, and assert A's message/typed pair rolls back atomically while an incomplete metadata-only header may remain.",
+        "Consume bounded NDJSON: require transport 201, A tool_output followed by terminal internal_error, and no successful assistant completion; never require late HTTP non-201.",
+        "Allow A's file effect to exist with requested content because execution precedes persistence; require B's file and pair/effect absent; make no compensation, replay, or whole-batch rollback claim.",
+        "Assert exactly one initial provider request and no follow-up; synchronize trigger setup, use existing fixture dependencies only, clean up bounded children, and freeze only after compiling behavioral RED."
+      ],
+      "notes": "External additive test-author/integrator registration only. Independent test author owns compiling RED; controller freezes source and command hash; APP-016 integrator runs GREEN after DB-020 bridge/server wiring and verifier-supplied OC2_TEST_BINARY are available. No product, frozen test, claims, dependency, runtime, or acceptance edits."
+    },
+    {
       "id": "TUI-012",
       "title": "Native interactive PTY RED and frozen contract",
       "deps": [],
