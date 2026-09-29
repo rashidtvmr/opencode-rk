@@ -834,9 +834,9 @@
       "status": "completed"
     },
     "SHIP-001": {
-      "blockedNote": "RED 5FAIL/1ok frozen-pending: python3 -m unittest release.test_release_contract; sha256 eb7bd3d6; blockers: no release.yml impl lane, no signing authority, no CODEOWNERS/protection coverage",
+      "blockedNote": "RED 5FAIL/1ok T01-absent T02-absent T03-no-codesign T04-preserve-deleted T05-no-restore; sha 825af0da; needs installer-restore impl + freeze + signing authority",
       "scratchpad": "worklog/SHIP-001.md",
-      "session": "ses_f1157ff71ffeNAozn0MSD4Ifsx",
+      "session": "ses_f114d864dffeS1B1RP9Oz8xMbh",
       "status": "blocked"
     },
     "SHIP-004": {

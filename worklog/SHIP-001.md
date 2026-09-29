@@ -49,10 +49,11 @@ owned file: .github/workflows/release.yml (does not exist yet)
 ## Next safe step (for orchestrator)
 - Route to independent test-author role to author + freeze SHIP-001-T01..T05 executable validators (workflow static checks + installer-behavior fixtures with failing capture), record frozen sha + commands, resolve signing-authority + protection-coverage decisions, then re-delegate implementation lane.
 
-## Test-author resume (ses_f1157ff71ffeNAozn0MSD4Ifsx) 2026-09-29
-- Reclaimed SHIP-001 not-started to in-progress via tools/completion_claims.py claim().
-- Owned file: release/test_release_contract.py (created, stdlib unittest, no new paths beyond owned + scratchpad + ledger).
-- Source evidence: tasks/completion/delivery.json SHIP-001 (5 obligations); .github/workflows/release.yml absent; release/ absent; scripts/install-oc2.sh:1-144 fail-closed installer (existing disposable fixture); docs/TDD.md s3 RED-must-compile-fail-for-missing-behavior, s4 freeze.
-- RED run: python3 -m unittest release.test_release_contract -v => 6 tests, 5 FAIL (T01 T02 T03 T04-reject T05) all "release.yml absent", 1 ok (T04 fixture-sanity good bundle installs). py_compile OK. Failures prove missing behavior, not syntax/import/path.
-- SHA-256 RED: eb7bd3d6a1caec620c081df287c4068eb62aab1b5d04874cfc72483014e2ebab
-- Freeze pending controller; signing-authority + protection-coverage unresolved (see prior scratchpad BLOCKER-2/3). Setting blocked.
+## Strengthen pass (ses_f114d864dffeS1B1RP9Oz8xMbh) 2026-09-29
+- Session holds SHIP-001 in-progress (claimed). Owned file only: release/test_release_contract.py.
+- Evidence: scripts/install-oc2.sh:94-141 identity gate exits 74 + `rm -f` on fail (destroys preexisting binary); no codesign/notarytool/signtool tokens anywhere in installer/scripts.
+- Probe: v1 install rc0 then foreign-tool upgrade rc74, dest binary GONE (not byte-identical). Same root cause fails T04-preserve and T05-restore.
+- Edits: T04 wrong-arch = nonempty executable foreign-tool fixture + byte-identical preexisting check, dynamic first; T05 = v1 installed then checksum-valid identity-failing upgrade, dynamic first (exit nonzero + v1 bytes/version + userdata); T03 = executable codesign + notarytool + signtool|AzureSignTool tokens with comment-line stripping + identity-secret fail-closed guard regex, dynamic first.
+- RED run: python3 -m unittest release.test_release_contract -v => 6 tests, 5 FAIL / 1 ok (T04-sanity good bundle installs rc0). Fail reasons: T01 release.yml absent; T02 release.yml absent; T03 'codesign' not found in installer code; T04 preexisting binary deleted on rejection; T05 v1 binary not restored after failed upgrade. py_compile OK.
+- New SHA-256 RED: 825af0da5871e86f69a3bc9465c96bead4e0c2314f6d96c99aa4d8731f3a0d9a
+- Blockers: implementation (installer backup-restore + staged identity gate) + freeze authority + signing authority. Setting blocked. No workflow/installer/policy edits made.
