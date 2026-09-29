@@ -138,7 +138,16 @@ fn zero_expected_pairs_with_no_records_fails_closed() {
     let turn = message(sid, MessageRole::User, "prompt");
     storage.append_message(&turn).unwrap();
     storage.begin_tool_round(sid, turn.id, "zero-round", 0, 0).unwrap();
-    assert!(storage.bounded_history(sid, 100, 512 * 1024).unwrap().is_empty());
+    let history = storage.bounded_history(sid, 100, 512 * 1024).unwrap();
+    assert_eq!(history.len(), 1);
+    assert!(matches!(
+        &history[0],
+        HistoryItem::Message(message)
+            if message.id == turn.id
+                && message.role == MessageRole::User
+                && message.body == (PayloadRef::Inline { text: "prompt".to_owned() })
+    ));
+    assert!(typed(&history).is_empty());
 }
 
 #[test]
