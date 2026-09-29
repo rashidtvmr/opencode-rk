@@ -4,6 +4,7 @@
 
 use std::io::{Read, Write};
 use std::process::Command;
+use opencode_rk_opentui_bridge as opentui_bridge;
 
 const READY: &[u8] = b"TUI015_READY_7f31\n";
 const RESTORED: &[u8] = b"TUI015_RESTORED_7f31\n";
