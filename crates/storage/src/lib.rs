@@ -339,7 +339,9 @@ impl Storage {
             let id_len = usize::try_from(id_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
             let role_len = usize::try_from(role_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
             let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
-            let metadata_bytes = id_len.checked_add(role_len).and_then(|v| v.checked_add(actual)).ok_or(StorageError::TypedHistoryLimit)?;
+            let metadata_bytes = id_len.checked_add(role_len).ok_or(StorageError::TypedHistoryLimit)?;
+            used = used.checked_add(metadata_bytes).ok_or(StorageError::TypedHistoryLimit)?;
+            if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
             let (id, role, blob, created): (String, String, Option<String>, String) = tx.query_row(
                 "SELECT id,role,blob_hash,created_at FROM messages WHERE rowid=?1", params![message_rowid],
                 |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))?;
