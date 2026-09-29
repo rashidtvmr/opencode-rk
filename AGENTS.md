@@ -20,6 +20,35 @@ paths require the canonical repository guard and the ownership/review process in
 `docs/REPOSITORY_PROTECTION.md`; source-controlled policy is not proof that the
 hosting platform has enabled the desired branch/ruleset settings.
 
+## Decision authority and escalation
+
+This section is binding on the main agent, orchestrators, and all delegated
+workers. opencode-rk is a native Rust variant of pinned OpenCode: it preserves
+upstream observable behavior while adding explicitly approved opencode-rk
+features. Rust-native engineering may differ internally; upstream compatibility
+is the baseline, not a prohibition on approved extensions. Do not characterize
+the project as a frozen feature-for-feature clone or invent new features.
+
+Apply these questions in order before asking Rashid for a product decision:
+
+1. **Is the behavior present in pinned OpenCode?**
+   **YES** → copy upstream behavior. Do not ask the user.
+2. **Is it an explicitly approved opencode-rk extension?**
+   **YES** → follow the existing approved requirement. Do not ask the user.
+3. **Is it a Rust implementation detail with equivalent observable behavior?**
+   **YES** → engineers choose the simplest safe implementation. Do not ask the
+   user.
+4. **Is it merely a test, fixture, build, or integration issue?**
+   **YES** → fix it internally through independent review. Do not ask the user.
+5. **Does it genuinely change user-visible product behavior relative to
+   upstream or an approved extension?**
+   **ONLY THEN** ask Rashid.
+
+Internal fixes remain subject to the existing ownership, independent review,
+frozen-test, security, and repository-protection procedures. This does not
+require routine user approval for implementation, test/build, fixture, or
+integration decisions.
+
 ## Convergence and parent-completion boundary
 
 Read `docs/CONVERGENCE.md`. Before choosing more leaf work, run
