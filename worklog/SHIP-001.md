@@ -49,11 +49,9 @@ owned file: .github/workflows/release.yml (does not exist yet)
 ## Next safe step (for orchestrator)
 - Route to independent test-author role to author + freeze SHIP-001-T01..T05 executable validators (workflow static checks + installer-behavior fixtures with failing capture), record frozen sha + commands, resolve signing-authority + protection-coverage decisions, then re-delegate implementation lane.
 
-## Strengthen pass (ses_f114d864dffeS1B1RP9Oz8xMbh) 2026-09-29
-- Session holds SHIP-001 in-progress (claimed). Owned file only: release/test_release_contract.py.
-- Evidence: scripts/install-oc2.sh:94-141 identity gate exits 74 + `rm -f` on fail (destroys preexisting binary); no codesign/notarytool/signtool tokens anywhere in installer/scripts.
-- Probe: v1 install rc0 then foreign-tool upgrade rc74, dest binary GONE (not byte-identical). Same root cause fails T04-preserve and T05-restore.
-- Edits: T04 wrong-arch = nonempty executable foreign-tool fixture + byte-identical preexisting check, dynamic first; T05 = v1 installed then checksum-valid identity-failing upgrade, dynamic first (exit nonzero + v1 bytes/version + userdata); T03 = executable codesign + notarytool + signtool|AzureSignTool tokens with comment-line stripping + identity-secret fail-closed guard regex, dynamic first.
-- RED run: python3 -m unittest release.test_release_contract -v => 6 tests, 5 FAIL / 1 ok (T04-sanity good bundle installs rc0). Fail reasons: T01 release.yml absent; T02 release.yml absent; T03 'codesign' not found in installer code; T04 preexisting binary deleted on rejection; T05 v1 binary not restored after failed upgrade. py_compile OK.
-- New SHA-256 RED: 825af0da5871e86f69a3bc9465c96bead4e0c2314f6d96c99aa4d8731f3a0d9a
-- Blockers: implementation (installer backup-restore + staged identity gate) + freeze authority + signing authority. Setting blocked. No workflow/installer/policy edits made.
+## Pre-freeze correction (ses_f114747d5ffe4NBs8gtP1q3PDv) 2026-09-29
+- Reclaimed SHIP-001 not-started via claim(); owned file only release/test_release_contract.py.
+- Correction: old T04 used valid host shell script with foreign identity (NOT wrong arch; executes natively). Replaced with deterministic nonempty executable in actual foreign binary format: ELF64/x86_64 bytes on Darwin arm64, Mach-O ARM64 bytes on Linux/other; asserts fixture magic + host mismatch before archive install; installer must reject (nonzero) and preserve preexisting binary byte-identically (sha256 equal). T05 identity-failing rollback kept separate; other assertions untouched.
+- RED run: python3 -m unittest release.test_release_contract -v => 6 tests, 5 FAIL / 1 ok (T04-sanity rc0). Fail reasons: T01 release.yml absent; T02 release.yml absent; T03 'codesign' missing in installer code; T04 preexisting binary deleted on rejection (foreign ELF/Mach-O install ran + rm -f); T05 v1 binary not restored after failed upgrade. py_compile OK.
+- New SHA-256 RED: 2decf1d282a8975343183fec934b75ccd4355c83b1c98d576ddd110083345a6e
+- Blockers: impl (installer backup-restore + staged identity/arch gate) + freeze authority + signing authority. Setting blocked. No workflow/installer/policy edits.
