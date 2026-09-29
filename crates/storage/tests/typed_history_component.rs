@@ -202,3 +202,14 @@ fn successful_pair_remains_durable_when_later_pair_aborts() {
     assert_eq!(check.query_row("SELECT count(*) FROM typed_tool_records WHERE round_id=?1 AND pair_index=1", params![round.round_id], |r| r.get::<_, i64>(0)).unwrap(), 0);
     assert_eq!(check.query_row("SELECT payload FROM typed_tool_records WHERE round_id=?1 AND pair_index=0 AND kind='output'", params![round.round_id], |r| r.get::<_, String>(0)).unwrap(), "good-output");
 }
+
+#[test]
+fn positive_expected_pairs_with_zero_records_fails_closed() {
+    let dir = tempdir().unwrap();
+    let storage = Storage::open(paths(dir.path())).unwrap();
+    let sid = session(&storage, "positive-zero-records");
+    let turn = message(sid, MessageRole::User, "prompt");
+    storage.append_message(&turn).unwrap();
+    storage.begin_tool_round(sid, turn.id, "missing-records", 0, 1).unwrap();
+    assert!(matches!(storage.bounded_history(sid, 100, 512 * 1024), Err(StorageError::TypedHistoryIncomplete)));
+}
