@@ -30,17 +30,30 @@ of `ffa52dd` (strongest TUI-015 ref), sha256
 `libopentui.dylib` + `DYLD_LIBRARY_PATH` child env, nonblocking handshake,
 1MiB cap, 8s deadline, process-group reap). No mechanical edits made.
 
-## Native library provenance: ABSENT
+## Native library provenance: RECOVERED from preserved Git blob
 
-- opentui lock: `sources/upstream.lock.json` pins the opencode app only
-  (`95daf90`); no OpenTUI native-library pin/provenance exists in-tree.
-- Approved attested path `temp/native-build-attest/wt/.../aarch64-macos/
-  libopentui.dylib` does not exist (`/Users/mymac/Projects/temp/` absent).
-- Read-only sweep of known worktrees found only
-  `native/lib/x86_64-unknown-linux-gnu/libopentui.so`; no mac `.dylib`/`.a`.
-- Nothing staged under `native/lib/aarch64-apple-darwin/`. No fake
-  backend/lib created, no fetch, no pin invented. A source patch staging the
-  real attested dylib is deferred until the artifact is produced/provided.
+- Git objects, not filesystem: blob
+  `0352894af7d7bbcc30f56b0848fd91f7dc31c02a` (6863648 bytes) exists in
+  preserved commits `6eba7ba` (vendor arm64 dylib), `79840f880ab3`
+  (`lane/TUI-011-native-artifacts`), `83b38276d59a` (artifact matrix),
+  `2263e912644e` (static-macos). Refs untouched.
+- Recovered via `git cat-file blob 0352894a > native/lib/
+  aarch64-apple-darwin/libopentui.dylib`. `git hash-object` of staged file
+  reproduces `0352894a`; sha256
+  `798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91`
+  matches `artifacts.json` (blob `758e20dd`, schema 1) at all four commits.
+- Manifest pin (read-only, no lock edited): OpenTUI source
+  `github.com/rashidtvmr/opentui.git` commit
+  `c01292fd0837bafd07ce458c74416b2b375a41ab` (tree `261e8ea4`),
+  zig `0.16.0` (`zig-aarch64-macos-0.16.0.tar.xz` sha256 `b23d70de...`,
+  target `aarch64-macos.13.0`), `ReleaseSafe`, install-name
+  `@rpath/libopentui.dylib` (no LC_RPATH — see `f0b5a27` RED rationale;
+  the PTY test passes the dir via `DYLD_LIBRARY_PATH` instead).
+- Local verify: `file` → Mach-O 64-bit arm64 dylib; `nm -gU` confirms all
+  14 required symbols incl. `restoreTerminalModes/suspendRenderer/
+  resumeRenderer/enableMouse/disableMouse/enableKittyKeyboard/
+  disableKittyKeyboard/clearTerminal`; `otool -L` confirms
+  `@rpath/libopentui.dylib` + system frameworks only.
 
 ## Verification (bridge only, jobs2, offline, locked)
 
@@ -51,14 +64,15 @@ of `ffa52dd` (strongest TUI-015 ref), sha256
   → compiles (10 dead-code warnings for native-only consts, pre-existing
   pattern); links without native lib as expected.
 - `... --features native --test native_terminal_lifecycle --no-run`
-  → FAILS at `build.rs:58` link gate: native artifact missing for
-  `aarch64-apple-darwin`. Infrastructure block, not semantic RED.
-  Gated by the missing dylib above; PTY runtime not runnable here.
+  → previously FAILED at `build.rs:58` link gate (missing dylib). Now
+  UNRUN here: no Cargo builds per current instruction (heavy Rust with
+  G4 owner). Link gate inputs now present; integrator/verifier to rerun.
 
 ## Remaining G5 failures
 
-1. No `aarch64-apple-darwin` libopentui artifact → native link + all 5 PTY
-   cases unrunnable. Prior lane observation (unverified here): child reached
-   READY but parent reported `live PTY was not raw`.
+1. Native artifact now staged (verified blob); native link + 5 PTY cases
+   NOT yet run here (no-build instruction). Prior lane observation
+   (unverified here): child reached READY but parent reported
+   `live PTY was not raw` — expect RED or failure on first run.
 2. `suspend/resume/clear_terminal` paths unexercised beyond compile.
 3. Full native loop/input redesign explicitly out of scope.
