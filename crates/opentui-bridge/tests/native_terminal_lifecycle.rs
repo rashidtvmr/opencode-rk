@@ -36,7 +36,15 @@ proc = subprocess.Popen([exe, "--exact", case, "--nocapture"], stdin=slave,
     start_new_session=True, preexec_fn=controlling_tty)
 data = bytearray(); deadline = time.monotonic() + 8.0; phase = "spawn"
 def read_until(needle, trace_needle=None):
-    while needle not in data and (trace_needle is None or trace_needle not in trace_file.read_text()):
+    # Wait on the trace marker when one is supplied; otherwise require a
+    # non-empty wire marker. An empty needle must never short-circuit the
+    # wait (that would check live state before the child has advanced).
+    while True:
+        if trace_needle is not None:
+            done = trace_needle in trace_file.read_bytes()
+        else:
+            done = needle not in (b"", None) and needle in data
+        if done: return
         if time.monotonic() >= deadline: raise RuntimeError("PTY handshake deadline")
         try:
             chunk = os.read(master, 65536)
@@ -74,6 +82,25 @@ try:
             except BlockingIOError: pass
             if len(data) > 1024 * 1024: raise RuntimeError("PTY output exceeded 1 MiB")
             time.sleep(.01)
+    # Drain the master while the child is still alive so its stdout never
+    # blocks on PTY backpressure, then a bounded final drain captures any
+    # trailing bytes before the protocol markers are evaluated.
+    while proc.poll() is None:
+        if time.monotonic() >= deadline: raise RuntimeError("PTY deadline")
+        try:
+            chunk = os.read(master, 65536)
+            if chunk: data.extend(chunk)
+        except BlockingIOError:
+            time.sleep(.01)
+        if len(data) > 1024 * 1024: raise RuntimeError("PTY output exceeded 1 MiB")
+    while True:
+        try:
+            chunk = os.read(master, 65536)
+        except (BlockingIOError, OSError):
+            break
+        if not chunk: break
+        data.extend(chunk)
+        if len(data) > 1024 * 1024: raise RuntimeError("PTY output exceeded 1 MiB")
     if case == "child_input_modes_and_singleton_reacquire":
         # These are the pinned native terminal protocol bytes: SGR mouse
         # (1000/1002 + 1006) and Kitty keyboard (>[>1u, disable [<u).
@@ -90,11 +117,21 @@ try:
     print(json.dumps({"case": case, "bytes": len(data), "exit": proc.returncode}))
 finally:
     if proc.poll() is None:
-        try: os.killpg(proc.pid, signal.SIGTERM); proc.wait(timeout=1)
-        except (ProcessLookupError, subprocess.TimeoutExpired):
-            try: os.killpg(proc.pid, signal.SIGKILL)
+        try:
+            os.killpg(proc.pid, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            try: proc.terminate()
             except ProcessLookupError: pass
-            proc.wait()
+        try:
+            proc.wait(timeout=1)
+        except subprocess.TimeoutExpired:
+            try:
+                os.killpg(proc.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                try: proc.kill()
+                except ProcessLookupError: pass
+            try: proc.wait(timeout=1)
+            except subprocess.TimeoutExpired: pass
     os.close(slave); os.close(master)
 "#;
 

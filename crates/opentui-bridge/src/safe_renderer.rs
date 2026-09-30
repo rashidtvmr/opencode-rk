@@ -13,11 +13,18 @@
 use std::error::Error;
 use std::fmt;
 use std::marker::PhantomData;
+#[cfg(all(feature = "native", unix))]
+use std::os::fd::{AsFd, OwnedFd};
 #[cfg(feature = "native")]
 use std::os::raw::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(feature = "native")]
 use std::sync::atomic::{AtomicU32, AtomicU8};
+#[cfg(all(feature = "native", unix))]
+use std::sync::Mutex;
+
+#[cfg(all(feature = "native", unix))]
+use rustix::termios::{tcgetattr, tcsetattr, OptionalActions, Termios};
 
 use crate::buffer::NativeHandle;
 use crate::color::Rgba;
@@ -42,6 +49,103 @@ const MOUSE_ENABLED: u8 = 2;
 #[cfg(feature = "native")]
 const KITTY_KEYBOARD_ENABLED: u8 = 4;
 
+/// OpenTUI's native library owns ANSI modes, while its TypeScript wrapper
+/// owns stdin raw mode. Retain the same input descriptor and exact attributes
+/// here, including across suspend/resume. The single-renderer claim bounds
+/// this slot to one terminal and prevents concurrent input-mode owners.
+#[cfg(all(feature = "native", unix))]
+static TERMINAL_INPUT: Mutex<Option<TerminalInput>> = Mutex::new(None);
+
+#[cfg(all(feature = "native", unix))]
+struct TerminalInput {
+    handle: NativeHandle,
+    fd: OwnedFd,
+    original: Termios,
+    raw: Termios,
+    active: bool,
+}
+
+#[cfg(all(feature = "native", unix))]
+fn activate_terminal_input(handle: NativeHandle) -> Result<(), BridgeError> {
+    let mut slot = TERMINAL_INPUT
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(input) = slot.as_mut() {
+        if input.handle != handle {
+            return Err(BridgeError::TerminalFailed);
+        }
+        if !input.active {
+            tcsetattr(&input.fd, OptionalActions::Now, &input.raw)
+                .map_err(|_| BridgeError::TerminalFailed)?;
+            input.active = true;
+        }
+        return Ok(());
+    }
+
+    // An owned CLOEXEC duplicate keeps restoration bound to the captured TTY
+    // even if the caller subsequently replaces stdin. A non-TTY input has no
+    // terminal attributes to own (e.g. memory/headless rendering).
+    let fd = std::io::stdin()
+        .as_fd()
+        .try_clone_to_owned()
+        .map_err(|_| BridgeError::TerminalFailed)?;
+    let original = match tcgetattr(&fd) {
+        Ok(attributes) => attributes,
+        Err(rustix::io::Errno::NOTTY) => return Ok(()),
+        Err(_) => return Err(BridgeError::TerminalFailed),
+    };
+    let mut raw = original.clone();
+    raw.make_raw();
+    tcsetattr(&fd, OptionalActions::Now, &raw).map_err(|_| BridgeError::TerminalFailed)?;
+    *slot = Some(TerminalInput {
+        handle,
+        fd,
+        original,
+        raw,
+        active: true,
+    });
+    Ok(())
+}
+
+#[cfg(all(feature = "native", unix))]
+fn restore_terminal_input(handle: NativeHandle, release: bool) -> Result<(), BridgeError> {
+    let mut slot = TERMINAL_INPUT
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    if let Some(input) = slot.as_mut() {
+        if input.handle != handle {
+            return Err(BridgeError::TerminalFailed);
+        }
+        if input.active {
+            tcsetattr(&input.fd, OptionalActions::Now, &input.original)
+                .map_err(|_| BridgeError::TerminalFailed)?;
+            #[cfg(target_os = "macos")]
+            {
+                use rustix::termios::{tcflush, LocalModes, QueueSelector};
+
+                // Darwin marks input for reprocessing when switching back to
+                // canonical mode. A nonblocking input flush clears this derived
+                // PENDIN bit, matching native cleanup's flush_input contract.
+                // Preserve a PENDIN bit that was already present on entry.
+                if !input.original.local_modes.contains(LocalModes::PENDIN)
+                    && tcgetattr(&input.fd)
+                        .map_err(|_| BridgeError::TerminalFailed)?
+                        .local_modes
+                        .contains(LocalModes::PENDIN)
+                {
+                    tcflush(&input.fd, QueueSelector::IFlush)
+                        .map_err(|_| BridgeError::TerminalFailed)?;
+                }
+            }
+            input.active = false;
+        }
+        if release {
+            *slot = None;
+        }
+    }
+    Ok(())
+}
+
 /// Byte cap for one [`Renderer::draw_text`] call.
 pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// [`Renderer::snapshot_text`] buffer bounds.
@@ -59,6 +163,7 @@ pub enum BridgeError {
     ZeroSize,
     TextTooLarge,
     TitleNul,
+    TerminalFailed,
 }
 
 impl fmt::Display for BridgeError {
@@ -71,6 +176,7 @@ impl fmt::Display for BridgeError {
             Self::ZeroSize => "zero-size renderer",
             Self::TextTooLarge => "text exceeds size limit",
             Self::TitleNul => "title contains NUL byte",
+            Self::TerminalFailed => "terminal input mode operation failed",
         };
         f.write_str(s)
     }
@@ -161,8 +267,7 @@ impl Renderer {
         {
             // SAFETY: plain integers + null feed ptr (buffered backend);
             // handle checked below, destroyed in `release`.
-            let handle =
-                unsafe { createRenderer(cols, rows, dest, 0, std::ptr::null()) };
+            let handle = unsafe { createRenderer(cols, rows, dest, 0, std::ptr::null()) };
             if handle == INVALID_HANDLE {
                 LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
                 LIFECYCLE_FLAGS.store(0, Ordering::Release);
@@ -231,6 +336,12 @@ impl Renderer {
             }
             destroyRenderer(self.handle, true);
         }
+        #[cfg(all(feature = "native", unix))]
+        if let Err(error) = restore_terminal_input(self.handle, true) {
+            // Drop must also work during unwinding; report a genuine kernel
+            // restoration failure without panicking or discarding its result.
+            eprintln!("native renderer cleanup: {error}");
+        }
         self.handle = INVALID_HANDLE;
         CLAIMED.store(false, Ordering::Release);
     }
@@ -257,6 +368,8 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
+            #[cfg(unix)]
+            activate_terminal_input(handle)?;
             // SAFETY: live handle; plain integers only.
             unsafe { setupTerminal(handle, true) };
             if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle {
@@ -275,9 +388,10 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
+            #[cfg(unix)]
+            restore_terminal_input(handle, true)?;
             if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
-                && LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel)
-                    & TERMINAL_ACTIVE
+                && LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel) & TERMINAL_ACTIVE
                     != 0
             {
                 unsafe { restoreTerminalModes(handle) };
@@ -297,6 +411,8 @@ impl Renderer {
         {
             // SAFETY: live renderer handle owned by self.
             unsafe { suspendRenderer(handle) };
+            #[cfg(unix)]
+            restore_terminal_input(handle, false)?;
             Ok(())
         }
     }
@@ -310,6 +426,12 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
+            #[cfg(unix)]
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.load(Ordering::Acquire) & TERMINAL_ACTIVE != 0
+            {
+                activate_terminal_input(handle)?;
+            }
             // SAFETY: live renderer handle owned by self.
             unsafe { resumeRenderer(handle) };
             Ok(())
@@ -343,9 +465,7 @@ impl Renderer {
         #[cfg(feature = "native")]
         {
             if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
-                && LIFECYCLE_FLAGS.fetch_and(!MOUSE_ENABLED, Ordering::AcqRel)
-                    & MOUSE_ENABLED
-                    != 0
+                && LIFECYCLE_FLAGS.fetch_and(!MOUSE_ENABLED, Ordering::AcqRel) & MOUSE_ENABLED != 0
             {
                 unsafe { disableMouse(handle) };
             }
@@ -590,9 +710,8 @@ impl Renderer {
             loop {
                 let mut out = vec![0u8; cap];
                 // SAFETY: `out` sized `cap`; native writes ≤ `outputLen` bytes.
-                let n = unsafe {
-                    bufferWriteResolvedChars(buf, out.as_mut_ptr(), cap as u32, true)
-                } as usize;
+                let n = unsafe { bufferWriteResolvedChars(buf, out.as_mut_ptr(), cap as u32, true) }
+                    as usize;
                 let n = n.min(cap);
                 if n < cap || cap >= SNAP_MAX {
                     out.truncate(n);
