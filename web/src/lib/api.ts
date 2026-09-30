@@ -874,10 +874,26 @@ export interface TurnResult {
 
 export interface TurnStreamHandlers {
   onUserMessage?: (message: MessageRecord) => void
+  onToolCall?: (toolCall: ToolCall) => void
+  onToolOutput?: (toolOutput: ToolOutput) => void
   onReasoningSummaryDelta?: (delta: string) => void
   onAssistantDelta?: (delta: string) => void
   onAssistantActivity?: (activity: AssistantActivity) => void
   onAssistantMessage?: (message: MessageRecord) => void
+}
+
+/** A transient tool invocation reported by the native turn stream. */
+export interface ToolCall {
+  call_id: string
+  name: string
+  arguments: string
+}
+
+/** A transient tool result reported by the native turn stream. */
+export interface ToolOutput {
+  call_id: string
+  name: string
+  output: string
 }
 
 const MAX_TURN_STREAM_BYTES = 2 * 1024 * 1024
@@ -930,6 +946,36 @@ function parseTurnStreamEvent(
         throw streamError('Reasoning summary exceeded the browser safety limit')
       }
       handlers.onReasoningSummaryDelta?.(event.delta)
+      break
+    }
+    case 'tool_call': {
+      if (
+        typeof event.call_id !== 'string' ||
+        typeof event.name !== 'string' ||
+        typeof event.arguments !== 'string'
+      ) {
+        throw streamError('Server returned an invalid tool call')
+      }
+      handlers.onToolCall?.({
+        call_id: event.call_id,
+        name: event.name,
+        arguments: event.arguments,
+      })
+      break
+    }
+    case 'tool_output': {
+      if (
+        typeof event.call_id !== 'string' ||
+        typeof event.name !== 'string' ||
+        typeof event.output !== 'string'
+      ) {
+        throw streamError('Server returned an invalid tool output')
+      }
+      handlers.onToolOutput?.({
+        call_id: event.call_id,
+        name: event.name,
+        output: event.output,
+      })
       break
     }
     case 'assistant_delta': {
