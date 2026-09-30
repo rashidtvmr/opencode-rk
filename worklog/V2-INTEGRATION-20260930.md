@@ -164,6 +164,59 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
   re-executed. Explicit recovery/quarantine, large-history compaction, concurrent
   client admission, and full native/browser/platform golden journeys remain open.
 
+## B1/G6 browser tool-stream transport
+
+- Package: parse native tool events and reconcile server-persisted tool rows
+  after a settled turn. Implementation base `89780a3121e8626b2d134adcda93dd523a2e53ff`
+  (frozen component contract over `7fe4656`); candidates `44b0ac5` and `7e264cea`.
+- Independent source review and runtime verifier: main session, separate from
+  Xkiro GPT-6 Luna's implementation role. The first candidate omitted the settled
+  transcript refresh; the follow-up repairs that path with controller ownership
+  checks before and after the bounded refresh.
+- Integration: frozen contract `e67b193`, parser `4b1e0bf`, settlement `25b6448`.
+  Exact integrated component-gate revision:
+  `25b64488cfc4282b867a924570ba267fbcd46c32`.
+- Changed paths: `web/src/lib/api.ts`, `web/src/App.tsx`,
+  `web/src/lib/api.tool-stream.test.mjs`,
+  `worklog/V2-WEB-TOOL-STREAM-CONTRACT.md`, `worklog/V2-WEB-TOOL-STREAM.md`.
+- Authority: the native daemon's `create_turn_stream` wire contract in
+  `crates/server/src/lib.rs` emits string-valued `tool_call` and `tool_output`
+  fields. Pinned upstream `95daf906` uses persisted message/tool parts rather
+  than this rk NDJSON extension. The existing 256 KiB line and 2 MiB stream
+  bounds, late-error propagation, and authenticated same-origin transport remain
+  part of the frozen contract.
+- Frozen tool-stream SHA-256:
+  `2f0e598ee1c0a27511bfcec06d7165b96f02ea73302b2673f2f8139b1365e7fb`.
+- Independently run on candidate `7e264cea` and exact integrated `25b6448`:
+
+  ```text
+  rtk /usr/bin/arch -arm64 node --experimental-strip-types --test web/src/lib/api.tool-stream.test.mjs web/src/lib/api.auth.test.mjs web/src/lib/api.direct-auth.test.mjs web/src/lib/api.refresh-auth.test.mjs
+  rtk /usr/bin/arch -arm64 pnpm --dir web run typecheck
+  rtk /usr/bin/arch -arm64 pnpm --dir web exec vitest run src/lib/canvas-model.test.ts --maxWorkers=1 --minWorkers=1
+  ```
+
+  Results: **five stream controls + six auth controls passed**, typecheck GREEN,
+  **16 canvas tests passed**. The scoped client transport contract is **ACCEPTED
+  on `25b6448`**; real-browser G6 acceptance remains pending.
+- A mistakenly broadened Vitest invocation (`pnpm test -- ...`) discovered
+  existing App fixture failures and tried to execute Node `.mjs` tests as Vitest
+  suites. A correctly focused baseline run on unchanged `c185ab4` independently
+  reproduces `App.stream.test.tsx:113`, missing the `Streaming turn` heading before
+  any stream starts. Log:
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-web-base-c185ab4-b8evx209/app-stream.log`.
+  These observed fixture failures remain open; the focused contract does not
+  imply the entire Web suite is GREEN.
+- Embedded bundle rebuilt by
+  `rtk /usr/bin/arch -arm64 pnpm --dir web run build` on the integrated source.
+  Entry SHA-256 `fee548caa07c879fb02ab22690252dc542ddfec6a5dd109c51804268b7b8b560`;
+  JS `index-BUFkk7Km.js` SHA-256
+  `74cb8fca204ccf6ac427072f3e1307343bb73b1e81ca2686d3081752445a46ad`;
+  CSS `index-CjLNe1JJ.css` SHA-256
+  `16b43a730b810f08f3bfb521454484f9a71b3beea18cff9c15b801769261fc12`.
+  Generated bundle changes include `crates/server/web_dist/index.html` and the
+  two renamed index assets. Installed-binary/browser verification follows on a
+  clean committed revision containing this bundle.
+
 ## Remaining observed product failures
 
 - G2 persisted/in-app credentials are not connected to the outbound provider
