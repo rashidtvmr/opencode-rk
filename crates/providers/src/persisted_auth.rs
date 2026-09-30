@@ -7,7 +7,14 @@ const MAX_API_KEY_BYTES: usize = 16 * 1024;
 
 pub async fn api_key(provider: &str, ambient_name: &str) -> Option<String> {
     let content = env::var("OPENCODE_AUTH_CONTENT").ok();
-    let bytes = if content.is_none() {
+    // Upstream uses a truthy inline value, parses it as the complete auth
+    // source, and falls through to disk only when it is empty or invalid JSON.
+    let inline = content
+        .as_deref()
+        .filter(|raw| !raw.is_empty())
+        .filter(|raw| raw.len() <= MAX_AUTH_BYTES)
+        .and_then(|raw| serde_json::from_str::<Value>(raw).ok());
+    let bytes = if inline.is_none() {
         let path = auth_path();
         tokio::task::spawn_blocking(move || path.and_then(|path| read_bounded_file(&path)))
             .await
@@ -16,10 +23,15 @@ pub async fn api_key(provider: &str, ambient_name: &str) -> Option<String> {
     } else {
         None
     };
-    content
-        .as_deref()
-        .and_then(|v| parse(v.as_bytes(), provider))
-        .or_else(|| bytes.as_deref().and_then(|v| parse(v, provider)))
+    inline
+        .as_ref()
+        .and_then(|value| api_key_from_value(value, provider))
+        .or_else(|| {
+            inline
+                .is_none()
+                .then(|| bytes.as_deref().and_then(|b| parse(b, provider)))
+                .flatten()
+        })
         .or_else(|| {
             env::var(ambient_name)
                 .ok()
@@ -61,6 +73,10 @@ fn parse(bytes: &[u8], provider: &str) -> Option<String> {
         return None;
     }
     let root: Value = serde_json::from_slice(bytes).ok()?;
+    api_key_from_value(&root, provider)
+}
+
+fn api_key_from_value(root: &Value, provider: &str) -> Option<String> {
     let entries = root.as_object()?;
     if entries.len() > MAX_AUTH_ENTRIES {
         return None;
@@ -68,6 +84,12 @@ fn parse(bytes: &[u8], provider: &str) -> Option<String> {
     let item = entries.get(provider)?.as_object()?;
     if item.get("type")?.as_str()? != "api" {
         return None;
+    }
+    if let Some(metadata) = item.get("metadata") {
+        let metadata = metadata.as_object()?;
+        if metadata.values().any(|value| !value.is_string()) {
+            return None;
+        }
     }
     let key = item.get("key")?.as_str()?;
     (!key.trim().is_empty() && key.len() <= MAX_API_KEY_BYTES).then(|| key.to_owned())
