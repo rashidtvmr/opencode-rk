@@ -1,16 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { expect, it } from 'vitest'
 
 import {
-  type CanvasEdge,
   type CanvasNode,
-  type CanvasState,
-  type Viewport,
   addEdge,
   addNode,
   canvasFromJson,
   canvasToJson,
   cloneCanvas,
-  evict,
   findNodeAtPoint,
   getNode,
   makeCanvas,
