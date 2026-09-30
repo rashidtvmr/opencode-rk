@@ -293,6 +293,9 @@ def run(binary, library, manifest, artifacts):
         state.phase = "success"
         result = {"phase": "success", "source_sha": source, "binary_sha256": binary_sha, "native_library_sha256": library_sha, "provider_requests": [{"model": x.get("model"), "stream": x.get("stream", False), "input": x.get("input")} for x in state.requests], "screen": redact(screen.text()), "file_sha256": sha256(root / "project" / FILE)}
         (artifacts / "native-stream-tool-result.json").write_text(json.dumps(result, indent=2) + "\n")
+    except BaseException as error:
+        state.fail(str(error))
+        raise
     finally:
         state.partial_visible.set(); state.release_partial.set()
         if daemon is not None:
@@ -311,11 +314,16 @@ def run(binary, library, manifest, artifacts):
         if master is not None: os.close(master)
         server.shutdown(); server.server_close(); provider_thread.join(timeout=10)
         if provider_thread.is_alive(): raise RuntimeError("fixture server failed bounded shutdown")
+        secret_echo = KEY.encode() in captures or KEY in screen.text()
+        if secret_echo:
+            state.fail("fixture API key appeared in terminal output")
         evidence = {"phase": state.phase, "error": redact(state.error or ""), "source_sha": source, "binary_sha256": binary_sha, "native_library_sha256": library_sha, "test_sha256": sha256(pathlib.Path(__file__)), "fixture_root": str(root), "provider_requests": len(state.requests), "requests": [{"model": x.get("model"), "stream": x.get("stream", False), "input": x.get("input")} for x in state.requests], "screen": redact(screen.text()), "captured_output": redact(bytes(captures[:MAX_PTY]).decode("utf-8", "replace")), "owned_process_cleanup": bool(daemon is None or daemon.poll() is not None), "owned_descriptors": descriptors}
         raw_evidence = json.dumps(evidence, indent=2) + "\n"
         if len(raw_evidence.encode()) > 512 * 1024: raise RuntimeError("evidence exceeded 512 KiB")
         evidence_name = "native-stream-tool-result.json" if state.phase == "success" and not state.error else "native-stream-tool-failure.json"
         (artifacts / evidence_name).write_text(raw_evidence)
+        if secret_echo:
+            raise AssertionError("fixture API key appeared in terminal output")
 
 
 def self_check():
@@ -380,8 +388,8 @@ def self_check():
         valid = ProviderState(root)
         valid.active_send = lambda payload: None
         valid.partial_visible.set()
-        valid.body({"Authorization": "Bearer " + KEY}, json.dumps({"model": MODEL, "input": [{"role": "user", "content": FIRST}], "stream": True}).encode())
         valid.release_partial.set()
+        valid.body({"Authorization": "Bearer " + KEY}, json.dumps({"model": MODEL, "input": [{"role": "user", "content": FIRST}], "stream": True}).encode())
         call_item = {"type": "function_call", "call_id": CALL_ID, "name": "write", "arguments": json.dumps({"path": FILE, "content": MARKER, "append": False}, separators=(",", ":"))}
         output_item = {"type": "function_call_output", "call_id": CALL_ID, "output": "write success"}
         continuation = valid.body({"Authorization": "Bearer " + KEY}, json.dumps({"model": MODEL, "input": [{"role": "user", "content": FIRST}, call_item, output_item], "stream": True}).encode())
@@ -391,12 +399,21 @@ def self_check():
         valid.restart_generation = 1
         resumed = valid.body({"Authorization": "Bearer " + KEY}, json.dumps({"model": MODEL, "input": [{"role": "user", "content": FIRST}, call_item, output_item, {"role": "assistant", "content": ASSISTANT_FIRST}, {"role": "user", "content": SECOND}, {"role": "assistant", "content": SECOND_FINAL}, {"role": "user", "content": RESUMED}], "stream": True}).encode())
         assert RESUME.encode() in resumed
-        try:
-            valid.body({"Authorization": "Bearer " + KEY}, json.dumps({"model": MODEL, "input": [{"role": "user", "content": FIRST}, {"type": "function_call_output", "call_id": CALL_ID, "output": "write success"}, {"type": "function_call", "call_id": CALL_ID, "name": "write", "arguments": "{}"}], "stream": True}).encode())
-            raise AssertionError("output-before-call accepted")
-        except RuntimeError:
-            pass
-        print("self-check: JSON defaults, actual early SSE frame, gated completion, auth, invalid stream, and history rejection passed")
+        first_user = {"role": "user", "content": FIRST}
+        invalid_pairs = [
+            ([first_user, output_item, call_item], "output preceded its call"),
+            ([first_user, call_item], "exactly one ordered typed call/output"),
+            ([first_user, call_item, output_item, output_item], "exactly one ordered typed call/output"),
+        ]
+        for items, expected_error in invalid_pairs:
+            invalid = ProviderState(root)
+            invalid.requests.append({"input": [first_user], "stream": True})
+            try:
+                invalid.body({"Authorization": "Bearer " + KEY}, json.dumps({"model": MODEL, "input": items, "stream": True}).encode())
+                raise AssertionError("invalid typed pair accepted")
+            except RuntimeError as error:
+                assert expected_error in str(error)
+        print("self-check: HTTP JSON defaults, actual gated early SSE, auth, invalid stream, four-round state history and typed-pair negatives passed")
     finally:
         server.state.release_partial.set()
         server.shutdown(); server.server_close(); thread.join(timeout=5)

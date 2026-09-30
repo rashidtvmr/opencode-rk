@@ -54,3 +54,18 @@ python3 tests/e2e/native_stream_tool.py \
 ```
 
 This handoff is a source-contract candidate only: neither PREVERIFIED nor ACCEPTED. The installed-product gate is still expected to RED only when the native client fails to expose the gated partial delta before provider completion; setup, auth, model readiness, typed history, restart, and fixture protocol failures are independently diagnosed.
+
+## Controller fixture maintenance and genuine baseline
+
+The installed, accepted `ac635fac5298e9151c6575aa6a089f53c5aa4309` reached healthy
+authenticated model readiness and one real provider request, omitted `stream`,
+and displayed `assistant: NONSTREAM_COMPLETED`. It failed to display the required
+early partial marker in 11.41s. This is product RED, not fixture startup failure:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-native-stream-red-ac635fa-v8ptt_7w`.
+The source-only self-check proves actual HTTP framing/gated early bytes; the
+remaining four rounds are state-level codec checks, not four live product turns.
+The controller corrected a self-check barrier ordering delay, made typed-pair
+negative cases reach their intended validation instead of the request-count cap,
+and ensured actual assertion failures and whole-capture key echo are recorded.
+No product file or existing frozen semantic test changed. The exact corrected
+contract must be rerun and hashed before a product implementation lease starts.
