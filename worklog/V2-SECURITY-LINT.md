@@ -18,6 +18,7 @@ candidate commit. An initial bounded verification attempt exposed the
 mechanical `&Path` conversion omissions in the three helper bodies; those are
 corrected in the follow-up candidate. Parent must independently rerun the
 bounded Clippy and security-library test commands.
+
 ## Integrated verification correction
 
 Candidate `3634145d6661b31421529d27e45dba24395d73d7` integrates as
@@ -32,3 +33,31 @@ The controller limits the `PathBuf` import to `cfg(test)`, preserving test code
 and behavior. No suppression, assertion or security default changed. Exact
 initial integrated logs and hashes are retained at
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-security-lint-integrated-c25nmmuk`.
+
+## Exact integrated acceptance
+
+Final integrated revision:
+`cb0ab245ff8cc62c27bb36d6770a7b8fb54cf5f2`.
+Both actual controller commands pass on that exact SHA:
+
+```text
+CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1
+RUSTFLAGS='-C link-arg=-Wl,-rpath,@executable_path/../lib'
+cargo clippy --offline --locked -p opencode-rk-security --lib -- -D warnings
+exit 0
+cargo test --offline --locked -p opencode-rk-security --lib -- --test-threads=1
+148 passed; 0 failed; exit 0
+```
+
+Source/log/command evidence:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-security-lint-cb0ab24-v6h5bzp8`.
+Clippy log SHA-256:
+`39d6d918c7a603437b1d8b0c2fcd686c2f4fd968180c33a6577d7f697098fae8`.
+Library-test log SHA-256:
+`e29115109ff451d9c3f6f6fb1881201e6e47df4a6cfe2cc7df396262936138d6`.
+
+Independent verifier `ses_f0c3bda7effeqXZjDfJqgOWKVF` corrected its earlier
+invalid PASS report, inspected the actual successful final logs and source
+diff, and confirmed protected test bodies, Cargo lock, policy grants and
+`InheritAll` default remain unchanged. State **ACCEPTED for SECURITY-LINT on
+integrated `cb0ab24`**. Workspace-wide formatting and Clippy remain open.
