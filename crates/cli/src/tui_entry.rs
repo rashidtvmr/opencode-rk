@@ -758,11 +758,11 @@ fn native_loop(
                     continue;
                 }
                 if !text.is_empty() {
-                    append_transcript(&mut transcript, format!("you: {text}"));
                     if let Some(snapshot) = live {
                         if worker.is_some() {
-                            append_transcript(&mut transcript, "[busy: draft retained]".to_owned());
+                            continue;
                         } else {
+                            append_transcript(&mut transcript, format!("you: {text}"));
                             let result = selected
                                 .as_ref()
                                 .ok_or_else(|| "select a model with /connect".to_owned())
@@ -784,6 +784,7 @@ fn native_loop(
                             }
                         }
                     } else {
+                        append_transcript(&mut transcript, format!("you: {text}"));
                         append_transcript(
                             &mut transcript,
                             "offline: turn not executed".to_string(),

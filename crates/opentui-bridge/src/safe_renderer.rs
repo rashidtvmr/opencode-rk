@@ -272,7 +272,10 @@ impl Renderer {
             .as_ref()
             .filter(|input| input.handle == handle)
             .ok_or(BridgeError::TerminalFailed)?;
-        let fd = std::io::stdin();
+        let fd = input
+            .fd
+            .try_clone_to_owned()
+            .map_err(|_| BridgeError::TerminalFailed)?;
         let mut descriptors = [PollFd::new(
             &fd,
             PollFlags::IN | PollFlags::HUP | PollFlags::ERR,
