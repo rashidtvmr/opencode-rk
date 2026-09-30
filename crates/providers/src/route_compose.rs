@@ -80,7 +80,7 @@ pub fn compose_route(
     if let Some(preferred) = req.preferred_id {
         if let Some(hit) = eligible.iter().find(|c| c.id == preferred) {
             return Ok(RouteComposeOutcome::Selected {
-                account_id: (*hit).id.clone(),
+                account_id: hit.id.clone(),
             });
         }
     }

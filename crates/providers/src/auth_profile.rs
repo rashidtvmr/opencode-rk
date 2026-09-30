@@ -54,7 +54,7 @@ impl fmt::Display for AuthProvenance {
 /// expiration data. `Unknown` exists so callers can represent an unrecognized
 /// external method at the validation boundary without accepting a string or
 /// credential payload.
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq, Serialize)]
 pub enum AuthMethodKind {
     /// API-key authentication.
     #[serde(rename = "api-key")]
@@ -67,13 +67,8 @@ pub enum AuthMethodKind {
     OAuth2Kind,
     /// Method kind not recognized by this version.
     #[serde(rename = "unknown")]
+    #[default]
     Unknown,
-}
-
-impl Default for AuthMethodKind {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 impl AuthMethodKind {

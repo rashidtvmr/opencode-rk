@@ -764,13 +764,12 @@ fn validate_status(status: &AuthStatus) -> Result<(), AuthCommandError> {
     if status.auth_mode == LOGGED_OUT_MODE && status.expires_at_ms.is_some() {
         return Err(AuthCommandError::InvalidMetadata);
     }
-    if status.expires_at_ms.is_some() {
-        if !validate_metadata(&status.account_label)
+    if status.expires_at_ms.is_some()
+        && (!validate_metadata(&status.account_label)
             || !validate_metadata(&status.auth_mode)
-            || !validate_metadata(&status.provenance)
-        {
-            return Err(AuthCommandError::InvalidMetadata);
-        }
+            || !validate_metadata(&status.provenance))
+    {
+        return Err(AuthCommandError::InvalidMetadata);
     }
     if let Some(error) = status.error.as_deref() {
         if error.len() > MAX_METADATA_BYTES || error.contains("sk-") {

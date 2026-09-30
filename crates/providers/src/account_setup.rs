@@ -379,6 +379,10 @@ impl AccountSetupStore {
     /// replaces the entry, so no half-authorized duplicate remains.
     /// ponytail: single-provider replacement keeps one secret per provider;
     /// upgrade path is multi-account ids when onboarding needs them.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "existing audited credential-import authority/scope decision retains its atomic public call"
+    )]
     pub fn authorize(
         &mut self,
         scope: &CredentialImportScope,
