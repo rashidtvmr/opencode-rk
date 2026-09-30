@@ -1,54 +1,63 @@
 #!/usr/bin/env python3
-"""G2 contract: fresh native app, in-app API-key setup, model choice, and resume.
+"""G2 contract: native /connect, API key, non-default model, and restart.
 
-This is intentionally a contract harness, not a product implementation.  It
-uses only stdlib and a loopback Responses fixture; credentials are generated in
-the fixture and are never written by this test before the UI enters them.
+This file is a test owner artifact, not product code.  It deliberately refuses
+to turn missing build/source/runtime evidence into a product RED.
 """
-import argparse, hashlib, http.server, json, os, pathlib, pty, re, select
-import shutil, signal, socket, subprocess, tempfile, termios, time, urllib.parse
+import argparse, hashlib, http.client, http.server, json, os, pathlib, pty
+import re, select, shutil, signal, socket, subprocess, tempfile, termios, time
+import urllib.error, urllib.request
 
-MAX_PTY = 256 * 1024
-MAX_REQUEST = 128 * 1024
-MAX_RESPONSE = 256 * 1024
-KEY = "fixture-generated-key-7f3a"
-MODEL = "gpt-5.6-mini"
+MAX_PTY, MAX_REQUEST, MAX_RESPONSE = 256 * 1024, 128 * 1024, 256 * 1024
+KEY, MODEL = "fixture-generated-key-7f3a", "gpt-5.6-mini"
 PROMPTS = ["native provider contract first", "native provider contract second"]
+HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 
-def digest(path):
+def sha256(path):
     h = hashlib.sha256()
     with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
+        for chunk in iter(lambda: f.read(65536), b""): h.update(chunk)
     return h.hexdigest()
 
-def checked_artifact(binary, build_json):
-    p = pathlib.Path(binary).resolve()
-    if not p.is_absolute() or not p.is_file(): raise RuntimeError("--binary must be an absolute file")
-    m = json.loads(pathlib.Path(build_json).read_text())
-    source = m.get("source_sha") or m.get("sourceSha") or m.get("git_sha")
-    expected = (m.get("binary_sha256") or m.get("binarySha256") or "").lower()
-    if not isinstance(source, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", source):
-        raise RuntimeError("build manifest lacks an attested 40-hex source SHA")
-    if not re.fullmatch(r"[0-9a-f]{64}", expected) or digest(p) != expected:
-        raise RuntimeError("installed binary does not match build manifest")
-    return p, source, expected
+def checked_artifact(raw_binary, raw_library, raw_manifest):
+    # Check the user-supplied spelling before resolve(); relative paths must not
+    # become acceptable merely because resolve() returns an absolute path.
+    for raw in (raw_binary, raw_library, raw_manifest):
+        if not pathlib.Path(raw).is_absolute(): raise RuntimeError("artifact paths must be absolute")
+    binary, library, manifest = map(lambda x: pathlib.Path(x).resolve(), (raw_binary, raw_library, raw_manifest))
+    if not binary.is_file() or not os.access(binary, os.R_OK | os.X_OK): raise RuntimeError("binary is not readable/executable")
+    if not library.is_file() or not os.access(library, os.R_OK) or library.suffix not in (".dylib", ".so"):
+        raise RuntimeError("native library must be a readable .dylib or .so")
+    data = json.loads(manifest.read_text())
+    source = data.get("source_sha") or data.get("sourceSha") or data.get("git_sha")
+    expected = (data.get("binary_sha256") or data.get("binarySha256") or "").lower()
+    if not isinstance(source, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", source): raise RuntimeError("missing source SHA attestation")
+    if not HEX64.fullmatch(expected) or sha256(binary) != expected: raise RuntimeError("binary SHA does not match build manifest")
+    library_expected = (data.get("native_library_sha256") or data.get("nativeLibrarySha256") or data.get("library_sha256") or data.get("librarySha256"))
+    if library_expected is not None and (not HEX64.fullmatch(str(library_expected)) or sha256(library) != str(library_expected).lower()):
+        raise RuntimeError("native library SHA does not match build manifest")
+    return binary, library, source, expected, sha256(library)
 
 class State:
-    def __init__(self): self.requests = []; self.error = None
+    def __init__(self): self.requests, self.error = [], None
     def body(self, headers, raw):
-        if len(raw) > MAX_REQUEST: raise RuntimeError("provider request exceeded 128 KiB")
-        if headers.get("Authorization") != "Bearer " + KEY: raise RuntimeError("wrong provider authorization")
+        if len(self.requests) >= 2: raise RuntimeError("third provider request is forbidden")
+        if len(raw) > MAX_REQUEST: raise RuntimeError("request exceeded 128 KiB")
+        if headers.get("Authorization") != "Bearer " + KEY: raise RuntimeError("wrong fixture authorization")
         value = json.loads(raw)
-        if value.get("model") != MODEL: raise RuntimeError("chosen non-default model did not reach provider")
-        users = [x.get("content") for x in value.get("input", []) if x.get("role") == "user"]
-        expected = PROMPTS[:len(self.requests) + 1]
-        if users != expected: raise RuntimeError("request history did not survive selection/restart")
+        inputs = value.get("input")
+        if not isinstance(inputs, list) or any(not isinstance(x, dict) for x in inputs): raise RuntimeError("input is not a list of objects")
+        if value.get("model") != MODEL: raise RuntimeError("non-default model was not selected")
+        users = [x.get("content") for x in inputs if x.get("role") == "user"]
+        expected_users = PROMPTS[:len(self.requests) + 1]
+        expected_assistants = [] if not self.requests else ["G2 first response"]
+        assistants = [x.get("content") for x in inputs if x.get("role") == "assistant"]
+        if users != expected_users or assistants != expected_assistants: raise RuntimeError("settled history is not durable")
         self.requests.append(value)
         text = "G2 first response" if len(self.requests) == 1 else "G2 resumed response"
-        out = ('event: response.output_text.delta\ndata: ' + json.dumps({'delta': text}) +
-               '\n\nevent: response.completed\ndata: {"type":"response.completed"}\n\n').encode()
-        if len(out) > MAX_RESPONSE: raise RuntimeError("provider response exceeded 256 KiB")
+        out = ("event: response.output_text.delta\ndata: " + json.dumps({"type":"response.output_text.delta","delta":text}) +
+               "\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n").encode()
+        if len(out) > MAX_RESPONSE: raise RuntimeError("response exceeded 256 KiB")
         return out
 
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -56,94 +65,153 @@ class Handler(http.server.BaseHTTPRequestHandler):
         try:
             if self.path != "/v1/responses": raise RuntimeError("unexpected provider endpoint")
             n = int(self.headers.get("Content-Length", "-1"))
-            if n < 0 or n > MAX_REQUEST: raise RuntimeError("invalid request length")
+            if n < 0 or n > MAX_REQUEST: raise RuntimeError("invalid content length")
             raw = self.rfile.read(n)
-            if len(raw) != n: raise RuntimeError("truncated provider request")
+            if len(raw) != n: raise RuntimeError("truncated request")
             out = self.server.state.body(self.headers, raw)
             self.send_response(200); self.send_header("Content-Type", "text/event-stream")
-            self.send_header("Content-Length", str(len(out))); self.end_headers(); self.wfile.write(out)
-        except Exception as e:
-            self.server.state.error = str(e); self.send_error(500, str(e))
+            self.send_header("Content-Length", str(len(out))); self.send_header("Connection", "close"); self.end_headers(); self.wfile.write(out)
+        except Exception as exc:
+            self.server.state.error = str(exc); self.send_error(500, str(exc))
     def log_message(self, *_): pass
 
-def frame(server, models):
-    return {"openai": {"name": "OpenAI loopback", "models": {
-        "gpt-5.6": {"name": "Default fixture", "limit": {"context": 200000}},
-        MODEL: {"name": "Non-default fixture", "limit": {"context": 200000}}}}}
+class Fixture(http.server.HTTPServer):
+    allow_reuse_address = True
+    def get_request(self):
+        conn, addr = super().get_request(); conn.settimeout(5); return conn, addr
 
-def read_until(fd, deadline, buf, needle=None):
+def models_json():
+    return {"openai":{"name":"OpenAI loopback","models":{"gpt-5.6":{"name":"Default fixture","limit":{"context":200000}}, MODEL:{"name":"Non-default fixture","limit":{"context":200000}}}}}
+
+def free_loopback_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]; sock.close()
+    return port
+
+def read_until(fd, deadline, buf, needle):
+    start = len(buf)
     while time.monotonic() < deadline and len(buf) < MAX_PTY:
-        ready, _, _ = select.select([fd], [], [], min(.1, deadline-time.monotonic()))
+        ready, _, _ = select.select([fd], [], [], min(.1, max(0, deadline-time.monotonic())))
         if not ready: continue
         try: chunk = os.read(fd, min(65536, MAX_PTY-len(buf)))
-        except OSError: return
-        if not chunk: return
+        except OSError as exc: raise AssertionError("PTY read failed before marker: %s" % exc)
+        if not chunk: raise AssertionError("PTY EOF before marker %r" % needle)
         buf.extend(chunk)
-        if needle and needle in bytes(buf): return
-    if needle and needle not in bytes(buf): raise AssertionError("native frame timeout: %r" % needle)
+        if needle.casefold() in bytes(buf[start:]).casefold(): return
+    if len(buf) >= MAX_PTY: raise AssertionError("PTY capture bound reached before marker %r" % needle)
+    raise AssertionError("PTY timeout before fresh marker %r" % needle)
 
-def run_ui(exe, env, root, first):
-    master, slave = pty.openpty(); out = bytearray()
+def descriptor(data_root, port, child, deadline):
+    path = data_root / "runtime" / "backend.json"
+    while time.monotonic() < deadline:
+        if child.poll() is not None: raise RuntimeError("native process exited before daemon descriptor")
+        try:
+            d = json.loads(path.read_text()); origin = d.get("http_origin", "")
+            daemon_pid = d.get("pid")
+            if isinstance(daemon_pid, int) and daemon_pid > 1 and origin == "http://127.0.0.1:%d" % port and HEX64.fullmatch(d.get("auth_token", "")):
+                req = urllib.request.Request("http://127.0.0.1:%d/api/models?limit=20" % port, headers={"Authorization":"Bearer "+d["auth_token"]})
+                with urllib.request.urlopen(req, timeout=2) as r:
+                    value = json.loads(r.read(MAX_RESPONSE)); ids = str(value)
+                    if r.status == 200 and "gpt-5.6" in ids and MODEL in ids:
+                        d["_validated_pid"] = daemon_pid
+                        return d
+        except (OSError, ValueError, urllib.error.URLError): pass
+        time.sleep(.03)
+    raise RuntimeError("owned authenticated daemon/models readiness failed")
+
+def stop_owned_daemon(descriptor_value):
+    pid = descriptor_value.get("_validated_pid")
+    if not isinstance(pid, int) or pid <= 1: raise RuntimeError("refusing to signal unvalidated daemon PID")
     try:
-        child = subprocess.Popen([str(exe)], cwd=root / "project", env=env, stdin=slave,
-                                 stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
+        os.kill(pid, 0)
+        os.kill(pid, signal.SIGTERM)
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline:
+            try: os.kill(pid, 0)
+            except ProcessLookupError: return
+            time.sleep(.05)
+        os.kill(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        return
+
+def run_ui(exe, env, root, first, captures, daemon_port):
+    master, slave = pty.openpty(); child = None; buf = bytearray()
+    try:
+        child = subprocess.Popen([str(exe), "--data-dir", str(root/"d")], cwd=root/"project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
         os.close(slave); slave = None
-        def cmd(value, marker, timeout=15):
-            os.write(master, value.encode() + b"\r"); read_until(master, time.monotonic()+timeout, out, marker)
-        read_until(master, time.monotonic()+15, out, b"OpenCode")
+        descriptor_value = descriptor(root/"d", daemon_port, child, time.monotonic()+20)
+        read_until(master, time.monotonic()+20, buf, b"OpenCode")
+        def cmd(text, marker):
+            start = len(buf); os.write(master, text.encode()+b"\r"); read_until(master, time.monotonic()+20, buf, marker)
+            return bytes(buf[start:])
         if first:
             cmd("/connect", b"provider")
-            cmd("openai", b"API")
-            before = len(out); cmd(KEY, b"model")
-            recent = bytes(out)[before:]
-            if KEY.encode() in recent: raise AssertionError("API key was echoed in PTY")
+            cmd("openai", b"API key")
+            cmd(KEY, b"model")
+            if KEY.encode() in bytes(buf): raise AssertionError("fixture API key echoed anywhere in PTY")
             cmd(MODEL, MODEL.encode())
-        cmd(PROMPTS[0 if first else 1], b"G2 ")
-        time.sleep(.2)
-        if child.poll() is not None: raise AssertionError("native process exited during turn")
-        if not first and PROMPTS[0].encode() not in bytes(out): raise AssertionError("history absent after restart")
+        response = cmd(PROMPTS[0 if first else 1], b"G2 first response" if first else b"G2 resumed response")
+        if first and b"G2 first response" not in response: raise AssertionError("first response did not settle")
+        if not first and PROMPTS[0].encode() not in bytes(buf): raise AssertionError("prior prompt absent after restart")
+        captures.extend(buf)
         os.write(master, b"\x03"); child.wait(timeout=10)
-        if child.returncode != 0: raise AssertionError("native exit failed: %s" % child.returncode)
-        return bytes(out)
+        if child.returncode != 0: raise AssertionError("native process exited %s" % child.returncode)
+        return descriptor_value
     finally:
-        try: os.close(slave)
-        except (OSError, TypeError): pass
-        try:
-            if 'child' in locals() and child.poll() is None:
-                os.killpg(child.pid, signal.SIGTERM); child.wait(timeout=3)
-        except (OSError, subprocess.TimeoutExpired): pass
-        try: os.close(master)
-        except OSError: pass
+        captures.extend(buf)
+        if child is not None and child.poll() is None:
+            try: os.killpg(child.pid, signal.SIGTERM); child.wait(timeout=3)
+            except subprocess.TimeoutExpired: os.killpg(child.pid, signal.SIGKILL); child.wait(timeout=3)
+        for fd in (slave, master):
+            if fd is not None:
+                try: os.close(fd)
+                except OSError: pass
+
+def self_check():
+    state = State(); good = {"Authorization":"Bearer "+KEY}
+    for i, prompt in enumerate(PROMPTS):
+        inp = [{"role":"user","content":PROMPTS[0]}, *([] if i == 0 else [{"role":"assistant","content":"G2 first response"},{"role":"user","content":prompt}])]
+        out = state.body(good, json.dumps({"model":MODEL,"input":inp}).encode())
+        assert b"response.output_text.delta" in out and b"response.completed" in out
+    try: state.body(good, json.dumps({"model":MODEL,"input":[]}).encode()); raise AssertionError("third request accepted")
+    except RuntimeError: pass
+    try: State().body({"Authorization":"Bearer wrong"}, b'{"model":"'+MODEL.encode()+b'","input":[]}'); raise AssertionError("wrong key accepted")
+    except RuntimeError: pass
+    print("self-check: auth, model, bounded count, history, and SSE framing passed")
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--binary", required=True); ap.add_argument("--native-library", required=True)
-    ap.add_argument("--build-json", required=True); ap.add_argument("--artifact-dir", required=True)
-    a = ap.parse_args(); binary, source, binary_sha = checked_artifact(a.binary, a.build_json)
-    lib = pathlib.Path(a.native_library).resolve()
-    if not lib.is_file() or lib.suffix not in (".dylib", ".so"): raise RuntimeError("invalid native library")
-    artifacts = pathlib.Path(a.artifact_dir).resolve(); artifacts.mkdir(parents=True, exist_ok=True)
-    root = pathlib.Path(tempfile.mkdtemp(prefix="g2-native-provider-")); install = root/"install"; (install/"bin").mkdir(parents=True); (install/"lib").mkdir()
-    exe = install/"bin"/"oc2"; shutil.copyfile(binary, exe); shutil.copyfile(lib, install/"lib"/lib.name); os.chmod(exe, 0o755)
-    for name in ("home", "data", "project", "models"): (root/name).mkdir()
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler); server.state = State()
-    import threading; thread = threading.Thread(target=server.serve_forever, daemon=True); thread.start()
-    models = root/"models"/"models.json"; models.write_text(json.dumps(frame(server, models)))
-    env = {"HOME": str(root/"home"), "XDG_CONFIG_HOME": str(root/"home"/".config"), "XDG_DATA_HOME": str(root/"data"),
-           "XDG_RUNTIME_DIR": str(root/"data"/"runtime"), "OPENCODE_PROJECT_DIR": str(root/"project"), "PATH": "/usr/bin:/bin", "TERM": "xterm-256color",
-           "OPENCODE_MODELS_PATH": str(models), "OPENAI_BASE_URL": "http://127.0.0.1:%d/v1" % server.server_port}
-    (root/"home"/".config").mkdir(); (root/"data"/"runtime").mkdir()
+    ap=argparse.ArgumentParser(); ap.add_argument("--binary"); ap.add_argument("--native-library"); ap.add_argument("--build-json"); ap.add_argument("--artifact-dir", required=True); ap.add_argument("--self-check", action="store_true"); a=ap.parse_args()
+    if a.self_check: self_check(); return
+    if not all((a.binary,a.native_library,a.build_json)): ap.error("actual run requires --binary --native-library --build-json")
+    binary, library, source, binary_sha, library_sha = checked_artifact(a.binary,a.native_library,a.build_json)
+    artifacts=pathlib.Path(a.artifact_dir)
+    if not artifacts.is_absolute(): raise RuntimeError("artifact directory must be absolute")
+    artifacts=artifacts.resolve(); artifacts.mkdir(parents=True,exist_ok=True)
+    root=pathlib.Path(tempfile.mkdtemp(prefix="g2-native-provider-", dir=os.environ.get("TMPDIR","/tmp"))); install=root/"install"; (install/"bin").mkdir(parents=True); (install/"lib").mkdir(); shutil.copyfile(binary,install/"bin"/"oc2"); shutil.copyfile(library,install/"lib"/"libopentui"+library.suffix); os.chmod(install/"bin"/"oc2",0o755)
+    for n in ("home","project","data","d"): (root/n).mkdir()
+    data=root/"d"; (data/"runtime").mkdir(); (data/"catalog").mkdir()
+    if len(str(data/"runtime"/"opencode-rk.sock").encode())>100: raise RuntimeError("runtime socket path exceeds 100 bytes")
+    catalog=data/"catalog"/"models.dev.api.json"; catalog.write_text(json.dumps(models_json()))
+    fixture=Fixture(("127.0.0.1",0),Handler); fixture.state=State(); import threading; thread=threading.Thread(target=fixture.serve_forever); thread.start(); captures=bytearray(); descriptor_info=None
+    provider_port=fixture.server_port; daemon_port=free_loopback_port()
+    env={"HOME":str(root/"home"),"XDG_CONFIG_HOME":str(root/"home"/".config"),"XDG_DATA_HOME":str(data),"XDG_RUNTIME_DIR":str(data/"runtime"),"OPENCODE_RK_HOME":str(data),"OPENCODE_RK_DAEMON_ADDR":"127.0.0.1:%d"%daemon_port,"OPENCODE_PROJECT_DIR":str(root/"project"),"PATH":"/usr/bin:/bin","TERM":"xterm-256color","OPENAI_BASE_URL":"http://127.0.0.1:%d/v1"%provider_port}
+    (root/"home"/".config").mkdir(); failed=False
     try:
-        run_ui(exe, env, root, True)
-        auth = root/"data"/"opencode"/"auth.json"
-        if not auth.is_file() or (auth.stat().st_mode & 0o777) != 0o600: raise AssertionError("UI did not create 0600 auth.json")
-        saved = json.loads(auth.read_text()).get("openai", {})
-        if saved.get("type") != "api" or saved.get("key") != KEY: raise AssertionError("wrong persisted API auth")
-        run_ui(exe, env, root, False)
-        if server.state.error: raise AssertionError(server.state.error)
-        if len(server.state.requests) != 2: raise AssertionError("expected two actual provider requests")
-        (artifacts/"native-provider-evidence.json").write_text(json.dumps({"source_sha":source,"binary_sha256":binary_sha,"model":MODEL,"requests":[{"model":x.get("model"),"input":x.get("input")} for x in server.state.requests]}, indent=2)+"\n")
+        first_descriptor=run_ui(install/"bin"/"oc2",env,root,True,captures,daemon_port); descriptor_info={"pid":first_descriptor["_validated_pid"],"port":daemon_port,"origin":first_descriptor["http_origin"]}; auth=data/"opencode"/"auth.json"
+        if not auth.is_file() or auth.stat().st_mode&0o777!=0o600: raise AssertionError("UI did not create 0600 auth.json")
+        saved=json.loads(auth.read_text()).get("openai",{}); assert saved.get("type")=="api" and saved.get("key")==KEY
+        stop_owned_daemon(first_descriptor)
+        run_ui(install/"bin"/"oc2",env,root,False,captures,daemon_port)
+        if fixture.state.error or len(fixture.state.requests)!=2: raise AssertionError(fixture.state.error or "expected exactly two provider requests")
+        (artifacts/"native-provider-evidence.json").write_text(json.dumps({"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"model":MODEL,"request_count":2,"requests":[{"model":r.get("model"),"input":r.get("input")} for r in fixture.state.requests]},indent=2)+"\n")
+    except Exception: failed=True; raise
     finally:
-        server.shutdown(); server.server_close(); thread.join(timeout=2); shutil.rmtree(root, ignore_errors=True)
-
-if __name__ == "__main__": main()
+        if descriptor_info:
+            try: stop_owned_daemon({"_validated_pid":descriptor_info["pid"]})
+            except (OSError, RuntimeError): pass
+        evidence={"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"phase":"failed" if failed else "success","provider_requests":len(fixture.state.requests),"descriptor":descriptor_info,"ui_capture":bytes(captures).replace(KEY.encode(),b"[REDACTED]")[-MAX_PTY:].decode("utf-8","replace")}
+        (artifacts/"native-provider-result.json").write_text(json.dumps(evidence,indent=2)+"\n"); fixture.shutdown(); fixture.server_close(); thread.join(timeout=5)
+        if thread.is_alive(): raise RuntimeError("fixture server failed bounded shutdown")
+        if not failed: shutil.rmtree(root,ignore_errors=True)
+        else: print("preserved failure fixture:",root)
+if __name__=="__main__": main()
