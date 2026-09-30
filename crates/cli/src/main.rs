@@ -231,7 +231,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             let plan = app_start::plan_default_launch(&probe, presence, creds);
             match plan.mode {
                 app_start::LaunchMode::NativeTui => {
-                    if cli.native {
+                    if cli.native || cfg!(feature = "native") {
                         let args = TuiArgs {
                             once: cli.once,
                             origin: None,
@@ -242,7 +242,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             submit_keymap: None,
                             memory: vec![],
                         };
-                        tui_entry::run(args)?;
+                        tui_entry::run_with_dir(args, Some(&data))?;
                     } else {
                         chat::run(&data)?;
                     }

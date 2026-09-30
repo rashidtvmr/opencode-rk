@@ -15,13 +15,15 @@
 //! mode and degrades to an explicit offline banner interactively; live data is
 //! never fabricated.
 
+use crate::daemon_client;
 use clap::{Args, ValueEnum};
+#[cfg(feature = "native")]
+use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use opencode_rk_sessions::tui_state::{
     context_breakdown, footer_hints, keybinding_help, status_click, Composer, MemoryFile,
     MemoryViewer, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES,
     MAX_SOURCES,
 };
-use crate::daemon_client;
 use std::{
     env, fs,
     io::{BufRead, IsTerminal as _, Read, Write},
@@ -155,7 +157,12 @@ fn http_request(
         .map_err(|e| format!("daemon unreachable at {origin}: {e}"))?;
     let payload = body.unwrap_or("");
     let auth_line = auth
-        .map(|token| format!("Authorization: {}\r\n", crate::daemon_client::authorization_header(token)))
+        .map(|token| {
+            format!(
+                "Authorization: {}\r\n",
+                crate::daemon_client::authorization_header(token)
+            )
+        })
         .unwrap_or_default();
     let request = format!(
         "{method} {path} HTTP/1.1\r\nHost: {origin}\r\n{auth_line}Content-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{payload}",
@@ -370,11 +377,7 @@ fn status_hint(action: StatusAction) -> &'static str {
 
 /// Persist a submitted draft through the daemon. Returns the typed failure on
 /// any non-2xx/transport error; the caller keeps the local state machine.
-fn persist_submit(
-    snapshot: &LiveSnapshot,
-    text: &str,
-    auth: Option<&str>,
-) -> Result<(), String> {
+fn persist_submit(snapshot: &LiveSnapshot, text: &str, auth: Option<&str>) -> Result<(), String> {
     let payload = serde_json::json!({ "text": text }).to_string();
     http_request(
         &snapshot.origin,
@@ -444,6 +447,122 @@ fn interactive_loop(
     Ok(())
 }
 
+#[cfg(feature = "native")]
+fn native_size() -> (u32, u32) {
+    let cols = env::var("COLUMNS").ok().and_then(|v| v.parse().ok());
+    let rows = env::var("LINES").ok().and_then(|v| v.parse().ok());
+    match (cols, rows) {
+        (Some(c), Some(r)) if c > 0 && r > 0 => (c, r),
+        _ => (80, 24),
+    }
+}
+
+#[cfg(feature = "native")]
+fn native_paint(
+    renderer: &mut NativeRenderer,
+    lines: &[String],
+) -> Result<(), Box<dyn std::error::Error>> {
+    renderer.fill_rect(
+        0,
+        0,
+        renderer.cols(),
+        renderer.rows(),
+        Rgba::new(0, 0, 0, 255),
+    )?;
+    for (row, line) in lines.iter().enumerate().take(renderer.rows() as usize) {
+        renderer.draw_text(0, row as u32, line)?;
+    }
+    renderer.frame(|_| {})?;
+    Ok(())
+}
+
+#[cfg(feature = "native")]
+fn native_loop(
+    memory: &[MemoryFile],
+    live: Option<&LiveSnapshot>,
+    auth: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let (cols, rows) = native_size();
+    let mut renderer = NativeRenderer::create(cols, rows)?;
+    renderer.setup_terminal()?;
+    let _ = renderer.enable_kitty_keyboard(1);
+    let mut draft = String::new();
+    let mut transcript = Vec::new();
+    if !memory.is_empty() {
+        transcript.push(format!("memory: {} file(s) loaded", memory.len()));
+    }
+    let mut input = std::io::stdin();
+    let mut byte = [0u8; 1];
+    loop {
+        let mut lines = vec![
+            "OpenCode RK (native)".to_string(),
+            live.map(|s| format!("session: {} (live)", s.title))
+                .unwrap_or_else(|| "daemon: offline".to_string()),
+        ];
+        lines.extend(transcript.iter().cloned());
+        lines.push(format!("> {draft}"));
+        native_paint(&mut renderer, &lines)?;
+        if input.read(&mut byte)? == 0 {
+            break;
+        }
+        match byte[0] {
+            3 | 4 => break,
+            8 | 127 => {
+                draft.pop();
+            }
+            b'\r' | b'\n' => {
+                let text = draft.trim().to_owned();
+                if text == ":q" || text == ":quit" || text == "/exit" || text == "/quit" {
+                    break;
+                }
+                if !text.is_empty() {
+                    transcript.push(format!("you: {text}"));
+                    if let Some(snapshot) = live {
+                        match execute_turn(snapshot, &text, auth) {
+                            Ok(reply) => transcript.push(format!("assistant: {reply}")),
+                            Err(error) => transcript.push(format!("error: {error}")),
+                        }
+                    } else {
+                        transcript.push("offline: turn not executed".to_string());
+                    }
+                    if transcript.len() > 500 {
+                        transcript.drain(..transcript.len() - 500);
+                    }
+                }
+                draft.clear();
+            }
+            b if b >= 0x20 && b != b'\t' => draft.push(char::from(b)),
+            _ => {}
+        }
+    }
+    let _ = renderer.disable_kitty_keyboard();
+    let _ = renderer.restore_terminal_modes();
+    renderer.close();
+    Ok(())
+}
+
+#[cfg(feature = "native")]
+fn execute_turn(snapshot: &LiveSnapshot, text: &str, auth: Option<&str>) -> Result<String, String> {
+    let body =
+        serde_json::json!({"text": text, "model": "openai/gpt-5.6", "reasoning_effort": "high"})
+            .to_string();
+    let response = http_request(
+        &snapshot.origin,
+        "POST",
+        &format!("/api/sessions/{}/turns", snapshot.session_id),
+        Some(&body),
+        auth,
+    )?;
+    let value: serde_json::Value = serde_json::from_str(&response).map_err(|e| e.to_string())?;
+    value
+        .get("assistant_message")
+        .and_then(|m| m.get("body"))
+        .and_then(|b| b.get("text"))
+        .and_then(|v| v.as_str())
+        .map(str::to_owned)
+        .ok_or_else(|| "turn response missing assistant text".to_string())
+}
+
 /// Follow mode: poll the bound session, re-render only on change, stop after
 /// `follow_for` seconds when bounded. Every poll is a fresh bounded fetch;
 /// nothing accumulates between polls. Poll errors degrade to an offline line
@@ -503,9 +622,23 @@ pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
 /// global `--data-dir` resolved in `main.rs`). `None` falls back to
 /// [`resolve_cli_data_dir`] exactly as before.
 pub fn run_with_dir(
-    args: TuiArgs,
+    mut args: TuiArgs,
     data_dir: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // A no-origin TUI invocation is still a real client: acquire the same
+    // singleton lease as default chat, then bind the live snapshot to its
+    // published authenticated origin.  DaemonLease's Drop owns cleanup only
+    // for a child spawned by this invocation.
+    let _daemon_lease = if args.origin.is_none() {
+        data_dir.map(crate::chat::prepare_daemon)
+    } else {
+        None
+    };
+    if args.origin.is_none() && !args.once && !args.follow {
+        if let Some(lease) = _daemon_lease.as_ref() {
+            args.origin = lease.origin.clone();
+        }
+    }
     let keymap = resolve_keymap(args.submit_keymap)
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let memory = load_memory(&args.memory);
@@ -531,7 +664,14 @@ pub fn run_with_dir(
                     print!("{}", print_native_or_legacy(&frame));
                     return Ok(());
                 }
-                return interactive_loop(keymap, &memory, Some(&snapshot), auth);
+                #[cfg(feature = "native")]
+                {
+                    return native_loop(&memory, Some(&snapshot), auth);
+                }
+                #[cfg(not(feature = "native"))]
+                {
+                    return interactive_loop(keymap, &memory, Some(&snapshot), auth);
+                }
             }
             Err(error) => {
                 // Fail closed in snapshot mode; degrade explicitly offline.
@@ -542,7 +682,10 @@ pub fn run_with_dir(
             }
         }
     } else if args.once {
-        print!("{}", print_native_or_legacy(&render_frame(keymap, &memory, "unset", None)));
+        print!(
+            "{}",
+            print_native_or_legacy(&render_frame(keymap, &memory, "unset", None))
+        );
         return Ok(());
     }
     if !std::io::stdin().is_terminal() {
@@ -551,10 +694,18 @@ pub fn run_with_dir(
         // empty only after poll) or hang scripts. `--once`/`--follow` are the
         // scriptable paths.
         return Err(
-            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY".into(),
+            "refusing interactive TUI on piped stdin: pass --once, --follow, or run on a TTY"
+                .into(),
         );
     }
-    interactive_loop(keymap, &memory, None, auth)
+    #[cfg(feature = "native")]
+    {
+        native_loop(&memory, None, auth)
+    }
+    #[cfg(not(feature = "native"))]
+    {
+        interactive_loop(keymap, &memory, None, auth)
+    }
 }
 
 /// Resolve the raw bearer token for `--origin` from the validated backend
@@ -571,8 +722,7 @@ fn resolve_origin_bearer(origin: Option<&str>, data_dir: Option<&Path>) -> Optio
             &owned
         }
     };
-    let descriptor =
-        opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
+    let descriptor = opencode_rk_server::daemon::read_backend_descriptor(data).ok()??;
     if descriptor.http_origin != origin {
         return None;
     }
