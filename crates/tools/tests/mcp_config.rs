@@ -130,7 +130,7 @@ fn config_schema_env_count_bounds() {
 fn config_schema_env_bytes_bounds() {
     let big_val = " ".repeat(200);
     let many_env: HashMap<String, String> =
-        (0..=5).map(|i| (format!("VAR"), big_val.clone())).collect();
+        (0..=5).map(|_| (format!("VAR"), big_val.clone())).collect();
     let cfg = json!({
         "command": "/bin/echo",
         "env": many_env,
