@@ -929,3 +929,24 @@ and `v2-storage-integrated-ed6e787-_y6n1zov` under the approved artifact parent.
 The recorded offline-cache and missing-installed-fixture failures are preserved
 and classified; neither was promoted to GREEN. Normal push through reviewed
 canonical `9c8829019b750df6a4cb4e79d6be82bfa83e4dd8` succeeded without force.
+
+### Formatting accepted; workspace gates advance to actual failures
+
+Mechanical candidate `b046ca453a5e3edbe5b30bf53ccc42be9d04c074`, base
+`ed6e787`, was independently compared against canonical rustfmt output for all
+778 tracked Rust paths. It changes 149 Rust paths; all are formatter-only and
+the protected native/auth/approval tests and lockfile stay byte-identical.
+After integration on exact **`f6e2d3b05c21f97c7224a333f177c60dfe210c0d`**, the
+workspace formatting gate passes. The installed native release still passes
+four-request stream/tool/restart and two-request onboarding. State **ACCEPTED
+for workspace formatting on exact `f6e2d3b`**. Full path manifest and evidence:
+`worklog/V2-WORKSPACE-FORMATTING-PATHS.json` and
+`worklog/V2-WORKSPACE-FORMATTING.md`.
+
+Fresh workspace Clippy then fails at 44 tools-library and six provider-library
+diagnostics. Fresh all-target/all-feature workspace tests compile and execute,
+then fail `t09_distinct_session_ids`: two back-to-back child spawn plans share
+the same clock-only session identity. These exact failures and return codes are
+retained at `v2-workspace-gates-f6e2d3b-20jfnwb5` under the approved artifact
+parent. Focused identity and provider maintenance candidates require independent
+verification before integration.

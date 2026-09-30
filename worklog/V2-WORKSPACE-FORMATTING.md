@@ -32,3 +32,34 @@ No Cargo build, test, clippy, Python product, PTY, Docker, browser, Node, or hea
 ## Handoff
 
 Candidate SHA: `3fb53b00859f09e2daf524da1a9a2b67a9e5e484`. This is a candidate only; independent verification and integration remain required. Exact changed paths and the manifest are the source of truth. Remaining observed failure: none in the permitted formatting gate; independent verification/integration remains required.
+
+## Exact integrated formatting acceptance
+
+Candidate `b046ca453a5e3edbe5b30bf53ccc42be9d04c074` was independently
+PREVERIFIED by formatting a clean Git archive of base `ed6e787` with the same
+unmodified rustfmt and comparing **all 778 tracked Rust paths byte-for-byte**
+against the candidate. Every path matched that formatter oracle; the 149 changed
+Rust paths and two new worklogs stay within the explicit grant. `Cargo.lock` and
+the frozen native, auth, expiry and retention controls remained byte-identical.
+Independent evidence: `v2-format-independent-g_7hm8cu` under the approved
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/` parent.
+
+Integrated SHA: **`f6e2d3b05c21f97c7224a333f177c60dfe210c0d`**. On this exact
+SHA, `cargo fmt --all -- --check` returned **0**. The native release was rebuilt,
+archived and actually installed; unchanged streaming/tool/restart and provider
+onboarding gates returned 0 with four and two requests. This establishes
+**ACCEPTED for the mechanical formatting gate on exact `f6e2d3b`**.
+
+The fresh full workspace commands reached these subsequent actual failures:
+
+```text
+cargo clippy --offline --locked --workspace --all-targets --all-features -- -D warnings
+  exit 101: 44 tools-library + 6 provider-library diagnostics
+cargo test --offline --locked --workspace --all-targets --all-features -- --test-threads=1
+  exit 101: t09_distinct_session_ids receives two identical clock-derived IDs
+```
+
+Actual commands, isolated environments, source/artifact/log hashes and results:
+`v2-workspace-gates-f6e2d3b-20jfnwb5` and
+`v2-native-workspace-integrated-f6e2d3b-5uld66ce`. Full workspace and release
+acceptance remain open; formatting does not supersede these observed failures.
