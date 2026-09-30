@@ -31,7 +31,10 @@ contains no Authorization header or key.
 
 ## Verification status
 
-Preparation only; no PTY/Cargo/build execution was performed. The helper-only
+Preparation only; no product PTY/Cargo/build execution was performed. The
+stdlib helper checks cover artifact path/profile and catalog validation, fresh
+marker matching including stale-buffer/EOF failure, bounded auth/model/count/
+history/SSE protocol, and capture redaction. The helper-only
 protocol check is:
 
 ```sh
