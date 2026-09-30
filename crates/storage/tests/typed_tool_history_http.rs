@@ -165,6 +165,51 @@ fn json_body(response: &[u8]) -> Value {
     serde_json::from_slice(&response[split + 4..]).unwrap()
 }
 
+fn provider_json(request: &[u8]) -> Value {
+    let split = request.windows(4).position(|w| w == b"\r\n\r\n").expect("provider request headers");
+    serde_json::from_slice(&request[split + 4..]).expect("provider request JSON")
+}
+
+fn assert_typed_pair(request: &[u8], call_id: &str, arguments: &str) {
+    let provider = provider_json(request);
+    let input = provider.get("input").and_then(Value::as_array).expect("provider input array");
+    let call = input.iter().position(|item| item.get("type").and_then(Value::as_str) == Some("function_call") && item.get("call_id").and_then(Value::as_str) == Some(call_id)).expect("typed function call");
+    let output = input.iter().position(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output") && item.get("call_id").and_then(Value::as_str) == Some(call_id)).expect("typed function output");
+    assert!(call < output, "typed call precedes its output");
+    assert_eq!(input[call].get("name").and_then(Value::as_str), Some("write"));
+    assert_eq!(input[call].get("arguments").and_then(Value::as_str), Some(arguments));
+    assert_eq!(input[output].get("output").and_then(Value::as_str), Some("write success"));
+    assert_eq!(input.iter().filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call") && item.get("call_id").and_then(Value::as_str) == Some(call_id)).count(), 1);
+    assert_eq!(input.iter().filter(|item| item.get("type").and_then(Value::as_str) == Some("function_call_output") && item.get("call_id").and_then(Value::as_str) == Some(call_id)).count(), 1);
+}
+
+fn decoded_chunked_body(response: &[u8]) -> Vec<u8> {
+    let header_end = response.windows(4).position(|w| w == b"\r\n\r\n").expect("HTTP headers");
+    let headers = String::from_utf8_lossy(&response[..header_end]);
+    let wire = &response[header_end + 4..];
+    if !headers.lines().any(|line| line.split_once(':').is_some_and(|(name, value)|
+        name.eq_ignore_ascii_case("transfer-encoding") && value.split(',').any(|coding| coding.trim().eq_ignore_ascii_case("chunked")))) {
+        return wire.to_vec();
+    }
+    let mut decoded = Vec::new();
+    let mut cursor = 0usize;
+    loop {
+        let line_end = wire.get(cursor..).and_then(|rest| rest.windows(2).position(|w| w == b"\r\n"))
+            .map(|end| cursor + end).expect("chunk size CRLF");
+        let size = usize::from_str_radix(std::str::from_utf8(&wire[cursor..line_end]).expect("chunk size UTF-8").trim(), 16)
+            .expect("chunk size");
+        cursor = line_end + 2;
+        if size == 0 { break; }
+        let end = cursor.checked_add(size).expect("chunk length overflow");
+        assert!(end + 2 <= wire.len(), "truncated HTTP chunk");
+        decoded.extend_from_slice(&wire[cursor..end]);
+        assert_eq!(&wire[end..end + 2], b"\r\n", "chunk terminator");
+        cursor = end + 2;
+        assert!(decoded.len() <= LIMIT, "decoded HTTP body exceeded bound");
+    }
+    decoded
+}
+
 fn find_state_db(root: &Path) -> PathBuf {
     // The installed daemon owns this data root; do not inspect any host DB.
     for candidate in [root.join("state.db"), root.join("runtime/state.db"), root.join("data/state.db")] {
@@ -179,11 +224,13 @@ fn installed_http_tool_writer_preserves_typed_round_and_rolls_back_failed_pair()
     let home = TempDir::new().unwrap();
     let project = home.path().join("project");
     std::fs::create_dir_all(&project).unwrap();
+    let project = std::fs::canonicalize(&project).expect("canonical disposable project");
     let target = project.join("typed-output.txt");
     let args = json!({"path":target,"content":"fixture\u{0}unicode"}).to_string();
     let first = provider_round(&[("call-α", "write", &args)], "first-output");
     let first_followup = provider_round(&[], "followup-output");
-    let fault_args = json!({"path":target,"content":"fault"}).to_string();
+    let fault_target = project.join("fault-output.txt");
+    let fault_args = json!({"path":fault_target,"content":"fault"}).to_string();
     let second = provider_round(&[("fault-call", "write", &fault_args)], "fault-output");
     let (provider, requests, _provider_guard) = spawn_provider(vec![first, first_followup, second]);
     let child = Command::new(binary)
@@ -210,6 +257,8 @@ fn installed_http_tool_writer_preserves_typed_round_and_rolls_back_failed_pair()
     assert_eq!(status, 201, "turn failed: {}", String::from_utf8_lossy(&response));
     let provider_request = requests.recv_timeout(DEADLINE).expect("real provider request");
     assert!(!provider_request.is_empty(), "initial provider request was not captured");
+    let first_followup_request = requests.recv_timeout(DEADLINE).expect("first turn provider continuation");
+    assert_typed_pair(&first_followup_request, "call-α", &args);
 
     let db = find_state_db(home.path());
     let connection = Connection::open(db).unwrap();
@@ -229,15 +278,23 @@ fn installed_http_tool_writer_preserves_typed_round_and_rolls_back_failed_pair()
         |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?))).unwrap();
     assert_eq!(output_id, "call-α");
     assert_eq!(output_name, "write");
-    assert!(output_payload.contains("fixture"), "delivered write output was not retained exactly: {output_payload:?}");
+    assert_eq!(output_payload, "write success", "delivered write output must not disclose path/content");
     assert_eq!(output_len, output_payload.len() as i64);
     let count: i64 = connection.query_row("SELECT count(*) FROM typed_tool_records", [], |row| row.get(0)).unwrap();
     let first_tool_messages: i64 = connection.query_row("SELECT count(*) FROM messages WHERE role='tool'", [], |row| row.get(0)).unwrap();
     assert_eq!(first_tool_messages, 1, "first typed pair must retain its ordinary Tool message");
 
     connection.execute_batch("CREATE TRIGGER db022_abort BEFORE INSERT ON typed_tool_records BEGIN SELECT RAISE(ABORT, 'DB-022 fixture fault'); END;").unwrap();
-    let (failed_status, _) = request(&origin, &token, "POST", &format!("/api/sessions/{session}/turns/stream"), body);
-    assert_ne!(failed_status, 201, "faulted typed write must fail closed");
+    let (failed_status, failed_response) = request(&origin, &token, "POST", &format!("/api/sessions/{session}/turns/stream"), body);
+    assert_eq!(failed_status, 201, "streaming late persistence faults retain committed HTTP status");
+    let failed_body = decoded_chunked_body(&failed_response);
+    assert!(!failed_body.is_empty() && failed_body.ends_with(b"\n"), "faulted stream must contain complete NDJSON records");
+    let events: Vec<Value> = failed_body[..failed_body.len() - 1].split(|byte| *byte == b'\n')
+        .map(|line| serde_json::from_slice(line).expect("faulted stream contains valid NDJSON")).collect();
+    let error_event = events.last().expect("faulted stream terminal error event");
+    assert_eq!(error_event.get("type").and_then(Value::as_str), Some("error"));
+    assert_eq!(error_event.get("code").and_then(Value::as_str), Some("internal_error"));
+    assert!(error_event.get("message").and_then(Value::as_str).is_some_and(|message| !message.is_empty()));
     let after: i64 = connection.query_row("SELECT count(*) FROM typed_tool_records", [], |row| row.get(0)).unwrap();
     assert_eq!(after, count, "failed pair leaked typed rows");
     let second_request = requests.recv_timeout(DEADLINE).expect("faulted turn's initial provider request");
@@ -245,4 +302,5 @@ fn installed_http_tool_writer_preserves_typed_round_and_rolls_back_failed_pair()
     assert!(requests.try_recv().is_err(), "provider received a request after the deterministic fault request");
     let second_tool_messages: i64 = connection.query_row("SELECT count(*) FROM messages WHERE role='tool'", [], |row| row.get(0)).unwrap();
     assert_eq!(second_tool_messages, first_tool_messages, "failed pair leaked ordinary Tool message");
+    assert!(!fault_target.exists(), "failed pair produced a file side effect");
 }
