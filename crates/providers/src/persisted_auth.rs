@@ -107,6 +107,15 @@ pub async fn save_api_key(
             object.remove(&provider);
         }
         object.remove(&format!("{normalized}/"));
+        // An update of one account must not silently discard another account
+        // merely because that credential exceeds this port's resource bounds.
+        // The explicitly replaced target may be repaired with the new key.
+        if object
+            .iter()
+            .any(|(id, entry)| id != &normalized && !preserved_api_entry_in_bounds(entry))
+        {
+            return Err("existing credential exceeds size limit".to_owned());
+        }
         if object.len() >= MAX_AUTH_ENTRIES && !object.contains_key(&normalized) {
             return Err("auth entry limit exceeded".to_owned());
         }
@@ -247,6 +256,25 @@ fn valid_auth_entry(value: &Value) -> bool {
         Some("wellknown") => strings(&["key", "token"]),
         _ => false,
     }
+}
+
+fn preserved_api_entry_in_bounds(value: &Value) -> bool {
+    if value["type"].as_str() != Some("api") {
+        return true;
+    }
+    value["key"]
+        .as_str()
+        .is_some_and(|key| key.len() <= MAX_API_KEY_BYTES)
+        && value.get("metadata").is_none_or(|metadata| {
+            metadata.as_object().is_some_and(|items| {
+                items.len() <= 128
+                    && items.iter().fold(0usize, |total, (key, value)| {
+                        total
+                            .saturating_add(key.len())
+                            .saturating_add(value.as_str().map_or(MAX_AUTH_BYTES, str::len))
+                    }) <= MAX_API_KEY_BYTES
+            })
+        })
 }
 fn parse(bytes: &[u8], provider: &str) -> Option<String> {
     if bytes.len() > MAX_AUTH_BYTES {
