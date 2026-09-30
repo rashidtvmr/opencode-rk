@@ -19,6 +19,10 @@ Pinned upstream `/Users/mymac/Projects/opencode-upstream-reference/packages/open
 
 All fixtures use synthetic secrets, `env_clear`, disposable HOME/XDG/data/project directories, bounded readiness and I/O, a short Unix-socket root, and RAII child/provider cleanup. `OC2_TEST_BINARY` is mandatory.
 
+## Mechanical fixture correction
+
+The provider now restores accepted sockets to blocking mode before reading, parses bounded HTTP headers and `Content-Length` bodies without waiting for EOF, and enforces a one-request provider fixture. Daemon readiness installs an RAII child guard immediately after spawn, polls with a bounded sleep, and uses a fixed minimal executable PATH. The daemon response uses the same bounded framing parser. These are fixture-only corrections; all six semantic status and Authorization assertions remain unchanged.
+
 ## Verification status
 
-No Cargo/build/test command was run in this slot by instruction. Source-ready candidate hash is to be recorded after the owning commit. Parent must compile/run the focused installed-daemon gate with `TMPDIR=/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode` and `OC2_TEST_BINARY=/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-provider-auth-3de1d2f-w55m3k_u/bin/oc2`, then freeze the source hash and capture RED/GREEN results.
+No Cargo/build/test command was run in this slot by instruction. Parent must compile/run the focused installed-daemon gate with the approved short temporary root and installed candidate binary, using the server crate package (`-p opencode-rk-server --offline --locked`), then freeze the source hash and capture RED/GREEN results.
