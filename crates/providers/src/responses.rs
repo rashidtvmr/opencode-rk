@@ -455,6 +455,14 @@ pub struct OpenAiResponsesClient {
 }
 
 impl OpenAiResponsesClient {
+    pub async fn from_persisted_env() -> Result<Self, ResponsesError> {
+        let config = ProviderConfig::from_env("openai");
+        config.validate().map_err(ResponsesError::InvalidConfig)?;
+        let key = crate::persisted_auth::api_key("openai", &config.api_key_env).await
+            .ok_or_else(|| ResponsesError::MissingCredential(config.api_key_env.clone()))?;
+        Self::from_config(config, key)
+    }
+
     pub fn from_env() -> Result<Self, ResponsesError> {
         let config = ProviderConfig::from_env("openai");
         config.validate().map_err(ResponsesError::InvalidConfig)?;
@@ -462,6 +470,10 @@ impl OpenAiResponsesClient {
             .get_api_key()
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| ResponsesError::MissingCredential(config.api_key_env.clone()))?;
+        Self::from_config(config, api_key)
+    }
+
+    fn from_config(config: ProviderConfig, api_key: String) -> Result<Self, ResponsesError> {
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs.clamp(1, 300)))
             .redirect(Policy::none())

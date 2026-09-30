@@ -775,7 +775,7 @@ async fn create_turn(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
-    let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
+    let provider = OpenAiResponsesClient::from_persisted_env().await.map_err(provider_failure)?;
     let user_message = state
         .sessions
         .append_text(id, MessageRole::User, body.text)
@@ -807,6 +807,7 @@ async fn create_turn(
 }
 
 struct TurnStreamState {
+    client: OpenAiResponsesClient,
     provider: OpenAiResponsesStream,
     sessions: SessionService,
     session_id: SessionId,
@@ -966,7 +967,7 @@ async fn create_turn_stream(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
-    let provider = OpenAiResponsesClient::from_env().map_err(provider_failure)?;
+    let client = OpenAiResponsesClient::from_persisted_env().await.map_err(provider_failure)?;
     let user_message = state
         .sessions
         .append_text(id, MessageRole::User, body.text)
@@ -1004,13 +1005,15 @@ async fn create_turn_stream(
         .unwrap_or(MAX_TURN_STEPS);
     let history_items = input;
 
-    let provider = provider
+    let provider = client
+        .clone()
         .stream_with_tools(model_id, &body.reasoning_effort, &history_items, &tools)
         .await
         .map_err(provider_failure)?;
 
     let stream = stream::unfold(
         TurnStreamState {
+            client,
             provider,
             sessions: state.sessions,
             session_id: id,
@@ -1392,15 +1395,7 @@ async fn create_turn_stream(
                             }
                         };
                         state.history_items = history_items;
-                        let client = match OpenAiResponsesClient::from_env() {
-                            Ok(client) => client,
-                            Err(error) => {
-                                state.stage = TurnStreamStage::Done;
-                                let failure = provider_failure(error);
-                                return Some((Ok::<Bytes, Infallible>(stream_error(failure.code, failure.message)), state));
-                            }
-                        };
-                        match client
+                        match state.client
                             .stream_with_tools(
                                 &state.model,
                                 &state.reasoning_effort,

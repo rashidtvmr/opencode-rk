@@ -49,6 +49,7 @@ pub mod refresh_gate;
 pub mod registry;
 pub mod request_profile;
 pub mod responses;
+pub mod persisted_auth;
 pub mod retry;
 pub mod route_compose;
 pub mod router;
