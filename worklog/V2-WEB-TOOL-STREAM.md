@@ -20,4 +20,4 @@
 
 ## Remaining
 
-This is a **PREVERIFIED candidate**, not `ACCEPTED`: integration, full G6 queue, and real-browser daemon verification remain with the main/integrator lane.
+This is a **CANDIDATE awaiting independent verification**, not `PREVERIFIED` or `ACCEPTED`: integration, full G6 queue, and real-browser daemon verification remain with the main/integrator lane.
