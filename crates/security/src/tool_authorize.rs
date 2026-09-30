@@ -64,7 +64,7 @@ pub fn shell_intent(command: &str, cwd: &Path) -> OperationIntent {
     OperationIntent::Process {
         program: "bash".to_owned(),
         args: vec!["-c".to_owned(), command.to_owned()],
-        cwd: cwd.clone(),
+        cwd: cwd.to_path_buf(),
     }
 }
 
@@ -74,7 +74,7 @@ pub fn argv_intent(program: &str, args: &[String], cwd: &Path) -> OperationInten
     OperationIntent::Process {
         program: program.to_owned(),
         args: args.to_vec(),
-        cwd: cwd.clone(),
+        cwd: cwd.to_path_buf(),
     }
 }
 
@@ -315,7 +315,7 @@ pub fn redact_secrets(text: &str) -> String {
 pub fn file_write_intent(path: &Path) -> OperationIntent {
     OperationIntent::File {
         action: FileAction::Write,
-        path: path.clone(),
+        path: path.to_path_buf(),
     }
 }
 

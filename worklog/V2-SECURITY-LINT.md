@@ -14,6 +14,7 @@ with `to_path_buf` at the owned-value boundary.
 
 The initial formatting command accidentally touched unowned workspace files;
 those paths were immediately restored before handoff and are not part of the
-candidate commit. No Cargo verification was run after the candidate commit in
-this worker report; the parent must independently run the bounded Clippy and
-security-library test commands using the captured baseline diagnostics.
+candidate commit. An initial bounded verification attempt exposed the
+mechanical `&Path` conversion omissions in the three helper bodies; those are
+corrected in the follow-up candidate. Parent must independently rerun the
+bounded Clippy and security-library test commands.
