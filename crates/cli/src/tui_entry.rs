@@ -537,8 +537,26 @@ fn native_loop(
             append_transcript(&mut transcript, line.clone());
         }
     }
-    let mut input = std::io::stdin();
-    let mut byte = [0u8; 1];
+    let input = std::io::stdin();
+    let (input_tx, input_rx) = std::sync::mpsc::sync_channel::<Option<u8>>(64);
+    let input_task = tokio::runtime::Handle::current().spawn_blocking(move || {
+        let mut input = input;
+        let mut byte = [0u8; 1];
+        loop {
+            match input.read(&mut byte) {
+                Ok(0) => {
+                    let _ = input_tx.send(None);
+                    break;
+                }
+                Ok(_) if input_tx.send(Some(byte[0])).is_err() => break,
+                Err(_) => {
+                    let _ = input_tx.send(None);
+                    break;
+                }
+                _ => {}
+            }
+        }
+    });
     loop {
         let mut lines = vec![
             "OpenCode RK (native)".to_string(),
@@ -626,10 +644,13 @@ fn native_loop(
         lines.extend(visible.into_iter().rev().cloned());
         lines.extend(panel);
         native_paint(&mut renderer, &lines)?;
-        if input.read(&mut byte)? == 0 {
-            break;
-        }
-        match byte[0] {
+        let byte = match input_rx.recv_timeout(Duration::from_millis(20)) {
+            Ok(Some(byte)) => byte,
+            Ok(None) => break,
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
+        };
+        match byte {
             3 | 4 => break,
             27 => {
                 dialog = native_setup::Dialog::None;
@@ -780,6 +801,7 @@ fn native_loop(
     let _ = renderer.disable_kitty_keyboard();
     let _ = renderer.restore_terminal_modes();
     renderer.close();
+    input_task.abort();
     Ok(())
 }
 
