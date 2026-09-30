@@ -834,10 +834,10 @@
       "status": "completed"
     },
     "SHIP-001": {
-      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "blockedNote": "f369ebd rejected: moving stable, broken arm64 cross-build, non-native oc2, ignored required failures, secret argv, pre-sign hashes, false rollback note; T04/T05 RED and native artifacts unresolved.",
       "scratchpad": "worklog/SHIP-001.md",
-      "session": "",
-      "status": "not-started"
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
+      "status": "blocked"
     },
     "SHIP-004": {
       "blockedNote": "Corrected satisfiable RED sha256 429ee2cd; 5/5 fail on missing release evidence, no errors; implementation and controller freeze authority pending.",
