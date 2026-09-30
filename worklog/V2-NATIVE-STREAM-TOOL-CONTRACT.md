@@ -24,6 +24,7 @@ The new fixture is `tests/e2e/native_stream_tool.py`. It is deliberately separat
 - Current server route is `crates/server/src/lib.rs:168-170`, `/api/sessions/{id}/turns/stream`.
 - Current stream event names are `assistant_delta` (`:1066-1075`), `tool_call` (`:1086-1111`), `tool_output` (`:1318-1330`), and `assistant_message` (`:1139-1158`).
 - Current persisted history API is `/api/sessions/{id}/messages` and `/api/sessions/{id}/history` (`crates/server/src/lib.rs:131-134`, `:425-463`); no current `/tool_history` route was found, so the fixture verifies typed history through the real subsequent provider inputs rather than inventing an endpoint.
+- Current server next-round handling clears `assistant_text` after a tool round at `crates/server/src/lib.rs:1339-1350`/the corresponding continuation path. That means the present Rust stream implementation can lose the pre-tool `PARTIAL` from the durable assistant message even though the provider emitted it before the tool lifecycle. This contract intentionally requires the settled assistant history to preserve `PARTIAL + " " + FINAL`; it does not silently relax the assertion to accept the loss. The eventual coherent implementation grant must include the server stream state/persistence path as well as native rendering.
 
 ## Bounds/security
 
@@ -31,7 +32,17 @@ Provider request 128 KiB, provider response 256 KiB, PTY capture 256 KiB via imp
 
 ## Verification status
 
-Not run by design: no Cargo, PTY, Docker, node, or live-product execution was performed in this source-only preparation. The actual command after G2 exact-SHA integration is:
+Source-only helper validation was run; no Cargo, product PTY, Docker, browser, or Node execution was performed. The bounded self-check uses the actual stdlib HTTP handler and an actual `http.client` stream reader. It validates absent/false JSON responses, early partial SSE bytes before completion, barrier release, auth/model/schema rejection, exact four-request continuation/second/restart synthetic history, final-marker separation, output-before-call rejection, and wrong-history rejection:
+
+```text
+python3 tests/e2e/native_stream_tool.py --self-check
+self-check: JSON defaults, actual early SSE frame, gated completion, auth, invalid stream, and history rejection passed
+
+python3 AST parse: OK
+git diff --check: OK
+```
+
+The actual installed-product command after G2 exact-SHA integration is:
 
 ```sh
 TMPDIR=/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp \
@@ -42,4 +53,19 @@ python3 tests/e2e/native_stream_tool.py \
   --artifact-dir /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/native-stream-tool-evidence
 ```
 
-This handoff is a source-contract candidate only: neither PREVERIFIED nor ACCEPTED.
+This handoff is a source-contract candidate only: neither PREVERIFIED nor ACCEPTED. The installed-product gate is still expected to RED only when the native client fails to expose the gated partial delta before provider completion; setup, auth, model readiness, typed history, restart, and fixture protocol failures are independently diagnosed.
+
+## Controller fixture maintenance and genuine baseline
+
+The installed, accepted `ac635fac5298e9151c6575aa6a089f53c5aa4309` reached healthy
+authenticated model readiness and one real provider request, omitted `stream`,
+and displayed `assistant: NONSTREAM_COMPLETED`. It failed to display the required
+early partial marker in 11.41s. This is product RED, not fixture startup failure:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-native-stream-red-ac635fa-v8ptt_7w`.
+The source-only self-check proves actual HTTP framing/gated early bytes; the
+remaining four rounds are state-level codec checks, not four live product turns.
+The controller corrected a self-check barrier ordering delay, made typed-pair
+negative cases reach their intended validation instead of the request-count cap,
+and ensured actual assertion failures and whole-capture key echo are recorded.
+No product file or existing frozen semantic test changed. The exact corrected
+contract must be rerun and hashed before a product implementation lease starts.
