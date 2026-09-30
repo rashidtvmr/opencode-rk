@@ -9,6 +9,7 @@ silently skipped product test.
 
 import atexit
 import os
+import platform
 import pty
 import select
 import shutil
@@ -30,6 +31,16 @@ DEFAULT_DYLIB = (
     "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/"
     "native-build-attest/wt/packages/native/lib/aarch64-macos/libopentui.dylib"
 )
+DEFAULT_NATIVE_LIBRARY = DEFAULT_DYLIB
+
+
+def native_library_profile():
+    system = platform.system()
+    if system == "Darwin":
+        return ".dylib"
+    if system == "Linux":
+        return ".so"
+    raise AssertionError(f"native PTY fixture unsupported platform: {system}")
 
 
 def fixture(name, default):
@@ -71,7 +82,15 @@ class NativeInteractivePTY(unittest.TestCase):
         for path in (self.home, self.project, self.data):
             os.makedirs(path)
         self.bin = fixture("OC2_NATIVE_BINARY", DEFAULT_BINARY)
-        self.dylib = fixture("MAC_OPENTUI_FIXTURE", DEFAULT_DYLIB)
+        native_suffix = native_library_profile()
+        native_value = os.environ.get("OC2_NATIVE_LIBRARY")
+        if native_value is None and platform.system() == "Darwin":
+            native_value = os.environ.get("MAC_OPENTUI_FIXTURE", DEFAULT_NATIVE_LIBRARY)
+        if native_value is None:
+            raise AssertionError(
+                "fixture error: OC2_NATIVE_LIBRARY must name the installed native library"
+            )
+        self.native_library = fixture("OC2_NATIVE_LIBRARY", native_value)
         # Stage an owned installed layout, never mutate the retained fixtures.
         self.install = os.path.join(self.root, "install")
         os.makedirs(os.path.join(self.install, "bin"))
@@ -79,7 +98,8 @@ class NativeInteractivePTY(unittest.TestCase):
         self.executable = os.path.join(self.install, "bin", "oc2")
         shutil.copyfile(self.bin, self.executable)
         shutil.copyfile(
-            self.dylib, os.path.join(self.install, "lib", "libopentui.dylib")
+            self.native_library,
+            os.path.join(self.install, "lib", f"libopentui{native_suffix}"),
         )
         os.chmod(self.executable, 0o755)
         atexit.register(self._cleanup)
@@ -121,6 +141,14 @@ class NativeInteractivePTY(unittest.TestCase):
         import fcntl
 
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        if hasattr(termios, "TIOCSCTTY"):
+            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
+        elif platform.system() == "Darwin":
+            fcntl.ioctl(slave, 0x20007461, 0)
+        else:
+            raise AssertionError(
+                f"native PTY fixture lacks TIOCSCTTY on {platform.system()}"
+            )
         env = {
             "HOME": self.home,
             "PATH": os.environ.get("PATH", ""),
