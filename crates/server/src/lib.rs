@@ -7,9 +7,9 @@ pub mod admission_bounds;
 pub mod agent_loop;
 pub mod app_client;
 pub use agent_loop::{
-    function_call_output as loop_function_call_output, truncate_tool_output, CallOutput,
-    LoopController, RequestedCall, TurnStop, MAX_CALLS_PER_ROUND, MAX_TOOL_OUTPUT_CHARS,
-    MAX_TURN_STEPS,
+    CallOutput, LoopController, MAX_CALLS_PER_ROUND, MAX_TOOL_OUTPUT_CHARS, MAX_TURN_STEPS,
+    RequestedCall, TurnStop, function_call_output as loop_function_call_output,
+    truncate_tool_output,
 };
 pub mod app_protocols;
 pub mod app_runtime;
@@ -75,24 +75,24 @@ pub mod web_turn_adapter;
 pub mod workspace_proxy;
 pub mod workspace_sessions;
 use axum::{
+    Json, Router,
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
-    Json, Router,
 };
 use futures_util::stream;
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    ArtifactId, ArtifactKind, AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef,
-    SessionId, Timestamp, MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
+    ArtifactId, ArtifactKind, AttachmentId, MAX_DRAFT_ATTACHMENT_BYTES, MessageId, MessageRecord,
+    MessageRole, PayloadRef, SessionId, Timestamp, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
-    OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesItem, ResponsesRole,
-    ResponsesStopReason, ResponsesStreamEvent, ResponsesTool, MAX_RESPONSES_INPUT_BYTES,
-    MAX_RESPONSES_INPUT_MESSAGES,
+    MAX_RESPONSES_INPUT_BYTES, MAX_RESPONSES_INPUT_MESSAGES, OpenAiResponsesClient,
+    OpenAiResponsesStream, ResponsesError, ResponsesItem, ResponsesRole, ResponsesStopReason,
+    ResponsesStreamEvent, ResponsesTool,
 };
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{
@@ -102,7 +102,7 @@ use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
@@ -1317,7 +1317,9 @@ async fn create_turn_stream(
                                 .iter()
                                 .any(|enabled| *enabled == call.name);
                             let raw_output = if index >= MAX_CALLS_PER_ROUND {
-                                format!("error: step budget per round exceeded (max {MAX_CALLS_PER_ROUND} calls); call not executed")
+                                format!(
+                                    "error: step budget per round exceeded (max {MAX_CALLS_PER_ROUND} calls); call not executed"
+                                )
                             } else if permitted {
                                 if call.name == "write" {
                                     execute_write(&call.arguments, &state.broker, &state.file_tool)
@@ -1363,9 +1365,9 @@ async fn create_turn_stream(
                                 }
                             } else {
                                 format!(
-                                        "error: tool '{}' is not permitted by turn policy (enable via OPENCODE_RK_TURN_TOOLS)",
-                                        call.name
-                                    )
+                                    "error: tool '{}' is not permitted by turn policy (enable via OPENCODE_RK_TURN_TOOLS)",
+                                    call.name
+                                )
                             };
                             let bounded = truncate_tool_output(&raw_output);
                             // Persist the real output before exposing its event:
@@ -1492,8 +1494,6 @@ async fn create_turn_stream(
                         {
                             Ok(next_stream) => {
                                 state.provider = next_stream;
-                                state.assistant_text.clear();
-                                state.reasoning_summary.clear();
                                 state.stage = TurnStreamStage::Provider;
                                 continue;
                             }
@@ -1552,7 +1552,7 @@ fn history_item_to_responses_item(item: HistoryItem) -> Result<ResponsesItem, Se
                 MessageRole::User => ResponsesRole::User,
                 MessageRole::Assistant => ResponsesRole::Assistant,
                 MessageRole::Tool => {
-                    return Err(SessionError::Contract("unlinked tool history".to_owned()))
+                    return Err(SessionError::Contract("unlinked tool history".to_owned()));
                 }
             };
             let PayloadRef::Inline { text } = &message.body else {

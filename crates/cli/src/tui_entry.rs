@@ -19,6 +19,12 @@ use crate::daemon_client;
 #[cfg(feature = "native")]
 #[path = "native_setup.rs"]
 mod native_setup;
+#[cfg(feature = "native")]
+#[path = "native_transcript.rs"]
+mod native_transcript;
+#[cfg(feature = "native")]
+#[path = "native_turn.rs"]
+mod native_turn;
 use clap::{Args, ValueEnum};
 #[cfg(feature = "native")]
 use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
@@ -142,7 +148,7 @@ fn http_request(
                 return Err(
                     "refusing unauthenticated /api/* request: no validated backend descriptor"
                         .to_string(),
-                )
+                );
             }
         }
     }
@@ -524,6 +530,8 @@ fn native_loop(
         .unwrap_or_default();
     let mut selected = native_setup::selected(&models);
     let mut transcript = Vec::new();
+    let mut worker: Option<native_turn::TurnWorker> = None;
+    let mut partial = String::new();
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
@@ -532,7 +540,6 @@ fn native_loop(
             append_transcript(&mut transcript, line.clone());
         }
     }
-    let mut input = std::io::stdin();
     let mut byte = [0u8; 1];
     loop {
         let mut lines = vec![
@@ -544,6 +551,55 @@ fn native_loop(
             live.map(|s| format!("session: {} (live)", s.title))
                 .unwrap_or_else(|| "daemon: offline".to_string()),
         ];
+        if let Some(active) = worker.as_mut() {
+            let mut settled = false;
+            while let Some(event) = active.try_next() {
+                match event {
+                    native_turn::Event::User => {}
+                    native_turn::Event::Delta(delta) => {
+                        partial.push_str(&delta);
+                        replace_partial(&mut transcript, &partial);
+                    }
+                    native_turn::Event::ToolCall(name) => {
+                        append_transcript(
+                            &mut transcript,
+                            format!("tool: {}", native_transcript::strip_ansi(&name)),
+                        );
+                    }
+                    native_turn::Event::ToolOutput(name, output) => {
+                        append_transcript(
+                            &mut transcript,
+                            format!(
+                                "tool {}: {}",
+                                native_transcript::strip_ansi(&name),
+                                native_transcript::strip_ansi(&output)
+                            ),
+                        );
+                    }
+                    native_turn::Event::Assistant(text) => {
+                        partial.clear();
+                        remove_partial(&mut transcript);
+                        settled = true;
+                        append_transcript(
+                            &mut transcript,
+                            format!("assistant: {}", native_transcript::strip_ansi(&text)),
+                        );
+                    }
+                    native_turn::Event::Error(error) => {
+                        partial.clear();
+                        remove_partial(&mut transcript);
+                        settled = true;
+                        append_transcript(
+                            &mut transcript,
+                            format!("error: {}", native_transcript::strip_ansi(&error)),
+                        );
+                    }
+                }
+            }
+            if settled || active.is_finished() {
+                worker = None;
+            }
+        }
         if let Some(snapshot) = live {
             lines.push(format!(
                 "state: {}, updated: {}",
@@ -593,10 +649,19 @@ fn native_loop(
         lines.extend(visible.into_iter().rev().cloned());
         lines.extend(panel);
         native_paint(&mut renderer, &lines)?;
-        if input.read(&mut byte)? == 0 {
+        let ready = renderer.input_ready(if worker.is_some() {
+            Some(Duration::from_millis(20))
+        } else {
+            None
+        })?;
+        if !ready {
+            continue;
+        }
+        if renderer.read_input(&mut byte)? == 0 {
             break;
         }
-        match byte[0] {
+        let byte = byte[0];
+        match byte {
             3 | 4 => break,
             27 => {
                 dialog = native_setup::Dialog::None;
@@ -697,23 +762,35 @@ fn native_loop(
                     continue;
                 }
                 if !text.is_empty() {
-                    append_transcript(&mut transcript, format!("you: {text}"));
+                    if worker.is_some() {
+                        // Do not consume or echo this draft while busy.
+                        continue;
+                    }
                     if let Some(snapshot) = live {
-                        let result = selected
-                            .as_ref()
-                            .ok_or_else(|| "select a model with /connect".to_owned())
-                            .and_then(|model| {
-                                execute_turn(snapshot, &text, auth, &model.qualified())
-                            });
-                        match result {
-                            Ok(reply) => {
-                                append_transcript(&mut transcript, format!("assistant: {reply}"))
-                            }
-                            Err(error) => {
-                                append_transcript(&mut transcript, format!("error: {error}"))
+                        {
+                            append_transcript(&mut transcript, format!("you: {text}"));
+                            let result = selected
+                                .as_ref()
+                                .ok_or_else(|| "select a model with /connect".to_owned())
+                                .and_then(|model| {
+                                    native_turn::TurnWorker::start(
+                                        &snapshot.origin,
+                                        &snapshot.session_id,
+                                        auth.ok_or("missing daemon token")?,
+                                        &text,
+                                        &model.qualified(),
+                                    )
+                                })
+                                .map(|next| {
+                                    worker = Some(next);
+                                    partial.clear();
+                                });
+                            if let Err(error) = result {
+                                append_transcript(&mut transcript, format!("error: {error}"));
                             }
                         }
                     } else {
+                        append_transcript(&mut transcript, format!("you: {text}"));
                         append_transcript(
                             &mut transcript,
                             "offline: turn not executed".to_string(),
@@ -754,29 +831,20 @@ fn append_transcript(transcript: &mut Vec<String>, mut line: String) {
 }
 
 #[cfg(feature = "native")]
-fn execute_turn(
-    snapshot: &LiveSnapshot,
-    text: &str,
-    auth: Option<&str>,
-    model: &str,
-) -> Result<String, String> {
-    let body =
-        serde_json::json!({"text": text, "model": model, "reasoning_effort": "high"}).to_string();
-    let response = http_request(
-        &snapshot.origin,
-        "POST",
-        &format!("/api/sessions/{}/turns", snapshot.session_id),
-        Some(&body),
-        auth,
-    )?;
-    let value: serde_json::Value = serde_json::from_str(&response).map_err(|e| e.to_string())?;
-    value
-        .get("assistant_message")
-        .and_then(|m| m.get("body"))
-        .and_then(|b| b.get("text"))
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .ok_or_else(|| "turn response missing assistant text".to_string())
+fn replace_partial(transcript: &mut Vec<String>, text: &str) {
+    remove_partial(transcript);
+    append_transcript(
+        transcript,
+        format!(
+            "assistant (streaming): {}",
+            native_transcript::strip_ansi(text)
+        ),
+    );
+}
+
+#[cfg(feature = "native")]
+fn remove_partial(transcript: &mut Vec<String>) {
+    transcript.retain(|line| !line.starts_with("assistant (streaming): "));
 }
 
 /// Follow mode: poll the bound session, re-render only on change, stop after
