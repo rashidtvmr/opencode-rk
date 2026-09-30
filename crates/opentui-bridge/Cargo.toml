@@ -11,4 +11,7 @@ crate-type = ["rlib"]
 
 [features]
 default = []
-native = []
+native = ["dep:rustix"]
+
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true, features = ["termios"], optional = true }
