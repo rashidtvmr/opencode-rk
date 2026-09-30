@@ -9,12 +9,11 @@ ralph.json or each other's files:
   wins on disk), but the ledger is committed to git, so a second agent that
   pulls and sees a foreign claim for its target task must stop and pick
   different work.
-- STATUS: a worker may only move its own claim forward:
-  not-started -> in-progress -> completed. Nothing else is a valid transition.
-- COMPLETED means: all test code for the task written (RED frozen before
-  implementation), all frozen tests green on the integrated tree, and the
-  feature/journey documented in the task's FEATURES.md section or worklog —
-  without modifying any frozen test to make it pass.
+- STATUS: a worker may only move its own claim through the coordination
+  lifecycle. A `completed` row means the worker has finished its candidate and
+  local obligations; it is NOT integration acceptance and unlocks nothing.
+- ACCEPTED authority lives in the trusted post-integration receipts written by
+  `tools.completion_integration`; only those receipts may unlock dependencies.
 - RELEASE: the orchestrator (or a human) is the only role allowed to clear a
   foreign stale claim (heartbeat expired) or reject a completed row.
 
@@ -144,9 +143,9 @@ def reclaim(root: pathlib.Path, tid: str, session: str, evidence: str) -> dict:
 def update(root: pathlib.Path, tid: str, session: str, new_status: str, note: str = "") -> dict:
     """Move an owned claim through a legal transition (write-through).
 
-    `completed` and `blocked` require a non-empty evidence note: `completed`
-    must carry the exact test commands/results proving frozen tests are green
-    with zero test edits; `blocked` must carry the exact blocker.
+    `completed` and `blocked` require a non-empty evidence note. `completed`
+    records candidate-local verification only; it never means ACCEPTED.
+    `blocked` must carry the exact blocker.
     """
     if len(note) > MAX_NOTE:
         raise ClaimError(f"{tid}: note too long")
@@ -193,22 +192,33 @@ def save_ledger(root: pathlib.Path, document: dict) -> None:
 
 
 def _accepted_v2_ids(root: pathlib.Path) -> set[str]:
-    """Return ids accepted by the trusted V2 integration state."""
-    path = root / "state" / "convergence-v2.json"
-    if not path.is_file():
+    """Return ids with trusted post-integration acceptance receipts."""
+    receipts = root / "state" / "completion-integration-receipts"
+    if not receipts.is_dir():
         return set()
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError):
-        return set()
-    packages = payload.get("packages", {})
-    if not isinstance(packages, dict):
-        return set()
-    return {
-        str(task_id)
-        for task_id, row in packages.items()
-        if isinstance(row, dict) and row.get("status") == "ACCEPTED"
-    }
+    accepted: set[str] = set()
+    for path in sorted(receipts.glob("*.json")):
+        try:
+            row = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ClaimError(f"unreadable V2 acceptance receipt {path.name}: {exc}") from exc
+        if not isinstance(row, dict):
+            raise ClaimError(f"invalid V2 acceptance receipt {path.name}")
+        task_id = row.get("task")
+        candidate = row.get("candidate_revision")
+        integrated = row.get("integrated_revision")
+        frozen_hash = row.get("frozen_tests_sha256")
+        if (
+            task_id != path.stem
+            or row.get("rerun") != "passed"
+            or not isinstance(candidate, str) or len(candidate) != 40
+            or not isinstance(integrated, str) or len(integrated) != 40
+            or not isinstance(frozen_hash, str) or len(frozen_hash) != 64
+            or any(ch not in "0123456789abcdef" for ch in candidate + integrated + frozen_hash)
+        ):
+            raise ClaimError(f"invalid V2 acceptance receipt {path.name}")
+        accepted.add(task_id)
+    return accepted
 
 
 def ready_tasks(root: pathlib.Path, plan_stories: dict[str, dict]) -> list[str]:
@@ -219,7 +229,7 @@ def ready_tasks(root: pathlib.Path, plan_stories: dict[str, dict]) -> list[str]:
     ready = []
     for tid, story in plan_stories.items():
         row = claims.get(tid, {})
-        if row.get("status") in {"in-progress", "blocked"}:
+        if tid in accepted or row.get("status") in {"in-progress", "blocked", "completed"}:
             continue
         deps = story.get("deps", [])
         if all(dep in accepted for dep in deps):

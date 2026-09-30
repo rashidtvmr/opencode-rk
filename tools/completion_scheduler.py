@@ -151,9 +151,16 @@ def validate_tasks(tasks: list[Task]) -> dict[str, Task]:
 def validate_candidate(task: Task, candidate: Candidate) -> None:
     if not isinstance(candidate, Candidate) or candidate.task_id != task.id or not REV.fullmatch(candidate.revision) or not candidate.worker:
         raise Rejected("candidate identity/revision missing")
-    grant = task_paths(task)
-    if len(set(candidate.changed_paths)) != len(candidate.changed_paths) or set(candidate.changed_paths) != set(grant):
-        raise Rejected("candidate does not match explicit package path grant")
+    grant = set(task_paths(task))
+    changed = tuple(candidate.changed_paths)
+    if not changed or len(set(changed)) != len(changed):
+        raise Rejected("candidate changed path set must be nonempty and unique")
+    try:
+        normalized = tuple(normalized_path(path) for path in changed)
+    except ValueError as exc:
+        raise Rejected("candidate contains an unsafe changed path") from exc
+    if any(path not in grant for path in normalized):
+        raise Rejected("candidate changed path is outside explicit package grant")
 
 
 def validate_proof(task: Task, candidate: Candidate, proof: Verification, revision: str) -> None:
@@ -172,109 +179,164 @@ def validate_proof(task: Task, candidate: Candidate, proof: Verification, revisi
 
 
 async def run_rolling(tasks: list[Task], adapter: TrustedAdapter, *, capacity: int = 20,
-                      max_unverified: int = 4, max_attempts: int = 3,
-                      stage_timeout: float = 3600) -> Report:
-    """Refill on individual completion; retain locks until post-merge proof.
+                      max_unverified: int = 4, max_preverify: int = 4,
+                      max_attempts: int = 3, stage_timeout: float = 3600) -> Report:
+    """Run packages with parallel preverification and one integration writer.
 
-    There is one verification/integration pipeline. Unverified capacity is
-    reserved before execution so simultaneous completions cannot overflow the
-    candidate queue. Backpressure may lower occupancy; it never disables gates.
-    An adapter must honor cancellation and stop/join owned remote/native work.
+    Implementations may run concurrently on non-overlapping grants. At most
+    ``max_unverified`` candidates may enter the candidate pipeline at once;
+    additional implementers block before publishing their candidate. Independent
+    preverification runs in parallel, while VCS integration plus post-integration
+    verification remains serialized through exactly one integration future.
     """
     by_id = validate_tasks(tasks)
     if type(capacity) is not int or not 1 <= capacity <= 20:
         raise ValueError("capacity must be between 1 and 20")
     if type(max_unverified) is not int or not 1 <= max_unverified <= 20:
         raise ValueError("unverified candidate cap must be between 1 and 20")
+    if type(max_preverify) is not int or not 1 <= max_preverify <= 20:
+        raise ValueError("preverification capacity must be between 1 and 20")
     if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
         raise ValueError("attempt cap must be between 1 and 3")
     if not math.isfinite(stage_timeout) or stage_timeout <= 0:
         raise ValueError("finite positive timeout required")
+
     report = Report({t.id: "pending" for t in tasks}, {t.id: 0 for t in tasks}, {}, {})
     running: dict[asyncio.Task, str] = {}
     candidates: deque[tuple[Task, Candidate]] = deque()
-    checking: asyncio.Task | None = None
-    checking_id: str | None = None
+    verifying: dict[asyncio.Task, tuple[Task, Candidate]] = {}
+    integration_ready: deque[tuple[Task, Candidate]] = deque()
+    integrating: asyncio.Task | None = None
+    integrating_item: tuple[Task, Candidate] | None = None
+    candidate_slots = asyncio.Semaphore(max_unverified)
 
     async def execute(task: Task) -> Candidate:
-        async with asyncio.timeout(stage_timeout):
-            candidate = await adapter.execute(task)
+        acquired = False
+        try:
+            candidate = await asyncio.wait_for(adapter.execute(task), timeout=stage_timeout)
             validate_candidate(task, candidate)
+            await asyncio.wait_for(candidate_slots.acquire(), timeout=stage_timeout)
+            acquired = True
             return candidate
+        except BaseException:
+            if acquired:
+                candidate_slots.release()
+            raise
 
-    async def finalize(task: Task, candidate: Candidate) -> str:
-        async with asyncio.timeout(stage_timeout):
-            proof = await adapter.verify(task, candidate)
-            validate_proof(task, candidate, proof, candidate.revision)
-            try:
-                integrated = await adapter.integrate(task, candidate)
-                if not isinstance(integrated, Integration) or integrated.integrated is not True or integrated.candidate_revision != candidate.revision or not REV.fullmatch(integrated.integrated_revision):
-                    raise Rejected("candidate was not integrated")
-                proof = await adapter.verify_integrated(task, candidate, integrated.integrated_revision)
-                validate_proof(task, candidate, proof, integrated.integrated_revision)
-                return integrated.integrated_revision
-            except RetryableFailure as exc:
-                # Integration may already have changed mainline. Reconcile it;
-                # never blindly run the implementation again after ambiguity.
-                raise Rejected("integration outcome requires reconciliation") from exc
+    async def preverify(task: Task, candidate: Candidate) -> None:
+        proof = await asyncio.wait_for(adapter.verify(task, candidate), timeout=stage_timeout)
+        validate_proof(task, candidate, proof, candidate.revision)
+
+    async def integrate_verified(task: Task, candidate: Candidate) -> str:
+        try:
+            integrated = await asyncio.wait_for(adapter.integrate(task, candidate), timeout=stage_timeout)
+            if (
+                not isinstance(integrated, Integration)
+                or integrated.integrated is not True
+                or integrated.candidate_revision != candidate.revision
+                or not REV.fullmatch(integrated.integrated_revision)
+            ):
+                raise Rejected("candidate was not integrated")
+            proof = await asyncio.wait_for(
+                adapter.verify_integrated(task, candidate, integrated.integrated_revision),
+                timeout=stage_timeout,
+            )
+            validate_proof(task, candidate, proof, integrated.integrated_revision)
+            return integrated.integrated_revision
+        except RetryableFailure as exc:
+            raise Rejected("integration outcome requires reconciliation") from exc
 
     def fail(tid: str, exc: Exception) -> None:
-        # Detailed potentially sensitive adapter logs stay with the trusted host.
         report.errors[tid] = type(exc).__name__
-        report.statuses[tid] = "pending" if isinstance(exc, RetryableFailure) and report.attempts[tid] < max_attempts else "blocked"
+        report.statuses[tid] = (
+            "pending"
+            if isinstance(exc, RetryableFailure) and report.attempts[tid] < max_attempts
+            else "blocked"
+        )
+
+    def held_paths() -> list[str]:
+        return [
+            path
+            for tid, status in report.statuses.items()
+            if status in {"running", "queued", "verifying", "integration-ready", "integrating"}
+            for path in task_paths(by_id[tid])
+        ]
 
     try:
         while True:
-            if checking is None and candidates:
+            while candidates and len(verifying) < max_preverify:
                 task, candidate = candidates.popleft()
-                checking_id = task.id
                 report.statuses[task.id] = "verifying"
-                checking = asyncio.create_task(finalize(task, candidate))
+                verifying[asyncio.create_task(preverify(task, candidate))] = (task, candidate)
+
+            if integrating is None and integration_ready:
+                task, candidate = integration_ready.popleft()
+                integrating_item = (task, candidate)
+                report.statuses[task.id] = "integrating"
+                integrating = asyncio.create_task(integrate_verified(task, candidate))
+
             for task in tasks:
-                if len(running) >= capacity or len(running) + len(candidates) >= max_unverified:
+                if len(running) >= capacity:
                     break
                 if report.statuses[task.id] != "pending":
                     continue
                 if any(report.statuses[dep] != "accepted" for dep in task.dependencies):
                     continue
-                held = [
-                    path
-                    for tid, status in report.statuses.items()
-                    if status in {"running", "queued", "verifying"}
-                    for path in task_paths(by_id[tid])
-                ]
+                held = held_paths()
                 if any(overlaps(path, other) for path in task_paths(task) for other in held):
                     continue
                 report.statuses[task.id] = "running"
                 report.attempts[task.id] += 1
                 running[asyncio.create_task(execute(task))] = task.id
+
             active = set(running)
-            if checking is not None:
-                active.add(checking)
+            active.update(verifying)
+            if integrating is not None:
+                active.add(integrating)
             if not active:
                 return report
+
             done, _ = await asyncio.wait(active, return_when=asyncio.FIRST_COMPLETED)
             for future in done:
-                if future is checking:
-                    tid = checking_id
+                if future is integrating:
+                    assert integrating_item is not None
+                    task, _candidate = integrating_item
+                    tid = task.id
                     try:
                         report.integrated_revisions[tid] = future.result()
                         report.statuses[tid] = "accepted"
                         report.errors.pop(tid, None)
                     except Exception as exc:
                         fail(tid, exc)
-                    checking, checking_id = None, None
-                else:
-                    tid = running.pop(future)
+                    finally:
+                        candidate_slots.release()
+                    integrating = None
+                    integrating_item = None
+                    continue
+
+                if future in verifying:
+                    task, candidate = verifying.pop(future)
+                    tid = task.id
                     try:
-                        candidates.append((by_id[tid], future.result()))
-                        report.statuses[tid] = "queued"
+                        future.result()
+                        report.statuses[tid] = "integration-ready"
+                        integration_ready.append((task, candidate))
                     except Exception as exc:
+                        candidate_slots.release()
                         fail(tid, exc)
+                    continue
+
+                tid = running.pop(future)
+                try:
+                    candidates.append((by_id[tid], future.result()))
+                    report.statuses[tid] = "queued"
+                except Exception as exc:
+                    fail(tid, exc)
     finally:
         active = list(running)
-        if checking is not None:
-            active.append(checking)
+        active.extend(verifying)
+        if integrating is not None:
+            active.append(integrating)
         for future in active:
             future.cancel()
         if active:
