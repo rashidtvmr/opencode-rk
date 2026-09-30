@@ -57,7 +57,7 @@ fn read_bounded_file(path: &PathBuf) -> Option<Vec<u8>> {
     if !std::fs::metadata(path).ok()?.is_file() {
         return None;
     }
-    let mut file = OpenOptions::new().read(true).open(path).ok()?;
+    let file = OpenOptions::new().read(true).open(path).ok()?;
     // Recheck the opened handle; this still does not claim race protection.
     if !file.metadata().ok()?.is_file() {
         return None;
