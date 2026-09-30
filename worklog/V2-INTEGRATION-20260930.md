@@ -5,6 +5,8 @@
 `0759e01464a7a0dbed614163a14b6f60673e2412`, pushed to `origin/main-v2`.
 Native lifecycle package: `425d617a3576c791e7027b2cc332a75e7441fd4e`.
 Typed live writer/restart package: `31ea2b0d39e4cf23e8eae5f894763edf88678cb9`.
+Browser transport: `25b64488cfc4282b867a924570ba267fbcd46c32`.
+Persisted API auth and rooted tool continuation: `f5cfb012369f3a4187cfa4f50ad01eb4051081c6`.
 Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-v2`.
 
 ## V2-SALVAGE-PRESERVATION
@@ -217,10 +219,65 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
   two renamed index assets. Installed-binary/browser verification follows on a
   clean committed revision containing this bundle.
 
+## G2 persisted API auth and rooted streaming continuation
+
+- Implementation base `c185ab489e2781343aa7629299a594bea79816aa`, frozen original
+  contract imported as `59f54d0`, product candidates `821d12d`, `3de1d2f`, and
+  final source candidate `f9eb056a2edccc12f4fb0898f905b829ce26b4ab`.
+- Main independently reviewed and ran the installed candidate. Review required
+  bounded file reads and absolute credential roots, then correct inline-source
+  fallback and complete Api metadata schema. The independent source-selection
+  contract produced three semantic RED and three GREEN controls against installed
+  `3de1d2f` after mechanical HTTP-framing repair; no implementation worker changed
+  the frozen assertions.
+- Authority inspected at full pinned OpenCode `95daf906`: `Auth.Api` and
+  `Auth.all` in `packages/opencode/src/auth/index.ts:23–27,58–71`, and persisted
+  API precedence after ambient loading in
+  `packages/opencode/src/provider/provider.ts:1582–1606`. Bounded auth bytes,
+  records, keys, and absolute-root lookup implement the approved resource/security
+  contract. Streaming retains one resolved client through continuation; relative
+  file authorization uses the captured project root.
+- Changed paths: `crates/providers/src/lib.rs`,
+  `crates/providers/src/persisted_auth.rs`, `crates/providers/src/responses.rs`,
+  `crates/server/src/lib.rs`, `crates/tools/src/file_ops.rs`,
+  `crates/server/tests/prov_025_request_auth.rs`,
+  `crates/server/tests/prov_030_auth_sources.rs`,
+  `worklog/V2-PERSISTED-PROVIDER-CONTRACT.md`,
+  `worklog/V2-PROVIDER-AUTH-SOURCES-CONTRACT.md`,
+  `worklog/V2-PERSISTED-PROVIDER-IMPL.md`.
+- Frozen original contract SHA-256:
+  `674f09ee78ffb062265e9f33d98b1fadabbd8ad2b619d722592e62643be83344`;
+  inline/schema contract SHA-256:
+  `abd8a3e023ddbc607aff8367b8cb7b07ca8660780ec4fbadf935199419c4a676`.
+- Candidate `f9eb056` independently passed both auth targets (**12/12**),
+  `agent_loop_turns` (**1/1**), all four scoped typed-history targets (**15/15**),
+  and focused file operations (**17/17**).
+- Integrated through `e581589`, with mechanical removal of the unused mutable
+  reader binding at `f5cfb01`. Exact verification SHA:
+  `f5cfb012369f3a4187cfa4f50ad01eb4051081c6`.
+- Clean integrated dev build, native off, installed at
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-integrated-f5cfb01-np94vwxp/bin/oc2`.
+  Binary SHA-256:
+  `1870d7627875ae450d2dcea2691d7b00e2127a30860726efeb2b43cdab434321`;
+  sibling `build.json` records source and build identity. Commands on that exact
+  integrated SHA, serially:
+
+  ```text
+  rtk /usr/bin/arch -arm64 env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo build --offline --locked -p opencode-rk-cli --bin oc2
+  rtk env TMPDIR=/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 OC2_TEST_BINARY=/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-integrated-f5cfb01-np94vwxp/bin/oc2 /usr/bin/arch -arm64 cargo test --offline --locked -p opencode-rk-server --test prov_025_request_auth --test prov_030_auth_sources --test agent_loop_turns
+  rtk env TMPDIR=/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 OC2_TEST_BINARY=/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-integrated-f5cfb01-np94vwxp/bin/oc2 /usr/bin/arch -arm64 cargo test --offline --locked -p opencode-rk-storage --test typed_history_http_restart --test typed_tool_history_http --test typed_history_boundary_regression --test typed_history_component
+  rtk /usr/bin/arch -arm64 env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo test --offline --locked -p opencode-rk-tools --lib file_ops
+  ```
+
+  Results: **12 auth + one agent-loop + 15 typed-history + 17 file-security checks
+  passed**. State: **ACCEPTED on integrated `f5cfb01` for persisted API auth and
+  rooted continuation**. In-app setup, OAuth/provider breadth, real-browser
+  journey, and release/platform acceptance remain open.
+
 ## Remaining observed product failures
 
-- G2 persisted/in-app credentials are not connected to the outbound provider
-  request; current turn execution reads environment credentials.
+- G2 persisted OpenAI API auth is connected and accepted for the scope above;
+  in-app provider setup, OAuth, and provider adaptation beyond OpenAI remain open.
 - G3/G4 settled typed history now passes the scoped live writer/restart gate;
   interruption recovery and second-client ownership still require golden-journey
   validation.
