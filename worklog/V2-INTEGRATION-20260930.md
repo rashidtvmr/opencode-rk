@@ -790,3 +790,23 @@ Native provider streaming/tool UI, interruption, second-client ownership,
 full input/resize/mouse behavior, per-session file rooting, non-OpenAI adaptation,
 G0 product-tip disposition, formatting and fresh workspace/Clippy gates remain
 open. This acceptance does not certify the complete G0–G8 release.
+
+## Next reproducible failures after onboarding acceptance
+
+- The separate frozen native streaming/tool journey is integrated as `7716079`
+  and has SHA-256
+  `f7d8fbe0cdc3f7be94e60a18bdfc2845f992038c6081bcba9c40ebbbe0c5f921`.
+  Actual accepted installed `ac635fa` sends a non-stream provider request and
+  displays only `NONSTREAM_COMPLETED`; it cannot show the gated first text delta.
+  The fresh 11.37s product RED, bounded cleanup and source/test/command manifest
+  are at `v2-stream-frozen-red-d2wrmua_` under the approved artifact parent.
+- Source inspection of `TurnStreamStage::NextRound` additionally finds that
+  clearing `assistant_text` discards pre-tool text before final persistence.
+  The coherent client/server repair must retain it across tool continuation.
+- Fresh `cargo fmt --all -- --check` on `4a3e98e` fails exit 1 in 1.09s.
+  Fresh `cargo clippy --offline --locked --workspace --all-targets --all-features
+  -- -D warnings` fails exit 101 in 4.42s at fourteen security-library lint
+  diagnostics. Both were read-only, serial, with two Cargo jobs and two test
+  threads. Logs/commands/hashes reside at `v2-workspace-gates-4a3e98e-ulyckkel`.
+  A narrowly granted mechanical security candidate is awaiting independent
+  preverification; workspace formatting and broader Clippy remain RED.

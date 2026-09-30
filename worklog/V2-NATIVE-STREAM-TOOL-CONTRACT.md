@@ -69,3 +69,27 @@ negative cases reach their intended validation instead of the request-count cap,
 and ensured actual assertion failures and whole-capture key echo are recorded.
 No product file or existing frozen semantic test changed. The exact corrected
 contract must be rerun and hashed before a product implementation lease starts.
+
+## Frozen integrated contract and implementation unlock
+
+The final test was integrated as `771607929cc6f2026384a820de68d7f6d8c606d6`.
+Its frozen SHA-256 is
+`f7d8fbe0cdc3f7be94e60a18bdfc2845f992038c6081bcba9c40ebbbe0c5f921`.
+Earlier source proposals share the same base rather than a linear ancestry;
+their immutable archive refs are `refs/archive/v2-native-stream-contract/<SHA>`
+for `39190de6`, `7fb01a7e`, `29f598a8` and `bb8b0980`. None were discarded.
+
+The controller reran the exact integrated fixture against the accepted installed
+`ac635fa` release. Self-check passed in 0.71s; actual PTY journey failed in 11.37s
+with healthy auth/catalog and one real **non-stream** provider request. The
+current screen shows the completed-only response and no early partial. The
+actual assertion error is captured, and owned CLI/daemon cleanup completed.
+The frozen command manifest, test/source/log hashes and sanitized reproduction
+are retained at
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-stream-frozen-red-d2wrmua_`.
+
+Dependency `G2-native-provider` is ACCEPTED on exact integrated `ac635fa`.
+One coherent native stream/tool/resume implementation package is now unlocked;
+its writer cannot modify this contract or existing semantic tests. The scoped
+Rust final-message grouping requires retaining the pre-tool partial in the final
+durable assistant text; complete upstream event replay remains a separate gate.
