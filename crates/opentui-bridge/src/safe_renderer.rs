@@ -16,6 +16,8 @@ use std::marker::PhantomData;
 #[cfg(feature = "native")]
 use std::os::raw::c_void;
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(feature = "native")]
+use std::sync::atomic::{AtomicU32, AtomicU8};
 
 use crate::buffer::NativeHandle;
 use crate::color::Rgba;
@@ -25,6 +27,20 @@ const INVALID_HANDLE: NativeHandle = 0;
 
 /// Global single-owner claim. Held while a [`Renderer`] is live.
 static CLAIMED: AtomicBool = AtomicBool::new(false);
+
+/// Native terminal/input state for the one renderer owned by this process.
+/// `CLAIMED` permits only one live renderer, so one bounded atomic slot avoids
+/// changing the frozen test-only struct literal or retaining a handle map.
+#[cfg(feature = "native")]
+static LIFECYCLE_HANDLE: AtomicU32 = AtomicU32::new(INVALID_HANDLE);
+#[cfg(feature = "native")]
+static LIFECYCLE_FLAGS: AtomicU8 = AtomicU8::new(0);
+#[cfg(feature = "native")]
+const TERMINAL_ACTIVE: u8 = 1;
+#[cfg(feature = "native")]
+const MOUSE_ENABLED: u8 = 2;
+#[cfg(feature = "native")]
+const KITTY_KEYBOARD_ENABLED: u8 = 4;
 
 /// Byte cap for one [`Renderer::draw_text`] call.
 pub const MAX_TEXT_BYTES: usize = 64 * 1024;
@@ -94,6 +110,14 @@ extern "C" {
     ) -> NativeHandle;
     fn destroyRenderer(renderer_handle: NativeHandle, flush_input: bool);
     fn setupTerminal(renderer_handle: NativeHandle, useAlternateScreen: bool);
+    fn restoreTerminalModes(renderer_handle: NativeHandle);
+    fn suspendRenderer(renderer_handle: NativeHandle);
+    fn resumeRenderer(renderer_handle: NativeHandle);
+    fn enableMouse(renderer_handle: NativeHandle, enableMovement: bool);
+    fn disableMouse(renderer_handle: NativeHandle);
+    fn enableKittyKeyboard(renderer_handle: NativeHandle, flags: u8);
+    fn disableKittyKeyboard(renderer_handle: NativeHandle);
+    fn clearTerminal(renderer_handle: NativeHandle);
     fn resizeRenderer(renderer_handle: NativeHandle, width: u32, height: u32);
     fn setCursorPosition(renderer_handle: NativeHandle, x: i32, y: i32, visible: bool);
     fn setTerminalTitle(renderer_handle: NativeHandle, titlePtr: *const u8, titleLen: u32);
@@ -140,9 +164,13 @@ impl Renderer {
             let handle =
                 unsafe { createRenderer(cols, rows, dest, 0, std::ptr::null()) };
             if handle == INVALID_HANDLE {
+                LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
+                LIFECYCLE_FLAGS.store(0, Ordering::Release);
                 CLAIMED.store(false, Ordering::Release);
                 return Err(BridgeError::CreateFailed);
             }
+            LIFECYCLE_FLAGS.store(0, Ordering::Release);
+            LIFECYCLE_HANDLE.store(handle, Ordering::Release);
             Ok(Self {
                 handle,
                 cols,
@@ -180,8 +208,27 @@ impl Renderer {
             return;
         }
         #[cfg(feature = "native")]
-        // SAFETY: live handle owned by self; zeroed below so destroy runs once.
+        // SAFETY: live handle owned by self; owned terminal/input modes are
+        // restored before the exactly-once destroy.
         unsafe {
+            let owned = LIFECYCLE_HANDLE.load(Ordering::Acquire) == self.handle;
+            let flags = if owned {
+                LIFECYCLE_FLAGS.swap(0, Ordering::AcqRel)
+            } else {
+                0
+            };
+            if owned && flags & MOUSE_ENABLED != 0 {
+                disableMouse(self.handle);
+            }
+            if owned && flags & KITTY_KEYBOARD_ENABLED != 0 {
+                disableKittyKeyboard(self.handle);
+            }
+            if owned && flags & TERMINAL_ACTIVE != 0 {
+                restoreTerminalModes(self.handle);
+            }
+            if owned {
+                LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
+            }
             destroyRenderer(self.handle, true);
         }
         self.handle = INVALID_HANDLE;
@@ -212,6 +259,147 @@ impl Renderer {
         {
             // SAFETY: live handle; plain integers only.
             unsafe { setupTerminal(handle, true) };
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle {
+                LIFECYCLE_FLAGS.fetch_or(TERMINAL_ACTIVE, Ordering::AcqRel);
+            }
+            Ok(())
+        }
+    }
+
+    pub fn restore_terminal_modes(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel)
+                    & TERMINAL_ACTIVE
+                    != 0
+            {
+                unsafe { restoreTerminalModes(handle) };
+            }
+            Ok(())
+        }
+    }
+
+    pub fn suspend(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle owned by self.
+            unsafe { suspendRenderer(handle) };
+            Ok(())
+        }
+    }
+
+    pub fn resume(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            // SAFETY: live renderer handle owned by self.
+            unsafe { resumeRenderer(handle) };
+            Ok(())
+        }
+    }
+
+    pub fn enable_mouse(&self, movement: bool) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (handle, movement);
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            unsafe { enableMouse(handle, movement) };
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle {
+                LIFECYCLE_FLAGS.fetch_or(MOUSE_ENABLED, Ordering::AcqRel);
+            }
+            Ok(())
+        }
+    }
+
+    pub fn disable_mouse(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.fetch_and(!MOUSE_ENABLED, Ordering::AcqRel)
+                    & MOUSE_ENABLED
+                    != 0
+            {
+                unsafe { disableMouse(handle) };
+            }
+            Ok(())
+        }
+    }
+
+    pub fn enable_kitty_keyboard(&self, flags: u8) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (handle, flags);
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            unsafe { enableKittyKeyboard(handle, flags) };
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle {
+                LIFECYCLE_FLAGS.fetch_or(KITTY_KEYBOARD_ENABLED, Ordering::AcqRel);
+            }
+            Ok(())
+        }
+    }
+
+    pub fn disable_kitty_keyboard(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.fetch_and(!KITTY_KEYBOARD_ENABLED, Ordering::AcqRel)
+                    & KITTY_KEYBOARD_ENABLED
+                    != 0
+            {
+                unsafe { disableKittyKeyboard(handle) };
+            }
+            Ok(())
+        }
+    }
+
+    pub fn clear_terminal(&self) -> Result<(), BridgeError> {
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = handle;
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            unsafe { clearTerminal(handle) };
             Ok(())
         }
     }
