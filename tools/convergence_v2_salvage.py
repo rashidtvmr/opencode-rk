@@ -30,9 +30,12 @@ import hashlib
 import json
 import os
 import pathlib
+import selectors
+import stat
 import subprocess
 import sys
 import tempfile
+import time
 from collections import Counter, defaultdict
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -97,14 +100,48 @@ CONFLICTING_IMPL_PRESERVED = "CONFLICTING_IMPL_PRESERVED"
 # bounded git helpers (subprocess arrays only; never a shell string)
 # --------------------------------------------------------------------------- #
 def run(args, cwd=ROOT, input_bytes=None, timeout=GIT_TIMEOUT):
-    """Return CompletedProcess, or None on timeout/OS error. Never raises."""
+    """Capture bounded output and always join this command's owned process."""
+    process = None
     try:
-        return subprocess.run(
-            list(args), cwd=str(cwd), input=input_bytes,
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout,
-        )
+        if input_bytes is not None and len(input_bytes) > MAX_TOTAL_BYTES:
+            return None
+        with tempfile.TemporaryFile() as stdin, selectors.DefaultSelector() as ready:
+            if input_bytes:
+                stdin.write(input_bytes)
+            stdin.seek(0)
+            process = subprocess.Popen(list(args), cwd=str(cwd), stdin=stdin,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            captured = {"stdout": bytearray(), "stderr": bytearray()}
+            ready.register(process.stdout, selectors.EVENT_READ, "stdout")
+            ready.register(process.stderr, selectors.EVENT_READ, "stderr")
+            deadline = time.monotonic() + timeout
+            while ready.get_map():
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    return None
+                for key, _ in ready.select(remaining):
+                    chunk = os.read(key.fileobj.fileno(), 65536)
+                    if not chunk:
+                        ready.unregister(key.fileobj)
+                        continue
+                    destination = captured[key.data]
+                    limit = MAX_TOTAL_BYTES if key.data == "stdout" else 65536
+                    if len(destination) + len(chunk) > limit:
+                        return None
+                    destination.extend(chunk)
+            status = process.wait(timeout=max(0.001, deadline - time.monotonic()))
+            return subprocess.CompletedProcess(list(args), status,
+                                               bytes(captured["stdout"]),
+                                               bytes(captured["stderr"]))
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return None
+    finally:
+        if process is not None:
+            if process.poll() is None:
+                process.kill()
+                process.wait(timeout=5)
+            process.stdout.close()
+            process.stderr.close()
 
 
 def git_out(*args, cwd=ROOT, timeout=GIT_TIMEOUT):
@@ -173,8 +210,9 @@ def classify(ancestor: bool, novel_paths: list[str]) -> tuple[str, str]:
     return PENDING_REVIEW, "NOT_ACCEPTED"
 
 
-def decide(ok: bool, ancestor: bool, merge_only: bool, novel_n: int,
-           inherited_n: int, novel_paths: list[str]) -> tuple[str, str, str]:
+def decide(ok: bool, ancestor: bool, merge_only: bool, merge_count: int,
+           novel_n: int, inherited_n: int,
+           novel_paths: list[str]) -> tuple[str, str, str]:
     """Fail-closed disposition decision. Returns (disposition, acceptance, reason)."""
     if not ok:
         return PENDING_REVIEW, "NOT_ACCEPTED", "analysis unavailable (git failure); fail-closed"
@@ -183,6 +221,11 @@ def decide(ok: bool, ancestor: bool, merge_only: bool, novel_n: int,
     if merge_only:
         return PENDING_REVIEW, "NOT_ACCEPTED", "merge-only unique history; conflict resolution not inspected"
     if novel_n == 0:
+        if merge_count > 0:
+            # unique merge commits present whose conflict resolution was not
+            # inspected for tree equivalence: conservatively never discard.
+            return (PENDING_REVIEW, "NOT_ACCEPTED",
+                    f"{merge_count} unique merge(s); resolution not inspected")
         return (SUPERSEDED_BY, "NOT_ACCEPTED",
                 "all non-merge patches already in base (compatibility evidence, not gate acceptance)")
     disp, acc = classify(False, novel_paths)
@@ -291,7 +334,7 @@ class Analyzer:
         return self._counts[sha]
 
     def novelty(self, sha: str):
-        """(unique_no_merge, novel, inherited, merge_only) or None on failure."""
+        """(unique_no_merge, novel, inherited, merge_only, merge_count) or None on failure."""
         if sha in self._novel:
             return self._novel[sha]
         raw = git_out("rev-list", "--no-merges", f"{self.base}..{sha}", cwd=self.cwd)
@@ -312,7 +355,8 @@ class Analyzer:
         novel = [s for s in unique if sign.get(s) == "+"]
         inherited = [s for s in unique if sign.get(s) != "+"]
         merge_only = (ahead_all > 0 and len(unique) == 0)
-        result = (unique, novel, inherited, merge_only)
+        merge_count = max(0, ahead_all - len(unique))
+        result = (unique, novel, inherited, merge_only, merge_count)
         self._novel[sha] = result
         return result
 
@@ -376,6 +420,7 @@ def inventory_refs(an: Analyzer, frozen: pathlib.Path, base_ref: str, base_sha: 
             "primaryRef": primary["ref"], "primaryKind": primary["kind"],
             "sha": sha, "aliases": aliases, "aliasCount": len(aliases),
             "objectPresent": False, "analysisFailure": False, "mergeOnly": False,
+            "uniqueMergeCount": 0,
             "ancestryExact": False, "disposition": PENDING_REVIEW,
             "acceptance": "NOT_ACCEPTED", "recommendedAction": "human-review",
             "reason": "object missing from local repository",
@@ -392,7 +437,7 @@ def inventory_refs(an: Analyzer, frozen: pathlib.Path, base_ref: str, base_sha: 
         if lr is None:
             row["analysisFailure"] = True
             row["disposition"], row["acceptance"], row["reason"] = decide(
-                False, False, False, 0, 0, [])
+                False, False, False, 0, 0, 0, [])
             row["recommendedAction"] = "content-review"
             rows.append(row)
             continue
@@ -401,6 +446,7 @@ def inventory_refs(an: Analyzer, frozen: pathlib.Path, base_ref: str, base_sha: 
         row["behind"], row["ahead"] = behind, ahead
         ok = True
         novel_n = inherited_n = 0
+        merge_count = 0
         novel_paths: list = []
         merge_only = False
         if ancestor:
@@ -410,16 +456,17 @@ def inventory_refs(an: Analyzer, frozen: pathlib.Path, base_ref: str, base_sha: 
             if res is None:
                 ok = False
             else:
-                unique, novel, inherited, merge_only = res
+                unique, novel, inherited, merge_only, merge_count = res
                 novel_n, inherited_n = len(novel), len(inherited)
                 row["mergeOnly"] = merge_only
+                row["uniqueMergeCount"] = merge_count
                 if novel_n > 0:
                     paths = an.paths_for(novel)
                     if paths is None:
                         ok = False
                     else:
                         novel_paths = paths
-        disp, acc, reason = decide(ok, ancestor, merge_only, novel_n, inherited_n, novel_paths)
+        disp, acc, reason = decide(ok, ancestor, merge_only, merge_count, novel_n, inherited_n, novel_paths)
         row.update({
             "analysisFailure": not ok,
             "disposition": disp, "acceptance": acc, "reason": reason,
@@ -459,29 +506,33 @@ def candidate_groups(rows):
 # --------------------------------------------------------------------------- #
 # worktree status (nonzero-returncode + rename-aware -z parsing)
 # --------------------------------------------------------------------------- #
+def porcelain_entries_z(data: bytes):
+    """Yield status, destination and optional rename origin without losing paths."""
+    fields = iter(data.split(b"\x00"))
+    for field in fields:
+        if not field:
+            continue
+        if len(field) < 4 or field[2:3] != b" ":
+            raise ValueError("malformed porcelain record")
+        code = field[:2].decode("ascii")
+        path = field[3:].decode("utf-8", "surrogateescape")
+        origin = None
+        if "R" in code or "C" in code:
+            raw_origin = next(fields, b"")
+            if not raw_origin:
+                raise ValueError("missing rename origin")
+            origin = raw_origin.decode("utf-8", "surrogateescape")
+        yield code, path, origin
+
+
 def parse_porcelain_z(data: bytes):
     """Parse `git status --porcelain=v1 -z`. Returns (tracked, staged, untracked,
     rename_entries) counting entries; rename records consume an extra token."""
-    fields = [f for f in data.split(b"\x00")]
     tracked = staged = untracked = 0
     renames = []
-    i = 0
-    n = len(fields)
-    while i < n:
-        f = fields[i]
-        if not f:
-            i += 1
-            continue
-        text = f.decode("utf-8", "replace")
-        code = text[:2]
-        path = text[3:] if len(text) > 3 else ""
-        is_rename = ("R" in code) or ("C" in code)
-        if is_rename and i + 1 < n:
-            origin = fields[i + 1].decode("utf-8", "replace")
+    for code, path, origin in porcelain_entries_z(data):
+        if origin is not None:
             renames.append({"code": code, "dest": path, "src": origin})
-            i += 2
-        else:
-            i += 1
         if code == "??":
             untracked += 1
         elif code[0] not in " ?" and code[1] not in " ?":
@@ -509,19 +560,23 @@ def worktree_dirty(path: pathlib.Path):
     if p.returncode != 0:
         meta["statusError"] = True
         return meta
-    tracked, staged, untracked, renames = parse_porcelain_z(p.stdout)
+    try:
+        tracked, staged, untracked, renames = parse_porcelain_z(p.stdout)
+    except (ValueError, UnicodeError):
+        meta["statusError"] = True
+        return meta
     meta["trackedChanges"] = tracked
     meta["stagedChanges"] = staged
     meta["untrackedCount"] = untracked
     meta["renames"] = renames[:20]
-    for f in [x for x in p.stdout.split(b"\x00") if x]:
-        text = f.decode("utf-8", "replace")
-        name = text[3:] if len(text) > 3 else ""
-        if name and is_sensitive_path(name):
-            meta["sensitivePathsReported"] += 1
-            if len(meta["sensitivePaths"]) < 20:
-                meta["sensitivePaths"].append(name)
-    meta["dirty"] = bool(tracked or untracked or renames)
+    sensitive = set()
+    for _, path_name, origin in porcelain_entries_z(p.stdout):
+        for name in (path_name, origin):
+            if name and is_sensitive_path(name):
+                sensitive.add(name)
+    meta["sensitivePathsReported"] = len(sensitive)
+    meta["sensitivePaths"] = sorted(sensitive)[:20]
+    meta["dirty"] = bool(tracked or staged or untracked or renames)
     return meta
 
 
@@ -552,19 +607,27 @@ def collect_detached(frozen: pathlib.Path, an: Analyzer):
 
 def collect_stash():
     rows = []
-    out = git_out("log", "-g", "--format=%H%x00%gs", "refs/stash") or ""
+    status = "ok"
+    out = git_out("log", "-g", "--format=%H%x00%gs", "refs/stash")
+    if out is None:
+        status = "unavailable"
+        out = ""
     for line in out.splitlines():
         sha, _, subject = line.partition("\x00")
         rows.append({"stashSha": sha.strip(), "subject": subject.strip()})
-    out2 = git_out("for-each-ref", "--format=%(refname) %(objectname)", "refs/stash") or ""
+    out2 = git_out("for-each-ref", "--format=%(refname) %(objectname)", "refs/stash")
+    if out2 is None:
+        status = "unavailable"
+        out2 = ""
     ref = [{"ref": l.split()[0], "sha": l.split()[1]}
            for l in out2.splitlines() if l.strip()]
-    return {"entries": rows, "ref": ref,
+    return {"entries": rows, "ref": ref, "status": status,
             "note": "recorded read-only; never popped or applied"}
 
 
 def collect_evidence_refs(frozen: pathlib.Path, an: Analyzer):
     rows, seen = [], set()
+    status = "ok"
     for line in (frozen / "archive-refs.txt").read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
@@ -574,7 +637,10 @@ def collect_evidence_refs(frozen: pathlib.Path, an: Analyzer):
         rows.append({"ref": ref, "sha": sha.strip(), "source": "frozen",
                      "objectPresent": an.object_exists(sha.strip())})
     live = git_out("for-each-ref", "--format=%(refname) %(objectname)",
-                   "refs/archive", "refs/ledger") or ""
+                   "refs/archive", "refs/ledger")
+    if live is None:
+        status = "unavailable"
+        live = ""
     for line in live.splitlines():
         if not line.strip():
             continue
@@ -583,35 +649,56 @@ def collect_evidence_refs(frozen: pathlib.Path, an: Analyzer):
             continue
         rows.append({"ref": ref, "sha": sha.strip(), "source": "live",
                      "objectPresent": an.object_exists(sha.strip())})
-    return rows
+    return rows, status
 
 
 # --------------------------------------------------------------------------- #
 # dirty preservation (separate staged/unstaged, bounded, no owner mutation)
 # --------------------------------------------------------------------------- #
 def preserve_dirty(worktrees, snapshot: pathlib.Path, report):
-    snapshot.mkdir(parents=True, exist_ok=True)
+    report["preservedWorktrees"] = []
+    report["preservedBytes"] = 0
+    try:
+        snapshot.mkdir(parents=True, exist_ok=False)
+    except OSError as exc:
+        report["gaps"].append({"worktree": "*", "path": str(snapshot),
+                               "reason": f"snapshot creation refused ({exc.__class__.__name__}); existing data untouched"})
+        return report
     total = 0
     preserved = []
     for wt in worktrees:
-        if not wt.get("exists") or not wt.get("dirty"):
+        if not wt.get("exists") or wt.get("dirty") is None or wt.get("statusError") or wt.get("statusTimeout"):
+            report["gaps"].append({"worktree": wt["path"], "path": "*",
+                                   "reason": "worktree missing or status unavailable; preservation unverified"})
+            continue
+        if not wt.get("dirty"):
             continue
         wtpath = pathlib.Path(wt["path"])
         name = hashlib.sha1(str(wtpath).encode()).hexdigest()[:12]
         outdir = snapshot / name
-        outdir.mkdir(parents=True, exist_ok=True)
-        head = git_out("rev-parse", "HEAD", cwd=wtpath) or wt.get("head") or ""
-        staged = git_bytes("diff", "--cached", "--binary", cwd=wtpath,
-                           timeout=STATUS_TIMEOUT * 2)
-        unstaged = git_bytes("diff", "--binary", cwd=wtpath,
-                             timeout=STATUS_TIMEOUT * 2)
-        if staged is None or unstaged is None:
-            report["gaps"].append({"worktree": wt["path"], "path": "*",
-                                   "reason": "diff read failure; not preserved"})
+        try:
+            outdir.mkdir(exist_ok=False)
+        except OSError as exc:
+            report["gaps"].append({"worktree": wt["path"], "path": str(outdir),
+                                   "reason": f"worktree snapshot refused ({exc.__class__.__name__})"})
             continue
-        staged_paths = (git_out("diff", "--cached", "--name-only", cwd=wtpath) or "").splitlines()
-        unstaged_paths = (git_out("diff", "--name-only", cwd=wtpath) or "").splitlines()
-        # sensitive content in tracked diffs -> do not write patch, record gap
+        observed_head = git_out("rev-parse", "HEAD", cwd=wtpath)
+        if observed_head is None:
+            report["gaps"].append({"worktree": wt["path"], "path": "*",
+                                   "reason": "observed HEAD unavailable; preservation unverified"})
+            continue
+        head = observed_head.strip()
+        # Disabling rename collapsing exposes BOTH sides, including a sensitive
+        # origin renamed to an innocent destination before an unstaged edit.
+        staged_names = git_bytes("diff", "--cached", "--no-renames", "--name-only", "-z", cwd=wtpath)
+        unstaged_names = git_bytes("diff", "--no-renames", "--name-only", "-z", cwd=wtpath)
+        if staged_names is None or unstaged_names is None:
+            report["gaps"].append({"worktree": wt["path"], "path": "*",
+                                   "reason": "diff path inventory unavailable; not preserved"})
+            continue
+        staged_paths = [p.decode("utf-8", "surrogateescape") for p in staged_names.split(b"\0") if p]
+        unstaged_paths = [p.decode("utf-8", "surrogateescape") for p in unstaged_names.split(b"\0") if p]
+        # Check names BEFORE materializing any tracked secret content.
         if any(is_sensitive_path(p) for p in staged_paths + unstaged_paths):
             for p in staged_paths + unstaged_paths:
                 if is_sensitive_path(p):
@@ -619,16 +706,33 @@ def preserve_dirty(worktrees, snapshot: pathlib.Path, report):
             report["gaps"].append({"worktree": wt["path"], "path": "*",
                                    "reason": "tracked diff touches sensitive path; left in place"})
             continue
+        staged = git_bytes("diff", "--cached", "--binary", cwd=wtpath,
+                           timeout=STATUS_TIMEOUT * 2)
+        unstaged = git_bytes("diff", "--binary", cwd=wtpath,
+                             timeout=STATUS_TIMEOUT * 2)
+        if staged is None or unstaged is None:
+            report["gaps"].append({"worktree": wt["path"], "path": "*",
+                                   "reason": "diff unavailable or output budget exceeded; not preserved"})
+            continue
+        if total + len(staged) + len(unstaged) > MAX_TOTAL_BYTES:
+            report["gaps"].append({"worktree": wt["path"], "path": "*",
+                                   "reason": "tracked patch run budget exceeded; left in place"})
+            report["overBudget"].append({"worktree": wt["path"], "path": "*"})
+            continue
         if staged:
             (outdir / "staged.patch").write_bytes(staged)
             total += len(staged)
         if unstaged:
             (outdir / "unstaged.patch").write_bytes(unstaged)
             total += len(unstaged)
-        others = git_out("ls-files", "--others", "--exclude-standard", "-z",
-                         cwd=wtpath) or ""
+        others = git_out("ls-files", "--others", "--exclude-standard", "-z", cwd=wtpath)
+        if others is None:
+            report["gaps"].append({"worktree": wt["path"], "path": "*",
+                                   "reason": "untracked inventory unavailable"})
+            others = ""
         untracked_names = [x for x in others.split("\x00") if x]
         copied = []
+        links = []
         for rel in untracked_names:
             relpath = wtpath / rel
             parts = set(rel.split("/"))
@@ -643,8 +747,15 @@ def preserve_dirty(worktrees, snapshot: pathlib.Path, report):
                 continue
             try:
                 if relpath.is_symlink():
-                    report["gaps"].append({"worktree": wt["path"], "path": rel,
-                                           "reason": "symlink skipped"})
+                    target = os.readlink(relpath)
+                    size = len(os.fsencode(target))
+                    if total + size > MAX_TOTAL_BYTES:
+                        report["gaps"].append({"worktree": wt["path"], "path": rel,
+                                               "reason": "symlink metadata run budget exceeded; left in place"})
+                        report["overBudget"].append({"worktree": wt["path"], "path": rel, "bytes": size})
+                        continue
+                    links.append({"path": rel, "target": target})
+                    total += size
                     continue
                 if not relpath.is_file():
                     report["gaps"].append({"worktree": wt["path"], "path": rel,
@@ -656,10 +767,23 @@ def preserve_dirty(worktrees, snapshot: pathlib.Path, report):
                                            "reason": f"over budget ({size} bytes); left in place"})
                     report["overBudget"].append({"worktree": wt["path"], "path": rel, "bytes": size})
                     continue
+                # Read the opened regular file under the actual byte budget;
+                # a stale stat must not turn a small file into unbounded capture
+                # or follow a final-component symlink introduced during capture.
+                descriptor = os.open(relpath, os.O_RDONLY | os.O_NOFOLLOW)
+                with os.fdopen(descriptor, "rb") as source:
+                    if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):
+                        raise OSError("not a regular file")
+                    content = source.read(min(MAX_FILE_BYTES, MAX_TOTAL_BYTES - total) + 1)
+                if len(content) > MAX_FILE_BYTES or total + len(content) > MAX_TOTAL_BYTES:
+                    report["gaps"].append({"worktree": wt["path"], "path": rel,
+                                           "reason": "file grew beyond capture budget; left in place"})
+                    report["overBudget"].append({"worktree": wt["path"], "path": rel, "bytes": len(content)})
+                    continue
                 dest = outdir / "untracked" / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
-                dest.write_bytes(relpath.read_bytes())
-                total += size
+                dest.write_bytes(content)
+                total += len(content)
                 copied.append(rel)
             except OSError as exc:
                 report["gaps"].append({"worktree": wt["path"], "path": rel,
@@ -670,12 +794,17 @@ def preserve_dirty(worktrees, snapshot: pathlib.Path, report):
             "stagedBytes": len(staged), "unstagedBytes": len(unstaged),
             "stagedPaths": staged_paths, "unstagedPaths": unstaged_paths,
             "untrackedCopied": copied, "untrackedTotal": len(untracked_names),
+            "untrackedLinks": len(links),
         }
+        if links:
+            (outdir / "links.json").write_text(json.dumps(links, indent=2) + "\n",
+                                               encoding="utf-8")
         (outdir / "meta.json").write_text(json.dumps(meta, indent=2) + "\n",
                                           encoding="utf-8")
         preserved.append({"worktree": wt["path"], "dir": str(outdir),
-                          "head": head, "stagedBytes": len(staged),
-                          "unstagedBytes": len(unstaged), "untracked": len(copied)})
+                           "head": head, "stagedBytes": len(staged),
+                           "unstagedBytes": len(unstaged), "untracked": len(copied),
+                           "untrackedLinks": len(links)})
     report["preservedWorktrees"] = preserved
     report["preservedBytes"] = total
     return report
@@ -712,7 +841,7 @@ def self_check() -> int:
         nov = an.novelty("1" * 40)
         if nov is not None:
             failures.append("git failure did not return None from novelty")
-        disp, acc, _ = decide(False, False, False, 0, 0, [])
+        disp, acc, _ = decide(False, False, False, 0, 0, 0, [])
         if (disp, acc) != (PENDING_REVIEW, "NOT_ACCEPTED"):
             failures.append(f"fail-closed decide -> {disp}/{acc}")
         if classify(False, []) != (PENDING_REVIEW, "NOT_ACCEPTED"):
@@ -746,10 +875,10 @@ def self_check() -> int:
         if res is None:
             failures.append("merge-only novelty returned None")
         else:
-            unique, novel, inherited, merge_only = res
+            unique, novel, inherited, merge_only, mcount = res
             if not merge_only:
                 failures.append(f"merge-only not detected: unique={len(unique)}")
-            d, a, _ = decide(True, False, merge_only, len(novel), len(inherited), [])
+            d, a, _ = decide(True, False, merge_only, mcount, len(novel), len(inherited), [])
             if (d, a) != (PENDING_REVIEW, "NOT_ACCEPTED"):
                 failures.append(f"merge-only decide -> {d}/{a}")
 
@@ -800,12 +929,77 @@ def self_check() -> int:
         if is_sensitive_path("crates/x/src/credentials.rs"):
             failures.append("crates .rs source false-positive")
 
+        # --- fixture 5: isolated staged-only worktree must be captured --------
+        staged_repo = init_repo(root / "stagedonly")
+        (staged_repo / "README.md").write_text("r\n")
+        g("add", "-A", cwd=staged_repo)
+        g("commit", "-q", "-m", "c0", cwd=staged_repo)
+        (staged_repo / "staged_only.rs").write_text("fn main(){}\n")
+        g("add", "staged_only.rs", cwd=staged_repo)
+        dstat = worktree_dirty(staged_repo)
+        if dstat["stagedChanges"] != 1 or dstat["untrackedCount"] != 0:
+            failures.append(f"staged-only counts wrong: {dstat}")
+        if not dstat["dirty"]:
+            failures.append("staged-only worktree reported clean (staged omitted from dirty)")
+        snap2 = root / "snap-staged"
+        rep2 = {"gaps": [], "sensitiveUntouched": [], "overBudget": []}
+        preserve_dirty([{"path": str(staged_repo), "exists": True, "dirty": True,
+                         "head": "x", "branch": "main"}], snap2, rep2)
+        sub2 = next(snap2.iterdir(), None)
+        if sub2 is None or not (sub2 / "staged.patch").exists():
+            failures.append("staged-only staged.patch missing")
+        else:
+            if "staged_only.rs" not in (sub2 / "staged.patch").read_text():
+                failures.append("staged-only content missing from staged.patch")
+            meta2 = json.loads((sub2 / "meta.json").read_text())
+            if "staged_only.rs" not in meta2["stagedPaths"]:
+                failures.append("staged-only path missing from meta")
+
+        # --- fixture 6: mixed unique-merge (non-merge patches matched) -> PENDING
+        # base already contains P by patch-id (cherry-pick). R merges the original
+        # P branch: base..R = {P (patch-id matched), M (unique merge)} -> novel 0,
+        # merge_count 1 -> PENDING (resolution not inspected).
+        repo6 = init_repo(root / "mixedmerge")
+        (repo6 / "f.txt").write_text("base\n")
+        g("add", "-A", cwd=repo6)
+        g("commit", "-q", "-m", "c0", cwd=repo6)
+        original_base = g("rev-parse", "HEAD", cwd=repo6).stdout.decode().strip()
+        g("checkout", "-q", "-b", "work", cwd=repo6)
+        (repo6 / "p.txt").write_text("P\n")
+        g("add", "-A", cwd=repo6)
+        g("commit", "-q", "-m", "P", cwd=repo6)
+        psha = g("rev-parse", "HEAD", cwd=repo6).stdout.decode().strip()
+        g("checkout", "-q", "main", cwd=repo6)
+        (repo6 / "base-only.txt").write_text("intervening base\n")
+        g("add", "base-only.txt", cwd=repo6)
+        g("commit", "-q", "-m", "advance base before cherry-pick", cwd=repo6)
+        advance = g("rev-parse", "HEAD", cwd=repo6).stdout.decode().strip()
+        g("cherry-pick", psha, cwd=repo6)            # patch-id now in base
+        base6 = g("rev-parse", "HEAD", cwd=repo6).stdout.decode().strip()
+        g("checkout", "-q", "-b", "r6", original_base, cwd=repo6)
+        g("cherry-pick", "--no-commit", advance, cwd=repo6)
+        g("commit", "-q", "-m", "same advance with separate ancestry", cwd=repo6)
+        g("merge", "-q", "--no-ff", "-m", "merge original P", "work", cwd=repo6)
+        r6 = g("rev-parse", "HEAD", cwd=repo6).stdout.decode().strip()
+        an6 = Analyzer(base6, cwd=repo6)
+        res6 = an6.novelty(r6)
+        if res6 is None:
+            failures.append("mixed-merge novelty returned None")
+        else:
+            unique, novel, inherited, merge_only, mcount = res6
+            if merge_only or len(novel) != 0 or mcount < 1:
+                failures.append(f"mixed-merge shape unexpected: novel={len(novel)} mcount={mcount}")
+            d6, a6, _ = decide(True, False, merge_only, mcount, len(novel), len(inherited), [])
+            if (d6, a6) != (PENDING_REVIEW, "NOT_ACCEPTED"):
+                failures.append(f"mixed-merge decide -> {d6}/{a6}")
+
     if failures:
         print("SELF-CHECK FAILED:")
         for f in failures:
             print("  - " + f)
         return 1
     print("SELF-CHECK OK: fail-closed=PENDING merge-only=PENDING "
+          "unique-merge=PENDING staged-only=captured "
           "staged/unstaged/rename=separate safe-source=ok secret-deny=ok")
     return 0
 
@@ -846,6 +1040,11 @@ def main() -> int:
     ap.add_argument("--self-check", action="store_true")
     args = ap.parse_args()
 
+    if args.preserve_dirty and not args.snapshot_dir:
+        ap.error("--preserve-dirty requires --snapshot-dir")
+    if args.preserve_dirty and not args.check_dirty:
+        ap.error("--preserve-dirty requires worktree status checks")
+
     if args.self_check:
         return self_check()
 
@@ -861,7 +1060,7 @@ def main() -> int:
     worktrees = collect_worktrees(frozen, args.check_dirty)
     detached = collect_detached(frozen, an)
     stash = collect_stash()
-    evidence = collect_evidence_refs(frozen, an)
+    evidence, evidence_status = collect_evidence_refs(frozen, an)
 
     ref_counts = Counter(r["disposition"] for r in rows)
     accepted = {"INTEGRATED_ANCESTOR"}
@@ -881,6 +1080,16 @@ def main() -> int:
         "worktreesExpected": EXPECTED_WORKTREES,
         "analysisFailures": [r["primaryRef"] for r in rows if r.get("analysisFailure")],
         "mergeOnlyPending": [r["primaryRef"] for r in rows if r.get("mergeOnly")],
+        "uniqueMergePending": [r["primaryRef"] for r in rows
+                               if (r.get("uniqueMergeCount") or 0) > 0
+                               and r["disposition"] == PENDING_REVIEW],
+        "stashStatus": stash.get("status", "ok"),
+        "evidenceStatus": evidence_status,
+        "dirtyWorktrees": [w["path"] for w in worktrees if w.get("dirty")],
+        "stagedOnlyWorktrees": [w["path"] for w in worktrees
+                                if w.get("dirty") and (w.get("stagedChanges") or 0) > 0
+                                and (w.get("trackedChanges") or 0) == 0
+                                and (w.get("untrackedCount") or 0) == 0],
         "supersededNeedsBase": all(
             (r.get("supersededBy") or {}).get("sha") for r in rows
             if r["disposition"] == SUPERSEDED_BY
@@ -980,6 +1189,11 @@ def main() -> int:
         "",
         f"- analysis failures: {len(validation['analysisFailures'])}",
         f"- merge-only pending: {len(validation['mergeOnlyPending'])}",
+        f"- unique-merge pending: {len(validation['uniqueMergePending'])}",
+        f"- stash status: {validation['stashStatus']}",
+        f"- evidence status: {validation['evidenceStatus']}",
+        f"- dirty worktrees: {len(validation['dirtyWorktrees'])}",
+        f"- staged-only worktrees: {len(validation['stagedOnlyWorktrees'])}",
         f"- detached: {len(detached)}/{EXPECTED_DETACHED} valid={validation['detachedAllValid']}",
         f"- worktrees: {len(worktrees)}/{EXPECTED_WORKTREES}",
         "",

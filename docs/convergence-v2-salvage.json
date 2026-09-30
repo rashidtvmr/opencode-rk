@@ -1,6 +1,6 @@
 {
   "baseRef": "main-v2",
-  "baseSha": "fc2d201f450b6020b1dce12268a550053d65235d",
+  "baseSha": "0088fbf2ea65251f344915c93bd8679c0c467320",
   "candidateGroups": [
     {
       "aliasRefs": 0,
@@ -690,7 +690,7 @@
     "refsAuthority": "pre-V2 heads/remotes",
     "refsFile": "refs-before.txt"
   },
-  "generatedAt": "2026-09-30T08:48:10.452153+00:00",
+  "generatedAt": "2026-09-30T09:19:31.003567+00:00",
   "preservation": {
     "g0": "pending",
     "gaps": [
@@ -698,23 +698,18 @@
         "path": "opencode.json",
         "reason": "sensitive path; left in place",
         "worktree": "/Users/mymac/Projects/opencode-rk"
-      },
-      {
-        "path": "crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib",
-        "reason": "symlink skipped",
-        "worktree": "/Users/mymac/Projects/opencode-rk-web006-integrate"
       }
     ],
     "overBudget": [],
-    "preservedBytes": 3268938,
-    "preservedWorktrees": 16,
+    "preservedBytes": 3379672,
+    "preservedWorktrees": 18,
     "sensitiveUntouched": [
       {
         "path": "opencode.json",
         "worktree": "/Users/mymac/Projects/opencode-rk"
       }
     ],
-    "snapshotDir": "/Users/mymac/Projects/opencode-rk-pre-v2-20260930-1130/v2-worktree-preservation-20260930-1600"
+    "snapshotDir": "/Users/mymac/Projects/opencode-rk-pre-v2-20260930-1130/v2-worktree-preservation-20260930-staged-complete"
   },
   "refs": [
     {
@@ -727,7 +722,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -781,7 +776,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "00e2c26d2c4e1a95480afbc051ba08e7b2a231e6",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -793,7 +789,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -847,7 +843,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "026a0aea2ee1c2d06710135410d18a061547a327",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -861,7 +858,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 59,
+      "behind": 60,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -874,7 +871,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "0289aefc059e9d33580ce5e78b9c960dc23238a4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -886,7 +884,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 66,
+      "behind": 67,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -899,7 +897,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "06c6ffd6ee537ff70b1fa3ebfcf3c15057649e12",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -911,7 +910,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -931,7 +930,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "077d2359ea2da295e24c384f4cfb0120ff8710e0",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -943,7 +943,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 3,
+      "behind": 4,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -958,7 +958,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "07a57c9f670a7c4a632c377b48db1fafa099e14b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -968,7 +969,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1022,7 +1023,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "096169461f5c356fa0b969bd5f8199f3ad1b1d4a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1034,7 +1036,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -1088,7 +1090,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "09a590e94b0ff65b349d189adfcb0c508f9d1382",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1100,7 +1103,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1154,7 +1157,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "0da7bcb316e241f4ae3ed53a3e94ea9d4ab0362b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1166,7 +1170,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1220,7 +1224,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "0ec028a8d820eee0ecbb7582c193573849f0167c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1232,7 +1237,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1286,7 +1291,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "0fb07076d4608f3c7b08eeeb2342cf11b85177d0",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1298,7 +1304,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 14,
+      "behind": 15,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1315,7 +1321,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "100875f7ac51b1633e329aa7900992aafb5d0c46",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1328,7 +1335,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -1382,7 +1389,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "106524114decd58854fad737b5f322638739bb1c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -1392,7 +1400,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 12,
+      "behind": 13,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1405,7 +1413,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "115facc2f3366c8bdbe45774dd9b03af69ebc0f6",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1417,7 +1426,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1434,7 +1443,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "12da0a88e847c4e508a8a43c621589aae61bf26d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1446,7 +1456,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1500,7 +1510,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "135d26e9403c77a7909fba6084273fa74891fc8c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1512,7 +1523,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1566,7 +1577,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "141c2028fa06ef326b4dd2e5e775a2b8d5d56bfa",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1578,7 +1590,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -1597,7 +1609,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "15231636d09168d514b0637e2872789de0157350",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1609,7 +1622,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1626,7 +1639,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "15f6406b85cce98269d1746ca479c82e6bd94742",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1638,7 +1652,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1692,7 +1706,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "174b955ff26a6037634f0808b0636b00e22b9a18",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1704,7 +1719,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1758,7 +1773,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "17a212246ea9408386f39de43b16d1ea49e0a9ae",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1770,7 +1786,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1824,7 +1840,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "18e7c304ea29258ec9a9339fce036cb858f106e8",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -1836,7 +1853,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 9,
+      "behind": 10,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1849,7 +1866,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "1c1a64f677b537319a110063ef6289f8225d41b9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1861,7 +1879,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1915,7 +1933,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "1c81b4cd1cca3a3d5450898b5d22309817a9e7ce",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1927,7 +1946,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -1981,7 +2000,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "1cb703996b6b1180bce7cb511acf439187755bd8",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -1993,7 +2013,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2047,7 +2067,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "1dcc0c884dfe6ed3d73bd0412036d79b2b77943e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2059,7 +2080,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2113,7 +2134,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "1f53b01176248c1b9dc364c8add06039d4d800a1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2125,7 +2147,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2179,7 +2201,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "1fcd3838e2a849eadfa4220c3d298750e99c52b3",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2191,7 +2214,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2245,7 +2268,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2040fcbcc920618d77e87d21fecd0900b64820ed",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2257,7 +2281,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2311,7 +2335,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2118939e30b75e6af92bd608f28be74cc7dd1fe9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2323,7 +2348,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -2340,7 +2365,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2185d332f46f8800cb8ebc86f98de87c42ac728b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2352,7 +2378,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2406,7 +2432,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "220de90f705ed1ea346e5d932da2e5fbddd1b50c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2418,7 +2445,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2472,7 +2499,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2263e912644ebc666bf94d3b811af86e1e3e84a7",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 3
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2484,7 +2512,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 57,
+      "behind": 58,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2500,7 +2528,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "22762c28e49a9b2b983884c7a7e154cb5aa61d32",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2512,7 +2541,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2566,7 +2595,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "233a99c2b55256d39a511422c3e8f575235d72a0",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2578,7 +2608,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -2632,7 +2662,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "238ed7a17cea33ac8fb183d6d53d2748376bc102",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2644,7 +2675,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2698,7 +2729,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2499012f2734480d36daeeefc352038e689e2000",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2710,7 +2742,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -2764,7 +2796,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "255958ccbfbb545296d86dee46d9853e3add761b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2776,7 +2809,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 39,
+      "behind": 40,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2793,7 +2826,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "260356596ce810f3d32ec762d22370bdaab85702",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2805,7 +2839,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2859,7 +2893,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2699dc7e666e78ddedcecf960d4d5ef425e0f172",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2871,7 +2906,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2925,7 +2960,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "26da87430cb38f34779d92211eecb3e73e3cbf8d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -2937,7 +2973,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -2991,7 +3027,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "26e54d7577c471b85a8e1c07faf083f2c788e0c5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -3004,7 +3041,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 3,
+      "behind": 4,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3017,7 +3054,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "2798d151dd20f05408cb600384f0a944c6576600",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -3029,7 +3067,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 33,
+      "behind": 34,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3042,7 +3080,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "28e894f4bdfe9c56fa1604cc115259f64f62d733",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3054,7 +3093,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3108,7 +3147,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2987c2e58d32604628c2c183af365ee577880382",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3120,7 +3160,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3174,7 +3214,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "299b969bf62da33ddd5a1e4e636df4e59de663e3",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3184,7 +3225,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -3238,7 +3279,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "299bbbfc53b63e205fd314faf4a936ffd1da2ea9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3250,7 +3292,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3304,7 +3346,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "29d2b8fee34378a388bf2cbc0226dde67ce86b53",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3316,7 +3359,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3370,7 +3413,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2b7a6faf2916169e5b776d951859c31ff622b39b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3382,7 +3426,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3436,7 +3480,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2c291e017f55f473ce8fb99137c3d1c35bd668f5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3448,7 +3493,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3502,7 +3547,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2c5e9cfbdc4989a54e88b0ebb095a078cc4805de",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3514,7 +3560,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3568,7 +3614,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2cd9ca9987bed99adcff0d1bee0038f7f1b2c3c5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3580,7 +3627,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3634,7 +3681,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2d04c1c925595b566f617b073129ecee24593eb9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3646,7 +3694,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3700,7 +3748,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2d0a6fead69210ed985cc46e969fbdcb64282aba",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3712,7 +3761,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 19,
+      "behind": 20,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3729,7 +3778,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2e73e42b5f368dac185a10318ae65447990e1596",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3741,7 +3791,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -3795,7 +3845,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2f4f7056517d6013bafa8ef2e2ddd5eca84dcda1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3807,7 +3858,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3861,7 +3912,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "2f87242d6371cc5059facb75ff6756b0ece6ed68",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3873,7 +3925,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3927,7 +3979,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "30de11af23a4db7ef701d5a753933a18897954d1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -3939,7 +3992,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -3993,7 +4046,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "3190556a78d7fe3766f65e55f9ac58ece97ba7b3",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -4005,7 +4059,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 58,
+      "behind": 59,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4018,7 +4072,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "3227b28e6dbaf604d8557768a8732407c5750181",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4030,7 +4085,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 2,
       "mergeOnly": false,
@@ -4084,7 +4139,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "34ff1c76e1ca754c048c639c630d35e0b46b6f6c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4094,7 +4150,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4148,7 +4204,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "36090717e4333b23d9765193ea250000b1de4325",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4160,7 +4217,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4214,7 +4271,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "36776159d0dc361646fec0eba17625c6798db1e9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4226,7 +4284,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 14,
+      "behind": 15,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4248,7 +4306,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "36953b19ae810f95d27b6e2d851bdf86b3c21e1d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4260,7 +4319,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4314,7 +4373,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "38569366021bd00cdcc79c284fcb7e7f270c149f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4326,7 +4386,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4380,7 +4440,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "38c54121be33f354e9606f14565991fb18e1c1d4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4390,7 +4451,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4444,7 +4505,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "399c65465a94d353276cdcb432a573f11909f827",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4456,7 +4518,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4510,7 +4572,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "39a08732930cf89d3d225a0a6c07db6328620057",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4522,7 +4585,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4576,7 +4639,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "3a271c473741d906f6cb9b123fed223936a672a7",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4588,7 +4652,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4642,7 +4706,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "3a3751dd7fbe57b524d81599450940dfda7d01c9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4654,7 +4719,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4708,7 +4773,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "3ad58b0554aecb79080064a7fa70b0071b1ba2a1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "INTEGRATED",
@@ -4720,7 +4786,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 71,
+      "behind": 72,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4733,7 +4799,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "3b716c7f405df7b7621a26f83fdd4aadd0541606",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4745,7 +4812,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 6,
+      "behind": 7,
       "disposition": "SUPERSEDED_BY",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -4760,8 +4827,9 @@
       "sha": "3ced89a87ba1f7a8416d6830b79bd7187406d392",
       "supersededBy": {
         "ref": "main-v2",
-        "sha": "fc2d201f450b6020b1dce12268a550053d65235d"
-      }
+        "sha": "0088fbf2ea65251f344915c93bd8679c0c467320"
+      },
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4773,7 +4841,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4827,7 +4895,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "3e89fbe86a99c1994f02b7087c4a1ef67d767029",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -4839,7 +4908,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 66,
+      "behind": 67,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4852,7 +4921,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "3ecee1009890087f71b3548260604fa9eed7af1c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -4864,7 +4934,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 72,
+      "behind": 73,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4877,7 +4947,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "3eefe5e808ff4c37391f422e1db79a0c1faef954",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4889,7 +4960,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 17,
+      "behind": 18,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4906,7 +4977,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "3fbbc6646db5c35e1dc5171b57840e27f86f10cd",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4918,7 +4990,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -4938,7 +5010,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "405599ab0a994682e9db517f353c5314f491671d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -4950,7 +5023,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5004,7 +5077,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4167f35b6246386bdfdedf3d1cb6e1046c404960",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5014,7 +5088,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 113,
+      "behind": 114,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5029,7 +5103,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "43172b57527a10976b0d7b48a468551d7d3a662c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5042,7 +5117,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -5096,7 +5171,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "434cddebed7a1d5c21965b395fb0d8c687a395ba",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5108,7 +5184,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5162,7 +5238,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "45095aecf32c0ecacd3e84c45556f0923f14652d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5174,7 +5251,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5228,7 +5305,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4535bef9fb8f1cf4f9434800b4d04964ce852c04",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5240,7 +5318,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5257,7 +5335,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "466ab67bcc392acd5186bd235199fddd2d704555",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5269,7 +5348,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5286,7 +5365,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "471d46bbe1fca0dcf0357fea71f2e78513d6287c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5298,7 +5378,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5352,7 +5432,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4771e3b8f53f6a26a754268896e4fe6e16a496e2",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5364,7 +5445,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5418,7 +5499,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "48143574365b841d2bf6659d574070b32575c461",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5430,7 +5512,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5484,7 +5566,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "48d0351040efb83ffd8fd2cc65bcdb89ee217620",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5496,7 +5579,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5550,7 +5633,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "49ab00c4932793fd02562e1e848b6ffd3904e355",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "INTEGRATED",
@@ -5562,7 +5646,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 7,
+      "behind": 8,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5575,7 +5659,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "4accfca9b158ccf227dff3fe99f21edbcb566654",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5587,7 +5672,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5641,7 +5726,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4bbeb99ac4357a5fb2101b50e8b218df8c4b23b1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5653,7 +5739,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 5,
+      "behind": 6,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5670,7 +5756,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4c307043091232939d8df6ac43ba45c66147d381",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5682,7 +5769,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5736,7 +5823,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4c6f2d89f8c5f0bbc3031ec167688a3f104d1968",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5748,7 +5836,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5802,7 +5890,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4c953e4e2a2907e5f7b693cb667d53824a9a873e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5814,7 +5903,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5868,7 +5957,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4cfd87c412f6b64a3eee8e52ddc07d9e42d99c2d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5880,7 +5970,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -5934,7 +6024,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4dc8811b65e6b340afe3b25efc3f55d2bb9d9147",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -5946,7 +6037,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -6000,7 +6091,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4f66a10f087e98d77db31ac7a968f74e33aae725",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6012,7 +6104,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6066,7 +6158,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4f7863ac5fc0f443e5e23f8921e71c88862cba0d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6078,7 +6171,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6132,7 +6225,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "4ff12a2aa994a35ba398cc93fbc9d28df48afe00",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6144,7 +6238,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -6198,7 +6292,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5117d76ef0cf105881da7d140732ea083f7721a6",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6210,7 +6305,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 10,
+      "behind": 11,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6229,7 +6324,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "51caadd7e25ee0c3d13152ecdceea1fb69ee0c1e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6241,7 +6337,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -6295,7 +6391,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "52807f87c4d9ff9937adb2e1a655acdeb51badbc",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -6305,7 +6402,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 14,
+      "behind": 15,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6318,7 +6415,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "5312b60be2b4a5bb635dfb67946aee4630076712",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6330,7 +6428,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6384,7 +6482,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "55174dc83edf9df197d102522d2889c9af3d6408",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6396,7 +6495,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6450,7 +6549,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "55a4292132958af6fc6d6c5b15e89c8d75b35e84",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6462,7 +6562,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6516,7 +6616,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "55acf2942d950fea0b4c90c336ec10713f0fa81d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6528,7 +6629,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6582,7 +6683,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "56f8e2b3d9bd1f50481d7c8b0ee9fc0a13b662d7",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6594,7 +6696,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6648,7 +6750,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "574924c1e2957b5923d4347fa5ca8b4f3970d1de",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6660,7 +6763,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6676,7 +6779,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "576cda69c01ac9375d95dc37936ee564e53dbd59",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6688,7 +6792,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6742,7 +6846,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5977b5877b61e7beff22ab299694c88fab1da2a1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6754,7 +6859,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6771,7 +6876,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5a5a51c48b2c0519e674a92ce9ee9051b59b7f46",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6783,7 +6889,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 18,
+      "behind": 19,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6800,7 +6906,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5a9db78c2111e0cae80493618e09fc147bbd8d3f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6812,7 +6919,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6829,7 +6936,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5b42e8be739fa23660ebb53cea2bf0d202b30169",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6841,7 +6949,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6858,7 +6966,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5bb32ee32edb9a94fdc5e3e9916ffbfcd60badd5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6868,7 +6977,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6922,7 +7031,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5c5f03e13a659a947505d470a9e7fbee540f328d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -6934,7 +7044,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 67,
+      "behind": 68,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -6947,7 +7057,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "5d07e20c43c1e332f93b1c305772f645df80e4b2",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -6959,7 +7070,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7013,7 +7124,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5d3f639a5fd129c6e93314c07bca37c2b881adce",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7025,7 +7137,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7079,7 +7191,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "5d666830bc9e5b716b2ea1d239d9d0ccbe6e067b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "INTEGRATED",
@@ -7089,7 +7202,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 4,
+      "behind": 5,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7102,7 +7215,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "600cbfc88af2cbf14149d2ff9e8fe0f0deeb50f8",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7114,7 +7228,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7168,7 +7282,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "606a820ec094022066008437f297b3e63bcdda7a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7180,7 +7295,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -7234,7 +7349,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "60f0a6c0d4ed80b23a44a55fee50138e6f708c8d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7246,7 +7362,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7300,7 +7416,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "614c22064c7280987bed298f38b442054fd73755",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7312,7 +7429,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7366,7 +7483,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "61b095902849f2e08ab2093c27c1d3e96003b93d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7378,7 +7496,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7432,7 +7550,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "61bec38a15b1bf24a81a0020f454d6f5daacf639",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7444,7 +7563,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 6,
+      "behind": 7,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7459,7 +7578,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "61d473ab6e2967069fd1f23acbd7219518d7b7c6",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7471,7 +7591,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7525,7 +7645,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "61de339868d7202a4ca017d903645dd282951f68",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7537,7 +7658,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -7591,7 +7712,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "61eabd432fa0eeb98017d2d3c92e63ba59a52920",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7603,7 +7725,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7657,7 +7779,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "62f43ce21b09f997d7df5c860dafb5c44a7bb3d8",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "INTEGRATED",
@@ -7667,7 +7790,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 10,
+      "behind": 11,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7680,7 +7803,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "62f6fed44c410c9b6d53f1ef619fe483522070d0",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -7690,7 +7814,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 76,
+      "behind": 77,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7703,7 +7827,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "62f7eb1ba1b744604762cd022118390784be8d41",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7713,7 +7838,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7767,7 +7892,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "632a71ef8f629da603c40627938004373f4abc64",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7779,7 +7905,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7798,7 +7924,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "671beb3a2e87b22af86b29799f96a56ca2d66340",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -7810,7 +7937,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 61,
+      "behind": 62,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7823,7 +7950,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "68bd3510ace6c419df6f5ebcb58250d1c8e5df44",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7835,7 +7963,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7851,7 +7979,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "68ff545e6727321b52e83ad21f308ca3531a0e65",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -7863,7 +7992,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 5,
+      "behind": 6,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7876,7 +8005,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "691709c46785a78a563f173a3d90a9d570c4bbfb",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -7888,7 +8018,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 70,
+      "behind": 71,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7901,7 +8031,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "693ab9a2aa11802f855acfab9abf2bb9ea00900b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7913,7 +8044,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -7967,7 +8098,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6962e8f21ff3c6d474169e660af223eeea895215",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -7979,7 +8111,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8033,7 +8165,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6a55ac573a25b4e55901a128458a014e677a00d2",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "INTEGRATED",
@@ -8045,7 +8178,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 63,
+      "behind": 64,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8058,7 +8191,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "6aee5973bd1ae700d4827cc9c0b8ff8e716ab5d5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8068,7 +8202,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -8122,7 +8256,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6b3906c036d253791470f8c34cc2ec3d963fe073",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8134,7 +8269,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8154,7 +8289,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6b65207494bc1b089f7a236760cacdc1b42ea8e4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8164,7 +8300,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8218,7 +8354,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6c2b725db473666677e393c88dbd26266d359d4b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8230,7 +8367,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8284,7 +8421,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6c975145ef6e1c564b55609ec13ca0f8ae45400e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8296,7 +8434,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -8322,7 +8460,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6cb5b88d340c24390d0f38232a4b6d432c7c90bc",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8334,7 +8473,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8388,7 +8527,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6d2f97f90478abf1dd484e3865d8aa0fd72630bc",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8400,7 +8540,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8454,7 +8594,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6dcfe198e096721169efb2d96f0d763b35c8daff",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8466,7 +8607,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8520,7 +8661,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6de682f7d70b22c0ae95e86a41fe6a1bb0a866c4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8532,7 +8674,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8586,7 +8728,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6e1695dbd01981d22c95291b7fe576aeb56e5d20",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8598,7 +8741,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8616,7 +8759,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "6fe73b898bc55bb8b53286d54214c1fb82e50b46",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8628,7 +8772,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8682,7 +8826,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "716b546077204c4db9c3514a91018546ac9af61a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8694,7 +8839,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8748,7 +8893,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "72621123a52e134b7caaebdc0173e1536e2eaf07",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8764,7 +8910,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8780,7 +8926,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7262682e31c1f473912c9483804c9430eb4ee4c5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8792,7 +8939,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8846,7 +8993,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7358e3e98acab6bb7740c0813f952e9ad0dae725",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8858,7 +9006,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8875,7 +9023,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7368e7d84e6c4c5b4603a2281da4995c46c3f258",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8885,7 +9034,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8939,7 +9088,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7463dbe74980b9a0098d245a275d2d03728925e5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8951,7 +9101,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -8969,7 +9119,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "758618d643a72c826f80147d6333e97525181a3f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -8981,7 +9132,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9035,7 +9186,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "76be775ecfb1c49868c5d90e92f7564e1ce67e8d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -9047,7 +9199,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 69,
+      "behind": 70,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9060,7 +9212,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "7888b47ab6ce04f7df96791e32bce4eaba2f30db",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9072,7 +9225,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 6,
+      "behind": 7,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9087,7 +9240,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "78930a81a1244925d4ecfe0d22b8ba291c333a61",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -9100,7 +9254,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 62,
+      "behind": 63,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9113,7 +9267,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "78b744ddeaa1b79d3cebddc4bbe80c8217bec8dd",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9125,7 +9280,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9179,7 +9334,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "78ba73a42bbb32beab596a5f0b9d6ec2077620dd",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9192,7 +9348,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9246,7 +9402,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7938791ba76645115e418928a728869b48beb73b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9258,7 +9415,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9312,7 +9469,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "79840f880ab36bf5ba645a0a5f36291c92388dba",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9324,7 +9482,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -9378,7 +9536,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "798cbff99f4e2a2ad21cc937df428eb6bd871cca",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9390,7 +9549,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9407,7 +9566,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7993f9f37d5664f3cd6646c906a7af44cc5f1f88",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9419,7 +9579,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9473,7 +9633,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7a459f9a224e3daec69fb2e848bdb66831b4550a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9485,7 +9646,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9502,7 +9663,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7b16a69411d11322dbeefebdb07fd4e9387878fe",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9512,7 +9674,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PENDING_REVIEW",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9535,7 +9697,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7c64e008c13f1f7e21cf421e2657a7b768fbb214",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9547,7 +9710,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9565,7 +9728,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7d90cdd6decf8c72f7036c01928e2b81e7bd4861",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9577,7 +9741,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9631,7 +9795,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7eae08b30ce84597f64640ee6cb3ccb627c08cdd",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9643,7 +9808,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 7,
+      "behind": 8,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9661,7 +9826,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7ee1b807de2817301b7d4e75d93a3bafec9104a9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9671,7 +9837,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 68,
+      "behind": 69,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9687,7 +9853,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "7eecdd0e5a71b24c172f26f37fed377a73bf0c83",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9699,7 +9866,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 14,
+      "behind": 15,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9719,7 +9886,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "80c06210695e13f43eff5375b105a1aaa3ea7dd8",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9731,7 +9899,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9785,7 +9953,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "836c987c0d4b14f977e711a6e526bbac9e23becb",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9797,7 +9966,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -9851,7 +10020,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "83b38276d59a239b88067e7da3427b51c9f43182",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9863,7 +10033,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -9888,7 +10058,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8422a9efcf25a5fc857f200abc5ce2c4e622220f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9900,7 +10071,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -9954,7 +10125,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "84f834a9f4bdb1112ad65110b8da456363e2ba86",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -9966,7 +10138,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 2,
       "mergeOnly": false,
@@ -10020,7 +10192,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8638c3ac71fd99180bc26114de462fe61805ec8a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10032,7 +10205,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -10086,7 +10259,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "86537198c26b39f75e64dc76cc278b2e7f6e9857",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10098,7 +10272,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10152,7 +10326,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "86d67f47b0e55f3b6c219a887d668368526221d7",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10164,7 +10339,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10180,7 +10355,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "872b30ded1d2333157046fcdf3a3b81d7d82823f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10192,7 +10368,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10246,7 +10422,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8916868dc31ba98f98bf26d33dbe9d43b1758d10",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10256,7 +10433,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10310,7 +10487,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "89fa28bcfa718cc3505da448cdb4686fd261c5c5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -10324,7 +10502,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 73,
+      "behind": 74,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10337,7 +10515,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "8a91a7b49a5a1c948218ad8f176d44e015530dcb",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10349,7 +10528,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10366,7 +10545,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8b1785e99109cd040a01ac844e387b8318d65251",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10378,7 +10558,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -10432,7 +10612,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8b5b5a0cea5d1c66b9aa7edb7de551ed1c400d16",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -10444,7 +10625,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 60,
+      "behind": 61,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10457,7 +10638,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "8b72e84823ebb133854557e2f8b3e62de46af5f0",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10469,7 +10651,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -10523,7 +10705,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8bff81a1f8219aec993af5abadad97d6fde7709f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10535,7 +10718,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10589,7 +10772,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8c0bcd53ff7a909a529bc361bc5986670b690a0f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10601,7 +10785,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10655,7 +10839,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8c514e05f63ad4de5942e43d56e3f180126fee2a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10667,7 +10852,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10685,7 +10870,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8d9dc23c7a23a292f19a30ff3001dbab5632128f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10697,7 +10883,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10715,7 +10901,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8e8679d0e4222cb56f7915894431669683af0871",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10727,7 +10914,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10781,7 +10968,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8ecf29524adf721857030fbdd698596a06ebf4ce",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10793,7 +10981,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10847,7 +11035,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "8f180c714f67479ea9c1af38ab2c5bb28d4343fb",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10859,7 +11048,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -10913,7 +11102,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "90d45f3aceed32dc7486701a3a1e4c24fd712140",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10925,7 +11115,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -10979,7 +11169,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "924301e43d2ee32b2605ef311bd9e1b4af7b5ad1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -10992,7 +11183,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11046,7 +11237,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "925bb52f7685e2900244fe4755892dee7c831bf9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11058,7 +11250,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11112,7 +11304,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "92fbdcf24e520e827df74431ed75fc71921938d1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11124,7 +11317,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11141,7 +11334,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9425be10a5a71c15055536f3a0309668db430d37",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11151,7 +11345,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 12,
+      "behind": 13,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11167,7 +11361,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "94b6ec80c979c655725a8be2d7953185c219fa26",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11179,7 +11374,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11233,7 +11428,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "96087d1d22727893273ba58ed28a3c6ede9e0bf0",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11245,7 +11441,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11299,7 +11495,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9613f53cdee83875e1ccef2229bb6e98c6c15599",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11311,7 +11508,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -11365,7 +11562,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "96b4a33ddee7d39fa5de508c8bea701326b23324",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11377,7 +11575,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11394,7 +11592,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "98de33bdeec7fe38a88f1c727f195c73ca00ba68",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11406,7 +11605,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11423,7 +11622,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "99688f2b34ab3ffd820013e7755b1ff21b5546d4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11435,7 +11635,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11455,7 +11655,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "99c9d057e9f07cb74254e92d1335f79e3e27b9be",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11467,7 +11668,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11483,7 +11684,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9a7d79214b2cb69677559e77071293e611f61389",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11495,7 +11697,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -11521,7 +11723,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9bae192704343a26398174b794280064645edde4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11533,7 +11736,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11549,7 +11752,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9bb4bde4ac9e768ffd59bfca9958a1d6aa8734f9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11561,7 +11765,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11615,7 +11819,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9c5192fe547a797516052a47263161220882198a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11625,7 +11830,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11679,7 +11884,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9cf998a5512f86e5f88c2f57280fc79d1f22c19a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11691,7 +11897,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11745,7 +11951,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9d74784888e2704433578fdfbb75e899c8223ac8",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11757,7 +11964,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11811,7 +12018,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9de9ee7e8bffc7b3cce16d1d2951adeb43735a7b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11823,7 +12031,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11877,7 +12085,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9f41701fd1e4a10b2ce22e0f1a63f1cfd6c9f317",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11889,7 +12098,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11906,7 +12115,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "9f4e9a59e1b4786e5e374c290060deee297cbe1f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11918,7 +12128,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -11972,7 +12182,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a0291547d4706d982e4e999f140e0fe4e1a0e9ce",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -11984,7 +12195,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12001,7 +12212,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a033941ae831d4e8aee2694b43d4be0f92694d4e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12013,7 +12225,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12029,7 +12241,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a039296a7fc55bddaf3708d5616623722ff96d98",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12041,7 +12254,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 71,
+      "behind": 72,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12057,7 +12270,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a2dcb8531ff7dcf77e3588b4e285dbb60d66d222",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12069,7 +12283,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12087,7 +12301,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a340af69617f11ebe3ad4ceaf527daa8761d52f9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12099,7 +12314,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12153,7 +12368,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a6e1d8200611343d440cdf199b77228aaa8c3be7",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "INTEGRATED",
@@ -12165,7 +12381,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 38,
+      "behind": 39,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12178,7 +12394,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "a79b61c66c298d0eb4c2dc9c12e9196aed00d512",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12190,7 +12407,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12207,7 +12424,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a7ec0d2b42383a226bc18ab6b1344b3f5aa91382",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12219,7 +12437,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12236,7 +12454,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a84a054c3c86fa336abf93a7890294fa4b7c7c28",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12248,7 +12467,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 9,
+      "behind": 10,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12265,7 +12484,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a881522a1986f6558ece4e5f00b9824a0a4808d1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12277,7 +12497,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 59,
+      "behind": 60,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12294,7 +12514,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a91bd89fe48cd379965462eead519b6d1c4f129e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12306,7 +12527,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12360,7 +12581,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "a9a73711ed12382f915ccb1a47e40f38ba1a1c29",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12370,7 +12592,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -12424,7 +12646,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "aa0e52b94b2936f70b3607832eafcdb693b7ed0a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12436,7 +12659,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12490,7 +12713,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "aa532962e039a706976824455b4f6d3f2869ad5a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12502,7 +12726,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12556,7 +12780,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "aad73f0032dbfb997f665cc7f509fa354ce0af7f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "INTEGRATED",
@@ -12568,7 +12793,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 55,
+      "behind": 56,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12581,7 +12806,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "b1c865e78424ed810efa63a4a9a6c8835d0e459b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12591,7 +12817,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12612,7 +12838,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "b2b2622f25c946dc7ee12049e14ef1bff075d349",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12624,7 +12851,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12678,7 +12905,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "b3708060917b54dc9055b8b6432c88d6deb40763",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12688,7 +12916,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12742,7 +12970,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "b3e0d012822da9fe48e43126c9085e9782c2b082",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12754,7 +12983,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 15,
+      "behind": 16,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12770,7 +12999,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "b3f2c30438b8fce288bcce9db23e4a3374198306",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -12782,7 +13012,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 21,
+      "behind": 22,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12795,7 +13025,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "b52b5651d1f5c10bd2ac13ead7da7e26fd9b7d41",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12805,7 +13036,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12859,7 +13090,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "b53a492198c0d453650ed1192cb4fdb2838462ba",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12871,7 +13103,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12925,7 +13157,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "b66ee38899dfb5daf22d0ab76533dc41d359fe13",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12937,7 +13170,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -12953,7 +13186,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "b924d9aed587f89ffbc2ee41ee316bc78c45e777",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -12965,7 +13199,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -13019,7 +13253,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "b943d1cc349d2b4e2cda8929e298a01676748474",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13031,7 +13266,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13085,7 +13320,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "bae37145a06d6811debb8f4d42b41d0e70660dc4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13097,7 +13333,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13113,7 +13349,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "baf1e855e727f5b8d304a73f0756d0dee7b3a0dd",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13125,7 +13362,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13179,7 +13416,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "bbdf1f1c3d1b8f07097fcd484bf567c130412b30",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13191,7 +13429,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13245,7 +13483,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "bd8ddc9557e9422e2bc1ff46aba86e8794bdd2cd",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13257,7 +13496,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13311,7 +13550,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "bdab3fede306e4505967cc10041e29b657b3b216",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -13323,7 +13563,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 35,
+      "behind": 36,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13336,7 +13576,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "bec346b2fdd361145f080a4771339ba632618a91",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13348,7 +13589,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13402,7 +13643,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "befb2b8b40609da6380b88cc9068225f2784c46a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13414,7 +13656,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13468,7 +13710,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "beffcb555323cf0dde5e75ee83ca1de9335b996f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13480,7 +13723,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "SUPERSEDED_BY",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -13495,8 +13738,9 @@
       "sha": "bfa974ffa17302cd91af7403a2850608cb06e996",
       "supersededBy": {
         "ref": "main-v2",
-        "sha": "fc2d201f450b6020b1dce12268a550053d65235d"
-      }
+        "sha": "0088fbf2ea65251f344915c93bd8679c0c467320"
+      },
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13508,7 +13752,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13562,7 +13806,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c0c5d9b48020413e57fdcabee708c83459b39268",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13574,7 +13819,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13628,7 +13873,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c15c09f957aa81adf409d84f2d92a93b93fce9be",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13641,7 +13887,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13695,7 +13941,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c2697156e3078b4dff50cb8093bd502840c12a4c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13707,7 +13954,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13761,7 +14008,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c54b68e6b2bd99825689c476ccfef0be653f5208",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13773,7 +14021,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 12,
+      "behind": 13,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13791,7 +14039,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c58850daefb39e3793121ce8dff3fb5cc5c6babe",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13803,7 +14052,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -13857,7 +14106,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c6091e166e06ee949921b0b60630c7b7b99d46b2",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13869,7 +14119,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13923,7 +14173,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c630f3fb0107c5f3a7c5104e8e6b3b018c6e04e6",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -13935,7 +14186,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -13989,7 +14240,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c745eab3e71d681b3df661c08a2d08abaa9c4ff1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14001,7 +14253,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14055,7 +14307,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c7ac440bb7d738992b5c4eafd54f3afc39758a00",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14067,7 +14320,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14121,7 +14374,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c8f6dcb39d98302f27f04a25897d3880e09e2c1b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14133,7 +14387,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14187,7 +14441,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "c97fbdded34d98006e8449019a929985305c32ce",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14199,7 +14454,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14253,7 +14508,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ca7a2df711ac5ce506e88c821d37ce94f3b1a940",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14266,7 +14522,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -14320,7 +14576,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "cab7c4cf3fc839cb306673fd7893a4028b38f6ad",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -14333,7 +14590,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 15,
+      "behind": 16,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14346,7 +14603,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "cacad26a2af5c88ef9708108ac4163cbb68a5222",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14358,7 +14616,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14375,7 +14633,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "cb64da11ea8afe675890bd799c6062daee989d8f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -14387,7 +14646,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 19,
+      "behind": 20,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14400,7 +14659,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "cc3a409e3b616f4835c96eb8691c03349e1d9026",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14412,7 +14672,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14466,7 +14726,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "cc3ebaa3c2f14c2070565cafc0f970f7cd887191",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14478,7 +14739,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 19,
+      "behind": 20,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14493,7 +14754,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "cd020cb121109cf4a85790a8d97cc74d509fe45b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -14505,7 +14767,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 8,
+      "behind": 9,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14518,7 +14780,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "cdd3ccbc7b867d991eb473ca718e01415b42a218",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14528,7 +14791,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14582,7 +14845,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ce0890765054f202ef2d212b109652c792423aa9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 3
     },
     {
       "acceptance": "INTEGRATED",
@@ -14594,7 +14858,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 64,
+      "behind": 65,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14607,7 +14871,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "ce97e8d8562660fd61f18e8cee5df1d88d3f2be1",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -14619,7 +14884,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 68,
+      "behind": 69,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14632,7 +14897,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "cf9f4bc5c764c1485ac6554510cbf1a9374bd9aa",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14644,7 +14910,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 14,
+      "behind": 15,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14665,7 +14931,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "d0886596c6ac034816775781fcb0531c47c81145",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14675,7 +14942,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -14729,7 +14996,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "d137a091dbc5d1c2e9245c7df31c83a5fdfc30fd",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -14739,7 +15007,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 18,
+      "behind": 19,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14752,7 +15020,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "d1ab680a471da70253a88001018463744dae2d15",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14764,7 +15033,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14818,7 +15087,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "d1b7f136753f84504d35edeca0a40738b1848997",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14830,7 +15100,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -14884,7 +15154,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "d33d142ba1f4525a0f8714a97f8c81694f26265c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14896,7 +15167,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -14921,7 +15192,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "d382fdfd8966052c81ef7ad10a56d87314ab8a73",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14933,7 +15205,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -14987,7 +15259,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "d3b442ec99813c2878bcb41d2632ba669c00807f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -14997,7 +15270,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 67,
+      "behind": 68,
       "disposition": "SUPERSEDED_BY",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -15012,8 +15285,9 @@
       "sha": "d51711ecb35d27ce2496fec000bec420f8dc015d",
       "supersededBy": {
         "ref": "main-v2",
-        "sha": "fc2d201f450b6020b1dce12268a550053d65235d"
-      }
+        "sha": "0088fbf2ea65251f344915c93bd8679c0c467320"
+      },
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -15025,7 +15299,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 6,
+      "behind": 7,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15038,7 +15312,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "d542fc0c021d27bf6985576f79972b8240c4fa92",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15050,7 +15325,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 31,
+      "behind": 32,
       "disposition": "SUPERSEDED_BY",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -15065,8 +15340,9 @@
       "sha": "d585e5ac5c3936b3a9892b0ffd9fd1172e9c46cd",
       "supersededBy": {
         "ref": "main-v2",
-        "sha": "fc2d201f450b6020b1dce12268a550053d65235d"
-      }
+        "sha": "0088fbf2ea65251f344915c93bd8679c0c467320"
+      },
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15076,7 +15352,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15130,7 +15406,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "d62fac636864101718da2a7e73a37add42c208e5",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "INTEGRATED",
@@ -15142,7 +15419,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 20,
+      "behind": 21,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15155,7 +15432,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "d7bc401e08c2c7883527951e5adbb9ecbc715406",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15167,7 +15445,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15221,7 +15499,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "d8599168b05fdf40a3841b398d9256afaf5b090a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15233,7 +15512,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15287,7 +15566,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "da07031d9c0260eeea7201a31a740c09e9d12453",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15299,7 +15579,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15353,7 +15633,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "dc1a84d17b05daa001225e2e94dd9a17c47b86fe",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15365,7 +15646,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15386,7 +15667,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "dc3331ee257dbb21197f5310b8455d32a38b34ed",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15398,7 +15680,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15417,7 +15699,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "dd1fa14c474c0065b2accb25cea80e3cdd7f3d76",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15429,7 +15712,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 3,
+      "behind": 4,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15446,7 +15729,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "dd5143ad37a2502f47d36d9e58789df0c28273f7",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15458,7 +15742,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -15484,7 +15768,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ddbc99f612614862884b1c40385dc1be122c8a8e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15496,7 +15781,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15550,7 +15835,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "de560e83680a9a02c85e32841c0978f09e27da47",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15562,7 +15848,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 19,
+      "behind": 20,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15579,7 +15865,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "de77c37ae477234c4ee324f3e3fba25ce6bdfce8",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "INTEGRATED",
@@ -15591,7 +15878,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 56,
+      "behind": 57,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15604,7 +15891,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "debb92786eb34f515999e9f7a16ac33d8a6b778f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15616,7 +15904,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -15670,7 +15958,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "e068f0b751d804980dbe22fb7ee7f9922d8fda05",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15682,7 +15971,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15699,7 +15988,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "e477cc420c96015bee990a991a38a45a1dd209d0",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15711,7 +16001,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15728,7 +16018,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "e4c65f7a94fb15d4323fc00d556add394dde020f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15740,7 +16031,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15791,7 +16082,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "e579d3818b6fda6fc36bd89ad546b031e3fdb0f0",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15803,7 +16095,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15857,7 +16149,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "e57d1d37b6050f217609c2c994bb9f9948841388",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "INTEGRATED",
@@ -15869,7 +16162,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 65,
+      "behind": 66,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15882,7 +16175,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "e5eb9b94a7e10bd8afe4522ae4b1789f5bbf375a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15894,7 +16188,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15948,7 +16242,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "e66ad1ee81d4befadb40adbc29aea7daae5d49c6",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15960,7 +16255,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -15976,7 +16271,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "e8da0668da99eb01f47ae25cb419b5463f24c7fa",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -15988,7 +16284,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16008,7 +16304,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ea295455444aa879eca6126f6afc92fc9ba4ec53",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16020,7 +16317,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16074,7 +16371,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "eae002f0e62361221788066a3e46cb4391428080",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16086,7 +16384,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16140,7 +16438,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "eb8bff9e7144f69f0f0d89146dda7ad91661c799",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16152,7 +16451,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16206,7 +16505,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ec8df6c178087752bf64ed64e93074dde7f7799d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16218,7 +16518,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16272,7 +16572,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ece05d12c29e2c66461eac7e86e4ad3bdc83328f",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16286,7 +16587,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -16340,7 +16641,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ecec045471641eb50b8e59bed00003f1af943d4d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16352,7 +16654,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16406,7 +16708,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ed835d5bd31612b88014276288849a1927d0c039",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16418,7 +16721,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16472,7 +16775,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "edf32a339d0a9f4bc3d25f77466dbe89302ed9c4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "INTEGRATED",
@@ -16485,7 +16789,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 57,
+      "behind": 58,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16498,7 +16802,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "eebf2359466f862ec98a54a7b8799734a77ad59a",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16510,7 +16815,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -16540,7 +16845,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "eff9dbd9b2c1a5a8b2a2c78724ca07d6b87644b7",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16552,7 +16858,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16606,7 +16912,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f0b5a27ffa8cc6d843e4e84d64c9489506efb492",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16618,7 +16925,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 75,
+      "behind": 76,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16672,7 +16979,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f0dbf6a4c68ce696bba59bfcc35dcc7cde0f476e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 1
     },
     {
       "acceptance": "INTEGRATED",
@@ -16685,7 +16993,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 67,
+      "behind": 68,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16698,7 +17006,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "f21a01e21a4a82b57dae641c032472585f84b2c4",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16711,7 +17020,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -16765,7 +17074,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f22e0e8b027c947ebeefd9dbc39fc0a5580a182b",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "INTEGRATED",
@@ -16777,7 +17087,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": true,
-      "behind": 68,
+      "behind": 69,
       "disposition": "INTEGRATED_ANCESTOR",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16790,7 +17100,8 @@
       "reason": "exact ancestor of base",
       "recommendedAction": "heritage-only",
       "sha": "f386fae6a98f25dc1e5fb3adb87b9d2e15ecc155",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16802,7 +17113,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16856,7 +17167,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f4d943d34890dd968b498678857e4cac343375b8",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16868,7 +17180,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -16922,7 +17234,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f577550b370d63ff7ab5c596ec6a7a439d803427",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -16935,7 +17248,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -16989,7 +17302,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f701110b94ca8ee8be6a6f9d2bab5be37c0acf05",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17001,7 +17315,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17055,7 +17369,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f7c0a81e04325cd2867efc4963b04f7dac15ce28",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17067,7 +17382,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 17,
+      "behind": 18,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17084,7 +17399,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f7dea8f7708519fe27aa5d3a419dae591ae15968",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17096,7 +17412,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 10,
+      "behind": 11,
       "disposition": "SALVAGE_TEST",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17113,7 +17429,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f7e2aeb85dd2738c49ab82682cd504d6768e14ba",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17125,7 +17442,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17179,7 +17496,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f83637df72c0410cfde84bdee225d0b060248c2c",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17191,7 +17509,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 12,
+      "behind": 13,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17210,7 +17528,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f92124e27ab59c4ec3841777653d52466b7d1b27",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17220,7 +17539,7 @@
       "aliases": [],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 14,
+      "behind": 15,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17236,7 +17555,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f92aa529cec55c068d27466c37af20cda51f62b9",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17248,7 +17568,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17302,7 +17622,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f92facb1f16acb4715b78451933c0dd66b9c9adf",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 4
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17314,7 +17635,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17331,7 +17652,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "f93f936f4951d1dc8bf3058e645ec1c319fcc43e",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17343,7 +17665,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17397,7 +17719,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "fbea8c407fa61cfc8bb7a8b9e312cfd1fd94a345",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17411,7 +17734,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 73,
+      "behind": 74,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 1,
       "mergeOnly": false,
@@ -17465,7 +17788,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ff61a62e6513addd53fe7d1f5f98165baea5dc2d",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 2
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17479,7 +17803,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 18,
+      "behind": 19,
       "disposition": "PROCESS_ONLY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17494,7 +17818,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ff7f44b84a4e89a850780d12605bd559a0598405",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     },
     {
       "acceptance": "NOT_ACCEPTED",
@@ -17506,7 +17831,7 @@
       ],
       "analysisFailure": false,
       "ancestryExact": false,
-      "behind": 14,
+      "behind": 15,
       "disposition": "SALVAGE_PRODUCT",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
@@ -17525,7 +17850,8 @@
       "reason": "novel content vs base",
       "recommendedAction": "content-review",
       "sha": "ffa52ddf4664833bca1fa30fb93ab520fb1d1747",
-      "supersededBy": null
+      "supersededBy": null,
+      "uniqueMergeCount": 0
     }
   ],
   "schemaVersion": 3,
@@ -17562,7 +17888,8 @@
         "ref": "refs/stash",
         "sha": "eda2b0509246b6c4d4236ce490fef401d60d016c"
       }
-    ]
+    ],
+    "status": "ok"
   },
   "validation": {
     "aliasedRefs": 328,
@@ -17570,16 +17897,43 @@
     "detachedAllValid": true,
     "detachedAnchors": 45,
     "detachedExpected": 45,
+    "dirtyWorktrees": [
+      "/Users/mymac/Projects/opencode-rk",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/app012-reg-review",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-registration-review-a79",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-registration-review-v2",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-v3-review-full",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-v5-indrev/tree",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/app012-v5-reg-prep",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/authweb-prep",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB-019",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/LINUX-installer-registration",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/LINUX-registration-additive-resume",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/prov030-red-verify-001",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/stack-verify-retry",
+      "/Users/mymac/Projects/opencode-rk-phase1-plan",
+      "/Users/mymac/Projects/opencode-rk-phase1-restored",
+      "/Users/mymac/Projects/opencode-rk-TUI-013-corrected",
+      "/Users/mymac/Projects/opencode-rk-tui011",
+      "/Users/mymac/Projects/opencode-rk-web006-integrate"
+    ],
+    "evidenceStatus": "ok",
     "frozenRefs": 659,
     "mergeOnlyPending": [],
     "refsAccounted": true,
+    "stagedOnlyWorktrees": [
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/authweb-prep",
+      "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/stack-verify-retry"
+    ],
+    "stashStatus": "ok",
     "supersededNeedsBase": true,
+    "uniqueMergePending": [],
     "uniqueTips": 331,
     "worktreesExpected": 112,
     "worktreesObserved": 112
   },
   "worktreeSummary": {
-    "dirty": 16,
+    "dirty": 18,
     "missing": 0,
     "present": 112,
     "statusError": 0,
@@ -18088,7 +18442,7 @@
     {
       "branch": null,
       "detached": true,
-      "dirty": false,
+      "dirty": true,
       "exists": true,
       "head": "806c247afc5fb633b8dd72616841a6e82aeb783a",
       "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/authweb-prep",
@@ -19064,7 +19418,7 @@
     {
       "branch": null,
       "detached": true,
-      "dirty": false,
+      "dirty": true,
       "exists": true,
       "head": "2798d151dd20f05408cb600384f0a944c6576600",
       "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/stack-verify-retry",
