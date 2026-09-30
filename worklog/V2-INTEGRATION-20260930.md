@@ -10,6 +10,7 @@ Persisted API auth and rooted tool continuation: `f5cfb012369f3a4187cfa4f50ad01e
 Installer native closure/transaction: `14ff5fb4d93b25ab1c8e6ccc64603b2dbf3ea9a9`.
 Ubuntu/Mac installer directory-layout portability: `96694bd23d97041647fe4f6308ed9fe53f2362d7`.
 Native entrypoint discovery/raw/render/restore: `6c52b419d4e4029f1baf15e4b25f289872cd0bb8`.
+Paired Mac/Ubuntu installed native release checks: `85c2547f20cfcb34014d80f5ae72fc25702659bc`.
 Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-v2`.
 
 ## V2-SALVAGE-PRESERVATION
@@ -585,6 +586,91 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
   restoration**. This is dev-profile scoped acceptance. In-app provider setup,
   native streaming, full UTF-8/escape/resize/mouse handling, interruption and
   second-client ownership, and exact release/platform golden journeys remain open.
+
+## Paired installed native release — exact source `85c2547`
+
+- Both release/native binaries were built offline/locked from exact integrated
+  `85c2547f20cfcb34014d80f5ae72fc25702659bc`, archived with their platform library,
+  and installed in separate disposable fixtures. Mac Cargo completed exit 0 in
+  18.59s; Ubuntu completed exit 0 in 29.42s under the two-job budget. Build logs
+  and receipts retain commands, source provenance and artifact hashes.
+- Mac receipt:
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-release-macos-85c2547-rd2cct9_/build.json`;
+  binary `35dd32a48f94ec5dd8f0406a03adda09eb93ba280edebf7da0b3c98d5ed18f10`,
+  native library `798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91`,
+  archive `db5fd96081851cab661bbf748b8856f5a9e89c6f043dcc152aa0e97532371669`.
+- Ubuntu receipt `/work/ubuntu-installed-85c2547/build.json` in the existing
+  disposable container; binary
+  `374313f2acc21e40c9bfe056fb206b234c7b39dc5c5626adae34ac5269a5a116`,
+  library `e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89`,
+  archive `05f70dffeb00b8be62f64419c59c8904536d6e3055dae793f77cc16a27b8b735`.
+  Its source archive is `/work/source-85c2547`, not the older `/work/source`.
+- Portable PTY fixture was independently maintained as `6c24d337` then corrected
+  `ff4ec3cc`, integrated as `62b8f40`/`4c7a8d4`. It changes only platform library
+  staging/environment selection. An erroneously added parent controlling-TTY
+  ioctl was caught and removed before runtime verification. The full test-method
+  AST is identical to its original, SHA-256
+  `f510581f59f4364c0aea44ded2222b2853d0ce989a5dc656d261e20f883a7efa`.
+  Final file hash `51c37cfe066987ab94b3bba8e8496c7632a37902702e4caf571f8b1dc4ebc9b5`.
+  All eight semantic assertions, timeouts and byte limits are retained.
+- Independent verifier ran **22/22 controls GREEN** serially: the same ten
+  packaged identity/installer controls and one installed native PTY test on each
+  platform. Generic fixture variables were `OC2_TEST_BINARY`,
+  `OC2_TEST_NATIVE_LIBRARY` for packaging and `OC2_NATIVE_BINARY`,
+  `OC2_NATIVE_LIBRARY` for the PTY. Mac used `arch -arm64 env ... python3`; Ubuntu
+  used `docker exec --workdir /work/source-85c2547 ... python3`. Both sets ran:
+
+  ```text
+  python3 -m unittest tests.bootstrap.test_app010_packaged_cli_identity tests.bootstrap.test_tui011_installer_native_closure tests.bootstrap.test_tui011_installer_rollback tests.bootstrap.test_tui011_installer_signal_layout
+  python3 tests/e2e/native_interactive_pty.py
+  ```
+
+  Mac logs in the retained short-temp `release-verify-85c2547-mac` directory:
+  packaging SHA-256 `ec6bc2cc460f09d040f90f84f5ffe82274fcc83d8f14dfbad674e74f1b2d6e99`,
+  PTY `7935e4052339b7063a661f397fd8117cf6a7bf6cf6449c94879ee4fe09beb7e9`.
+  Ubuntu `/work/release-verify-85c2547-ubuntu` logs:
+  packaging `e0b03469e16c3c65fe8ac54b67d2b5127714f36320b8862e2602e642156065e0`,
+  PTY `6c7b657d35909b1c58712fe4f9486f6977b2a49624ec97110cec00995d25639c`.
+- Independently verified relative native loader closure without `DYLD_*` or
+  `LD_LIBRARY_PATH` overrides, and all ten required render/lifecycle exports,
+  including the newly used `getNextBuffer`.
+- State: **ACCEPTED on integrated release source `85c2547` for packaged identity,
+  installer rollback/layout and native raw-input/redraw/Ctrl-C/restoration**.
+  Fresh-HOME in-app credentials/model choice, native streaming/tool/restart,
+  second-client ownership and full G7/G8 golden acceptance remain open.
+- Canonical commits through `85c2547` were pushed normally to `origin/main-v2`.
+
+## Installed native provider setup — frozen executable RED
+
+- Independent contract-owner history `67445cf`, `88f0df`, `39b71aa`, `79f8ec1`
+  is preserved and imported. Controller maintenance/freeze `1523144` is integrated
+  as `9a42c4a`. Only `tests/e2e/native_provider_setup.py` and
+  `worklog/V2-NATIVE-PROVIDER-CONTRACT.md` are added by this test package.
+- Pinned native authority is `95daf906`, `packages/tui/src/app.tsx:739–745`,
+  `component/dialog-provider.tsx:228–230,352–417`,
+  `component/dialog-model.tsx:136–154`, `context/local.tsx:164–234,320–337`, and
+  the legacy-compatible auth control route/schema in
+  `packages/opencode/src/server/routes/instance/httpapi/groups/control.ts:32–49`.
+  `/connect` opens a provider dialog; user-entered API auth is persisted before
+  selecting a catalogue model; model recents drive the restart fallback.
+- Frozen test hash
+  `752c97c5d1eee013e4d350e62428be5938987b5bb3491967122f7fa00b29b3ff`.
+  The fixture supports valid Responses JSON and SSE wire formats but freezes only
+  onboarding/auth/model/settled-history behavior. It cannot establish native
+  streaming parity from a non-stream request.
+- Controller ran the actual installed release source `85c2547`. Healthy owned
+  authenticated descriptor and both exact catalogue IDs were verified first;
+  `/connect` rendered as composer input and then ordinary turn HTTP 503. No
+  connection dialog appeared, no `auth.json` was created, and the provider
+  received zero requests. The run failed exit 1 in 20.77s, while all known owned
+  process groups were independently confirmed stopped afterward.
+- Reproduction, command manifest, sanitized PTY, receipt/test/log hashes and
+  objective failure classification:
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-g2-native-red-85c2547-opjif3xe`.
+  A separate earlier socket-path fixture failure is retained and classified as
+  infrastructure; it was repaired without relaxing the 100-byte socket bound.
+- State: frozen **product RED**, ready for one coherent native provider connection,
+  model selection and durable resume repair. This test handoff is not acceptance.
 
 ## Fresh workspace formatting failure
 
