@@ -7,7 +7,7 @@
 - Status: `CANDIDATE` (not PREVERIFIED or ACCEPTED)
 - Base SHA: `f6e2d3b05c21f97c7224a333f177c60dfe210c0d`
 - Branch: `v2/delegation-identity`
-- Candidate SHA: recorded after the normal commit
+- Candidate SHA: `1319d5911532a94ca7f0591144a12812ff606aac`
 
 ## Failure and frozen contract
 
