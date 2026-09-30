@@ -21,3 +21,33 @@ Frozen evidence supplied by the test owner:
 
 No tests, setup files, manifests, or dependencies were modified by this
 candidate. Parent must run the focused and full web suites independently.
+
+## Controller preverification and runner maintenance
+
+Exact candidate `45ed37378318e074c7a628e0102c01cc70b45cc0` passes all four
+focused streaming/credential controls. Its full Vitest invocation passes all 49
+TS/TSX assertions, but discovers four existing `node:test` `.mjs` contracts and
+reports "No test suite found" for those files. These are runner mismatches.
+Evidence: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-web-verify-45ed373-sszb_43s`.
+
+The independent controller directs Vitest to TS/TSX suites and the standard
+package test command to run every existing `.mjs` contract through `node --test`
+afterward. None of the existing semantic test files or assertions are changed.
+Both runners remain required for full Web test acceptance.
+
+## Independent contract supersession
+
+The unchanged Node runner exposed a semantic conflict in the new malformed-token
+preflight expectation. Independent evaluator `ses_f0d28bef1ffeUDXYYY4jehyYp5`
+inspected the accepted `api.refresh-auth.test.mjs:266–295` and
+`worklog/AUTHWEB-REFRESH-IMPL.md:13–17,29`: malformed fragments are ignored, send no
+Authorization header, and receive a real server `401`. No higher-authority
+requirement prohibits that unauthenticated request. The original behavior is
+secure and accepted; the new preflight restriction was an unsupported product
+change. `45ed373` remains preserved as a conflicting proposal.
+
+The controller restores the accepted product source and supersedes only the new
+TS malformed-fragment assertion to exercise the same server-authoritative
+rejection. All 20 existing semantic test files and their assertions remain
+byte-identical to the base. The substantive product transport is unchanged.
+The component launcher fixture and dual-runner repair remain independently useful.

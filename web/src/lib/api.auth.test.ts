@@ -26,12 +26,17 @@ describe('browser daemon credential boundary', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('rejects a malformed launcher credential before fetching', async () => {
+  it('sends no bearer for a malformed fragment and propagates the server rejection', async () => {
     window.history.replaceState(null, '', '/#oc2-token=invalid')
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'missing bearer credential' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json' },
+    }))
     const { listModels } = await import('./api')
 
-    await expect(listModels()).rejects.toThrow('Re-authentication required')
-    expect(fetchMock).not.toHaveBeenCalled()
+    await expect(listModels()).rejects.toThrow('missing bearer credential')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).has('authorization')).toBe(false)
   })
 
   it('consumes a valid fragment and retains the bearer only for this document', async () => {
