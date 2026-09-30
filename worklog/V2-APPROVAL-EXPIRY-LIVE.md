@@ -1,5 +1,9 @@
 # V2 approval expiry live candidate
 
+The controller moved this owned candidate handoff into its granted `worklog/`
+path before integration. Product and frozen-test bytes remain identical to
+independently verified candidate `c8864330eb018b0e8c8cf02e0ead94a1647414de`.
+
 Package: approval-expiry-live
 Lifecycle: CANDIDATE (source-only; not independently verified or accepted)
 
