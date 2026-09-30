@@ -63,6 +63,7 @@ use thiserror::Error;
 pub use branch_v2::ForkProvenance;
 pub type SessionRecord = SessionSummary;
 pub use opencode_rk_contracts::MessageRole as Role;
+pub use opencode_rk_storage::{HistoryItem, ToolCallAdmission, ToolRound};
 const ACTIVE: i64 = 0;
 const ARCHIVED: i64 = 1;
 const PAGE_MAX: usize = 500;
@@ -472,6 +473,60 @@ impl SessionService {
         let candidate = message.clone();
         run_blocking(move || storage.append_message(&candidate)).await?;
         Ok(message)
+    }
+
+    /// Admit every call and display row in one transaction before execution.
+    pub async fn admit_tool_round(
+        &self,
+        round: ToolRound,
+        calls: Vec<ToolCallAdmission>,
+    ) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.admit_tool_round(&round, &calls)).await
+    }
+
+    /// Persist the tool OUTPUT record after the tool has executed. Must be
+    /// called after `admit_tool_round` for the same round/pair_index.
+    pub async fn persist_tool_output(
+        &self,
+        round: ToolRound,
+        pair_index: u64,
+        output: String,
+        message_id: MessageId,
+    ) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || {
+            storage.append_tool_output(&round, pair_index, &output, message_id)
+        })
+        .await
+    }
+
+    /// Load bounded typed history for provider continuation/restart. Returns
+    /// ordered `HistoryItem` variants (messages and typed tool records).
+    pub async fn bounded_history(
+        &self,
+        session_id: SessionId,
+        max_provider_items: usize,
+        max_provider_bytes: usize,
+    ) -> Result<Vec<HistoryItem>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || {
+            let mut items = storage.bounded_history(session_id, max_provider_items, max_provider_bytes)?;
+            // Storage validates the blob hash and declared length before this
+            // bounded UTF-8 projection. Never silently drop durable text.
+            for item in &mut items {
+                if let HistoryItem::Message(message) = item {
+                    if let PayloadRef::Blob { hash, .. } = &message.body {
+                        let bytes = storage.blob_store().get_bounded(hash, max_provider_bytes)?;
+                        let text = String::from_utf8(bytes)
+                            .map_err(|_| StorageError::TypedHistoryIdentity)?;
+                        message.body = PayloadRef::Inline { text };
+                    }
+                }
+            }
+            Ok(items)
+        })
+        .await
     }
     pub async fn append_assistant_with_reasoning(
         &self,

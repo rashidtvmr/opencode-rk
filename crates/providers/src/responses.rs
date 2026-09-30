@@ -156,7 +156,7 @@ pub fn responses_request_payload<I: Serialize>(
     if model.trim().is_empty() {
         return Err(ResponsesError::EmptyModel);
     }
-    if !matches!(
+    if !reasoning_effort.is_empty() && !matches!(
         reasoning_effort,
         "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
     ) {
@@ -189,8 +189,11 @@ pub fn responses_request_payload<I: Serialize>(
     let mut payload = serde_json::json!({
         "model": model,
         "input": input,
-        "reasoning": { "effort": reasoning_effort },
     });
+    // An omitted effort preserves the model/provider's default variant.
+    if !reasoning_effort.is_empty() {
+        payload["reasoning"] = json!({ "effort": reasoning_effort });
+    }
     if !tools.is_empty() {
         payload["tools"] = serde_json::to_value(tools)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
@@ -480,7 +483,17 @@ impl OpenAiResponsesClient {
         input: &[ResponsesInput],
     ) -> Result<String, ResponsesError> {
         let items: Vec<ResponsesItem> = input.iter().cloned().map(Into::into).collect();
-        let mut payload = responses_request_payload(model, reasoning_effort, &items, &[], false)?;
+        self.create_with_items(model, reasoning_effort, &items).await
+    }
+
+    /// Non-streaming turns retain typed call/result pairs from durable history.
+    pub async fn create_with_items(
+        &self,
+        model: &str,
+        reasoning_effort: &str,
+        items: &[ResponsesItem],
+    ) -> Result<String, ResponsesError> {
+        let mut payload = responses_request_payload(model, reasoning_effort, items, &[], false)?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
         let mut response = self
             .http

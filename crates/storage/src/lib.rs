@@ -72,6 +72,15 @@ pub struct ToolPair {
     pub message: MessageRecord,
 }
 
+/// Exact provider call and its display row, admitted before tool execution.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ToolCallAdmission {
+    pub call_id: String,
+    pub name: String,
+    pub arguments: String,
+    pub message: MessageRecord,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ToolHistoryItem {
     pub round_id: Arc<str>,
@@ -267,6 +276,138 @@ impl Storage {
                 params![round.round_id, checked_i64(pair_index)?, kind, pair.message.id.to_string(), pair.call_id, pair.name, payload, payload.len() as i64, now],
             )?;
         }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Atomically admit the entire round before executing any side effect.
+    /// An insertion fault rolls back the header, every call and every display
+    /// row, including when a later call in the batch is rejected.
+    pub fn admit_tool_round(
+        &self,
+        round: &ToolRound,
+        calls: &[ToolCallAdmission],
+    ) -> Result<(), StorageError> {
+        validate_typed_text(&round.round_id)?;
+        if calls.is_empty() || calls.len() > 64
+            || usize::try_from(round.expected_pairs).ok() != Some(calls.len())
+        {
+            return Err(StorageError::TypedHistoryLimit);
+        }
+        let mut bytes = 0usize;
+        for call in calls {
+            validate_typed_text(&call.call_id)?;
+            validate_typed_text(&call.name)?;
+            if call.arguments.len() > TYPED_FIELD_LIMIT
+                || call.message.role != MessageRole::Tool
+                || call.message.session_id != round.session_id
+            {
+                return Err(StorageError::TypedHistoryIdentity);
+            }
+            let PayloadRef::Inline { text } = &call.message.body else {
+                return Err(StorageError::InlinePayloadTooLarge);
+            };
+            if text.len() > MAX_INLINE_PAYLOAD_BYTES {
+                return Err(StorageError::InlinePayloadTooLarge);
+            }
+            bytes = bytes.checked_add(call.call_id.len())
+                .and_then(|n| n.checked_add(call.name.len()))
+                .and_then(|n| n.checked_add(call.arguments.len()))
+                .and_then(|n| n.checked_add(text.len()))
+                .ok_or(StorageError::TypedHistoryLimit)?;
+            if bytes > TYPED_FIELD_LIMIT {
+                return Err(StorageError::TypedHistoryLimit);
+            }
+        }
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let role: Option<String> = tx.query_row(
+            "SELECT role FROM messages WHERE id=?1 AND session_id=?2 LIMIT 1",
+            params![round.turn_message_id.to_string(), round.session_id.to_string()],
+            |row| row.get(0),
+        ).optional()?;
+        if role.as_deref() != Some("user") {
+            return Err(StorageError::TypedHistoryIdentity);
+        }
+        let now = Timestamp::now().to_string();
+        tx.execute(
+            "INSERT INTO tool_rounds(round_id,session_id,turn_message_id,round_ordinal,expected_pairs,created_at) VALUES(?1,?2,?3,?4,?5,?6)",
+            params![round.round_id, round.session_id.to_string(), round.turn_message_id.to_string(), i64::from(round.round_ordinal), i64::from(round.expected_pairs), now],
+        )?;
+        for (index, call) in calls.iter().enumerate() {
+            let PayloadRef::Inline { text } = &call.message.body else {
+                return Err(StorageError::InlinePayloadTooLarge);
+            };
+            tx.execute(
+                "INSERT INTO messages(id,session_id,role,inline_text,blob_hash,byte_len,created_at) VALUES(?1,?2,'tool',?3,NULL,?4,?5)",
+                params![call.message.id.to_string(), round.session_id.to_string(), text, checked_i64(text.len() as u64)?, call.message.created_at.to_string()],
+            )?;
+            tx.execute(
+                "INSERT INTO typed_tool_records(round_id,pair_index,kind,message_id,call_id,name,payload,byte_len,created_at) VALUES(?1,?2,'call',?3,?4,?5,?6,?7,?8)",
+                params![round.round_id, checked_i64(index as u64)?, call.message.id.to_string(), call.call_id, call.name, call.arguments, checked_i64(call.arguments.len() as u64)?, now],
+            )?;
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Settle the exact admitted call's display row and typed output together.
+    pub fn append_tool_output(
+        &self,
+        round: &ToolRound,
+        pair_index: u64,
+        output: &str,
+        message_id: MessageId,
+    ) -> Result<(), StorageError> {
+        if output.len() > MAX_INLINE_PAYLOAD_BYTES {
+            return Err(StorageError::InlinePayloadTooLarge);
+        }
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (session, turn, ordinal, expected_pairs): (String, String, i64, i64) = tx
+            .query_row("SELECT session_id,turn_message_id,round_ordinal,expected_pairs FROM tool_rounds WHERE round_id=?1 LIMIT 1", params![round.round_id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)))
+            .optional()?
+            .ok_or(StorageError::TypedHistoryIdentity)?;
+        if session != round.session_id.to_string()
+            || turn != round.turn_message_id.to_string()
+            || ordinal != i64::from(round.round_ordinal)
+            || expected_pairs != i64::from(round.expected_pairs)
+        {
+            return Err(StorageError::TypedHistoryIdentity);
+        }
+        let expected_pairs = u64::try_from(expected_pairs).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+        if pair_index >= expected_pairs {
+            return Err(StorageError::TypedHistoryIncomplete);
+        }
+        let call: Option<(String, String, String)> = tx.query_row(
+            "SELECT message_id,call_id,name FROM typed_tool_records WHERE round_id=?1 AND pair_index=?2 AND kind='call' LIMIT 1",
+            params![round.round_id, checked_i64(pair_index)?],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        ).optional()?;
+        let (admitted_message, call_id, name) = call.ok_or(StorageError::TypedHistoryIncomplete)?;
+        if admitted_message != message_id.to_string() {
+            return Err(StorageError::TypedHistoryIdentity);
+        }
+        let display = format!("[{name}] {output}");
+        if display.len() > MAX_INLINE_PAYLOAD_BYTES {
+            return Err(StorageError::InlinePayloadTooLarge);
+        }
+        let changed = tx.execute(
+            "UPDATE messages SET inline_text=?1,byte_len=?2 WHERE id=?3 AND session_id=?4 AND role='tool' AND blob_hash IS NULL",
+            params![display, checked_i64(display.len() as u64)?, message_id.to_string(), session],
+        )?;
+        if changed != 1 {
+            return Err(StorageError::TypedHistoryIdentity);
+        }
+        let now = Timestamp::now().to_string();
+        tx.execute(
+            "INSERT INTO typed_tool_records(round_id,pair_index,kind,message_id,call_id,name,payload,byte_len,created_at) VALUES(?1,?2,'output',?3,?4,?5,?6,?7,?8)",
+            params![round.round_id, checked_i64(pair_index)?, message_id.to_string(), call_id, name, output, checked_i64(output.len() as u64)?, now],
+        )?;
+        tx.execute(
+            "UPDATE sessions SET updated_at=?1 WHERE id=?2",
+            params![now, round.session_id.to_string()],
+        )?;
         tx.commit()?;
         Ok(())
     }
