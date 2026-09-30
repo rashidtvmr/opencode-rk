@@ -263,12 +263,7 @@ impl ShellLayout {
     /// Every non-empty region pair must be disjoint.
     #[must_use]
     pub fn has_overlap(self) -> bool {
-        let rs = [
-            self.transcript,
-            self.composer,
-            self.sidebar,
-            self.status,
-        ];
+        let rs = [self.transcript, self.composer, self.sidebar, self.status];
         for i in 0..rs.len() {
             if rs[i].area() == 0 {
                 continue;
@@ -391,8 +386,7 @@ impl NativeApp {
     /// Anything else must be badged stale/offline/loading/error.
     #[must_use]
     pub const fn shows_live_data(&self) -> bool {
-        matches!(self.freshness, Freshness::Live)
-            && matches!(self.view, AppView::Actionable)
+        matches!(self.freshness, Freshness::Live) && matches!(self.view, AppView::Actionable)
     }
 
     #[must_use]
@@ -607,7 +601,11 @@ mod tests {
         let mut labels = views.iter().map(|v| v.label()).collect::<Vec<_>>();
         labels.sort_unstable();
         labels.dedup();
-        assert_eq!(labels.len(), views.len(), "each view needs a distinct label");
+        assert_eq!(
+            labels.len(),
+            views.len(),
+            "each view needs a distinct label"
+        );
         assert!(!AppView::Offline.is_actionable());
         assert!(!AppView::Empty.is_actionable());
         assert!(!AppView::Loading.is_actionable());
@@ -734,11 +732,7 @@ mod tests {
         app.resize(40, 10, true);
         app.set_focus(Focus::Transcript);
         app.cycle_focus();
-        assert_eq!(
-            app.focus(),
-            Focus::Status,
-            "compact Tab must skip Sidebar"
-        );
+        assert_eq!(app.focus(), Focus::Status, "compact Tab must skip Sidebar");
     }
 
     #[test]

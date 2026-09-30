@@ -170,7 +170,10 @@ pub fn run_bounded(
         .map_err(|e| GitLaneError::Spawn(e.to_string()))?;
     let start = Instant::now();
     loop {
-        match child.try_wait().map_err(|e| GitLaneError::Spawn(e.to_string()))? {
+        match child
+            .try_wait()
+            .map_err(|e| GitLaneError::Spawn(e.to_string()))?
+        {
             Some(status) => {
                 return Ok(RunOutcome {
                     timed_out: false,
@@ -233,8 +236,7 @@ mod tests {
 
     #[test]
     fn timeout_kills_child_stable_state() {
-        let outcome = run_bounded("true", &[], Duration::from_secs(5))
-            .expect("true must exit 0");
+        let outcome = run_bounded("true", &[], Duration::from_secs(5)).expect("true must exit 0");
         assert_eq!(
             outcome,
             RunOutcome {

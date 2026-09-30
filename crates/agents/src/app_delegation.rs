@@ -211,12 +211,10 @@ impl Delegations {
 
     #[must_use]
     pub fn link(&self, child: ChildId) -> Option<ParentLink> {
-        self.entries
-            .get(&child.key())
-            .map(|e| ParentLink {
-                parent: e.parent,
-                child,
-            })
+        self.entries.get(&child.key()).map(|e| ParentLink {
+            parent: e.parent,
+            child,
+        })
     }
 
     #[must_use]
@@ -253,7 +251,10 @@ impl Delegations {
         owner: OwnerToken,
         effect: EffectKind,
     ) -> Result<(), DelegError> {
-        let entry = self.entries.get_mut(&child.key()).ok_or(DelegError::Unknown)?;
+        let entry = self
+            .entries
+            .get_mut(&child.key())
+            .ok_or(DelegError::Unknown)?;
         if entry.owner != owner {
             return Err(DelegError::NotOwner);
         }
@@ -267,7 +268,10 @@ impl Delegations {
     /// Owner cancel reclaims the live slot. Double cancel is idempotent;
     /// cancel-after-terminal -> Terminal; wrong owner -> NotOwner, no mutation.
     pub fn cancel(&mut self, child: ChildId, owner: OwnerToken) -> Result<ChildState, DelegError> {
-        let entry = self.entries.get_mut(&child.key()).ok_or(DelegError::Unknown)?;
+        let entry = self
+            .entries
+            .get_mut(&child.key())
+            .ok_or(DelegError::Unknown)?;
         if entry.owner != owner {
             return Err(DelegError::NotOwner);
         }
@@ -285,8 +289,15 @@ impl Delegations {
     /// Crash reclaims the live slot. Ambiguous effects never replay
     /// (returns replay_allowed=false); recorded non-ambiguous effects may.
     /// Crash on a non-live child -> Terminal.
-    pub fn crash(&mut self, child: ChildId, effect: EffectKind) -> Result<CrashOutcome, DelegError> {
-        let entry = self.entries.get_mut(&child.key()).ok_or(DelegError::Unknown)?;
+    pub fn crash(
+        &mut self,
+        child: ChildId,
+        effect: EffectKind,
+    ) -> Result<CrashOutcome, DelegError> {
+        let entry = self
+            .entries
+            .get_mut(&child.key())
+            .ok_or(DelegError::Unknown)?;
         if !entry.live {
             return Err(DelegError::Terminal);
         }
@@ -310,15 +321,29 @@ mod tests {
     fn steer_hits_intended_child() {
         let mut d = Delegations::with_defaults();
         let a = d
-            .spawn(1, OwnerToken::new(10), Ownership::ForegroundWait, IndependentEffort::new(5))
+            .spawn(
+                1,
+                OwnerToken::new(10),
+                Ownership::ForegroundWait,
+                IndependentEffort::new(5),
+            )
             .unwrap();
         let b = d
-            .spawn(1, OwnerToken::new(20), Ownership::BackgroundOwned, IndependentEffort::new(5))
+            .spawn(
+                1,
+                OwnerToken::new(20),
+                Ownership::BackgroundOwned,
+                IndependentEffort::new(5),
+            )
             .unwrap();
-        d.steer(a.child, OwnerToken::new(10), EffectKind::ReadOnly).unwrap();
+        d.steer(a.child, OwnerToken::new(10), EffectKind::ReadOnly)
+            .unwrap();
         assert_eq!(d.state(a.child), Some(ChildState::Running));
         assert_eq!(d.state(b.child), Some(ChildState::Running));
-        assert_eq!(d.steer(a.child, OwnerToken::new(20), EffectKind::ReadOnly), Err(DelegError::NotOwner));
+        assert_eq!(
+            d.steer(a.child, OwnerToken::new(20), EffectKind::ReadOnly),
+            Err(DelegError::NotOwner)
+        );
         // b untouched by a's steer: still no terminal transition
         assert_eq!(d.state(b.child), Some(ChildState::Running));
     }
@@ -327,21 +352,37 @@ mod tests {
     fn background_cancel_reclaims() {
         let mut d = Delegations::with_defaults();
         let h = d
-            .spawn(7, OwnerToken::new(42), Ownership::BackgroundOwned, IndependentEffort::new(3))
+            .spawn(
+                7,
+                OwnerToken::new(42),
+                Ownership::BackgroundOwned,
+                IndependentEffort::new(3),
+            )
             .unwrap();
         assert_eq!(d.live_count(), 1);
-        assert_eq!(d.cancel(h.child, OwnerToken::new(42)), Ok(ChildState::Cancelled));
+        assert_eq!(
+            d.cancel(h.child, OwnerToken::new(42)),
+            Ok(ChildState::Cancelled)
+        );
         assert!(d.task_joined(h.child));
         assert_eq!(d.live_count(), 0);
         // idempotent second cancel
-        assert_eq!(d.cancel(h.child, OwnerToken::new(42)), Ok(ChildState::Cancelled));
+        assert_eq!(
+            d.cancel(h.child, OwnerToken::new(42)),
+            Ok(ChildState::Cancelled)
+        );
     }
 
     #[test]
     fn crash_never_replays_ambiguous() {
         let mut d = Delegations::with_defaults();
         let h = d
-            .spawn(9, OwnerToken::new(1), Ownership::BackgroundOwned, IndependentEffort::new(2))
+            .spawn(
+                9,
+                OwnerToken::new(1),
+                Ownership::BackgroundOwned,
+                IndependentEffort::new(2),
+            )
             .unwrap();
         let out = d.crash(h.child, EffectKind::Ambiguous).unwrap();
         assert!(!out.replay_allowed);
@@ -350,7 +391,12 @@ mod tests {
         assert_eq!(d.state(h.child), Some(ChildState::Crashed));
         // contrast: readonly crash may allow retry
         let h2 = d
-            .spawn(9, OwnerToken::new(1), Ownership::ForegroundWait, IndependentEffort::new(2))
+            .spawn(
+                9,
+                OwnerToken::new(1),
+                Ownership::ForegroundWait,
+                IndependentEffort::new(2),
+            )
             .unwrap();
         let out2 = d.crash(h2.child, EffectKind::ReadOnly).unwrap();
         assert!(out2.replay_allowed);
@@ -363,6 +409,9 @@ mod tests {
         assert!(IndependentEffort::new(4).is_independent());
         assert_eq!(classify(EffectKind::Ambiguous), RetryDecision::NeverReplay);
         assert_eq!(classify(EffectKind::ReadOnly), RetryDecision::RetryAllowed);
-        assert_eq!(classify(EffectKind::IdempotentWrite), RetryDecision::RetryAllowed);
+        assert_eq!(
+            classify(EffectKind::IdempotentWrite),
+            RetryDecision::RetryAllowed
+        );
     }
 }

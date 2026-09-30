@@ -9,8 +9,7 @@
 #[cfg(unix)]
 mod unix {
     use std::{
-        env,
-        fs,
+        env, fs,
         io::{Read, Write},
         net::{SocketAddr, TcpListener, TcpStream},
         os::unix::fs::symlink,
@@ -117,7 +116,10 @@ mod unix {
             if expected_len.is_some_and(|len| request.len() >= len) {
                 break;
             }
-            assert!(request.len() <= 256 * 1024, "provider request exceeded fixture bound");
+            assert!(
+                request.len() <= 256 * 1024,
+                "provider request exceeded fixture bound"
+            );
         }
         request
     }
@@ -129,7 +131,9 @@ mod unix {
             )
             .expect("write provider headers");
         for event in events {
-            stream.write_all(event.as_bytes()).expect("write provider event");
+            stream
+                .write_all(event.as_bytes())
+                .expect("write provider event");
         }
         stream.flush().expect("flush provider events");
     }
@@ -163,7 +167,9 @@ mod unix {
         ]
     }
 
-    fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, thread::JoinHandle<Vec<Value>>) {
+    fn spawn_scripted_provider(
+        rounds: Vec<Vec<String>>,
+    ) -> (String, thread::JoinHandle<Vec<Value>>) {
         let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider fixture");
         let address = listener.local_addr().expect("provider fixture address");
         let task = thread::spawn(move || {
@@ -178,7 +184,10 @@ mod unix {
                 bodies.push(
                     serde_json::from_slice(&request[header_end + 4..]).expect("provider JSON"),
                 );
-                respond_sse(&mut stream, &events.iter().map(String::as_str).collect::<Vec<_>>());
+                respond_sse(
+                    &mut stream,
+                    &events.iter().map(String::as_str).collect::<Vec<_>>(),
+                );
             }
             bodies
         });
@@ -221,7 +230,10 @@ mod unix {
                 break;
             }
             response.extend_from_slice(&buffer[..read]);
-            assert!(response.len() <= 512 * 1024, "live response exceeded fixture bound");
+            assert!(
+                response.len() <= 512 * 1024,
+                "live response exceeded fixture bound"
+            );
         }
         response
     }
@@ -307,17 +319,16 @@ mod unix {
             let _api_key = EnvGuard::set("OPENAI_API_KEY", "fixture-secret");
             let _tools = EnvGuard::set("OPENCODE_RK_TURN_TOOLS", "write");
             let (app, _storage_dir) = build_app();
-            let (provider_base, provider_task) = spawn_scripted_provider(vec![
-                round_one_events(&target),
-                round_two_events(),
-            ]);
+            let (provider_base, provider_task) =
+                spawn_scripted_provider(vec![round_one_events(&target), round_two_events()]);
             let _base = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
             let session_id = create_session(&app).await;
             let (address, server) = spawn_http(app.clone()).await;
             let stream_session = session_id.clone();
-            let response = tokio::task::spawn_blocking(move || stream_turn(address, stream_session))
-                .await
-                .expect("stream task");
+            let response =
+                tokio::task::spawn_blocking(move || stream_turn(address, stream_session))
+                    .await
+                    .expect("stream task");
             server.abort();
 
             assert_eq!(fs::read(&sentinel).expect("read sentinel"), SENTINEL);
@@ -328,7 +339,9 @@ mod unix {
                 .and_then(|event| event["output"].as_str())
                 .expect("write tool output");
             assert!(
-                output.contains("denied") || output.contains("symlink") || output.contains("approval"),
+                output.contains("denied")
+                    || output.contains("symlink")
+                    || output.contains("approval"),
                 "symlink denial must be truthful, got {output:?}"
             );
             assert!(!output.contains("Successfully wrote"));
@@ -338,7 +351,11 @@ mod unix {
             }));
 
             let bodies = provider_task.join().expect("provider fixture finished");
-            assert_eq!(bodies.len(), 2, "denial permits exactly one bounded feedback round");
+            assert_eq!(
+                bodies.len(),
+                2,
+                "denial permits exactly one bounded feedback round"
+            );
             let feedback = bodies[1]["input"]
                 .as_array()
                 .expect("round two input")

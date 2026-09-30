@@ -388,8 +388,8 @@ impl Session {
             .collect();
         self.tool_cache.extend(new_tools);
         if self.tool_cache.len() > self.tool_cap {
-            self.tool_cache.drain(0..self.tool_cache.len() - self.tool_cap);
+            self.tool_cache
+                .drain(0..self.tool_cache.len() - self.tool_cap);
         }
     }
 }
-

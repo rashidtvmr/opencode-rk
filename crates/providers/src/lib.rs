@@ -1,8 +1,10 @@
 //! Provider abstractions for LLM and tool backends.
 #![forbid(unsafe_code)]
 
+pub mod account_setup;
 pub mod account_status;
 pub mod account_sync;
+pub mod app_routing;
 pub mod auth;
 pub mod auth_commands;
 pub mod auth_profile;
@@ -37,10 +39,9 @@ pub mod local_credential_import;
 pub mod location_ctx;
 pub mod mcp_transport;
 pub mod metrics;
-pub mod account_setup;
-pub mod app_routing;
 pub mod model_route;
 pub mod oauth_flow;
+pub mod persisted_auth;
 pub mod provider_dispatch;
 pub mod proxy_route;
 pub mod rate_limit;
@@ -49,7 +50,6 @@ pub mod refresh_gate;
 pub mod registry;
 pub mod request_profile;
 pub mod responses;
-pub mod persisted_auth;
 pub mod retry;
 pub mod route_compose;
 pub mod router;

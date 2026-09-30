@@ -38,7 +38,11 @@ impl Bar {
         if !(0.0..=1.0).contains(&ratio) || len == 0 || len > MAX_BAR_LEN {
             return None;
         }
-        Some(Self { orientation, len, ratio })
+        Some(Self {
+            orientation,
+            len,
+            ratio,
+        })
     }
 
     /// Filled cells, rounded, clamped to `len`.
@@ -69,7 +73,9 @@ impl Sparkline {
     /// Fail-closed: `None` on empty or over-bound input.
     #[must_use]
     pub fn new(points: &[f32]) -> Option<Self> {
-        render_slice(points).map(|_| Self { points: points.to_vec() })
+        render_slice(points).map(|_| Self {
+            points: points.to_vec(),
+        })
     }
 
     /// One block char per point; `""` when empty. Flat series → mid block.
@@ -93,7 +99,12 @@ pub fn render_slice(points: &[f32]) -> Option<String> {
     if (max - min) < f32::EPSILON {
         return Some(core::iter::repeat_n(SPARK_BLOCKS[4], points.len()).collect());
     }
-    Some(points.iter().map(|&v| SPARK_BLOCKS[((v - min) / (max - min) * 7.0).round() as usize % 8]).collect())
+    Some(
+        points
+            .iter()
+            .map(|&v| SPARK_BLOCKS[((v - min) / (max - min) * 7.0).round() as usize % 8])
+            .collect(),
+    )
 }
 
 /// Item list with clamped selection.
@@ -108,7 +119,11 @@ impl Menu {
     #[must_use]
     pub fn new(items: &[&str]) -> Self {
         Self {
-            items: items.iter().take(MAX_MENU_ITEMS).map(|s| s.chars().take(MAX_MENU_LABEL).collect()).collect(),
+            items: items
+                .iter()
+                .take(MAX_MENU_ITEMS)
+                .map(|s| s.chars().take(MAX_MENU_LABEL).collect())
+                .collect(),
             selected: 0,
         }
     }
@@ -145,7 +160,12 @@ impl Card {
         if width == 0 || width > MAX_CARD_WIDTH {
             return None;
         }
-        let inner = if bordered { width.saturating_sub(2) } else { width }.max(1);
+        let inner = if bordered {
+            width.saturating_sub(2)
+        } else {
+            width
+        }
+        .max(1);
         Some(Self {
             title: title.chars().take(MAX_CARD_TITLE).take(inner).collect(),
             body: body.chars().take(MAX_CARD_BODY).collect(),
@@ -155,7 +175,11 @@ impl Card {
     }
 
     fn inner(&self) -> usize {
-        if self.bordered { self.width.saturating_sub(2).max(1) } else { self.width }
+        if self.bordered {
+            self.width.saturating_sub(2).max(1)
+        } else {
+            self.width
+        }
     }
 
     fn pad_line(&self, text: &str) -> String {
@@ -163,7 +187,11 @@ impl Card {
         while line.chars().count() < self.inner() {
             line.push(' ');
         }
-        if self.bordered { format!("│{line}│") } else { line }
+        if self.bordered {
+            format!("│{line}│")
+        } else {
+            line
+        }
     }
 
     /// Lines incl. border when `bordered`; body wraps at inner width.
@@ -203,7 +231,10 @@ mod tests {
         let bar = Bar::new(BarOrientation::Horizontal, 8, 0.5).unwrap();
         assert_eq!(bar.filled(), 4);
         assert_eq!(bar.render().chars().count(), 8);
-        assert_eq!(Bar::new(BarOrientation::Vertical, 4, 1.0).unwrap().filled(), 4);
+        assert_eq!(
+            Bar::new(BarOrientation::Vertical, 4, 1.0).unwrap().filled(),
+            4
+        );
     }
 
     #[test]
@@ -220,7 +251,10 @@ mod tests {
     fn menu_select_clamp() {
         let mut menu = Menu::new(&["a", "b", "c"]);
         menu.select(99);
-        assert_eq!((menu.selected_index(), menu.selected_item()), (2, Some("c")));
+        assert_eq!(
+            (menu.selected_index(), menu.selected_item()),
+            (2, Some("c"))
+        );
         menu.select(1);
         assert_eq!(menu.selected_item(), Some("b"));
         let mut empty = Menu::new(&[]);
@@ -236,6 +270,9 @@ mod tests {
         assert_eq!(lines[0], "┌───┐");
         assert!(lines.iter().all(|l| l.chars().count() == 5));
         assert_eq!(lines[1], "│lon│");
-        assert_eq!(Card::new("hi", "xy", 4, false).unwrap().render(), vec!["hi  ", "xy  "]);
+        assert_eq!(
+            Card::new("hi", "xy", 4, false).unwrap().render(),
+            vec!["hi  ", "xy  "]
+        );
     }
 }

@@ -430,9 +430,6 @@ mod tests {
     #[test]
     fn ownership_and_effort() {
         assert!(IndependentEffort::new(5).units() == 5);
-        assert_eq!(
-            DelegError::Unknown.to_string(),
-            "unknown child"
-        );
+        assert_eq!(DelegError::Unknown.to_string(), "unknown child");
     }
 }

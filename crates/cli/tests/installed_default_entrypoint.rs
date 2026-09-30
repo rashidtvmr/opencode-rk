@@ -27,11 +27,7 @@ use std::process::Command;
 /// Fresh disposable HOME, isolated per test (mirrors `TestHome` in
 /// `crates/cli/tests/default_tui.rs:20-42`).
 fn fresh_home(tag: &str) -> PathBuf {
-    let path = std::env::temp_dir().join(format!(
-        "opencode2-e2e-{}-{}",
-        std::process::id(),
-        tag
-    ));
+    let path = std::env::temp_dir().join(format!("opencode2-e2e-{}-{}", std::process::id(), tag));
     let _ = fs::remove_dir_all(&path);
     fs::create_dir_all(&path).expect("create disposable HOME");
     path

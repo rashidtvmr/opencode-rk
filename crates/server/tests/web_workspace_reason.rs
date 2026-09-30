@@ -39,7 +39,10 @@ async fn web_015_reason_missing_catalog_carries_explicit_reason() {
     assert_eq!(body["session_scope_available"], false);
     assert_eq!(body["memory_available"], false);
     let reason = body["reason"].as_str().unwrap();
-    assert!(!reason.is_empty(), "missing-catalog reason must be non-empty");
+    assert!(
+        !reason.is_empty(),
+        "missing-catalog reason must be non-empty"
+    );
     assert!(
         reason.contains("not configured"),
         "missing-catalog reason must state the catalog is not configured"
@@ -88,8 +91,11 @@ async fn web_015_reason_unknown_scope_projects_no_membership() {
     let body = get_workspaces(app_without_catalog(&dir), "/api/workspaces").await;
     assert!(body.get("sessions").is_none());
     assert!(body.get("memory").is_none());
-    let scoped =
-        get_workspaces(app_without_catalog(&dir), "/api/workspaces?scope=no-such-scope").await;
+    let scoped = get_workspaces(
+        app_without_catalog(&dir),
+        "/api/workspaces?scope=no-such-scope",
+    )
+    .await;
     assert_eq!(scoped["available"], false);
     assert!(scoped["workspaces"].as_array().unwrap().is_empty());
     assert_eq!(scoped["session_scope_available"], false);

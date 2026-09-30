@@ -36,15 +36,26 @@ fn r1_payload_carries_function_tool_schemas() {
         role: ResponsesRole::User,
         content: "list files".to_owned(),
     }];
-    let payload =
-        responses_request_payload("gpt-test", "low", &items, std::slice::from_ref(&bash_tool()), true)
-            .expect("payload builds");
+    let payload = responses_request_payload(
+        "gpt-test",
+        "low",
+        &items,
+        std::slice::from_ref(&bash_tool()),
+        true,
+    )
+    .expect("payload builds");
     let tools = payload["tools"].as_array().expect("tools array present");
     assert_eq!(tools.len(), 1);
     assert_eq!(tools[0]["type"], "function");
     assert_eq!(tools[0]["name"], "bash");
-    assert_eq!(tools[0]["description"], "Run a shell command and return stdout");
-    assert_eq!(tools[0]["parameters"]["properties"]["command"]["type"], "string");
+    assert_eq!(
+        tools[0]["description"],
+        "Run a shell command and return stdout"
+    );
+    assert_eq!(
+        tools[0]["parameters"]["properties"]["command"]["type"],
+        "string"
+    );
     assert_eq!(payload["stream"], true);
 }
 

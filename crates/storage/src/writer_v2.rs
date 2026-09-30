@@ -139,9 +139,7 @@ fn insert_message(
     };
     let role = encode_role(message.role);
     if let Some(summary) = reasoning_summary {
-        if message.role != MessageRole::Assistant
-            || summary.len() > MAX_REASONING_SUMMARY_BYTES
-        {
+        if message.role != MessageRole::Assistant || summary.len() > MAX_REASONING_SUMMARY_BYTES {
             return Err(StorageError::InlinePayloadTooLarge);
         }
     }
@@ -249,12 +247,12 @@ fn admit_checked(
         budget.max_wal_bytes,
     ) {
         Ok(()) => Ok(()),
-        Err(QuotaV2Error::DbBytes(n)) => Err(StorageError::Io(std::io::Error::other(
-            format!("db budget exceeded: {n} bytes"),
-        ))),
-        Err(QuotaV2Error::WalBytes(n)) => Err(StorageError::Io(std::io::Error::other(
-            format!("wal budget exceeded: {n} bytes"),
-        ))),
+        Err(QuotaV2Error::DbBytes(n)) => Err(StorageError::Io(std::io::Error::other(format!(
+            "db budget exceeded: {n} bytes"
+        )))),
+        Err(QuotaV2Error::WalBytes(n)) => Err(StorageError::Io(std::io::Error::other(format!(
+            "wal budget exceeded: {n} bytes"
+        )))),
     }
 }
 

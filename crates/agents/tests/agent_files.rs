@@ -58,7 +58,11 @@ fn t02_json_agent_parsed() {
         "tools": ["bash", "read"],
         "prompt": "You are a planning agent."
     });
-    fs::write(ws.join("planner.json"), serde_json::to_string_pretty(&agent).unwrap()).unwrap();
+    fs::write(
+        ws.join("planner.json"),
+        serde_json::to_string_pretty(&agent).unwrap(),
+    )
+    .unwrap();
     let snap = load_agent_files(&ws).unwrap();
     assert_eq!(snap.defs.len(), 1);
     let d = &snap.defs[0];
@@ -96,11 +100,7 @@ fn t03_deterministic_ordering() {
 #[test]
 fn t04_duplicate_name_error() {
     let ws = tmp_dir("t04");
-    fs::write(
-        ws.join("alpha.md"),
-        "---\nname: same_name\n---\nbody1",
-    )
-    .unwrap();
+    fs::write(ws.join("alpha.md"), "---\nname: same_name\n---\nbody1").unwrap();
     fs::write(
         ws.join("beta.json"),
         r#"{"name":"same_name","prompt":"body2"}"#,

@@ -66,7 +66,9 @@ impl EventBus {
     /// Push one event. Merges if `kind` is `Tick` and back is `Tick`
     /// (keeps original `seq`). Drops oldest when at `cap`.
     pub fn push(&mut self, kind: EventKind) {
-        if kind == EventKind::Tick && matches!(self.queue.back(), Some(e) if e.kind == EventKind::Tick) {
+        if kind == EventKind::Tick
+            && matches!(self.queue.back(), Some(e) if e.kind == EventKind::Tick)
+        {
             return;
         }
         let event = BusEvent {

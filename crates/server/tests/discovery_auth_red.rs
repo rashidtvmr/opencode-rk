@@ -93,12 +93,7 @@ async fn disc101_t02_pid_mismatch_rejected() {
 #[tokio::test]
 async fn disc101_t03_legacy_empty_token_rejected() {
     let dir = tempdir().expect("data dir");
-    write_descriptor(
-        dir.path(),
-        std::process::id(),
-        "http://127.0.0.1:4096",
-        "",
-    );
+    write_descriptor(dir.path(), std::process::id(), "http://127.0.0.1:4096", "");
     assert_eq!(read_backend_descriptor(dir.path()).expect("read"), None);
     assert!(DaemonAuth::from_published("").is_err());
     // Legacy descriptor must never authenticate `/api/*`: no credential → 401.

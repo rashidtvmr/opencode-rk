@@ -252,9 +252,7 @@ fn proc_filesystems_has_landlock() -> bool {
         Ok(c) => c,
         Err(_) => return false,
     };
-    content
-        .lines()
-        .any(|line| line.trim().contains("landlock"))
+    content.lines().any(|line| line.trim().contains("landlock"))
 }
 
 pub const REDACTED_MARKER: &str = "[redacted]";

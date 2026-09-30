@@ -32,8 +32,8 @@ use std::io::{Read, Write};
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Marker appended when output exceeds the byte budget.
@@ -122,12 +122,7 @@ impl ShellBounds {
     /// `denial_log` when set. Timeout/cancel kill AND reap the child (no leak).
     /// Output is capped during the read — the retained buffer never exceeds
     /// `max_bytes + marker len`, whatever the child emits.
-    pub fn run(
-        &self,
-        program: &str,
-        args: &[&str],
-        denial_log: Option<&Path>,
-    ) -> BoundedRun {
+    pub fn run(&self, program: &str, args: &[&str], denial_log: Option<&Path>) -> BoundedRun {
         let start = Instant::now();
         if program.is_empty() || !self.is_allowed(program) {
             append_denial_event(denial_log, program, args);
@@ -334,8 +329,16 @@ fn spawn_capped(
         return Spawned::Done(BoundedRun {
             state: RunState::Cancelled,
             exit_code: None,
-            stdout: finish(String::from_utf8_lossy(&out_bytes).into_owned(), true, CANCELLED_MARKER),
-            stderr: finish(String::from_utf8_lossy(&err_bytes).into_owned(), false, CANCELLED_MARKER),
+            stdout: finish(
+                String::from_utf8_lossy(&out_bytes).into_owned(),
+                true,
+                CANCELLED_MARKER,
+            ),
+            stderr: finish(
+                String::from_utf8_lossy(&err_bytes).into_owned(),
+                false,
+                CANCELLED_MARKER,
+            ),
             timed_out: false,
             cancelled: true,
             truncated,
@@ -351,7 +354,11 @@ fn spawn_capped(
                 true,
                 TIMEOUT_MARKER,
             ),
-            stderr: finish(String::from_utf8_lossy(&err_bytes).into_owned(), false, TIMEOUT_MARKER),
+            stderr: finish(
+                String::from_utf8_lossy(&err_bytes).into_owned(),
+                false,
+                TIMEOUT_MARKER,
+            ),
             timed_out: true,
             cancelled: false,
             truncated,
@@ -366,8 +373,16 @@ fn spawn_capped(
     Spawned::Done(BoundedRun {
         state,
         exit_code,
-        stdout: finish(String::from_utf8_lossy(&out_bytes).into_owned(), out_over, TRUNCATED_MARKER),
-        stderr: finish(String::from_utf8_lossy(&err_bytes).into_owned(), err_over, TRUNCATED_MARKER),
+        stdout: finish(
+            String::from_utf8_lossy(&out_bytes).into_owned(),
+            out_over,
+            TRUNCATED_MARKER,
+        ),
+        stderr: finish(
+            String::from_utf8_lossy(&err_bytes).into_owned(),
+            err_over,
+            TRUNCATED_MARKER,
+        ),
         timed_out: false,
         cancelled: false,
         truncated,
@@ -382,7 +397,11 @@ fn debug_assert_not_running(pid: u32) {
     {
         let stat = format!("/proc/{pid}/stat");
         if let Ok(text) = std::fs::read_to_string(&stat) {
-            if let Some(state) = text.rsplit(')').next().and_then(|s| s.split_whitespace().nth(1)) {
+            if let Some(state) = text
+                .rsplit(')')
+                .next()
+                .and_then(|s| s.split_whitespace().nth(1))
+            {
                 debug_assert!(
                     state.starts_with('Z'),
                     "child {pid} still running after kill+wait (state {state})"
@@ -420,7 +439,10 @@ pub fn denial_event_json(program: &str, args: &[&str]) -> String {
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis())
         .unwrap_or(0);
-    let arg_list: Vec<String> = args.iter().map(|a| format!("\"{}\"", json_escape(a))).collect();
+    let arg_list: Vec<String> = args
+        .iter()
+        .map(|a| format!("\"{}\"", json_escape(a)))
+        .collect();
     format!(
         "{{\"kind\":\"{DENIAL_EVENT_KIND}\",\"program\":\"{}\",\"args\":[{}],\"denied\":true,\"spawned\":false,\"ts_ms\":{now}}}",
         json_escape(program),
@@ -450,12 +472,7 @@ pub enum WriteOutcome {
 /// `root`. Denial performs zero filesystem I/O: the target is never created,
 /// truncated, or had parents created — verified by the frozen tests via
 /// byte-identical fixture comparison.
-pub fn gated_write_file(
-    root: &Path,
-    path: &Path,
-    content: &str,
-    permitted: bool,
-) -> WriteOutcome {
+pub fn gated_write_file(root: &Path, path: &Path, content: &str, permitted: bool) -> WriteOutcome {
     if !permitted {
         return WriteOutcome::Denied {
             reason: "permission-denied",
@@ -511,7 +528,6 @@ pub fn render_denial(action: &str, detail: &str) -> String {
 mod tests {
     use super::*;
 
-
     fn bounds(allowed: &[&str], timeout_ms: u64, max_bytes: usize) -> ShellBounds {
         ShellBounds::new(
             allowed.iter().map(|s| s.to_string()).collect(),
@@ -533,13 +549,26 @@ mod tests {
         // `sh` is NOT allowlisted: denial must happen before spawn, so the
         // marker file can never be created as a side effect.
         let b = bounds(&["echo"], 5_000, 4096);
-        let r = b.run("sh", &["-c", "touch \"$0\"", &marker.to_string_lossy()], Some(&log));
+        let r = b.run(
+            "sh",
+            &["-c", "touch \"$0\"", &marker.to_string_lossy()],
+            Some(&log),
+        );
         assert_eq!(r.state, RunState::Denied, "unallowlisted command must deny");
         assert!(!r.timed_out && !r.cancelled);
-        assert!(!marker.exists(), "denial must spawn no process (marker absent)");
+        assert!(
+            !marker.exists(),
+            "denial must spawn no process (marker absent)"
+        );
         let log_text = std::fs::read_to_string(&log).expect("denial event must be durable");
-        assert!(log_text.contains(DENIAL_EVENT_KIND), "durable denial event kind");
-        assert!(log_text.contains("\"spawned\":false"), "event proves no spawn");
+        assert!(
+            log_text.contains(DENIAL_EVENT_KIND),
+            "durable denial event kind"
+        );
+        assert!(
+            log_text.contains("\"spawned\":false"),
+            "event proves no spawn"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -548,14 +577,24 @@ mod tests {
     fn disc104_t02_timeout_kills_and_marks() {
         let b = bounds(&["sh"], 300, 4096);
         let start = Instant::now();
-        let r = b.run("sh", &["-c", "yes TRASH | head -c 10000000; sleep 30"], None);
+        let r = b.run(
+            "sh",
+            &["-c", "yes TRASH | head -c 10000000; sleep 30"],
+            None,
+        );
         let wall = start.elapsed();
         assert_eq!(r.state, RunState::TimedOut);
         assert!(r.timed_out);
         assert!(r.exit_code.is_none(), "killed child has no normal exit");
         assert!(r.stdout.contains(TIMEOUT_MARKER), "explicit timeout marker");
-        assert!(r.stdout.len() <= 4096 + TIMEOUT_MARKER.len() + 1, "bounded after kill");
-        assert!(wall < Duration::from_secs(20), "must return promptly, took {wall:?}");
+        assert!(
+            r.stdout.len() <= 4096 + TIMEOUT_MARKER.len() + 1,
+            "bounded after kill"
+        );
+        assert!(
+            wall < Duration::from_secs(20),
+            "must return promptly, took {wall:?}"
+        );
     }
 
     // DISC-104-T03: cancel reaches stable cancelled state with no leaked child.
@@ -567,7 +606,9 @@ mod tests {
         let handle = std::thread::spawn(move || b.run("sleep", &["30"], None));
         std::thread::sleep(Duration::from_millis(400));
         cancel2.store(true, Ordering::SeqCst);
-        let r = handle.join().expect("run thread must join (no hang, no leak)");
+        let r = handle
+            .join()
+            .expect("run thread must join (no hang, no leak)");
         assert_eq!(r.state, RunState::Cancelled);
         assert!(r.cancelled && !r.timed_out);
         assert!(r.stdout.contains(CANCELLED_MARKER));
@@ -586,7 +627,10 @@ mod tests {
         // Emits ~200 KiB — 200x the cap. Retained buffer must stay ~cap.
         let r = b.run("sh", &["-c", "yes PADLINE | head -c 200000"], None);
         assert!(r.truncated, "over-budget output must flag truncated");
-        assert!(r.stdout.contains(TRUNCATED_MARKER), "explicit truncation marker");
+        assert!(
+            r.stdout.contains(TRUNCATED_MARKER),
+            "explicit truncation marker"
+        );
         assert!(
             r.stdout.len() <= cap + TRUNCATED_MARKER.len() + 1,
             "retained stdout never grows unboundedly ({} > cap {cap})",
@@ -604,14 +648,24 @@ mod tests {
         std::fs::write(&fixture, original).unwrap();
         let before = std::fs::read(&fixture).unwrap();
         let out = gated_write_file(&dir, &fixture, "ATTACKER-BYTES", false);
-        assert_eq!(out, WriteOutcome::Denied { reason: "permission-denied" });
+        assert_eq!(
+            out,
+            WriteOutcome::Denied {
+                reason: "permission-denied"
+            }
+        );
         let after = std::fs::read(&fixture).unwrap();
         assert_eq!(before, after, "denied write must leave file byte-identical");
         assert_eq!(after, original.as_bytes());
         // Escape attempt denied with zero side effects (no parent dirs made).
         let escape = dir.join("../disc104-t05-escape.marker");
         let out2 = gated_write_file(&dir, &escape, "x", true);
-        assert_eq!(out2, WriteOutcome::Denied { reason: "path-escape" });
+        assert_eq!(
+            out2,
+            WriteOutcome::Denied {
+                reason: "path-escape"
+            }
+        );
         assert!(!escape.exists());
         // UI renders the denial.
         let ui = render_denial("write fixture.txt", "permission-denied");
@@ -673,7 +727,10 @@ mod tests {
         let b = bounds(&["sh"], 15_000, cap);
         let r = b.run(
             "sh",
-            &["-c", "(yes OUT | head -c 100000 & yes ERR | head -c 100000 >&2) | head -c 200000"],
+            &[
+                "-c",
+                "(yes OUT | head -c 100000 & yes ERR | head -c 100000 >&2) | head -c 200000",
+            ],
             None,
         );
         assert!(r.stdout.len() <= cap + TRUNCATED_MARKER.len() + 1);

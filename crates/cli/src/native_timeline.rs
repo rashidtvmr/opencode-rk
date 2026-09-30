@@ -512,11 +512,7 @@ mod tests {
         let mut page = TimelinePage::new();
         page.scroll_up(2, builder.len());
         assert_eq!(page.scroll(), 2);
-        let vis: Vec<u64> = builder
-            .page(&page, 2)
-            .iter()
-            .map(|l| l.stream_id)
-            .collect();
+        let vis: Vec<u64> = builder.page(&page, 2).iter().map(|l| l.stream_id).collect();
         assert_eq!(vis, vec![1, 2]);
         // New arrivals must not move a scrolled-up view.
         builder.push_back(TimelineItem {
@@ -524,11 +520,7 @@ mod tests {
             stream_id: 5,
             preview: "line 5".into(),
         });
-        let vis: Vec<u64> = builder
-            .page(&page, 2)
-            .iter()
-            .map(|l| l.stream_id)
-            .collect();
+        let vis: Vec<u64> = builder.page(&page, 2).iter().map(|l| l.stream_id).collect();
         assert_eq!(vis, vec![1, 2]);
         page.scroll_down(10);
         assert_eq!(page.scroll(), 0);

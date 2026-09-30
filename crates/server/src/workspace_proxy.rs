@@ -136,13 +136,9 @@ fn stripped_name(name: &str) -> bool {
 ///
 /// Input slice is never mutated. Over-cap names/values fail the whole
 /// call with [`ProxyError::BadHeader`]; stripped values are dropped.
-pub fn strip_headers(
-    headers: &[(String, String)],
-) -> Result<Vec<(String, String)>, ProxyError> {
+pub fn strip_headers(headers: &[(String, String)]) -> Result<Vec<(String, String)>, ProxyError> {
     for (name, value) in headers {
-        if name.len() > MAX_PROXY_HEADER_NAME_LEN
-            || value.len() > MAX_PROXY_HEADER_VALUE_LEN
-        {
+        if name.len() > MAX_PROXY_HEADER_NAME_LEN || value.len() > MAX_PROXY_HEADER_VALUE_LEN {
             return Err(ProxyError::BadHeader);
         }
     }
@@ -175,10 +171,7 @@ impl ProxyQueue {
             return Err(ProxyError::TooLarge);
         }
         if self.items.len() >= MAX_PROXY_QUEUE_ITEMS
-            || self
-                .queued_bytes
-                .saturating_add(item.bytes.len())
-                > MAX_PROXY_QUEUE_BYTES
+            || self.queued_bytes.saturating_add(item.bytes.len()) > MAX_PROXY_QUEUE_BYTES
         {
             return Err(ProxyError::QueueFull);
         }

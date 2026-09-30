@@ -237,7 +237,10 @@ mod tests {
         }
         assert_eq!(buf.len(), MAX_LINES);
         assert_eq!(buf.lines()[0].text, "line10");
-        assert_eq!(buf.lines()[MAX_LINES - 1].text, format!("line{}", MAX_LINES + 9));
+        assert_eq!(
+            buf.lines()[MAX_LINES - 1].text,
+            format!("line{}", MAX_LINES + 9)
+        );
     }
 
     #[test]
@@ -287,9 +290,21 @@ mod tests {
         pages.push_transcript("t1", false);
         pages.push_composer("c1", true);
         pages.push_sidebar("s1", false);
-        let t: Vec<&str> = pages.transcript_window(10).iter().map(|l| l.text.as_str()).collect();
-        let c: Vec<&str> = pages.composer_window(10).iter().map(|l| l.text.as_str()).collect();
-        let s: Vec<&str> = pages.sidebar_window(10).iter().map(|l| l.text.as_str()).collect();
+        let t: Vec<&str> = pages
+            .transcript_window(10)
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
+        let c: Vec<&str> = pages
+            .composer_window(10)
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
+        let s: Vec<&str> = pages
+            .sidebar_window(10)
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
         assert_eq!(t, vec!["t1"]);
         assert_eq!(c, vec!["c1"]);
         assert_eq!(s, vec!["s1"]);
@@ -301,8 +316,11 @@ mod tests {
         for i in 0..5 {
             pages.push_transcript(format!("l{i}"), false);
         }
-        let win: Vec<&str> =
-            pages.transcript_window(2).iter().map(|l| l.text.as_str()).collect();
+        let win: Vec<&str> = pages
+            .transcript_window(2)
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
         assert_eq!(win, vec!["l3", "l4"]);
         assert!(pages.transcript_window(0).is_empty());
         assert!(pages.sidebar_window(10).is_empty());
@@ -316,9 +334,16 @@ mod tests {
             pages.push_sidebar(format!("s{i}"), false);
         }
         pages.scroll_transcript_up(2);
-        let t: Vec<&str> =
-            pages.transcript_window(2).iter().map(|l| l.text.as_str()).collect();
-        let s: Vec<&str> = pages.sidebar_window(2).iter().map(|l| l.text.as_str()).collect();
+        let t: Vec<&str> = pages
+            .transcript_window(2)
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
+        let s: Vec<&str> = pages
+            .sidebar_window(2)
+            .iter()
+            .map(|l| l.text.as_str())
+            .collect();
         assert_eq!(t, vec!["t1", "t2"]);
         assert_eq!(s, vec!["s3", "s4"]);
     }
@@ -330,7 +355,10 @@ mod tests {
             pages.push_transcript(format!("line{i}"), false);
         }
         assert_eq!(pages.transcript_len(), MAX_LINES);
-        assert_eq!(pages.transcript_window(1)[0].text, format!("line{}", MAX_LINES + 9));
+        assert_eq!(
+            pages.transcript_window(1)[0].text,
+            format!("line{}", MAX_LINES + 9)
+        );
         pages.push_composer("z".repeat(MAX_LINE + 5), false);
         assert_eq!(pages.composer_window(1)[0].text.chars().count(), MAX_LINE);
     }

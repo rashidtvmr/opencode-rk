@@ -92,9 +92,7 @@ fn valid_token(value: &str, max_chars: usize, colon: bool) -> bool {
         Some(c) if c.is_ascii_alphanumeric() => {}
         _ => return false,
     }
-    chars.all(|c| {
-        c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') || (colon && c == ':')
-    })
+    chars.all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') || (colon && c == ':'))
 }
 
 macro_rules! wire_id {
@@ -227,7 +225,10 @@ impl fmt::Display for IdempotencyKey {
 /// retries of one operation collapse in the caller store while distinct
 /// operations never collide. Inputs are already bounded, so the derived
 /// form always fits [`MAX_IDEMPOTENCY_KEY_CHARS`].
-pub fn idempotency_key(request: &RequestId, op: &OpDigest) -> Result<IdempotencyKey, ProtocolError> {
+pub fn idempotency_key(
+    request: &RequestId,
+    op: &OpDigest,
+) -> Result<IdempotencyKey, ProtocolError> {
     IdempotencyKey::parse(&format!("{}:{}", request.as_str(), op.as_str()))
 }
 
@@ -620,7 +621,13 @@ mod tests {
     fn digests_validate_hex_bounds() {
         assert!(OpDigest::parse(DIGEST).is_ok());
         assert!(OpDigest::parse(&DIGEST.to_ascii_uppercase()).is_ok());
-        for bad in ["", "xyz", &"a".repeat(31), &"g".repeat(32), &"a".repeat(129)] {
+        for bad in [
+            "",
+            "xyz",
+            &"a".repeat(31),
+            &"g".repeat(32),
+            &"a".repeat(129),
+        ] {
             assert!(OpDigest::parse(bad).is_err(), "digest {bad:?}");
         }
     }
@@ -761,7 +768,10 @@ mod tests {
             queue.push(vec![0u8; 1]).unwrap();
         }
         let before = (queue.len(), queue.queued_bytes());
-        assert_eq!(queue.push(vec![0u8; 1]).unwrap_err(), ProtocolError::QueueFull);
+        assert_eq!(
+            queue.push(vec![0u8; 1]).unwrap_err(),
+            ProtocolError::QueueFull
+        );
         assert_eq!((queue.len(), queue.queued_bytes()), before);
         let frames = queue.drain();
         assert_eq!(frames.len(), MAX_QUEUE_ITEMS);

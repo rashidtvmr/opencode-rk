@@ -24,21 +24,19 @@
 #![forbid(unsafe_code)]
 
 use opencode_rk_security::{
-    Decision, OperationIntent, PermissionBroker,
-    spawn::SecureSpawner,
-    ssrf::SsrfGuard,
+    Decision, OperationIntent, PermissionBroker, spawn::SecureSpawner, ssrf::SsrfGuard,
 };
 use std::{
     collections::HashMap,
     path::PathBuf,
     process::Stdio,
-    sync::atomic::{AtomicBool, Ordering},
     sync::Arc,
+    sync::atomic::{AtomicBool, Ordering},
     time::Instant,
 };
-use tokio::time::Duration;
 use thiserror::Error;
 use tokio::process::{Child, Command};
+use tokio::time::Duration;
 
 /// Max endpoint URL bytes inspected.
 pub const MAX_URL_LEN: usize = 2048;
@@ -210,9 +208,8 @@ fn cap_ok(s: &str) -> bool {
         Some(b) if b.is_ascii_alphanumeric() => (),
         _ => return false,
     }
-    s.bytes().all(|b| {
-        b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-'
-    })
+    s.bytes()
+        .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'_' || b == b'-')
 }
 
 fn id_ok(s: &str) -> bool {
@@ -362,18 +359,11 @@ pub async fn spawn_server(
     // gates (destructive argv, shell `-c`) keep their broker semantics.
     let (program, argv, cwd) = match &endpoint {
         McpEndpoint::Stdio {
-            program,
-            args,
-            cwd,
-            ..
+            program, args, cwd, ..
         } => (program.clone(), args.clone(), cwd.clone()),
         McpEndpoint::Http { url } => {
             check_endpoint_ssrf(url, allow_loopback)?;
-            (
-                format!("mcp-http:{url}"),
-                Vec::new(),
-                PathBuf::from("/tmp"),
-            )
+            (format!("mcp-http:{url}"), Vec::new(), PathBuf::from("/tmp"))
         }
     };
     match broker.authorize(&OperationIntent::Process {
@@ -384,7 +374,9 @@ pub async fn spawn_server(
         Decision::Allow => (),
         Decision::Deny { reason } => return Err(SpawnError::Denied(reason)),
         Decision::RequireHuman { reason, .. } => {
-            return Err(SpawnError::Denied(format!("requires human approval: {reason}")));
+            return Err(SpawnError::Denied(format!(
+                "requires human approval: {reason}"
+            )));
         }
     }
     if cancel.load(Ordering::SeqCst) {
@@ -413,7 +405,9 @@ pub fn check_endpoint_ssrf(url: &str, allow_loopback: bool) -> Result<(), SpawnE
         )));
     }
     if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Err(SpawnError::SsrfBlocked(format!("unsupported scheme: {url:?}")));
+        return Err(SpawnError::SsrfBlocked(format!(
+            "unsupported scheme: {url:?}"
+        )));
     }
     let mut guard = SsrfGuard::new();
     if allow_loopback {
@@ -523,11 +517,7 @@ fn parse_http_authority(url: &str) -> Result<(String, u16), SpawnError> {
             (h.to_owned(), port)
         }
         _ => {
-            let default = if url.starts_with("https://") {
-                443
-            } else {
-                80
-            };
+            let default = if url.starts_with("https://") { 443 } else { 80 };
             (authority.to_owned(), default)
         }
     };
@@ -573,12 +563,9 @@ mod tests {
     // T01: broker approval gates spawn; denial spawns no process.
     #[tokio::test]
     async fn disc111_t01_denial_spawns_no_process() {
-        let denied = broker().with_permissions(opencode_rk_security::PermissionSet::new(
-            vec![opencode_rk_security::PermissionRule::new(
-                "*",
-                opencode_rk_security::RuleEffect::Deny,
-            )],
-        ));
+        let denied = broker().with_permissions(opencode_rk_security::PermissionSet::new(vec![
+            opencode_rk_security::PermissionRule::new("*", opencode_rk_security::RuleEffect::Deny),
+        ]));
         // Sanity: the fixture broker really denies process intents.
         assert!(matches!(
             denied.authorize(&OperationIntent::Process {
@@ -642,10 +629,7 @@ mod tests {
             );
         }
         // Even with loopback allowed, private ranges and DNS names stay blocked.
-        for url in [
-            "http://10.0.0.5:8080/mcp",
-            "https://example.com/mcp",
-        ] {
+        for url in ["http://10.0.0.5:8080/mcp", "https://example.com/mcp"] {
             assert!(
                 matches!(
                     check_endpoint_ssrf(url, true),
@@ -778,9 +762,17 @@ mod tests {
         )
         .await
         .expect("spawn must run");
-        let good =
-            ToolApproval::bind("tool1", "tools.call", b"{}", "project:default", StdDuration::from_secs(60));
-        assert!(good.check("tool1", "tools.call", b"{}", "project:default").is_ok());
+        let good = ToolApproval::bind(
+            "tool1",
+            "tools.call",
+            b"{}",
+            "project:default",
+            StdDuration::from_secs(60),
+        );
+        assert!(
+            good.check("tool1", "tools.call", b"{}", "project:default")
+                .is_ok()
+        );
         // Drift in args -> denied, no side effect.
         assert!(matches!(
             good.check("tool1", "tools.call", b"{\"x\":1}", "project:default"),
@@ -805,10 +797,16 @@ mod tests {
             Err(SpawnError::Denied(_))
         ));
         // Capability outside the spawn grant -> denied at invoke.
-        let foreign =
-            ToolApproval::bind("tool1", "admin.exec", b"{}", "project:default", StdDuration::from_secs(60));
+        let foreign = ToolApproval::bind(
+            "tool1",
+            "admin.exec",
+            b"{}",
+            "project:default",
+            StdDuration::from_secs(60),
+        );
         assert!(matches!(
-            srv.invoke(&foreign, "admin.exec", b"{}", "project:default").await,
+            srv.invoke(&foreign, "admin.exec", b"{}", "project:default")
+                .await,
             Err(SpawnError::Denied(_))
         ));
         // Valid invoke succeeds without spawning anything new.

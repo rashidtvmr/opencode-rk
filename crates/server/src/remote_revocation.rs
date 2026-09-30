@@ -122,9 +122,12 @@ impl RevocationRegistry {
     }
 
     fn live(&self, device: &str) -> Result<&DeviceState, RevocationError> {
-        let d = self.devices.get(device).ok_or(RevocationError::UnknownDevice {
-            device: device.to_string(),
-        })?;
+        let d = self
+            .devices
+            .get(device)
+            .ok_or(RevocationError::UnknownDevice {
+                device: device.to_string(),
+            })?;
         if !d.enrolled {
             return Err(RevocationError::UnknownDevice {
                 device: device.to_string(),
@@ -164,9 +167,12 @@ impl RevocationRegistry {
         if credential.is_empty() {
             return Err(RevocationError::EmptyCredential);
         }
-        let seq = self.issued.remove(challenge).ok_or(RevocationError::NeedsFreshPairing {
-            device: device.to_string(),
-        })?;
+        let seq = self
+            .issued
+            .remove(challenge)
+            .ok_or(RevocationError::NeedsFreshPairing {
+                device: device.to_string(),
+            })?;
         if let Some(wm) = self.revoke_watermark.get(device) {
             if seq < *wm {
                 return Err(RevocationError::NeedsFreshPairing {
@@ -216,9 +222,12 @@ impl RevocationRegistry {
     /// Authorize a command: device live, stream open, epochs match.
     pub fn authorize_command(&self, device: &str, stream: u64) -> Result<(), RevocationError> {
         let d = self.live(device)?;
-        let s = self.streams.get(&stream).ok_or(RevocationError::StaleEpoch {
-            device: device.to_string(),
-        })?;
+        let s = self
+            .streams
+            .get(&stream)
+            .ok_or(RevocationError::StaleEpoch {
+                device: device.to_string(),
+            })?;
         if s.device != device || s.epoch != d.epoch {
             return Err(RevocationError::StaleEpoch {
                 device: device.to_string(),
@@ -254,10 +263,16 @@ impl RevocationRegistry {
     /// Execute a queued op: reauthorize against the live epoch; stale or
     /// revoked devices are denied and the op is dropped (no replay).
     pub fn execute_queued(&mut self, op: u64) -> Result<(), RevocationError> {
-        let q = self.queued.remove(&op).ok_or(RevocationError::UnknownOp { op })?;
-        let d = self.devices.get(&q.device).ok_or(RevocationError::UnknownDevice {
-            device: q.device.clone(),
-        })?;
+        let q = self
+            .queued
+            .remove(&op)
+            .ok_or(RevocationError::UnknownOp { op })?;
+        let d = self
+            .devices
+            .get(&q.device)
+            .ok_or(RevocationError::UnknownDevice {
+                device: q.device.clone(),
+            })?;
         if !d.enrolled || d.revoked {
             return Err(RevocationError::Revoked {
                 device: q.device.clone(),
@@ -276,9 +291,12 @@ impl RevocationRegistry {
     /// denies them (no silent replay, no silent drop ambiguity for callers
     /// holding the op id). Unrelated devices untouched.
     pub fn revoke(&mut self, device: &str, now_secs: u64) -> Result<usize, RevocationError> {
-        let d = self.devices.get_mut(device).ok_or(RevocationError::UnknownDevice {
-            device: device.to_string(),
-        })?;
+        let d = self
+            .devices
+            .get_mut(device)
+            .ok_or(RevocationError::UnknownDevice {
+                device: device.to_string(),
+            })?;
         if !d.enrolled {
             return Err(RevocationError::UnknownDevice {
                 device: device.to_string(),
@@ -289,7 +307,8 @@ impl RevocationRegistry {
         d.prev_credential = None;
         self.revoked_at.insert(device.to_string(), now_secs);
         // Watermark: only challenges issued at/after this seq are fresh.
-        self.revoke_watermark.insert(device.to_string(), self.next_challenge);
+        self.revoke_watermark
+            .insert(device.to_string(), self.next_challenge);
         let before = self.streams.len();
         self.streams.retain(|_, s| s.device != device);
         let closed = before - self.streams.len();
@@ -302,9 +321,12 @@ impl RevocationRegistry {
         if new_cred.is_empty() {
             return Err(RevocationError::EmptyCredential);
         }
-        let d = self.devices.get_mut(device).ok_or(RevocationError::UnknownDevice {
-            device: device.to_string(),
-        })?;
+        let d = self
+            .devices
+            .get_mut(device)
+            .ok_or(RevocationError::UnknownDevice {
+                device: device.to_string(),
+            })?;
         if !d.enrolled || d.revoked {
             return Err(RevocationError::Revoked {
                 device: device.to_string(),
@@ -328,9 +350,12 @@ impl RevocationRegistry {
         if next.is_empty() {
             return Err(RevocationError::EmptyCredential);
         }
-        let d = self.devices.get_mut(device).ok_or(RevocationError::UnknownDevice {
-            device: device.to_string(),
-        })?;
+        let d = self
+            .devices
+            .get_mut(device)
+            .ok_or(RevocationError::UnknownDevice {
+                device: device.to_string(),
+            })?;
         if !d.enrolled || d.revoked {
             return Err(RevocationError::Revoked {
                 device: device.to_string(),

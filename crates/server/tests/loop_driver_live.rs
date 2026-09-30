@@ -137,7 +137,9 @@ fn round_one_events() -> Vec<String> {
     ]
 }
 
-fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, std::thread::JoinHandle<Vec<Value>>) {
+fn spawn_scripted_provider(
+    rounds: Vec<Vec<String>>,
+) -> (String, std::thread::JoinHandle<Vec<Value>>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider fixture");
     let address = listener.local_addr().expect("fixture address");
     let task = std::thread::spawn(move || {
@@ -151,7 +153,10 @@ fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, std::thread::Jo
                 .expect("provider request header terminator");
             let body = &request[header_end + 4..];
             bodies.push(serde_json::from_slice(body).expect("provider json"));
-            respond_sse(&mut stream, &events.iter().map(String::as_str).collect::<Vec<_>>());
+            respond_sse(
+                &mut stream,
+                &events.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
         }
         bodies
     });
@@ -159,7 +164,9 @@ fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, std::thread::Jo
 }
 
 async fn spawn_http(app: axum::Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind server");
     let address = listener.local_addr().expect("server address");
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
@@ -251,10 +258,7 @@ fn scenario_a_drive_multi_goal_trajectory() {
     // Start → Continue goal 1
     let action = driver.send(LoopEvent::Start(plan));
     assert_eq!(action, LoopAction::Continue { goal_id: 1 });
-    assert_eq!(
-        driver.state().plan.goals[0].status,
-        GoalStatus::InProgress
-    );
+    assert_eq!(driver.state().plan.goals[0].status, GoalStatus::InProgress);
     assert_eq!(driver.state().current_index, 0);
 
     // Step 1 Done → Continue goal 2
@@ -417,7 +421,10 @@ fn scenario_b_checkpoint_resume_roundtrip() {
         "restored driver continues from goal 2"
     );
     assert_eq!(restored.state().plan.goals[0].status, GoalStatus::Achieved);
-    assert_eq!(restored.state().plan.goals[1].status, GoalStatus::InProgress);
+    assert_eq!(
+        restored.state().plan.goals[1].status,
+        GoalStatus::InProgress
+    );
     assert_eq!(restored.state().amends.len(), 1);
     assert_eq!(restored.state().amends[0], "mid-course hint");
 }
@@ -535,8 +542,7 @@ fn scenario_d_live_turn_no_loop_driver_events() {
     // (plan_started, step_outcome, goal_completed, steer_applied, checkpoint).
     let rt = tokio::runtime::Runtime::new().expect("tokio runtime");
     rt.block_on(async {
-        let (_provider_base, _provider_task) =
-            spawn_scripted_provider(vec![round_one_events()]);
+        let (_provider_base, _provider_task) = spawn_scripted_provider(vec![round_one_events()]);
         let (app, _dir) = build_app();
         let session_id = create_session(&app, "LoopDriver gap test").await;
         let (address, server) = spawn_http(app.clone()).await;
@@ -546,10 +552,7 @@ fn scenario_d_live_turn_no_loop_driver_events() {
         server.abort();
 
         let events = ndjson_events(&response);
-        let event_types: Vec<&str> = events
-            .iter()
-            .filter_map(|e| e["type"].as_str())
-            .collect();
+        let event_types: Vec<&str> = events.iter().filter_map(|e| e["type"].as_str()).collect();
 
         // LoopDriver trajectory events that are NOT present:
         let loop_driver_types = [

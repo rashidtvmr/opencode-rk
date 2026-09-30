@@ -107,7 +107,10 @@ fn valid_host(host: &str) -> bool {
         return false;
     }
     let lower = host.to_ascii_lowercase();
-    if lower.starts_with('-') || lower.starts_with('.') || lower.ends_with('-') || lower.ends_with('.')
+    if lower.starts_with('-')
+        || lower.starts_with('.')
+        || lower.ends_with('-')
+        || lower.ends_with('.')
     {
         return false;
     }
@@ -243,11 +246,7 @@ impl Drop for DeviceCredentials {
 }
 
 impl DeviceCredentials {
-    pub fn new(
-        device_id: &str,
-        account_id: &str,
-        token: &[u8],
-    ) -> Result<Self, ConnectorError> {
+    pub fn new(device_id: &str, account_id: &str, token: &[u8]) -> Result<Self, ConnectorError> {
         if !valid_id(device_id) || !valid_id(account_id) {
             return Err(ConnectorError::BadCredentials);
         }
@@ -743,7 +742,11 @@ mod tests {
             let d = p.delay_for(attempt);
             assert!(d <= cap, "attempt {attempt}: {d:?} exceeds cap");
             assert!(d >= floor, "attempt {attempt}: {d:?} below floor");
-            assert_eq!(d, p.delay_for(attempt), "attempt {attempt}: not deterministic");
+            assert_eq!(
+                d,
+                p.delay_for(attempt),
+                "attempt {attempt}: not deterministic"
+            );
             seen.insert(d);
         }
         assert!(seen.len() > 1, "no jitter spread across attempts");
@@ -756,7 +759,10 @@ mod tests {
         }
         assert!(c.is_offline());
         assert_eq!(c.state(), ConnectorState::Offline);
-        assert_eq!(c.last_retry().unwrap(), p.delay_for(RECONNECT_MAX_ATTEMPTS - 1));
+        assert_eq!(
+            c.last_retry().unwrap(),
+            p.delay_for(RECONNECT_MAX_ATTEMPTS - 1)
+        );
     }
 
     #[test]
@@ -772,7 +778,11 @@ mod tests {
         assert!(!dbg.contains("TESTSECRET"), "secret in receipt: {dbg}");
         // Connector and credential Debug must redact too.
         let c2 = connected();
-        for dbg in [format!("{c2:?}"), format!("{:?}", creds()), format!("{:?}", endpoint())] {
+        for dbg in [
+            format!("{c2:?}"),
+            format!("{:?}", creds()),
+            format!("{:?}", endpoint()),
+        ] {
             assert!(!dbg.contains("TESTSECRET"), "secret in logs: {dbg}");
         }
     }

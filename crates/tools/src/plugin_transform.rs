@@ -101,7 +101,11 @@ impl TransformLog {
         if !value_valid(value) {
             return Err(TransformError::InvalidValue);
         }
-        if self.entries.iter().any(|t| t.scope == scope && t.key == key) {
+        if self
+            .entries
+            .iter()
+            .any(|t| t.scope == scope && t.key == key)
+        {
             return Err(TransformError::Duplicate);
         }
         if self.entries.len() >= EXT11_MAX_TRANSFORMS {

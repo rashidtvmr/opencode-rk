@@ -245,9 +245,8 @@ impl std::error::Error for TurnError {}
 fn valid_id(s: &str) -> bool {
     !s.is_empty()
         && s.len() <= MAX_ID_LEN
-        && s.bytes().all(|b| {
-            b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b':'
-        })
+        && s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b':')
 }
 
 /// Owns turns, idempotency keys, auth, online state, and per-device
@@ -460,7 +459,10 @@ mod tests {
         let p = c.submit(phone).expect("phone submit works");
         let l = c.submit(local).expect("local submit works");
         assert_ne!(p.turn_id, l.turn_id);
-        assert_eq!(c.turn(p.turn_id).unwrap().prompt, c.turn(l.turn_id).unwrap().prompt);
+        assert_eq!(
+            c.turn(p.turn_id).unwrap().prompt,
+            c.turn(l.turn_id).unwrap().prompt
+        );
     }
 
     #[test]
@@ -492,9 +494,13 @@ mod tests {
     #[test]
     fn duplicate_submission_id_creates_one_turn() {
         let mut c = controller();
-        let first = c.submit(phone_env("dup-1", "do work")).expect("first works");
+        let first = c
+            .submit(phone_env("dup-1", "do work"))
+            .expect("first works");
         assert!(!first.deduped);
-        let second = c.submit(phone_env("dup-1", "do work")).expect("replay works");
+        let second = c
+            .submit(phone_env("dup-1", "do work"))
+            .expect("replay works");
         assert!(second.deduped);
         assert_eq!(first.turn_id, second.turn_id);
         assert_eq!(c.turn_count(), 1);
@@ -503,7 +509,9 @@ mod tests {
     #[test]
     fn duplicate_id_with_different_prompt_still_one_turn() {
         let mut c = controller();
-        let first = c.submit(phone_env("dup-2", "original")).expect("first works");
+        let first = c
+            .submit(phone_env("dup-2", "original"))
+            .expect("first works");
         let replay = c
             .submit(phone_env("dup-2", "attacker-changed-prompt"))
             .expect("replay returns receipt, never a new turn");
@@ -516,8 +524,14 @@ mod tests {
     #[test]
     fn interrupt_hits_intended_turn_and_preserves_history() {
         let mut c = controller();
-        let a = c.submit(phone_env("t-a", "task a")).expect("a works").turn_id;
-        let b = c.submit(phone_env("t-b", "task b")).expect("b works").turn_id;
+        let a = c
+            .submit(phone_env("t-a", "task a"))
+            .expect("a works")
+            .turn_id;
+        let b = c
+            .submit(phone_env("t-b", "task b"))
+            .expect("b works")
+            .turn_id;
         let origin = Origin::Phone {
             device_id: DEV.to_string(),
         };
@@ -560,11 +574,16 @@ mod tests {
     #[test]
     fn unauthorized_interrupt_errors_without_side_effect() {
         let mut c = controller();
-        let id = c.submit(phone_env("t-victim", "victim task")).expect("works").turn_id;
+        let id = c
+            .submit(phone_env("t-victim", "victim task"))
+            .expect("works")
+            .turn_id;
         let evil = Origin::Phone {
             device_id: "intruder".to_string(),
         };
-        let err = c.interrupt(&evil, id).expect_err("intruder interrupt fails");
+        let err = c
+            .interrupt(&evil, id)
+            .expect_err("intruder interrupt fails");
         assert!(format!("{err}").contains("unauthorized"));
         assert_eq!(c.turn(id).unwrap().status, TurnStatus::Running);
         assert_eq!(c.history(id).unwrap().len(), 1);
@@ -586,10 +605,15 @@ mod tests {
         assert!(format!("{err}").contains("offline"));
         assert!(format!("{err}").contains("nothing queued"));
         assert_eq!(c.turn_count(), 0, "offline prompt leaves no turn");
-        assert!(c.selection_for(DEV).is_none(), "offline prompt persists nothing");
+        assert!(
+            c.selection_for(DEV).is_none(),
+            "offline prompt persists nothing"
+        );
         // Back online: same id succeeds exactly once.
         assert!(c.set_device_online(DEV, true));
-        let r = c.submit(phone_env("off-1", "queued invisibly?")).expect("works");
+        let r = c
+            .submit(phone_env("off-1", "queued invisibly?"))
+            .expect("works");
         assert!(!r.deduped);
         assert_eq!(c.turn_count(), 1);
     }

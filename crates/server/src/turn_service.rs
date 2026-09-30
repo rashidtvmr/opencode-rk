@@ -196,12 +196,25 @@ pub struct TurnEvent {
 /// Errors from turn transitions.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TurnError {
-    WrongTurn { active: TurnId, requested: TurnId },
-    InvalidTransition { from: TurnPhase, operation: &'static str },
-    TextTooLarge { bytes: usize, max: usize },
+    WrongTurn {
+        active: TurnId,
+        requested: TurnId,
+    },
+    InvalidTransition {
+        from: TurnPhase,
+        operation: &'static str,
+    },
+    TextTooLarge {
+        bytes: usize,
+        max: usize,
+    },
     EventLogFull,
-    AmbiguousRetryDenied { failure: FailureKind },
-    AlreadyTerminal { phase: TurnPhase },
+    AmbiguousRetryDenied {
+        failure: FailureKind,
+    },
+    AlreadyTerminal {
+        phase: TurnPhase,
+    },
 }
 
 impl fmt::Display for TurnError {

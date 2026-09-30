@@ -162,9 +162,7 @@ impl UltraCodegen {
         // Denylist check
         if let Some(pattern) = Self::check_denylist(source) {
             let p = pattern.to_owned();
-            self.state = UltraState::Denied(DenyReason::ForbiddenApiHit {
-                pattern: p.clone(),
-            });
+            self.state = UltraState::Denied(DenyReason::ForbiddenApiHit { pattern: p.clone() });
             return Err(CodegenError::ForbiddenApi { pattern: p });
         }
 
@@ -207,10 +205,7 @@ impl UltraCodegen {
         self.attempt_count += 1;
         if self.attempt_count >= self.config.max_attempts {
             self.state = UltraState::Fallback {
-                reason: format!(
-                    "compile failed {} times: {}",
-                    self.attempt_count, error
-                ),
+                reason: format!("compile failed {} times: {}", self.attempt_count, error),
             };
         } else {
             self.state = UltraState::CompileFailed {

@@ -104,14 +104,23 @@ fn p01_startup_once_frame_contract() {
 fn p02_compose_keymap_flag_and_env() {
     let (code, stdout, _) = run(bin(), &["tui", "--once", "--submit-keymap", "ctrl-j"], None);
     assert_eq!(code, 0);
-    assert!(stdout.contains("Ctrl+J: submit"), "ctrl-j advertises: {stdout}");
-    assert!(!stdout.contains("Enter: submit"), "default replaced: {stdout}");
+    assert!(
+        stdout.contains("Ctrl+J: submit"),
+        "ctrl-j advertises: {stdout}"
+    );
+    assert!(
+        !stdout.contains("Enter: submit"),
+        "default replaced: {stdout}"
+    );
 
     let mut env_cmd = bin();
     env_cmd.env("OPENCODE_RK_TUI_SUBMIT_KEY", "ctrl-j");
     let (code_env, stdout_env, _) = run(env_cmd, &["tui", "--once"], None);
     assert_eq!(code_env, 0);
-    assert!(stdout_env.contains("Ctrl+J: submit"), "env override: {stdout_env}");
+    assert!(
+        stdout_env.contains("Ctrl+J: submit"),
+        "env override: {stdout_env}"
+    );
 }
 
 // p03 tools: status bar names model-switcher / context-detail actions.
@@ -120,8 +129,14 @@ fn p03_tools_status_actions_named() {
     let (code, stdout, stderr) = run(bin(), &["tui", "--once"], None);
     assert_eq!(code, 0, "stderr: {stderr}");
     assert!(stdout.contains("model switcher"), "model action: {stdout}");
-    assert!(stdout.contains("context detail"), "context action: {stdout}");
-    assert!(stdout.contains("?: keybindings help"), "help hint: {stdout}");
+    assert!(
+        stdout.contains("context detail"),
+        "context action: {stdout}"
+    );
+    assert!(
+        stdout.contains("?: keybindings help"),
+        "help hint: {stdout}"
+    );
 }
 
 // p04 tabs proxy: scriptable session-stream path runs headless and exits clean.
@@ -182,14 +197,22 @@ fn p06_resize_width_independent_headless() {
 #[test]
 fn p07_unicode_memory_renders_with_fallback_hints() {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("opencode-rk-parity-uni-{}-{id}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "opencode-rk-parity-uni-{}-{id}",
+        std::process::id()
+    ));
     fs::create_dir_all(&dir).unwrap();
     let name = "héllo-日本語.md";
     fs::write(dir.join(name), "x".repeat(16)).unwrap();
 
     let (code, stdout, stderr) = run(
         bin(),
-        &["tui", "--once", "--memory", dir.join(name).to_str().unwrap()],
+        &[
+            "tui",
+            "--once",
+            "--memory",
+            dir.join(name).to_str().unwrap(),
+        ],
         None,
     );
     assert_eq!(code, 0, "stderr: {stderr}");
@@ -208,7 +231,10 @@ fn p08_exit_restore_bounded_and_shell_usable() {
     let start = Instant::now();
     let (code, stdout, stderr) = run(bin(), &["tui", "--once"], None);
     assert_eq!(code, 0, "stderr: {stderr}");
-    assert!(start.elapsed() < Duration::from_secs(30), "exit must stay bounded");
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "exit must stay bounded"
+    );
     assert!(!stdout.trim().is_empty(), "frame emitted before exit");
     // Shell usable: an immediate follow-up run works in a fresh home.
     let (code2, _, stderr2) = run(bin(), &["tui", "--once"], None);
@@ -219,10 +245,14 @@ fn p08_exit_restore_bounded_and_shell_usable() {
 #[test]
 fn p09_memory_pane_bounded_at_64() {
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let dir = std::env::temp_dir().join(format!("opencode-rk-parity-mem-{}-{id}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "opencode-rk-parity-mem-{}-{id}",
+        std::process::id()
+    ));
     fs::create_dir_all(&dir).unwrap();
     let cmd = bin();
-    let mut args: Vec<String> = vec!["tui".into(), "--once".into()];    for i in 0..70 {
+    let mut args: Vec<String> = vec!["tui".into(), "--once".into()];
+    for i in 0..70 {
         let p = dir.join(format!("f{i:03}.md"));
         fs::write(&p, "z").unwrap();
         args.push("--memory".into());
@@ -253,7 +283,10 @@ fn p11_dead_origin_once_fails_closed_bounded() {
     let port = free_port();
     let origin = format!("http://127.0.0.1:{port}");
     let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-    let home = std::env::temp_dir().join(format!("opencode-rk-parity-dead-{}-{id}", std::process::id()));
+    let home = std::env::temp_dir().join(format!(
+        "opencode-rk-parity-dead-{}-{id}",
+        std::process::id()
+    ));
     fs::create_dir_all(&home).unwrap();
     write_descriptor(&home, &origin);
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
@@ -276,7 +309,10 @@ fn p11_dead_origin_once_fails_closed_bounded() {
                     || stderr.contains("offline"))),
         "typed connection/auth error: {stderr}"
     );
-    assert!(!stdout.contains("(live)"), "no fabricated live data: {stdout}");
+    assert!(
+        !stdout.contains("(live)"),
+        "no fabricated live data: {stdout}"
+    );
     let _ = fs::remove_dir_all(&home);
 }
 
@@ -286,7 +322,10 @@ fn p11_dead_origin_once_fails_closed_bounded() {
 fn p12_native_once_renders_or_typed_refusal() {
     let start = Instant::now();
     let (code, stdout, stderr) = run(bin(), &["--native", "--once"], None);
-    assert!(start.elapsed() < Duration::from_secs(30), "must stay bounded");
+    assert!(
+        start.elapsed() < Duration::from_secs(30),
+        "must stay bounded"
+    );
     if code == 0 {
         assert!(
             stdout.contains("OpenCode RK") || !stdout.trim().is_empty(),
@@ -313,6 +352,9 @@ fn p13_repeated_frames_exit_cleanly() {
     for i in 0..3 {
         let (code, stdout, stderr) = run(bin(), &["tui", "--once"], None);
         assert_eq!(code, 0, "run {i} must exit 0 (stderr: {stderr})");
-        assert!(stdout.contains("OpenCode RK TUI"), "run {i} frame: {stdout}");
+        assert!(
+            stdout.contains("OpenCode RK TUI"),
+            "run {i} frame: {stdout}"
+        );
     }
 }

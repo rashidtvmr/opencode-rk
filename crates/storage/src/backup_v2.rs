@@ -108,8 +108,12 @@ impl BackupV2 {
             return Err(BackupError::Corrupt);
         }
         let u64_at = |off: usize| {
-            u64::from_be_bytes(bytes[off..off + 8].try_into().map_err(|_| BackupError::Corrupt)?)
-                .pipe_ok()
+            u64::from_be_bytes(
+                bytes[off..off + 8]
+                    .try_into()
+                    .map_err(|_| BackupError::Corrupt)?,
+            )
+            .pipe_ok()
         };
         let manifest = BackupManifest {
             schema_version: version,
@@ -175,9 +179,7 @@ impl<'a> VerifiedRestore<'a> {
 }
 
 fn check_quotas(sessions: u64, messages: u64, blobs: u64, bytes: u64) -> Result<(), BackupError> {
-    let items = sessions
-        .saturating_add(messages)
-        .saturating_add(blobs);
+    let items = sessions.saturating_add(messages).saturating_add(blobs);
     if items > MAX_BACKUP_ITEMS || bytes > MAX_BACKUP_BYTES {
         return Err(BackupError::QuotaExceeded);
     }
