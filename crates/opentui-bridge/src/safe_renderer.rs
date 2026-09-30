@@ -274,7 +274,7 @@ impl Renderer {
             .ok_or(BridgeError::TerminalFailed)?;
         let fd = input
             .fd
-            .try_clone_to_owned()
+            .try_clone()
             .map_err(|_| BridgeError::TerminalFailed)?;
         let mut descriptors = [PollFd::new(
             &fd,
