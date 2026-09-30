@@ -48,9 +48,29 @@ pub async fn api_key(provider: &str, ambient_name: &str) -> Option<String> {
 
 /// Persist one API credential in the upstream auth.json shape, preserving all
 /// other valid entries. Disk work is never performed on the async executor.
-pub async fn save_api_key(provider: String, key: String) -> Result<(), String> {
-    if provider.is_empty() || key.trim().is_empty() || key.len() > MAX_API_KEY_BYTES {
+pub async fn save_api_key(
+    provider: String,
+    key: String,
+    metadata: Option<std::collections::BTreeMap<String, String>>,
+) -> Result<(), String> {
+    let normalized = provider.trim_end_matches('/').to_owned();
+    if normalized.is_empty()
+        || provider.len() > 128
+        || provider.chars().any(char::is_control)
+        || key.trim().is_empty()
+        || key.len() > MAX_API_KEY_BYTES
+    {
         return Err("invalid provider credential".to_owned());
+    }
+    if metadata.as_ref().is_some_and(|items| {
+        items.len() > 128
+            || items
+                .iter()
+                .map(|(k, v)| k.len().saturating_add(v.len()))
+                .sum::<usize>()
+                > MAX_API_KEY_BYTES
+    }) {
+        return Err("credential metadata exceeds size limit".to_owned());
     }
     let path = auth_path().ok_or_else(|| "unable to resolve auth path".to_owned())?;
     static WRITE_GATE: OnceLock<Arc<Semaphore>> = OnceLock::new();
@@ -61,19 +81,42 @@ pub async fn save_api_key(provider: String, key: String) -> Result<(), String> {
         .map_err(|_| "provider auth write busy".to_owned())?;
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
-        let mut root = match read_auth_document(&path) {
+        let inline = env::var("OPENCODE_AUTH_CONTENT")
+            .ok()
+            .filter(|raw| !raw.is_empty() && raw.len() <= MAX_AUTH_BYTES)
+            .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+        let mut root = match inline
+            .map(|value| Ok(Some(value)))
+            .unwrap_or_else(|| read_auth_document(&path))
+        {
             Ok(Some(value)) => value,
             Ok(None) => Value::Object(serde_json::Map::new()),
             Err(error) => return Err(error),
         };
+        if !root.is_object() {
+            root = Value::Object(serde_json::Map::new());
+        }
         let object = root
             .as_object_mut()
-            .ok_or_else(|| "auth root is not an object".to_owned())?;
-        if object.len() >= MAX_AUTH_ENTRIES && !object.contains_key(&provider) {
+            .ok_or_else(|| "invalid auth document".to_owned())?;
+        if object.len() > MAX_AUTH_ENTRIES {
             return Err("auth entry limit exceeded".to_owned());
         }
-        object.insert(provider, serde_json::json!({"type":"api","key":key}));
-        let bytes = serde_json::to_vec_pretty(&root).map_err(|e| e.to_string())?;
+        object.retain(|_, value| valid_auth_entry(value));
+        if normalized != provider {
+            object.remove(&provider);
+        }
+        object.remove(&format!("{normalized}/"));
+        if object.len() >= MAX_AUTH_ENTRIES && !object.contains_key(&normalized) {
+            return Err("auth entry limit exceeded".to_owned());
+        }
+        let mut entry = serde_json::json!({"type":"api","key":key});
+        if let Some(metadata) = metadata {
+            entry["metadata"] = serde_json::json!(metadata);
+        }
+        object.insert(normalized, entry);
+        let bytes = serde_json::to_vec_pretty(&root)
+            .map_err(|_| "unable to encode auth file".to_owned())?;
         if bytes.len() > MAX_AUTH_BYTES {
             return Err("auth file exceeds size limit".to_owned());
         }
@@ -81,24 +124,30 @@ pub async fn save_api_key(provider: String, key: String) -> Result<(), String> {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
         let tmp = path.with_extension(format!("json.{}.tmp", unique_suffix()));
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .write(true)
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut file = options
             .open(&tmp)
-            .map_err(|e| e.to_string())?;
+            .map_err(|_| "unable to create auth file".to_owned())?;
+        let cleanup = TemporaryAuthFile(tmp.clone());
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             file.set_permissions(fs::Permissions::from_mode(0o600))
-                .map_err(|e| e.to_string())?;
+                .map_err(|_| "unable to protect auth file".to_owned())?;
         }
-        file.write_all(&bytes).map_err(|e| e.to_string())?;
-        file.sync_all().map_err(|e| e.to_string())?;
-        let result = fs::rename(&tmp, &path).map_err(|e| e.to_string());
-        if result.is_err() {
-            let _ = fs::remove_file(&tmp);
-        }
-        result
+        file.write_all(&bytes)
+            .map_err(|_| "unable to write auth file".to_owned())?;
+        file.sync_all()
+            .map_err(|_| "unable to sync auth file".to_owned())?;
+        fs::rename(&tmp, &path).map_err(|_| "unable to commit auth file".to_owned())?;
+        drop(cleanup);
+        Ok(())
     })
     .await
     .map_err(|e| e.to_string())?
@@ -146,10 +195,15 @@ fn read_bounded_file(path: &PathBuf) -> Option<Vec<u8>> {
 }
 
 fn read_auth_document(path: &PathBuf) -> Result<Option<Value>, String> {
-    if !path.exists() {
-        return Ok(None);
+    match fs::symlink_metadata(path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Ok(metadata) if metadata.is_file() && !metadata.file_type().is_symlink() => {}
+        _ => return Err("unable to read regular auth file".to_owned()),
     }
     let bytes = read_bounded_file(path).ok_or_else(|| "unable to read auth file".to_owned())?;
+    if bytes.len() > MAX_AUTH_BYTES {
+        return Err("auth file exceeds size limit".to_owned());
+    }
     let value: Value =
         serde_json::from_slice(&bytes).map_err(|_| "invalid auth file".to_owned())?;
     let object = value
@@ -159,6 +213,40 @@ fn read_auth_document(path: &PathBuf) -> Result<Option<Value>, String> {
         return Err("auth entry limit exceeded".to_owned());
     }
     Ok(Some(value))
+}
+
+struct TemporaryAuthFile(PathBuf);
+impl Drop for TemporaryAuthFile {
+    fn drop(&mut self) {
+        if let Err(error) = fs::remove_file(&self.0) {
+            if error.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("provider auth temporary-file cleanup failed: {error}");
+            }
+        }
+    }
+}
+
+fn valid_auth_entry(value: &Value) -> bool {
+    let strings = |fields: &[&str]| fields.iter().all(|field| value[*field].is_string());
+    match value["type"].as_str() {
+        Some("api") => {
+            strings(&["key"])
+                && value.get("metadata").is_none_or(|metadata| {
+                    metadata
+                        .as_object()
+                        .is_some_and(|object| object.values().all(Value::is_string))
+                })
+        }
+        Some("oauth") => {
+            strings(&["refresh", "access"])
+                && value["expires"].as_u64().is_some()
+                && ["accountId", "enterpriseUrl"]
+                    .iter()
+                    .all(|field| value.get(*field).is_none_or(Value::is_string))
+        }
+        Some("wellknown") => strings(&["key", "token"]),
+        _ => false,
+    }
 }
 fn parse(bytes: &[u8], provider: &str) -> Option<String> {
     if bytes.len() > MAX_AUTH_BYTES {

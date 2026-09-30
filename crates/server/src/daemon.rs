@@ -209,8 +209,7 @@ pub fn read_backend_descriptor(data_dir: impl AsRef<Path>) -> Result<Option<Back
 /// True only for a 64-char hex bearer (mirrors
 /// `daemon_auth::from_published`: empty/short/non-hex never authenticates).
 fn is_wellformed_token(token: &str) -> bool {
-    token.len() == crate::daemon_auth::TOKEN_HEX_LEN
-        && token.bytes().all(|b| b.is_ascii_hexdigit())
+    token.len() == crate::daemon_auth::TOKEN_HEX_LEN && token.bytes().all(|b| b.is_ascii_hexdigit())
 }
 
 /// Byte budget for `backend.json`. Anything larger is forged/broken and is
@@ -318,14 +317,32 @@ pub fn publish_backend_descriptor_with_auth(
         .with_extension(format!("json.{}.tmp", std::process::id()));
     // Create-before-write with owner-only permissions; relying on umask here
     // would publish the bearer under permissive umasks (notably 0022).
-    let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
-    #[cfg(unix)] {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options.open(&temporary)?;
+    #[cfg(unix)]
+    {
         use std::os::unix::fs::PermissionsExt;
         file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
     }
-    file.write_all(&bytes)?;
-    file.sync_all()?;
-    std::fs::rename(&temporary, &paths.descriptor)?;
+    let result = (|| -> std::io::Result<()> {
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, &paths.descriptor)
+    })();
+    if let Err(error) = result {
+        if let Err(cleanup) = std::fs::remove_file(&temporary) {
+            if cleanup.kind() != std::io::ErrorKind::NotFound {
+                eprintln!("daemon descriptor temporary-file cleanup failed: {cleanup}");
+            }
+        }
+        return Err(error.into());
+    }
     Ok(descriptor)
 }
 pub struct ClientConnection {

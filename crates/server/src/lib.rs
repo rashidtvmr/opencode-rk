@@ -126,7 +126,11 @@ pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) 
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
         .route("/api/models/{provider}/{model}", get(get_model))
-        .route("/auth/{provider}", axum::routing::put(save_provider_auth))
+        .route(
+            "/auth/{provider}",
+            axum::routing::put(save_provider_auth)
+                .layer(axum::extract::DefaultBodyLimit::max(32 * 1024)),
+        )
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
         .route("/api/sessions/{id}/archive", post(archive_session))
@@ -181,22 +185,29 @@ pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) 
     }
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Deserialize)]
 struct ProviderAuthBody {
+    #[serde(rename = "type")]
+    kind: String,
     key: String,
+    metadata: Option<std::collections::BTreeMap<String, String>>,
 }
 
 async fn save_provider_auth(
     axum::extract::Path(provider): axum::extract::Path<String>,
     Json(body): Json<ProviderAuthBody>,
 ) -> Result<Json<Value>, ApiFailure> {
-    if provider.len() > 128 || body.key.len() > 16 * 1024 || body.key.trim().is_empty() {
+    if body.kind != "api"
+        || provider.len() > 128
+        || body.key.len() > 16 * 1024
+        || body.key.trim().is_empty()
+    {
         return Err(ApiFailure::bad_request("invalid provider credential"));
     }
-    opencode_rk_providers::persisted_auth::save_api_key(provider, body.key)
+    opencode_rk_providers::persisted_auth::save_api_key(provider, body.key, body.metadata)
         .await
         .map_err(ApiFailure::internal)?;
-    Ok(Json(json!({"success": true})))
+    Ok(Json(json!(true)))
 }
 async fn health() -> Json<Value> {
     Json(json!({"schema_version":WIRE_SCHEMA_VERSION,"status":"ok","runtime":"native-rust"}))
