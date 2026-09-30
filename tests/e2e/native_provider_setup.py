@@ -37,17 +37,28 @@ class TerminalScreen:
 
     def _csi(self, raw):
         final = chr(raw[-1]); body = raw[:-1]
-        if body[:1] in b"?><=" : return
+        if body and body[0] in b"?><=": return
         nums = body.decode("ascii", "ignore")
         args = [int(x) if x else 1 for x in nums.split(";")] if nums else [1]
+        if final not in "HfGABCDJKsu": return
         if final in "Hf": self.row = max(0, min(self.rows - 1, (args[0] if len(args)>0 else 1)-1)); self.col = max(0, min(self.cols - 1, (args[1] if len(args)>1 else 1)-1))
         elif final == "G": self.col = max(0, min(self.cols - 1, args[0]-1))
         elif final == "A": self.row = max(0, self.row-args[0])
         elif final == "B": self.row = min(self.rows-1, self.row+args[0])
         elif final == "C": self.col = min(self.cols-1, self.col+args[0])
         elif final == "D": self.col = max(0, self.col-args[0])
-        elif final == "J" and args[0] in (0, 2): self.cells = [[" "]*self.cols for _ in range(self.rows)]
-        elif final == "K": self.cells[self.row][self.col if args[0] == 0 else 0:self.cols if args[0] == 0 else (self.col+1 if args[0] == 1 else self.cols)] = [" "] * (self.cols-self.col if args[0] == 0 else (self.col+1 if args[0] == 1 else self.cols))
+        elif final == "J":
+            if args[0] == 0:
+                self.cells[self.row][self.col:] = [" "] * (self.cols - self.col)
+                for row in range(self.row + 1, self.rows): self.cells[row] = [" "] * self.cols
+            elif args[0] == 1:
+                for row in range(self.row): self.cells[row] = [" "] * self.cols
+                self.cells[self.row][:self.col + 1] = [" "] * (self.col + 1)
+            elif args[0] == 2: self.cells = [[" "]*self.cols for _ in range(self.rows)]
+        elif final == "K":
+            if args[0] == 0: self.cells[self.row][self.col:] = [" "] * (self.cols - self.col)
+            elif args[0] == 1: self.cells[self.row][:self.col + 1] = [" "] * (self.col + 1)
+            elif args[0] == 2: self.cells[self.row] = [" "] * self.cols
         elif final == "s" and not body[:1] in b"?><=": self.saved = (self.row, self.col)
         elif final == "u" and not body[:1] in b"?><=": self.row, self.col = self.saved
 
@@ -80,6 +91,7 @@ class TerminalScreen:
     def text(self): return "\n".join("".join(row).rstrip() for row in self.cells)
     def contains(self, marker): return marker.casefold() in self.text().casefold()
     def has_model_status(self): return re.search(r"(?m)^model:\s*openai/" + re.escape(MODEL) + r"\b(?:\s*\(ctrl-p\))?\s*$", self.text()) is not None
+    def has_api_prompt(self): return re.search(r"(?m)^API key \(OpenAI\)\s*$", self.text()) is not None
     def has_assistant(self, text): return text.casefold() in self.text().casefold()
     def picker_closed(self): return not self.contains("Select model")
 
@@ -125,7 +137,10 @@ class State:
         if users != expected_users or assistants != expected_assistants: raise RuntimeError("settled history is not durable")
         self.requests.append(value)
         text = "G2 first response" if len(self.requests) == 1 else "G2 resumed response"
-        if value.get("stream") is False:
+        stream = value.get("stream", False)
+        if not isinstance(stream, bool):
+            raise RuntimeError("stream must be boolean when present")
+        if not stream:
             out = json.dumps({"id": "g2-fixture", "object": "response", "status": "completed",
                               "output": [{"type": "message", "role": "assistant",
                                           "content": [{"type": "output_text", "text": text}]}]}).encode()
@@ -169,7 +184,6 @@ def free_loopback_port():
     return port
 
 def read_until(fd, deadline, buf, needle, start, screen=None, predicate=None):
-    if predicate is not None and predicate(): return
     if predicate is None and screen is None and needle.lower() in bytes(buf[start:]).lower(): return
     while time.monotonic() < deadline and len(buf) < MAX_PTY:
         ready, _, _ = select.select([fd], [], [], min(.1, max(0, deadline-time.monotonic())))
@@ -180,7 +194,7 @@ def read_until(fd, deadline, buf, needle, start, screen=None, predicate=None):
         buf.extend(chunk)
         if screen is not None: screen.feed(chunk)
         if predicate is not None:
-            if predicate(): return
+            if len(buf) > start and predicate(): return
         elif screen is not None:
             if screen.contains(needle.decode("utf-8", "replace")) and len(buf) > start: return
         elif needle.lower() in bytes(buf[start:]).lower(): return
@@ -243,14 +257,14 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
         descriptor_records.append({"pid": descriptor_value["_validated_pid"], "owner_pgid": descriptor_value["_owner_pgid"], "origin": descriptor_value["http_origin"], "port": daemon_port})
         descriptor_records[-1]["phase"] = "initial_frame"
         read_until(master, time.monotonic()+20, buf, b"OpenCode", 0, screen)
-        def cmd(text, marker):
+        def cmd(text, marker, predicate=None):
             descriptor_records[-1]["phase"] = "await_" + marker.decode("ascii")
-            start = len(buf); previous = screen.text(); os.write(master, text.encode()+b"\r"); read_until(master, time.monotonic()+20, buf, marker, start, screen)
+            start = len(buf); previous = screen.text(); os.write(master, text.encode()+b"\r"); read_until(master, time.monotonic()+20, buf, marker, start, screen, predicate)
             if screen.text() == previous: raise AssertionError("command produced no visible terminal update")
             return bytes(buf[start:])
         if first:
             cmd("/connect", b"Connect a provider")
-            cmd("openai", b"API key")
+            cmd("openai", b"API key", lambda: screen.has_api_prompt())
             cmd(KEY, MODEL.encode())
             if KEY.encode() in bytes(buf): raise AssertionError("fixture API key echoed anywhere in PTY")
             if not auth_path.is_file() or auth_path.stat().st_mode & 0o777 != 0o600:
@@ -337,8 +351,17 @@ def self_check():
     except RuntimeError: pass
     try: State().body({"Authorization":"Bearer wrong"}, b'{"model":"'+MODEL.encode()+b'","input":[]}'); raise AssertionError("wrong key accepted")
     except RuntimeError: pass
+    out, content_type = State().body(good, json.dumps({"model": MODEL, "input": [{"role": "user", "content": PROMPTS[0]}]}).encode())
+    assert content_type == "application/json" and json.loads(out)["status"] == "completed"
     out, content_type = State().body(good, json.dumps({"model": MODEL, "input": [{"role": "user", "content": PROMPTS[0]}], "stream": False}).encode())
     assert content_type == "application/json" and json.loads(out)["status"] == "completed"
+    out, content_type = State().body(good, json.dumps({"model": MODEL, "input": [{"role": "user", "content": PROMPTS[0]}], "stream": True}).encode())
+    assert content_type == "text/event-stream" and b"response.completed" in out
+    try:
+        State().body(good, json.dumps({"model": MODEL, "input": [], "stream": "false"}).encode())
+        raise AssertionError("invalid stream type accepted")
+    except RuntimeError:
+        pass
     evidence = sanitize(KEY.encode() + b" visible"); assert KEY.encode() not in evidence
     print("self-check: artifacts, catalog, fresh markers, auth, model, count, history, SSE, and redaction passed")
 

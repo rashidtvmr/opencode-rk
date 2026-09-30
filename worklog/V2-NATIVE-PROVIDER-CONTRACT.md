@@ -93,6 +93,13 @@ capture shape before any product run. It handles fragmented UTF-8, private VT
 queries, split-key visibility, stale picker text, and current status projection
 without changing the provider/request/history contract.
 
+Protocol maintenance: pinned native `create_with_items` omits `stream` for its
+normal settled Responses request (`packages/core/src/session/llm.ts:189-203`,
+request payload evidence). The fixture now treats an absent or explicit
+`stream: false` as valid non-stream JSON, `stream: true` as SSE, and rejects
+non-boolean values. This corrects the fixture codec without relaxing auth,
+model, request-count, prompt-history, or settled-response assertions.
+
 ## Executable RED and freeze
 
 The controller independently ran the actual installed Mac native release from
