@@ -3,6 +3,7 @@
 
 use reqwest::redirect::Policy;
 use serde_json::Value;
+use std::net::ToSocketAddrs;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -39,8 +40,18 @@ impl TurnWorker {
         let authority = origin
             .strip_prefix("http://")
             .ok_or("native turns require http loopback")?;
-        if authority.contains('/') || authority.contains('@') {
+        if authority.contains('/')
+            || authority.contains('@')
+            || authority.contains('?')
+            || authority.contains('#')
+        {
             return Err("invalid daemon origin".into());
+        }
+        let addresses = authority
+            .to_socket_addrs()
+            .map_err(|_| "invalid daemon origin")?;
+        if !addresses.clone().all(|address| address.ip().is_loopback()) {
+            return Err("native turns require a loopback daemon origin".into());
         }
         let url = format!("http://{authority}/api/sessions/{session}/turns/stream");
         let body = serde_json::json!({"text": text, "model": model, "reasoning_effort": "high"});
@@ -68,6 +79,7 @@ impl TurnWorker {
                 let mut carry = Vec::new();
                 let mut total = 0;
                 let mut retained = 0;
+                let mut terminal = false;
                 while let Some(chunk) = response.chunk().await.map_err(|e| e.to_string())? {
                     total += chunk.len();
                     if total > MAX_TOTAL {
@@ -85,12 +97,16 @@ impl TurnWorker {
                         let value: Value = serde_json::from_slice(&line[..line.len() - 1])
                             .map_err(|e| format!("invalid turn event: {e}"))?;
                         if let Some(event) = decode(value, &mut retained)? {
+                            terminal = matches!(event, Event::Assistant(_) | Event::Error(_));
                             tx.send(event).await.map_err(|_| "UI closed".to_string())?;
                         }
                     }
                 }
                 if !carry.is_empty() {
                     return Err("turn stream ended with incomplete event".into());
+                }
+                if !terminal {
+                    return Err("turn stream ended without a terminal assistant event".into());
                 }
                 Ok::<(), String>(())
             }

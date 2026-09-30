@@ -20,6 +20,9 @@ use crate::daemon_client;
 #[path = "native_setup.rs"]
 mod native_setup;
 #[cfg(feature = "native")]
+#[path = "native_transcript.rs"]
+mod native_transcript;
+#[cfg(feature = "native")]
 #[path = "native_turn.rs"]
 mod native_turn;
 use clap::{Args, ValueEnum};
@@ -537,26 +540,8 @@ fn native_loop(
             append_transcript(&mut transcript, line.clone());
         }
     }
-    let input = std::io::stdin();
-    let (input_tx, input_rx) = std::sync::mpsc::sync_channel::<Option<u8>>(64);
-    let input_task = tokio::runtime::Handle::current().spawn_blocking(move || {
-        let mut input = input;
-        let mut byte = [0u8; 1];
-        loop {
-            match input.read(&mut byte) {
-                Ok(0) => {
-                    let _ = input_tx.send(None);
-                    break;
-                }
-                Ok(_) if input_tx.send(Some(byte[0])).is_err() => break,
-                Err(_) => {
-                    let _ = input_tx.send(None);
-                    break;
-                }
-                _ => {}
-            }
-        }
-    });
+    let mut input = std::io::stdin();
+    let mut byte = [0u8; 1];
     loop {
         let mut lines = vec![
             "OpenCode RK (native)".to_string(),
@@ -576,18 +561,34 @@ fn native_loop(
                         replace_partial(&mut transcript, &partial);
                     }
                     native_turn::Event::ToolCall(name) => {
-                        append_transcript(&mut transcript, format!("tool: {name}"));
+                        append_transcript(
+                            &mut transcript,
+                            format!("tool: {}", crate::native_transcript::strip_ansi(&name)),
+                        );
                     }
                     native_turn::Event::ToolOutput(name, output) => {
-                        append_transcript(&mut transcript, format!("tool {name}: {output}"));
+                        append_transcript(
+                            &mut transcript,
+                            format!(
+                                "tool {}: {}",
+                                crate::native_transcript::strip_ansi(&name),
+                                crate::native_transcript::strip_ansi(&output)
+                            ),
+                        );
                     }
                     native_turn::Event::Assistant(text) => {
                         partial.clear();
-                        append_transcript(&mut transcript, format!("assistant: {text}"));
+                        append_transcript(
+                            &mut transcript,
+                            format!("assistant: {}", crate::native_transcript::strip_ansi(&text)),
+                        );
                     }
                     native_turn::Event::Error(error) => {
                         partial.clear();
-                        append_transcript(&mut transcript, format!("error: {error}"));
+                        append_transcript(
+                            &mut transcript,
+                            format!("error: {}", crate::native_transcript::strip_ansi(&error)),
+                        );
                     }
                 }
             }
@@ -644,12 +645,18 @@ fn native_loop(
         lines.extend(visible.into_iter().rev().cloned());
         lines.extend(panel);
         native_paint(&mut renderer, &lines)?;
-        let byte = match input_rx.recv_timeout(Duration::from_millis(20)) {
-            Ok(Some(byte)) => byte,
-            Ok(None) => break,
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
-        };
+        let ready = renderer.input_ready(if worker.is_some() {
+            Some(Duration::from_millis(20))
+        } else {
+            None
+        })?;
+        if !ready {
+            continue;
+        }
+        if input.read(&mut byte)? == 0 {
+            break;
+        }
+        let byte = byte[0];
         match byte {
             3 | 4 => break,
             27 => {
@@ -801,7 +808,6 @@ fn native_loop(
     let _ = renderer.disable_kitty_keyboard();
     let _ = renderer.restore_terminal_modes();
     renderer.close();
-    input_task.abort();
     Ok(())
 }
 
@@ -825,7 +831,13 @@ fn replace_partial(transcript: &mut Vec<String>, text: &str) {
     {
         let _ = transcript.pop();
     }
-    append_transcript(transcript, format!("assistant: {text}"));
+    append_transcript(
+        transcript,
+        format!(
+            "assistant (streaming): {}",
+            crate::native_transcript::strip_ansi(text)
+        ),
+    );
 }
 
 #[cfg(feature = "native")]

@@ -22,7 +22,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicU32, AtomicU8};
 #[cfg(all(feature = "native", unix))]
 use std::sync::Mutex;
+#[cfg(all(feature = "native", unix))]
+use std::time::Duration;
 
+#[cfg(all(feature = "native", unix))]
+use rustix::event::{poll, PollFd, PollFlags, Timespec};
 #[cfg(all(feature = "native", unix))]
 use rustix::termios::{tcgetattr, tcsetattr, OptionalActions, Termios};
 
@@ -257,6 +261,43 @@ extern "C" {
 }
 
 impl Renderer {
+    /// Wait for native terminal input without taking the lifecycle mutex.
+    #[cfg(all(feature = "native", unix))]
+    pub fn input_ready(&self, timeout: Option<Duration>) -> Result<bool, BridgeError> {
+        let handle = self.live()?;
+        let slot = TERMINAL_INPUT
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let input = slot
+            .as_ref()
+            .filter(|input| input.handle == handle)
+            .ok_or(BridgeError::TerminalFailed)?;
+        let fd = std::io::stdin();
+        let mut descriptors = [PollFd::new(
+            &fd,
+            PollFlags::IN | PollFlags::HUP | PollFlags::ERR,
+        )];
+        drop(slot);
+        let deadline = timeout.map(|duration| Timespec {
+            tv_sec: duration.as_secs() as i64,
+            tv_nsec: duration.subsec_nanos() as _,
+        });
+        loop {
+            match poll(&mut descriptors, deadline.as_ref()) {
+                Ok(0) => return Ok(false),
+                Ok(_) => {
+                    let events = descriptors[0].revents();
+                    if events.contains(PollFlags::NVAL) {
+                        return Err(BridgeError::TerminalFailed);
+                    }
+                    return Ok(events.intersects(PollFlags::IN | PollFlags::HUP | PollFlags::ERR));
+                }
+                Err(error) if error == rustix::io::Errno::INTR => continue,
+                Err(_) => return Err(BridgeError::TerminalFailed),
+            }
+        }
+    }
+
     fn create_inner(cols: u32, rows: u32, dest: u8) -> Result<Self, BridgeError> {
         if cols == 0 || rows == 0 {
             return Err(BridgeError::ZeroSize);
