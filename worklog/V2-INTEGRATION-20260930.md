@@ -1,8 +1,9 @@
 # V2 integration evidence — 2026-09-30
 
-## Integrated revision
+## Integrated revisions
 
 `0759e01464a7a0dbed614163a14b6f60673e2412`, pushed to `origin/main-v2`.
+Native lifecycle package: `425d617a3576c791e7027b2cc332a75e7441fd4e`.
 Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-v2`.
 
 ## V2-SALVAGE-PRESERVATION
@@ -63,6 +64,46 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
 - State: **ACCEPTED for the mechanical build package on `0759e01`**. The real
   browser tool/second-turn/reload journey G6 has not been run.
 
+## V2-NATIVE-LIFECYCLE — exact integrated renderer acceptance
+
+- Raw-input repair base: `3692743b0c2fd717efcabd7b491a4e48b7d46c1e`;
+  original selective-salvage base: `fc2d201`.
+- Candidate: `6959f88d1e94dc489a545e51390d00de56c7257b`, pushed on
+  `v2/native-lifecycle-salvage`.
+- Integration: known deltas `2391c50`, `3692743`, `6959f88` cherry-picked as
+  `fb0a584`, `3197598`, `425d617`. All six package paths were independently
+  compared byte-for-byte between candidate and exact integrated revision:
+  `crates/opentui-bridge/src/safe_renderer.rs`,
+  `crates/opentui-bridge/Cargo.toml`, `Cargo.lock`,
+  `crates/opentui-bridge/tests/native_terminal_lifecycle.rs`,
+  `crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib`,
+  `worklog/V2-NATIVE-LIFECYCLE.md`.
+- Authority/evidence: pinned OpenTUI `c01292fd0837bafd07ce458c74416b2b375a41ab`,
+  `packages/core/src/renderer.ts` host raw-input lifecycle at 3592–3593,
+  4295–4296, 4303–4304, 4470–4472; current G5 real-PTY contract.
+- Final independently repaired PTY freeze SHA-256:
+  `3799fb3444d0ac20f3b20c40404543c93bf85790aaa8060f053a8b678c011940`.
+- Native dylib SHA-256:
+  `798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91`.
+- Exact final fixture produces four clean raw-input RED failures on preserved
+  baseline `3692743`. Xkiro GPT-6 Luna independently reviewed and ran the committed
+  candidate: all focused gates passed, tracked tree remained clean.
+- Main reran these commands **serially on exact integrated `425d617`**:
+
+  ```text
+  rtk /usr/bin/arch -arm64 env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 TUI015_NATIVE_LIB_DIR=/Users/mymac/Projects/opencode-rk-main-v2/crates/opentui-bridge/native/lib/aarch64-apple-darwin DYLD_LIBRARY_PATH=/Users/mymac/Projects/opencode-rk-main-v2/crates/opentui-bridge/native/lib/aarch64-apple-darwin cargo test --offline --locked -p opencode-rk-opentui-bridge --features native --test native_terminal_lifecycle -- --nocapture
+  rtk /usr/bin/arch -arm64 env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 DYLD_LIBRARY_PATH=/Users/mymac/Projects/opencode-rk-main-v2/crates/opentui-bridge/native/lib/aarch64-apple-darwin cargo test --offline --locked -p opencode-rk-opentui-bridge --features native --lib
+  rtk /usr/bin/arch -arm64 env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo test --offline --locked -p opencode-rk-opentui-bridge --lib
+  git diff --check
+  ```
+
+  Results: **10/10 PTY-target tests, 73/73 native library tests, 72/72 default
+  library tests passed**; diff check passed. Five real PTY scenarios exercise raw
+  input, explicit restoration, close/drop, unwinding, resize/closed handles,
+  input protocol modes, suspend/resume and singleton reacquisition.
+- State: **ACCEPTED for the native renderer lifecycle package on `425d617`**.
+  Full release-built CLI/provider/session golden journey, G5 and G8 remain pending.
+
 ## Remaining observed product failures
 
 - G2 persisted/in-app credentials are not connected to the outbound provider
@@ -70,13 +111,12 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
 - G3/G4 typed tool persistence is not called by the live server, and second-turn
   history rejects Tool messages. The independent durability fixture is being
   frozen before the isolated source candidate is validated.
-- Native renderer raw input belongs in the Rust host wrapper. A real compiled
-  native PTY target reached runtime and failed four raw-mode cases at candidate
-  `3692743`. Independent test-owner review also repaired a false-ready empty-byte
-  marker condition without changing raw/restoration assertions. The native
-  implementation and corrected fixture remain unintegrated.
-- Docker server is ready (`29.8.0`). Ubuntu packaging and its golden journey
-  remain unrun; usable historical native installer/artifact commits have been
-  identified for selective salvage.
+- Native renderer lifecycle is accepted as above; the complete native CLI golden
+  journey still requires G1–G4 integration.
+- Docker server is ready (`29.8.0`). Ubuntu 24.04 arm64 image acquired at digest
+  `sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3`.
+  The frozen native installer closure test independently reproduces one failing
+  test with three missing-library/atomicity assertions against `b323e2b`.
+  Ubuntu packaging and its real native golden journey remain unrun.
 
 These component acceptances are not G0–G8 release acceptance.
