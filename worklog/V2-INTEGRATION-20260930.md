@@ -909,3 +909,23 @@ URL/merge/status assertions and all named tests are preserved. State **ACCEPTED
 for mechanical MCP fixture compilation on integrated `4ab19b7`**. Exact receipt
 roots are `v2-mcp-compile-preverify-dg2lsi4n` and
 `v2-mcp-compile-integrated-6ihhaphu` under the approved artifact parent.
+
+### Storage diagnostic package accepted
+
+Candidate `d099194edc1afb87adb1f1e10eab80e969aab2aa`, base `de7e05f`, was
+independently PREVERIFIED after actual Clippy and all storage tests against its
+attested installed release. The controller integrated it as
+**`ed6e78736ae8aad091ba2f0ba182754cbbbe155c`**, rebuilt/archived/installed that
+exact SHA and repeated all required gates: storage-library Clippy exit 0,
+**212 storage tests + 1 frozen security expiry test passed**, plus frozen native
+stream/tool/restart and onboarding journeys (four / two requests, both exit 0).
+All eight storage source paths and the preservation/exception review are in
+`worklog/V2-STORAGE-LINT.md`. Protected tests, SQL, schema, public signatures,
+error checks and bounds remain unchanged. State **ACCEPTED for scoped
+storage-library maintenance on exact `ed6e787`**.
+
+Exact integrated receipts are `v2-native-storage-integrated-ed6e787-i82gzid6`
+and `v2-storage-integrated-ed6e787-_y6n1zov` under the approved artifact parent.
+The recorded offline-cache and missing-installed-fixture failures are preserved
+and classified; neither was promoted to GREEN. Normal push through reviewed
+canonical `9c8829019b750df6a4cb4e79d6be82bfa83e4dd8` succeeded without force.
