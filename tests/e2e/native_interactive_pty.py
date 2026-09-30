@@ -141,14 +141,6 @@ class NativeInteractivePTY(unittest.TestCase):
         import fcntl
 
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-        if hasattr(termios, "TIOCSCTTY"):
-            fcntl.ioctl(slave, termios.TIOCSCTTY, 0)
-        elif platform.system() == "Darwin":
-            fcntl.ioctl(slave, 0x20007461, 0)
-        else:
-            raise AssertionError(
-                f"native PTY fixture lacks TIOCSCTTY on {platform.system()}"
-            )
         env = {
             "HOME": self.home,
             "PATH": os.environ.get("PATH", ""),
