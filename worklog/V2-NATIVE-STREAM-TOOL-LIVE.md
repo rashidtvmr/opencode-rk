@@ -8,6 +8,12 @@ Tokio task, with bounded frames, retained text, total bytes, queue count, no
 proxy, no redirects, and abort-on-drop. The UI polls stdin so provider deltas
 remain visible while input stays responsive.
 
-Validation intentionally source-only pending the parent heavy-slot grant. No
-tests, fixtures, helper assertions, lockfiles, credentials, or databases were
-modified.
+Heavy validation was later granted. The frozen native stream fixture reached
+all observable stream/tool/second-turn assertions (including early
+`STREAM_PARTIAL_7d91`, typed write output, final continuation text, and second
+turn marker). The Python harness then failed during its own daemon cleanup with
+`PermissionError: [Errno 1] Operation not permitted` from `os.killpg`; this is
+recorded as a harness cleanup failure, not converted to GREEN. The captured
+screen and sanitized fixture evidence are retained under the approved temp
+artifact directory. No tests, fixtures, helper assertions, lockfiles,
+credentials, or databases were modified.
