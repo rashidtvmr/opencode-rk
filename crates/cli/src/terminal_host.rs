@@ -544,7 +544,10 @@ impl HostLoop {
     }
 
     fn mark_frame(&mut self) {
-        self.pending_frames = self.pending_frames.saturating_add(1).min(MAX_PENDING_FRAMES);
+        self.pending_frames = self
+            .pending_frames
+            .saturating_add(1)
+            .min(MAX_PENDING_FRAMES);
     }
 }
 
@@ -788,7 +791,10 @@ mod tests {
         assert_eq!(q.len(), 1, "600-resize storm collapses to one event");
         assert_eq!(
             q.drain(),
-            vec![TerminalEvent::Resize { cols: 129, rows: 24 }]
+            vec![TerminalEvent::Resize {
+                cols: 129,
+                rows: 24
+            }]
         );
     }
 
@@ -835,7 +841,10 @@ mod tests {
                 "explicit host restore disarms the pending obligation"
             );
         }
-        assert!(flag.was_restored(), "drop after explicit restore stays restored");
+        assert!(
+            flag.was_restored(),
+            "drop after explicit restore stays restored"
+        );
         flag.mark_restored();
         assert!(flag.was_restored(), "restore marking is idempotent");
     }
@@ -843,10 +852,7 @@ mod tests {
     #[test]
     fn host_loop_max_pending_frames_matches_native_app() {
         assert_eq!(MAX_PENDING_FRAMES, 16);
-        assert_eq!(
-            MAX_PENDING_FRAMES,
-            crate::native_app::MAX_PENDING_FRAMES
-        );
+        assert_eq!(MAX_PENDING_FRAMES, crate::native_app::MAX_PENDING_FRAMES);
     }
 
     #[test]
@@ -888,19 +894,20 @@ mod tests {
     }
 
     #[test]
-    fn host_loop_step_routes_quit_resize_tick() {        let mut host = HostLoop::new();
+    fn host_loop_step_routes_quit_resize_tick() {
+        let mut host = HostLoop::new();
         assert_eq!(host.step(TerminalEvent::Key('q')), KeyAction::Quit);
         assert!(host.should_quit());
         let mut host = HostLoop::new();
         assert_eq!(
-            host.step(TerminalEvent::Resize { cols: 100, rows: 30 }),
+            host.step(TerminalEvent::Resize {
+                cols: 100,
+                rows: 30
+            }),
             KeyAction::RequestFrame
         );
         assert_eq!(host.pending_frames(), 1);
         assert_eq!(host.step(TerminalEvent::Tick), KeyAction::RequestFrame);
-        assert_eq!(
-            host.step(TerminalEvent::Key('\t')),
-            KeyAction::CycleFocus
-        );
+        assert_eq!(host.step(TerminalEvent::Key('\t')), KeyAction::CycleFocus);
     }
 }

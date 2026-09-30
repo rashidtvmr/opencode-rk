@@ -5,8 +5,8 @@ use delegation_live::{
     build_spawn_plan, complete_handback, CompositionError, DelegationRequest, Handback, SpawnPlan,
 };
 
-use delegation_live::{ChildId, ChildState, Delegations, Ownership, OwnerToken, IndependentEffort};
 use delegation_live::{AgentSession, SessionId};
+use delegation_live::{ChildId, ChildState, Delegations, IndependentEffort, OwnerToken, Ownership};
 
 fn parent_session(id: &str, agent: &str) -> AgentSession {
     AgentSession::new(id.to_owned(), agent.to_owned())
@@ -24,8 +24,14 @@ fn t01_spawn_plan_fresh_session_id() {
         max_tool_calls: 50,
     };
     let plan = build_spawn_plan(&parent, &req);
-    assert_ne!(plan.session_id, parent.id, "child SessionId must differ from parent");
-    assert!(!plan.session_id.is_empty(), "child SessionId must not be empty");
+    assert_ne!(
+        plan.session_id, parent.id,
+        "child SessionId must differ from parent"
+    );
+    assert!(
+        !plan.session_id.is_empty(),
+        "child SessionId must not be empty"
+    );
 }
 
 // ── T02: spawn plan forks parent context variables ──
@@ -70,7 +76,12 @@ fn t04_spawn_plan_cancellation_link() {
     let mut delegations = Delegations::with_defaults();
     let owner = OwnerToken::new(1);
     let handle = delegations
-        .spawn(100, owner, Ownership::ForegroundWait, IndependentEffort::new(5))
+        .spawn(
+            100,
+            owner,
+            Ownership::ForegroundWait,
+            IndependentEffort::new(5),
+        )
         .expect("spawn must succeed");
     let req = DelegationRequest {
         agent_id: "agent-e".to_owned(),
@@ -94,7 +105,10 @@ fn t05_handback_output_bounds() {
     assert_eq!(handback.status, "completed");
     let large_output = "x".repeat(100_000);
     let hb_with_output = handback.with_output(&large_output);
-    assert!(hb_with_output.output_len() <= 8192, "output must be bounded to 8KiB");
+    assert!(
+        hb_with_output.output_len() <= 8192,
+        "output must be bounded to 8KiB"
+    );
 }
 
 // ── T06: handback status transitions ──
@@ -131,7 +145,12 @@ fn t07_full_round_trip() {
 
     // 3. register child in delegation controller
     let handle = delegations
-        .spawn(1, owner, Ownership::BackgroundOwned, IndependentEffort::new(10))
+        .spawn(
+            1,
+            owner,
+            Ownership::BackgroundOwned,
+            IndependentEffort::new(10),
+        )
         .expect("spawn must succeed");
     let linked = plan.link_to_delegation(handle.child);
     assert!(linked.is_ok());
@@ -160,7 +179,12 @@ fn t08_handback_cancelled_child() {
     let mut delegations = Delegations::with_defaults();
     let owner = OwnerToken::new(7);
     let handle = delegations
-        .spawn(200, owner, Ownership::BackgroundOwned, IndependentEffort::new(3))
+        .spawn(
+            200,
+            owner,
+            Ownership::BackgroundOwned,
+            IndependentEffort::new(3),
+        )
         .expect("spawn must succeed");
 
     let cancel_result = delegations.cancel(handle.child, owner);
@@ -184,7 +208,10 @@ fn t09_distinct_session_ids() {
     };
     let plan1 = build_spawn_plan(&parent, &req);
     let plan2 = build_spawn_plan(&parent, &req);
-    assert_ne!(plan1.session_id, plan2.session_id, "each spawn plan must get unique SessionId");
+    assert_ne!(
+        plan1.session_id, plan2.session_id,
+        "each spawn plan must get unique SessionId"
+    );
 }
 
 // ── T10: spawn plan carries parent link metadata ──

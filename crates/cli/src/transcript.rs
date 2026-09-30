@@ -52,14 +52,23 @@ pub struct AppTranscript {
 impl AppTranscript {
     #[must_use]
     pub fn new() -> Self {
-        Self { entries: VecDeque::new() }
+        Self {
+            entries: VecDeque::new(),
+        }
     }
 
     /// Push one entry; rejects text over [`MAX_TEXT_BYTES`], evicts oldest past cap.
-    pub fn push(&mut self, role: AppRole, text: impl Into<String>) -> Result<(), AppTranscriptError> {
+    pub fn push(
+        &mut self,
+        role: AppRole,
+        text: impl Into<String>,
+    ) -> Result<(), AppTranscriptError> {
         let text = text.into();
         if text.len() > MAX_TEXT_BYTES {
-            return Err(AppTranscriptError::Oversize { len: text.len(), max: MAX_TEXT_BYTES });
+            return Err(AppTranscriptError::Oversize {
+                len: text.len(),
+                max: MAX_TEXT_BYTES,
+            });
         }
         if self.entries.len() >= MAX_ENTRIES {
             self.entries.pop_front();
@@ -166,7 +175,10 @@ mod tests {
         }
         assert_eq!(t.len(), MAX_ENTRIES);
         assert_eq!(t.entries()[0].text, "m10");
-        assert_eq!(t.last_n(2).map(|e| e.text.as_str()).collect::<Vec<_>>(), ["m1008", "m1009"]);
+        assert_eq!(
+            t.last_n(2).map(|e| e.text.as_str()).collect::<Vec<_>>(),
+            ["m1008", "m1009"]
+        );
     }
 
     #[test]
@@ -175,7 +187,10 @@ mod tests {
         let big = "x".repeat(MAX_TEXT_BYTES + 1);
         assert_eq!(
             t.push(AppRole::Assistant, big),
-            Err(AppTranscriptError::Oversize { len: MAX_TEXT_BYTES + 1, max: MAX_TEXT_BYTES })
+            Err(AppTranscriptError::Oversize {
+                len: MAX_TEXT_BYTES + 1,
+                max: MAX_TEXT_BYTES
+            })
         );
         assert!(t.is_empty());
         t.push(AppRole::System, "x".repeat(MAX_TEXT_BYTES)).unwrap();
@@ -187,7 +202,14 @@ mod tests {
         let mut t = AppTranscript::new();
         t.push(AppRole::User, "hello world foo").unwrap();
         let rows = t.render_window(1, 10);
-        assert_eq!(rows, vec!["USER:".to_owned(), "hello".to_owned(), "world foo".to_owned()]);
+        assert_eq!(
+            rows,
+            vec![
+                "USER:".to_owned(),
+                "hello".to_owned(),
+                "world foo".to_owned()
+            ]
+        );
         for r in &rows {
             assert!(r.chars().count() <= 10, "row overflow: {r:?}");
         }
@@ -207,7 +229,10 @@ mod tests {
         t.push(AppRole::Assistant, "two").unwrap();
         t.push(AppRole::System, "three").unwrap();
         let rows = t.render_window(2, 0);
-        assert_eq!(rows, vec!["ASSISTANT: two".to_owned(), "SYSTEM: three".to_owned()]);
+        assert_eq!(
+            rows,
+            vec!["ASSISTANT: two".to_owned(), "SYSTEM: three".to_owned()]
+        );
         assert!(t.render_window(0, 0).is_empty());
     }
 }

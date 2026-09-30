@@ -140,7 +140,8 @@ fn round_one_events(path: &std::path::Path) -> Vec<String> {
     let args = serde_json::to_string(&json!({
         "path": path.to_string_lossy(),
         "content": "fixture-secret-content"
-    })).expect("write arguments");
+    }))
+    .expect("write arguments");
     let item = json!({
         "type": "response.output_item.done",
         "item": {
@@ -180,7 +181,10 @@ fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, thread::JoinHan
                 .expect("provider request header terminator");
             let body = &request[header_end + 4..];
             bodies.push(serde_json::from_slice(body).expect("provider json"));
-            respond_sse(&mut stream, &events.iter().map(String::as_str).collect::<Vec<_>>());
+            respond_sse(
+                &mut stream,
+                &events.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
         }
         bodies
     });
@@ -188,7 +192,9 @@ fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, thread::JoinHan
 }
 
 async fn spawn_http(app: axum::Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind server");
     let address = listener.local_addr().expect("server address");
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
@@ -288,10 +294,8 @@ async fn live_write_to_env_is_denied_by_broker() {
     let _tools = EnvGuard::set("OPENCODE_RK_TURN_TOOLS", "write");
     let (app, dir) = build_app();
     let target = dir.path().join(".env");
-    let (provider_base, provider_task) = spawn_scripted_provider(vec![
-        round_one_events(&target),
-        round_two_events(),
-    ]);
+    let (provider_base, provider_task) =
+        spawn_scripted_provider(vec![round_one_events(&target), round_two_events()]);
     let _base = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
     let session_id = create_session(&app, "live write denial").await;
     let (address, server) = spawn_http(app.clone()).await;
@@ -311,11 +315,23 @@ async fn live_write_to_env_is_denied_by_broker() {
         output.contains("denied") || output.contains("secret-bearing"),
         "broker must explain denial, got {output:?}"
     );
-    assert!(!output.contains("Unknown tool: write"), "must reach broker, not generic executor");
-    assert!(!target.exists(), "denied write must have no filesystem side effect");
-    assert!(!events.iter().any(|event| event.to_string().contains("fixture-secret-content")));
+    assert!(
+        !output.contains("Unknown tool: write"),
+        "must reach broker, not generic executor"
+    );
+    assert!(
+        !target.exists(),
+        "denied write must have no filesystem side effect"
+    );
+    assert!(!events
+        .iter()
+        .any(|event| event.to_string().contains("fixture-secret-content")));
     let bodies = provider_task.join().expect("provider fixture finished");
-    assert_eq!(bodies.len(), 2, "denial is acknowledged in exactly one bounded second round");
+    assert_eq!(
+        bodies.len(),
+        2,
+        "denial is acknowledged in exactly one bounded second round"
+    );
     let round2 = bodies[1]["input"].as_array().expect("round two input");
     let feedback = round2
         .iter()

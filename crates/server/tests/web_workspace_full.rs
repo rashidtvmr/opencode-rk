@@ -119,7 +119,10 @@ async fn web_015_full_t04_workspace_objects_expose_registry_fields_only() {
         let obj = entry.as_object().unwrap();
         let mut keys: Vec<&str> = obj.keys().map(String::as_str).collect();
         keys.sort_unstable();
-        assert_eq!(keys, ["created_at_us", "id", "label", "project_root", "status"]);
+        assert_eq!(
+            keys,
+            ["created_at_us", "id", "label", "project_root", "status"]
+        );
     }
     // project_root is registry metadata passthrough, never a live path grant.
     assert_eq!(body["workspaces"][0]["project_root"], "/workspace/main");

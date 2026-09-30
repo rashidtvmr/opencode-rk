@@ -509,10 +509,7 @@ mod tests {
     #[test]
     fn title_bounds_reject_empty_and_oversize() {
         let id = WorkspaceId::new();
-        assert_eq!(
-            WorkspaceView::create(id, ""),
-            Err(TitleError::Empty)
-        );
+        assert_eq!(WorkspaceView::create(id, ""), Err(TitleError::Empty));
         let long = "x".repeat(MAX_TITLE_BYTES + 1);
         assert!(matches!(
             WorkspaceView::create(id, &long),

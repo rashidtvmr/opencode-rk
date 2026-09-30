@@ -55,7 +55,11 @@ impl CellBuffer {
         }
         let w = src.cols.min(self.cols - dx);
         let h = src.rows.min(self.rows - dy);
-        if w == 0 || h == 0 { None } else { Some((w, h)) }
+        if w == 0 || h == 0 {
+            None
+        } else {
+            Some((w, h))
+        }
     }
 }
 

@@ -8,9 +8,9 @@
 #[path = "../src/rules_inject.rs"]
 mod rules_inject;
 
-use rules_inject::{assemble_prompt, InjectRecord, LoadedRule, SkippedRule};
 use opencode_rk_server::rules_globs::LoadDecision;
 use opencode_rk_server::rules_loader::{RuleEntry, RulesSnapshot};
+use rules_inject::{assemble_prompt, InjectRecord, LoadedRule, SkippedRule};
 use std::path::PathBuf;
 
 /// T01: Empty rules + empty decision -> base prompt returned with empty record.
@@ -244,10 +244,7 @@ fn t09_base_prompt_after_rules() {
     let (prompt, _) = assemble_prompt(&snap, &decision, "BASE PROMPT");
     let rules_pos = prompt.find("rule content").unwrap();
     let base_pos = prompt.find("BASE PROMPT").unwrap();
-    assert!(
-        rules_pos < base_pos,
-        "rules must appear before base prompt"
-    );
+    assert!(rules_pos < base_pos, "rules must appear before base prompt");
 }
 
 /// T10: Skipped reason includes "budget exceeded" when cap hit.

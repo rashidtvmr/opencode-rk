@@ -328,14 +328,14 @@ mod tests {
     #[test]
     fn t01_segment_split_sums_to_total() {
         let input = TurnStateInput {
-            system_prompt_bytes: 400,  // 100 tokens
-            rules_bytes: 200,          // 50 tokens
+            system_prompt_bytes: 400, // 100 tokens
+            rules_bytes: 200,         // 50 tokens
             history_entries: vec![
                 HistoryEntry { bytes: 80 },  // 20
                 HistoryEntry { bytes: 120 }, // 30
             ],
             tool_result_bytes: vec![160, 80], // 40 + 20
-            current_turn_bytes: 40,            // 10
+            current_turn_bytes: 40,           // 10
             model_limit: 1000,
         };
         let report = build_context_report(&input).unwrap();
@@ -419,10 +419,7 @@ mod tests {
         let input = TurnStateInput {
             system_prompt_bytes: 400,
             rules_bytes: 200,
-            history_entries: vec![
-                HistoryEntry { bytes: 80 },
-                HistoryEntry { bytes: 120 },
-            ],
+            history_entries: vec![HistoryEntry { bytes: 80 }, HistoryEntry { bytes: 120 }],
             tool_result_bytes: vec![160],
             current_turn_bytes: 40,
             model_limit: 5000,
@@ -459,11 +456,11 @@ mod tests {
 
         // Consistent across segment kinds
         let input = TurnStateInput {
-            system_prompt_bytes: 12,   // 3 tokens
-            rules_bytes: 16,           // 4 tokens
+            system_prompt_bytes: 12, // 3 tokens
+            rules_bytes: 16,         // 4 tokens
             history_entries: vec![HistoryEntry { bytes: 4 }],
             tool_result_bytes: vec![8],
-            current_turn_bytes: 20,     // 5 tokens
+            current_turn_bytes: 20, // 5 tokens
             model_limit: 100,
         };
         let report = build_context_report(&input).unwrap();

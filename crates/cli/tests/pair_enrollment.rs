@@ -10,9 +10,7 @@ mod pair;
 
 #[test]
 fn enrollment_issues_single_use_code() {
-    todo!(
-        "NET-002: enrollment must issue single-use account-bound code with visible fingerprint"
-    );
+    todo!("NET-002: enrollment must issue single-use account-bound code with visible fingerprint");
 }
 
 #[test]

@@ -53,10 +53,10 @@ async fn web_013_reason_names_adapter_boundary() {
         "search reason must name the grep boundary"
     );
     assert!(
-            value["deep_research"]["reason"]
-                .as_str()
-                .unwrap()
-                .contains("citation"),
+        value["deep_research"]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("citation"),
         "research reason must name the citation gap"
     );
     let voice = value["voice"]["reason"].as_str().unwrap();

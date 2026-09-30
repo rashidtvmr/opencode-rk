@@ -273,9 +273,7 @@ pub struct ReleaseReceipt {
 impl ReleaseReceipt {
     #[must_use]
     pub const fn is_empty(self) -> bool {
-        self.released_workspaces == 0
-            && self.released_sessions == 0
-            && self.released_messages == 0
+        self.released_workspaces == 0 && self.released_sessions == 0 && self.released_messages == 0
     }
 }
 
@@ -379,8 +377,10 @@ impl Home {
                 next_seq: 1,
             });
         }
-        Ok(Self::store_mut(&mut self.stores, workspace)
-            .expect("store present after get-or-create"))
+        Ok(
+            Self::store_mut(&mut self.stores, workspace)
+                .expect("store present after get-or-create"),
+        )
     }
 
     /// First-session workflow: on an empty home (zero sessions anywhere),
@@ -573,8 +573,13 @@ impl Home {
             .ok_or(WorkspaceError::SessionNotFound)?;
         let total = entry.history.len();
         let take = clamp_limit(limit);
-        let entries: Vec<Message> =
-            entry.history.iter().skip(offset).take(take).cloned().collect();
+        let entries: Vec<Message> = entry
+            .history
+            .iter()
+            .skip(offset)
+            .take(take)
+            .cloned()
+            .collect();
         let consumed = offset.saturating_add(entries.len());
         Ok(HistoryPage {
             entries,
@@ -612,8 +617,11 @@ impl Home {
             } else {
                 receipt.released_workspaces += 1;
                 receipt.released_sessions += store.sessions.len();
-                receipt.released_messages +=
-                    store.sessions.iter().map(|s| s.history.len()).sum::<usize>();
+                receipt.released_messages += store
+                    .sessions
+                    .iter()
+                    .map(|s| s.history.len())
+                    .sum::<usize>();
             }
         }
         self.stores = kept;
@@ -714,7 +722,10 @@ mod tests {
             .unwrap_err();
         assert_eq!(err, WorkspaceError::SessionNotFound);
         // Neither error echoes IDs or titles.
-        for probe in [WorkspaceError::ScopeRejected, WorkspaceError::SessionNotFound] {
+        for probe in [
+            WorkspaceError::ScopeRejected,
+            WorkspaceError::SessionNotFound,
+        ] {
             let rendered = format!("{probe} {probe:?}");
             assert!(
                 !rendered.contains("secret-title"),
@@ -726,7 +737,10 @@ mod tests {
             );
         }
         // Home unchanged by the rejected ops.
-        assert_eq!(home.get(&scope, &workspace_a, &session_a.id).unwrap().title, "secret-title");
+        assert_eq!(
+            home.get(&scope, &workspace_a, &session_a.id).unwrap().title,
+            "secret-title"
+        );
     }
 
     #[test]
@@ -815,7 +829,8 @@ mod tests {
         );
         let long = "x".repeat(MAX_TITLE_BYTES + 1);
         assert!(matches!(
-            home.rename(&scope, &workspace, &session.id, &long).unwrap_err(),
+            home.rename(&scope, &workspace, &session.id, &long)
+                .unwrap_err(),
             WorkspaceError::TitleTooLong { .. }
         ));
         assert_eq!(
@@ -835,7 +850,8 @@ mod tests {
         home.append(&scope, &workspace_a, &keep.id, "k1").unwrap();
         home.append(&scope, &workspace_a, &keep.id, "k2").unwrap();
         let drop_me = home.create(&scope, &workspace_b, "drop").unwrap();
-        home.append(&scope, &workspace_b, &drop_me.id, "d1").unwrap();
+        home.append(&scope, &workspace_b, &drop_me.id, "d1")
+            .unwrap();
         home.create(&scope, &workspace_b, "drop2").unwrap();
         // Release everything except workspace A.
         let receipt = home.release_inactive(&[workspace_a]);

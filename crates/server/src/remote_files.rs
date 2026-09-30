@@ -313,17 +313,29 @@ mod tests {
 
     #[test]
     fn allowed_view_preserves_version_conflict() {
-        let v = RemoteView { version: 7, base_version: 7, conflict: false };
+        let v = RemoteView {
+            version: 7,
+            base_version: 7,
+            conflict: false,
+        };
         assert!(check_view(&v).is_ok());
         assert_eq!(v.version, 7);
-        let c = RemoteView { version: 8, base_version: 7, conflict: true };
+        let c = RemoteView {
+            version: 8,
+            base_version: 7,
+            conflict: true,
+        };
         assert!(check_view(&c).is_ok());
         assert!(c.conflict);
     }
 
     #[test]
     fn view_conflict_flag_mismatch_rejected() {
-        let v = RemoteView { version: 8, base_version: 7, conflict: false };
+        let v = RemoteView {
+            version: 8,
+            base_version: 7,
+            conflict: false,
+        };
         assert!(check_view(&v).is_err());
     }
 
@@ -345,7 +357,10 @@ mod tests {
 
     #[test]
     fn symlink_escape_denied() {
-        assert_eq!(check_rel("a/b.txt", true), Err(RemotePathError::SymlinkDenied));
+        assert_eq!(
+            check_rel("a/b.txt", true),
+            Err(RemotePathError::SymlinkDenied)
+        );
     }
 
     #[test]
@@ -362,32 +377,65 @@ mod tests {
     fn concurrent_edit_needs_version() {
         let cur = 5u64;
         assert_eq!(
-            check_edit(cur, &VersionedEdit { expected_version: None, content_len: 10 }),
+            check_edit(
+                cur,
+                &VersionedEdit {
+                    expected_version: None,
+                    content_len: 10
+                }
+            ),
             Err(EditError::VersionRequired)
         );
         assert_eq!(
-            check_edit(cur, &VersionedEdit { expected_version: Some(4), content_len: 10 }),
+            check_edit(
+                cur,
+                &VersionedEdit {
+                    expected_version: Some(4),
+                    content_len: 10
+                }
+            ),
             Err(EditError::VersionMismatch)
         );
         assert_eq!(
-            check_edit(cur, &VersionedEdit { expected_version: Some(5), content_len: 10 }),
+            check_edit(
+                cur,
+                &VersionedEdit {
+                    expected_version: Some(5),
+                    content_len: 10
+                }
+            ),
             Ok(6)
         );
     }
 
     #[test]
     fn upload_over_cap_rejected() {
-        let q = Quota { used_bytes: 0, quota_bytes: u64::MAX };
+        let q = Quota {
+            used_bytes: 0,
+            quota_bytes: u64::MAX,
+        };
         let live = CancelToken { cancelled: false };
-        assert_eq!(check_transfer(MAX_TRANSFER_BYTES + 1, &q, &live), Err(TransferError::TooLarge));
-        let tight = Quota { used_bytes: 900, quota_bytes: 1000 };
-        assert_eq!(check_transfer(200, &tight, &live), Err(TransferError::QuotaExceeded));
+        assert_eq!(
+            check_transfer(MAX_TRANSFER_BYTES + 1, &q, &live),
+            Err(TransferError::TooLarge)
+        );
+        let tight = Quota {
+            used_bytes: 900,
+            quota_bytes: 1000,
+        };
+        assert_eq!(
+            check_transfer(200, &tight, &live),
+            Err(TransferError::QuotaExceeded)
+        );
         assert!(check_transfer(100, &tight, &live).is_ok());
     }
 
     #[test]
     fn cancel_cleans_up() {
-        let q = Quota { used_bytes: 0, quota_bytes: u64::MAX };
+        let q = Quota {
+            used_bytes: 0,
+            quota_bytes: u64::MAX,
+        };
         let dead = CancelToken { cancelled: true };
         assert_eq!(check_transfer(10, &q, &dead), Err(TransferError::Cancelled));
         let mut held = 4096u64;
@@ -398,8 +446,14 @@ mod tests {
 
     #[test]
     fn artifact_path_same_as_local() {
-        assert_eq!(check_artifact(ApprovalPath::RemoteArtifactSamePath), Ok(ApprovalPath::LocalFileEdit));
-        assert_eq!(check_artifact(ApprovalPath::LocalFileEdit), Ok(ApprovalPath::LocalFileEdit));
+        assert_eq!(
+            check_artifact(ApprovalPath::RemoteArtifactSamePath),
+            Ok(ApprovalPath::LocalFileEdit)
+        );
+        assert_eq!(
+            check_artifact(ApprovalPath::LocalFileEdit),
+            Ok(ApprovalPath::LocalFileEdit)
+        );
         assert_eq!(
             check_artifact(ApprovalPath::RemoteBypass),
             Err(ArtifactError::RemoteBypassDenied)

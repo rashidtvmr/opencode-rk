@@ -61,11 +61,14 @@ fn t02_init_handshake_transitions_to_ready() {
     let frame = session.begin_init().expect("begin_init ok");
     assert_eq!(frame.method.as_deref(), Some("initialize"));
     assert_eq!(session.state(), ClientState::Initializing);
-    let response = rpc_response(frame.id.unwrap(), json!({
-        "protocolVersion": "2024-11-05",
-        "capabilities": {"tools": {"listChanged": true}},
-        "serverInfo": {"name": "test-server", "version": "1.0"}
-    }));
+    let response = rpc_response(
+        frame.id.unwrap(),
+        json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {"tools": {"listChanged": true}},
+            "serverInfo": {"name": "test-server", "version": "1.0"}
+        }),
+    );
     session.receive(response).expect("handshake ok");
     assert_eq!(session.state(), ClientState::Ready);
 }
@@ -87,18 +90,24 @@ fn t03_init_error_transitions_to_error() {
 fn t04_sequential_request_correlation() {
     let mut session = Session::new(8, 10);
     let init = session.begin_init().expect("init");
-    let r = rpc_response(init.id.unwrap(), json!({
-        "protocolVersion": "2024-11-05",
-        "capabilities": {},
-        "serverInfo": {"name": "s", "version": "1"}
-    }));
+    let r = rpc_response(
+        init.id.unwrap(),
+        json!({
+            "protocolVersion": "2024-11-05",
+            "capabilities": {},
+            "serverInfo": {"name": "s", "version": "1"}
+        }),
+    );
     session.receive(r).expect("init ok");
     assert_eq!(session.state(), ClientState::Ready);
 
     let list_frame = session.list_tools().expect("list_tools");
-    let resp = rpc_response(list_frame.id.unwrap(), json!({
-        "tools": []
-    }));
+    let resp = rpc_response(
+        list_frame.id.unwrap(),
+        json!({
+            "tools": []
+        }),
+    );
     session.receive(resp).expect("list response ok");
     assert_eq!(session.tools().len(), 0);
 }
@@ -120,8 +129,14 @@ fn t05_interleaved_request_correlation() {
     let call_frame = session.call_tool("foo", json!({"x": 1})).expect("call");
     assert_ne!(list_frame.id, call_frame.id);
 
-    let call_resp = rpc_response(call_frame.id.unwrap(), json!({"content":[{"type":"text","text":"ok"}]}));
-    let list_resp = rpc_response(list_frame.id.unwrap(), json!({"tools":[{"name":"foo","description":"d","inputSchema":{}}]}));
+    let call_resp = rpc_response(
+        call_frame.id.unwrap(),
+        json!({"content":[{"type":"text","text":"ok"}]}),
+    );
+    let list_resp = rpc_response(
+        list_frame.id.unwrap(),
+        json!({"tools":[{"name":"foo","description":"d","inputSchema":{}}]}),
+    );
     session.receive(call_resp).expect("call resp");
     session.receive(list_resp).expect("list resp");
 
@@ -142,7 +157,9 @@ async fn t06_tool_call_timeout() {
         .expect("init ok");
 
     let frame = session.call_tool("foo", json!({})).expect("call");
-    let result = session.wait_result(frame.id.unwrap(), std::time::Duration::from_millis(10)).await;
+    let result = session
+        .wait_result(frame.id.unwrap(), std::time::Duration::from_millis(10))
+        .await;
     assert!(matches!(result, Err(Error::Timeout)));
 }
 
@@ -161,7 +178,9 @@ async fn t07_cancel_pending_call() {
 
     let frame = session.call_tool("bar", json!({})).expect("call");
     session.cancel_pending();
-    let result = session.wait_result(frame.id.unwrap(), std::time::Duration::from_secs(5)).await;
+    let result = session
+        .wait_result(frame.id.unwrap(), std::time::Duration::from_secs(5))
+        .await;
     assert!(matches!(result, Err(Error::Cancelled)));
 }
 
@@ -182,7 +201,9 @@ fn t08_tool_list_cache_eviction() {
     let tools: Vec<Value> = (0..5)
         .map(|i| json!({"name": format!("t{i}"), "description": "d", "inputSchema": {}}))
         .collect();
-    session.receive(rpc_response(f1.id.unwrap(), json!({"tools": tools}))).expect("ok");
+    session
+        .receive(rpc_response(f1.id.unwrap(), json!({"tools": tools})))
+        .expect("ok");
     assert_eq!(session.tools().len(), 2, "should evict to cap");
 }
 
@@ -220,7 +241,9 @@ fn t10_spawn_failed_error() {
 async fn t11_init_timeout() {
     let mut session = Session::new(8, 10);
     let frame = session.begin_init().expect("init");
-    let result = session.wait_result(frame.id.unwrap(), std::time::Duration::from_millis(10)).await;
+    let result = session
+        .wait_result(frame.id.unwrap(), std::time::Duration::from_millis(10))
+        .await;
     assert!(matches!(result, Err(Error::Timeout)));
 }
 

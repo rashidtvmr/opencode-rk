@@ -115,7 +115,11 @@ impl SessionManager {
     /// Create and store a new session, returning a clone of it.
     ///
     /// Returns [`SessionError::AlreadyExists`] if the id is already in use.
-    pub fn create(&mut self, id: SessionId, agent_id: AgentId) -> Result<AgentSession, SessionError> {
+    pub fn create(
+        &mut self,
+        id: SessionId,
+        agent_id: AgentId,
+    ) -> Result<AgentSession, SessionError> {
         if self.sessions.contains_key(&id) {
             return Err(SessionError::AlreadyExists(id));
         }
@@ -184,7 +188,9 @@ mod tests {
     #[test]
     fn create_and_get() {
         let mut mgr = SessionManager::new();
-        let session = mgr.create("sess-1".to_string(), "agent-a".to_string()).unwrap();
+        let session = mgr
+            .create("sess-1".to_string(), "agent-a".to_string())
+            .unwrap();
         assert_eq!(session.id, "sess-1");
         assert_eq!(session.agent_id, "agent-a");
         assert_eq!(session.state, SessionState::Active);
@@ -205,7 +211,8 @@ mod tests {
     #[test]
     fn activity_updates() {
         let mut mgr = SessionManager::new();
-        mgr.create("sess-1".to_string(), "agent-a".to_string()).unwrap();
+        mgr.create("sess-1".to_string(), "agent-a".to_string())
+            .unwrap();
 
         let before = mgr.get(&"sess-1".to_string()).unwrap().last_activity;
         thread::sleep(Duration::from_millis(20));
@@ -213,7 +220,10 @@ mod tests {
         mgr.activity(&"sess-1".to_string()).unwrap();
         let after = mgr.get(&"sess-1".to_string()).unwrap().last_activity;
         assert!(after > before);
-        assert_eq!(mgr.get(&"sess-1".to_string()).unwrap().state, SessionState::Active);
+        assert_eq!(
+            mgr.get(&"sess-1".to_string()).unwrap().state,
+            SessionState::Active
+        );
 
         // Activity on nonexistent session should error
         assert!(matches!(
@@ -225,12 +235,19 @@ mod tests {
     #[test]
     fn terminate_changes_state() {
         let mut mgr = SessionManager::new();
-        mgr.create("sess-1".to_string(), "agent-a".to_string()).unwrap();
+        mgr.create("sess-1".to_string(), "agent-a".to_string())
+            .unwrap();
 
-        assert_eq!(mgr.get(&"sess-1".to_string()).unwrap().state, SessionState::Active);
+        assert_eq!(
+            mgr.get(&"sess-1".to_string()).unwrap().state,
+            SessionState::Active
+        );
 
         mgr.terminate(&"sess-1".to_string()).unwrap();
-        assert_eq!(mgr.get(&"sess-1".to_string()).unwrap().state, SessionState::Terminated);
+        assert_eq!(
+            mgr.get(&"sess-1".to_string()).unwrap().state,
+            SessionState::Terminated
+        );
 
         // Terminate nonexistent session should error
         assert!(matches!(
@@ -242,7 +259,8 @@ mod tests {
     #[test]
     fn cleanup_idle() {
         let mut mgr = SessionManager::new();
-        mgr.create("sess-1".to_string(), "agent-a".to_string()).unwrap();
+        mgr.create("sess-1".to_string(), "agent-a".to_string())
+            .unwrap();
 
         // Terminate the session so cleanup removes it
         mgr.terminate(&"sess-1".to_string()).unwrap();
@@ -258,9 +276,12 @@ mod tests {
     #[test]
     fn multiple_sessions() {
         let mut mgr = SessionManager::new();
-        mgr.create("sess-1".to_string(), "agent-a".to_string()).unwrap();
-        mgr.create("sess-2".to_string(), "agent-b".to_string()).unwrap();
-        mgr.create("sess-3".to_string(), "agent-c".to_string()).unwrap();
+        mgr.create("sess-1".to_string(), "agent-a".to_string())
+            .unwrap();
+        mgr.create("sess-2".to_string(), "agent-b".to_string())
+            .unwrap();
+        mgr.create("sess-3".to_string(), "agent-c".to_string())
+            .unwrap();
 
         assert_eq!(mgr.get(&"sess-1".to_string()).unwrap().agent_id, "agent-a");
         assert_eq!(mgr.get(&"sess-2".to_string()).unwrap().agent_id, "agent-b");

@@ -14,7 +14,12 @@ fn fa3_gated_t01_deny_blocks_with_no_state() {
     let mut ctl = DelegationController::with_defaults();
     let live_before = ctl.live_count();
     let denied = ctl
-        .submit_gated(owner(1), Mode::Foreground, "denied work", BrokerDecision::Deny)
+        .submit_gated(
+            owner(1),
+            Mode::Foreground,
+            "denied work",
+            BrokerDecision::Deny,
+        )
         .expect_err("deny must block admission");
     assert_eq!(denied, DelegError::BrokerDenied);
     assert_eq!(ctl.live_count(), live_before);
@@ -40,12 +45,19 @@ fn fa3_gated_t02_require_human_blocks_with_no_state() {
 fn fa3_gated_t03_allow_admits_lane_work() {
     let mut ctl = DelegationController::with_defaults();
     let handle = ctl
-        .submit_gated(owner(7), Mode::Foreground, "allowed work", BrokerDecision::Allow)
+        .submit_gated(
+            owner(7),
+            Mode::Foreground,
+            "allowed work",
+            BrokerDecision::Allow,
+        )
         .expect("allow must admit");
     assert_eq!(handle.owner, owner(7));
     assert_eq!(handle.mode, Mode::Foreground);
     assert_eq!(ctl.live_count(), 1);
-    let st = ctl.status(handle.id).expect("admitted entry must be queryable");
+    let st = ctl
+        .status(handle.id)
+        .expect("admitted entry must be queryable");
     assert_eq!(st.owner, owner(7));
 }
 

@@ -22,8 +22,7 @@ struct TestHome(PathBuf);
 impl TestHome {
     fn new() -> Self {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("opencode-rk-native-{}", id));
+        let path = std::env::temp_dir().join(format!("opencode-rk-native-{}", id));
         fs::create_dir_all(&path).unwrap();
         Self(path)
     }
@@ -279,9 +278,7 @@ fn native_once_renders_or_fails_with_actionable_message() {
         .stderr(Stdio::piped());
 
     let start = Instant::now();
-    let output = command
-        .output()
-        .expect("failed to spawn --native --once");
+    let output = command.output().expect("failed to spawn --native --once");
     let elapsed = start.elapsed();
 
     // Must not hang: bounded at 30 seconds.

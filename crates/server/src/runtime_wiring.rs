@@ -24,8 +24,8 @@ use std::{
     collections::HashMap,
     fmt,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
     },
 };
 
@@ -37,13 +37,13 @@ use tokio::sync::mpsc;
 
 use crate::{
     app_runtime::{
-        EngineError, EngineHandles, EnginePolicy, TurnObservation, TurnPermits,
-        assert_same_turn, assert_single_owner, event_bus, MAX_ENGINE_CLIENTS,
-        MAX_MODEL_REF_BYTES, OwnerGuard, SingleOwner,
+        assert_same_turn, assert_single_owner, event_bus, EngineError, EngineHandles, EnginePolicy,
+        OwnerGuard, SingleOwner, TurnObservation, TurnPermits, MAX_ENGINE_CLIENTS,
+        MAX_MODEL_REF_BYTES,
     },
     clients::{ClientError, ClientId, ClientMessage},
     event_bus::{EventBus, ServerEvent},
-    event_cursor::{Cursor, CursorError, ReplayBuffer, StoredEvent, classify},
+    event_cursor::{classify, Cursor, CursorError, ReplayBuffer, StoredEvent},
     turn_service::CancelToken,
     workspace_proxy::{ProxyError, ProxyItem, ProxyQueue, ProxyTarget, RouteHint},
 };
@@ -128,9 +128,7 @@ impl From<EngineError> for WiringError {
             }
             EngineError::NoTurnPermit => Self::NoTurnPermit,
             EngineError::InvalidModelRef => Self::InvalidModelRef,
-            EngineError::QueueFull { .. } | EngineError::PolicyFull { .. } => {
-                Self::TooManySessions
-            }
+            EngineError::QueueFull { .. } | EngineError::PolicyFull { .. } => Self::TooManySessions,
             EngineError::InvalidToolName => Self::InvalidModelRef,
         }
     }
@@ -369,10 +367,7 @@ impl RuntimeWiring {
 
     /// Attach one client. Bounded by [`MAX_ENGINE_CLIENTS`]; the sender is
     /// retained so daemon broadcasts reach this client.
-    pub fn attach(
-        &self,
-        sender: mpsc::Sender<ClientMessage>,
-    ) -> Result<ClientId, WiringError> {
+    pub fn attach(&self, sender: mpsc::Sender<ClientMessage>) -> Result<ClientId, WiringError> {
         let mut attached = self.inner.attached.lock().expect("client registry");
         if attached.len() >= MAX_ENGINE_CLIENTS {
             return Err(WiringError::TooManyClients);
@@ -466,7 +461,11 @@ impl RuntimeWiring {
         if model.is_empty() || model.len() > MAX_MODEL_REF_BYTES {
             return Err(WiringError::InvalidModelRef);
         }
-        let permit = self.inner.permits.try_acquire().map_err(WiringError::from)?;
+        let permit = self
+            .inner
+            .permits
+            .try_acquire()
+            .map_err(WiringError::from)?;
         self.record("message.appended");
         let _ = self.inner.events.publish(ServerEvent::MessageAppended {
             session,
@@ -605,13 +604,9 @@ mod tests {
         // Leak the guard: the in-memory store owns its rows; the blob dir is
         // only touched on blob writes, which these tests never perform.
         std::mem::forget(dir);
-        let storage = opencode_rk_storage::Storage::open_in_memory(
-            std::env::temp_dir().join(format!(
-                "disc113-blobs-{}-{}",
-                std::process::id(),
-                next_fixture_id()
-            )),
-        )
+        let storage = opencode_rk_storage::Storage::open_in_memory(std::env::temp_dir().join(
+            format!("disc113-blobs-{}-{}", std::process::id(), next_fixture_id()),
+        ))
         .expect("in-memory storage fixture");
         SessionService::new(Arc::new(storage))
     }
@@ -674,8 +669,7 @@ mod tests {
         assert_eq!(wiring.available_permits(), permits_before);
         assert_eq!(wiring.replay_head(), head_before);
         // Unknown clients and unregistered sessions fail closed.
-        let (stray_sender, _stray_receiver) =
-            mpsc::channel::<ClientMessage>(8);
+        let (stray_sender, _stray_receiver) = mpsc::channel::<ClientMessage>(8);
         let _ = stray_sender;
         let ghost = ClientId(u64::MAX);
         assert_eq!(
@@ -765,7 +759,9 @@ mod tests {
         };
         assert!(
             matches!(
-                wiring.route_for_session(&bridge, Some(session)).unwrap_err(),
+                wiring
+                    .route_for_session(&bridge, Some(session))
+                    .unwrap_err(),
                 WiringError::Proxy(_)
             ),
             "bridge path without endpoint must stay rejected"
@@ -823,15 +819,11 @@ mod tests {
         assert_eq!(late[0].digest, third.digest);
         // Stale cursors fail closed with resync, never a gapped prefix.
         assert_eq!(
-            wiring
-                .replay(&Cursor::new(0, 7))
-                .unwrap_err(),
+            wiring.replay(&Cursor::new(0, 7)).unwrap_err(),
             WiringError::BadCursor
         );
         assert_eq!(
-            wiring
-                .replay(&Cursor::new(u64::MAX, 0))
-                .unwrap_err(),
+            wiring.replay(&Cursor::new(u64::MAX, 0)).unwrap_err(),
             WiringError::BadCursor
         );
     }

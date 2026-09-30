@@ -33,7 +33,7 @@ use tokio::sync::Semaphore;
 
 use crate::executor::{ToolCall, ToolExecutor, ToolResult};
 use crate::output_store::{OutputStore, ToolOutput};
-use crate::registry::{ToolRegistry, Tool};
+use crate::registry::{Tool, ToolRegistry};
 
 /// Marker appended when output hits the byte budget.
 pub const TRUNCATED_MARKER: &str = "[truncated:over-byte-budget]";
@@ -177,7 +177,9 @@ impl RegistryDispatcher {
         if name.is_empty() {
             return Err(DispatchError::EmptyName);
         }
-        let input_bytes = serde_json::to_vec(&input).map(|v| v.len()).unwrap_or(usize::MAX);
+        let input_bytes = serde_json::to_vec(&input)
+            .map(|v| v.len())
+            .unwrap_or(usize::MAX);
         if input_bytes > self.config.max_input_bytes {
             return Err(DispatchError::InputTooLarge {
                 actual: input_bytes,
@@ -225,17 +227,25 @@ impl RegistryDispatcher {
         let _ = executor;
         enum Ready {
             Immediate(Result<DispatchRecord, DispatchError>),
-            Spawn { tool: Tool, input: Value, provenance: String },
+            Spawn {
+                tool: Tool,
+                input: Value,
+                provenance: String,
+            },
         }
         let mut ready: Vec<Option<Ready>> = Vec::with_capacity(requests.len());
         for (name, input, provenance) in requests {
             let item = if name.is_empty() {
                 Ready::Immediate(Err(DispatchError::EmptyName))
-            } else if serde_json::to_vec(&input).map(|v| v.len()).unwrap_or(usize::MAX)
+            } else if serde_json::to_vec(&input)
+                .map(|v| v.len())
+                .unwrap_or(usize::MAX)
                 > self.config.max_input_bytes
             {
                 Ready::Immediate(Err(DispatchError::InputTooLarge {
-                    actual: serde_json::to_vec(&input).map(|v| v.len()).unwrap_or(usize::MAX),
+                    actual: serde_json::to_vec(&input)
+                        .map(|v| v.len())
+                        .unwrap_or(usize::MAX),
                     max: self.config.max_input_bytes,
                 }))
             } else {
@@ -260,7 +270,12 @@ impl RegistryDispatcher {
         let mut set = tokio::task::JoinSet::new();
         let mut spawned_idx: Vec<usize> = Vec::new();
         for (idx, slot) in ready.iter_mut().enumerate() {
-            if let Some(Ready::Spawn { tool, input, provenance }) = slot.take() {
+            if let Some(Ready::Spawn {
+                tool,
+                input,
+                provenance,
+            }) = slot.take()
+            {
                 let sem = self.semaphore.clone();
                 let max_out = self.config.max_output_bytes;
                 spawned_idx.push(idx);
@@ -296,11 +311,8 @@ impl RegistryDispatcher {
         records.sort_by_key(|r| r.as_ref().map(|(i, _)| *i).unwrap_or(usize::MAX));
 
         // Durable write-back in request order; only successful spawns recorded.
-        let mut by_idx: std::collections::HashMap<usize, DispatchRecord> = records
-            .into_iter()
-            .flatten()
-            .map(|(i, r)| (i, r))
-            .collect();
+        let mut by_idx: std::collections::HashMap<usize, DispatchRecord> =
+            records.into_iter().flatten().map(|(i, r)| (i, r)).collect();
         let mut out: Vec<Result<DispatchRecord, DispatchError>> =
             Vec::with_capacity(ready.len() + spawned_idx.len());
         // Rebuild in original order: immediates stay, spawns pull from by_idx.
@@ -362,7 +374,12 @@ fn bound_output(output: String, max_bytes: usize) -> String {
 
 /// Record an executor result durably and return the dispatch record.
 #[allow(dead_code)]
-fn record_result(result: &ToolResult, name: &str, output: String, provenance: &str) -> DispatchRecord {
+fn record_result(
+    result: &ToolResult,
+    name: &str,
+    output: String,
+    provenance: &str,
+) -> DispatchRecord {
     DispatchRecord {
         tool_id: result.tool_id.clone(),
         name: name.to_string(),
@@ -491,7 +508,14 @@ mod tests {
         let d = test_dispatcher();
 
         let err = d
-            .dispatch(&reg, &exec, &store, "echo", json!({ "message": "x" }), "prov")
+            .dispatch(
+                &reg,
+                &exec,
+                &store,
+                "echo",
+                json!({ "message": "x" }),
+                "prov",
+            )
             .await
             .expect_err("disabled tool must be refused");
         assert_eq!(err, DispatchError::Disabled("echo".to_string()));
@@ -508,7 +532,14 @@ mod tests {
         let d = RegistryDispatcher::with_policy(DispatchConfig::default(), Arc::new(DenyAll));
 
         let err = d
-            .dispatch(&reg, &exec, &store, "echo", json!({ "message": "x" }), "prov")
+            .dispatch(
+                &reg,
+                &exec,
+                &store,
+                "echo",
+                json!({ "message": "x" }),
+                "prov",
+            )
             .await
             .expect_err("denied tool must fail");
         assert_eq!(err, DispatchError::Denied("echo".to_string()));
@@ -577,7 +608,14 @@ mod tests {
 
         let big = "x".repeat(1024);
         let err = d
-            .dispatch(&reg, &exec, &store, "echo", json!({ "message": big }), "prov")
+            .dispatch(
+                &reg,
+                &exec,
+                &store,
+                "echo",
+                json!({ "message": big }),
+                "prov",
+            )
             .await
             .expect_err("oversized input must be rejected");
         assert!(matches!(err, DispatchError::InputTooLarge { .. }));
@@ -600,14 +638,25 @@ mod tests {
         );
 
         // Occupy the single permit so the dispatch below pends on acquire.
-        let held = d.semaphore.clone().try_acquire_owned().expect("permit free");
+        let held = d
+            .semaphore
+            .clone()
+            .try_acquire_owned()
+            .expect("permit free");
         assert_eq!(d.available_permits(), 0);
 
         // Cancel (drop) a pending dispatch via timeout: the future is dropped
         // while parked on the semaphore, reclaiming its task with no write.
         let timed = tokio::time::timeout(
             Duration::from_millis(100),
-            d.dispatch(&reg, &exec, &store, "echo", json!({ "message": "cancelled" }), "prov"),
+            d.dispatch(
+                &reg,
+                &exec,
+                &store,
+                "echo",
+                json!({ "message": "cancelled" }),
+                "prov",
+            ),
         )
         .await;
         assert!(timed.is_err(), "pending dispatch must be cancellable");
@@ -620,7 +669,14 @@ mod tests {
 
         // Liveness: a fresh dispatch on the same dispatcher still works.
         let rec = d
-            .dispatch(&reg, &exec, &store, "echo", json!({ "message": "alive" }), "prov")
+            .dispatch(
+                &reg,
+                &exec,
+                &store,
+                "echo",
+                json!({ "message": "alive" }),
+                "prov",
+            )
             .await
             .expect("dispatcher usable after cancel");
         assert!(rec.success);

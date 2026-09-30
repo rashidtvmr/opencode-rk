@@ -168,7 +168,10 @@ fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, thread::JoinHan
                 .expect("provider request header terminator");
             let body = &request[header_end + 4..];
             bodies.push(serde_json::from_slice(body).expect("provider json"));
-            respond_sse(&mut stream, &events.iter().map(String::as_str).collect::<Vec<_>>());
+            respond_sse(
+                &mut stream,
+                &events.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
         }
         bodies
     });
@@ -176,7 +179,9 @@ fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, thread::JoinHan
 }
 
 async fn spawn_http(app: axum::Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind server");
     let address = listener.local_addr().expect("server address");
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
@@ -276,10 +281,8 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
     let _api_key = EnvGuard::set("OPENAI_API_KEY", "fixture-secret");
 
     // ---------- E1: tools enabled, full loop ----------
-    let (provider_base, provider_task) = spawn_scripted_provider(vec![
-        round_one_events(),
-        round_two_events(),
-    ]);
+    let (provider_base, provider_task) =
+        spawn_scripted_provider(vec![round_one_events(), round_two_events()]);
     let _enable = EnvGuard::set("OPENCODE_RK_TURN_TOOLS", "bash");
     let _base = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
     let (app, _dir) = build_app();
@@ -314,13 +317,19 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
     // Round two fed the function call and its output back.
     let round2_items = bodies[1]["input"].as_array().expect("round two input");
     assert!(
-        round2_items.iter().any(|item| item["type"] == "function_call"
-            && item["call_id"] == "call_fixture_1"),
+        round2_items
+            .iter()
+            .any(|item| item["type"] == "function_call" && item["call_id"] == "call_fixture_1"),
         "round two must replay the function_call"
     );
     assert!(
-        round2_items.iter().any(|item| item["type"] == "function_call_output"
-            && item["output"].as_str().unwrap_or_default().contains("loop-fixture-ran")),
+        round2_items
+            .iter()
+            .any(|item| item["type"] == "function_call_output"
+                && item["output"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("loop-fixture-ran")),
         "round two must carry the executed tool output"
     );
 
@@ -334,10 +343,7 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
         roles.contains(&"tool"),
         "tool transcript record persisted, roles: {roles:?}"
     );
-    assert_eq!(
-        messages.last().expect("final message")["role"],
-        "assistant"
-    );
+    assert_eq!(messages.last().expect("final message")["role"], "assistant");
 
     // ---------- E2: iteration cap ----------
     // Under cap=1 the loop must stop after round one: the fixture serves a
@@ -368,10 +374,8 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
     assert_eq!(bodies.len(), 1, "cap=1 must stop before the second round");
 
     // ---------- E3: default policy denies ----------
-    let (provider_base, provider_task) = spawn_scripted_provider(vec![
-        round_one_events(),
-        round_two_events(),
-    ]);
+    let (provider_base, provider_task) =
+        spawn_scripted_provider(vec![round_one_events(), round_two_events()]);
     env::remove_var("OPENCODE_RK_TURN_TOOLS");
     env::remove_var("OPENCODE_RK_TURN_MAX_STEPS");
     let _base = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
@@ -399,8 +403,13 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
     assert_eq!(bodies.len(), 2);
     let round2_items = bodies[1]["input"].as_array().expect("round two input");
     assert!(
-        round2_items.iter().any(|item| item["type"] == "function_call_output"
-            && item["output"].as_str().unwrap_or_default().contains("not permitted")),
+        round2_items
+            .iter()
+            .any(|item| item["type"] == "function_call_output"
+                && item["output"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .contains("not permitted")),
         "denial must be fed back to the provider"
     );
 
@@ -426,7 +435,10 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
         .expect("bash capability entry")
         .clone();
     assert_eq!(bash["available_for_web_turn"], true);
-    assert!(bash["reason"].as_str().unwrap_or_default().contains("OPENCODE_RK_TURN_TOOLS"));
+    assert!(bash["reason"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("OPENCODE_RK_TURN_TOOLS"));
 
     env::remove_var("OPENCODE_RK_TURN_TOOLS");
     let (app2, _dir2) = build_app();

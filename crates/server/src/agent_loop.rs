@@ -288,10 +288,7 @@ mod tests {
             .as_str(),
             "incomplete:max_output_tokens"
         );
-        assert_eq!(
-            TurnStop::MaxSteps { steps: 64 }.as_str(),
-            "max_steps:64"
-        );
+        assert_eq!(TurnStop::MaxSteps { steps: 64 }.as_str(), "max_steps:64");
         assert_eq!(
             TurnStop::PolicyDenied {
                 tool: "bash".into()

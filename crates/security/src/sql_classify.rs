@@ -179,11 +179,9 @@ mod tests {
     fn grant_revoke_denied() {
         assert!(std().classify("GRANT SELECT ON users TO app").is_denied());
         assert!(std().classify("grant all on db.* to 'app'@'%'").is_denied());
-        assert!(
-            std()
-                .classify("REVOKE DELETE ON users FROM role")
-                .is_denied()
-        );
+        assert!(std()
+            .classify("REVOKE DELETE ON users FROM role")
+            .is_denied());
         assert!(std().classify("revoke all on users from app").is_denied());
         assert!(matches!(
             SqlClassifier::permissive().classify("GRANT SELECT ON t TO r"),
@@ -227,16 +225,12 @@ mod tests {
 
     #[test]
     fn attach_database_denied() {
-        assert!(
-            std()
-                .classify("ATTACH DATABASE 'aux.db' AS aux")
-                .is_denied()
-        );
-        assert!(
-            std()
-                .classify("attach database '/tmp/x.db' as x")
-                .is_denied()
-        );
+        assert!(std()
+            .classify("ATTACH DATABASE 'aux.db' AS aux")
+            .is_denied());
+        assert!(std()
+            .classify("attach database '/tmp/x.db' as x")
+            .is_denied());
         assert!(std().classify("ATTACH 'aux.db' AS aux").is_denied());
         assert!(matches!(
             SqlClassifier::permissive().classify("ATTACH DATABASE 'a' AS a"),

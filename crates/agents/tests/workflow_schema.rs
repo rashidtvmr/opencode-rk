@@ -11,13 +11,32 @@ fn t01_valid_linear_dag() {
         name: "linear".into(),
         description: "A -> B -> C".into(),
         steps: vec![
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec!["b".into()] },
-            Step { id: "b".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec!["c".into()] },
-            Step { id: "c".into(), kind: StepKind::Subagent, args: "{}".into(), next: vec![] },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec!["b".into()],
+            },
+            Step {
+                id: "b".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec!["c".into()],
+            },
+            Step {
+                id: "c".into(),
+                kind: StepKind::Subagent,
+                args: "{}".into(),
+                next: vec![],
+            },
         ],
     };
     let result = validate_workflow(&wf);
-    assert!(result.is_ok(), "linear DAG should be valid, got: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "linear DAG should be valid, got: {:?}",
+        result
+    );
 }
 
 // ── T02: cycle rejection ──
@@ -28,8 +47,18 @@ fn t02_cycle_rejection() {
         name: "cyclic".into(),
         description: "A -> B -> A".into(),
         steps: vec![
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec!["b".into()] },
-            Step { id: "b".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec!["a".into()] },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec!["b".into()],
+            },
+            Step {
+                id: "b".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec!["a".into()],
+            },
         ],
     };
     let result = validate_workflow(&wf);
@@ -48,14 +77,33 @@ fn t03_unreachable_step() {
         name: "unreachable".into(),
         description: "A -> B, C orphan".into(),
         steps: vec![
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec!["b".into()] },
-            Step { id: "b".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec![] },
-            Step { id: "c".into(), kind: StepKind::Subagent, args: "{}".into(), next: vec!["a".into()] },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec!["b".into()],
+            },
+            Step {
+                id: "b".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec![],
+            },
+            Step {
+                id: "c".into(),
+                kind: StepKind::Subagent,
+                args: "{}".into(),
+                next: vec!["a".into()],
+            },
         ],
     };
     let result = validate_workflow(&wf);
     // c -> a -> b; c is root, all reachable from c. This is valid.
-    assert!(result.is_ok(), "single-root reachable DAG should be valid, got: {:?}", result);
+    assert!(
+        result.is_ok(),
+        "single-root reachable DAG should be valid, got: {:?}",
+        result
+    );
 }
 
 // ── T04: multi-root rejection ──
@@ -66,9 +114,24 @@ fn t04_multi_root_rejection() {
         name: "multi_root".into(),
         description: "two roots".into(),
         steps: vec![
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec!["c".into()] },
-            Step { id: "b".into(), kind: StepKind::Skill, args: "{}".into(), next: vec!["c".into()] },
-            Step { id: "c".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec![] },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec!["c".into()],
+            },
+            Step {
+                id: "b".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec!["c".into()],
+            },
+            Step {
+                id: "c".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec![],
+            },
         ],
     };
     let result = validate_workflow(&wf);
@@ -90,10 +153,30 @@ fn t05_topo_order_stability() {
         name: "diamond".into(),
         description: "A -> B, A -> C, B -> D, C -> D".into(),
         steps: vec![
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec!["b".into(), "c".into()] },
-            Step { id: "b".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec!["d".into()] },
-            Step { id: "c".into(), kind: StepKind::Subagent, args: "{}".into(), next: vec!["d".into()] },
-            Step { id: "d".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec![] },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec!["b".into(), "c".into()],
+            },
+            Step {
+                id: "b".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec!["d".into()],
+            },
+            Step {
+                id: "c".into(),
+                kind: StepKind::Subagent,
+                args: "{}".into(),
+                next: vec!["d".into()],
+            },
+            Step {
+                id: "d".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec![],
+            },
         ],
     };
     let topo1 = topological_order(&wf).expect("diamond should have valid topo order");
@@ -217,8 +300,18 @@ fn t08_json_round_trip() {
         name: "rt".into(),
         description: "round trip test".into(),
         steps: vec![
-            Step { id: "x".into(), kind: StepKind::Skill, args: r#"{"key":"val"}"#.into(), next: vec!["y".into()] },
-            Step { id: "y".into(), kind: StepKind::Subagent, args: "{}".into(), next: vec![] },
+            Step {
+                id: "x".into(),
+                kind: StepKind::Skill,
+                args: r#"{"key":"val"}"#.into(),
+                next: vec!["y".into()],
+            },
+            Step {
+                id: "y".into(),
+                kind: StepKind::Subagent,
+                args: "{}".into(),
+                next: vec![],
+            },
         ],
     };
     let json = serde_json::to_string(&wf).expect("serialize");
@@ -234,8 +327,18 @@ fn t09_render_plan() {
         name: "plan_test".into(),
         description: "test render".into(),
         steps: vec![
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec!["b".into()] },
-            Step { id: "b".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec![] },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec!["b".into()],
+            },
+            Step {
+                id: "b".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec![],
+            },
         ],
     };
     let rendered = render_plan(&wf);
@@ -249,12 +352,14 @@ fn t09_render_plan() {
 
 #[test]
 fn t10_depth_exceeded() {
-    let mut steps: Vec<Step> = (0..=MAX_DEPTH).map(|i| Step {
-        id: format!("d{}", i),
-        kind: StepKind::Skill,
-        args: "{}".into(),
-        next: vec![],
-    }).collect();
+    let mut steps: Vec<Step> = (0..=MAX_DEPTH)
+        .map(|i| Step {
+            id: format!("d{}", i),
+            kind: StepKind::Skill,
+            args: "{}".into(),
+            next: vec![],
+        })
+        .collect();
     for i in 0..MAX_DEPTH {
         steps[i].next = vec![format!("d{}", i + 1)];
     }
@@ -296,8 +401,18 @@ fn t12_duplicate_step_id() {
         name: "dup".into(),
         description: "duplicate ids".into(),
         steps: vec![
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec![] },
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec![] },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec![],
+            },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec![],
+            },
         ],
     };
     let result = validate_workflow(&wf);
@@ -339,10 +454,30 @@ fn t13_unreachable_step_from_single_root() {
         name: "disconnected_cycle".into(),
         description: "a -> b, c -> d -> c".into(),
         steps: vec![
-            Step { id: "a".into(), kind: StepKind::Skill, args: "{}".into(), next: vec!["b".into()] },
-            Step { id: "b".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec![] },
-            Step { id: "c".into(), kind: StepKind::Subagent, args: "{}".into(), next: vec!["d".into()] },
-            Step { id: "d".into(), kind: StepKind::ToolCall, args: "{}".into(), next: vec!["c".into()] },
+            Step {
+                id: "a".into(),
+                kind: StepKind::Skill,
+                args: "{}".into(),
+                next: vec!["b".into()],
+            },
+            Step {
+                id: "b".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec![],
+            },
+            Step {
+                id: "c".into(),
+                kind: StepKind::Subagent,
+                args: "{}".into(),
+                next: vec!["d".into()],
+            },
+            Step {
+                id: "d".into(),
+                kind: StepKind::ToolCall,
+                args: "{}".into(),
+                next: vec!["c".into()],
+            },
         ],
     };
     let result = validate_workflow(&wf);

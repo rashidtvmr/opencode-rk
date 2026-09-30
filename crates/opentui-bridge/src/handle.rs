@@ -149,7 +149,10 @@ mod tests {
     fn double_claim_rejected() {
         let _guard = TEST_LOCK.lock().unwrap();
         let _held = BridgeHandle::claim(7).expect("first claim");
-        assert_eq!(BridgeHandle::claim(8).unwrap_err(), BridgeError::AlreadyLive);
+        assert_eq!(
+            BridgeHandle::claim(8).unwrap_err(),
+            BridgeError::AlreadyLive
+        );
     }
 
     #[test]

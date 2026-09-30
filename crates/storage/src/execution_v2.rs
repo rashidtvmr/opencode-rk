@@ -17,7 +17,10 @@ pub struct ExecV2;
 impl ExecV2 {
     /// Start a queued execution. The partial UNIQUE index on sessions with an
     /// active execution rejects a second owner while one is live.
-    #[expect(clippy::too_many_arguments, reason = "Existing explicit execution-start operation keeps ownership and provider configuration atomic.")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Existing explicit execution-start operation keeps ownership and provider configuration atomic."
+    )]
     pub fn start_execution(
         connection: &Connection,
         session_pk: i64,
@@ -140,7 +143,10 @@ impl ExecV2 {
 
     /// Plan a tool call owned by an assistant message in the same session.
     /// The tool_assistant_owner trigger rejects non-assistant owners.
-    #[expect(clippy::too_many_arguments, reason = "Existing explicit tool-planning operation keeps caller-validated ownership and intent fields auditable.")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Existing explicit tool-planning operation keeps caller-validated ownership and intent fields auditable."
+    )]
     pub fn plan_tool(
         connection: &Connection,
         session_pk: i64,

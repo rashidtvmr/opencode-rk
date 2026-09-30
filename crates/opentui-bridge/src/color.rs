@@ -153,7 +153,12 @@ impl Rgba {
 
     /// Fully transparent.
     pub const fn transparent() -> Self {
-        Self { r: 0, g: 0, b: 0, a: 0 }
+        Self {
+            r: 0,
+            g: 0,
+            b: 0,
+            a: 0,
+        }
     }
 
     /// Pack as RGB-intent lanes (high bytes zero).
@@ -247,27 +252,63 @@ pub const fn theme_slot(name: &str) -> Option<u8> {
             }
         }
         5 => {
-            if bytes[0] == b'e' && bytes[1] == b'r' && bytes[2] == b'r' && bytes[3] == b'o' && bytes[4] == b'r' {
+            if bytes[0] == b'e'
+                && bytes[1] == b'r'
+                && bytes[2] == b'r'
+                && bytes[3] == b'o'
+                && bytes[4] == b'r'
+            {
                 Some(SLOT_ERROR)
-            } else if bytes[0] == b'm' && bytes[1] == b'u' && bytes[2] == b't' && bytes[3] == b'e' && bytes[4] == b'd' {
+            } else if bytes[0] == b'm'
+                && bytes[1] == b'u'
+                && bytes[2] == b't'
+                && bytes[3] == b'e'
+                && bytes[4] == b'd'
+            {
                 Some(SLOT_MUTED)
             } else {
                 None
             }
         }
         6 => {
-            if bytes[0] == b'a' && bytes[1] == b'c' && bytes[2] == b'c' && bytes[3] == b'e' && bytes[4] == b'n' && bytes[5] == b't' {
+            if bytes[0] == b'a'
+                && bytes[1] == b'c'
+                && bytes[2] == b'c'
+                && bytes[3] == b'e'
+                && bytes[4] == b'n'
+                && bytes[5] == b't'
+            {
                 Some(SLOT_ACCENT)
-            } else if bytes[0] == b'b' && bytes[1] == b'o' && bytes[2] == b'r' && bytes[3] == b'd' && bytes[4] == b'e' && bytes[5] == b'r' {
+            } else if bytes[0] == b'b'
+                && bytes[1] == b'o'
+                && bytes[2] == b'r'
+                && bytes[3] == b'd'
+                && bytes[4] == b'e'
+                && bytes[5] == b'r'
+            {
                 Some(SLOT_BORDER)
             } else {
                 None
             }
         }
         7 => {
-            if bytes[0] == b's' && bytes[1] == b'u' && bytes[2] == b'c' && bytes[3] == b'c' && bytes[4] == b'e' && bytes[5] == b's' && bytes[6] == b's' {
+            if bytes[0] == b's'
+                && bytes[1] == b'u'
+                && bytes[2] == b'c'
+                && bytes[3] == b'c'
+                && bytes[4] == b'e'
+                && bytes[5] == b's'
+                && bytes[6] == b's'
+            {
                 Some(SLOT_SUCCESS)
-            } else if bytes[0] == b'w' && bytes[1] == b'a' && bytes[2] == b'r' && bytes[3] == b'n' && bytes[4] == b'i' && bytes[5] == b'n' && bytes[6] == b'g' {
+            } else if bytes[0] == b'w'
+                && bytes[1] == b'a'
+                && bytes[2] == b'r'
+                && bytes[3] == b'n'
+                && bytes[4] == b'i'
+                && bytes[5] == b'n'
+                && bytes[6] == b'g'
+            {
                 Some(SLOT_WARNING)
             } else {
                 None
@@ -322,7 +363,15 @@ mod tests {
         assert_eq!(intent_of(meta), INTENT_INDEXED);
         assert_eq!(slot_of(meta), 7);
         let packed = pack_rgba8(1, 2, 3, 4, meta);
-        assert_eq!([packed[0] & 0xff, packed[1] & 0xff, packed[2] & 0xff, packed[3] & 0xff], [1, 2, 3, 4]);
+        assert_eq!(
+            [
+                packed[0] & 0xff,
+                packed[1] & 0xff,
+                packed[2] & 0xff,
+                packed[3] & 0xff
+            ],
+            [1, 2, 3, 4]
+        );
     }
 
     #[test]
@@ -370,14 +419,23 @@ mod tests {
 
     #[test]
     fn rgba_from_f32_clamps() {
-        assert_eq!(Rgba::from_f32(1.0, 0.0, 0.5, 1.0), Rgba::new(255, 0, 128, 255));
-        assert_eq!(Rgba::from_f32(-1.0, 2.0, 0.0, -0.5), Rgba::new(0, 255, 0, 0));
+        assert_eq!(
+            Rgba::from_f32(1.0, 0.0, 0.5, 1.0),
+            Rgba::new(255, 0, 128, 255)
+        );
+        assert_eq!(
+            Rgba::from_f32(-1.0, 2.0, 0.0, -0.5),
+            Rgba::new(0, 255, 0, 0)
+        );
         assert_eq!(Rgba::from_f32(f32::NAN, 0.0, 0.0, 1.0).r, 0);
     }
 
     #[test]
     fn rgba_from_i32_clamps() {
-        assert_eq!(Rgba::from_i32(255, 0, 128, 255), Rgba::new(255, 0, 128, 255));
+        assert_eq!(
+            Rgba::from_i32(255, 0, 128, 255),
+            Rgba::new(255, 0, 128, 255)
+        );
         assert_eq!(Rgba::from_i32(-5, 300, 0, 70000), Rgba::new(0, 255, 0, 255));
     }
 

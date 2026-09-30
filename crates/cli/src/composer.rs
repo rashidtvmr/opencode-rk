@@ -183,7 +183,10 @@ impl AppComposer {
         }
         // Mid: both sides cut, window centered on cursor.
         let win = max_chars - 3;
-        let start = c_idx.saturating_sub(win / 2).min(c_idx).min(n.saturating_sub(win));
+        let start = c_idx
+            .saturating_sub(win / 2)
+            .min(c_idx)
+            .min(n.saturating_sub(win));
         let end = (start + win).min(n);
         let mut s = String::from("…");
         for (k, ch) in chars.iter().skip(start).take(end - start).enumerate() {

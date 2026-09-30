@@ -124,12 +124,7 @@ impl Router {
         Self::default()
     }
 
-    pub fn register_session(
-        &mut self,
-        workspace: WorkspaceId,
-        session: SessionId,
-        title: &str,
-    ) {
+    pub fn register_session(&mut self, workspace: WorkspaceId, session: SessionId, title: &str) {
         self.sessions.insert(
             session.clone(),
             SessionRecord {
@@ -260,7 +255,10 @@ impl Router {
         match self.tabs.remove(tab) {
             None => false,
             Some(t) => {
-                let still_open = self.tabs.values().any(|o| o.device == t.device && o.session == t.session);
+                let still_open = self
+                    .tabs
+                    .values()
+                    .any(|o| o.device == t.device && o.session == t.session);
                 if !still_open {
                     if let Some(set) = self.subs.get_mut(&t.session) {
                         set.remove(&t.device);
@@ -311,7 +309,14 @@ impl Router {
 mod tests {
     use super::*;
 
-    fn ids() -> (DeviceId, DeviceId, WorkspaceId, WorkspaceId, SessionId, SessionId) {
+    fn ids() -> (
+        DeviceId,
+        DeviceId,
+        WorkspaceId,
+        WorkspaceId,
+        SessionId,
+        SessionId,
+    ) {
         (
             DeviceId::new("phone-a"),
             DeviceId::new("phone-b"),
@@ -322,7 +327,15 @@ mod tests {
         )
     }
 
-    fn two_session_router() -> (Router, DeviceId, DeviceId, WorkspaceId, WorkspaceId, SessionId, SessionId) {
+    fn two_session_router() -> (
+        Router,
+        DeviceId,
+        DeviceId,
+        WorkspaceId,
+        WorkspaceId,
+        SessionId,
+        SessionId,
+    ) {
         let (da, db, wa, wb, sa, sb) = ids();
         let mut r = Router::new();
         r.register_session(wa.clone(), sa.clone(), "one");
@@ -337,23 +350,38 @@ mod tests {
         // Each device drives its own session fine.
         assert!(r
             .open_tab(
-                RouteTriple { device: da.clone(), workspace: wa.clone(), session: sa.clone() },
+                RouteTriple {
+                    device: da.clone(),
+                    workspace: wa.clone(),
+                    session: sa.clone()
+                },
                 TabId::new("tab-a"),
             )
             .is_ok());
         assert!(r
             .open_tab(
-                RouteTriple { device: db.clone(), workspace: wb.clone(), session: sb.clone() },
+                RouteTriple {
+                    device: db.clone(),
+                    workspace: wb.clone(),
+                    session: sb.clone()
+                },
                 TabId::new("tab-b"),
             )
             .is_ok());
         // Phone A aimed at session B via the wrong workspace: rejected.
         assert_eq!(
             r.open_tab(
-                RouteTriple { device: da.clone(), workspace: wa.clone(), session: sb.clone() },
+                RouteTriple {
+                    device: da.clone(),
+                    workspace: wa.clone(),
+                    session: sb.clone()
+                },
                 TabId::new("tab-x"),
             ),
-            Err(RoutingError::CrossWorkspace { expected: wb.clone(), got: wa.clone() })
+            Err(RoutingError::CrossWorkspace {
+                expected: wb.clone(),
+                got: wa.clone()
+            })
         );
         // Queued prompt with mismatched workspace rejected too.
         assert!(r.queue_action(&db, &wa, &sb).is_err());
@@ -367,7 +395,11 @@ mod tests {
     fn drafts_client_local() {
         let (mut r, da, _, wa, _, sa, _) = two_session_router();
         r.open_tab(
-            RouteTriple { device: da, workspace: wa, session: sa.clone() },
+            RouteTriple {
+                device: da,
+                workspace: wa,
+                session: sa.clone(),
+            },
             TabId::new("tab-a"),
         )
         .unwrap();
@@ -419,7 +451,11 @@ mod tests {
     fn close_tab_preserves_background_session() {
         let (mut r, da, _, wa, _, sa, _) = two_session_router();
         r.open_tab(
-            RouteTriple { device: da, workspace: wa, session: sa.clone() },
+            RouteTriple {
+                device: da,
+                workspace: wa,
+                session: sa.clone(),
+            },
             TabId::new("tab-a"),
         )
         .unwrap();
@@ -441,7 +477,11 @@ mod tests {
     fn revocation_blocks_queued() {
         let (mut r, da, _, wa, _, sa, _) = two_session_router();
         r.open_tab(
-            RouteTriple { device: da.clone(), workspace: wa.clone(), session: sa.clone() },
+            RouteTriple {
+                device: da.clone(),
+                workspace: wa.clone(),
+                session: sa.clone(),
+            },
             TabId::new("tab-a"),
         )
         .unwrap();
@@ -453,7 +493,11 @@ mod tests {
         assert_eq!(r.queue_action(&da, &wa, &sa), Err(RoutingError::Revoked));
         assert_eq!(
             r.open_tab(
-                RouteTriple { device: da, workspace: wa, session: sa },
+                RouteTriple {
+                    device: da,
+                    workspace: wa,
+                    session: sa
+                },
                 TabId::new("tab-rejoin"),
             ),
             Err(RoutingError::Revoked)

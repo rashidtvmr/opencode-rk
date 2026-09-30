@@ -201,7 +201,10 @@ impl RemoteApprovalStore {
         Self::check_field(&req.device_id)?;
         Self::check_field(&req.workspace_id)?;
         Self::check_field(&req.requester)?;
-        let mut g = self.inner.lock().map_err(|_| ApprovalError::InvalidInput("lock"))?;
+        let mut g = self
+            .inner
+            .lock()
+            .map_err(|_| ApprovalError::InvalidInput("lock"))?;
         if g.requests.contains_key(&req.id) {
             return Err(ApprovalError::AlreadyExists);
         }
@@ -211,7 +214,13 @@ impl RemoteApprovalStore {
         if req.policy_version != g.policy_version {
             return Err(ApprovalError::PolicyMismatch);
         }
-        g.requests.insert(req.id.clone(), StoredRequest { req, decision: None });
+        g.requests.insert(
+            req.id.clone(),
+            StoredRequest {
+                req,
+                decision: None,
+            },
+        );
         Ok(())
     }
 
@@ -225,7 +234,10 @@ impl RemoteApprovalStore {
         decision: Decision,
         now_ms: u64,
     ) -> Result<ApprovalReceipt, ApprovalError> {
-        let mut g = self.inner.lock().map_err(|_| ApprovalError::InvalidInput("lock"))?;
+        let mut g = self
+            .inner
+            .lock()
+            .map_err(|_| ApprovalError::InvalidInput("lock"))?;
         let stored = g.requests.get(request_id).ok_or(ApprovalError::NotFound)?;
         if stored.decision.is_some() {
             return Err(ApprovalError::AlreadyDecided);
@@ -290,7 +302,10 @@ impl RemoteApprovalStore {
         current_op_digest: &[u8; 32],
         now_ms: u64,
     ) -> Result<Decision, ApprovalError> {
-        let mut g = self.inner.lock().map_err(|_| ApprovalError::InvalidInput("lock"))?;
+        let mut g = self
+            .inner
+            .lock()
+            .map_err(|_| ApprovalError::InvalidInput("lock"))?;
         if g.revoked_requests.contains(&receipt.request_id)
             || g.revoked_devices.contains(&receipt.device_id)
         {
@@ -299,7 +314,10 @@ impl RemoteApprovalStore {
         if receipt.policy_version != g.policy_version {
             return Err(ApprovalError::Revoked);
         }
-        let stored = g.requests.get(&receipt.request_id).ok_or(ApprovalError::NotFound)?;
+        let stored = g
+            .requests
+            .get(&receipt.request_id)
+            .ok_or(ApprovalError::NotFound)?;
         let req = stored.req.clone();
         let recorded = stored.decision;
         // Receipt must be faithful to the stored request.
@@ -403,7 +421,9 @@ mod tests {
         let pv = s.policy_version();
         let r = req("op-1", pv);
         s.register(r.clone()).unwrap();
-        let rc = s.decide("op-1", &binding(&r), Decision::Approve, 5_000).unwrap();
+        let rc = s
+            .decide("op-1", &binding(&r), Decision::Approve, 5_000)
+            .unwrap();
         assert_eq!(rc.request_id, "op-1");
         assert_eq!(rc.op_digest, r.op_digest);
         assert_eq!(rc.device_id, r.device_id);
@@ -417,20 +437,39 @@ mod tests {
         s.register(base.clone()).unwrap();
         let mut bad = binding(&base);
         bad.device_id = "phone-2".into();
-        assert_eq!(s.decide("op-2", &bad, Decision::Approve, 5_000), Err(ApprovalError::DeviceMismatch));
+        assert_eq!(
+            s.decide("op-2", &bad, Decision::Approve, 5_000),
+            Err(ApprovalError::DeviceMismatch)
+        );
         bad = binding(&base);
         bad.op_digest = digest(9);
-        assert_eq!(s.decide("op-2", &bad, Decision::Approve, 5_000), Err(ApprovalError::DigestMismatch));
+        assert_eq!(
+            s.decide("op-2", &bad, Decision::Approve, 5_000),
+            Err(ApprovalError::DigestMismatch)
+        );
         bad = binding(&base);
         bad.workspace_id = "ws-2".into();
-        assert_eq!(s.decide("op-2", &bad, Decision::Approve, 5_000), Err(ApprovalError::WorkspaceMismatch));
+        assert_eq!(
+            s.decide("op-2", &bad, Decision::Approve, 5_000),
+            Err(ApprovalError::WorkspaceMismatch)
+        );
         bad = binding(&base);
         bad.requester = "mallory".into();
-        assert_eq!(s.decide("op-2", &bad, Decision::Approve, 5_000), Err(ApprovalError::RequesterMismatch));
+        assert_eq!(
+            s.decide("op-2", &bad, Decision::Approve, 5_000),
+            Err(ApprovalError::RequesterMismatch)
+        );
         bad = binding(&base);
         bad.expires_at_ms = 99;
-        assert_eq!(s.decide("op-2", &bad, Decision::Approve, 5_000), Err(ApprovalError::ExpiryMismatch));
-        assert_eq!(s.decision_of("op-2"), None, "failed decide must record nothing");
+        assert_eq!(
+            s.decide("op-2", &bad, Decision::Approve, 5_000),
+            Err(ApprovalError::ExpiryMismatch)
+        );
+        assert_eq!(
+            s.decision_of("op-2"),
+            None,
+            "failed decide must record nothing"
+        );
         // Expired request rejected.
         assert_eq!(
             s.decide("op-2", &binding(&base), Decision::Approve, 10_001),
@@ -448,7 +487,14 @@ mod tests {
         let b = binding(&r);
         s.register(r).unwrap();
         let gate = Arc::new(Barrier::new(2));
-        let (s1, s2, b1, b2, g1, g2) = (Arc::clone(&s), Arc::clone(&s), b.clone(), b, Arc::clone(&gate), Arc::clone(&gate));
+        let (s1, s2, b1, b2, g1, g2) = (
+            Arc::clone(&s),
+            Arc::clone(&s),
+            b.clone(),
+            b,
+            Arc::clone(&gate),
+            Arc::clone(&gate),
+        );
         let t1 = std::thread::spawn(move || {
             g1.wait();
             s1.decide("race-1", &b1, Decision::Approve, 1_000)
@@ -476,7 +522,10 @@ mod tests {
             decision: winner,
         };
         assert_eq!(s.consume(&receipt, &digest(7), 2_000), Ok(winner));
-        assert_eq!(s.consume(&receipt, &digest(7), 2_000), Err(ApprovalError::Replay));
+        assert_eq!(
+            s.consume(&receipt, &digest(7), 2_000),
+            Err(ApprovalError::Replay)
+        );
     }
 
     // NET-009-T03: replay or changed content invalidates, no side effects.
@@ -486,17 +535,33 @@ mod tests {
         let pv = s.policy_version();
         let r = req("op-3", pv);
         s.register(r.clone()).unwrap();
-        let rc = s.decide("op-3", &binding(&r), Decision::Approve, 1_000).unwrap();
+        let rc = s
+            .decide("op-3", &binding(&r), Decision::Approve, 1_000)
+            .unwrap();
         assert_eq!(s.consume(&rc, &digest(7), 2_000), Ok(Decision::Approve));
         // Replay: second execution refused.
-        assert_eq!(s.consume(&rc, &digest(7), 2_000), Err(ApprovalError::Replay));
+        assert_eq!(
+            s.consume(&rc, &digest(7), 2_000),
+            Err(ApprovalError::Replay)
+        );
 
-        let r2 = ApprovalRequest { id: "op-4".into(), ..req("op-4", pv) };
+        let r2 = ApprovalRequest {
+            id: "op-4".into(),
+            ..req("op-4", pv)
+        };
         s.register(r2.clone()).unwrap();
-        let rc2 = s.decide("op-4", &binding(&r2), Decision::Approve, 1_000).unwrap();
+        let rc2 = s
+            .decide("op-4", &binding(&r2), Decision::Approve, 1_000)
+            .unwrap();
         // Operation content changed after approval => invalid, no execution.
-        assert_eq!(s.consume(&rc2, &digest(0xFF), 2_000), Err(ApprovalError::DigestMismatch));
-        assert!(!s.is_consumed("op-4"), "failed consume must not mark consumed");
+        assert_eq!(
+            s.consume(&rc2, &digest(0xFF), 2_000),
+            Err(ApprovalError::DigestMismatch)
+        );
+        assert!(
+            !s.is_consumed("op-4"),
+            "failed consume must not mark consumed"
+        );
     }
 
     // NET-009-T04: local-only / human-only enforced against remote clients.
@@ -532,15 +597,26 @@ mod tests {
         let r = req("op-5", pv);
         s.register(r.clone()).unwrap();
         s.revoke_request("op-5");
-        assert_eq!(s.decide("op-5", &binding(&r), Decision::Approve, 1_000), Err(ApprovalError::Revoked));
+        assert_eq!(
+            s.decide("op-5", &binding(&r), Decision::Approve, 1_000),
+            Err(ApprovalError::Revoked)
+        );
         assert_eq!(s.decision_of("op-5"), None);
 
         // Device logout (revocation) after decide invalidates receipt.
-        let r2 = ApprovalRequest { id: "op-6".into(), ..req("op-6", pv) };
+        let r2 = ApprovalRequest {
+            id: "op-6".into(),
+            ..req("op-6", pv)
+        };
         s.register(r2.clone()).unwrap();
-        let rc2 = s.decide("op-6", &binding(&r2), Decision::Approve, 1_000).unwrap();
+        let rc2 = s
+            .decide("op-6", &binding(&r2), Decision::Approve, 1_000)
+            .unwrap();
         s.revoke_device("phone-1");
-        assert_eq!(s.consume(&rc2, &digest(7), 2_000), Err(ApprovalError::Revoked));
+        assert_eq!(
+            s.consume(&rc2, &digest(7), 2_000),
+            Err(ApprovalError::Revoked)
+        );
 
         // PC policy change invalidates other pending authority.
         let s2 = RemoteApprovalStore::new();
@@ -548,6 +624,9 @@ mod tests {
         let r3 = req("op-7", pv2);
         s2.register(r3.clone()).unwrap();
         s2.bump_policy();
-        assert_eq!(s2.decide("op-7", &binding(&r3), Decision::Approve, 1_000), Err(ApprovalError::Revoked));
+        assert_eq!(
+            s2.decide("op-7", &binding(&r3), Decision::Approve, 1_000),
+            Err(ApprovalError::Revoked)
+        );
     }
 }

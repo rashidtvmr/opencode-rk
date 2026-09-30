@@ -23,7 +23,10 @@ const MAX_SWEEP_ROWS: usize = 500;
 pub struct ApprovalsV2;
 
 impl ApprovalsV2 {
-    #[expect(clippy::too_many_arguments, reason = "Existing explicit approval operation keeps admission and its audit fields together.")]
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "Existing explicit approval operation keeps admission and its audit fields together."
+    )]
     pub fn request(
         connection: &Connection,
         session_pk: i64,

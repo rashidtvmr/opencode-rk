@@ -188,7 +188,11 @@ fn fresh_open_creates_typed_schema_and_feature_ledger_and_keeps_format1() {
     let storage = Storage::open(paths_under(dir.path())).expect("Storage::open");
     let connection = Connection::open(paths_under(dir.path()).database).unwrap();
 
-    assert_eq!(schema_version(&connection), "1", "format-1 marker preserved");
+    assert_eq!(
+        schema_version(&connection),
+        "1",
+        "format-1 marker preserved"
+    );
     assert!(
         table_exists(&connection, TOOL_ROUNDS),
         "migration must create {TOOL_ROUNDS}: absent today (missing typed migration)"
@@ -256,7 +260,8 @@ fn conflicting_preexisting_tool_rounds_object_fails_closed_atomically() {
     std::fs::create_dir_all(&paths.root).unwrap();
     {
         let raw = Connection::open(&paths.database).unwrap();
-        raw.execute_batch("CREATE TABLE tool_rounds(x TEXT);").unwrap();
+        raw.execute_batch("CREATE TABLE tool_rounds(x TEXT);")
+            .unwrap();
     }
 
     let opened = Storage::open(paths.clone());
@@ -304,7 +309,10 @@ fn reopen_is_idempotent_and_preserves_marker_and_schema() {
     let connection = Connection::open(&paths.database).unwrap();
     assert_eq!(schema_version(&connection), "1");
     assert_eq!(schema_version(&connection), first_version);
-    assert_eq!(table_sql(&connection, TOOL_ROUNDS).as_deref(), Some(first_rounds_sql.as_str()));
+    assert_eq!(
+        table_sql(&connection, TOOL_ROUNDS).as_deref(),
+        Some(first_rounds_sql.as_str())
+    );
     assert_eq!(
         table_sql(&connection, TYPED_RECORDS).as_deref(),
         Some(first_records_sql.as_str())
@@ -327,10 +335,20 @@ fn fixed_keying_and_foreign_keys_are_present() {
     let storage = Storage::open(paths_under(dir.path())).expect("Storage::open");
     let connection = Connection::open(paths_under(dir.path()).database).unwrap();
 
-    assert!(table_exists(&connection, TOOL_ROUNDS), "missing typed migration");
-    assert!(table_exists(&connection, TYPED_RECORDS), "missing typed migration");
+    assert!(
+        table_exists(&connection, TOOL_ROUNDS),
+        "missing typed migration"
+    );
+    assert!(
+        table_exists(&connection, TYPED_RECORDS),
+        "missing typed migration"
+    );
 
-    let mut round_keys: Vec<String> = vec!["round_id".to_owned(), "turn_message_id".to_owned(), "round_ordinal".to_owned()];
+    let mut round_keys: Vec<String> = vec![
+        "round_id".to_owned(),
+        "turn_message_id".to_owned(),
+        "round_ordinal".to_owned(),
+    ];
     round_keys.sort();
     assert!(
         unique_index_columns(&connection, TOOL_ROUNDS).contains(&round_keys),
@@ -338,7 +356,11 @@ fn fixed_keying_and_foreign_keys_are_present() {
         unique_index_columns(&connection, TOOL_ROUNDS)
     );
 
-    let mut record_key: Vec<String> = vec!["round_id".to_owned(), "pair_index".to_owned(), "kind".to_owned()];
+    let mut record_key: Vec<String> = vec![
+        "round_id".to_owned(),
+        "pair_index".to_owned(),
+        "kind".to_owned(),
+    ];
     record_key.sort();
     assert!(
         unique_index_columns(&connection, TYPED_RECORDS).contains(&record_key),
@@ -347,12 +369,24 @@ fn fixed_keying_and_foreign_keys_are_present() {
     );
 
     let round_targets = foreign_key_targets(&connection, TOOL_ROUNDS);
-    assert!(round_targets.iter().any(|t| t == "sessions"), "tool_rounds -> sessions FK");
-    assert!(round_targets.iter().any(|t| t == "messages"), "tool_rounds -> messages FK");
+    assert!(
+        round_targets.iter().any(|t| t == "sessions"),
+        "tool_rounds -> sessions FK"
+    );
+    assert!(
+        round_targets.iter().any(|t| t == "messages"),
+        "tool_rounds -> messages FK"
+    );
 
     let record_targets = foreign_key_targets(&connection, TYPED_RECORDS);
-    assert!(record_targets.iter().any(|t| t == "tool_rounds"), "typed -> tool_rounds FK");
-    assert!(record_targets.iter().any(|t| t == "messages"), "typed -> messages FK");
+    assert!(
+        record_targets.iter().any(|t| t == "tool_rounds"),
+        "typed -> tool_rounds FK"
+    );
+    assert!(
+        record_targets.iter().any(|t| t == "messages"),
+        "typed -> messages FK"
+    );
 
     drop(connection);
     drop(storage);
@@ -369,7 +403,11 @@ fn typed_ddl_uses_blob_byte_accounting_and_has_no_512_call_id_cap() {
 
     let sql = table_sql(&connection, TYPED_RECORDS)
         .expect("typed_tool_records DDL must exist (missing typed migration)");
-    let normalized: String = sql.to_lowercase().split_whitespace().collect::<Vec<_>>().join(" ");
+    let normalized: String = sql
+        .to_lowercase()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ");
     assert!(
         normalized.contains("cast(") && normalized.contains("as blob"),
         "byte accounting must use length(CAST(x AS BLOB)); got {sql}"
@@ -469,8 +507,19 @@ fn legacy_rows_survive_migrated_reopen_byte_identical() {
     assert_eq!(summary, reasoning);
     drop(raw);
 
-    assert_eq!(storage.get_message(session_id, tool_id).unwrap().body, PayloadRef::Inline { text: tool_text.to_owned() });
+    assert_eq!(
+        storage.get_message(session_id, tool_id).unwrap().body,
+        PayloadRef::Inline {
+            text: tool_text.to_owned()
+        }
+    );
     assert_eq!(storage.list_draft_attachments(session_id).unwrap().len(), 1);
-    assert_eq!(storage.list_assistant_activity(session_id, 10).unwrap().len(), 1);
+    assert_eq!(
+        storage
+            .list_assistant_activity(session_id, 10)
+            .unwrap()
+            .len(),
+        1
+    );
     drop(storage);
 }

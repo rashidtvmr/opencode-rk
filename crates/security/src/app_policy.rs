@@ -14,8 +14,8 @@
 //! always returns [`PolicyDeny::UnsupportedSandbox`].
 #![forbid(unsafe_code)]
 
-use opencode_rk_contracts::{ApprovalId, SessionId};
 use super::{Decision, FileAction, OperationIntent, PermissionBroker};
+use opencode_rk_contracts::{ApprovalId, SessionId};
 use serde::{Deserialize, Serialize};
 use std::{
     collections::{HashSet, VecDeque},
@@ -428,8 +428,8 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use super::super::{PermissionSet, SecurityPolicy};
+    use super::*;
     use std::time::Duration;
 
     const NOW: u64 = 1_750_000_000;
@@ -501,7 +501,10 @@ mod tests {
         let b = star();
         let (_, expected) = ctx(b.generation());
         let mut ledger = GrantLedger::new();
-        assert_eq!(decide(&b, &write_src(), None, &expected, &mut ledger), AppDecision::Allow);
+        assert_eq!(
+            decide(&b, &write_src(), None, &expected, &mut ledger),
+            AppDecision::Allow
+        );
         assert!(ledger.is_empty());
     }
 
@@ -608,12 +611,10 @@ mod tests {
         let intent = delete_tmp();
         let grant = grant_for(&intent, &scope, false);
         let mut ledger = GrantLedger::new();
-        assert!(
-            matches!(
-                decide(&b, &intent, Some(&grant), &expected, &mut ledger),
-                AppDecision::Deny { .. }
-            )
-        );
+        assert!(matches!(
+            decide(&b, &intent, Some(&grant), &expected, &mut ledger),
+            AppDecision::Deny { .. }
+        ));
         assert!(ledger.is_empty());
     }
 
@@ -686,12 +687,10 @@ mod tests {
         let mut ledger = GrantLedger::new();
         let decision = decide(&b, &intent, Some(&grant), &expected, &mut ledger);
         assert_eq!(decision, AppDecision::Allow);
-        assert!(
-            matches!(
-                enforce_local_only(false, &grant, decision),
-                AppDecision::Deny { .. }
-            )
-        );
+        assert!(matches!(
+            enforce_local_only(false, &grant, decision),
+            AppDecision::Deny { .. }
+        ));
         let decision = decide(&b, &intent, None, &expected, &mut GrantLedger::new());
         let _ = enforce_local_only(true, &grant, decision);
         // Fresh grant honored from local origin.

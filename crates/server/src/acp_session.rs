@@ -465,7 +465,8 @@ impl LiveBridge {
                 },
             );
             if status == Status::Recovered {
-                self.bus.publish(DaemonEvent::SessionRecovered { session: id });
+                self.bus
+                    .publish(DaemonEvent::SessionRecovered { session: id });
             }
         }
         Ok(self.sessions.len())
@@ -652,10 +653,7 @@ mod tests {
         assert_eq!(bridge.status(&id, OWNER), Ok(Status::Running));
         let events = bridge.drain(sub).expect("drain");
         assert_eq!(events.len(), 1);
-        assert_eq!(
-            events[0],
-            DaemonEvent::SessionStarted { session: id }
-        );
+        assert_eq!(events[0], DaemonEvent::SessionStarted { session: id });
     }
 
     // DISC-112-T04: restart recovers truthful state via disposable snapshot.
@@ -687,7 +685,9 @@ mod tests {
         let events = fresh.drain(sub).expect("drain");
         assert_eq!(
             events,
-            vec![DaemonEvent::SessionRecovered { session: live.clone() }]
+            vec![DaemonEvent::SessionRecovered {
+                session: live.clone()
+            }]
         );
         assert!(
             !events.iter().any(|e| e.session() == done),
@@ -760,9 +760,11 @@ mod tests {
         });
         assert_eq!(summary.delivered, 1);
         let events = bridge.drain(fast).expect("fast drains");
-        assert!(events
-            .iter()
-            .any(|e| e == &DaemonEvent::MessageQueued { session: id.clone(), seq: 999 }));
+        assert!(events.iter().any(|e| e
+            == &DaemonEvent::MessageQueued {
+                session: id.clone(),
+                seq: 999
+            }));
         // Disconnect reclaims the slow slot.
         assert!(bridge.bus_mut().unsubscribe(slow));
         assert_eq!(bridge.bus().live_subscribers(), 1);

@@ -2,8 +2,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
+        Arc, Mutex,
     },
 };
 use tokio::sync::mpsc;

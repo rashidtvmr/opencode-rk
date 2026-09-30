@@ -113,14 +113,16 @@ fn t03_navigate_left_wraps() {
 fn t04_eviction_keeps_focused() {
     let mut nodes = Vec::new();
     for i in 0..100 {
-        nodes.push(node(
-            &format!("n{i}"),
-            NodeKind::Session,
-            &format!("N{i}"),
-            i * 10,
-            0,
-        )
-        .build());
+        nodes.push(
+            node(
+                &format!("n{i}"),
+                NodeKind::Session,
+                &format!("N{i}"),
+                i * 10,
+                0,
+            )
+            .build(),
+        );
     }
     let edges: Vec<EdgeView> = Vec::new();
     let mut graph = GraphView::with_capacity(nodes, edges, 80, 24, 10);
@@ -129,14 +131,16 @@ fn t04_eviction_keeps_focused() {
     let focused = graph.focused_id().unwrap().to_string();
     // Evict more nodes
     for i in 10..50 {
-        graph.insert_node(node(
-            &format!("n{i}"),
-            NodeKind::Session,
-            &format!("N{i}"),
-            i * 10,
-            0,
-        )
-        .build());
+        graph.insert_node(
+            node(
+                &format!("n{i}"),
+                NodeKind::Session,
+                &format!("N{i}"),
+                i * 10,
+                0,
+            )
+            .build(),
+        );
     }
     assert_eq!(graph.node_count(), 10);
     // Focused node must survive eviction

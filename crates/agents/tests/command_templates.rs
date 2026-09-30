@@ -7,8 +7,8 @@
 mod command_templates;
 
 use command_templates::{
-    expand_template, parse_command_def, round_trip, serialize_command_def, CommandDef, CommandError,
-    FileRef, ShellPlan, MAX_FILE_REFS, MAX_POSITIONAL_ARGS, MAX_TEMPLATE_BYTES,
+    expand_template, parse_command_def, round_trip, serialize_command_def, CommandDef,
+    CommandError, FileRef, ShellPlan, MAX_FILE_REFS, MAX_POSITIONAL_ARGS, MAX_TEMPLATE_BYTES,
 };
 
 // ── T01: basic $ARGUMENTS substitution ─────────────────────────────────────

@@ -466,7 +466,9 @@ mod tests {
     use super::*;
 
     fn window(n: u64) -> Vec<StoredEvent> {
-        (1..=n).map(|s| StoredEvent::at(s, "message.appended")).collect()
+        (1..=n)
+            .map(|s| StoredEvent::at(s, "message.appended"))
+            .collect()
     }
 
     #[test]
@@ -485,7 +487,10 @@ mod tests {
         let ReconnectPlan::Rebuild { events } = second else {
             panic!("caught-up cursor must still rebuild");
         };
-        assert!(events.is_empty(), "replay after catch-up must not duplicate");
+        assert!(
+            events.is_empty(),
+            "replay after catch-up must not duplicate"
+        );
         let mid = Cursor::after(&log[0]);
         let tail = plan_reconnect(&mid, &log).unwrap();
         let ReconnectPlan::Rebuild { events } = tail else {
@@ -565,7 +570,13 @@ mod tests {
             })
         );
         assert_eq!(
-            format!("{}", VersionConflict { expected: 7, actual: 9 }),
+            format!(
+                "{}",
+                VersionConflict {
+                    expected: 7,
+                    actual: 9
+                }
+            ),
             "version conflict: expected 7, actual 9"
         );
     }

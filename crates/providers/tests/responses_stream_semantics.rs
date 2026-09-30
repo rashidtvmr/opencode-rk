@@ -84,7 +84,10 @@ fn s4_completed_with_tool_call_and_no_text_is_valid() {
             r#"{"type":"response.output_item.done","item":{"type":"function_call","call_id":"call_1","name":"bash","arguments":"{}"}}"#,
         )
         .expect("function call first");
-    assert!(matches!(first, Some(ResponsesStreamEvent::FunctionCall { .. })));
+    assert!(matches!(
+        first,
+        Some(ResponsesStreamEvent::FunctionCall { .. })
+    ));
     let e = p
         .parse_event(
             None,
@@ -103,16 +106,28 @@ fn s4_completed_with_tool_call_and_no_text_is_valid() {
 fn s5_parser_is_exhausted_after_terminal_event() {
     let mut p = parser();
     let _ = p
-        .parse_event(None, r#"{"type":"response.completed","response":{"status":"completed"}}"#)
+        .parse_event(
+            None,
+            r#"{"type":"response.completed","response":{"status":"completed"}}"#,
+        )
         .expect("terminal");
-    assert_eq!(p.parse_event(None, r#"{"type":"response.completed","response":{}}"#), Ok(None));
+    assert_eq!(
+        p.parse_event(None, r#"{"type":"response.completed","response":{}}"#),
+        Ok(None)
+    );
 }
 
 #[test]
 fn s6_text_delta_still_flows_through_shared_parser() {
     let mut p = parser();
     let e = p
-        .parse_event(None, r#"{"type":"response.output_text.delta","delta":"hi"}"#)
+        .parse_event(
+            None,
+            r#"{"type":"response.output_text.delta","delta":"hi"}"#,
+        )
         .expect("delta");
-    assert_eq!(e, Some(ResponsesStreamEvent::OutputTextDelta("hi".to_owned())));
+    assert_eq!(
+        e,
+        Some(ResponsesStreamEvent::OutputTextDelta("hi".to_owned()))
+    );
 }

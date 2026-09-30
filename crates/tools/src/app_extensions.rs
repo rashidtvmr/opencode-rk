@@ -164,13 +164,14 @@ fn valid_name(s: &str, max_len: usize) -> bool {
 }
 
 fn valid_command_name(s: &str) -> bool {
-    s.len() >= 2 && s.starts_with('/') && !s.contains(char::is_whitespace) && valid_name(&s[1..], MAX_NAME_LEN)
+    s.len() >= 2
+        && s.starts_with('/')
+        && !s.contains(char::is_whitespace)
+        && valid_name(&s[1..], MAX_NAME_LEN)
 }
 
 fn valid_marker(s: &str) -> bool {
-    !s.is_empty()
-        && s.len() <= MAX_MARKER_LEN
-        && s.bytes().all(|b| matches!(b, 0x20..=0x7E))
+    !s.is_empty() && s.len() <= MAX_MARKER_LEN && s.bytes().all(|b| matches!(b, 0x20..=0x7E))
 }
 
 fn valid_cap(s: &str) -> bool {
@@ -322,7 +323,12 @@ impl UiContribution {
         if self.label.is_empty() || self.label.len() > MAX_LABEL_LEN {
             return Err(ExtError::InvalidName);
         }
-        if !self.label.bytes().next().is_some_and(|b| b.is_ascii_alphanumeric()) {
+        if !self
+            .label
+            .bytes()
+            .next()
+            .is_some_and(|b| b.is_ascii_alphanumeric())
+        {
             return Err(ExtError::InvalidName);
         }
         if !self
@@ -374,7 +380,11 @@ impl UiCatalog {
     /// Record one UI contribution. Duplicate label+kind refused.
     pub fn add(&mut self, u: UiContribution) -> Result<(), ExtError> {
         u.validate()?;
-        if self.entries.iter().any(|e| e.label == u.label && e.kind == u.kind) {
+        if self
+            .entries
+            .iter()
+            .any(|e| e.label == u.label && e.kind == u.kind)
+        {
             return Err(ExtError::Duplicate);
         }
         if self.entries.len() >= MAX_UI {
@@ -386,7 +396,10 @@ impl UiCatalog {
 
     /// Only native-compatible contributions: Solid/TS never advertised.
     pub fn list_native(&self) -> Vec<&UiContribution> {
-        self.entries.iter().filter(|e| e.is_native_compatible()).collect()
+        self.entries
+            .iter()
+            .filter(|e| e.is_native_compatible())
+            .collect()
     }
 
     pub fn list_all(&self) -> &[UiContribution] {
@@ -529,7 +542,8 @@ mod tests {
     #[test]
     fn custom_command_affects_turn_marker() {
         let mut reg = ExtensionRegistry::new();
-        reg.add(cmd(Scope::Builtin, "/ship", "builtin-ship")).unwrap();
+        reg.add(cmd(Scope::Builtin, "/ship", "builtin-ship"))
+            .unwrap();
         reg.add(cmd(Scope::User, "/ship", "user-ship")).unwrap();
         let mut turn = Turn::default();
         reg.apply_command("/ship", &mut turn).unwrap();
@@ -540,7 +554,8 @@ mod tests {
     fn precedence_and_scope_project_beats_plugin() {
         let mut reg = ExtensionRegistry::new();
         reg.add(cmd(Scope::Plugin, "/deploy", "plugin-v")).unwrap();
-        reg.add(cmd(Scope::Project, "/deploy", "project-v")).unwrap();
+        reg.add(cmd(Scope::Project, "/deploy", "project-v"))
+            .unwrap();
         let won = reg.resolve(ContributorKind::Command, "/deploy").unwrap();
         assert_eq!(won.scope, Scope::Project);
         let mut turn = Turn::default();
@@ -602,9 +617,13 @@ mod tests {
     #[test]
     fn compat_never_starts_native_only() {
         let mut host = CompatHost::new();
-        assert_eq!(host.start(CompatMode::NativeOnly), Err(ExtError::CompatRefusedNativeOnly));
+        assert_eq!(
+            host.start(CompatMode::NativeOnly),
+            Err(ExtError::CompatRefusedNativeOnly)
+        );
         assert!(!host.is_started());
-        host.start(CompatMode::Sandboxed { budget_bytes: 1024 }).unwrap();
+        host.start(CompatMode::Sandboxed { budget_bytes: 1024 })
+            .unwrap();
         assert!(host.is_started());
         host.account(512).unwrap();
         assert_eq!(host.used_bytes(), 512);
@@ -621,7 +640,9 @@ mod tests {
             Err(ExtError::CompatBudgetExceeded)
         );
         assert_eq!(
-            host.start(CompatMode::Sandboxed { budget_bytes: MAX_COMPAT_BUDGET + 1 }),
+            host.start(CompatMode::Sandboxed {
+                budget_bytes: MAX_COMPAT_BUDGET + 1
+            }),
             Err(ExtError::CompatBudgetExceeded)
         );
         assert!(!host.is_started());
@@ -630,12 +651,28 @@ mod tests {
     #[test]
     fn malicious_grant_rejected_authority_unchanged() {
         let mut auth = Authority::new();
-        for evil in ["", "*", "../secret", "a/b", "human.approve", "system.exec", "..", "a..b..c..d..e..f..g..h..i..j..k..l..m..n..o..p..q..r..s..t..u..v..w..x..y..z..1..2..3..4..5..6..extra-long-tail-ok-but-dots-flagged"] {
-            assert_eq!(auth.request(&[evil]), Err(ExtError::GrantRejected), "evil: {evil:?}");
+        for evil in [
+            "",
+            "*",
+            "../secret",
+            "a/b",
+            "human.approve",
+            "system.exec",
+            "..",
+            "a..b..c..d..e..f..g..h..i..j..k..l..m..n..o..p..q..r..s..t..u..v..w..x..y..z..1..2..3..4..5..6..extra-long-tail-ok-but-dots-flagged",
+        ] {
+            assert_eq!(
+                auth.request(&[evil]),
+                Err(ExtError::GrantRejected),
+                "evil: {evil:?}"
+            );
         }
         assert!(auth.granted().is_empty());
         auth.request(&["tools.read"]).unwrap();
-        assert_eq!(auth.request(&["tools.read", "human.approve"]), Err(ExtError::GrantRejected));
+        assert_eq!(
+            auth.request(&["tools.read", "human.approve"]),
+            Err(ExtError::GrantRejected)
+        );
         assert_eq!(auth.granted(), &["tools.read".to_string()]);
     }
 
@@ -646,12 +683,21 @@ mod tests {
             reg.add(cmd(Scope::User, "noslash", "m")),
             Err(ExtError::InvalidName)
         );
-        assert_eq!(reg.add(cmd(Scope::User, "/ok", "")), Err(ExtError::InvalidMarker));
+        assert_eq!(
+            reg.add(cmd(Scope::User, "/ok", "")),
+            Err(ExtError::InvalidMarker)
+        );
         reg.add(cmd(Scope::User, "/ok", "m1")).unwrap();
-        assert_eq!(reg.add(cmd(Scope::User, "/ok", "m1")), Err(ExtError::Duplicate));
+        assert_eq!(
+            reg.add(cmd(Scope::User, "/ok", "m1")),
+            Err(ExtError::Duplicate)
+        );
         assert!(reg.is_empty() == false && reg.len() == 1);
         let mut turn = Turn::default();
-        assert_eq!(reg.apply_command("/nope", &mut turn), Err(ExtError::Unknown));
+        assert_eq!(
+            reg.apply_command("/nope", &mut turn),
+            Err(ExtError::Unknown)
+        );
         assert_eq!(turn.marker, "");
     }
 }

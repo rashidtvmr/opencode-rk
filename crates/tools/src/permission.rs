@@ -174,7 +174,15 @@ mod tests {
     #[test]
     fn t02_unknown_tool_denied_zero_side_effect() {
         let b = broker();
-        let verdict = check(&allowed(), &grants(), &[], &b, "nope-missing", "ext-a", &read_intent());
+        let verdict = check(
+            &allowed(),
+            &grants(),
+            &[],
+            &b,
+            "nope-missing",
+            "ext-a",
+            &read_intent(),
+        );
         assert_eq!(
             verdict,
             Err(PermissionError::NotAllowed("nope-missing".to_string()))
@@ -193,7 +201,15 @@ mod tests {
     #[test]
     fn t03_ungranted_ext_denied_zero_side_effect() {
         let b = broker();
-        let verdict = check(&allowed(), &grants(), &[], &b, "read", "ext-b", &read_intent());
+        let verdict = check(
+            &allowed(),
+            &grants(),
+            &[],
+            &b,
+            "read",
+            "ext-b",
+            &read_intent(),
+        );
         assert_eq!(
             verdict,
             Err(PermissionError::ExtDenied {
@@ -220,8 +236,19 @@ mod tests {
             ext: "*".to_string(),
             perm: "*".to_string(),
         }];
-        let verdict = check(&star_allowed, &star_grants, &[], &b, "*", "*", &read_intent());
-        assert_eq!(verdict, Err(PermissionError::WildcardRejected("*".to_string())));
+        let verdict = check(
+            &star_allowed,
+            &star_grants,
+            &[],
+            &b,
+            "*",
+            "*",
+            &read_intent(),
+        );
+        assert_eq!(
+            verdict,
+            Err(PermissionError::WildcardRejected("*".to_string()))
+        );
         // Broker mandatory controls survive allowlist + ext grant: secret read
         // denies even when both layers cover the tool.
         let allowed2 = vec!["read".to_string()];
@@ -257,7 +284,15 @@ mod tests {
             perm: "secure.deploy".to_string(),
         });
         // Ungranted secure perm denies with zero side effects.
-        let denied = check(&allowed(), &ext, &[], &b, "secure.deploy", "ext-a", &read_intent());
+        let denied = check(
+            &allowed(),
+            &ext,
+            &[],
+            &b,
+            "secure.deploy",
+            "ext-a",
+            &read_intent(),
+        );
         assert_eq!(
             denied,
             Err(PermissionError::SecureDenied("secure.deploy".to_string()))
@@ -276,7 +311,15 @@ mod tests {
             path: PathBuf::from("/work/project/generated.tmp"),
         };
         assert_eq!(
-            check(&allowed(), &ext, &secure_grants(), &b, "secure.deploy", "ext-a", &del),
+            check(
+                &allowed(),
+                &ext,
+                &secure_grants(),
+                &b,
+                "secure.deploy",
+                "ext-a",
+                &del
+            ),
             Err(PermissionError::BrokerHumanGate)
         );
         // Reserved human namespace never grantable.

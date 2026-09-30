@@ -5,8 +5,8 @@
 mod workspace_proxy;
 
 use workspace_proxy::{
-    route, strip_headers, ProxyError, ProxyItem, ProxyItemKind, ProxyQueue, ProxyTarget,
-    RouteHint, MAX_PROXY_QUEUE_BYTES, MAX_PROXY_QUEUE_ITEMS,
+    route, strip_headers, ProxyError, ProxyItem, ProxyItemKind, ProxyQueue, ProxyTarget, RouteHint,
+    MAX_PROXY_QUEUE_BYTES, MAX_PROXY_QUEUE_ITEMS,
 };
 
 fn local_hint(path: &str) -> RouteHint {
@@ -209,13 +209,12 @@ fn wsx001_t03_queue_caps_atomic() {
     assert_eq!(q2.queue_len(), 16);
     // Exact single-item cap is accepted on a fresh queue.
     let mut q3 = ProxyQueue::new();
-    assert!(
-        q3.push(ProxyItem {
+    assert!(q3
+        .push(ProxyItem {
             kind: ProxyItemKind::WsFrame,
             bytes: vec![1u8; 262_144],
         })
-        .is_ok()
-    );
+        .is_ok());
 }
 
 #[test]
@@ -227,15 +226,9 @@ fn wsx001_t04_strip_safety_and_bad_headers() {
     ];
     let before = headers.clone();
     let stripped = strip_headers(&headers).unwrap();
-    assert_eq!(
-        stripped,
-        vec![("X-Custom".to_string(), "keep".to_string())]
-    );
+    assert_eq!(stripped, vec![("X-Custom".to_string(), "keep".to_string())]);
     let rendered = format!("{stripped:?}");
-    assert!(
-        !rendered.contains(secret),
-        "stripped value must not leak"
-    );
+    assert!(!rendered.contains(secret), "stripped value must not leak");
     assert_eq!(headers, before);
 
     let long_name = "n".repeat(257);

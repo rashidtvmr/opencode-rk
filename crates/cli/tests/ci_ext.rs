@@ -4,9 +4,9 @@
 mod ci_output;
 
 use ci_output::CiExitCode;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::io::{BufRead, BufReader};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
@@ -22,10 +22,8 @@ struct TestHome {
 impl TestHome {
     fn new() -> Self {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!(
-            "opencode-rk-ci-ext-{}-{id}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("opencode-rk-ci-ext-{}-{id}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         Self { dir }
     }
@@ -104,10 +102,7 @@ fn spawn_openai_fixture(home: &TestHome, extra_args: Vec<String>) -> Child {
     );
     std::fs::write(home.path().join("config.json"), config).unwrap();
 
-    let mut args = vec![
-        "run".to_string(),
-        "--ci".to_string(),
-    ];
+    let mut args = vec!["run".to_string(), "--ci".to_string()];
     args.extend(extra_args);
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
@@ -141,11 +136,11 @@ fn ci_command(home: &TestHome, prompt: &str) -> Child {
 
     let mut cmd = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
     cmd.args(["run", "--ci", "--prompt", prompt])
-    .env_clear()
-    .env("OPENCODE_RK_HOME", home.path())
-    .env("OPENCODE_RK_DAEMON_ADDR", addr.to_string())
-    .stdout(Stdio::piped())
-    .stderr(Stdio::piped());
+        .env_clear()
+        .env("OPENCODE_RK_HOME", home.path())
+        .env("OPENCODE_RK_DAEMON_ADDR", addr.to_string())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
 
     cmd.spawn().expect("failed to spawn opencode-rk")
 }
@@ -310,9 +305,10 @@ fn ci_ext_t05_doctor_emits_valid_jsonl_with_checks() {
     let _status = child.wait().unwrap();
 
     // Find the Doctor JSONL line
-    let doctor_line = lines.iter().find(|l| l.contains("Doctor")).expect(
-        "expected a Doctor JSONL line in output",
-    );
+    let doctor_line = lines
+        .iter()
+        .find(|l| l.contains("Doctor"))
+        .expect("expected a Doctor JSONL line in output");
 
     let parsed: serde_json::Value =
         serde_json::from_str(doctor_line.trim()).expect("Doctor line is not valid JSON");
@@ -323,10 +319,7 @@ fn ci_ext_t05_doctor_emits_valid_jsonl_with_checks() {
         .and_then(|v| v.as_array())
         .expect("Doctor JSONL must contain a 'checks' array");
 
-    assert!(
-        !checks.is_empty(),
-        "Doctor checks array must not be empty"
-    );
+    assert!(!checks.is_empty(), "Doctor checks array must not be empty");
 
     // Each check must have name + status
     for check in checks {
@@ -375,8 +368,5 @@ fn ci_ext_t06_doctor_is_single_jsonl_line() {
     // That one line must be valid JSON
     let parsed: serde_json::Value =
         serde_json::from_str(doctor_lines[0]).expect("Doctor line is not valid JSON");
-    assert!(
-        parsed.is_object(),
-        "Doctor line must be a JSON object"
-    );
+    assert!(parsed.is_object(), "Doctor line must be a JSON object");
 }

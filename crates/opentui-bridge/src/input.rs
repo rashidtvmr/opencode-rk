@@ -16,7 +16,12 @@ pub struct Key {
 impl Key {
     #[must_use]
     pub const fn new(code: u32, ctrl: bool, alt: bool, shift: bool) -> Self {
-        Self { code, ctrl, alt, shift }
+        Self {
+            code,
+            ctrl,
+            alt,
+            shift,
+        }
     }
 
     /// Plain key, no modifiers held.
@@ -68,7 +73,11 @@ pub struct FocusRing {
 impl FocusRing {
     #[must_use]
     pub const fn new() -> Self {
-        Self { ids: [0; MAX_FOCUS], len: 0, current: 0 }
+        Self {
+            ids: [0; MAX_FOCUS],
+            len: 0,
+            current: 0,
+        }
     }
 
     #[must_use]
@@ -200,7 +209,11 @@ mod tests {
         assert_eq!(key, InputEvent::Key(Key::plain(13)));
         assert_ne!(
             key,
-            InputEvent::Mouse { x: 0, y: 0, button: MouseButton::Left }
+            InputEvent::Mouse {
+                x: 0,
+                y: 0,
+                button: MouseButton::Left
+            }
         );
         assert_eq!(
             InputEvent::Resize { w: 80, h: 24 },

@@ -372,8 +372,14 @@ mod tests {
     #[test]
     fn api_wire_missing_bearer_fails_closed() {
         for bearer in [None, Some(""), Some("   ")] {
-            let err = build_api_wire("POST", "127.0.0.1:4096", "/api/sessions/turns", "{}", bearer)
-                .expect_err("credential-less /api/* must refuse");
+            let err = build_api_wire(
+                "POST",
+                "127.0.0.1:4096",
+                "/api/sessions/turns",
+                "{}",
+                bearer,
+            )
+            .expect_err("credential-less /api/* must refuse");
             assert!(err.contains("refusing unauthenticated"));
         }
     }
@@ -396,7 +402,10 @@ mod tests {
         assert!(text.contains("authorization: Bearer tok"));
         assert!(text.contains(HEADLESS_TURN_PATH));
         assert_eq!(run_headless("hello", None), Err(ExitCode::Unauthorized));
-        assert_eq!(run_headless("hello", Some("  ")), Err(ExitCode::Unauthorized));
+        assert_eq!(
+            run_headless("hello", Some("  ")),
+            Err(ExitCode::Unauthorized)
+        );
         assert_eq!(run_headless("", Some("Bearer tok")), Err(ExitCode::Usage));
     }
 }

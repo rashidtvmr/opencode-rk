@@ -13,11 +13,11 @@ pub type NativeHandle = u32;
 /// Invalid/sentinel handle returned on failure.
 pub const INVALID_HANDLE: NativeHandle = 0;
 
+use crate::safe_renderer::BridgeError;
 /// Byte cap for one draw call. Mirrors
 /// [`crate::safe_renderer::MAX_TEXT_BYTES`]; re-checked here so callers can
 /// validate before touching a renderer.
 pub use crate::safe_renderer::MAX_TEXT_BYTES;
-use crate::safe_renderer::BridgeError;
 
 /// Reject text over [`MAX_TEXT_BYTES`] (byte length, matching `draw_text`).
 pub fn check_text_bytes(text: &str) -> Result<(), BridgeError> {
@@ -99,39 +99,19 @@ unsafe extern "C" {
     pub fn textBufferSetDefaultFg(tb_handle: NativeHandle, fg: *const u16);
     pub fn textBufferSetDefaultBg(tb_handle: NativeHandle, bg: *const u16);
     pub fn textBufferSetTextFromMem(tb_handle: NativeHandle, id: u8);
-    pub fn textBufferAppend(
-        tb_handle: NativeHandle,
-        data_ptr: *const u8,
-        data_len: u32,
-    );
+    pub fn textBufferAppend(tb_handle: NativeHandle, data_ptr: *const u8, data_len: u32);
     pub fn textBufferAppendFromMemId(tb_handle: NativeHandle, id: u8);
-    pub fn textBufferLoadFile(
-        tb_handle: NativeHandle,
-        path_ptr: *const u8,
-        path_len: u32,
-    ) -> bool;
+    pub fn textBufferLoadFile(tb_handle: NativeHandle, path_ptr: *const u8, path_len: u32) -> bool;
     pub fn textBufferSetStyledText(
         tb_handle: NativeHandle,
         chunks_ptr: *const StyledChunk,
         chunk_count: u32,
     );
     pub fn textBufferGetLineCount(tb_handle: NativeHandle) -> u32;
-    pub fn textBufferGetPlainText(
-        tb_handle: NativeHandle,
-        out_ptr: *mut u8,
-        max_len: u32,
-    ) -> u32;
-    pub fn editBufferSetText(
-        edit_handle: NativeHandle,
-        text_ptr: *const u8,
-        text_len: u32,
-    );
+    pub fn textBufferGetPlainText(tb_handle: NativeHandle, out_ptr: *mut u8, max_len: u32) -> u32;
+    pub fn editBufferSetText(edit_handle: NativeHandle, text_ptr: *const u8, text_len: u32);
     pub fn editBufferSetTextFromMem(edit_handle: NativeHandle, mem_id: u8);
-    pub fn editBufferReplaceText(
-        edit_handle: NativeHandle,
-        text_ptr: *const u8,
-        text_len: u32,
-    );
+    pub fn editBufferReplaceText(edit_handle: NativeHandle, text_ptr: *const u8, text_len: u32);
 }
 
 #[cfg(test)]
@@ -177,10 +157,7 @@ mod tests {
             vec!["ab", "cd", "e"]
         );
         assert_eq!(super::wrap_text("", 4).unwrap(), vec![""]);
-        assert_eq!(
-            super::wrap_text("héllo", 2).unwrap(),
-            vec!["hé", "ll", "o"]
-        );
+        assert_eq!(super::wrap_text("héllo", 2).unwrap(), vec!["hé", "ll", "o"]);
         assert!(super::wrap_text("abc", 0).unwrap().is_empty());
         assert_eq!(
             super::wrap_text(&"x".repeat(MAX_TEXT_BYTES + 1), 80).unwrap_err(),

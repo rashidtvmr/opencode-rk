@@ -410,7 +410,11 @@ impl NavigationState {
     /// are dropped.
     pub fn apply(&mut self, event: DaemonEvent) {
         match event {
-            DaemonEvent::Renamed { session, title, rev } => {
+            DaemonEvent::Renamed {
+                session,
+                title,
+                rev,
+            } => {
                 if self.tombstone_at_or_above(&session, rev) {
                     return;
                 }
@@ -610,17 +614,18 @@ mod tests {
         // Intents route to the real service with the exact session ids.
         assert_eq!(
             nav.fork_request(&s("parent")).unwrap(),
-            ForkRequest { parent: s("parent") }
+            ForkRequest {
+                parent: s("parent")
+            }
         );
         assert_eq!(
             nav.resume_request(&s("child")).unwrap(),
-            ResumeRequest { session: s("child") }
+            ResumeRequest {
+                session: s("child")
+            }
         );
         assert_eq!(nav.fork_request(&s("ghost")), Err(NavRefusal::NoSuchTab));
-        assert_eq!(
-            nav.resume_request(&s("ghost")),
-            Err(NavRefusal::NoSuchTab)
-        );
+        assert_eq!(nav.resume_request(&s("ghost")), Err(NavRefusal::NoSuchTab));
     }
 
     #[test]
@@ -730,10 +735,7 @@ mod tests {
             resolve_sidebar_focus(Focus::Sidebar, true),
             Focus::Transcript
         );
-        assert_eq!(
-            resolve_sidebar_focus(Focus::Sidebar, false),
-            Focus::Sidebar
-        );
+        assert_eq!(resolve_sidebar_focus(Focus::Sidebar, false), Focus::Sidebar);
         assert_eq!(
             resolve_sidebar_focus(Focus::Composer, true),
             Focus::Composer
@@ -771,7 +773,9 @@ mod tests {
     #[test]
     fn sidebar_roster_is_bounded_and_paginates() {
         let mut bar = SidebarNav::new();
-        let many: Vec<SessionRef> = (0..(MAX_SIDEBAR + 8)).map(|i| s(&format!("s{i}"))).collect();
+        let many: Vec<SessionRef> = (0..(MAX_SIDEBAR + 8))
+            .map(|i| s(&format!("s{i}")))
+            .collect();
         bar.set_entries(many);
         assert_eq!(MAX_SIDEBAR, 32);
         assert_eq!(bar.len(), MAX_SIDEBAR);

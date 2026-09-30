@@ -7,9 +7,9 @@ pub mod admission_bounds;
 pub mod agent_loop;
 pub mod app_client;
 pub use agent_loop::{
-    CallOutput, LoopController, MAX_CALLS_PER_ROUND, MAX_TOOL_OUTPUT_CHARS, MAX_TURN_STEPS,
-    RequestedCall, TurnStop, function_call_output as loop_function_call_output,
-    truncate_tool_output,
+    function_call_output as loop_function_call_output, truncate_tool_output, CallOutput,
+    LoopController, RequestedCall, TurnStop, MAX_CALLS_PER_ROUND, MAX_TOOL_OUTPUT_CHARS,
+    MAX_TURN_STEPS,
 };
 pub mod app_protocols;
 pub mod app_runtime;
@@ -75,24 +75,24 @@ pub mod web_turn_adapter;
 pub mod workspace_proxy;
 pub mod workspace_sessions;
 use axum::{
-    Json, Router,
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
+    Json, Router,
 };
 use futures_util::stream;
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    ArtifactId, ArtifactKind, AttachmentId, MAX_DRAFT_ATTACHMENT_BYTES, MessageId, MessageRecord,
-    MessageRole, PayloadRef, SessionId, Timestamp, WIRE_SCHEMA_VERSION,
+    ArtifactId, ArtifactKind, AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef,
+    SessionId, Timestamp, MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
-    MAX_RESPONSES_INPUT_BYTES, MAX_RESPONSES_INPUT_MESSAGES, OpenAiResponsesClient,
-    OpenAiResponsesStream, ResponsesError, ResponsesItem, ResponsesRole, ResponsesStopReason,
-    ResponsesStreamEvent, ResponsesTool,
+    OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesItem, ResponsesRole,
+    ResponsesStopReason, ResponsesStreamEvent, ResponsesTool, MAX_RESPONSES_INPUT_BYTES,
+    MAX_RESPONSES_INPUT_MESSAGES,
 };
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{
@@ -102,7 +102,7 @@ use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
-use serde_json::{Value, json};
+use serde_json::{json, Value};
 use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
 use tokio::sync::{Semaphore, SemaphorePermit};
 

@@ -52,10 +52,7 @@ impl DeviceFingerprint {
         if display.is_empty() || display.len() > MAX_FINGERPRINT_LEN {
             return Err(PairError::InvalidInput);
         }
-        if !display
-            .bytes()
-            .all(|b| b.is_ascii_graphic() || b == b' ')
-        {
+        if !display.bytes().all(|b| b.is_ascii_graphic() || b == b' ') {
             return Err(PairError::InvalidInput);
         }
         Ok(Self(display.to_owned()))
@@ -239,9 +236,8 @@ impl CancelReceipt {
 /// QR payload: challenge material only. Takes `&SingleUseChallenge`, which has
 /// no provider-key field, so secrets cannot reach the QR by construction.
 pub fn qr_payload(challenge: &SingleUseChallenge) -> String {
-    let mut out = String::with_capacity(
-        QR_SCHEME_PREFIX.len() + challenge.challenge_material().len() + 64,
-    );
+    let mut out =
+        String::with_capacity(QR_SCHEME_PREFIX.len() + challenge.challenge_material().len() + 64);
     out.push_str(QR_SCHEME_PREFIX);
     out.push_str("c=");
     out.push_str(&pct_encode(challenge.challenge_material()));
@@ -301,10 +297,7 @@ mod tests {
     fn reused_challenge_fails_second_redeem() {
         let mut p = Pairing::begin(challenge());
         p.redeem(ACCT, OPAQUE, NOW).unwrap();
-        assert_eq!(
-            p.redeem(ACCT, OPAQUE, NOW),
-            Err(PairError::AlreadyUsed)
-        );
+        assert_eq!(p.redeem(ACCT, OPAQUE, NOW), Err(PairError::AlreadyUsed));
     }
 
     #[test]

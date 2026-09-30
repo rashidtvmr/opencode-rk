@@ -618,7 +618,10 @@ mod tests {
             DaemonPresence::Absent,
             Some(true),
         );
-        assert_eq!(plan.mode, LaunchMode::Headless(HeadlessReason::BothRedirected));
+        assert_eq!(
+            plan.mode,
+            LaunchMode::Headless(HeadlessReason::BothRedirected)
+        );
         assert!(!enters_raw_mode(&plan.mode));
         assert_eq!(plan.role, None);
         assert_eq!(plan.view, None);
@@ -628,9 +631,17 @@ mod tests {
 
     #[test]
     fn none_arm_error_probe_passes_through_with_no_role_or_view() {
-        for p in [probe(None, None), probe(None, Some(true)), probe(Some(true), None)] {
+        for p in [
+            probe(None, None),
+            probe(None, Some(true)),
+            probe(Some(true), None),
+        ] {
             let plan = plan_default_launch(&p, DaemonPresence::Reusable, Some(true));
-            assert_eq!(plan.mode, LaunchMode::Error(LaunchError::TerminalProbeFailed), "{p:?}");
+            assert_eq!(
+                plan.mode,
+                LaunchMode::Error(LaunchError::TerminalProbeFailed),
+                "{p:?}"
+            );
             assert!(!enters_raw_mode(&plan.mode), "{p:?}");
             assert_eq!(plan.role, None, "{p:?}");
             assert_eq!(plan.view, None, "{p:?}");

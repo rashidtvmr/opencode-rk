@@ -162,7 +162,10 @@ impl StatusBoard {
     /// Counter by index (0..5 per `apply_usage`).
     #[must_use]
     pub fn counter(&self, idx: usize) -> Counter {
-        self.counters.get(idx).copied().unwrap_or(Counter::Unobserved)
+        self.counters
+            .get(idx)
+            .copied()
+            .unwrap_or(Counter::Unobserved)
     }
 
     /// Whether any usage event was ever applied.
@@ -210,12 +213,18 @@ impl StatusBoard {
     /// Enable an MCP server. Returns the lifecycle action the caller must
     /// execute; the state only flips when the caller reports success.
     pub fn enable_server(&mut self, name: &str) -> Option<McpAction> {
-        self.servers.iter().find(|s| s.name == name).map(|_| McpAction::Start(name.to_string()))
+        self.servers
+            .iter()
+            .find(|s| s.name == name)
+            .map(|_| McpAction::Start(name.to_string()))
     }
 
     /// Disable an MCP server; returns the stop action for the caller.
     pub fn disable_server(&mut self, name: &str) -> Option<McpAction> {
-        self.servers.iter().find(|s| s.name == name).map(|_| McpAction::Stop(name.to_string()))
+        self.servers
+            .iter()
+            .find(|s| s.name == name)
+            .map(|_| McpAction::Stop(name.to_string()))
     }
 
     /// The caller reports the executed lifecycle outcome.
@@ -413,11 +422,7 @@ mod tests {
             .collect();
         assert_eq!(renderable, vec![true, false, false]);
         // Elevated policy shows internal but never secret.
-        let elevated: Vec<bool> = board
-            .context()
-            .iter()
-            .map(|e| e.renderable(true))
-            .collect();
+        let elevated: Vec<bool> = board.context().iter().map(|e| e.renderable(true)).collect();
         assert_eq!(elevated, vec![true, true, false]);
     }
 
@@ -520,8 +525,14 @@ mod tests {
         board.set_quota("rate limited; retrying on fallback".into(), true);
         let line = status_line(&board, Some(&"m".repeat(100)), Some("s"), true);
         assert!(line.contains("[fallback]"), "{line}");
-        assert!(line.contains("[quota: rate limited; retrying on fallback]"), "{line}");
-        assert!(line.chars().count() <= 3 * (MAX_STATUS_LABEL + 20) + 64 + 32, "{line}");
+        assert!(
+            line.contains("[quota: rate limited; retrying on fallback]"),
+            "{line}"
+        );
+        assert!(
+            line.chars().count() <= 3 * (MAX_STATUS_LABEL + 20) + 64 + 32,
+            "{line}"
+        );
         assert!(!line.contains(&"m".repeat(100)), "{line}");
     }
 }

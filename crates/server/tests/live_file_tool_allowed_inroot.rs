@@ -201,7 +201,10 @@ fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, thread::JoinHan
                 .expect("provider request header terminator");
             let body = &request[header_end + 4..];
             bodies.push(serde_json::from_slice(body).expect("provider json"));
-            respond_sse(&mut stream, &events.iter().map(String::as_str).collect::<Vec<_>>());
+            respond_sse(
+                &mut stream,
+                &events.iter().map(String::as_str).collect::<Vec<_>>(),
+            );
         }
         bodies
     });
@@ -209,7 +212,9 @@ fn spawn_scripted_provider(rounds: Vec<Vec<String>>) -> (String, thread::JoinHan
 }
 
 async fn spawn_http(app: axum::Router) -> (SocketAddr, tokio::task::JoinHandle<()>) {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("bind server");
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind server");
     let address = listener.local_addr().expect("server address");
     let task = tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
@@ -311,10 +316,8 @@ async fn live_write_tool_inroot_is_allowed_and_persisted() {
         fixture.target.starts_with(env::current_dir().expect("cwd")),
         "fixture target must live inside the broker project root"
     );
-    let (provider_base, provider_task) = spawn_scripted_provider(vec![
-        round_one_events(&fixture.target),
-        round_two_events(),
-    ]);
+    let (provider_base, provider_task) =
+        spawn_scripted_provider(vec![round_one_events(&fixture.target), round_two_events()]);
     let _base = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
     let session_id = create_session(&app, "live write inroot").await;
     let (address, server) = spawn_http(app.clone()).await;
@@ -334,17 +337,26 @@ async fn live_write_tool_inroot_is_allowed_and_persisted() {
         output.contains("success") || output.contains("written"),
         "expected successful write, got {output:?}"
     );
-    assert!(!output.contains("Unknown tool"), "live caller must dispatch write tool");
+    assert!(
+        !output.contains("Unknown tool"),
+        "live caller must dispatch write tool"
+    );
     assert_eq!(
         std::fs::read_to_string(&fixture.target).expect("written file"),
         ALLOWED_CONTENT
     );
     assert!(
-        !events.iter().any(|event| event.to_string().contains(ALLOWED_CONTENT)),
+        !events
+            .iter()
+            .any(|event| event.to_string().contains(ALLOWED_CONTENT)),
         "public tool_call must not leak file content"
     );
     let bodies = provider_task.join().expect("provider fixture finished");
-    assert_eq!(bodies.len(), 2, "allow is acknowledged in exactly one bounded second round");
+    assert_eq!(
+        bodies.len(),
+        2,
+        "allow is acknowledged in exactly one bounded second round"
+    );
     let round2 = bodies[1]["input"].as_array().expect("round two input");
     let feedback = round2
         .iter()
@@ -364,10 +376,15 @@ async fn live_write_tool_inroot_is_allowed_and_persisted() {
         "persisted tool transcript must record success"
     );
     assert!(
-        !messages.iter().any(|message| message.to_string().contains(ALLOWED_CONTENT)),
+        !messages
+            .iter()
+            .any(|message| message.to_string().contains(ALLOWED_CONTENT)),
         "transcript must not include file payload"
     );
     let dir = fixture.dir.clone();
     drop(fixture);
-    assert!(!dir.exists(), "disposable inroot fixture dir must be cleaned up");
+    assert!(
+        !dir.exists(),
+        "disposable inroot fixture dir must be cleaned up"
+    );
 }

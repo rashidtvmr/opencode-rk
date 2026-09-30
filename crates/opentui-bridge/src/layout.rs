@@ -61,10 +61,22 @@ pub const SIDEBAR_MIN_WIDTH: u32 = 20;
 #[must_use]
 pub const fn sidebar_width(width: u32) -> u32 {
     let third = width / 3;
-    let capped = if third < SIDEBAR_WIDTH { third } else { SIDEBAR_WIDTH };
-    let floor = if SIDEBAR_MIN_WIDTH < width { SIDEBAR_MIN_WIDTH } else { width };
+    let capped = if third < SIDEBAR_WIDTH {
+        third
+    } else {
+        SIDEBAR_WIDTH
+    };
+    let floor = if SIDEBAR_MIN_WIDTH < width {
+        SIDEBAR_MIN_WIDTH
+    } else {
+        width
+    };
     let floored = if capped < floor { floor } else { capped };
-    if floored > width { width } else { floored }
+    if floored > width {
+        width
+    } else {
+        floored
+    }
 }
 
 /// Shell regions in paint order (mirrors CLI `ShellLayout`).
@@ -103,9 +115,19 @@ impl ShellRegions {
         };
         if compact || !sidebar_visible {
             return ShellRegions {
-                transcript: Rect { x: 0, y: 0, w: width, h: body_h },
+                transcript: Rect {
+                    x: 0,
+                    y: 0,
+                    w: width,
+                    h: body_h,
+                },
                 composer,
-                sidebar: Rect { x: 0, y: 0, w: 0, h: 0 },
+                sidebar: Rect {
+                    x: 0,
+                    y: 0,
+                    w: 0,
+                    h: 0,
+                },
                 status,
                 compact: true,
             };
@@ -113,9 +135,19 @@ impl ShellRegions {
         let side_w = sidebar_width(width);
         let side_w = if side_w < width { side_w } else { width };
         ShellRegions {
-            transcript: Rect { x: 0, y: 0, w: width.saturating_sub(side_w), h: body_h },
+            transcript: Rect {
+                x: 0,
+                y: 0,
+                w: width.saturating_sub(side_w),
+                h: body_h,
+            },
             composer,
-            sidebar: Rect { x: width.saturating_sub(side_w), y: 0, w: side_w, h: body_h },
+            sidebar: Rect {
+                x: width.saturating_sub(side_w),
+                y: 0,
+                w: side_w,
+                h: body_h,
+            },
             status,
             compact: false,
         }
@@ -272,8 +304,15 @@ mod tests {
     #[test]
     fn fixed_plus_flex_row() {
         let area = Rect::new(0, 0, 100, 10);
-        let out = split_row(area, &[Constraint::Fixed(20), Constraint::Flex(1), Constraint::Flex(3)])
-            .unwrap();
+        let out = split_row(
+            area,
+            &[
+                Constraint::Fixed(20),
+                Constraint::Flex(1),
+                Constraint::Flex(3),
+            ],
+        )
+        .unwrap();
         assert_eq!(out.len(), 3);
         assert_eq!((out[0].x, out[0].w), (0, 20));
         assert_eq!((out[1].x, out[1].w), (20, 20));
@@ -285,8 +324,15 @@ mod tests {
     #[test]
     fn percent_col_and_remainder_to_leading_flex() {
         let area = Rect::new(5, 2, 8, 10);
-        let out = split_col(area, &[Constraint::Percent(50), Constraint::Flex(1), Constraint::Flex(1)])
-            .unwrap();
+        let out = split_col(
+            area,
+            &[
+                Constraint::Percent(50),
+                Constraint::Flex(1),
+                Constraint::Flex(1),
+            ],
+        )
+        .unwrap();
         assert_eq!(out.iter().map(|r| r.h).sum::<u32>(), 10);
         assert_eq!(out[0].h, 5);
         // 5 cells left over 2 equal weights: 5/2=2 each +1 leftover to first.

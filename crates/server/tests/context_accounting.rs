@@ -12,11 +12,11 @@ use context_accounting::*;
 #[test]
 fn t01_segment_split_sums_to_total() {
     let input = AccountInput {
-        system_prompt_bytes: 400,  // 100 tokens
-        rules_bytes: 200,          // 50 tokens
+        system_prompt_bytes: 400, // 100 tokens
+        rules_bytes: 200,         // 50 tokens
         history_messages: vec![
-            HistoryPiece { bytes: 80 },   // 20 tokens
-            HistoryPiece { bytes: 120 },  // 30 tokens
+            HistoryPiece { bytes: 80 },  // 20 tokens
+            HistoryPiece { bytes: 120 }, // 30 tokens
         ],
         tool_schemas_bytes: vec![160, 80], // 40 + 20 = 60
         current_turn_bytes: 40,            // 10 tokens
@@ -42,11 +42,11 @@ fn t02_estimator_bytes_per_4_consistent() {
     assert_eq!(estimate_tokens(101), 25);
 
     let input = AccountInput {
-        system_prompt_bytes: 12,   // 3 tokens
-        rules_bytes: 16,           // 4 tokens
+        system_prompt_bytes: 12, // 3 tokens
+        rules_bytes: 16,         // 4 tokens
         history_messages: vec![HistoryPiece { bytes: 4 }],
         tool_schemas_bytes: vec![8],
-        current_turn_bytes: 20,    // 5 tokens
+        current_turn_bytes: 20, // 5 tokens
         model_limit: 100,
         compaction_threshold: 0.8,
     };

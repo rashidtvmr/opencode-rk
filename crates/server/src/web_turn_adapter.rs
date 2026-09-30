@@ -200,7 +200,10 @@ impl core::fmt::Display for AttachmentGateError {
                 f,
                 "draft files are persisted but the provider attachment adapter is unavailable"
             ),
-            Self::Denied => write!(f, "attachment transmit denied: explicit authorization required"),
+            Self::Denied => write!(
+                f,
+                "attachment transmit denied: explicit authorization required"
+            ),
             Self::Oversize { len, max } => {
                 write!(f, "attachment too large: {len} bytes exceeds {max}")
             }
@@ -311,7 +314,10 @@ impl core::fmt::Display for ArtifactGateError {
                 f,
                 "code run/apply disabled: no safe native executor is installed"
             ),
-            Self::Denied => write!(f, "code run/apply denied: explicit authorization is required"),
+            Self::Denied => write!(
+                f,
+                "code run/apply denied: explicit authorization is required"
+            ),
         }
     }
 }
@@ -459,13 +465,19 @@ mod tests {
         // No provider adapter: gate refuses before any sink write.
         let err = authorize_transmit("hello", 1, flags, true).unwrap_err();
         assert_eq!(err, AttachmentGateError::NoProviderAdapter);
-        assert!(sink.is_empty(), "denied transmit must leave no side effects");
+        assert!(
+            sink.is_empty(),
+            "denied transmit must leave no side effects"
+        );
         // Adapter present but no explicit grant: still refused, sink clean.
         let mut with_adapter = flags;
         with_adapter.attachment_provider_adapter = true;
         let err = authorize_transmit("hello", 1, with_adapter, false).unwrap_err();
         assert_eq!(err, AttachmentGateError::Denied);
-        assert!(sink.is_empty(), "denied transmit must leave no side effects");
+        assert!(
+            sink.is_empty(),
+            "denied transmit must leave no side effects"
+        );
         // Authorized path forwards exactly the permitted digests.
         let permit = authorize_transmit("hello", 1, with_adapter, true).unwrap();
         let n = transmit_attachments(permit, &["blob:abc".to_string()], &mut sink).unwrap();
@@ -506,9 +518,21 @@ mod tests {
             assert!(!reason.is_empty(), "unavailable must carry a reason");
         }
         // Reasons name the missing adapter, never a fake success.
-        assert!(voice_start_status(flags).unwrap_err().reason().unwrap().contains("adapter"));
-        assert!(search_status(flags).unwrap_err().reason().unwrap().contains("adapter"));
-        assert!(research_status(flags).unwrap_err().reason().unwrap().contains("adapter"));
+        assert!(voice_start_status(flags)
+            .unwrap_err()
+            .reason()
+            .unwrap()
+            .contains("adapter"));
+        assert!(search_status(flags)
+            .unwrap_err()
+            .reason()
+            .unwrap()
+            .contains("adapter"));
+        assert!(research_status(flags)
+            .unwrap_err()
+            .reason()
+            .unwrap()
+            .contains("adapter"));
         // And the capability report agrees with the journey gates.
         let r = capability_report(flags);
         assert!(!r.voice.available() && !r.search.available() && !r.deep_research.available());

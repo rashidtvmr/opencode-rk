@@ -354,10 +354,7 @@ impl EditBuffer {
     /// long enough. False on the first line.
     pub fn move_up(&mut self) -> bool {
         let starts = line_starts(&self.text);
-        let line = starts
-            .iter()
-            .rposition(|&s| s <= self.cursor)
-            .unwrap_or(0);
+        let line = starts.iter().rposition(|&s| s <= self.cursor).unwrap_or(0);
         if line == 0 {
             return false;
         }
@@ -372,10 +369,7 @@ impl EditBuffer {
     /// Down one visual line, keeping the char column. False on the last line.
     pub fn move_down(&mut self) -> bool {
         let starts = line_starts(&self.text);
-        let line = starts
-            .iter()
-            .rposition(|&s| s <= self.cursor)
-            .unwrap_or(0);
+        let line = starts.iter().rposition(|&s| s <= self.cursor).unwrap_or(0);
         if line + 1 >= starts.len() {
             return false;
         }
@@ -676,7 +670,9 @@ impl ComposerPage {
         queue: &[String],
     ) -> Result<(), ComposerError> {
         if queue.len() > BUSY_QUEUE_CAP {
-            return Err(ComposerError::QueueFull { limit: BUSY_QUEUE_CAP });
+            return Err(ComposerError::QueueFull {
+                limit: BUSY_QUEUE_CAP,
+            });
         }
         if draft.len() > MAX_DRAFT_BYTES {
             return Err(ComposerError::DraftTooLong {
@@ -738,8 +734,7 @@ impl ComposerPage {
             push_wrapped(&mut lines, &format!("queued[{i}]: {first}"), w);
         }
         lines.truncate(MAX_PAGE_LINES);
-        if self.composer.queue.len() + draft_line_count(self.composer.draft()) + 1
-            > MAX_PAGE_LINES
+        if self.composer.queue.len() + draft_line_count(self.composer.draft()) + 1 > MAX_PAGE_LINES
         {
             if let Some(last) = lines.last_mut() {
                 *last = "... (truncated)".to_string();
@@ -959,10 +954,7 @@ mod tests {
     fn busy_queue_bounded_fifo_at_32() {
         let mut c = Composer::new();
         c.set_draft("first").unwrap();
-        assert_eq!(
-            c.submit(),
-            Ok(SubmitOutcome::Sent("first".to_owned()))
-        );
+        assert_eq!(c.submit(), Ok(SubmitOutcome::Sent("first".to_owned())));
         assert!(c.is_busy());
         for i in 0..BUSY_QUEUE_CAP {
             c.set_draft(&format!("q{i}")).unwrap();
@@ -1014,7 +1006,7 @@ mod tests {
         assert!(c.buffer_mut().move_up());
         assert!(c.buffer_mut().move_up());
         assert!(!c.buffer_mut().move_up()); // top line: no-op
-        // Column clamps on short lines: end of "cdef" down to "z".
+                                            // Column clamps on short lines: end of "cdef" down to "z".
         c.set_draft("ab\ncdef\nz").unwrap();
         c.buffer_mut().move_to_start();
         c.buffer_mut().move_down();
@@ -1062,19 +1054,27 @@ mod tests {
         page.composer_mut().submit().unwrap();
         let busy = page.render_lines(80);
         assert!(busy.iter().any(|l| l.contains("busy")), "busy badged");
-        assert!(busy.iter().any(|l| l.contains("queue 1/")), "queued count shown");
+        assert!(
+            busy.iter().any(|l| l.contains("queue 1/")),
+            "queued count shown"
+        );
         page.composer_mut().interrupt();
         let back = page.render_lines(80);
-        assert!(back.iter().any(|l| l.contains("idle")), "interrupt back to idle");
-        assert!(back.iter().any(|l| l.contains("waiting")), "draft preserved");
+        assert!(
+            back.iter().any(|l| l.contains("idle")),
+            "interrupt back to idle"
+        );
+        assert!(
+            back.iter().any(|l| l.contains("waiting")),
+            "draft preserved"
+        );
     }
 
     #[test]
     fn page_adopts_sessions_snapshot_atomically() {
         let mut page = ComposerPage::new();
         page.composer_mut().set_draft("local").unwrap();
-        page
-            .set_from_session("remote", true, &["q0".to_owned()])
+        page.set_from_session("remote", true, &["q0".to_owned()])
             .unwrap();
         assert_eq!(page.draft(), "remote");
         assert!(page.is_busy());
@@ -1083,7 +1083,9 @@ mod tests {
         let big: Vec<String> = (0..=BUSY_QUEUE_CAP).map(|i| format!("q{i}")).collect();
         assert_eq!(
             page.set_from_session("other", false, &big),
-            Err(ComposerError::QueueFull { limit: BUSY_QUEUE_CAP })
+            Err(ComposerError::QueueFull {
+                limit: BUSY_QUEUE_CAP
+            })
         );
         assert_eq!(page.draft(), "remote");
         assert!(page.is_busy());

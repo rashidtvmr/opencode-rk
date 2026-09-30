@@ -2,8 +2,7 @@
 mod ultra_codegen;
 
 use ultra_codegen::{
-    CacheKey, CodegenConfig, CompileResult, DenyReason, ExecutionBounds,
-    UltraCodegen, UltraState,
+    CacheKey, CodegenConfig, CompileResult, DenyReason, ExecutionBounds, UltraCodegen, UltraState,
 };
 
 fn default_config() -> CodegenConfig {
@@ -98,7 +97,10 @@ fn t07_fallback_after_max_attempts() {
 
     gen.request_compile();
     gen.compile_failure("err1");
-    assert!(matches!(gen.state(), UltraState::CompileFailed { attempt: 1, .. }));
+    assert!(matches!(
+        gen.state(),
+        UltraState::CompileFailed { attempt: 1, .. }
+    ));
 
     gen.request_compile();
     gen.compile_failure("err2");
@@ -112,7 +114,10 @@ fn t08_deny_unsafe_without_approval() {
     let mut gen = UltraCodegen::new(default_config());
     gen.emit_draft("fn main() {}").unwrap();
     gen.deny(DenyReason::UnsafeWithoutApproval);
-    assert!(matches!(gen.state(), UltraState::Denied(DenyReason::UnsafeWithoutApproval)));
+    assert!(matches!(
+        gen.state(),
+        UltraState::Denied(DenyReason::UnsafeWithoutApproval)
+    ));
 }
 
 // ── T09: denied for forbidden_api_hit ──
@@ -121,7 +126,9 @@ fn t08_deny_unsafe_without_approval() {
 fn t09_deny_forbidden_api() {
     let mut gen = UltraCodegen::new(default_config());
     gen.emit_draft("fn main() {}").unwrap();
-    gen.deny(DenyReason::ForbiddenApiHit { pattern: "std::process::Command".into() });
+    gen.deny(DenyReason::ForbiddenApiHit {
+        pattern: "std::process::Command".into(),
+    });
     match gen.state() {
         UltraState::Denied(DenyReason::ForbiddenApiHit { pattern }) => {
             assert_eq!(pattern, "std::process::Command");
@@ -136,7 +143,10 @@ fn t09_deny_forbidden_api() {
 fn t10_deny_bounds_exceeded() {
     let mut gen = UltraCodegen::new(default_config());
     gen.emit_draft("fn main() {}").unwrap();
-    gen.deny(DenyReason::BoundsExceeded { bytes: 999_999, limit: 1024 });
+    gen.deny(DenyReason::BoundsExceeded {
+        bytes: 999_999,
+        limit: 1024,
+    });
     match gen.state() {
         UltraState::Denied(DenyReason::BoundsExceeded { bytes, limit }) => {
             assert_eq!(*bytes, 999_999);
@@ -264,7 +274,10 @@ fn t19_deny_overwrites_previous() {
     let mut gen = UltraCodegen::new(default_config());
     gen.emit_draft("fn main() {}").unwrap();
     gen.deny(DenyReason::UnsafeWithoutApproval);
-    gen.deny(DenyReason::BoundsExceeded { bytes: 100, limit: 50 });
+    gen.deny(DenyReason::BoundsExceeded {
+        bytes: 100,
+        limit: 50,
+    });
     match gen.state() {
         UltraState::Denied(DenyReason::BoundsExceeded { bytes, limit }) => {
             assert_eq!(*bytes, 100);

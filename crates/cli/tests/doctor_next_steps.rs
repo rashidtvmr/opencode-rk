@@ -167,11 +167,8 @@ fn doctor_real_daemon_health_reports_ok_without_hint() {
     // Wait for daemon readiness before probing.
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     loop {
-        if std::net::TcpStream::connect_timeout(
-            &address,
-            std::time::Duration::from_millis(250),
-        )
-        .is_ok()
+        if std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_millis(250))
+            .is_ok()
         {
             break;
         }

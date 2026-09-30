@@ -100,7 +100,8 @@ pub const PLATFORM_MATRIX: [PlatformRow; 3] = [
         os: Os::Windows,
         required_backend: Backend::PlatformOptIn,
         isolated: false,
-        limits: "no Job-Object/AppContainer backend in this module; inherited capabilities not closed",
+        limits:
+            "no Job-Object/AppContainer backend in this module; inherited capabilities not closed",
     },
 ];
 

@@ -1,9 +1,9 @@
 #![forbid(unsafe_code)]
 //! FIX-PACKAGING frozen tests: installer --aliases, download mode, identity gate.
 
-use std::process::Command;
 use std::fs;
 use std::path::Path;
+use std::process::Command;
 
 const SCRIPT_PATH: &str = "/home/rashid/projects/opencode-rk/scripts/install-oc2.sh";
 const BIN: &str = "oc2";
@@ -12,7 +12,11 @@ const TEMP_DIR: &str = "/tmp";
 // Helper: run the install-oc2.sh script with given args, return exit code.
 fn run_install(args: &str) -> i32 {
     let script = Path::new(SCRIPT_PATH);
-    assert!(script.exists(), "install script must exist at {}", SCRIPT_PATH);
+    assert!(
+        script.exists(),
+        "install script must exist at {}",
+        SCRIPT_PATH
+    );
     let status = Command::new("sh")
         .arg(script)
         .args(args.split_whitespace())
@@ -28,12 +32,10 @@ fn fix_packaging_t01_aliases_created_and_same_inode() {
     let install_dir = format!("{}/oc2_test_t01", TEMP_DIR);
     let _ = fs::remove_dir_all(&install_dir);
 
-    let exit_code = run_install(
-        &format!(
-            "--aliases \"oc,ooo,oooo,ocrt\" --install-dir {}",
-            install_dir
-        ),
-    );
+    let exit_code = run_install(&format!(
+        "--aliases \"oc,ooo,oooo,ocrt\" --install-dir {}",
+        install_dir
+    ));
 
     // Before implementation: --aliases not supported, exit != 0, aliases not created
     // After implementation: exit 0, all aliases created with same inode/content
@@ -67,17 +69,14 @@ fn fix_packaging_t02_alias_over_existing_fails_exit64() {
     // First, create a "different" binary at oc in the install dir
     fs::create_dir_all(&install_dir).expect("create install dir");
     let different_binary = format!("{}/oc", install_dir);
-    fs::write(&different_binary, "this is opencode2 not oc2")
-        .expect("write different binary");
+    fs::write(&different_binary, "this is opencode2 not oc2").expect("write different binary");
 
     // Before implementation: --aliases not supported, may fail with different exit
     // After implementation: should fail with exit 64, original binary untouched
-    let exit_code = run_install(
-        &format!(
-            "--aliases \"oc\" --install-dir {} --archive /tmp/fake --checksum fake",
-            install_dir
-        ),
-    );
+    let exit_code = run_install(&format!(
+        "--aliases \"oc\" --install-dir {} --archive /tmp/fake --checksum fake",
+        install_dir
+    ));
 
     // Cleanup different binary first
     let _ = fs::remove_file(&different_binary);
@@ -100,12 +99,10 @@ fn fix_packaging_t03_uninstall_removes_aliases() {
     let install_dir = format!("{}/oc2_test_t03", TEMP_DIR);
 
     // First install with aliases (may partially succeed or fail before impl)
-    let _ = run_install(
-        &format!(
-            "--aliases \"oc,ooo\" --install-dir {}",
-            install_dir
-        ),
-    );
+    let _ = run_install(&format!(
+        "--aliases \"oc,ooo\" --install-dir {}",
+        install_dir
+    ));
 
     // Then uninstall
     let exit_code = run_install(&format!("--uninstall --install-dir {}", install_dir));
@@ -143,16 +140,17 @@ fn fix_packaging_t04_download_mode_mocked_base() {
 
     // Before implementation: OC2_RELEASE_BASE not yet handled
     // After implementation: script uses OC2_RELEASE_BASE to construct artifact URL
-    let exit_code = run_install(
-        &format!(
-            "--install-dir {} OC2_RELEASE_BASE=/tmp/opencode-rk/release-metadata",
-            install_dir
-        ),
-    );
+    let exit_code = run_install(&format!(
+        "--install-dir {} OC2_RELEASE_BASE=/tmp/opencode-rk/release-metadata",
+        install_dir
+    ));
 
     // Before implementation: may ignore OC2_RELEASE_BASE or fail differently
     // After implementation: should attempt download with custom base URL (exit may be 0 or non-zero depending on fetch success)
-    eprintln!("T04: download mode with OC2_RELEASE_BASE exit code: {}", exit_code);
+    eprintln!(
+        "T04: download mode with OC2_RELEASE_BASE exit code: {}",
+        exit_code
+    );
 
     let _ = fs::remove_dir_all(&install_dir);
 }
@@ -176,8 +174,7 @@ fn fix_packaging_t05_no_stale_opencode2_references() {
         if trimmed.contains("opencode2") {
             panic!(
                 "line {} in install-oc2.sh contains stale 'opencode2' reference: {}",
-                line_num,
-                line
+                line_num, line
             );
         }
     }

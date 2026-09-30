@@ -315,7 +315,8 @@ impl GraphView {
         if let Some(idx) = farthest {
             let removed_id = self.nodes[idx].id.clone();
             self.nodes.remove(idx);
-            self.edges.retain(|e| e.from != removed_id && e.to != removed_id);
+            self.edges
+                .retain(|e| e.from != removed_id && e.to != removed_id);
             if let Some(ref mut f) = self.focus_idx {
                 if *f > idx {
                     *f -= 1;

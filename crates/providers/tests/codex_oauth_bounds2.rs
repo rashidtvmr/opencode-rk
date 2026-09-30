@@ -6,8 +6,8 @@
 
 use opencode_rk_providers::codex_oauth::{
     begin_login, begin_login_with, complete_login, complete_login_at, refresh, refresh_at,
-    CodexAuthState, CodexError, HumanGrant, RefreshGrant, CODEX_CONSENT_URL,
-    MAX_CONSENT_URL_BYTES, MAX_DEVICE_CODE_BYTES,
+    CodexAuthState, CodexError, HumanGrant, RefreshGrant, CODEX_CONSENT_URL, MAX_CONSENT_URL_BYTES,
+    MAX_DEVICE_CODE_BYTES,
 };
 
 const EXPIRY_MS: u64 = 1_700_000_000_000;
@@ -105,8 +105,7 @@ fn prov_016_c16_stale_expiry_rejected_on_complete() {
         CodexError::InvalidExpiry
     );
     let ready =
-        complete_login_at(&pending, HumanGrant::for_test(EXPIRY_MS), EXPIRY_MS - 1)
-            .expect("ready");
+        complete_login_at(&pending, HumanGrant::for_test(EXPIRY_MS), EXPIRY_MS - 1).expect("ready");
     assert!(matches!(ready, CodexAuthState::Ready { .. }));
 }
 
@@ -115,26 +114,16 @@ fn prov_016_c16_stale_expiry_rejected_on_complete() {
 fn prov_016_c17_stale_expiry_rejected_on_refresh() {
     let pending = begin_login();
     let ready =
-        complete_login_at(&pending, HumanGrant::for_test(EXPIRY_MS), EXPIRY_MS - 1)
-            .expect("ready");
+        complete_login_at(&pending, HumanGrant::for_test(EXPIRY_MS), EXPIRY_MS - 1).expect("ready");
     assert_eq!(
         refresh_at(&ready, RefreshGrant::for_test(EXPIRY_MS), EXPIRY_MS).unwrap_err(),
         CodexError::InvalidExpiry
     );
     assert_eq!(
-        refresh_at(
-            &ready,
-            RefreshGrant::for_test(EXPIRY_MS),
-            EXPIRY_MS + 1
-        )
-        .unwrap_err(),
+        refresh_at(&ready, RefreshGrant::for_test(EXPIRY_MS), EXPIRY_MS + 1).unwrap_err(),
         CodexError::InvalidExpiry
     );
-    let refreshed = refresh_at(
-        &ready,
-        RefreshGrant::for_test(EXPIRY_MS),
-        EXPIRY_MS - 1,
-    )
-    .expect("refresh ok");
+    let refreshed =
+        refresh_at(&ready, RefreshGrant::for_test(EXPIRY_MS), EXPIRY_MS - 1).expect("refresh ok");
     assert!(matches!(refreshed, CodexAuthState::Ready { .. }));
 }

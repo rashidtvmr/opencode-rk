@@ -390,20 +390,35 @@ mod tests {
         let mut other = scope();
         other.workspace = "ws:evil".into();
         assert_eq!(
-            board.approve(&OperationDigest("abc".into()), &other, Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("abc".into()),
+                &other,
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Refused(Refusal::StaleOrReplayed)
         );
         // Wrong policy version refuses likewise.
         let mut older = scope();
         older.policy_version = 6;
         assert_eq!(
-            board.approve(&OperationDigest("abc".into()), &older, Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("abc".into()),
+                &older,
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Refused(Refusal::StaleOrReplayed)
         );
         assert_eq!(board.pending_len(), 1);
         // Exact digest + full scope approves and snapshots the scope.
         assert_eq!(
-            board.approve(&OperationDigest("abc".into()), &scope(), Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("abc".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Decided(Decision {
                 digest: OperationDigest("abc".into()),
                 scope: scope(),
@@ -421,7 +436,12 @@ mod tests {
         board.offer(req("abc", Risk::Safe)).unwrap();
         let before = board.broadcast_seq();
         assert_eq!(
-            board.approve(&OperationDigest("nope".into()), &scope(), Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("nope".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Refused(Refusal::StaleOrReplayed)
         );
         assert_eq!(board.pending_len(), 1);
@@ -434,12 +454,22 @@ mod tests {
         let mut board = ApprovalBoard::new();
         board.offer(req("abc", Risk::Safe)).unwrap();
         assert!(matches!(
-            board.approve(&OperationDigest("abc".into()), &scope(), Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("abc".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Decided(_)
         ));
         // Same digest can never be decided twice.
         assert_eq!(
-            board.approve(&OperationDigest("abc".into()), &scope(), Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("abc".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Refused(Refusal::StaleOrReplayed)
         );
         assert_eq!(board.history().len(), 1);
@@ -452,8 +482,17 @@ mod tests {
         let mut board = ApprovalBoard::new();
         board.offer(req("old", Risk::Safe)).unwrap();
         assert!(matches!(
-            board.approve(&OperationDigest("old".into()), &scope(), Confirm::Confirmed, 600),
-            Outcome::Decided(Decision { expired: true, approved: false, .. })
+            board.approve(
+                &OperationDigest("old".into()),
+                &scope(),
+                Confirm::Confirmed,
+                600
+            ),
+            Outcome::Decided(Decision {
+                expired: true,
+                approved: false,
+                ..
+            })
         ));
         assert_eq!(board.pending_len(), 0);
     }
@@ -464,19 +503,38 @@ mod tests {
         board.offer(req("rm", Risk::Destructive)).unwrap();
         // Focus/Enter maps to Unconfirmed: must not approve.
         assert_eq!(
-            board.approve(&OperationDigest("rm".into()), &scope(), Confirm::Unconfirmed, 0),
+            board.approve(
+                &OperationDigest("rm".into()),
+                &scope(),
+                Confirm::Unconfirmed,
+                0
+            ),
             Outcome::Refused(Refusal::ConfirmationRequired)
         );
-        assert_eq!(board.pending_len(), 1, "request stays pending after refusal");
+        assert_eq!(
+            board.pending_len(),
+            1,
+            "request stays pending after refusal"
+        );
         // Explicit confirm without the arm step is still not enough.
         assert_eq!(
-            board.approve(&OperationDigest("rm".into()), &scope(), Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("rm".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Refused(Refusal::ConfirmationRequired)
         );
         // Arm, then explicit confirm: approves with both steps recorded.
         assert!(board.arm(&OperationDigest("rm".into())));
         assert_eq!(
-            board.approve(&OperationDigest("rm".into()), &scope(), Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("rm".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Decided(Decision {
                 digest: OperationDigest("rm".into()),
                 scope: scope(),
@@ -492,17 +550,36 @@ mod tests {
         let mut board = ApprovalBoard::new();
         board.offer(req("acct", Risk::HumanOnly)).unwrap();
         assert_eq!(
-            board.approve(&OperationDigest("acct".into()), &scope(), Confirm::Unconfirmed, 0),
+            board.approve(
+                &OperationDigest("acct".into()),
+                &scope(),
+                Confirm::Unconfirmed,
+                0
+            ),
             Outcome::Refused(Refusal::ConfirmationRequired)
         );
         assert_eq!(
-            board.approve(&OperationDigest("acct".into()), &scope(), Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("acct".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Refused(Refusal::ConfirmationRequired)
         );
         assert!(board.arm(&OperationDigest("acct".into())));
         assert!(matches!(
-            board.approve(&OperationDigest("acct".into()), &scope(), Confirm::Confirmed, 0),
-            Outcome::Decided(Decision { approved: true, confirmed_twice: true, .. })
+            board.approve(
+                &OperationDigest("acct".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
+            Outcome::Decided(Decision {
+                approved: true,
+                confirmed_twice: true,
+                ..
+            })
         ));
     }
 
@@ -512,7 +589,10 @@ mod tests {
         board.offer(req("x", Risk::Destructive)).unwrap();
         assert!(matches!(
             board.deny(&OperationDigest("x".into()), 0),
-            Outcome::Decided(Decision { approved: false, .. })
+            Outcome::Decided(Decision {
+                approved: false,
+                ..
+            })
         ));
     }
 
@@ -521,16 +601,27 @@ mod tests {
         let mut board = ApprovalBoard::new();
         assert_eq!(board.interrupt(9), None, "idle interrupt is None");
         board.offer(req("op1", Risk::Safe)).unwrap();
-        board.approve(&OperationDigest("op1".into()), &scope(), Confirm::Confirmed, 0);
+        board.approve(
+            &OperationDigest("op1".into()),
+            &scope(),
+            Confirm::Confirmed,
+            0,
+        );
         assert!(board.note_started(&OperationDigest("op1".into())));
         assert_eq!(board.in_flight(), Some(&OperationDigest("op1".into())));
         let before = board.broadcast_seq();
-        let receipt = board.interrupt(42).expect("in-flight interrupt has a receipt");
+        let receipt = board
+            .interrupt(42)
+            .expect("in-flight interrupt has a receipt");
         assert_eq!(receipt.digest, OperationDigest("op1".into()));
         assert_eq!(receipt.interrupted_at_tick, 42);
         assert_eq!(receipt.broadcast_seq, before + 1);
         assert_eq!(board.in_flight(), None, "slot cleared");
-        assert_eq!(board.broadcast_seq(), before + 1, "clients observe the update");
+        assert_eq!(
+            board.broadcast_seq(),
+            before + 1,
+            "clients observe the update"
+        );
         assert_eq!(board.interrupt(43), None, "second interrupt is idle");
     }
 
@@ -546,7 +637,12 @@ mod tests {
         );
         // Interrupted after start: ambiguous, may have completed side effects.
         board.offer(req("op1", Risk::Safe)).unwrap();
-        board.approve(&OperationDigest("op1".into()), &scope(), Confirm::Confirmed, 0);
+        board.approve(
+            &OperationDigest("op1".into()),
+            &scope(),
+            Confirm::Confirmed,
+            0,
+        );
         assert!(board.note_started(&OperationDigest("op1".into())));
         board.interrupt(7);
         assert_eq!(
@@ -556,7 +652,12 @@ mod tests {
         // Retry itself runs under a fresh digest, never a silent replay.
         board.offer(req("op1-retry", Risk::Safe)).unwrap();
         assert!(matches!(
-            board.approve(&OperationDigest("op1-retry".into()), &scope(), Confirm::Confirmed, 0),
+            board.approve(
+                &OperationDigest("op1-retry".into()),
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
             Outcome::Decided(_)
         ));
     }

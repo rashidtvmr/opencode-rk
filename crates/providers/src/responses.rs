@@ -156,10 +156,12 @@ pub fn responses_request_payload<I: Serialize>(
     if model.trim().is_empty() {
         return Err(ResponsesError::EmptyModel);
     }
-    if !reasoning_effort.is_empty() && !matches!(
-        reasoning_effort,
-        "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
-    ) {
+    if !reasoning_effort.is_empty()
+        && !matches!(
+            reasoning_effort,
+            "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+        )
+    {
         return Err(ResponsesError::UnsupportedReasoningEffort(
             reasoning_effort.to_owned(),
         ));
@@ -260,7 +262,9 @@ pub enum ResponsesStreamEvent {
         arguments: String,
     },
     /// Terminal event. Every well-formed stream ends here exactly once.
-    Completed { stop_reason: ResponsesStopReason },
+    Completed {
+        stop_reason: ResponsesStopReason,
+    },
 }
 
 /// Pure SSE event parser shared by the live stream and tests.
@@ -458,7 +462,8 @@ impl OpenAiResponsesClient {
     pub async fn from_persisted_env() -> Result<Self, ResponsesError> {
         let config = ProviderConfig::from_env("openai");
         config.validate().map_err(ResponsesError::InvalidConfig)?;
-        let key = crate::persisted_auth::api_key("openai", &config.api_key_env).await
+        let key = crate::persisted_auth::api_key("openai", &config.api_key_env)
+            .await
             .ok_or_else(|| ResponsesError::MissingCredential(config.api_key_env.clone()))?;
         Self::from_config(config, key)
     }
@@ -495,7 +500,8 @@ impl OpenAiResponsesClient {
         input: &[ResponsesInput],
     ) -> Result<String, ResponsesError> {
         let items: Vec<ResponsesItem> = input.iter().cloned().map(Into::into).collect();
-        self.create_with_items(model, reasoning_effort, &items).await
+        self.create_with_items(model, reasoning_effort, &items)
+            .await
     }
 
     /// Non-streaming turns retain typed call/result pairs from durable history.

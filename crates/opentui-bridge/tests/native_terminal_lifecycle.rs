@@ -2,10 +2,10 @@
 //! descriptor throughout; the child is allowed to clean up only after the
 //! parent has observed its live state.
 
+use opencode_rk_opentui_bridge as opentui_bridge;
 use std::fs::OpenOptions;
 use std::io::{Read, Write};
 use std::process::Command;
-use opencode_rk_opentui_bridge as opentui_bridge;
 
 const READY: &[u8] = b"TUI015_READY_7f31\n";
 const RESTORED: &[u8] = b"TUI015_RESTORED_7f31\n";
@@ -139,87 +139,185 @@ finally:
 fn run_case(case: &str) {
     let native_dir = std::env::var("TUI015_NATIVE_LIB_DIR")
         .expect("TUI015_NATIVE_LIB_DIR must name the staged native fixture directory");
-    assert!(std::path::Path::new(&native_dir).join("libopentui.dylib").is_file(),
-        "native fixture missing at {native_dir}/libopentui.dylib");
-    let output = Command::new("python3").arg("-c").arg(PYTHON_DRIVER)
-        .env("TUI015_EXE", std::env::current_exe().expect("current test executable"))
-        .env("TUI015_CASE", case).env("TUI015_NATIVE_LIB_DIR", native_dir)
-        .output().expect("python3 PTY supervisor");
-    assert!(output.status.success(), "PTY supervisor failed for {case}: {}{}",
-        String::from_utf8_lossy(&output.stdout), String::from_utf8_lossy(&output.stderr));
+    assert!(
+        std::path::Path::new(&native_dir)
+            .join("libopentui.dylib")
+            .is_file(),
+        "native fixture missing at {native_dir}/libopentui.dylib"
+    );
+    let output = Command::new("python3")
+        .arg("-c")
+        .arg(PYTHON_DRIVER)
+        .env(
+            "TUI015_EXE",
+            std::env::current_exe().expect("current test executable"),
+        )
+        .env("TUI015_CASE", case)
+        .env("TUI015_NATIVE_LIB_DIR", native_dir)
+        .output()
+        .expect("python3 PTY supervisor");
+    assert!(
+        output.status.success(),
+        "PTY supervisor failed for {case}: {}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
     assert!(String::from_utf8_lossy(&output.stdout).contains("\"exit\": 0"));
 }
 
 #[cfg(feature = "native")]
-#[test] fn native_setup_raw_and_restore() { run_case("child_setup_raw_and_restore"); }
+#[test]
+fn native_setup_raw_and_restore() {
+    run_case("child_setup_raw_and_restore");
+}
 #[cfg(feature = "native")]
-#[test] fn native_normal_close_and_drop() { run_case("child_normal_close_and_drop"); }
+#[test]
+fn native_normal_close_and_drop() {
+    run_case("child_normal_close_and_drop");
+}
 #[cfg(feature = "native")]
-#[test] fn native_error_scope_drop_restores() { run_case("child_error_scope_drop_restores"); }
+#[test]
+fn native_error_scope_drop_restores() {
+    run_case("child_error_scope_drop_restores");
+}
 #[cfg(feature = "native")]
-#[test] fn native_resize_and_closed_handle_errors() { run_case("child_resize_and_closed_handle_errors"); }
+#[test]
+fn native_resize_and_closed_handle_errors() {
+    run_case("child_resize_and_closed_handle_errors");
+}
 #[cfg(feature = "native")]
-#[test] fn native_input_modes_and_singleton_reacquire() { run_case("child_input_modes_and_singleton_reacquire"); }
+#[test]
+fn native_input_modes_and_singleton_reacquire() {
+    run_case("child_input_modes_and_singleton_reacquire");
+}
 #[cfg(not(feature = "native"))]
-#[test] fn native_feature_is_required() { panic!("native_terminal_lifecycle requires --features native"); }
+#[test]
+fn native_feature_is_required() {
+    panic!("native_terminal_lifecycle requires --features native");
+}
 
 #[cfg(feature = "native")]
-fn child_only() -> bool { std::env::var_os("TUI015_CHILD").is_some() }
+fn child_only() -> bool {
+    std::env::var_os("TUI015_CHILD").is_some()
+}
 #[cfg(feature = "native")]
 fn trace_write(marker: &[u8]) {
     let path = std::env::var("TUI015_TRACE_FILE").unwrap();
     let mut trace = OpenOptions::new().append(true).open(path).unwrap();
-    trace.write_all(marker).unwrap(); trace.flush().unwrap();
+    trace.write_all(marker).unwrap();
+    trace.flush().unwrap();
 }
 #[cfg(feature = "native")]
 fn handshake() {
     trace_write(READY);
-    let mut ack = [0u8; 1]; std::io::stdin().read_exact(&mut ack).unwrap(); assert_eq!(ack[0], ACK);
+    let mut ack = [0u8; 1];
+    std::io::stdin().read_exact(&mut ack).unwrap();
+    assert_eq!(ack[0], ACK);
 }
 #[cfg(feature = "native")]
-fn restored() { trace_write(RESTORED); }
+fn restored() {
+    trace_write(RESTORED);
+}
 
 #[cfg(feature = "native")]
-#[test] fn child_setup_raw_and_restore() {
-    if !child_only() { return; }
+#[test]
+fn child_setup_raw_and_restore() {
+    if !child_only() {
+        return;
+    }
     trace_write(BEFORE_CREATE);
-    let mut r = opentui_bridge::Renderer::create(20, 8).unwrap(); trace_write(BEFORE_SETUP); r.setup_terminal().unwrap();
-    r.frame(|_| {}).unwrap(); handshake(); r.restore_terminal_modes().unwrap(); restored();
+    let mut r = opentui_bridge::Renderer::create(20, 8).unwrap();
+    trace_write(BEFORE_SETUP);
+    r.setup_terminal().unwrap();
+    r.frame(|_| {}).unwrap();
+    handshake();
+    r.restore_terminal_modes().unwrap();
+    restored();
 }
 #[cfg(feature = "native")]
-#[test] fn child_normal_close_and_drop() {
-    if !child_only() { return; }
+#[test]
+fn child_normal_close_and_drop() {
+    if !child_only() {
+        return;
+    }
     trace_write(BEFORE_CREATE);
-    let mut r = opentui_bridge::Renderer::create(20, 8).unwrap(); trace_write(BEFORE_SETUP); r.setup_terminal().unwrap(); handshake();
-    r.close(); assert_eq!(r.snapshot_text(), Err(opentui_bridge::BridgeError::InvalidHandle)); restored();
-    drop(r); let _ = opentui_bridge::Renderer::create(20, 8).unwrap();
+    let mut r = opentui_bridge::Renderer::create(20, 8).unwrap();
+    trace_write(BEFORE_SETUP);
+    r.setup_terminal().unwrap();
+    handshake();
+    r.close();
+    assert_eq!(
+        r.snapshot_text(),
+        Err(opentui_bridge::BridgeError::InvalidHandle)
+    );
+    restored();
+    drop(r);
+    let _ = opentui_bridge::Renderer::create(20, 8).unwrap();
 }
 #[cfg(feature = "native")]
-#[test] fn child_error_scope_drop_restores() {
-    if !child_only() { return; }
+#[test]
+fn child_error_scope_drop_restores() {
+    if !child_only() {
+        return;
+    }
     trace_write(BEFORE_CREATE);
-    let result = std::panic::catch_unwind(|| { let r = opentui_bridge::Renderer::create(20, 8).unwrap();
-        trace_write(BEFORE_SETUP); r.setup_terminal().unwrap(); handshake(); panic!("caller-owned failure"); });
-    assert!(result.is_err()); restored(); let _ = opentui_bridge::Renderer::create(20, 8).unwrap();
+    let result = std::panic::catch_unwind(|| {
+        let r = opentui_bridge::Renderer::create(20, 8).unwrap();
+        trace_write(BEFORE_SETUP);
+        r.setup_terminal().unwrap();
+        handshake();
+        panic!("caller-owned failure");
+    });
+    assert!(result.is_err());
+    restored();
+    let _ = opentui_bridge::Renderer::create(20, 8).unwrap();
 }
 #[cfg(feature = "native")]
-#[test] fn child_resize_and_closed_handle_errors() {
-    if !child_only() { return; }
+#[test]
+fn child_resize_and_closed_handle_errors() {
+    if !child_only() {
+        return;
+    }
     let mut r = opentui_bridge::Renderer::create(20, 8).unwrap();
     assert_eq!(r.resize(0, 8), Err(opentui_bridge::BridgeError::ZeroSize));
-    assert_eq!(r.resize(8, 0), Err(opentui_bridge::BridgeError::ZeroSize)); r.resize(24, 10).unwrap();
-    assert_eq!((r.cols(), r.rows()), (24, 10)); r.close();
-    assert_eq!(r.frame(|_| {}), Err(opentui_bridge::BridgeError::InvalidHandle));
-    assert_eq!(r.draw_text(0, 0, "closed"), Err(opentui_bridge::BridgeError::InvalidHandle));
-    assert_eq!(r.snapshot_text(), Err(opentui_bridge::BridgeError::InvalidHandle));
+    assert_eq!(r.resize(8, 0), Err(opentui_bridge::BridgeError::ZeroSize));
+    r.resize(24, 10).unwrap();
+    assert_eq!((r.cols(), r.rows()), (24, 10));
+    r.close();
+    assert_eq!(
+        r.frame(|_| {}),
+        Err(opentui_bridge::BridgeError::InvalidHandle)
+    );
+    assert_eq!(
+        r.draw_text(0, 0, "closed"),
+        Err(opentui_bridge::BridgeError::InvalidHandle)
+    );
+    assert_eq!(
+        r.snapshot_text(),
+        Err(opentui_bridge::BridgeError::InvalidHandle)
+    );
 }
 #[cfg(feature = "native")]
-#[test] fn child_input_modes_and_singleton_reacquire() {
-    if !child_only() { return; }
+#[test]
+fn child_input_modes_and_singleton_reacquire() {
+    if !child_only() {
+        return;
+    }
     trace_write(BEFORE_CREATE);
-    let mut pre = opentui_bridge::Renderer::create(20, 8).unwrap(); pre.enable_mouse(true).unwrap();
-    pre.enable_kitty_keyboard(1).unwrap(); pre.close(); drop(pre);
-    let r = opentui_bridge::Renderer::create(20, 8).unwrap(); r.enable_mouse(true).unwrap();
-    r.enable_kitty_keyboard(1).unwrap(); trace_write(BEFORE_SETUP); r.setup_terminal().unwrap(); handshake(); r.suspend().unwrap();
-    r.resume().unwrap(); drop(r); restored(); let _ = opentui_bridge::Renderer::create(20, 8).unwrap();
+    let mut pre = opentui_bridge::Renderer::create(20, 8).unwrap();
+    pre.enable_mouse(true).unwrap();
+    pre.enable_kitty_keyboard(1).unwrap();
+    pre.close();
+    drop(pre);
+    let r = opentui_bridge::Renderer::create(20, 8).unwrap();
+    r.enable_mouse(true).unwrap();
+    r.enable_kitty_keyboard(1).unwrap();
+    trace_write(BEFORE_SETUP);
+    r.setup_terminal().unwrap();
+    handshake();
+    r.suspend().unwrap();
+    r.resume().unwrap();
+    drop(r);
+    restored();
+    let _ = opentui_bridge::Renderer::create(20, 8).unwrap();
 }

@@ -327,7 +327,10 @@ impl ConsumerSet {
     }
 
     pub fn live_consumers(&self) -> usize {
-        self.pending.keys().filter(|id| !self.slow.contains(id)).count()
+        self.pending
+            .keys()
+            .filter(|id| !self.slow.contains(id))
+            .count()
     }
 }
 
@@ -410,13 +413,20 @@ mod tests {
         let queued = vec![item(2), item(3), item(4), item(4), item(5)];
         let recovered = recover(&committed, &queued);
         let ids: Vec<u64> = recovered.replay.iter().map(|w| w.id).collect();
-        assert_eq!(ids, vec![4, 5], "committed never re-queued, first copy wins");
+        assert_eq!(
+            ids,
+            vec![4, 5],
+            "committed never re-queued, first copy wins"
+        );
         assert_eq!(recovered.duplicates_dropped, 3);
         // Replaying twice changes nothing: committed absorbs the replay.
         let mut committed2 = committed.clone();
         committed2.extend(ids.iter().copied());
         let again = recover(&committed2, &recovered.replay);
-        assert!(again.replay.is_empty(), "second recovery must not duplicate");
+        assert!(
+            again.replay.is_empty(),
+            "second recovery must not duplicate"
+        );
     }
 
     // DISC-114-T04: queue overflow rejects with explicit backpressure, no unbounded growth.

@@ -222,7 +222,13 @@ fn blit(grid: &mut PaintGrid, x: usize, y: usize, s: &str, style: PaintStyle) {
 
 fn paint_into(grid: &mut PaintGrid, view: AppView, compact: bool) {
     let (w, h) = (grid.width(), grid.height());
-    blit(grid, 0, 0, &format!("opencode-rk {}", view.label()), PaintStyle::Dim);
+    blit(
+        grid,
+        0,
+        0,
+        &format!("opencode-rk {}", view.label()),
+        PaintStyle::Dim,
+    );
     let full = !compact && w >= 80 && h >= 24;
     if full {
         let side_w = 30.min(w / 3).max(20.min(w));
@@ -245,7 +251,11 @@ fn paint_into(grid: &mut PaintGrid, view: AppView, compact: bool) {
         }
     }
     if h > 1 {
-        let badge = if view.is_actionable() { "live" } else { "stale" };
+        let badge = if view.is_actionable() {
+            "live"
+        } else {
+            "stale"
+        };
         let status = match view.action_hint() {
             Some(hint) => format!("{badge} | {hint}"),
             None => badge.to_owned(),
@@ -362,10 +372,7 @@ mod tests {
                 max: MAX_CELLS
             })
         );
-        assert_eq!(
-            paint_compact(AppView::Empty, 0, 4),
-            Err(PaintError::Empty)
-        );
+        assert_eq!(paint_compact(AppView::Empty, 0, 4), Err(PaintError::Empty));
     }
 
     #[test]

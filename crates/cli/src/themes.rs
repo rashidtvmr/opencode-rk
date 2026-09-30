@@ -121,7 +121,10 @@ mod tests {
     #[test]
     fn names_distinct() {
         assert_eq!(AppTheme::Dark.name(), "dark");
-        assert_eq!(AppTheme::HighContrast.registry_name(), "opencode-high-contrast");
+        assert_eq!(
+            AppTheme::HighContrast.registry_name(),
+            "opencode-high-contrast"
+        );
     }
 
     fn slot(p: [(u16, [u16; 4]); 3], id: u16) -> [u16; 4] {
@@ -143,7 +146,10 @@ mod tests {
         for t in [AppTheme::Dark, AppTheme::Light, AppTheme::HighContrast] {
             let p = t.palette();
             assert_eq!(p.len(), 3);
-            assert_eq!([p[0].0, p[1].0, p[2].0], [AppTheme::NORMAL, AppTheme::ACCENT, AppTheme::DIM]);
+            assert_eq!(
+                [p[0].0, p[1].0, p[2].0],
+                [AppTheme::NORMAL, AppTheme::ACCENT, AppTheme::DIM]
+            );
             let (n, a, d) = (slot(p, 0), slot(p, 1), slot(p, 2));
             assert_ne!(a, n);
             assert_ne!(a, d);

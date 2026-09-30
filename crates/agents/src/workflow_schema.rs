@@ -42,7 +42,10 @@ pub enum WorkflowError {
     TooManySteps(usize),
     TooManyEdges(usize),
     DuplicateStepId(String),
-    ReferenceUnknownStep { step_id: String, missing_ref: String },
+    ReferenceUnknownStep {
+        step_id: String,
+        missing_ref: String,
+    },
     CycleDetected(Vec<String>),
     MultipleRoots(Vec<String>),
     UnreachableSteps(Vec<String>),
@@ -141,8 +144,14 @@ pub fn topological_order(wf: &Workflow) -> Result<Vec<&Step>, WorkflowError> {
     validate_workflow(wf)?;
 
     // Kahn's algorithm with deterministic (sorted) neighbor selection
-    let id_to_idx: HashMap<&str, usize> = wf.steps.iter().enumerate().map(|(i, s)| (s.id.as_str(), i)).collect();
-    let mut in_degree: HashMap<&str, usize> = wf.steps.iter().map(|s| (s.id.as_str(), 0usize)).collect();
+    let id_to_idx: HashMap<&str, usize> = wf
+        .steps
+        .iter()
+        .enumerate()
+        .map(|(i, s)| (s.id.as_str(), i))
+        .collect();
+    let mut in_degree: HashMap<&str, usize> =
+        wf.steps.iter().map(|s| (s.id.as_str(), 0usize)).collect();
     for s in &wf.steps {
         for r in &s.next {
             *in_degree.get_mut(r.as_str()).unwrap() += 1;
@@ -150,7 +159,12 @@ pub fn topological_order(wf: &Workflow) -> Result<Vec<&Step>, WorkflowError> {
     }
 
     let mut queue: VecDeque<&str> = VecDeque::new();
-    let mut roots: Vec<&str> = wf.steps.iter().filter(|s| in_degree[&s.id.as_str()] == 0).map(|s| s.id.as_str()).collect();
+    let mut roots: Vec<&str> = wf
+        .steps
+        .iter()
+        .filter(|s| in_degree[&s.id.as_str()] == 0)
+        .map(|s| s.id.as_str())
+        .collect();
     roots.sort();
     for r in roots {
         queue.push_back(r);

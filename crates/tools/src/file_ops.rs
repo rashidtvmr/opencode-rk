@@ -10,7 +10,7 @@ use std::{fs, io::Write};
 use thiserror::Error;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use rustix::fs::{self as rustix_fs, fstat, mkdirat, openat, Mode, OFlags};
+use rustix::fs::{self as rustix_fs, Mode, OFlags, fstat, mkdirat, openat};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::OsStr;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -324,9 +324,7 @@ fn write_file(
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
         let _ = (path, content, append, hook);
-        Ok(FileResult::failure(
-            "write denied: unsupported platform",
-        ))
+        Ok(FileResult::failure("write denied: unsupported platform"))
     }
 }
 
@@ -400,7 +398,9 @@ fn rooted_path(root: &Path, path: &Path) -> Result<PathBuf, ToolError> {
     };
     for component in joined.components() {
         if !matches!(component, std::path::Component::Normal(_)) {
-            return Err(ToolError::FileError("write denied: invalid path".to_owned()));
+            return Err(ToolError::FileError(
+                "write denied: invalid path".to_owned(),
+            ));
         }
     }
     joined = root.join(joined);
@@ -516,8 +516,9 @@ fn write_file_descriptor_at(
         hook(display_path, append)?;
     }
 
-    let current = traverse_write_parent(&root, parent_components, false)
-        .map_err(|_| ToolError::FileError("write denied: parent changed during write".to_owned()))?;
+    let current = traverse_write_parent(&root, parent_components, false).map_err(|_| {
+        ToolError::FileError("write denied: parent changed during write".to_owned())
+    })?;
     if !same_descriptor_path(&pinned, &current)? {
         return Ok(FileResult::failure(
             "write denied: parent changed during write",
@@ -527,15 +528,21 @@ fn write_file_descriptor_at(
         .last()
         .ok_or_else(|| ToolError::FileError("write denied: missing parent".to_owned()))?;
     let mut flags = OFlags::WRONLY | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-    flags |= if append { OFlags::APPEND } else { OFlags::TRUNC };
+    flags |= if append {
+        OFlags::APPEND
+    } else {
+        OFlags::TRUNC
+    };
     let fd = openat(parent.as_fd(), OsStr::new(leaf), flags, Mode::from(0o600))
         .map_err(|error| ToolError::IoError(error.into()))?;
     let mut file = std::fs::File::from(fd);
-    file.write_all(content.as_bytes()).map_err(ToolError::IoError)?;
+    file.write_all(content.as_bytes())
+        .map_err(ToolError::IoError)?;
 
     Ok(FileResult::success(format!(
         "Successfully wrote {} bytes to {:?}",
-        content.len(), display_path
+        content.len(),
+        display_path
     )))
 }
 
@@ -547,7 +554,9 @@ fn normalized_path(root: &Path, path: &NormalizedWritePath) -> PathBuf {
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn normalize_rooted_path(root: &Path, path: &Path) -> Result<NormalizedWritePath, ToolError> {
     if path.as_os_str().len() > MAX_WRITE_PATH_BYTES {
-        return Err(ToolError::FileError("write denied: path too long".to_owned()));
+        return Err(ToolError::FileError(
+            "write denied: path too long".to_owned(),
+        ));
     }
     let root = root.to_path_buf();
     let relative = if path.is_absolute() {
@@ -555,7 +564,7 @@ fn normalize_rooted_path(root: &Path, path: &Path) -> Result<NormalizedWritePath
         absolute
             .strip_prefix(&root)
             .map_err(|_| {
-            ToolError::FileError("write denied: path outside project root".to_owned())
+                ToolError::FileError("write denied: path outside project root".to_owned())
             })?
             .to_path_buf()
     } else {
@@ -567,15 +576,21 @@ fn normalize_rooted_path(root: &Path, path: &Path) -> Result<NormalizedWritePath
             std::path::Component::Normal(name) => components.push(name.to_owned()),
             std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                return Err(ToolError::FileError("write denied: path traversal".to_owned()))
+                return Err(ToolError::FileError(
+                    "write denied: path traversal".to_owned(),
+                ));
             }
             std::path::Component::RootDir | std::path::Component::Prefix(_) => {
-                return Err(ToolError::FileError("write denied: invalid path".to_owned()))
+                return Err(ToolError::FileError(
+                    "write denied: invalid path".to_owned(),
+                ));
             }
         }
     }
     if components.is_empty() {
-        return Err(ToolError::FileError("write denied: path has no leaf".to_owned()));
+        return Err(ToolError::FileError(
+            "write denied: path has no leaf".to_owned(),
+        ));
     }
     if components.len() > MAX_WRITE_COMPONENTS {
         return Err(ToolError::FileError(
@@ -591,7 +606,9 @@ fn normalize_absolute_path_without_parent(path: &Path) -> Result<PathBuf, ToolEr
     for component in normalize_platform_path(path).components() {
         match component {
             std::path::Component::ParentDir => {
-                return Err(ToolError::FileError("write denied: path traversal".to_owned()))
+                return Err(ToolError::FileError(
+                    "write denied: path traversal".to_owned(),
+                ));
             }
             std::path::Component::CurDir => {}
             _ => normalized.push(component.as_os_str()),
@@ -618,11 +635,13 @@ fn legacy_write_anchor(path: &Path) -> Result<(PathBuf, NormalizedWritePath), To
     let mut anchor = absolute
         .parent()
         .ok_or_else(|| ToolError::FileError("write denied: path has no parent".to_owned()))?
-            .to_path_buf();
+        .to_path_buf();
     while !anchor.exists() {
         anchor = anchor
             .parent()
-            .ok_or_else(|| ToolError::FileError("write denied: no existing target parent".to_owned()))?
+            .ok_or_else(|| {
+                ToolError::FileError("write denied: no existing target parent".to_owned())
+            })?
             .to_path_buf();
     }
     if anchor.parent().is_none() {
@@ -650,9 +669,7 @@ fn is_symlink_error(error: &std::io::Error) -> bool {
 /// This observer seam allows tests to observe the root descriptor's metadata
 /// (device/inode identity) for verification without modifying production behavior.
 pub(crate) fn open_write_root_with_observer(
-    mut observer: Option<
-        &mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>,
-    >,
+    mut observer: Option<&mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>,
 ) -> Result<std::os::fd::OwnedFd, ToolError> {
     open_write_root_at(
         &normalize_platform_path(&std::env::current_dir().map_err(ToolError::IoError)?),
@@ -663,9 +680,7 @@ pub(crate) fn open_write_root_with_observer(
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn open_write_root_at(
     root: &Path,
-    mut observer: Option<
-        &mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>,
-    >,
+    mut observer: Option<&mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>,
 ) -> Result<std::os::fd::OwnedFd, ToolError> {
     if !root.is_absolute() {
         return Err(ToolError::FileError(
@@ -704,7 +719,8 @@ fn traverse_write_parent(
     components: &[std::ffi::OsString],
     create: bool,
 ) -> Result<Vec<std::os::fd::OwnedFd>, ToolError> {
-    let mut descriptors = vec![rustix::io::dup(root).map_err(|error| ToolError::IoError(error.into()))?];
+    let mut descriptors =
+        vec![rustix::io::dup(root).map_err(|error| ToolError::IoError(error.into()))?];
     for component in components {
         let parent = descriptors
             .last()
@@ -712,13 +728,12 @@ fn traverse_write_parent(
         let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
         let next = match openat(parent.as_fd(), component.as_os_str(), flags, Mode::empty()) {
             Ok(fd) => fd,
-            Err(error)
-                if create && error == rustix::io::Errno::NOENT => {
-                    mkdirat(parent.as_fd(), component.as_os_str(), Mode::from(0o700))
-                        .map_err(|error| ToolError::IoError(error.into()))?;
-                    openat(parent.as_fd(), component.as_os_str(), flags, Mode::empty())
-                        .map_err(|error| ToolError::IoError(error.into()))?
-                }
+            Err(error) if create && error == rustix::io::Errno::NOENT => {
+                mkdirat(parent.as_fd(), component.as_os_str(), Mode::from(0o700))
+                    .map_err(|error| ToolError::IoError(error.into()))?;
+                openat(parent.as_fd(), component.as_os_str(), flags, Mode::empty())
+                    .map_err(|error| ToolError::IoError(error.into()))?
+            }
             Err(error) => return Err(ToolError::IoError(error.into())),
         };
         descriptors.push(next);
@@ -907,14 +922,20 @@ mod tests {
     fn hook_record(path: &Path, append: bool) -> Result<(), ToolError> {
         let parent = path.parent().expect("hook: path has parent");
         assert!(parent.exists(), "hook must run after parent creation");
-        let marker = parent.join(if append { "hook_append_true" } else { "hook_append_false" });
+        let marker = parent.join(if append {
+            "hook_append_true"
+        } else {
+            "hook_append_false"
+        });
         fs::write(&marker, b"seen").map_err(ToolError::IoError)?;
         Ok(())
     }
 
     /// Cancels the write from the hook.
     fn hook_cancel(_path: &Path, _append: bool) -> Result<(), ToolError> {
-        Err(ToolError::FileError("pre-open canceled by test hook".to_owned()))
+        Err(ToolError::FileError(
+            "pre-open canceled by test hook".to_owned(),
+        ))
     }
 
     /// Deterministic disposable-fixture mutation: swap the leaf for a symlink
@@ -923,7 +944,10 @@ mod tests {
     fn hook_swap_leaf_to_symlink(path: &Path, _append: bool) -> Result<(), ToolError> {
         let target = path.with_extension("sentinel_target");
         fs::write(&target, b"external sentinel").map_err(ToolError::IoError)?;
-        assert!(path.symlink_metadata().is_err(), "leaf must not exist pre-open");
+        assert!(
+            path.symlink_metadata().is_err(),
+            "leaf must not exist pre-open"
+        );
         std::os::unix::fs::symlink(&target, path).map_err(ToolError::IoError)?;
         Ok(())
     }
@@ -1032,7 +1056,10 @@ mod tests {
         assert!(!err.success);
         assert!(err.error.unwrap_or_default().contains("symlink"));
         // cancel hook would have errored instead; symlink denial won => hook never ran
-        assert_eq!(fs::read_to_string(&sentinel).expect("read"), "sentinel content");
+        assert_eq!(
+            fs::read_to_string(&sentinel).expect("read"),
+            "sentinel content"
+        );
         assert!(!dir.path().join("hook_append_false").exists());
     }
 
@@ -1051,7 +1078,10 @@ mod tests {
             Err(ToolError::FileError(msg)) => assert!(msg.contains("test hook")),
             other => panic!("expected hook ToolError::FileError, got {other:?}"),
         }
-        assert!(!file_path.exists(), "cancelled write must not create the file");
+        assert!(
+            !file_path.exists(),
+            "cancelled write must not create the file"
+        );
     }
 
     /// Seam supports deterministic disposable-fixture mutation without
@@ -1082,8 +1112,11 @@ mod tests {
             other => panic!("expected io error from O_NOFOLLOW open, got {other:?}"),
         }
         let meta = fs::symlink_metadata(&file_path).expect("leaf still symlink");
-        assert!(meta.file_type().is_symlink(), "leaf must remain a symlink, not be written through");
-assert_eq!(
+        assert!(
+            meta.file_type().is_symlink(),
+            "leaf must remain a symlink, not be written through"
+        );
+        assert_eq!(
             fs::read_to_string(file_path.with_extension("sentinel_target")).expect("sentinel"),
             "external sentinel",
             "sentinel must be untouched"
@@ -1151,8 +1184,7 @@ assert_eq!(
         // If it succeeded, the sentinel was overwritten -- that is the bug.
         let sentinel_bytes = fs::read(&sentinel).expect("sentinel must exist");
         assert_eq!(
-            sentinel_bytes,
-            b"SENTINEL_UNCHANGED",
+            sentinel_bytes, b"SENTINEL_UNCHANGED",
             "PARENT TOCTOU: outside sentinel was modified through swapped parent symlink; \
              write_file must re-validate or use fd-relative open to prevent escape. \
              result={result:?}"
@@ -1161,7 +1193,12 @@ assert_eq!(
         // Cleanup: restore real parent so tempdir cleanup works.
         let parent = dir.path().join("real_parent");
         let backup = dir.path().join("real_parent.real_parent_bak");
-        if backup.exists() && parent.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false) {
+        if backup.exists()
+            && parent
+                .symlink_metadata()
+                .map(|m| m.file_type().is_symlink())
+                .unwrap_or(false)
+        {
             let _ = fs::remove_file(&parent);
             let _ = fs::rename(&backup, &parent);
         }
@@ -1193,8 +1230,8 @@ assert_eq!(
         );
 
         let default_fd = open_write_root().expect("default root open should succeed");
-        let explicit_none_fd = open_write_root_with_observer(None)
-            .expect("None-observer root open should succeed");
+        let explicit_none_fd =
+            open_write_root_with_observer(None).expect("None-observer root open should succeed");
         let default_stat = fstat(&default_fd).expect("fstat default fd");
         let none_stat = fstat(&explicit_none_fd).expect("fstat None fd");
         assert_eq!(
@@ -1223,9 +1260,13 @@ assert_eq!(
         );
 
         let outside_path = outside.path().join("escape.txt");
-        assert!(tool
-            .execute(FileOperation::write(outside_path.clone(), "escape".to_owned()))
-            .is_err());
+        assert!(
+            tool.execute(FileOperation::write(
+                outside_path.clone(),
+                "escape".to_owned()
+            ))
+            .is_err()
+        );
         assert!(!outside_path.exists());
     }
 
@@ -1236,12 +1277,13 @@ assert_eq!(
         let escaped = outside.join("rooted-traversal-denied.txt");
         let tool = FileTool::with_project_root(project.path().to_path_buf());
 
-        assert!(tool
-            .execute(FileOperation::write(
+        assert!(
+            tool.execute(FileOperation::write(
                 PathBuf::from("../rooted-traversal-denied.txt"),
                 "escape".to_owned(),
             ))
-            .is_err());
+            .is_err()
+        );
         assert!(!escaped.exists());
     }
 
@@ -1286,12 +1328,10 @@ assert_eq!(
 
             let mut observer = |fd: &OwnedFd| -> Result<(), ToolError> {
                 let opened = fstat(fd.as_fd()).map_err(|e| ToolError::IoError(e.into()))?;
-                let cwd = std::env::current_dir()
-                    .map_err(|e| ToolError::IoError(e.into()))?;
-                let project = std::fs::File::open(&cwd)
-                    .map_err(|e| ToolError::IoError(e.into()))?;
-                let wanted = fstat(project.as_fd())
-                    .map_err(|e| ToolError::IoError(e.into()))?;
+                let cwd = std::env::current_dir().map_err(|e| ToolError::IoError(e.into()))?;
+                let project =
+                    std::fs::File::open(&cwd).map_err(|e| ToolError::IoError(e.into()))?;
+                let wanted = fstat(project.as_fd()).map_err(|e| ToolError::IoError(e.into()))?;
                 if (opened.st_dev, opened.st_ino) == (wanted.st_dev, wanted.st_ino) {
                     Ok(())
                 } else {

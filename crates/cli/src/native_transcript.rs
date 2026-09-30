@@ -35,7 +35,11 @@ impl TokenDelta {
             }
             t.truncate(end);
         }
-        Self { stream_id, seq, text: t }
+        Self {
+            stream_id,
+            seq,
+            text: t,
+        }
     }
 }
 
@@ -76,7 +80,13 @@ pub struct StreamAccumulator {
 
 impl StreamAccumulator {
     pub fn new(stream_id: u64) -> Self {
-        Self { stream_id, next_seq: 0, pending: Vec::new(), text: String::new(), dropped_bytes: 0 }
+        Self {
+            stream_id,
+            next_seq: 0,
+            pending: Vec::new(),
+            text: String::new(),
+            dropped_bytes: 0,
+        }
     }
 
     /// Push a delta. Wrong stream ignored (returns false). Duplicates/stale
@@ -473,7 +483,11 @@ pub fn render_lines(lines: &[TranscriptLine], width: usize) -> Vec<String> {
             out.push(line);
         }
     }
-    let lines = if lines.len() > MAX_WINDOW { &lines[lines.len() - MAX_WINDOW..] } else { lines };
+    let lines = if lines.len() > MAX_WINDOW {
+        &lines[lines.len() - MAX_WINDOW..]
+    } else {
+        lines
+    };
     let mut out = Vec::new();
     for l in lines {
         if width == 0 {
@@ -612,7 +626,11 @@ mod tests {
         for i in 0..5 {
             t.push(&format!("line {i}"));
         }
-        let vis: Vec<u64> = t.page(&TranscriptPage::new(), 2).iter().map(|l| l.id).collect();
+        let vis: Vec<u64> = t
+            .page(&TranscriptPage::new(), 2)
+            .iter()
+            .map(|l| l.id)
+            .collect();
         assert_eq!(vis, vec![3, 4]);
         let mut page = TranscriptPage::new();
         page.scroll_up(2, t.len());
@@ -653,17 +671,30 @@ mod tests {
 
     #[test]
     fn render_lines_wraps_and_bounds() {
-        let lines = vec![TranscriptLine { id: 0, text: "hello world foo".into() }];
+        let lines = vec![TranscriptLine {
+            id: 0,
+            text: "hello world foo".into(),
+        }];
         let rows = render_lines(&lines, 5);
         assert!(rows.join("|").contains("hello"));
         for r in &rows {
             assert!(r.chars().count() <= 5, "row overflow: {r:?}");
         }
         assert_eq!(render_lines(&lines, 0), vec!["hello world foo".to_owned()]);
-        let lines = vec![TranscriptLine { id: 1, text: "a\nb".into() }];
-        assert_eq!(render_lines(&lines, 0), vec!["a".to_owned(), "b".to_owned()]);
-        let big: Vec<TranscriptLine> =
-            (0..500).map(|i| TranscriptLine { id: i, text: "x".repeat(100) }).collect();
+        let lines = vec![TranscriptLine {
+            id: 1,
+            text: "a\nb".into(),
+        }];
+        assert_eq!(
+            render_lines(&lines, 0),
+            vec!["a".to_owned(), "b".to_owned()]
+        );
+        let big: Vec<TranscriptLine> = (0..500)
+            .map(|i| TranscriptLine {
+                id: i,
+                text: "x".repeat(100),
+            })
+            .collect();
         assert!(render_lines(&big, 10).len() <= MAX_WINDOW);
     }
 

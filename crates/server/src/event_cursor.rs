@@ -135,8 +135,9 @@ impl Durability {
 pub fn classify(event_type: &str) -> Durability {
     match event_type {
         "session.created" | "session.renamed" | "session.archived" | "message.appended"
-        | "message.compacted" | "tool.completed" | "permission.granted"
-        | "permission.denied" => Durability::Durable,
+        | "message.compacted" | "tool.completed" | "permission.granted" | "permission.denied" => {
+            Durability::Durable
+        }
         _ => Durability::Ephemeral,
     }
 }
@@ -307,9 +308,6 @@ mod tests {
     #[test]
     fn malformed_cursor_is_bad_cursor() {
         let log = ReplayBuffer::new();
-        assert_eq!(
-            log.replay(&Cursor::new(0, 7)),
-            Err(CursorError::BadCursor)
-        );
+        assert_eq!(log.replay(&Cursor::new(0, 7)), Err(CursorError::BadCursor));
     }
 }

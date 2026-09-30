@@ -97,11 +97,7 @@ pub fn assemble_prompt(
         let has_glob = entry.glob.is_some();
         let in_load_set = decision.load.iter().any(|n| n == &name);
 
-        let should_inject = if !has_glob {
-            true
-        } else {
-            in_load_set
-        };
+        let should_inject = if !has_glob { true } else { in_load_set };
 
         if !should_inject {
             if skipped.len() < MAX_RECORD_ENTRIES {

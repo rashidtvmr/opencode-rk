@@ -28,7 +28,14 @@ type ForkMessageRow = (
     i64,
     Option<i64>,
 );
-type ForkPartRow = (i64, i64, i64, Option<String>, Option<String>, Option<String>);
+type ForkPartRow = (
+    i64,
+    i64,
+    i64,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+);
 
 pub struct ForkV2;
 

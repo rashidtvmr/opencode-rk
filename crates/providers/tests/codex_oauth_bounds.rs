@@ -5,8 +5,8 @@
 
 use opencode_rk_providers::codex_oauth::{
     begin_login, begin_login_with, complete_login, complete_login_at, refresh, refresh_at,
-    CodexAuthState, CodexError, HumanGrant, RefreshGrant, CODEX_CONSENT_URL,
-    MAX_CONSENT_URL_BYTES, MAX_DEVICE_CODE_BYTES,
+    CodexAuthState, CodexError, HumanGrant, RefreshGrant, CODEX_CONSENT_URL, MAX_CONSENT_URL_BYTES,
+    MAX_DEVICE_CODE_BYTES,
 };
 
 const EXPIRY_MS: u64 = 1_700_000_000_000;
@@ -58,13 +58,19 @@ fn prov_016_b08_grant_constructor_device_code_bounds() {
 fn prov_016_b09_consent_url_length_cap() {
     assert_eq!(MAX_CONSENT_URL_BYTES, 2_048);
     let prefix = "https://x/";
-    let over = format!("{prefix}{}", "p".repeat(MAX_CONSENT_URL_BYTES + 1 - prefix.len()));
+    let over = format!(
+        "{prefix}{}",
+        "p".repeat(MAX_CONSENT_URL_BYTES + 1 - prefix.len())
+    );
     assert_eq!(over.len(), MAX_CONSENT_URL_BYTES + 1);
     assert_eq!(
         begin_login_with(&over, "device-1").unwrap_err(),
         CodexError::BadConsentUrl
     );
-    let at_max = format!("{prefix}{}", "p".repeat(MAX_CONSENT_URL_BYTES - prefix.len()));
+    let at_max = format!(
+        "{prefix}{}",
+        "p".repeat(MAX_CONSENT_URL_BYTES - prefix.len())
+    );
     assert_eq!(at_max.len(), MAX_CONSENT_URL_BYTES);
     assert!(begin_login_with(&at_max, "device-1").is_ok());
 }
