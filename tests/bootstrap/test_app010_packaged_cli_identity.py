@@ -23,9 +23,32 @@ def _installed_binary() -> pathlib.Path:
     if not value:
         raise AssertionError("OC2_TEST_BINARY must name the installed oc2 binary")
     path = pathlib.Path(value)
+    if not path.is_absolute():
+        raise AssertionError(f"OC2_TEST_BINARY must be absolute: {path}")
     if not path.is_file():
         raise AssertionError(f"OC2_TEST_BINARY is not a file: {path}")
     return path
+
+
+def _stage_install(source: pathlib.Path, root: pathlib.Path) -> pathlib.Path:
+    install = root / "install"
+    binary = install / "bin" / "oc2"
+    binary.parent.mkdir(parents=True)
+    shutil.copy2(source, binary)
+
+    library_value = os.environ.get("OC2_TEST_NATIVE_LIBRARY")
+    if library_value:
+        library = pathlib.Path(library_value)
+        if not library.is_absolute():
+            raise AssertionError(f"OC2_TEST_NATIVE_LIBRARY must be absolute: {library}")
+        if not library.is_file() or not os.access(library, os.R_OK):
+            raise AssertionError(f"OC2_TEST_NATIVE_LIBRARY is not readable: {library}")
+        if library.suffix not in {".dylib", ".so"}:
+            raise AssertionError("OC2_TEST_NATIVE_LIBRARY must end in .dylib or .so")
+        library_target = install / "lib" / f"libopentui{library.suffix}"
+        library_target.parent.mkdir(parents=True)
+        shutil.copy2(library, library_target)
+    return binary
 
 
 def _run_inspection(binary: pathlib.Path, root: pathlib.Path, *args: str) -> str:
@@ -86,9 +109,7 @@ class PackagedCliIdentityTests(unittest.TestCase):
         source = _installed_binary()
         with tempfile.TemporaryDirectory(prefix="app010-version-") as temporary:
             root = pathlib.Path(temporary)
-            binary = root / "install" / "bin" / "oc2"
-            binary.parent.mkdir(parents=True)
-            shutil.copy2(source, binary)
+            binary = _stage_install(source, root)
             output = _run_inspection(binary, root, "--version")
 
             self.assertIn("oc2", output)
@@ -100,9 +121,7 @@ class PackagedCliIdentityTests(unittest.TestCase):
         source = _installed_binary()
         with tempfile.TemporaryDirectory(prefix="app010-help-") as temporary:
             root = pathlib.Path(temporary)
-            binary = root / "install" / "bin" / "oc2"
-            binary.parent.mkdir(parents=True)
-            shutil.copy2(source, binary)
+            binary = _stage_install(source, root)
             output = _run_inspection(binary, root, "--help")
 
             self.assertIn("Usage: oc2", output)
