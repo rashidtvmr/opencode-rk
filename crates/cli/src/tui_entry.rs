@@ -16,6 +16,9 @@
 //! never fabricated.
 
 use crate::daemon_client;
+#[cfg(feature = "native")]
+#[path = "native_setup.rs"]
+mod native_setup;
 use clap::{Args, ValueEnum};
 #[cfg(feature = "native")]
 use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
@@ -280,25 +283,6 @@ fn message_text_bounded(message: &serde_json::Value) -> Option<String> {
     Some(text.chars().take(MAX_NATIVE_LINE_CHARS).collect())
 }
 
-#[cfg(feature = "native")]
-fn advertised_model(
-    origin: &str,
-    auth: Option<&str>,
-    provider: &str,
-    model: &str,
-) -> Result<bool, String> {
-    let body = http_request(origin, "GET", "/api/models?limit=500", None, auth)?;
-    let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
-    Ok(value["models"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .any(|entry| {
-            entry["provider_id"].as_str() == Some(provider)
-                && entry["model_id"].as_str() == Some(model)
-        }))
-}
-
 fn preview(text: &str) -> String {
     if text.chars().count() <= LIVE_PREVIEW_CHARS {
         text.to_owned()
@@ -524,18 +508,28 @@ fn native_loop(
     let _ = renderer.enable_kitty_keyboard(1);
     renderer.set_title("OpenCode RK")?;
     let mut draft = String::new();
-    let mut setup = false;
-    let mut provider = String::new();
-    let mut model = "openai/gpt-5.6".to_owned();
-    let mut key_saved = false;
+    let mut dialog = native_setup::Dialog::None;
+    let models = live
+        .and_then(|snapshot| {
+            http_request(
+                &snapshot.origin,
+                "GET",
+                "/api/models?provider=openai&limit=500",
+                None,
+                auth,
+            )
+            .and_then(|body| native_setup::catalogue(&body))
+            .ok()
+        })
+        .unwrap_or_default();
+    let mut selected = native_setup::selected(&models);
     let mut transcript = Vec::new();
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
     if let Some(snapshot) = live {
-        transcript.extend(snapshot.history.iter().cloned());
-        if let Some(text) = &snapshot.last_text {
-            transcript.push(format!("last: {text}"));
+        for line in &snapshot.history {
+            append_transcript(&mut transcript, line.clone());
         }
     }
     let mut input = std::io::stdin();
@@ -543,6 +537,10 @@ fn native_loop(
     loop {
         let mut lines = vec![
             "OpenCode RK (native)".to_string(),
+            selected
+                .as_ref()
+                .map(|model| format!("model: {} (ctrl-p)", model.qualified()))
+                .unwrap_or_else(|| "model: unset (/connect)".to_owned()),
             live.map(|s| format!("session: {} (live)", s.title))
                 .unwrap_or_else(|| "daemon: offline".to_string()),
         ];
@@ -560,91 +558,154 @@ fn native_loop(
                 lines.push(format!("last: {last}"));
             }
         }
-        let visible = transcript
-            .iter()
-            .rev()
-            .scan(0usize, |bytes, line| {
-                let next = bytes.saturating_add(line.len());
-                if next > MAX_NATIVE_TRANSCRIPT_BYTES {
-                    None
-                } else {
-                    *bytes = next;
-                    Some(line)
+        let panel = match dialog {
+            native_setup::Dialog::None => vec![format!("> {draft}")],
+            native_setup::Dialog::Provider => {
+                let mut panel = vec!["Connect a provider".to_owned()];
+                if !models.is_empty() && "openai".contains(&draft.trim().to_lowercase()) {
+                    panel.push("  OpenAI (API key)".to_owned());
                 }
-            })
-            .collect::<Vec<_>>();
-        lines.extend(visible.into_iter().rev().cloned());
-        lines.push(if setup {
-            if provider.is_empty() {
-                "Connect a provider".to_owned()
-            } else if !key_saved {
-                "API key".to_owned()
-            } else {
-                format!("Select model (current: {model})")
+                panel.push(format!("filter: {draft} (enter / escape)"));
+                panel
             }
-        } else {
-            format!("> {draft}")
-        });
+            native_setup::Dialog::ApiKey => vec![
+                "API key (OpenAI)".to_owned(),
+                format!(
+                    "key: {} (enter / escape)",
+                    "*".repeat(draft.chars().count().min(40))
+                ),
+            ],
+            native_setup::Dialog::Model => {
+                let mut panel = vec!["Select model (OpenAI)".to_owned()];
+                panel.extend(
+                    models
+                        .iter()
+                        .filter(|model| model.matches(&draft))
+                        .take(6)
+                        .map(|model| format!("  {} — {}", model.id, model.name)),
+                );
+                panel.push(format!("filter: {draft} (enter / escape)"));
+                panel
+            }
+        };
+        let slots = (renderer.rows() as usize).saturating_sub(lines.len() + panel.len());
+        let visible = transcript.iter().rev().take(slots).collect::<Vec<_>>();
+        lines.extend(visible.into_iter().rev().cloned());
+        lines.extend(panel);
         native_paint(&mut renderer, &lines)?;
         if input.read(&mut byte)? == 0 {
             break;
         }
         match byte[0] {
             3 | 4 => break,
+            27 => {
+                dialog = native_setup::Dialog::None;
+                draft.clear();
+            }
+            16 => {
+                dialog = native_setup::Dialog::Model;
+                draft.clear();
+            }
             8 | 127 => {
                 draft.pop();
             }
             b'\r' | b'\n' => {
                 let text = draft.trim().to_owned();
-                if text == ":q" || text == ":quit" || text == "/exit" || text == "/quit" {
+                if matches!(dialog, native_setup::Dialog::None)
+                    && matches!(text.as_str(), ":q" | ":quit" | "/exit" | "/quit")
+                {
                     break;
                 }
-                if setup {
-                    if provider.is_empty() {
-                        if text == "/connect" {
-                            provider.clear();
-                        } else {
-                            provider = text;
+                if !matches!(dialog, native_setup::Dialog::None) {
+                    match dialog {
+                        native_setup::Dialog::Provider => {
+                            if !models.is_empty() && "openai".contains(&text.to_lowercase()) {
+                                dialog = native_setup::Dialog::ApiKey;
+                            } else {
+                                append_transcript(
+                                    &mut transcript,
+                                    "error: no supported provider matches".to_owned(),
+                                );
+                            }
                         }
-                    } else if !key_saved {
-                        let payload = serde_json::json!({"type":"api", "key": text}).to_string();
-                        let response = live.ok_or("daemon unavailable")?;
-                        http_request(
-                            &response.origin,
-                            "PUT",
-                            &format!("/auth/{provider}"),
-                            Some(&payload),
-                            auth,
-                        )?;
-                        key_saved = true;
-                        draft.clear();
-                    } else {
-                        if let Some(snapshot) = live {
-                            if !advertised_model(&snapshot.origin, auth, &provider, &text)? {
+                        native_setup::Dialog::ApiKey => {
+                            let payload = serde_json::json!({"type":"api", "key":text}).to_string();
+                            let result = live
+                                .ok_or_else(|| "daemon unavailable".to_owned())
+                                .and_then(|snapshot| {
+                                    http_request(
+                                        &snapshot.origin,
+                                        "PUT",
+                                        "/auth/openai",
+                                        Some(&payload),
+                                        auth,
+                                    )
+                                })
+                                .and_then(|response| {
+                                    if serde_json::from_str::<serde_json::Value>(&response).ok()
+                                        == Some(serde_json::Value::Bool(true))
+                                    {
+                                        Ok(())
+                                    } else {
+                                        Err("credential was not saved".to_owned())
+                                    }
+                                });
+                            match result {
+                                Ok(()) => dialog = native_setup::Dialog::Model,
+                                Err(_) => append_transcript(
+                                    &mut transcript,
+                                    "error: unable to save API key".to_owned(),
+                                ),
+                            }
+                        }
+                        native_setup::Dialog::Model => {
+                            let choice = models
+                                .iter()
+                                .find(|model| model.id == text || model.qualified() == text)
+                                .or_else(|| models.iter().find(|model| model.matches(&text)));
+                            if let Some(model) = choice {
+                                match native_setup::save_model(model) {
+                                    Ok(()) => {
+                                        selected = Some(model.clone());
+                                        dialog = native_setup::Dialog::None;
+                                    }
+                                    Err(error) => append_transcript(
+                                        &mut transcript,
+                                        format!("error: {error}"),
+                                    ),
+                                }
+                            } else {
                                 append_transcript(
                                     &mut transcript,
                                     "error: model is not advertised".to_owned(),
                                 );
-                                draft.clear();
-                                continue;
                             }
                         }
-                        model = format!("{provider}/{text}");
-                        setup = false;
+                        native_setup::Dialog::None => {}
                     }
                     draft.clear();
                     continue;
                 }
                 if text == "/connect" {
-                    setup = true;
-                    provider.clear();
+                    dialog = native_setup::Dialog::Provider;
+                    draft.clear();
+                    continue;
+                }
+                if text == "/models" {
+                    dialog = native_setup::Dialog::Model;
                     draft.clear();
                     continue;
                 }
                 if !text.is_empty() {
                     append_transcript(&mut transcript, format!("you: {text}"));
                     if let Some(snapshot) = live {
-                        match execute_turn(snapshot, &text, auth, &model) {
+                        let result = selected
+                            .as_ref()
+                            .ok_or_else(|| "select a model with /connect".to_owned())
+                            .and_then(|model| {
+                                execute_turn(snapshot, &text, auth, &model.qualified())
+                            });
+                        match result {
                             Ok(reply) => {
                                 append_transcript(&mut transcript, format!("assistant: {reply}"))
                             }
@@ -662,7 +723,12 @@ fn native_loop(
                 draft.clear();
             }
             b if b >= 0x20 && b != b'\t' => {
-                if draft.len() < MAX_NATIVE_DRAFT_BYTES {
+                let limit = if matches!(dialog, native_setup::Dialog::ApiKey) {
+                    16 * 1024
+                } else {
+                    MAX_NATIVE_DRAFT_BYTES
+                };
+                if draft.len() < limit {
                     draft.push(char::from(b));
                 }
             }
@@ -681,19 +747,9 @@ fn append_transcript(transcript: &mut Vec<String>, mut line: String) {
         line = line.chars().take(MAX_NATIVE_LINE_CHARS).collect();
     }
     transcript.push(line);
-    let mut bytes = 0usize;
-    let first = transcript.len().saturating_sub(1);
-    let keep_from = transcript
-        .iter()
-        .enumerate()
-        .rev()
-        .find_map(|(index, item)| {
-            bytes = bytes.saturating_add(item.len());
-            (bytes <= MAX_NATIVE_TRANSCRIPT_BYTES).then_some(index)
-        })
-        .unwrap_or(first);
-    if keep_from > 0 {
-        transcript.drain(..keep_from);
+    let mut bytes: usize = transcript.iter().map(String::len).sum();
+    while bytes > MAX_NATIVE_TRANSCRIPT_BYTES || transcript.len() > 200 {
+        bytes = bytes.saturating_sub(transcript.remove(0).len());
     }
 }
 
