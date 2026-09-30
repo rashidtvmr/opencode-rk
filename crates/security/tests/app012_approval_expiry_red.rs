@@ -3,7 +3,9 @@
 
 use opencode_rk_contracts::ApprovalId;
 use opencode_rk_security::{
-    app_policy::{decide, AppDecision, ExpectedScope, Grant, GrantLedger, OperationDigest, PolicyDeny, Scope},
+    app_policy::{
+        decide, AppDecision, ExpectedScope, Grant, GrantLedger, OperationDigest, PolicyDeny, Scope,
+    },
     FileAction, OperationIntent, PermissionBroker, SecurityPolicy,
 };
 use std::path::PathBuf;
@@ -32,7 +34,11 @@ fn expected(session: opencode_rk_contracts::SessionId, at: SystemTime) -> Expect
     }
 }
 
-fn grant(intent: &OperationIntent, session: opencode_rk_contracts::SessionId, expires_at: SystemTime) -> Grant {
+fn grant(
+    intent: &OperationIntent,
+    session: opencode_rk_contracts::SessionId,
+    expires_at: SystemTime,
+) -> Grant {
     Grant::new(
         ApprovalId::new(),
         OperationDigest::of(intent),
@@ -55,21 +61,41 @@ fn approval_expiry_is_exclusive_and_expired_grant_has_no_side_effect() {
     assert_eq!(before.covers(&operation, &before_scope), Ok(()));
     let mut before_ledger = GrantLedger::new();
     assert_eq!(
-        decide(&broker(), &operation, Some(&before), &before_scope, &mut before_ledger),
+        decide(
+            &broker(),
+            &operation,
+            Some(&before),
+            &before_scope,
+            &mut before_ledger
+        ),
         AppDecision::Allow
     );
     assert!(before_ledger.contains(&before.approval));
 
     let at_boundary = grant(&operation, session, now());
     let at_scope = expected(session, now());
-    assert_eq!(at_boundary.covers(&operation, &at_scope), Err(PolicyDeny::Expired));
+    assert_eq!(
+        at_boundary.covers(&operation, &at_scope),
+        Err(PolicyDeny::Expired)
+    );
     let mut at_ledger = GrantLedger::new();
     assert_eq!(
-        decide(&broker(), &operation, Some(&at_boundary), &at_scope, &mut at_ledger),
-        AppDecision::Deny { reason: PolicyDeny::Expired.to_string() }
+        decide(
+            &broker(),
+            &operation,
+            Some(&at_boundary),
+            &at_scope,
+            &mut at_ledger
+        ),
+        AppDecision::Deny {
+            reason: PolicyDeny::Expired.to_string()
+        }
     );
     assert!(at_ledger.is_empty());
 
     let after = grant(&operation, session, now() - Duration::from_secs(1));
-    assert_eq!(after.covers(&operation, &expected(session, now())), Err(PolicyDeny::Expired));
+    assert_eq!(
+        after.covers(&operation, &expected(session, now())),
+        Err(PolicyDeny::Expired)
+    );
 }
