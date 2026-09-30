@@ -52,3 +52,23 @@ history, framing, barrier and self-check ASTs. Forced CLI termination and
 unproven daemon cleanup always fail the gate after writing bounded evidence.
 The existing helper's ownership guard remains active. Actual installed runtime
 verification and an exact new contract hash are required before acceptance.
+
+## Executable mechanical contract verification
+
+Final integrated cleanup source is `963b88f7356567558950336687f65c1c756ac83d`;
+the actual test SHA-256 is
+`c6d8d561a96136061c4d6e87e183bad144e762df17847fcfca4a347d0d30633e`.
+The provider, history, framing, barrier and self-check ASTs remain identical to
+the prior frozen `f7d8` contract. The unchanged G2 fixture and cleanup helper
+retain their original hashes.
+
+Controller self-check passes in 0.73s. The new fixture against the accepted
+installed `ac635fa` still reproduces genuine missing-stream RED in 11.43s,
+with healthy startup, one non-stream request and proven owned cleanup. Against
+the already-attested installed candidate `ed727a6`, the full four-request early
+delta/tool/second-turn/CLI+daemon restart journey passes in 2.23s, with exact
+typed history and both owned groups gone. No rebuild was used for fixture-only
+maintenance. Source/test/command/log hashes and both runs are retained at
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-stream-cleanup-reverified-us6dfyl3`.
+This is executable test maintenance and candidate evidence; integrated native
+product acceptance still requires the exact new release gate.

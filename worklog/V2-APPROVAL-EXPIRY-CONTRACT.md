@@ -22,7 +22,7 @@ and `docs/STORAGE.md:263` identifies terminal approval retention as an existing
 sweep. State 3 is explicitly the expired terminal state (`approvals_v2.rs:18-22`)
 but is excluded from both retention queries. The corrected retention tests require
 the real pending → `expire_sweep` transition to produce both state `3` and
-`resolved_at_us == expires_at_us`; no manual SQL repair is used. They then test
+`resolved_at_us == now_us`; no manual SQL repair is used. They then test
 the existing resolved-age cutoff, bounded limit of one, resource cascade,
 pending protection, and newer-expired protection. This authorizes the coherent
 product repair to timestamp the state-0 → state-3 transition alongside the
@@ -36,3 +36,17 @@ necessary real transition control. This supersedes the prior `5e9d1f1` contract'
 synthetic null-timestamp control without deleting or amending that history. This
 is source preparation only; parent
 must run the current-canonical RED before assigning product implementation.
+
+## Frozen compiling RED
+
+Controller formatting was completed before freezing at
+`c84b4f741b28b57308ef75a248fb292a4f8e3ffa`. Exact hashes:
+
+- Security contract: `834176d8e4aa26ce10bb6b161515c936dfd2537dfe038074da3dc5d33e923233`.
+- Storage contract: `cba8bcef14de64b5278ba1b9761842cfa6abce9666b83ee6d41fc317bc07979d`.
+
+The controller ran both real targets: the expiry contract fails because equality
+returns `Ok(())`; all three retention controls fail because real expiry produces
+`(3, None)` instead of a terminal resolution timestamp. Both compile and fail
+at runtime, exit 101. Commands/source/test/log hashes are retained at
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-approval-lifetime-red-3tv4ajy2`.

@@ -808,5 +808,32 @@ open. This acceptance does not certify the complete G0–G8 release.
   -- -D warnings` fails exit 101 in 4.42s at fourteen security-library lint
   diagnostics. Both were read-only, serial, with two Cargo jobs and two test
   threads. Logs/commands/hashes reside at `v2-workspace-gates-4a3e98e-ulyckkel`.
-  A narrowly granted mechanical security candidate is awaiting independent
-  preverification; workspace formatting and broader Clippy remain RED.
+  The narrowly granted mechanical security package was subsequently ACCEPTED on
+  exact `cb0ab24` with actual Clippy exit 0 and 148 library tests, as recorded in
+  `worklog/V2-SECURITY-LINT.md`. Workspace formatting and broader Clippy remain
+  RED.
+
+## Selected approval expiry/retention salvage accepted
+
+- Package `APP012-APPROVAL-LIFETIME`, base
+  `c84b4f741b28b57308ef75a248fb292a4f8e3ffa`; independently PREVERIFIED product
+  candidate `c8864330eb018b0e8c8cf02e0ead94a1647414de`; exact integrated SHA
+  **`dddb8d4ab1de0d4501353451651bec979058f84f`**.
+- Product paths: `crates/security/src/app_policy.rs`,
+  `crates/storage/src/approvals_v2.rs`, `crates/storage/src/retention_v2.rs`.
+  The owned handoff is `worklog/V2-APPROVAL-EXPIRY-LIVE.md`.
+- Current approved authority is inclusive approval expiry (`expires_at_us <=
+  now_us`), terminal state 3, caller-selected resolved-age retention and explicit
+  human grant expiration bounds. No new cutoff, TTL or retention choice was
+  introduced. Historical `dc3331ee257d` implementations/tests were selected as
+  useful salvage and extended with a real transition/timestamp control; all
+  proposal and claims evidence is preserved.
+- The controller captured compiling RED before implementation, froze both
+  executable contract hashes, and reran the same required gates after integration:
+  **148 security library + 1 expiry + 3 real retention + 8 approval transition +
+  6 retention regression tests**, plus security-library Clippy exit 0.
+- Exact commands, source/test/log hashes and results reside at
+  `v2-approval-lifetime-integrated-l1ymyfck` under the approved artifact parent;
+  independent candidate evidence is `v2-approval-expiry-independent-c886`.
+  State **ACCEPTED for expiry/terminal retention on integrated `dddb8d4`**.
+  This does not accept the complete APP012 interactive approval story.
