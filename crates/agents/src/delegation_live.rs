@@ -10,6 +10,8 @@
 
 use std::fmt;
 
+use uuid::Uuid;
+
 // ── Delegation primitives (mirror of app_delegation public API) ──
 
 /// Opaque child handle id.
@@ -298,12 +300,11 @@ pub enum CompositionError {
 // ── Spawn plan builder ──
 
 /// Generate a fresh SessionId that is distinct from the parent.
+///
+/// The UUID supplies process-safe randomness rather than relying on a clock
+/// whose resolution can produce the same value for back-to-back children.
 fn fresh_session_id(parent_id: &SessionId) -> SessionId {
-    let ts = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    format!("child-{}-{}", parent_id, ts)
+    format!("child-{}-{}", parent_id, Uuid::new_v4())
 }
 
 /// Build a [`SpawnPlan`] from a parent session and a delegation request.
