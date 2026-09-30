@@ -834,9 +834,9 @@
       "status": "completed"
     },
     "SHIP-001": {
-      "blockedNote": "T04 wrong-arch preserve + T05 rollback-restore fail in scripts/install-oc2.sh (outside owned path); frozen 6 tests 4 pass/2 fail; workflow real subset landed",
+      "blockedNote": "f369ebd rejected: moving stable, broken arm64 cross-build, non-native oc2, ignored required failures, secret argv, pre-sign hashes, false rollback note; T04/T05 RED and native artifacts unresolved.",
       "scratchpad": "worklog/SHIP-001.md",
-      "session": "ses_f100510e6ffeOYCofOi2XTNQl2",
+      "session": "ses_f3c4de578ffelQv59xDXmOs03B",
       "status": "blocked"
     },
     "SHIP-004": {

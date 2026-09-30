@@ -62,3 +62,29 @@ owned file: .github/workflows/release.yml (does not exist yet)
 - Content: 6 jobs build/integrity/sign-macos/sign-windows/verify/publish. 22 SHA-pinned action refs (checkout 11d5960a, upload-artifact ea165f8d, download-artifact d3f86a10, setup-python a26af69b, sbom e22c3899, attest e8998f94, rust-toolchain 6bed0761 via live commit API). Matrix: ubuntu x86_64+aarch64 linux, macos arm64, windows x64. cargo build --locked. upload-artifact, sha256+sha256sum -c, SBOM spdx-json, THIRD_PARTY_LICENSES from cargo metadata --locked, PROVENANCE with github.sha+ref+toolchain. Real codesign --sign/--verify + xcrun notarytool submit --wait; AzureSignTool sign + signtool verify /pa. Executable fail-closed [ -z ${APPLE_...} ] / [ -z ${AZURE_...} ] guards exit 1. No echo-signed lines. No secret output. publish needs all 5 jobs, draft-first then undraft.
 - Validation: python3 -m unittest release.test_release_contract => 6 tests, 4 pass (T01 ok, T02 ok, T03 ok, T04-sanity ok), 2 FAIL residual: T04 test_t04_wrong_arch_and_corrupt_rejected (preexisting binary deleted on rejection, scripts/install-oc2.sh outside owned path), T05 test_t05_upgrade_preserves_data_with_rollback (v1 binary not restored, same installer file). Static token self-check: 22 pins, all required tokens present.
 - Terminal state BLOCKED: T04/T05 dynamic installer behavior outside owned path; cannot fix without editing scripts/install-oc2.sh (forbidden). Real workflow subset committed; no stubs/TODOs/placeholders in owned file.
+
+## Integration rejection (2026-09-30)
+
+- Candidate `f369ebd` is **not accepted and must not be integrated**. Frozen
+  static checks improved to 4/6, but review found production/security defects
+  outside those assertions:
+  - `toolchain: stable` and `*-latest` runners are moving inputs, not a
+    reproducible toolchain/environment.
+  - Linux ARM64 is cross-linked on an x64 Ubuntu runner without a cross linker.
+  - The release builds `oc2` without `--features native`; it would ship the
+    reduced non-OpenTUI binary. The tree has only the Linux x64
+    `libopentui.so`, so supported-platform native bundles cannot be produced.
+  - Required installer copy and macOS stapling use `|| true`.
+  - Windows client secret and Apple notarization password expand into process
+    arguments; required identity variables are not all fail-closed checked.
+  - Checksums/provenance are computed before signing, while publish combines
+    unsigned and signed artifacts. Attestation excludes the Windows ZIP.
+  - Publish emits a rollback claim that contradicts the frozen T04/T05 failures
+    proving prior executable deletion/non-restoration.
+- All seven referenced action commit IDs were independently confirmed to exist,
+  but immutable action pins do not cure the workflow defects above.
+- YAML parses. Frozen suite remains byte-identical at SHA-256 `2decf1d2...`.
+- Two repair delegations after `f369ebd` produced no workflow edits; retry cap
+  reached. SHIP-001 remains blocked on reviewed signing infrastructure,
+  proposed DISC-120 installer rollback, proposed DISC-121 native artifacts, and
+  a new workflow repair candidate. No completion or acceptance claimed.
