@@ -126,10 +126,7 @@ pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) 
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
         .route("/api/models/{provider}/{model}", get(get_model))
-        .route(
-            "/api/auth/{provider}",
-            axum::routing::put(save_provider_auth),
-        )
+        .route("/auth/{provider}", axum::routing::put(save_provider_auth))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
         .route("/api/sessions/{id}/archive", post(archive_session))
