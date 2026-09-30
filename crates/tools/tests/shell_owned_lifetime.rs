@@ -104,10 +104,8 @@ fn process_row(pid: u32) -> Option<(u32, u32)> {
     if !output.status.success() {
         return None;
     }
-    let fields: Vec<_> = String::from_utf8(output.stdout)
-        .ok()?
-        .split_whitespace()
-        .collect();
+    let text = String::from_utf8(output.stdout).ok()?;
+    let fields: Vec<_> = text.split_whitespace().collect();
     if fields.len() != 2 {
         return None;
     }
