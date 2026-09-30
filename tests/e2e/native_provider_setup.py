@@ -127,8 +127,10 @@ def descriptor(data_root, port, child, deadline):
             if same_group and origin == "http://127.0.0.1:%d" % port and HEX64.fullmatch(d.get("auth_token", "")):
                 req = urllib.request.Request("http://127.0.0.1:%d/api/models?limit=20" % port, headers={"Authorization":"Bearer "+d["auth_token"]})
                 with urllib.request.urlopen(req, timeout=2) as r:
-                    value = json.loads(r.read(MAX_RESPONSE)); ids = str(value)
-                    if r.status == 200 and "gpt-5.6" in ids and MODEL in ids:
+                    value = json.loads(r.read(MAX_RESPONSE))
+                    ids = {item.get("model_id") for item in value.get("models", [])
+                           if isinstance(item, dict) and item.get("provider_id") == "openai"}
+                    if r.status == 200 and {"gpt-5.6", MODEL} <= ids:
                         d["_validated_pid"] = daemon_pid
                         d["_owner_pgid"] = child.pid
                         return d
@@ -165,8 +167,10 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
         os.close(slave); slave = None
         descriptor_value = descriptor(root/"d", daemon_port, child, time.monotonic()+20)
         descriptor_records.append({"pid": descriptor_value["_validated_pid"], "owner_pgid": descriptor_value["_owner_pgid"], "origin": descriptor_value["http_origin"], "port": daemon_port})
+        descriptor_records[-1]["phase"] = "initial_frame"
         read_until(master, time.monotonic()+20, buf, b"OpenCode", 0)
         def cmd(text, marker):
+            descriptor_records[-1]["phase"] = "await_" + marker.decode("ascii")
             start = len(buf); os.write(master, text.encode()+b"\r"); read_until(master, time.monotonic()+20, buf, marker, start)
             return bytes(buf[start:])
         if first:
@@ -183,6 +187,7 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
         response = cmd(PROMPTS[0 if first else 1], b"G2 first response" if first else b"G2 resumed response")
         if first and b"G2 first response" not in response: raise AssertionError("first response did not settle")
         if not first and PROMPTS[0].encode() not in bytes(buf): raise AssertionError("prior prompt absent after restart")
+        if KEY.encode() in bytes(buf): raise AssertionError("fixture API key echoed anywhere in PTY")
         if len(captures) + len(buf) > MAX_PTY: raise AssertionError("combined PTY capture bound reached")
         captures.extend(buf)
         capture_added = True
@@ -190,16 +195,19 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
         if child.returncode != 0: raise AssertionError("native process exited %s" % child.returncode)
         return descriptor_value
     finally:
+        capture_overflow = False
         if not capture_added:
-            if len(captures) + len(buf) > MAX_PTY: raise AssertionError("combined PTY capture bound reached")
-            captures.extend(buf)
+            capture_overflow = len(captures) + len(buf) > MAX_PTY
+            captures.extend(buf[:max(0, MAX_PTY - len(captures))])
         if child is not None and child.poll() is None:
             try: os.killpg(child.pid, signal.SIGTERM); child.wait(timeout=3)
             except subprocess.TimeoutExpired: os.killpg(child.pid, signal.SIGKILL); child.wait(timeout=3)
+            except ProcessLookupError: child.wait(timeout=3)
         for fd in (slave, master):
             if fd is not None:
                 try: os.close(fd)
                 except OSError: pass
+        if capture_overflow: raise AssertionError("combined PTY capture bound reached")
 
 def self_check():
     try:
@@ -212,7 +220,6 @@ def self_check():
     assert set(catalog["openai"]["models"]) == {"gpt-5.6", MODEL}
     read_fd, write_fd = os.pipe()
     try:
-        os.write(write_fd, b"stale Connect provider\n")
         buf = bytearray(b"stale Connect provider\n")
         start = len(buf)
         os.write(write_fd, b"fresh Connect provider\n")
@@ -246,7 +253,7 @@ def main():
     artifacts=artifacts.resolve()
     if artifacts.exists() and any(artifacts.iterdir()): raise RuntimeError("artifact directory must be new or empty")
     artifacts.mkdir(parents=True,exist_ok=True)
-    root=pathlib.Path(tempfile.mkdtemp(prefix="g2-native-provider-", dir=os.environ.get("TMPDIR","/tmp"))); install=root/"install"; (install/"bin").mkdir(parents=True); (install/"lib").mkdir(); shutil.copyfile(binary,install/"bin"/"oc2"); shutil.copyfile(library,install/"lib"/("libopentui"+HOST_LIBRARY_SUFFIX)); os.chmod(install/"bin"/"oc2",0o755)
+    root=pathlib.Path(tempfile.mkdtemp(prefix="g2-", dir=os.environ.get("TMPDIR","/tmp"))); install=root/"install"; (install/"bin").mkdir(parents=True); (install/"lib").mkdir(); shutil.copyfile(binary,install/"bin"/"oc2"); shutil.copyfile(library,install/"lib"/("libopentui"+HOST_LIBRARY_SUFFIX)); os.chmod(install/"bin"/"oc2",0o755)
     for n in ("home","project","data","d"): (root/n).mkdir()
     data=root/"d"; (data/"runtime").mkdir(); (data/"catalog").mkdir()
     if len(str(data/"runtime"/"opencode-rk.sock").encode())>100: raise RuntimeError("runtime socket path exceeds 100 bytes")
@@ -260,7 +267,7 @@ def main():
         first_descriptor=run_ui(install/"bin"/"oc2",env,root,True,captures,daemon_port,descriptor_records,auth); descriptor_info=descriptor_records[-1]
         if not auth.is_file() or auth.stat().st_mode&0o777!=0o600: raise AssertionError("UI did not create 0600 auth.json")
         saved=json.loads(auth.read_text()).get("openai",{}); assert saved.get("type")=="api" and saved.get("key")==KEY
-        stop_owned_daemon({"_validated_pid": first_descriptor["pid"], "_owner_pgid": first_descriptor["owner_pgid"]})
+        stop_owned_daemon(first_descriptor)
         second_descriptor = run_ui(install/"bin"/"oc2",env,root,False,captures,daemon_port,descriptor_records,auth)
         if fixture.state.error or len(fixture.state.requests)!=2: raise AssertionError(fixture.state.error or "expected exactly two provider requests")
         (artifacts/"native-provider-evidence.json").write_text(json.dumps({"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"model":MODEL,"request_count":2,"requests":[{"model":r.get("model"),"input":r.get("input")} for r in fixture.state.requests]},indent=2)+"\n")
@@ -269,7 +276,7 @@ def main():
         for record in descriptor_records:
             try: stop_owned_daemon({"_validated_pid":record["pid"], "_owner_pgid":record["owner_pgid"]})
             except (OSError, RuntimeError): pass
-        evidence={"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"phase":"failed" if failed else "success","provider_requests":len(fixture.state.requests),"descriptors":descriptor_records,"ui_capture":sanitize(bytes(captures)).decode("utf-8","replace")}
+        evidence={"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"phase":"failed" if failed else "success","provider_requests":len(fixture.state.requests),"fixture_root":str(root),"descriptors":descriptor_records,"ui_capture":sanitize(bytes(captures)).decode("utf-8","replace")}
         (artifacts/"native-provider-result.json").write_text(json.dumps(evidence,indent=2)+"\n"); fixture.shutdown(); fixture.server_close(); thread.join(timeout=5)
         if thread.is_alive(): raise RuntimeError("fixture server failed bounded shutdown")
         if not failed: shutil.rmtree(root,ignore_errors=True)
