@@ -90,11 +90,11 @@ def run(binary, library, manifest, artifacts):
     (root / "data" / "runtime").mkdir()
     if len(os.fsencode(root / "data" / "runtime" / "opencode-rk.sock")) > SOCKET_LIMIT: raise RuntimeError("socket path exceeds 100 bytes")
     auth = root / "data" / "opencode" / "auth.json"; auth.parent.mkdir(); auth.write_text(json.dumps({"openai":{"type":"api","key":KEY}})+"\n"); os.chmod(auth, 0o600)
-    catalog = root / "data" / "catalog" / "models.dev.api.json"; catalog.parent.mkdir(); catalog.write_text(json.dumps({"openai":{"name":"fixture","models":{MODEL:{"name":"UTF8 fixture","limit":{"context":200000}}}}})+"\n")
+    catalog = root / "data" / "catalog" / "models.dev.api.json"; catalog.parent.mkdir(); catalog.write_text(json.dumps({"openai":{"name":"fixture","models":{MODEL:{"name":"UTF8 fixture","limit":{"context":200000}}, "gpt-5.6-mini":{"name":"Readiness fixture","limit":{"context":200000}}}}})+"\n")
     state = State(); server = Fixture(("127.0.0.1", 0), Handler); server.state = state
     thread = threading.Thread(target=server.serve_forever, daemon=False); thread.start()
     daemon = None; master = slave = None; descriptors = []; captures = bytearray(); screen = TerminalScreen(); saved_attrs = None; second_saved_attrs = None; raw_seen = []; cleanup_error = None
-    termios_ok = False; thread_joined = False; cli_ok = False; daemons_gone = False
+    restored = []; cli_exits = []; thread_joined = False; daemons_gone = False
     try:
         port = free_loopback_port()
         env = {"HOME":str(root/"home"), "PATH":os.environ.get("PATH", ""), "TERM":"xterm-256color", "TMPDIR":str(root), "XDG_CONFIG_HOME":str(root/"home"/".config"), "XDG_DATA_HOME":str(root/"data"), "XDG_RUNTIME_DIR":str(root/"data"/"runtime"), "OPENCODE_RK_HOME":str(root/"data"), "OPENCODE_PROJECT_DIR":str(root/"project"), "OPENCODE_RK_DAEMON_ADDR":f"127.0.0.1:{port}", "OPENAI_BASE_URL":f"http://127.0.0.1:{server.server_port}/v1"}
@@ -102,16 +102,19 @@ def run(binary, library, manifest, artifacts):
         master, slave = pty.openpty(); saved_attrs = termios.tcgetattr(master); import fcntl; fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",24,80,0,0))
         daemon = launch(install/"bin"/"oc2", root, env, master, slave); os.close(slave); slave = None
         d = descriptor(root/"data", port, daemon, time.monotonic()+TIMEOUT); descriptors.append(d)
-        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", 0, screen)
+        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", 0, screen, lambda: screen.contains("model: openai/" + MODEL))
         raw_seen.append(not (termios.tcgetattr(master)[3] & termios.ICANON))
         write_fragments(master); os.write(master, b"\r")
         read_until(master, time.monotonic()+TIMEOUT, captures, ASSISTANT.encode(), len(captures), screen, lambda: screen.contains(ASSISTANT))
         if state.error or len(state.requests) != 1 or state.semantic_errors: raise AssertionError(state.error or state.semantic_errors or "expected one first request")
-        reap_cli_then_daemon(daemon, d, master); cli_ok = daemon.returncode == 0; termios_ok = termios.tcgetattr(master) == saved_attrs
+        reap_cli_then_daemon(daemon, d, master)
+        cli_exits.append(daemon.returncode)
+        restored.append(termios.tcgetattr(master) == saved_attrs)
+        if not restored[-1]: raise AssertionError("first native PTY was not restored")
         daemon = None; os.close(master); master = None
         master, slave = pty.openpty(); second_saved_attrs = termios.tcgetattr(master); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",24,80,0,0)); daemon = launch(install/"bin"/"oc2", root, env, master, slave); os.close(slave); slave=None
         d2 = descriptor(root/"data", port, daemon, time.monotonic()+TIMEOUT); descriptors.append(d2); state.restart_generation=1; screen=TerminalScreen(); start=len(captures)
-        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", start, screen, lambda: screen.has_model_status() and screen.contains(ASSISTANT))
+        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", start, screen, lambda: screen.contains("model: openai/" + MODEL) and screen.contains(ASSISTANT))
         raw_seen.append(not (termios.tcgetattr(master)[3] & termios.ICANON))
         for byte in RESUMED.encode("utf-8"): os.write(master, bytes([byte])); time.sleep(.008)
         os.write(master, b"\r"); read_until(master, time.monotonic()+TIMEOUT, captures, b"UTF8_RESUMED_RESPONSE", start, screen, lambda: screen.contains("UTF8_RESUMED_RESPONSE"))
@@ -122,14 +125,11 @@ def run(binary, library, manifest, artifacts):
         if daemon is not None:
             try: reap_cli_then_daemon(daemon, descriptors[-1] if descriptors else None, master)
             except BaseException as error: cleanup_error = cleanup_error or "owned cleanup failed: " + str(error)
-            else:
-                cli_ok = cli_ok and daemon.returncode == 0
-                if master is not None and second_saved_attrs is not None:
-                    try: termios_ok = termios_ok and termios.tcgetattr(master) == second_saved_attrs
-                    except OSError: termios_ok = False
-        if master is not None and saved_attrs is not None:
-            try: termios_ok = termios.tcgetattr(master) == saved_attrs
-            except OSError: termios_ok = False
+            cli_exits.append(daemon.returncode)
+            expected_attrs = second_saved_attrs if second_saved_attrs is not None else saved_attrs
+            if master is not None and expected_attrs is not None:
+                try: restored.append(termios.tcgetattr(master) == expected_attrs)
+                except OSError: restored.append(False)
         if slave is not None: os.close(slave)
         if master is not None: os.close(master)
         server.shutdown(); server.server_close(); thread.join(timeout=10); thread_joined = not thread.is_alive()
@@ -140,11 +140,15 @@ def run(binary, library, manifest, artifacts):
             except PermissionError: daemons_gone = False
             else: daemons_gone = False
         secret_echo = KEY.encode() in captures or KEY in screen.text()
-        evidence = {"phase":"failed" if (state.error or cleanup_error or state.semantic_errors or secret_echo) else "success", "error":state.error or cleanup_error or ("fixture credential echoed" if secret_echo else ""), "source_sha":source, "binary_sha256":binary_sha, "native_library_sha256":library_sha, "test_sha256":sha256(pathlib.Path(__file__)), "requests":state.requests, "semantic_errors":state.semantic_errors, "raw_mode_seen":raw_seen, "termios_restored":termios_ok, "cli_reaped_zero":cli_ok, "validated_daemons_gone":daemons_gone, "provider_thread_joined":thread_joined, "max_captured_bytes":len(captures), "captured_bytes":bytes(captures).replace(KEY.encode(), b"[REDACTED]").decode("utf-8", "replace")}
+        termios_ok = bool(restored) and all(restored)
+        cli_ok = bool(cli_exits) and all(code == 0 for code in cli_exits)
+        lifecycle_ok = termios_ok and cli_ok and daemons_gone and thread_joined and len(raw_seen) == 2 and all(raw_seen)
+        success = not (state.error or cleanup_error or state.semantic_errors or secret_echo) and lifecycle_ok and len(state.requests) == 2
+        evidence = {"phase":"success" if success else "failed", "error":state.error or cleanup_error or ("fixture credential echoed" if secret_echo else "" if success else "native ownership/terminal cleanup contract failed"), "source_sha":source, "binary_sha256":binary_sha,"native_library_sha256":library_sha, "test_sha256":sha256(pathlib.Path(__file__)), "requests":state.requests, "semantic_errors":state.semantic_errors, "raw_mode_seen":raw_seen, "pty_restoration_checks":restored, "cli_exit_codes":cli_exits, "termios_restored":termios_ok, "cli_reaped_zero":cli_ok, "validated_daemons_gone":daemons_gone, "provider_thread_joined":thread_joined, "max_captured_bytes":len(captures), "captured_bytes":bytes(captures).replace(KEY.encode(), b"[REDACTED]").decode("utf-8", "replace")}
         raw = json.dumps(evidence, ensure_ascii=False, indent=2) + "\n"
         if len(raw.encode()) > 512 * 1024: raise RuntimeError("evidence exceeded 512 KiB")
         (artifacts/("native-utf8-result.json" if evidence["phase"] == "success" else "native-utf8-failure.json")).write_text(raw)
-        if state.error or cleanup_error or state.semantic_errors or secret_echo or not (termios_ok and cli_ok and daemons_gone and thread_joined and all(raw_seen)): raise AssertionError(state.error or cleanup_error or state.semantic_errors or "native ownership/terminal cleanup contract failed")
+        if not success: raise AssertionError(evidence["error"])
 
 def main():
     p=argparse.ArgumentParser(); p.add_argument("--binary"); p.add_argument("--native-library"); p.add_argument("--build-json"); p.add_argument("--artifact-dir"); p.add_argument("--self-check", action="store_true"); a=p.parse_args()
@@ -155,6 +159,8 @@ def main():
         state.restart_generation = 1
         second = json.dumps({"model":MODEL,"input":[{"role":"user","content":PROMPT},{"role":"assistant","content":ASSISTANT},{"role":"user","content":RESUMED}],"stream":True}).encode()
         assert b"response.completed" in state.body(headers, second) and not state.semantic_errors
+        try: state.body(headers, second); raise AssertionError("third request accepted")
+        except RuntimeError: pass
         mismatch = State(); mismatch.body(headers, json.dumps({"model":MODEL,"input":[{"role":"user","content":"mojibake"}],"stream":True}).encode())
         assert len(mismatch.requests) == 1 and mismatch.semantic_errors
         try: State().body({"Authorization":"Bearer wrong"}, first); raise AssertionError("wrong auth accepted")

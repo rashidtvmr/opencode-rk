@@ -62,3 +62,16 @@ test was changed. Its pure-state self-check exercises valid SSE, exact Unicode
 state, retained mismatch, request cap, and auth negative without live PTY or
 provider threads. Parent owns semantic review, self-check, real installed RED,
 test-hash freezing, and independent integration.
+
+The controller's final source review replaces overwrite-prone aggregate terminal
+and CLI flags with per-PTY restoration checks and actual CLI exit-code lists.
+Failure on the first semantic mismatch can still truthfully prove its owned
+cleanup; success requires both restored PTYs, both zero exits, both raw-mode
+observations and exactly two real requests. Lifecycle failure always writes a
+failure artifact. The pure-state self-check now actually attempts and rejects
+the third request before claiming a request-cap control.
+
+Readiness uses the unchanged G2 helper catalogue probe, which requires both
+`gpt-5.6` and `gpt-5.6-mini`; the isolated cache therefore advertises both.
+Native prompt readiness checks this contract's selected `gpt-5.6`, rather than
+the G2 screen helper's different `gpt-5.6-mini` constant.
