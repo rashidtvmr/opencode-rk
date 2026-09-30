@@ -31,7 +31,8 @@ process-group cleanup.  They verify:
 4. invalid API types/metadata are rejected without file mutation or key echo;
 5. an auth destination directory and marker are never overwritten;
 6. an existing auth file over 1 MiB is rejected without truncation or mutation;
-7. an existing *other-account* API record whose key exceeds 16 KiB causes a
+7. the daemon bearer descriptor is `0600` even under process umask `0022`;
+8. an existing *other-account* API record whose key exceeds 16 KiB causes a
    replacement update to fail with a non-2xx status and preserves the auth file
    byte-for-byte.  The test deliberately does not require the replacement
    target's new key to be rejected: replacing the explicitly selected target is
@@ -40,7 +41,7 @@ process-group cleanup.  They verify:
 The 1 MiB file bound is an approved resource-bounded native extension; it is
 explicitly not a claim that the upstream implementation has the same bound.
 
-The seventh case freezes the distinction between schema validity and bounded
+The eighth case freezes the distinction between schema validity and bounded
 update validity.  Structurally valid existing API records are precious and
 must not be silently dropped while rewriting another account.  For this
 update path, an oversized other-account API key is therefore a fail-closed
@@ -65,7 +66,7 @@ Mechanical review corrections after the initial `360ca736` candidate:
 - receipt validation requires an absolute executable/readable binary,
   absolute matching `.dylib`/`.so`, valid library SHA, and native release
   attestation.
-- descriptor validation requires a regular `0600` descriptor no larger than
+- descriptor readiness requires a regular descriptor no larger than
   8 KiB, the owned daemon PID/group, strict loopback origin and valid port,
   and exact OpenAI model IDs.
 - absent Authorization and wrong bearer are separate cases (`401` versus
@@ -116,3 +117,19 @@ The prior seven-control frozen test SHA-256 was
 This source-only follow-up adds the eighth negative control above; the parent
 must recompute the test hash and run the baseline to capture its RED result.
 No product acceptance is claimed. Implementation cannot edit this contract.
+
+## Eighth-control executable RED and current freeze
+
+Independent reviewer/test-owner candidate `e29a9e9` is integrated as `4bf2ebe`.
+The controller confirms all seven prior test-method ASTs are identical. Current
+eight-control SHA-256:
+`f5b7dd3372b1d0aac4e285d16fb4295833854c8ab9b6ec836bacdb9205d8809d`.
+
+The eighth control failed against the attested installed native release
+`7db4a837684e6ca39569526c5860c8e9748dda7e`: authenticated update returned HTTP 200
+despite another account's oversized credential. Healthy owned catalogue and
+bearer readiness passed; the owned process was reaped. The exact command,
+source/test/log hashes and cleanup receipt are retained at
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-auth-bound-red-7db4a83-5hwqcztg`.
+All original seven controls had passed on the same installed product. The final
+candidate must pass all eight together without silently dropping another account.

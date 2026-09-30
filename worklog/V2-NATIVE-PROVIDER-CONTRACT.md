@@ -93,9 +93,9 @@ capture shape before any product run. It handles fragmented UTF-8, private VT
 queries, split-key visibility, stale picker text, and current status projection
 without changing the provider/request/history contract.
 
-Protocol maintenance: pinned native `create_with_items` omits `stream` for its
-normal settled Responses request (`packages/core/src/session/llm.ts:189-203`,
-request payload evidence). The fixture now treats an absent or explicit
+Protocol maintenance: the Rust daemon's `create_with_items` omits `stream` for
+its normal settled Responses request (`crates/providers/src/responses.rs`,
+`responses_request_payload`, lines 189–203). The fixture now treats an absent or explicit
 `stream: false` as valid non-stream JSON, `stream: true` as SSE, and rejects
 non-boolean values. This corrects the fixture codec without relaxing auth,
 model, request-count, prompt-history, or settled-response assertions.
@@ -134,3 +134,23 @@ The disposable failure HOME/project/data remain preserved at the recorded path.
 Frozen test SHA-256:
 `752c97c5d1eee013e4d350e62428be5938987b5bb3491967122f7fa00b29b3ff`.
 The implementation lease cannot edit this file or weaken its assertions.
+
+## Current observer/wire freeze and executable candidate proof
+
+Independent owner commits `dc55fdc`, `51d5d6e`, and `c377a96` are preserved and
+integrated as `8047ade`, `0e5d1f2`, and `3ae8654`. They correct VT dirty-cell
+observation and default non-stream Responses framing. The old hash above remains
+historical RED evidence; the current contract SHA-256 is
+`32edfa5c0ac5eacef9cfa949e02fce0d3440fe1cd8f75580efb584bc0a7780dc`.
+The exact bearer, selected non-default model, two real requests, ordered durable
+user/assistant history, auth `0600`, masked key and 256 KiB capture bounds remain
+mandatory. Helper State checks establish codec construction, not an HTTP run.
+
+The controller fed the retained real dirty-cell output from installed `7db4a83`
+through the observer in 257-byte chunks; it reconstructed the current selected
+model status with the picker closed and zero pending escape bytes. The actual
+installed provider journey then passed in 2.24s with exactly two real requests
+using the same `gpt-5.6-mini`, prior assistant and user history across daemon/CLI
+restart. Manifest, sanitized capture and provider input evidence:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-g2-wire-7db4a83-bhfwl0l5`.
+This is candidate evidence; exact integrated release verification remains required.
