@@ -8,6 +8,8 @@ Typed live writer/restart package: `31ea2b0d39e4cf23e8eae5f894763edf88678cb9`.
 Browser transport: `25b64488cfc4282b867a924570ba267fbcd46c32`.
 Persisted API auth and rooted tool continuation: `f5cfb012369f3a4187cfa4f50ad01eb4051081c6`.
 Installer native closure/transaction: `14ff5fb4d93b25ab1c8e6ccc64603b2dbf3ea9a9`.
+Ubuntu/Mac installer directory-layout portability: `96694bd23d97041647fe4f6308ed9fe53f2362d7`.
+Native entrypoint discovery/raw/render/restore: `6c52b419d4e4029f1baf15e4b25f289872cd0bb8`.
 Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-v2`.
 
 ## V2-SALVAGE-PRESERVATION
@@ -441,6 +443,160 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
   was copied without user auth/config. Release build, native loading/installation,
   and actual Ubuntu golden behavior remain to be verified.
 
+## Native daemon fixture freeze and runnable discovery RED
+
+- Independent mechanical fixture history `459c531`, `f8c08e1`, `8b5b6ef` was
+  selectively integrated as `e0563fc`, `12ad2b4`, `c8dd682`. Prior dirty bytes and
+  both failed-helper PID files remain preserved. Portable embedded-driver checks
+  passed true exit 0, false exit 1, and TERM cleanup of child plus descendant.
+- Frozen Rust test SHA-256:
+  `8d319b35ac851f96b1f79deb76c60c042e654d33864bf80f5c5a78ab1f74e21b`;
+  installed interactive Python contract SHA-256:
+  `02d0e7fd0211fa138594fc5633f32597af17261ec16d15e3fc54cf5c6c387342`.
+  External `freeze.json` and helper results are retained under
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/native-fixture-interrupted-7v7fzxae`.
+- Focused gate ran on exact integrated
+  `0b00ae430c0ddddfe8cc70efa6707c1ac46d51b1`:
+
+  ```text
+  rtk /usr/bin/arch -arm64 env TMPDIR=/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 RUSTFLAGS='-C link-arg=-Wl,-rpath,@executable_path/../lib' cargo test --offline --locked -p opencode-rk-cli --features native --test native_daemon_flow -- --nocapture
+  ```
+
+  Compiled in 37.73s; **three GREEN / one semantic RED** in 0.76s. Fresh default
+  daemon ownership, redirected-entry exit 2/no daemon, and explicit-origin live
+  frame passed. Genuine `tui` without `--origin` failed at line 790: frame lacked
+  `NativeTuiLiveProbe` and `(live)`. It showed `model: unset`, no live session.
+  Log: `/Users/mymac/.local/share/opencode/shell/6b4e89130cd2bcaa27985bc8bdd3449317a541c3/sh_0f30e509a001qGXI9ePH8xWiOK.out`.
+- This is now a compiling, executed product-discovery RED. It does not substitute
+  default chat or explicit origin for the failing entrypoint. A source-only native
+  entrypoint repair is leased separately over the frozen contracts; main retains
+  integration/build authority. Fixture maintenance is not product acceptance.
+
+## Ubuntu installed native release and platform-specific layout RED
+
+- Archived source `0b00ae430c0ddddfe8cc70efa6707c1ac46d51b1` built offline/locked
+  in the disposable Ubuntu 24.04 arm64 container, Rust 1.98.1, native release
+  profile, two Cargo jobs, `$ORIGIN/../lib` executable RUNPATH. Cargo exited 0 in
+  114.1 seconds including command overhead (reported build time 1m30s).
+  Exact command is retained in `/work/build-command.txt`; output in
+  `/work/cargo-release.log` under the approved Ubuntu fixture root above.
+- The real native release archive installed into a disposable HOME, exit 0.
+  Independently confirmed build/binary/library/archive provenance:
+  binary SHA-256 `38ad662e59a6c37655320bfe5cad7caf982fadc2adbe976981ca9a29630d7d35`,
+  library `e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89`,
+  archive `87abb050e20f2cf0ea76b827bb449da76456dd4fb97597fbd3efb8bada3c509f`.
+  Installed fixture: `/work/ubuntu-installed-verified/install/bin/oc2`, companion
+  `../lib/libopentui.so`, provenance `/work/ubuntu-installed-verified/build.json`.
+- Independent `readelf`/`ldd` checks confirmed ELF64/AArch64, executable
+  `NEEDED libopentui.so`, RUNPATH `$ORIGIN/../lib`, library SONAME `libopentui.so`,
+  no unresolved dependencies, and resolution to the owned installed companion.
+  Minimal-env version was `oc2 0.1.0-alpha.1`; no `LD_LIBRARY_PATH` was needed.
+- Same frozen identity/installer controls were independently run in Ubuntu:
+
+  ```text
+  docker exec --workdir /work/source -e OC2_TEST_BINARY=/work/ubuntu-installed-verified/install/bin/oc2 -e OC2_TEST_NATIVE_LIBRARY=/work/ubuntu-installed-verified/install/lib/libopentui.so -e TMPDIR=/work/verify-tmp oc2-v2-ubuntu-build python3 -m unittest tests.bootstrap.test_app010_packaged_cli_identity tests.bootstrap.test_tui011_installer_native_closure tests.bootstrap.test_tui011_installer_rollback tests.bootstrap.test_tui011_installer_signal_layout
+  ```
+
+  **9/10 passed, one RED**: historical nested directory entries failed during
+  extraction, exit 65. Independent log `/work/ubuntu-independent-verify/packaged-installer.log`,
+  SHA-256 `573d3544d60457819ec3855dc3adfbde109763e010029a5f3a63a5a2607f9952`.
+  The parent traced GNU tar's rejection to mode-000 directory headers; direct
+  extraction reproduction failed exit 2 with permission errors. This contract is
+  unchanged from the Mac run, where it passed.
+- Product script repair is integrated CANDIDATE
+  `96694bd23d97041647fe4f6308ed9fe53f2362d7`; source SHA-256
+  `9b7f259dc02bb38e86cac52482e0ac01c2c09074c648533f3e6ec6d255c07f16`.
+  Parent reruns passed Ubuntu 10/10 and Mac installer 8/8. Independent exact-script
+  verification is pending. See `worklog/V2-UBUNTU-LAYOUT-REPAIR.md` for immutable
+  baseline, contract hashes, repair and commands. Ubuntu native golden remains open.
+- The initial independent ABI filter produced empty output because the filter was
+  mechanical, not evidence of absent exports. The bounded parent symbol-table
+  probe found all nine required render/lifecycle symbols. Independent corrected
+  ABI evidence is pending alongside the script gate.
+
+### Independent installer acceptance on `96694bd`
+
+- Independent verifier staged only the exact integrated script in
+  `/work/ubuntu-layout-independent-verify/install-oc2.sh`, hash `9b7f259d…`.
+  All three frozen installer test sources match their original hashes and the
+  canonical checkout. **Ubuntu 8/8 and Mac 8/8 passed independently**.
+- Ubuntu exact-script gate used the frozen `/work/source` test modules and
+  `TUI011_INSTALLER_SCRIPT=/work/ubuntu-layout-independent-verify/install-oc2.sh`.
+  Log `/work/ubuntu-layout-independent-verify/ubuntu-8.log`, SHA-256
+  `9daebb0e55c3e924de034b9ffc5547583736536d673350db0a8074ba0bfde932`.
+  Mac exact-script gate used canonical `scripts/install-oc2.sh` with the same
+  three unittest modules. Log
+  `/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp/ubuntu-layout-independent-verify/mac-8.log`,
+  SHA-256 `aebfc3e2c0462c30e33918cd883e662ed115c61eed4e3717d12f6b51f3fb86c4`.
+- Corrected independent ABI filter found all nine actual required render/lifecycle
+  exports in the installed Ubuntu native library. Bounded 154-byte log
+  `/work/ubuntu-layout-independent-verify/native-abi-9.log`, SHA-256
+  `3bf671486ebfcf409176428c13e023ab204861b2ffa6309b0222d3882b58d44e`.
+- State: **ACCEPTED on exact integrated `96694bd` for installer-only portability**.
+  Native Ubuntu binary provenance remains source `0b00ae4`; this acceptance does
+  not relabel that artifact as a `96694bd` build or certify the native golden path.
+
+## Native entrypoint recovery — exact integrated scoped acceptance
+
+- Package base `0b00ae430c0ddddfe8cc70efa6707c1ac46d51b1`; candidate
+  `3ece0394b414f87aab34700f1bb6c631566f5b3b`. Candidate commits `47d6e38`,
+  `be7fe0a`, `3ece039` were independently preverified then integrated as
+  `0e5ca05`, `8205ee7`, `6c52b41`. Changed paths:
+  `crates/cli/src/main.rs`, `crates/cli/src/chat.rs`,
+  `crates/cli/src/tui_entry.rs`, `crates/opentui-bridge/src/safe_renderer.rs`,
+  `worklog/V2-NATIVE-ENTRYPOINT-RECOVERY.md`.
+- Evidence: pinned OpenCode `95daf906` `packages/cli/src/tui.ts:7–19` drives the
+  event-based TUI runner; historical `2263e91`/`53845c2` supply native default
+  routing and persistent renderer salvage. The pinned OpenTUI fork `c01292fd`
+  `packages/native/src/renderer.zig::{getCurrentBuffer,getNextBuffer,render}`
+  identifies next as the writable scene and current as the presented scene.
+  Painting current produced the independently observed all-space frame. The
+  bridge now paints next and commits memory frames before snapshotting current.
+- Native builds now route bare TTY launch and implicit `tui` through authenticated
+  daemon discovery/ownership; empty authenticated catalogs create an actual first
+  session. Interactive native rendering owns raw input/restoration through the
+  existing bridge. Redirected entry remains exit 2; scriptable once/follow retain
+  separate paths. Composer/transcript growth is bounded.
+- Frozen Rust daemon-flow, Python interactive, and bridge PTY contracts retained
+  their exact hashes `8d319b35…`, `02d0e7fd…`, `3799fb34…`. Main independently
+  preverified candidate: **4 daemon-flow, 1 installed-PTY, 73 native bridge and
+  10 bridge PTY tests passed**. Candidate/source hashes and logs:
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-native-entry-preverify-3ece039-7uaoqt1y/preverification.json`.
+- Main independently reran on exact integrated
+  `6c52b419d4e4029f1baf15e4b25f289872cd0bb8`: **4 daemon-flow, 1 installed-PTY,
+  73 native library, 10 bridge PTY, and 72 default library tests passed**.
+  Required commands used jobs 2, test threads 1, offline/locked and the explicit
+  relative executable loader flag:
+
+  ```text
+  /usr/bin/arch -arm64 cargo test --offline --locked -p opencode-rk-cli --features native --test native_daemon_flow -- --nocapture
+  OC2_NATIVE_BINARY=<canonical>/target/debug/oc2 MAC_OPENTUI_FIXTURE=<canonical-native>/libopentui.dylib /usr/bin/arch -arm64 python3 tests/e2e/native_interactive_pty.py
+  /usr/bin/arch -arm64 env DYLD_LIBRARY_PATH=<canonical-native> TUI015_NATIVE_LIB_DIR=<canonical-native> cargo test --offline --locked -p opencode-rk-opentui-bridge --features native --lib --test native_terminal_lifecycle
+  /usr/bin/arch -arm64 cargo test --offline --locked -p opencode-rk-opentui-bridge --lib
+  ```
+
+  Full commands, environment values, source hashes, results and log hashes are in
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-native-entry-integrated-6c52b41-rrzto9oc/verification.json`.
+  An initial bridge invocation inherited `DYLD_LIBRARY_PATH` before `arch`, which
+  macOS strips; its loader failure is retained. The corrected manifest places the
+  explicit fixture variable after `arch` and the same unchanged tests pass.
+- State: **ACCEPTED on integrated `6c52b41` for native entrypoint authenticated
+  discovery, persistent visible frames, raw single-byte redraw, Ctrl-C exit and
+  restoration**. This is dev-profile scoped acceptance. In-app provider setup,
+  native streaming, full UTF-8/escape/resize/mouse handling, interruption and
+  second-client ownership, and exact release/platform golden journeys remain open.
+
+## Fresh workspace formatting failure
+
+- Read-only `cargo fmt --all -- --check` on exact `0b00ae4` returned exit 1.
+  Raw log contains 932 diff sections across 157 printed path spellings, including
+  module aliases through `../src`. No files were reformatted by this gate.
+- Evidence:
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-mechanical-gates-0b00ae4-4s96j56l/fmt.log`;
+  `result.json` records the source SHA, log hash and reported paths. Workspace
+  formatting is a reproduced mechanical gate failure; Clippy/workspace runtime
+  gates remain to be captured under the single-heavy-validation budget.
+
 ## Remaining observed product failures
 
 - G2 persisted OpenAI API auth is connected and accepted for the scope above;
@@ -453,6 +609,7 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
 - Docker server is ready. Ubuntu 24.04 arm64 image acquired at digest
   `sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3`.
   Host-profile installer closure/transaction is accepted as recorded above.
-  Ubuntu packaging and its real native golden journey remain unrun.
+  Ubuntu native release packaging/loader closure is verified as above; its complete
+  native golden journey remains pending.
 
 These component acceptances are not G0–G8 release acceptance.
