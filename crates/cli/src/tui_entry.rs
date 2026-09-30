@@ -631,10 +631,7 @@ fn native_loop(
         native_paint(&mut renderer, &lines)?;
         let timeout = if worker.is_some() { 20 } else { 250 };
         let mut fds = [PollFd::new(input.as_fd(), PollFlags::IN)];
-        let wait = Timespec {
-            tv_sec: 0,
-            tv_nsec: timeout * 1_000_000,
-        };
+        let wait = Timespec::from(Duration::from_millis(timeout));
         if poll(&mut fds, Some(&wait))? == 0 {
             continue;
         }
