@@ -834,10 +834,10 @@
       "status": "completed"
     },
     "SHIP-001": {
-      "blockedNote": "RED 5FAIL/1ok T01,02 yml absent T03 codesign missing T04 foreign-arch deletes preexist T05 v1 not restored; sha 2decf1d2; impl/freeze/signing pending",
+      "reclaimedBy": "ses_f3c4de578ffelQv59xDXmOs03B",
       "scratchpad": "worklog/SHIP-001.md",
-      "session": "ses_f114747d5ffe4NBs8gtP1q3PDv",
-      "status": "blocked"
+      "session": "",
+      "status": "not-started"
     },
     "SHIP-004": {
       "blockedNote": "Corrected satisfiable RED sha256 429ee2cd; 5/5 fail on missing release evidence, no errors; implementation and controller freeze authority pending.",
