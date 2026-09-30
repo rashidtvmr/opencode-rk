@@ -40,6 +40,29 @@ explicitly not a claim that the upstream implementation has the same bound.
 Base SHA:
 `710a410e0ce32c716c40217696b515caa6c52310`
 
+Mechanical review corrections after the initial `360ca736` candidate:
+
+- `XDG_DATA_HOME` now points at the service data root used by `auth.json` and
+  the generated catalog.
+- cleanup is registered immediately after service construction and is
+  idempotent, including constructor/start failures; owned daemon output is
+  file-backed, bounded, and optionally copied to the absolute
+  `OC2_AUTH_CONTROL_ARTIFACT_ROOT` on failure/evidence collection.
+- receipt validation requires an absolute executable/readable binary,
+  absolute matching `.dylib`/`.so`, valid library SHA, and native release
+  attestation.
+- descriptor validation requires a regular `0600` descriptor no larger than
+  8 KiB, the owned daemon PID/group, strict loopback origin and valid port,
+  and exact OpenAI model IDs.
+- absent Authorization and wrong bearer are separate cases (`401` versus
+  `403`); response bodies are bounded and closed.
+- trailing-slash normalization is tested using encoded `/auth/openai%2F`, not
+  an unencoded route slash.
+- authorized success requires the JSON boolean `true` exactly.
+
+No controlling-TTY ioctl, product API assumption beyond the pinned wire path,
+or source-hash-dependent behavior was added.
+
 Owned paths:
 
 - `tests/bootstrap/test_native_provider_auth_control.py`
