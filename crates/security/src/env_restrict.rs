@@ -3,20 +3,15 @@
 use std::collections::HashMap;
 
 /// Policy for inheriting environment variables in child processes.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum InheritPolicy {
     /// Inherit all environment variables unchanged.
+    #[default]
     InheritAll,
     /// Inherit no environment variables (empty environment).
     InheritNone,
     /// Inherit only variables in the allowlist.
     InheritAllowlist(Vec<String>),
-}
-
-impl Default for InheritPolicy {
-    fn default() -> Self {
-        InheritPolicy::InheritAll
-    }
 }
 
 /// Default blocklist patterns for sensitive environment variables.

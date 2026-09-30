@@ -113,7 +113,7 @@ fn is_in_cidr(ip: Ipv4Addr, prefix: Ipv4Addr, prefix_len: u8) -> bool {
 }
 
 fn is_in_ipv6_cidr(ip: Ipv6Addr, prefix_value: u16, prefix_len: u8) -> bool {
-    let first_seg = ip.segments()[0] as u16;
+    let first_seg = ip.segments()[0];
     if prefix_len >= 16 {
         return first_seg == prefix_value;
     }

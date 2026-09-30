@@ -71,7 +71,7 @@ impl SqlClassifier {
             .filter(|w| !w.is_empty())
             .collect();
         let first = words.first().copied().unwrap_or("");
-        let has_where = words.iter().any(|w| *w == "WHERE");
+        let has_where = words.contains(&"WHERE");
 
         // Dot-commands (sqlite3 shell): file read/write outside SQL grammar.
         if upper.starts_with(".IMPORT") || upper.starts_with(".LOAD") {
@@ -86,7 +86,7 @@ impl SqlClassifier {
             ));
         }
         // Cross-database file attach: never agent-executed.
-        if words.iter().any(|w| *w == "ATTACH") {
+        if words.contains(&"ATTACH") {
             return SqlRisk::Denied("ATTACH DATABASE is never executed by an agent".to_owned());
         }
         // Stacked statements: each extra statement hides intent.
@@ -109,7 +109,7 @@ impl SqlClassifier {
             );
         }
         // Bulk copy inside the engine, bypasses row-level review.
-        if first == "INSERT" && words.iter().any(|w| *w == "SELECT") {
+        if first == "INSERT" && words.contains(&"SELECT") {
             return self
                 .gate("INSERT INTO ... SELECT bulk copy requires human approval".to_owned());
         }
@@ -179,9 +179,11 @@ mod tests {
     fn grant_revoke_denied() {
         assert!(std().classify("GRANT SELECT ON users TO app").is_denied());
         assert!(std().classify("grant all on db.* to 'app'@'%'").is_denied());
-        assert!(std()
-            .classify("REVOKE DELETE ON users FROM role")
-            .is_denied());
+        assert!(
+            std()
+                .classify("REVOKE DELETE ON users FROM role")
+                .is_denied()
+        );
         assert!(std().classify("revoke all on users from app").is_denied());
         assert!(matches!(
             SqlClassifier::permissive().classify("GRANT SELECT ON t TO r"),
@@ -225,12 +227,16 @@ mod tests {
 
     #[test]
     fn attach_database_denied() {
-        assert!(std()
-            .classify("ATTACH DATABASE 'aux.db' AS aux")
-            .is_denied());
-        assert!(std()
-            .classify("attach database '/tmp/x.db' as x")
-            .is_denied());
+        assert!(
+            std()
+                .classify("ATTACH DATABASE 'aux.db' AS aux")
+                .is_denied()
+        );
+        assert!(
+            std()
+                .classify("attach database '/tmp/x.db' as x")
+                .is_denied()
+        );
         assert!(std().classify("ATTACH 'aux.db' AS aux").is_denied());
         assert!(matches!(
             SqlClassifier::permissive().classify("ATTACH DATABASE 'a' AS a"),
