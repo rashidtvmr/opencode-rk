@@ -95,3 +95,24 @@ The reviewer also investigated concurrent model-recents writes. Pinned upstream
 with no cross-process recents merge. This package retains that behavior; it does
 not establish second-client work ownership or race-proof filesystem protection.
 This final product change requires a new exact release and independent gates.
+
+## Exact integrated acceptance
+
+The final candidate `bdee47eac2e31f25a4787944a230a2ec8554e70b` was independently
+PREVERIFIED, including all eight auth controls, native G2, four daemon flows,
+73 bridge and ten terminal lifecycle checks, and installed interactive PTY.
+The verifier's first G2 invocation used the obsolete raw-marker fixture and is
+retained as an infrastructure mismatch. The canonical dirty-cell observer
+passed against the same installed bytes; no product repair or assertion change
+was made to resolve that mismatch.
+
+All six preserved product commits were integrated on `main-v2`, ending at
+`ac635fac5298e9151c6575aa6a089f53c5aa4309`. Exact Mac and Ubuntu native releases
+were built, archived, installed and independently rerun with the current frozen
+G2 and eight auth controls. Both completed two real provider requests across
+restart and **8/8 auth controls**; the real browser completed the tool, second
+turn and resumed third turn on the same source SHA. Status **ACCEPTED for the
+settled onboarding and credential-safety scope on integrated `ac635fa`**.
+Full commands, upstream evidence, artifact hashes and remaining failures are
+recorded in `worklog/V2-INTEGRATION-20260930.md`. Native streaming is the next
+observed gap and is not established by this acceptance.

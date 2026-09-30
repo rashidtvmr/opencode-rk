@@ -685,8 +685,8 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
 
 ## Remaining observed product failures
 
-- G2 persisted OpenAI API auth is connected and accepted for the scope above;
-  in-app provider setup, OAuth, and provider adaptation beyond OpenAI remain open.
+- G2 persisted OpenAI API auth and in-app API-key/model setup are accepted on
+  `ac635fa` as recorded below. OAuth and adaptation beyond OpenAI remain open.
 - G3/G4 settled typed history now passes the scoped live writer/restart gate;
   interruption recovery and second-client ownership still require golden-journey
   validation.
@@ -699,3 +699,94 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
   native golden journey remains pending.
 
 These component acceptances are not G0–G8 release acceptance.
+
+## Integrated native onboarding, credential safety and paired release acceptance
+
+- Package: `G2-native-provider`, plus the mechanically repaired Web runners.
+  Product base `710a410e0ce32c716c40217696b515caa6c52310`; independently
+  PREVERIFIED candidate `bdee47eac2e31f25a4787944a230a2ec8554e70b`; exact
+  integrated revision **`ac635fac5298e9151c6575aa6a089f53c5aa4309`**.
+- Product paths: `crates/cli/src/native_setup.rs`, `crates/cli/src/tui_entry.rs`,
+  `crates/opentui-bridge/src/safe_renderer.rs`,
+  `crates/providers/src/persisted_auth.rs`, `crates/server/src/daemon.rs`,
+  `crates/server/src/daemon_auth.rs`, `crates/server/src/lib.rs`. Candidate
+  `worklog/V2-NATIVE-PROVIDER-LIVE.md` is the eighth changed path.
+- Preserved candidate commits `8d974c06`, `0cbaf618`, `c6a29470`, `aedc289`,
+  `7db4a83`, `bdee47e` integrate as `7f06f45`, `5973f61`, `3ff80e3`, `552c617`,
+  `aeaf87e`, `ac635fa`. The canonical branch is the only integration writer.
+- Pinned upstream remains `95daf90670b7c039c436c85537da5fbfe2205b41`:
+  provider dialog `packages/tui/src/component/dialog-provider.tsx:352–417`,
+  model dialog `component/dialog-model.tsx:23–154`, model recents
+  `context/local.tsx`, auth schema/filter/merge
+  `packages/opencode/src/auth/index.ts:23–27,58–97`, legacy-compatible control
+  `server/routes/instance/httpapi/groups/control.ts:32–49`, and per-client atomic
+  recents persistence `packages/tui/src/util/persistence.ts:22–33` were inspected.
+- Current frozen G2 SHA-256 is
+  `32edfa5c0ac5eacef9cfa949e02fce0d3440fe1cd8f75580efb584bc0a7780dc`;
+  eight credential controls are
+  `f5b7dd3372b1d0aac4e285d16fb4295833854c8ab9b6ec836bacdb9205d8809d`.
+  Independent observer maintenance handles dirty-cell VT output and Responses'
+  default non-stream JSON. The old fixtures/RED evidence remain preserved.
+  All seven original auth-control method ASTs remain identical.
+
+### Actual exact-integrated gates
+
+- Both releases were built with `cargo build --offline --locked --release -p
+  opencode-rk-cli --bin oc2 --features native`, two Cargo jobs and one test
+  thread, then archived and installed through `scripts/install-oc2.sh`. Mac uses
+  `@executable_path/../lib`; Ubuntu uses `$ORIGIN/../lib`. No loader overrides are
+  present in installed PTY/onboarding runs.
+- Mac and Ubuntu each pass **two real provider requests across restart** from
+  UI-created masked API auth, using non-default `gpt-5.6-mini`, restored model,
+  prior user and assistant history, exact bearer and owner-only auth/descriptor.
+  Independent verifier `ses_f0c3bda7effeqXZjDfJqgOWKVF` reran the canonical G2
+  fixture and all **8/8 credential controls on each installed release**. All
+  sixteen auth-case process receipts report reaped owned processes.
+- Controller exact-integrated Mac regressions pass: **12 auth-source controls,
+  4 native daemon flows, 73 bridge + 10 native lifecycle checks, one raw-input
+  PTY/restoration journey, 10 installed identity/packaging controls, 49 Vitest
+  assertions and 11 Node assertions**. Ubuntu passes the native PTY and all ten
+  installed identity/packaging controls; normalized relative loader closure and
+  ten required native ABI exports pass.
+- The real Playwright browser ran the same exact Mac release: prompt, broker
+  file write, typed tool continuation, second turn, fresh authenticated document
+  reopen, daemon restart and a resumed third turn. Evidence confirms **4 provider
+  requests, 7 distinct durable messages, one tool message and one ordered typed
+  call/output pair in resumed input**, with the exact marker bytes and no fixture
+  provider failure. The owned browser fixture stopped cleanly. Native streaming
+  is outside the settled G2 contract.
+- Mechanical Web package preserves all 20 original test files and accepted
+  `api.ts` bytes from `710a410`; rejected malformed-fragment preflight proposal
+  `45ed373` is preserved and explicitly superseded. Final runner/fixture net
+  changes are independent of product transport.
+
+### Retained evidence
+
+All paths below share the approved artifact parent
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/`:
+
+- Mac: `v2-integrated-mac-ac635fa-di8p3h86/`, including `build.json`,
+  `commands.json`, original logs, `independent-g2-fresh/` and
+  `independent-auth-fresh.log` (SHA-256
+  `f34089458bce62b3d8fa0aafc21b5b2896b38dd18b2424a4a010a6ea4c567e9f`).
+- Ubuntu: `v2-ubuntu-arm64-release-dqhrz_mn/ubuntu-native-ac635fa/`, with
+  source archive/build receipts, all installed logs, fresh independent controls,
+  `loader-abi-verification.json`. Source archive resides alongside
+  `source-ac635fa.tar` and the read-only extracted source.
+- Browser: `v2-browser-ac635fa-20261001/`, including provider inputs, seven
+  durable messages, original browser captures, fixture result and browser
+  verification SHA-256
+  `5ba7c5ee204a1f7d639cbc88a09b87934aae70f97f36ebad19011e2077f6f371`.
+- Mac binary/library/archive SHA-256: `a26248e738e8e5292e72fe75c85188d87aceca9b119e478b15a3400eb45a4a21`,
+  `798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91`,
+  `8d8b40b8f7e94a08698cdf9d73cc56a3cce6d9f1f7875d466a4f3e449f60e6b8`.
+- Ubuntu binary/library/archive SHA-256: `ea8f4bc0a98e12808ef561a5568ef10f05d2a2c7f2c31b07ace480052b3f1e52`,
+  `e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89`,
+  `7bb980ceb93dc2e8f3faa15d88bf840655a78e06c7f2b8f16b9801b12b6836c5`.
+
+State: **ACCEPTED for scoped native provider onboarding/credential safety,
+paired release packaging and existing Web journey on exact `ac635fa`**.
+Native provider streaming/tool UI, interruption, second-client ownership,
+full input/resize/mouse behavior, per-session file rooting, non-OpenAI adaptation,
+G0 product-tip disposition, formatting and fresh workspace/Clippy gates remain
+open. This acceptance does not certify the complete G0–G8 release.
