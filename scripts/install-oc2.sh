@@ -254,7 +254,10 @@ for member in "$BIN" "$EXPECTED_NATIVE"; do
   fi
 done
 
-if ! tar -xzf "$ARCHIVE" -C "$stage" >/dev/null 2>&1; then
+# Extract only the two validated payloads. Optional directory headers can carry
+# mode 000; applying those modes prevents GNU tar from creating their children.
+# Let tar create the private staging ancestors instead of restoring archive modes.
+if ! tar -xzf "$ARCHIVE" -C "$stage" "$BIN" "$EXPECTED_NATIVE" >/dev/null 2>&1; then
   echo "invalid archive: extraction failed" >&2
   exit 65
 fi
