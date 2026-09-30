@@ -76,6 +76,39 @@ def redact(value):
     return value.replace(KEY, "[REDACTED]")
 
 
+def reap_cli_then_daemon(child, descriptor_value, master):
+    """Exit the owned native CLI before probing its owned daemon group.
+
+    The descriptor helper intentionally remains unchanged.  A graceful Ctrl-C
+    first lets the CLI close its daemon connection; only then is the validated
+    daemon group handed to the frozen helper.  This avoids probing a dead
+    process group while its parent Popen object is still unreaped.
+    """
+    if child is None:
+        return
+    if child.poll() is None:
+        if master is not None:
+            try:
+                os.write(master, b"\x03")
+            except OSError:
+                pass
+        try:
+            child.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=3)
+    daemon_pid = descriptor_value.get("_validated_pid") if descriptor_value else None
+    if not isinstance(daemon_pid, int) or daemon_pid <= 1:
+        return
+    try:
+        os.kill(daemon_pid, 0)
+    except ProcessLookupError:
+        return
+    except PermissionError as error:
+        raise AssertionError("validated daemon ownership probe was denied") from error
+    stop_owned_daemon(descriptor_value)
+
+
 def sse(event, data):
     return (f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n").encode()
 
@@ -268,11 +301,7 @@ def run(binary, library, manifest, artifacts):
             raise AssertionError("native screen did not visibly identify tool completion")
         second_start = len(captures); os.write(master, (SECOND + "\r").encode()); read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, SECOND_FINAL.encode(), second_start, screen, lambda: screen.contains(SECOND_FINAL))
         old_daemon = daemon
-        stop_owned_daemon(d)
-        try:
-            old_daemon.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-            raise AssertionError("first native CLI was not reaped after daemon shutdown")
+        reap_cli_then_daemon(old_daemon, d, master)
         daemon = None
         # Restart the installed native CLI and its owned daemon through a new
         # PTY.  The prior PTY is closed only after the validated process group
@@ -300,16 +329,9 @@ def run(binary, library, manifest, artifacts):
         state.partial_visible.set(); state.release_partial.set()
         if daemon is not None:
             try:
-                if daemon.poll() is None:
-                    os.write(master, b"\x03") if master is not None else None
-                    daemon.wait(timeout=3)
-            except (OSError, subprocess.TimeoutExpired):
+                reap_cli_then_daemon(daemon, descriptors[-1] if descriptors else None, master)
+            except (OSError, RuntimeError):
                 pass
-            if descriptors:
-                try: stop_owned_daemon(descriptors[-1])
-                except (OSError, RuntimeError): pass
-            try: daemon.wait(timeout=3)
-            except subprocess.TimeoutExpired: pass
         if slave is not None: os.close(slave)
         if master is not None: os.close(master)
         server.shutdown(); server.server_close(); provider_thread.join(timeout=10)
@@ -317,7 +339,16 @@ def run(binary, library, manifest, artifacts):
         secret_echo = KEY.encode() in captures or KEY in screen.text()
         if secret_echo:
             state.fail("fixture API key appeared in terminal output")
-        evidence = {"phase": state.phase, "error": redact(state.error or ""), "source_sha": source, "binary_sha256": binary_sha, "native_library_sha256": library_sha, "test_sha256": sha256(pathlib.Path(__file__)), "fixture_root": str(root), "provider_requests": len(state.requests), "requests": [{"model": x.get("model"), "stream": x.get("stream", False), "input": x.get("input")} for x in state.requests], "screen": redact(screen.text()), "captured_output": redact(bytes(captures[:MAX_PTY]).decode("utf-8", "replace")), "owned_process_cleanup": bool(daemon is None or daemon.poll() is not None), "owned_descriptors": descriptors}
+        owned_daemon_gone = True
+        for item in descriptors:
+            pid = item.get("_validated_pid")
+            if isinstance(pid, int) and pid > 1:
+                try:
+                    os.kill(pid, 0)
+                    owned_daemon_gone = False
+                except (ProcessLookupError, PermissionError):
+                    pass
+        evidence = {"phase": state.phase, "error": redact(state.error or ""), "source_sha": source, "binary_sha256": binary_sha, "native_library_sha256": library_sha, "test_sha256": sha256(pathlib.Path(__file__)), "fixture_root": str(root), "provider_requests": len(state.requests), "requests": [{"model": x.get("model"), "stream": x.get("stream", False), "input": x.get("input")} for x in state.requests], "screen": redact(screen.text()), "captured_output": redact(bytes(captures[:MAX_PTY]).decode("utf-8", "replace")), "owned_process_cleanup": bool(daemon is None or daemon.poll() is not None) and owned_daemon_gone, "owned_descriptors": descriptors}
         raw_evidence = json.dumps(evidence, indent=2) + "\n"
         if len(raw_evidence.encode()) > 512 * 1024: raise RuntimeError("evidence exceeded 512 KiB")
         evidence_name = "native-stream-tool-result.json" if state.phase == "success" and not state.error else "native-stream-tool-failure.json"
