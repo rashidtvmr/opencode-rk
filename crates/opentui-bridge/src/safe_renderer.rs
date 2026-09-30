@@ -281,12 +281,14 @@ impl Renderer {
             PollFlags::IN | PollFlags::HUP | PollFlags::ERR,
         )];
         drop(slot);
-        let deadline = timeout.map(|duration| Timespec {
-            tv_sec: duration.as_secs() as i64,
-            tv_nsec: duration.subsec_nanos() as _,
-        });
+        let end = timeout.map(|duration| std::time::Instant::now() + duration);
         loop {
-            match poll(&mut descriptors, deadline.as_ref()) {
+            let remaining = end.map(|end| end.saturating_duration_since(std::time::Instant::now()));
+            let wait = remaining.map(|duration| Timespec {
+                tv_sec: duration.as_secs() as i64,
+                tv_nsec: duration.subsec_nanos() as _,
+            });
+            match poll(&mut descriptors, wait.as_ref()) {
                 Ok(0) => return Ok(false),
                 Ok(_) => {
                     let events = descriptors[0].revents();
