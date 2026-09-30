@@ -86,15 +86,15 @@ use futures_util::stream;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
     ArtifactId, ArtifactKind, AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId,
-    MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
+    Timestamp, MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::responses::{
-    OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesInput, ResponsesItem,
+    OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesItem,
     ResponsesRole, ResponsesStopReason, ResponsesStreamEvent, ResponsesTool,
-    MAX_RESPONSES_INPUT_MESSAGES,
+    MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES,
 };
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
-use opencode_rk_sessions::{SessionError, SessionService};
+use opencode_rk_sessions::{HistoryItem, SessionError, SessionService, ToolCallAdmission, ToolRound};
 use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::registry::ToolRegistry;
@@ -740,6 +740,7 @@ async fn get_fork_provenance(
 struct CreateTurnBody {
     text: String,
     model: String,
+    #[serde(default)]
     reasoning_effort: String,
 }
 
@@ -767,7 +768,7 @@ async fn create_turn(
             "provider '{provider_id}' does not have a native turn adapter yet"
         )));
     }
-    if !matches!(
+    if !body.reasoning_effort.is_empty() && !matches!(
         body.reasoning_effort.as_str(),
         "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
     ) {
@@ -780,25 +781,14 @@ async fn create_turn(
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
-    let history = state
-        .sessions
-        .messages(id, 500)
-        .await
-        .map_err(ApiFailure::internal)?;
-    let mut input = responses_history(&history)?;
-    if !history.iter().any(|message| message.id == user_message.id) {
-        if input.len() == MAX_RESPONSES_INPUT_MESSAGES {
-            input.remove(0);
-        }
-        let PayloadRef::Inline { text } = &user_message.body else {
-            return Err(ApiFailure::internal(
-                "newly appended user message was not stored inline",
-            ));
-        };
-        input.push(ResponsesInput::new(ResponsesRole::User, text.clone()));
-    }
+    let input = bounded_typed_history(
+        &state.sessions,
+        id,
+        MAX_RESPONSES_INPUT_MESSAGES,
+        MAX_RESPONSES_INPUT_BYTES,
+    ).await.map_err(ApiFailure::internal)?;
     let assistant_text = provider
-        .create(model_id, &body.reasoning_effort, &input)
+        .create_with_items(model_id, &body.reasoning_effort, &input)
         .await
         .map_err(provider_failure)?;
     let assistant_message = state
@@ -821,6 +811,8 @@ struct TurnStreamState {
     sessions: SessionService,
     session_id: SessionId,
     user_message: Option<MessageRecord>,
+    /// User message ID preserved after user_message.take() for round linkage.
+    turn_message_id: MessageId,
     assistant_text: String,
     reasoning_summary: String,
     stage: TurnStreamStage,
@@ -843,6 +835,8 @@ struct TurnStreamState {
     forced_stop: Option<TurnStop>,
     /// Agents-crate executor: mirror of the real agent loop plan (CONVERGENCE AGENTS).
     agent_plan: AgentExecutor,
+    /// Ordinal of the current tool round within this turn.
+    round_ordinal: u32,
 }
 
 /// Turn-tool allowlist from OPENCODE_RK_TURN_TOOLS (comma-separated tool ids).
@@ -866,6 +860,7 @@ struct CallOutputItem {
 }
 
 const MAX_FILE_WRITE_ARGUMENT_BYTES: usize = 1024 * 1024;
+const MAX_PENDING_TURN_CALLS: usize = (MAX_RESPONSES_INPUT_MESSAGES - 1) / 2;
 
 /// Parse a provider write request without touching the filesystem.
 fn file_write_operation(arguments: &str) -> Result<FileOperation, String> {
@@ -931,7 +926,7 @@ enum TurnStreamStage {
     Executing,
     /// Emit one `tool_output` NDJSON event per executed call.
     EmitOutputs,
-    /// Persist round outputs and start the next provider round (or finalize).
+    /// Reload durable outputs and start the next provider round (or finalize).
     NextRound,
     Done,
 }
@@ -964,7 +959,7 @@ async fn create_turn_stream(
             "provider '{provider_id}' does not have a native turn adapter yet"
         )));
     }
-    if !matches!(
+    if !body.reasoning_effort.is_empty() && !matches!(
         body.reasoning_effort.as_str(),
         "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
     ) {
@@ -977,23 +972,13 @@ async fn create_turn_stream(
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
-    let history = state
-        .sessions
-        .messages(id, 500)
-        .await
-        .map_err(ApiFailure::internal)?;
-    let mut input = responses_history(&history)?;
-    if !history.iter().any(|message| message.id == user_message.id) {
-        if input.len() == MAX_RESPONSES_INPUT_MESSAGES {
-            input.remove(0);
-        }
-        let PayloadRef::Inline { text } = &user_message.body else {
-            return Err(ApiFailure::internal(
-                "newly appended user message was not stored inline",
-            ));
-        };
-        input.push(ResponsesInput::new(ResponsesRole::User, text.clone()));
-    }
+    let user_message_id = user_message.id;
+    let input = bounded_typed_history(
+        &state.sessions,
+        id,
+        MAX_RESPONSES_INPUT_MESSAGES,
+        MAX_RESPONSES_INPUT_BYTES,
+    ).await.map_err(ApiFailure::internal)?;
 
     // Agentic loop setup: advertise tools only when turn-tool execution is
     // explicitly enabled (OPENCODE_RK_TURN_TOOLS). The list is deny-by-default:
@@ -1017,7 +1002,7 @@ async fn create_turn_stream(
         .and_then(|value| value.parse::<u32>().ok())
         .filter(|steps| *steps > 0)
         .unwrap_or(MAX_TURN_STEPS);
-    let history_items: Vec<ResponsesItem> = input.into_iter().map(Into::into).collect();
+    let history_items = input;
 
     let provider = provider
         .stream_with_tools(model_id, &body.reasoning_effort, &history_items, &tools)
@@ -1030,6 +1015,7 @@ async fn create_turn_stream(
             sessions: state.sessions,
             session_id: id,
             user_message: Some(user_message),
+            turn_message_id: user_message_id,
             assistant_text: String::new(),
             reasoning_summary: String::new(),
             stage: TurnStreamStage::User,
@@ -1052,6 +1038,7 @@ async fn create_turn_stream(
                 opencode_rk_agents::agent_executor::LoopStep::PolicyCheck,
                 opencode_rk_agents::agent_executor::LoopStep::Settle,
             ]).expect("fixed 4-step turn plan fits agent executor capacity"),
+            round_ordinal: 0,
         },
         |mut state| async move {
             loop {
@@ -1098,20 +1085,17 @@ async fn create_turn_stream(
                             name,
                             arguments,
                         })) => {
+                            if state.pending_calls.len() >= MAX_PENDING_TURN_CALLS {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((Ok::<Bytes, Infallible>(stream_error(
+                                    "bad_gateway", "provider tool batch exceeds the replay bound",
+                                )), state));
+                            }
                             state.pending_calls.push(RequestedCall {
                                 call_id: call_id.clone(),
                                 name: name.clone(),
                                 arguments: arguments.clone(),
                             });
-                            // Replay rule: the next round's input must contain
-                            // the model's function_call before its output.
-                            state
-                                .history_items
-                                .push(ResponsesItem::FunctionCall {
-                                    call_id: call_id.clone(),
-                                    name: name.clone(),
-                                    arguments: arguments.clone(),
-                                });
                             return Some((
                                 Ok::<Bytes, Infallible>(ndjson(json!({
                                     "type": "tool_call",
@@ -1204,87 +1188,130 @@ async fn create_turn_stream(
                             ));
                         }
                         }
-                    }                    TurnStreamStage::Executing => {
+                    }
+                    TurnStreamStage::Executing => {
                             // One round = one provider stream + at most one
                             // tool dispatch batch. The budget was checked at
                             // the completed event; consume it here.
                             let _ = state.loop_control.begin_round();
                             let executor = ToolExecutor::new();
-                        let mut round_outputs: Vec<CallOutputItem> = Vec::new();
-                        let mut batch = std::mem::take(&mut state.pending_calls);
-                        // Truncate oversized batches with explicit error outputs.
-                        let (kept, overflow) = state.loop_control.truncate_calls(&batch);
-                        batch = kept;
-                        for item in overflow {
-                            round_outputs.push(CallOutputItem {
-                                call_id: item.call_id,
-                                name: String::new(),
-                                output: item.output,
-                            });
-                        }
-                        for call in batch {
-                            let permitted = state
-                                .enabled_tools
-                                .iter()
-                                .any(|enabled| *enabled == call.name);
-                            let raw_output = if permitted {
-                                if call.name == "write" {
-                                    execute_write(&call.arguments, &state.broker, &state.file_tool)
-                                } else {
-                                    match state.broker.authorize(&OperationIntent::Tool {
-                                        name: call.name.clone(),
-                                        description: "turn tool call".to_owned(),
-                                    }) {
-                                        Decision::Allow => {
-                                            let arguments: Value =
-                                                serde_json::from_str(&call.arguments)
-                                                    .unwrap_or_else(|_| json!({}));
-                                            let result = executor
-                                                .execute(opencode_rk_tools::executor::ToolCall::new(
-                                                    call.call_id.clone(),
-                                                    call.name.clone(),
-                                                    arguments,
-                                                ))
-                                                .await;
-                                            if result.success {
-                                                result.output
-                                            } else {
-                                                result
-                                                    .error
-                                                    .unwrap_or_else(|| "tool failed".to_owned())
+                            let batch = std::mem::take(&mut state.pending_calls);
+                            let admissions: Result<Vec<_>, SessionError> = batch.iter().map(|call| {
+                                let body = PayloadRef::inline(format!("[{}] pending", call.name))
+                                    .map_err(|error| SessionError::Contract(error.to_string()))?;
+                                Ok(ToolCallAdmission {
+                                    call_id: call.call_id.clone(),
+                                    name: call.name.clone(),
+                                    arguments: call.arguments.clone(),
+                                    message: MessageRecord {
+                                        id: MessageId::new(), session_id: state.session_id,
+                                        role: MessageRole::Tool, body, created_at: Timestamp::now(),
+                                    },
+                                })
+                            }).collect();
+                            let admissions = match admissions {
+                                Ok(calls) => calls,
+                                Err(error) => {
+                                    state.stage = TurnStreamStage::Done;
+                                    return Some((Ok::<Bytes, Infallible>(stream_error(
+                                        "internal_error", error.to_string(),
+                                    )), state));
+                                }
+                            };
+                            let message_ids: Vec<_> = admissions.iter().map(|call| call.message.id).collect();
+                            let round = ToolRound {
+                                round_id: format!("round-{}-{}", state.turn_message_id, state.round_ordinal),
+                                session_id: state.session_id,
+                                turn_message_id: state.turn_message_id,
+                                round_ordinal: state.round_ordinal,
+                                // The pending-call byte/count gate bounds this conversion.
+                                expected_pairs: batch.len() as u32,
+                            };
+                            // Admission is one transaction for ALL calls, including
+                            // denied/overflow outputs. No tool runs before it commits.
+                            if let Err(error) = state.sessions.admit_tool_round(round.clone(), admissions).await {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((Ok::<Bytes, Infallible>(stream_error(
+                                    "internal_error", format!("failed to admit tool round: {error}"),
+                                )), state));
+                            }
+                            state.round_ordinal = state.round_ordinal.saturating_add(1);
+                            let mut round_outputs: Vec<CallOutputItem> = Vec::new();
+                            for (index, (call, message_id)) in batch.into_iter().zip(message_ids).enumerate() {
+                                let permitted = state
+                                    .enabled_tools
+                                    .iter()
+                                    .any(|enabled| *enabled == call.name);
+                                let raw_output = if index >= MAX_CALLS_PER_ROUND {
+                                    format!("error: step budget per round exceeded (max {MAX_CALLS_PER_ROUND} calls); call not executed")
+                                } else if permitted {
+                                    if call.name == "write" {
+                                        execute_write(&call.arguments, &state.broker, &state.file_tool)
+                                    } else {
+                                        match state.broker.authorize(&OperationIntent::Tool {
+                                            name: call.name.clone(),
+                                            description: "turn tool call".to_owned(),
+                                        }) {
+                                            Decision::Allow => {
+                                                let arguments: Value =
+                                                    serde_json::from_str(&call.arguments)
+                                                        .unwrap_or_else(|_| json!({}));
+                                                let result = executor
+                                                    .execute(opencode_rk_tools::executor::ToolCall::new(
+                                                        call.call_id.clone(),
+                                                        call.name.clone(),
+                                                        arguments,
+                                                    ))
+                                                    .await;
+                                                if result.success {
+                                                    result.output
+                                                } else {
+                                                    result
+                                                        .error
+                                                        .unwrap_or_else(|| "tool failed".to_owned())
+                                                }
+                                            }
+                                            Decision::Deny { reason } => {
+                                                format!(
+                                                    "error: tool '{}' denied: {}",
+                                                    call.name, reason
+                                                )
+                                            }
+                                            Decision::RequireHuman { reason, .. } => {
+                                                format!(
+                                                    "error: tool '{}' requires human approval: {}",
+                                                    call.name, reason
+                                                )
                                             }
                                         }
-                                        Decision::Deny { reason } => {
-                                            format!(
-                                                "error: tool '{}' denied: {}",
-                                                call.name, reason
-                                            )
-                                        }
-                                        Decision::RequireHuman { reason, .. } => {
-                                            format!(
-                                                "error: tool '{}' requires human approval: {}",
-                                                call.name, reason
-                                            )
-                                        }
                                     }
+                                } else {
+                                    format!(
+                                        "error: tool '{}' is not permitted by turn policy (enable via OPENCODE_RK_TURN_TOOLS)",
+                                        call.name
+                                    )
+                                };
+                                let bounded = truncate_tool_output(&raw_output);
+                                // Persist the real output before exposing its event:
+                                // a disconnected reader cannot discard a completed pair.
+                                if let Err(error) = state.sessions.persist_tool_output(
+                                    round.clone(), index as u64, bounded.clone(), message_id,
+                                ).await {
+                                    state.stage = TurnStreamStage::Done;
+                                    return Some((Ok::<Bytes, Infallible>(stream_error(
+                                        "internal_error", format!("failed to persist tool output: {error}"),
+                                    )), state));
                                 }
-                            } else {
-                                format!(
-                                    "error: tool '{}' is not permitted by turn policy (enable via OPENCODE_RK_TURN_TOOLS)",
-                                    call.name
-                                )
-                            };
-                            let bounded = truncate_tool_output(&raw_output);
-                            round_outputs.push(CallOutputItem {
-                                call_id: call.call_id.clone(),
-                                name: call.name,
-                                output: bounded,
-                            });
+                                round_outputs.push(CallOutputItem {
+                                    call_id: call.call_id.clone(),
+                                    name: call.name,
+                                    output: bounded,
+                                });
+                            }
+                            state.executed_outputs = round_outputs;
+                            state.stage = TurnStreamStage::EmitOutputs;
+                            continue;
                         }
-                        state.executed_outputs = round_outputs;
-                        state.stage = TurnStreamStage::EmitOutputs;
-                        continue;
-                    }
                     TurnStreamStage::EmitOutputs => {
                             if state.emit_cursor < state.executed_outputs.len() {
                                 let item = state.executed_outputs[state.emit_cursor].clone();
@@ -1304,34 +1331,7 @@ async fn create_turn_stream(
                             continue;
                         }
                     TurnStreamStage::NextRound => {
-                        // Persist round outputs (tool transcript rows) and
-                        // either start the next provider round or finalize
-                        // with the forced stop reason.
-                        let outputs = std::mem::take(&mut state.executed_outputs);
-                        for item in &outputs {
-                            let record = state
-                                .sessions
-                                .append_text(
-                                    state.session_id,
-                                    MessageRole::Tool,
-                                    format!("[{}] {}", item.name, item.output),
-                                )
-                                .await;
-                            if record.is_err() {
-                                state.stage = TurnStreamStage::Done;
-                                return Some((
-                                    Ok::<Bytes, Infallible>(stream_error(
-                                        "internal_error",
-                                        "failed to persist tool output",
-                                    )),
-                                    state,
-                                ));
-                            }
-                            state.history_items.push(ResponsesItem::FunctionCallOutput {
-                                call_id: item.call_id.clone(),
-                                output: item.output.clone(),
-                            });
-                        }
+                        state.executed_outputs.clear();
                         if let Some(stop) = state.forced_stop.take() {
                             let assistant_text = std::mem::take(&mut state.assistant_text);
                             let reasoning_summary =
@@ -1371,7 +1371,27 @@ async fn create_turn_stream(
                                 }
                             }
                         }
-                        // Next provider round with the grown typed history.
+                        // Next provider round: reload typed history from storage
+                        // to ensure accurate replay across restarts.
+                        let history_items = match bounded_typed_history(
+                            &state.sessions,
+                            state.session_id,
+                            MAX_RESPONSES_INPUT_MESSAGES,
+                            MAX_RESPONSES_INPUT_BYTES,
+                        ).await {
+                            Ok(items) => items,
+                            Err(error) => {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((
+                                    Ok::<Bytes, Infallible>(stream_error(
+                                        "internal_error",
+                                        format!("failed to reload typed history: {error}"),
+                                    )),
+                                    state,
+                                ));
+                            }
+                        };
+                        state.history_items = history_items;
                         let client = match OpenAiResponsesClient::from_env() {
                             Ok(client) => client,
                             Err(error) => {
@@ -1434,30 +1454,60 @@ fn stream_error(code: &'static str, message: impl Into<String>) -> Bytes {
     }))
 }
 
-fn responses_history(
-    history: &[opencode_rk_contracts::MessageRecord],
-) -> Result<Vec<ResponsesInput>, ApiFailure> {
-    let start = history.len().saturating_sub(MAX_RESPONSES_INPUT_MESSAGES);
-    history[start..]
-        .iter()
-        .map(|message| {
+/// Convert a `HistoryItem` from typed storage into a `ResponsesItem` for
+/// provider requests. Reconstructs function_call and function_call_output
+/// items from typed tool records, and plain text items from message rows.
+fn history_item_to_responses_item(item: HistoryItem) -> Result<ResponsesItem, SessionError> {
+    match item {
+        HistoryItem::Message(message) => {
             let role = match message.role {
                 MessageRole::System => ResponsesRole::System,
                 MessageRole::User => ResponsesRole::User,
                 MessageRole::Assistant => ResponsesRole::Assistant,
-                MessageRole::Tool => {
-                    return Err(ApiFailure::bad_request(
-                        "tool transcript entries need a native Responses tool adapter",
-                    ));
-                }
+                MessageRole::Tool => return Err(SessionError::Contract("unlinked tool history".to_owned())),
             };
             let PayloadRef::Inline { text } = &message.body else {
-                return Err(ApiFailure::bad_request(
-                    "blob transcript entries need a native Responses attachment adapter",
-                ));
+                return Err(SessionError::Contract("unresolved blob history".to_owned()));
             };
-            Ok(ResponsesInput::new(role, text.clone()))
-        })
+            Ok(ResponsesItem::Text {
+                role,
+                content: text.clone(),
+            })
+        }
+        HistoryItem::Tool(typed) => {
+            if typed.kind == "call" {
+                Ok(ResponsesItem::FunctionCall {
+                    call_id: typed.call_id,
+                    name: typed.name,
+                    arguments: typed.payload,
+                })
+            } else if typed.kind == "output" {
+                Ok(ResponsesItem::FunctionCallOutput {
+                    call_id: typed.call_id,
+                    output: typed.payload,
+                })
+            } else {
+                Err(SessionError::Contract("invalid typed tool record kind".to_owned()))
+            }
+        }
+    }
+}
+
+/// Load bounded typed history from storage for provider continuation/restart.
+/// Returns `ResponsesItem` entries reconstructed from both regular messages
+/// and typed tool records, ordered by insertion order.
+async fn bounded_typed_history(
+    sessions: &SessionService,
+    session_id: SessionId,
+    max_items: usize,
+    max_bytes: usize,
+) -> Result<Vec<ResponsesItem>, SessionError> {
+    let items = sessions
+        .bounded_history(session_id, max_items, max_bytes)
+        .await?;
+    items
+        .into_iter()
+        .map(history_item_to_responses_item)
         .collect()
 }
 
