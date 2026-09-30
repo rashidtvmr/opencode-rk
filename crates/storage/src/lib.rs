@@ -479,7 +479,7 @@ impl Storage {
             let (message_rowid, id_len, role_len, inline_len, _has_blob, byte_len) = row?;
             let id_len = usize::try_from(id_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
             let role_len = usize::try_from(role_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
-            let actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
+            let _actual = usize::try_from(byte_len).map_err(|_| StorageError::TypedHistoryIncomplete)?;
             let metadata_bytes = id_len.checked_add(role_len).ok_or(StorageError::TypedHistoryLimit)?;
             used = used.checked_add(metadata_bytes).ok_or(StorageError::TypedHistoryLimit)?;
             if used > max_provider_bytes { return Err(StorageError::TypedHistoryLimit); }
@@ -639,7 +639,7 @@ impl Storage {
         };
         if let Some(summary) = reasoning_summary {
             if message.role != MessageRole::Assistant
-                || summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES
+                || summary.len() > MAX_REASONING_SUMMARY_BYTES
             {
                 return Err(StorageError::InlinePayloadTooLarge);
             }
@@ -674,9 +674,9 @@ impl Storage {
             return Err(StorageError::InlinePayloadTooLarge);
         }
         if name.is_empty()
-            || name.as_bytes().len() > MAX_ATTACHMENT_NAME_BYTES
+            || name.len() > MAX_ATTACHMENT_NAME_BYTES
             || mime.is_empty()
-            || mime.as_bytes().len() > MAX_ATTACHMENT_MIME_BYTES
+            || mime.len() > MAX_ATTACHMENT_MIME_BYTES
         {
             return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
         }
@@ -803,6 +803,7 @@ impl Storage {
             .optional()?
             .ok_or(StorageError::MessageNotFound(message_id))
     }
+    #[expect(clippy::too_many_arguments, reason = "Existing explicit artifact creation commits one auditable write with typed identity, metadata, content, and timestamp.")]
     pub fn create_artifact(
         &self,
         session_id: SessionId,
@@ -1151,13 +1152,13 @@ impl Storage {
                 if sql.to_ascii_lowercase().split_whitespace().collect::<String>() != expected.to_ascii_lowercase().split_whitespace().collect::<String>() { return Err(StorageError::TypedHistorySchema); }
             } else { connection.execute_batch(expected)?; }
         }
-        validate_typed_index(&connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
-        validate_typed_index(&connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
-        validate_typed_index(&connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
+        validate_typed_index(connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
+        validate_typed_index(connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
+        validate_typed_index(connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
         connection.execute_batch("CREATE INDEX IF NOT EXISTS tool_rounds_session_idx ON tool_rounds(session_id,created_at,round_id); CREATE INDEX IF NOT EXISTS typed_tool_round_idx ON typed_tool_records(round_id,pair_index,kind); CREATE UNIQUE INDEX IF NOT EXISTS tool_rounds_identity_idx ON tool_rounds(round_id,turn_message_id,round_ordinal);")?;
-        validate_typed_index(&connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
-        validate_typed_index(&connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
-        validate_typed_index(&connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
+        validate_typed_index(connection, "tool_rounds_session_idx", false, &["session_id", "created_at", "round_id"])?;
+        validate_typed_index(connection, "typed_tool_round_idx", false, &["round_id", "pair_index", "kind"])?;
+        validate_typed_index(connection, "tool_rounds_identity_idx", true, &["round_id", "turn_message_id", "round_ordinal"])?;
         connection.execute("INSERT INTO feature_migrations(feature,version,applied_at) VALUES(?1,1,?2) ON CONFLICT(feature) DO NOTHING", params![TYPED_HISTORY_FEATURE, Timestamp::now().to_string()])?;
         Ok(())
         })();
@@ -1316,9 +1317,9 @@ fn decode_artifact_kind(value: &str) -> Result<ArtifactKind, rusqlite::Error> {
 }
 fn validate_artifact_metadata(title: &str, language: Option<&str>) -> Result<(), StorageError> {
     if title.is_empty()
-        || title.as_bytes().len() > MAX_ARTIFACT_TITLE_BYTES
+        || title.len() > MAX_ARTIFACT_TITLE_BYTES
         || language.is_some_and(|value| {
-            value.is_empty() || value.as_bytes().len() > MAX_ARTIFACT_LANGUAGE_BYTES
+            value.is_empty() || value.len() > MAX_ARTIFACT_LANGUAGE_BYTES
         })
     {
         return Err(StorageError::InvalidArtifact);
@@ -1326,7 +1327,7 @@ fn validate_artifact_metadata(title: &str, language: Option<&str>) -> Result<(),
     Ok(())
 }
 fn validate_artifact_content(content: &str) -> Result<(), StorageError> {
-    if content.as_bytes().len() > MAX_ARTIFACT_CONTENT_BYTES {
+    if content.len() > MAX_ARTIFACT_CONTENT_BYTES {
         return Err(StorageError::ArtifactContentTooLarge);
     }
     Ok(())

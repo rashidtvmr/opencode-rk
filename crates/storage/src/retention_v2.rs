@@ -78,7 +78,7 @@ impl RetentionV2 {
              )",
             params![now_us, limit],
         )?;
-        Ok(changed as usize)
+        Ok(changed)
     }
 
     /// Delete at most `limit` (clamped 1..=500) approvals in a terminal state
@@ -102,7 +102,7 @@ impl RetentionV2 {
              )",
             params![older_than_us, limit],
         )?;
-        Ok(changed as usize)
+        Ok(changed)
     }
 
     /// Delete at most `limit` (clamped 1..=500) inline payloads that are old
@@ -123,7 +123,7 @@ impl RetentionV2 {
              )"
         );
         let changed = connection.execute(&sql, params![older_than_us, limit])?;
-        Ok(changed as usize)
+        Ok(changed)
     }
 
     /// `(expired_receipts, resolved_approvals, orphan_inline_payloads)` counts

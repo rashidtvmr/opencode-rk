@@ -18,6 +18,8 @@ use crate::StorageError;
 const MAX_PAGE_SIZE: usize = 500;
 const MAX_SNAPSHOT_READ: usize = 200;
 
+type CheckpointRow = (i64, i64, i64, Option<i64>);
+
 pub struct SnapshotV2;
 
 impl SnapshotV2 {
@@ -156,7 +158,7 @@ impl SnapshotV2 {
     pub fn latest_checkpoint(
         connection: &Connection,
         session_pk: i64,
-    ) -> Result<Option<(i64, i64, i64, Option<i64>)>, StorageError> {
+    ) -> Result<Option<CheckpointRow>, StorageError> {
         let mut statement = connection.prepare(
             "SELECT boundary_message_seq, summary_payload_pk, created_at_us,
                     CASE WHEN recent_payload_pk IS NULL THEN 0 ELSE 1 END
