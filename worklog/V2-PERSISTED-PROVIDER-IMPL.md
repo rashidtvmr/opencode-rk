@@ -4,7 +4,9 @@ Package: G2 persisted-provider request authentication (implementation owner)
 Base: `HEAD59f54d0`
 
 Implemented schema-filtered persisted OpenAI API credential resolution with
-`OPENCODE_AUTH_CONTENT` and XDG/HOME auth-file lookup, bounded blocking reads,
+`OPENCODE_AUTH_CONTENT` and XDG/HOME auth-file lookup. File reads are blocking
+and bounded to at most `MAX_AUTH_BYTES + 1` bytes using `Read::take`; regular
+files are required before reading,
 ambient fallback, and fail-closed missing-credential behavior. Native nonstream
 and stream turns now use this resolver. Streaming retains the resolved cloned
 client across tool-continuation rounds rather than rebuilding from the ambient
