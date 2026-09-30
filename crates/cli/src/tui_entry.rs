@@ -563,7 +563,7 @@ fn native_loop(
                     native_turn::Event::ToolCall(name) => {
                         append_transcript(
                             &mut transcript,
-                            format!("tool: {}", crate::native_transcript::strip_ansi(&name)),
+                            format!("tool: {}", native_transcript::strip_ansi(&name)),
                         );
                     }
                     native_turn::Event::ToolOutput(name, output) => {
@@ -571,8 +571,8 @@ fn native_loop(
                             &mut transcript,
                             format!(
                                 "tool {}: {}",
-                                crate::native_transcript::strip_ansi(&name),
-                                crate::native_transcript::strip_ansi(&output)
+                                native_transcript::strip_ansi(&name),
+                                native_transcript::strip_ansi(&output)
                             ),
                         );
                     }
@@ -580,14 +580,14 @@ fn native_loop(
                         partial.clear();
                         append_transcript(
                             &mut transcript,
-                            format!("assistant: {}", crate::native_transcript::strip_ansi(&text)),
+                            format!("assistant: {}", native_transcript::strip_ansi(&text)),
                         );
                     }
                     native_turn::Event::Error(error) => {
                         partial.clear();
                         append_transcript(
                             &mut transcript,
-                            format!("error: {}", crate::native_transcript::strip_ansi(&error)),
+                            format!("error: {}", native_transcript::strip_ansi(&error)),
                         );
                     }
                 }
@@ -835,7 +835,7 @@ fn replace_partial(transcript: &mut Vec<String>, text: &str) {
         transcript,
         format!(
             "assistant (streaming): {}",
-            crate::native_transcript::strip_ansi(text)
+            native_transcript::strip_ansi(text)
         ),
     );
 }
