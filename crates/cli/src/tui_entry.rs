@@ -30,10 +30,6 @@ use opencode_rk_sessions::tui_state::{
     MemoryViewer, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES,
     MAX_SOURCES,
 };
-#[cfg(feature = "native")]
-use rustix::event::{poll, PollFd, PollFlags, Timespec};
-#[cfg(feature = "native")]
-use std::os::fd::AsFd;
 use std::{
     env, fs,
     io::{BufRead, IsTerminal as _, Read, Write},
@@ -630,16 +626,6 @@ fn native_loop(
         lines.extend(visible.into_iter().rev().cloned());
         lines.extend(panel);
         native_paint(&mut renderer, &lines)?;
-        let timeout = if worker.is_some() { 20 } else { 250 };
-        let fd = input.as_fd();
-        let mut fds = [PollFd::new(&fd, PollFlags::IN)];
-        let wait = Timespec {
-            tv_sec: 0,
-            tv_nsec: (timeout as i64) * 1_000_000,
-        };
-        if poll(&mut fds, Some(&wait))? == 0 {
-            continue;
-        }
         if input.read(&mut byte)? == 0 {
             break;
         }
