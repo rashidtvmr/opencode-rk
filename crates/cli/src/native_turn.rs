@@ -47,10 +47,11 @@ impl TurnWorker {
         {
             return Err("invalid daemon origin".into());
         }
-        let addresses = authority
+        let addresses: Vec<_> = authority
             .to_socket_addrs()
-            .map_err(|_| "invalid daemon origin")?;
-        if !addresses.clone().all(|address| address.ip().is_loopback()) {
+            .map_err(|_| "invalid daemon origin")?
+            .collect();
+        if addresses.is_empty() || !addresses.iter().all(|address| address.ip().is_loopback()) {
             return Err("native turns require a loopback daemon origin".into());
         }
         let url = format!("http://{authority}/api/sessions/{session}/turns/stream");
@@ -97,7 +98,9 @@ impl TurnWorker {
                         let value: Value = serde_json::from_slice(&line[..line.len() - 1])
                             .map_err(|e| format!("invalid turn event: {e}"))?;
                         if let Some(event) = decode(value, &mut retained)? {
-                            terminal = matches!(event, Event::Assistant(_) | Event::Error(_));
+                            if matches!(event, Event::Assistant(_) | Event::Error(_)) {
+                                terminal = true;
+                            }
                             tx.send(event).await.map_err(|_| "UI closed".to_string())?;
                         }
                     }
@@ -157,13 +160,9 @@ fn decode(value: Value, retained: &mut usize) -> Result<Option<Event>, String> {
             }
             Event::Assistant(text.to_owned())
         }
-        "error" => Event::Error(
-            value
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("turn failed")
-                .to_owned(),
-        ),
+        "error" => {
+            Event::Error(field("message", retained).unwrap_or_else(|_| "turn failed".into()))
+        }
         "reasoning_summary_delta" => return Ok(None),
         other => return Err(format!("unsupported event {other}")),
     }))
