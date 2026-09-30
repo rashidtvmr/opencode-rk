@@ -316,7 +316,15 @@ pub fn publish_backend_descriptor_with_auth(
     let temporary = paths
         .descriptor
         .with_extension(format!("json.{}.tmp", std::process::id()));
-    std::fs::write(&temporary, bytes)?;
+    // Create-before-write with owner-only permissions; relying on umask here
+    // would publish the bearer under permissive umasks (notably 0022).
+    let mut file = OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+    #[cfg(unix)] {
+        use std::os::unix::fs::PermissionsExt;
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(&bytes)?;
+    file.sync_all()?;
     std::fs::rename(&temporary, &paths.descriptor)?;
     Ok(descriptor)
 }

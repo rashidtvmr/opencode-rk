@@ -1,6 +1,6 @@
 //! Narrow, schema-filtered access to OpenCode's persisted API credentials.
 use serde_json::Value;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 use std::{
     env,
     fs::{self, OpenOptions},
@@ -53,9 +53,10 @@ pub async fn save_api_key(provider: String, key: String) -> Result<(), String> {
         return Err("invalid provider credential".to_owned());
     }
     let path = auth_path().ok_or_else(|| "unable to resolve auth path".to_owned())?;
-    static WRITE_GATE: OnceLock<Semaphore> = OnceLock::new();
+    static WRITE_GATE: OnceLock<Arc<Semaphore>> = OnceLock::new();
     let permit = WRITE_GATE
-        .get_or_init(|| Semaphore::new(1))
+        .get_or_init(|| Arc::new(Semaphore::new(1)))
+        .clone()
         .try_acquire_owned()
         .map_err(|_| "provider auth write busy".to_owned())?;
     tokio::task::spawn_blocking(move || {
