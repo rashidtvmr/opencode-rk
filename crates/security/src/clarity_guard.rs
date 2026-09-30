@@ -187,9 +187,7 @@ impl GuardConfig {
 /// missing language tag also yields `Full` (never terse on doubt).
 #[must_use]
 pub fn select_mode(ctx: &RenderCtx) -> Mode {
-    if ctx.kind_flags.any() {
-        Mode::Full
-    } else if ctx.lang.is_empty() {
+    if ctx.kind_flags.any() || ctx.lang.is_empty() {
         Mode::Full
     } else {
         Mode::Terse
@@ -334,8 +332,7 @@ fn first_line(body: &str) -> Option<&str> {
 fn salient_noun(body: &str) -> String {
     body.split_whitespace()
         .map(|t| t.trim_matches(|c: char| !c.is_alphanumeric()))
-        .filter(|t| !t.is_empty())
-        .next_back()
+        .rfind(|t| !t.is_empty())
         .unwrap_or("request")
         .to_owned()
 }

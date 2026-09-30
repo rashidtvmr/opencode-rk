@@ -1,9 +1,6 @@
 //! Bounded hook bus v2 - max 100 pending with shift-drop, always-emit allowlist, SSRF guard.
 #![forbid(unsafe_code)]
-use std::{
-    collections::VecDeque,
-    time::{Duration, Instant},
-};
+use std::{collections::VecDeque, time::Instant};
 
 use thiserror::Error;
 

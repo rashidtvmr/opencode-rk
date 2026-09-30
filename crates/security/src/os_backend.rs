@@ -43,8 +43,6 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 
-use thiserror::Error;
-
 /// Fail-closed receipt: the requested OS sandbox capability is unsupported or
 /// not linked in this crate. Callers must deny the operation; this error
 /// grants nothing and never claims isolation.
@@ -534,11 +532,18 @@ mod tests {
             .map(|c| c.lines().any(|l| l.trim().contains("landlock")))
             .unwrap_or(false);
         assert_eq!(sup.landlock_detected, has_entry);
-        assert!(!sup.enforcement_linked, "no syscall backend linked in this crate");
+        assert!(
+            !sup.enforcement_linked,
+            "no syscall backend linked in this crate"
+        );
         assert!(!sup.available);
         let err = require_supported().expect_err("must BLOCK, never silent-allow");
         assert!(format!("{err}").contains("BLOCKED"));
-        assert!(format!("{err}").contains("unsupported") || format!("{err}").contains("refusing") || format!("{err}").contains("no syscall"));
+        assert!(
+            format!("{err}").contains("unsupported")
+                || format!("{err}").contains("refusing")
+                || format!("{err}").contains("no syscall")
+        );
         // engage() agrees: always Err.
         let bogus = FsGrant {
             root: PathBuf::from("/tmp"),

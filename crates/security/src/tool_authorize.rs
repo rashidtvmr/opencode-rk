@@ -21,7 +21,7 @@
 
 use super::app_policy::{AppDecision, ExpectedScope, Grant, GrantLedger, OperationDigest};
 use super::{Decision, FileAction, OperationIntent, PermissionBroker};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Bounded tool-authorizer audit (mirrors `MAX_AUDIT_ENTRIES` discipline).
 pub const MAX_TOOL_AUDIT: usize = 256;
@@ -60,7 +60,7 @@ pub enum ToolGateSummary {
 /// `shell` tool with a `command` string) maps to an opaque `Process` intent:
 /// the broker forces a human gate, so the direct-spawn bypass is closed.
 #[must_use]
-pub fn shell_intent(command: &str, cwd: &PathBuf) -> OperationIntent {
+pub fn shell_intent(command: &str, cwd: &Path) -> OperationIntent {
     OperationIntent::Process {
         program: "bash".to_owned(),
         args: vec!["-c".to_owned(), command.to_owned()],
@@ -70,7 +70,7 @@ pub fn shell_intent(command: &str, cwd: &PathBuf) -> OperationIntent {
 
 /// Intent constructor for direct-argv execution (preferred): no opaque string.
 #[must_use]
-pub fn argv_intent(program: &str, args: &[String], cwd: &PathBuf) -> OperationIntent {
+pub fn argv_intent(program: &str, args: &[String], cwd: &Path) -> OperationIntent {
     OperationIntent::Process {
         program: program.to_owned(),
         args: args.to_vec(),
@@ -312,7 +312,7 @@ pub fn redact_secrets(text: &str) -> String {
 
 /// File-write intent helper for tool arguments that touch the filesystem.
 #[must_use]
-pub fn file_write_intent(path: &PathBuf) -> OperationIntent {
+pub fn file_write_intent(path: &Path) -> OperationIntent {
     OperationIntent::File {
         action: FileAction::Write,
         path: path.clone(),

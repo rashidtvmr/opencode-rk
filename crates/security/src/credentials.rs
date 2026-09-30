@@ -19,7 +19,7 @@ impl Credential {
             id: id.into(),
             provider: provider.into(),
             token: token.into(),
-            expires_at: expires_at,
+            expires_at,
         }
     }
     #[must_use]
