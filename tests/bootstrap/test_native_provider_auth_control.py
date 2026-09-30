@@ -413,6 +413,26 @@ class NativeProviderAuthControlTests(unittest.TestCase):
         finally:
             service.stop()
 
+    def test_oversized_other_api_credential_rejects_update_unchanged(self):
+        oversized_other_key = "fixture-long-other-" + ("x" * (16 * 1024 + 1))
+        initial = {
+            "other": api_info(oversized_other_key, {"account": "other"}),
+            "legacy": api_info("old-fixture", {"account": "old"}),
+        }
+        service, auth = self.run_service(initial)
+        try:
+            before = auth.read_bytes()
+            self.assertLessEqual(len(before), MAX_AUTH_FILE)
+            status, response = service.request(
+                "PUT", "/auth/openai", api_info(metadata={"account": "fixture"})
+            )
+            self.assertGreaterEqual(status, 400)
+            self.assertLessEqual(status, 599)
+            bounded_discard(response)
+            self.assertEqual(auth.read_bytes(), before)
+        finally:
+            service.stop()
+
 
 if __name__ == "__main__":
     unittest.main()

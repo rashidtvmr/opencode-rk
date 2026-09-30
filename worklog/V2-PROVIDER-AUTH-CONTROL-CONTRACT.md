@@ -18,7 +18,7 @@ storage; this worktree owns only the executable contract.
 
 ## Contract cases
 
-Six tests use an installed binary and a loopback bearer descriptor.  They use
+Eight tests use an installed binary and a loopback bearer descriptor.  They use
 fresh disposable HOME/XDG/data/project roots, a generated offline OpenAI
 catalog, bounded HTTP bodies/responses/logs, no ambient API key, and owned
 process-group cleanup.  They verify:
@@ -30,10 +30,24 @@ process-group cleanup.  They verify:
    metadata remain intact;
 4. invalid API types/metadata are rejected without file mutation or key echo;
 5. an auth destination directory and marker are never overwritten;
-6. an existing auth file over 1 MiB is rejected without truncation or mutation.
+6. an existing auth file over 1 MiB is rejected without truncation or mutation;
+7. an existing *other-account* API record whose key exceeds 16 KiB causes a
+   replacement update to fail with a non-2xx status and preserves the auth file
+   byte-for-byte.  The test deliberately does not require the replacement
+   target's new key to be rejected: replacing the explicitly selected target is
+   the human-authorized update operation.
 
 The 1 MiB file bound is an approved resource-bounded native extension; it is
 explicitly not a claim that the upstream implementation has the same bound.
+
+The seventh case freezes the distinction between schema validity and bounded
+update validity.  Structurally valid existing API records are precious and
+must not be silently dropped while rewriting another account.  For this
+update path, an oversized other-account API key is therefore a fail-closed
+condition, not a record to filter out.  Existing empty API keys remain a
+schema-preservation/read-side concern and are not required to be deleted by
+this contract.  New metadata remains subject to the 128-entry and 16 KiB
+aggregate limits; this test does not add a separate oversized-metadata case.
 
 ## Preparation evidence
 
@@ -81,7 +95,7 @@ are retained as infrastructure evidence. Readiness checks ownership, descriptor
 PID/group, loopback origin, bearer authentication and the two exact model IDs.
 
 The actual installed native release source
-`710a410e0ce32c716c40217696b515caa6c52310` now runs all seven controls. The missing
+`710a410e0ce32c716c40217696b515caa6c52310` previously ran all seven controls. The missing
 auth route falls through to the Web SPA and returns HTML/HTTP 200 instead of
 authenticated API auth behavior. A separate seventh control captures an observed
 credential-publication failure: `backend.json` is mode `0644` under a `0022`
@@ -97,6 +111,8 @@ case has a sanitized source/PID/cleanup/log receipt. The two response errors are
 the product returning SPA HTML or failing to create the requested auth entry;
 they are not source/compiler/harness failures.
 
-Frozen test SHA-256:
+The prior seven-control frozen test SHA-256 was
 `1f08cd2968e4867f7eed26efe2c4534ea005bac1fa9f961c862ce31aa8b4f419`.
+This source-only follow-up adds the eighth negative control above; the parent
+must recompute the test hash and run the baseline to capture its RED result.
 No product acceptance is claimed. Implementation cannot edit this contract.
