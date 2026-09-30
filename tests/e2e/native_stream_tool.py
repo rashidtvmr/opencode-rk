@@ -99,10 +99,18 @@ def reap_cli_then_daemon(child, descriptor_value, master):
             child.wait(timeout=3)
     daemon_pid = descriptor_value.get("_validated_pid") if descriptor_value else None
     if not isinstance(daemon_pid, int) or daemon_pid <= 1:
+        if timed_out:
+            raise AssertionError("native CLI did not exit after Ctrl-C")
+        if child.returncode != 0:
+            raise AssertionError(f"native CLI exited with status {child.returncode}")
         return
     try:
         os.kill(daemon_pid, 0)
     except ProcessLookupError:
+        if timed_out:
+            raise AssertionError("native CLI did not exit after Ctrl-C")
+        if child.returncode != 0:
+            raise AssertionError(f"native CLI exited with status {child.returncode}")
         return
     except PermissionError as error:
         raise AssertionError("validated daemon ownership probe was denied") from error
