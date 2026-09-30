@@ -228,6 +228,7 @@ extern "C" {
     fn setCursorPosition(renderer_handle: NativeHandle, x: i32, y: i32, visible: bool);
     fn setTerminalTitle(renderer_handle: NativeHandle, titlePtr: *const u8, titleLen: u32);
     fn getCurrentBuffer(renderer_handle: NativeHandle) -> NativeHandle;
+    fn getNextBuffer(renderer_handle: NativeHandle) -> NativeHandle;
     fn render(renderer_handle: NativeHandle, force: bool) -> u8;
     fn bufferDrawText(
         buffer_handle: NativeHandle,
@@ -556,7 +557,11 @@ impl Renderer {
         #[cfg(feature = "native")]
         {
             // SAFETY: live handle; returned buffer valid for the frame.
-            let buf = unsafe { getCurrentBuffer(handle) };
+            // OpenTUI treats `nextRenderBuffer` as the writable scene and
+            // commits it into `currentRenderBuffer` during render(). Drawing
+            // into current is only useful for snapshots and is discarded by
+            // the persistent diff renderer.
+            let buf = unsafe { getNextBuffer(handle) };
             if buf == INVALID_HANDLE {
                 return Err(BridgeError::RenderFailed);
             }
@@ -599,7 +604,7 @@ impl Renderer {
             // SAFETY: live handle; `text` and `fg` outlive the call; null bg
             // selects the native default (nullable `?[*]u16`).
             unsafe {
-                let buf = getCurrentBuffer(handle);
+                let buf = getNextBuffer(handle);
                 if buf == INVALID_HANDLE {
                     return Err(BridgeError::RenderFailed);
                 }
@@ -645,7 +650,7 @@ impl Renderer {
             ];
             // SAFETY: live handle; `bg` outlives the call.
             unsafe {
-                let buf = getCurrentBuffer(handle);
+                let buf = getNextBuffer(handle);
                 if buf == INVALID_HANDLE {
                     return Err(BridgeError::RenderFailed);
                 }
@@ -737,7 +742,7 @@ impl Renderer {
         if lines.iter().any(|l| l.len() > MAX_TEXT_BYTES) {
             return Err(BridgeError::TextTooLarge);
         }
-        let renderer = Self::create_memory(cols, rows)?;
+        let mut renderer = Self::create_memory(cols, rows)?;
         let max_cols = cols as usize;
         for (y, line) in lines.iter().enumerate().take(rows as usize) {
             let clipped: String = line.chars().take(max_cols).collect();
@@ -746,6 +751,7 @@ impl Renderer {
             }
             renderer.draw_text(0, y as u32, &clipped)?;
         }
+        renderer.frame(|_| {})?;
         renderer.snapshot_text()
     }
 }
