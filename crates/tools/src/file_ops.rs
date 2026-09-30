@@ -189,9 +189,15 @@ impl FileTool {
         broker: &PermissionBroker,
     ) -> Result<FileResult, ToolError> {
         if let FileOperation::Write { ref path, .. } = op {
+            let authorized_path = self
+                .project_root
+                .as_deref()
+                .filter(|_| !path.is_absolute())
+                .map(|root| root.join(path))
+                .unwrap_or_else(|| path.clone());
             let intent = OperationIntent::File {
                 action: FileAction::Write,
-                path: path.clone(),
+                path: authorized_path,
             };
             match broker.authorize(&intent) {
                 Decision::Allow => (),
