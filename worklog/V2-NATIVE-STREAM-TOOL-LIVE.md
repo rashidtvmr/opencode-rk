@@ -1,5 +1,11 @@
 # V2 Native stream/tool candidate
 
+Post-fix source investigation confirmed that `std::io::Stdin::read` could
+pre-buffer PTY input after the first byte, while readiness was checked against
+the bridge-owned descriptor. The native bridge now owns both readiness polling
+and the one-byte kernel read through `Renderer::read_input`, eliminating that
+split-buffer lifecycle/input stall without adding a reader thread or runtime.
+
 Base: `771607929cc6f2026384a820de68d7f6d8c606d6`
 
 This candidate owns the native daemon NDJSON client and preserves accumulated
