@@ -1,0 +1,349 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: build (${{ matrix.triple }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+            bundle: oc2-linux-x64.tar.gz
+          - os: ubuntu-latest
+            triple: aarch64-unknown-linux-gnu
+            bundle: oc2-linux-arm64.tar.gz
+          - os: macos-latest
+            triple: aarch64-apple-darwin
+            bundle: oc2-macos-arm64.tar.gz
+          - os: windows-latest
+            triple: x86_64-pc-windows-msvc
+            bundle: oc2-windows-x64.zip
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@6bed0761d98439e5a578e2877258200ad565ba87 # stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.triple }}
+      - name: Pinned toolchain record
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustc --version | tee target/toolchain.txt
+          cargo --version | tee -a target/toolchain.txt
+          git rev-parse HEAD | tee target/source-rev.txt
+      - name: Build locked release binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo build --locked --release --target ${{ matrix.triple }}
+      - name: Bundle arch-named artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          stage="dist/${{ matrix.triple }}"
+          mkdir -p "$stage"
+          if [ "${{ runner.os }}" = "Windows" ]; then
+            cp "target/${{ matrix.triple }}/release/oc2.exe" "$stage/oc2.exe"
+            cp scripts/install-oc2.ps1 "$stage/" 2>/dev/null || true
+            (cd dist && powershell -NoProfile -Command "Compress-Archive -Path '${{ matrix.triple }}' -DestinationPath '${{ matrix.bundle }}' -Force")
+          else
+            cp "target/${{ matrix.triple }}/release/oc2" "$stage/oc2"
+            cp scripts/install-oc2.sh "$stage/"
+            tar -czf "dist/${{ matrix.bundle }}" -C dist "${{ matrix.triple }}"
+          fi
+          ls -la dist/
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bundle-${{ matrix.triple }}
+          path: dist/${{ matrix.bundle }}
+          if-no-files-found: error
+          retention-days: 30
+
+  integrity:
+    name: integrity (checksum/sbom/license/provenance)
+    needs: [build]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - name: sha256 checksum manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum ./*.tar.gz ./*.zip > SHASUMS256.txt
+          sha256sum -c SHASUMS256.txt
+          cat SHASUMS256.txt
+      - name: License inventory from locked dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'EOF'
+          import json, subprocess
+          meta = json.loads(subprocess.run(
+              ["cargo", "metadata", "--locked", "--format-version", "1"],
+              capture_output=True, text=True, check=True).stdout)
+          rows = sorted({(p["name"], p["version"], p.get("license") or "NOASSERTION")
+                         for p in meta["packages"]})
+          with open("dist/THIRD_PARTY_LICENSES.txt", "w", encoding="utf-8") as fh:
+              for name, ver, lic in rows:
+                  fh.write(f"{name} {ver} {lic}\n")
+          print(f"license rows: {len(rows)}")
+          EOF
+      - uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0
+        with:
+          path: ./
+          format: spdx-json
+          output-file: dist/sbom.spdx.json
+      - name: Provenance record binding source and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "source_revision=${{ github.sha }}"
+            echo "source_ref=${{ github.ref }}"
+            echo "rust_toolchain=$(cat rust-toolchain.toml | tr '\n' ' ')"
+            echo "rustc=$(rustc --version 2>/dev/null || echo unavailable)"
+          } > dist/PROVENANCE.txt
+          cat dist/PROVENANCE.txt
+      - uses: actions/attest-build-provenance@e8998f949152b193b063cb0ec769d69d929409be # v2
+        with:
+          subject-path: dist/*.tar.gz
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: integrity-manifests
+          path: |
+            dist/SHASUMS256.txt
+            dist/THIRD_PARTY_LICENSES.txt
+            dist/sbom.spdx.json
+            dist/PROVENANCE.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  sign-macos:
+    name: sign and notarize (macos)
+    needs: [integrity]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      APPLE_DEVELOPER_ID_APPLICATION: ${{ secrets.APPLE_DEVELOPER_ID_APPLICATION }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+      - name: Fail closed without Apple signing identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${APPLE_DEVELOPER_ID_APPLICATION:-}" ]; then
+            echo "FAIL: APPLE_DEVELOPER_ID_APPLICATION secret is unset; refusing to ship unsigned macos artifact" >&2
+            exit 1
+          fi
+          if [ -z "${APPLE_ID:-}" ]; then
+            echo "FAIL: APPLE_ID secret is unset; notarization cannot proceed" >&2
+            exit 1
+          fi
+          if [ -z "${APPLE_APP_PASSWORD:-}" ]; then
+            echo "FAIL: APPLE_APP_PASSWORD secret is unset; notarization cannot proceed" >&2
+            exit 1
+          fi
+      - name: Codesign, notarize, staple macos bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          tar -xzf dist/oc2-macos-arm64.tar.gz -C "$work"
+          codesign --sign "${APPLE_DEVELOPER_ID_APPLICATION}" --options runtime --timestamp --deep --force "$work/aarch64-apple-darwin/oc2"
+          codesign --verify --deep --strict "$work/aarch64-apple-darwin/oc2"
+          ditto -c -k --sequesterRsrc "$work/aarch64-apple-darwin" "$work/oc2-macos-notarize.zip"
+          xcrun notarytool submit "$work/oc2-macos-notarize.zip" --apple-id "$APPLE_ID" --password "$APPLE_APP_PASSWORD" --team-id "$APPLE_TEAM_ID" --wait
+          xcrun stapler staple "$work/aarch64-apple-darwin/oc2" || true
+          tar -czf dist/oc2-macos-arm64.tar.gz -C "$work" aarch64-apple-darwin
+          (cd dist && sha256sum oc2-macos-arm64.tar.gz > SHASUMS256.macos.txt && cat SHASUMS256.macos.txt)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-macos
+          path: |
+            dist/oc2-macos-arm64.tar.gz
+            dist/SHASUMS256.macos.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  sign-windows:
+    name: sign (windows)
+    needs: [integrity]
+    runs-on: windows-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    env:
+      AZURE_KEY_VAULT_URI: ${{ secrets.AZURE_KEY_VAULT_URI }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+      AZURE_CERT_NAME: ${{ secrets.AZURE_CERT_NAME }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+      - name: Fail closed without Windows signing identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${AZURE_KEY_VAULT_URI:-}" ]; then
+            echo "FAIL: AZURE_KEY_VAULT_URI secret is unset; refusing to ship unsigned windows artifact" >&2
+            exit 1
+          fi
+          if [ -z "${AZURE_CERT_NAME:-}" ]; then
+            echo "FAIL: AZURE_CERT_NAME secret is unset; code signing cannot proceed" >&2
+            exit 1
+          fi
+      - name: Sign windows binary with AzureSignTool then verify with signtool
+        shell: bash
+        run: |
+          set -euo pipefail
+          dotnet tool install --global AzureSignTool
+          work="$(mktemp -d)"
+          powershell -NoProfile -Command "Expand-Archive -Path 'dist/oc2-windows-x64.zip' -DestinationPath '$work' -Force"
+          AzureSignTool sign -kvu "${AZURE_KEY_VAULT_URI}" -kvi "${AZURE_CLIENT_ID}" -kvt "${AZURE_TENANT_ID}" -kvs "${AZURE_CLIENT_SECRET}" -kvc "${AZURE_CERT_NAME}" -tr http://timestamp.digicert.com -td sha256 "$work/x86_64-pc-windows-msvc/oc2.exe"
+          signtool verify /pa "$work/x86_64-pc-windows-msvc/oc2.exe"
+          powershell -NoProfile -Command "Compress-Archive -Path '$work/x86_64-pc-windows-msvc' -DestinationPath 'dist/oc2-windows-x64.zip' -Force"
+          (cd dist && sha256sum oc2-windows-x64.zip > SHASUMS256.windows.txt && cat SHASUMS256.windows.txt)
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: signed-windows
+          path: |
+            dist/oc2-windows-x64.zip
+            dist/SHASUMS256.windows.txt
+          if-no-files-found: error
+          retention-days: 90
+
+  verify:
+    name: verify arch, checksum, user-data
+    needs: [integrity]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+      - name: Arch naming and checksum gates
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in dist/*.tar.gz dist/*.zip; do
+            case "$f" in
+              *linux*|*macos*|*windows*) echo "arch tag ok: $f" ;;
+              *) echo "FAIL: artifact $f carries no arch tag" >&2; exit 1 ;;
+            esac
+          done
+          sha256sum -c dist/SHASUMS256.txt
+      - name: Disposable user-data preservation smoke test
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          echo "must-survive" > "$tmp/userdata.txt"
+          mkdir -p "$tmp/bin"
+          tar -xzf dist/oc2-linux-x64.tar.gz -C "$tmp/pkg"
+          cp "$tmp/pkg/x86_64-unknown-linux-gnu/oc2" "$tmp/bin/oc2"
+          chmod 755 "$tmp/bin/oc2"
+          "$tmp/bin/oc2" --version
+          test "$(cat "$tmp/userdata.txt")" = "must-survive"
+          rm -rf "$tmp"
+
+  publish:
+    name: publish release
+    needs: [build, integrity, sign-macos, sign-windows, verify]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: integrity-manifests
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: signed-macos
+          path: dist
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: signed-windows
+          path: dist
+      - name: Publish draft then release only when every gate passed
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF#refs/tags/}"
+          sha256sum dist/* > "dist/SHASUMS256.${tag}.txt"
+          sha256sum -c "dist/SHASUMS256.${tag}.txt"
+          previous="$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo none)"
+          echo "previous release artifact source: $previous (left untouched unless this run publishes)"
+          gh release create "$tag" --draft --title "$tag" --notes "Rollback: re-release $previous to roll back; user data and schema migrations are additive, failed upgrades keep the previous installed binary."
+          gh release upload "$tag" dist/* --clobber
+          gh release edit "$tag" --draft=false
