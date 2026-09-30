@@ -87,7 +87,7 @@ impl std::fmt::Debug for MethodInput<'_> {
 
 impl Clone for MethodInput<'_> {
     fn clone(&self) -> Self {
-        Self { bytes: self.bytes }
+        *self
     }
 }
 
