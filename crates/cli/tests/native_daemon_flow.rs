@@ -163,7 +163,27 @@ fn spawn_openai_fixture() -> (String, thread::JoinHandle<()>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider fixture");
     let address = listener.local_addr().expect("fixture address");
     let task = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept provider request");
+        // Bounded owned cleanup: an unused fixture must not block the test's
+        // join() forever when no request is ever submitted to it.
+        listener
+            .set_nonblocking(true)
+            .expect("fixture listener nonblocking");
+        let accept_deadline = Instant::now() + Duration::from_secs(5);
+        let (mut stream, _) = loop {
+            match listener.accept() {
+                Ok(accepted) => break accepted,
+                Err(err) if err.kind() == std::io::ErrorKind::WouldBlock => {
+                    if Instant::now() >= accept_deadline {
+                        return;
+                    }
+                    thread::sleep(Duration::from_millis(20));
+                }
+                Err(err) => panic!("accept provider request: {err}"),
+            }
+        };
+        stream
+            .set_nonblocking(false)
+            .expect("fixture stream blocking");
         stream
             .set_read_timeout(Some(Duration::from_secs(10)))
             .expect("fixture read timeout");
@@ -186,8 +206,9 @@ fn spawn_openai_fixture() -> (String, thread::JoinHandle<()>) {
                                 .map(str::parse::<usize>)
                         })
                         .transpose()
-                        .expect("valid content length");
-                    expected_len = Some(header_end + 4 + content_length?);
+                        .expect("valid content length")
+                        .expect("provider request content length");
+                    expected_len = Some(header_end + 4 + content_length);
                 }
             }
             if expected_len.is_some_and(|len| request.len() >= len) {
@@ -223,7 +244,7 @@ fn spawn_openai_fixture() -> (String, thread::JoinHandle<()>) {
 fn native_daemon_spawns_when_none_running() {
     let home = TestHome::new();
     let daemon_addr = free_loopback_addr();
-    let (provider_base, provider_task) = spawn_openai_fixture();
+    let (_provider_base, provider_task) = spawn_openai_fixture();
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
     command
@@ -236,7 +257,7 @@ fn native_daemon_spawns_when_none_running() {
         .stderr(Stdio::piped());
 
     let output = command.output().expect("spawn --native --once");
-    let stdout = String::from_utf8_lossy(&output.stdout);
+    let _stdout = String::from_utf8_lossy(&output.stdout);
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     // The --native --once must exit cleanly (exit 0) after spawning the daemon
@@ -267,7 +288,7 @@ fn native_daemon_spawns_when_none_running() {
 fn native_no_tty_still_takes_native_path() {
     let home = TestHome::new();
     let daemon_addr = free_loopback_addr();
-    let (provider_base, provider_task) = spawn_openai_fixture();
+    let (_provider_base, provider_task) = spawn_openai_fixture();
 
     let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
     command
@@ -350,7 +371,7 @@ fn tui_attaches_to_running_serve_daemon() {
 fn status_frame_carries_live_daemon_values() {
     let home = TestHome::new();
     let daemon_addr = free_loopback_addr();
-    let (provider_base, provider_task) = spawn_openai_fixture();
+    let (_provider_base, provider_task) = spawn_openai_fixture();
 
     // Start daemon with descriptor containing auth token
     let mut daemon_cmd = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
