@@ -303,6 +303,35 @@ impl Renderer {
         }
     }
 
+    /// Read terminal bytes from the same descriptor used by `input_ready`.
+    /// This bypasses buffered stdin and performs one bounded kernel read.
+    #[cfg(all(feature = "native", unix))]
+    pub fn read_input(&self, buffer: &mut [u8]) -> Result<usize, BridgeError> {
+        if buffer.is_empty() {
+            return Ok(0);
+        }
+        let handle = self.live()?;
+        let slot = TERMINAL_INPUT
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let input = slot
+            .as_ref()
+            .filter(|input| input.handle == handle && input.active)
+            .ok_or(BridgeError::TerminalFailed)?;
+        let fd = input
+            .fd
+            .try_clone()
+            .map_err(|_| BridgeError::TerminalFailed)?;
+        drop(slot);
+        loop {
+            match rustix::io::read(&fd, buffer) {
+                Ok(read) => return Ok(read),
+                Err(error) if error == rustix::io::Errno::INTR => continue,
+                Err(_) => return Err(BridgeError::TerminalFailed),
+            }
+        }
+    }
+
     fn create_inner(cols: u32, rows: u32, dest: u8) -> Result<Self, BridgeError> {
         if cols == 0 || rows == 0 {
             return Err(BridgeError::ZeroSize);

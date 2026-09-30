@@ -540,7 +540,6 @@ fn native_loop(
             append_transcript(&mut transcript, line.clone());
         }
     }
-    let mut input = std::io::stdin();
     let mut byte = [0u8; 1];
     loop {
         let mut lines = vec![
@@ -656,7 +655,7 @@ fn native_loop(
         if !ready {
             continue;
         }
-        if input.read(&mut byte)? == 0 {
+        if renderer.read_input(&mut byte)? == 0 {
             break;
         }
         let byte = byte[0];
