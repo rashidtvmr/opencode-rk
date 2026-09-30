@@ -1,11 +1,13 @@
 //! Narrow, schema-filtered access to OpenCode's persisted API credentials.
 use serde_json::Value;
+use std::sync::OnceLock;
 use std::{
     env,
     fs::{self, OpenOptions},
     io::{Read, Write},
     path::PathBuf,
 };
+use tokio::sync::Semaphore;
 const MAX_AUTH_BYTES: usize = 1024 * 1024;
 const MAX_AUTH_ENTRIES: usize = 256;
 const MAX_API_KEY_BYTES: usize = 16 * 1024;
@@ -51,15 +53,24 @@ pub async fn save_api_key(provider: String, key: String) -> Result<(), String> {
         return Err("invalid provider credential".to_owned());
     }
     let path = auth_path().ok_or_else(|| "unable to resolve auth path".to_owned())?;
+    static WRITE_GATE: OnceLock<Semaphore> = OnceLock::new();
+    let permit = WRITE_GATE
+        .get_or_init(|| Semaphore::new(1))
+        .try_acquire_owned()
+        .map_err(|_| "provider auth write busy".to_owned())?;
     tokio::task::spawn_blocking(move || {
-        let mut root = fs::read(&path)
-            .ok()
-            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
-            .filter(|v| v.as_object().map_or(false, |o| o.len() <= MAX_AUTH_ENTRIES))
-            .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+        let _permit = permit;
+        let mut root = match read_auth_document(&path) {
+            Ok(Some(value)) => value,
+            Ok(None) => Value::Object(serde_json::Map::new()),
+            Err(error) => return Err(error),
+        };
         let object = root
             .as_object_mut()
             .ok_or_else(|| "auth root is not an object".to_owned())?;
+        if object.len() >= MAX_AUTH_ENTRIES && !object.contains_key(&provider) {
+            return Err("auth entry limit exceeded".to_owned());
+        }
         object.insert(provider, serde_json::json!({"type":"api","key":key}));
         let bytes = serde_json::to_vec_pretty(&root).map_err(|e| e.to_string())?;
         if bytes.len() > MAX_AUTH_BYTES {
@@ -68,10 +79,9 @@ pub async fn save_api_key(provider: String, key: String) -> Result<(), String> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| e.to_string())?;
         }
-        let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        let tmp = path.with_extension(format!("json.{}.tmp", unique_suffix()));
         let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .write(true)
             .open(&tmp)
             .map_err(|e| e.to_string())?;
@@ -83,10 +93,25 @@ pub async fn save_api_key(provider: String, key: String) -> Result<(), String> {
         }
         file.write_all(&bytes).map_err(|e| e.to_string())?;
         file.sync_all().map_err(|e| e.to_string())?;
-        fs::rename(&tmp, &path).map_err(|e| e.to_string())
+        let result = fs::rename(&tmp, &path).map_err(|e| e.to_string());
+        if result.is_err() {
+            let _ = fs::remove_file(&tmp);
+        }
+        result
     })
     .await
     .map_err(|e| e.to_string())?
+}
+fn unique_suffix() -> String {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    format!(
+        "{}-{}",
+        std::process::id(),
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos()
+    )
 }
 fn auth_path() -> Option<PathBuf> {
     env::var_os("XDG_DATA_HOME")
@@ -117,6 +142,22 @@ fn read_bounded_file(path: &PathBuf) -> Option<Vec<u8>> {
         .read_to_end(&mut bytes)
         .ok()?;
     Some(bytes)
+}
+
+fn read_auth_document(path: &PathBuf) -> Result<Option<Value>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = read_bounded_file(path).ok_or_else(|| "unable to read auth file".to_owned())?;
+    let value: Value =
+        serde_json::from_slice(&bytes).map_err(|_| "invalid auth file".to_owned())?;
+    let object = value
+        .as_object()
+        .ok_or_else(|| "auth root is not an object".to_owned())?;
+    if object.len() > MAX_AUTH_ENTRIES {
+        return Err("auth entry limit exceeded".to_owned());
+    }
+    Ok(Some(value))
 }
 fn parse(bytes: &[u8], provider: &str) -> Option<String> {
     if bytes.len() > MAX_AUTH_BYTES {

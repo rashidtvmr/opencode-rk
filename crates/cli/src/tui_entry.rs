@@ -119,6 +119,7 @@ struct LiveSnapshot {
     updated_at: String,
     message_count: usize,
     last_text: Option<String>,
+    history: Vec<String>,
 }
 
 /// Minimal bounded HTTP/1.1 client for the daemon API (std-only, http scheme).
@@ -131,7 +132,7 @@ fn http_request(
     body: Option<&str>,
     auth: Option<&str>,
 ) -> Result<String, String> {
-    if path.starts_with("/api/") {
+    if path.starts_with("/api/") || path.starts_with("/auth/") {
         match auth {
             Some(token) if crate::daemon_client::is_wellformed_token(token) => {}
             _ => {
@@ -246,6 +247,13 @@ fn fetch_snapshot(
         .as_array()
         .cloned()
         .unwrap_or_default();
+    let mut history = Vec::new();
+    for message in messages.iter().rev().take(40).rev() {
+        let role = message["role"].as_str().unwrap_or("message");
+        if let Some(text) = message_text_bounded(message) {
+            history.push(format!("{role}: {text}"));
+        }
+    }
     let last_text = messages.last().and_then(|m| match &m["body"] {
         serde_json::Value::Object(map) => match map.get("storage").and_then(|s| s.as_str()) {
             Some("inline") => map.get("text").and_then(|t| t.as_str()).map(preview),
@@ -263,7 +271,32 @@ fn fetch_snapshot(
         updated_at: target["updated_at"].as_str().unwrap_or_default().to_owned(),
         message_count: messages.len(),
         last_text: last_text,
+        history,
     })
+}
+
+fn message_text_bounded(message: &serde_json::Value) -> Option<String> {
+    let text = message["body"]["text"].as_str()?;
+    Some(text.chars().take(MAX_NATIVE_LINE_CHARS).collect())
+}
+
+#[cfg(feature = "native")]
+fn advertised_model(
+    origin: &str,
+    auth: Option<&str>,
+    provider: &str,
+    model: &str,
+) -> Result<bool, String> {
+    let body = http_request(origin, "GET", "/api/models?limit=500", None, auth)?;
+    let value: serde_json::Value = serde_json::from_str(&body).map_err(|e| e.to_string())?;
+    Ok(value["models"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .any(|entry| {
+            entry["provider_id"].as_str() == Some(provider)
+                && entry["model_id"].as_str() == Some(model)
+        }))
 }
 
 fn preview(text: &str) -> String {
@@ -500,6 +533,7 @@ fn native_loop(
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
     if let Some(snapshot) = live {
+        transcript.extend(snapshot.history.iter().cloned());
         if let Some(text) = &snapshot.last_text {
             transcript.push(format!("last: {text}"));
         }
@@ -578,14 +612,24 @@ fn native_loop(
                         http_request(
                             &response.origin,
                             "PUT",
-                            &format!("/api/auth/{provider}"),
+                            &format!("/auth/{provider}"),
                             Some(&payload),
                             auth,
                         )?;
                         key_saved = true;
                         draft.clear();
                     } else {
-                        model = text;
+                        if let Some(snapshot) = live {
+                            if !advertised_model(&snapshot.origin, auth, &provider, &text)? {
+                                append_transcript(
+                                    &mut transcript,
+                                    "error: model is not advertised".to_owned(),
+                                );
+                                draft.clear();
+                                continue;
+                            }
+                        }
+                        model = format!("{provider}/{text}");
                         setup = false;
                     }
                     draft.clear();
