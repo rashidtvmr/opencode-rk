@@ -21,7 +21,9 @@
 
 use super::app_policy::{AppDecision, ExpectedScope, Grant, GrantLedger, OperationDigest};
 use super::{Decision, FileAction, OperationIntent, PermissionBroker};
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 
 /// Bounded tool-authorizer audit (mirrors `MAX_AUDIT_ENTRIES` discipline).
 pub const MAX_TOOL_AUDIT: usize = 256;
