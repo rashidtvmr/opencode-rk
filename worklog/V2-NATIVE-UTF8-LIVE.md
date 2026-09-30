@@ -24,11 +24,20 @@ discarded without unsafe or lossy conversion.
 ## Upstream evidence
 
 The pinned checkout at `95daf90670b7c039c436c85537da5fbfe2205b41` was inspected.
-`packages/opencode/src/cli/cmd/run/footer.view.tsx` wires
-`composer.onContentChange` into `RunPromptBody`; the composer implementation in
-`footer.prompt.tsx` synchronizes the complete `area.plainText` draft in
-`onContentChange` and submits that text. This candidate preserves that observable
-complete-text behavior in the native bridge.
+The native V2 source at
+`packages/tui/src/component/prompt/index.tsx` implements the corresponding
+complete-text behavior: `onContentChange` at lines 1377-1382 reads
+`input.plainText`, stores it, forwards it to autocomplete, synchronizes
+extmarks, and updates the cursor version. `submitInner` at lines 947-955 reads
+and synchronizes `input.plainText` before downstream reads, explicitly covering
+the final composed character. The downstream session submission text part at
+lines 1104-1106 passes `inputText` as the text payload. This is classified as
+implemented native V2 behavior and the Rust bridge preserves its complete-text
+observable semantics.
+
+The shared/legacy `packages/opencode/src/cli/cmd/run/footer.view.tsx` and
+`footer.prompt.tsx` path was also inspected as corroborating evidence, but is
+not the basis for the native V2 classification.
 
 ## Verification boundary
 
