@@ -23,3 +23,17 @@ recorded as a harness cleanup failure, not converted to GREEN. The captured
 screen and sanitized fixture evidence are retained under the approved temp
 artifact directory. No tests, fixtures, helper assertions, lockfiles,
 credentials, or databases were modified.
+## Controller preverification compiler maintenance
+
+The first actual release build of `3280a24` failed with E0382: `rustix::io::read`
+takes the mutable slice by value, so retrying after `EINTR` requires a fresh
+reborrow. The controller adds `&mut *buffer` to retain the caller's slice across
+retry iterations. This compiler repair changes no frozen tests or input/stream
+contract. Release and installed product gates must rerun on the corrected SHA.
+
+Independent source review also found that the partial-row replacement checked
+the settled `assistant:` prefix while creating `assistant (streaming):` rows.
+The controller now replaces only the active streaming row and removes it when
+the real terminal assistant/error event arrives, including after intervening
+tool rows. The unused settled HTTP submission function is removed. Frozen
+semantic fixtures remain unchanged; runtime preverification is still pending.

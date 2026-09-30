@@ -324,7 +324,7 @@ impl Renderer {
             .map_err(|_| BridgeError::TerminalFailed)?;
         drop(slot);
         loop {
-            match rustix::io::read(&fd, buffer) {
+            match rustix::io::read(&fd, &mut *buffer) {
                 Ok(read) => return Ok(read),
                 Err(error) if error == rustix::io::Errno::INTR => continue,
                 Err(_) => return Err(BridgeError::TerminalFailed),

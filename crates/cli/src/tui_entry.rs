@@ -578,6 +578,7 @@ fn native_loop(
                     }
                     native_turn::Event::Assistant(text) => {
                         partial.clear();
+                        remove_partial(&mut transcript);
                         settled = true;
                         append_transcript(
                             &mut transcript,
@@ -586,6 +587,7 @@ fn native_loop(
                     }
                     native_turn::Event::Error(error) => {
                         partial.clear();
+                        remove_partial(&mut transcript);
                         settled = true;
                         append_transcript(
                             &mut transcript,
@@ -830,12 +832,7 @@ fn append_transcript(transcript: &mut Vec<String>, mut line: String) {
 
 #[cfg(feature = "native")]
 fn replace_partial(transcript: &mut Vec<String>, text: &str) {
-    if transcript
-        .last()
-        .is_some_and(|line| line.starts_with("assistant: "))
-    {
-        let _ = transcript.pop();
-    }
+    remove_partial(transcript);
     append_transcript(
         transcript,
         format!(
@@ -846,29 +843,8 @@ fn replace_partial(transcript: &mut Vec<String>, text: &str) {
 }
 
 #[cfg(feature = "native")]
-fn execute_turn(
-    snapshot: &LiveSnapshot,
-    text: &str,
-    auth: Option<&str>,
-    model: &str,
-) -> Result<String, String> {
-    let body =
-        serde_json::json!({"text": text, "model": model, "reasoning_effort": "high"}).to_string();
-    let response = http_request(
-        &snapshot.origin,
-        "POST",
-        &format!("/api/sessions/{}/turns", snapshot.session_id),
-        Some(&body),
-        auth,
-    )?;
-    let value: serde_json::Value = serde_json::from_str(&response).map_err(|e| e.to_string())?;
-    value
-        .get("assistant_message")
-        .and_then(|m| m.get("body"))
-        .and_then(|b| b.get("text"))
-        .and_then(|v| v.as_str())
-        .map(str::to_owned)
-        .ok_or_else(|| "turn response missing assistant text".to_string())
+fn remove_partial(transcript: &mut Vec<String>) {
+    transcript.retain(|line| !line.starts_with("assistant (streaming): "));
 }
 
 /// Follow mode: poll the bound session, re-render only on change, stop after
