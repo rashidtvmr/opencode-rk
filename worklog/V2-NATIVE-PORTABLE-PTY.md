@@ -3,8 +3,8 @@
 Mechanical test-harness change only; no product or test assertion semantics
 changed.  The fixture now stages the platform's native library suffix, accepts
 `OC2_NATIVE_LIBRARY` with the macOS `MAC_OPENTUI_FIXTURE` fallback preserved,
-and uses `termios.TIOCSCTTY` when available (retaining the existing Darwin
-request fallback). Unsupported platforms fail explicitly rather than skip.
+and preserves the existing PTY/session setup without adding a controlling-TTY
+ioctl. Unsupported platforms fail explicitly rather than skip.
 
 Base: `6c52b419d4e4029f1baf15e4b25f289872cd0bb8`.
 
@@ -13,5 +13,9 @@ against base, and `git diff --check`. No PTY/native runtime, Cargo, build, or
 Docker validation was performed in this work package; the parent runs both
 installed platform profiles.
 
-The semantic test method's assertion AST remained unchanged: 8 assertion nodes,
-SHA-256 `f471ce0b3e3a9a6f411010bde3cbd9b5be2e1692b9a5492f99d0f97ea6508b13`.
+The initial candidate's pre-spawn `TIOCSCTTY` ioctl was rejected during parent
+review: it ran before `Popen(start_new_session=True)`, could return `EPERM`, and
+could alter terminal authority when run as a session leader.  That block was
+removed in this corrective candidate.  The semantic test method now exactly
+matches the base method; its AST dump is compared in validation.  The parent
+review finding is a fixture defect, not a product failure or acceptance result.
