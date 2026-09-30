@@ -151,7 +151,7 @@ impl ContentStore {
             )",
             [],
         )?;
-        Ok(deleted as usize)
+        Ok(deleted)
     }
 }
 

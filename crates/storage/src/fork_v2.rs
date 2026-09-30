@@ -18,6 +18,18 @@ use crate::StorageError;
 pub const MAX_FORK_COPY_MESSAGES: usize = 500;
 pub const MAX_FORK_DEPTH: usize = 8;
 
+type ForkMessageRow = (
+    i64,
+    i64,
+    i64,
+    i64,
+    Option<String>,
+    Option<String>,
+    i64,
+    Option<i64>,
+);
+type ForkPartRow = (i64, i64, i64, Option<String>, Option<String>, Option<String>);
+
 pub struct ForkV2;
 
 impl ForkV2 {
@@ -125,16 +137,7 @@ impl ForkV2 {
         let new_pk = transaction.last_insert_rowid();
 
         // fetch source messages: pk, seq, role, status, provider, model, times
-        let rows: Vec<(
-            i64,
-            i64,
-            i64,
-            i64,
-            Option<String>,
-            Option<String>,
-            i64,
-            Option<i64>,
-        )> = {
+        let rows: Vec<ForkMessageRow> = {
             let mut stmt = transaction.prepare(
                 "SELECT pk, seq, role, status, provider_id, model_id, created_at_us, completed_at_us
                  FROM messages WHERE session_pk=?1 AND seq<=?2 ORDER BY seq ASC",
@@ -180,14 +183,7 @@ impl ForkV2 {
             )?;
             let new_message_pk = transaction.last_insert_rowid();
 
-            let parts: Vec<(
-                i64,
-                i64,
-                i64,
-                Option<String>,
-                Option<String>,
-                Option<String>,
-            )> = {
+            let parts: Vec<ForkPartRow> = {
                 let mut pstmt = transaction.prepare(
                     "SELECT ordinal, kind, payload_pk, mime, name, metadata_json
                      FROM message_parts WHERE message_pk=?1 ORDER BY ordinal ASC",
@@ -265,7 +261,7 @@ impl ForkV2 {
              WHERE m.session_pk=?1
              ORDER BY m.seq ASC, mp.ordinal ASC",
         )?;
-        let rows = stmt.query_map(params![new_pk], |row| Ok(row.get::<_, Option<Vec<u8>>>(0)?))?;
+        let rows = stmt.query_map(params![new_pk], |row| row.get::<_, Option<Vec<u8>>>(0))?;
         for row in rows {
             if let Some(data) = row? {
                 hasher.update(&data);

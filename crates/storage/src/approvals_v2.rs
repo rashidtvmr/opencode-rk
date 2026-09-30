@@ -23,6 +23,7 @@ const MAX_SWEEP_ROWS: usize = 500;
 pub struct ApprovalsV2;
 
 impl ApprovalsV2 {
+    #[expect(clippy::too_many_arguments, reason = "Existing explicit approval operation keeps admission and its audit fields together.")]
     pub fn request(
         connection: &Connection,
         session_pk: i64,
@@ -144,7 +145,7 @@ impl ApprovalsV2 {
              )",
             params![now_us, limit],
         )?;
-        Ok(changed as usize)
+        Ok(changed)
     }
 
     pub fn add_resource(
