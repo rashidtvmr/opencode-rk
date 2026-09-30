@@ -8,6 +8,7 @@ import json
 import os
 import pathlib
 import re
+import shutil
 import signal
 import socket
 import subprocess
@@ -79,6 +80,10 @@ class ProviderState:
         inputs = value.get("input")
         if not isinstance(inputs, list):
             raise ValueError("provider input is not an array")
+        if any(not isinstance(item, dict) for item in inputs):
+            raise ValueError("provider input contains a non-object")
+        if value.get("model") != "gpt-5.6":
+            raise ValueError("the selected fixture model did not reach the provider")
         users = [item.get("content") for item in inputs if item.get("role") == "user"]
         expected_users = {
             1: [FIRST_PROMPT],
@@ -97,7 +102,15 @@ class ProviderState:
             return sse_function_call(arguments)
         if not (pathlib.Path(self.project, "g6-browser-marker.txt").is_file() and pathlib.Path(self.project, "g6-browser-marker.txt").read_text() == MARKER):
             raise ValueError("write success was reported without the exact marker bytes")
-        if len(calls) != 1 or len(outputs) != 1 or len(inputs) != len([x for x in inputs if x.get("role") == "user"]) + 2:
+        assistants = [item.get("content") for item in inputs if item.get("role") == "assistant"]
+        expected_assistants = {
+            2: [],
+            3: ["G6 first turn settled"],
+            4: ["G6 first turn settled", "G6 second turn settled"],
+        }[number]
+        if assistants != expected_assistants:
+            raise ValueError("settled assistant history changed before continuation or resume")
+        if len(calls) != 1 or len(outputs) != 1 or len(inputs) != len(users) + len(assistants) + 2:
             raise ValueError("request does not contain exactly one typed call and output")
         call, output = calls[0], outputs[0]
         expected_args = json.dumps({"path": "g6-browser-marker.txt", "content": MARKER, "append": False}, separators=(",", ":"))
@@ -105,6 +118,8 @@ class ProviderState:
             raise ValueError("typed call identity or arguments changed")
         if output != {"type": "function_call_output", "call_id": CALL_ID, "output": "write success"}:
             raise ValueError("typed output identity or result changed")
+        if inputs.index(call) >= inputs.index(output):
+            raise ValueError("typed output precedes its function call")
         if number == 4 and self.restart_generation < 1:
             raise ValueError("resumed request arrived before a fresh daemon restart")
         return sse_text({2: "G6 first turn settled", 3: "G6 second turn settled", 4: "G6 resumed turn settled"}[number])
@@ -125,12 +140,22 @@ def completed():
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        length = int(self.headers.get("Content-Length", "-1"))
+        try:
+            length = int(self.headers.get("Content-Length", "-1"))
+        except ValueError:
+            self.send_error(400)
+            return
         if length < 0 or length > MAX_REQUEST_BYTES:
             self.send_error(413)
             return
         try:
-            response = self.server.state.response(self.headers, self.rfile.read(length))
+            if self.path != "/v1/responses":
+                raise ValueError("unexpected provider route")
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise ValueError("truncated provider request body")
+            response = self.server.state.response(self.headers, body)
+            self.server.persist_evidence()
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Content-Length", str(len(response)))
@@ -139,6 +164,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(response)
         except Exception as error:
             self.server.state.failed = str(error)
+            self.server.persist_evidence()
             self.send_error(500, str(error))
 
     def log_message(self, *_):
@@ -147,6 +173,19 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
 class Provider(http.server.HTTPServer):
     allow_reuse_address = True
+
+    def get_request(self):
+        connection, address = super().get_request()
+        connection.settimeout(5)
+        return connection, address
+
+    def persist_evidence(self):
+        if getattr(self, "evidence_path", None) is None:
+            return
+        evidence = json.dumps(self.state.requests, indent=2).encode()
+        if len(evidence) > MAX_EVIDENCE_BYTES:
+            raise ValueError("provider evidence exceeded 512 KiB")
+        atomic_json(self.evidence_path, self.state.requests)
 
 
 def stop(child):
@@ -159,12 +198,17 @@ def stop(child):
             child.wait(timeout=2)
 
 
-def descriptor(path, deadline, different_pid=None):
+def descriptor(path, deadline, child):
     while time.monotonic() < deadline:
+        if child.poll() is not None:
+            raise RuntimeError("owned daemon exited before publishing a ready descriptor")
         try:
             value = json.loads(path.read_text())
-            if (isinstance(value.get("pid"), int) and (different_pid is None or value["pid"] != different_pid)
-                    and TOKEN_RE.fullmatch(value.get("auth_token", ""))):
+            if (value.get("pid") == child.pid
+                    and isinstance(value.get("http_origin"), str)
+                    and re.fullmatch(r"http://127\.0\.0\.1:[0-9]+", value["http_origin"])
+                    and TOKEN_RE.fullmatch(value.get("auth_token", ""))
+                    and healthy(value)):
                 return value
         except (OSError, ValueError):
             pass
@@ -174,7 +218,7 @@ def descriptor(path, deadline, different_pid=None):
 
 def healthy(value):
     host = value["http_origin"].removeprefix("http://")
-    request = urllib.request.Request("http://" + host + "/health", headers={"Authorization": "Bearer " + value["auth_token"]})
+    request = urllib.request.Request("http://" + host + "/api/models?limit=1", headers={"Authorization": "Bearer " + value["auth_token"]})
     try:
         with urllib.request.urlopen(request, timeout=1) as response:
             return response.status == 200
@@ -196,16 +240,31 @@ def self_check():
         thread = __import__("threading").Thread(target=server.serve_forever)
         thread.start()
         connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
-        body = json.dumps({"input": [{"role": "user", "content": FIRST_PROMPT}]}).encode()
+        body = json.dumps({"model": "gpt-5.6", "input": [{"role": "user", "content": FIRST_PROMPT}]}).encode()
         connection.request("POST", "/v1/responses", body, {"Authorization": "Bearer fixture-key", "Content-Length": str(len(body))})
         assert connection.getresponse().status == 200
         connection.close()
         assert len(state.requests) == 1
-        print("fixture self-check: loopback HTTP framing and credential assertion passed")
+        arguments = json.dumps({"path": "g6-browser-marker.txt", "content": MARKER, "append": False}, separators=(",", ":"))
+        call = {"type": "function_call", "call_id": CALL_ID, "name": "write", "arguments": arguments}
+        output = {"type": "function_call_output", "call_id": CALL_ID, "output": "write success"}
+        (project / "g6-browser-marker.txt").write_text(MARKER)
+        inputs = [{"role": "user", "content": FIRST_PROMPT}, call, output]
+        headers = {"Authorization": "Bearer fixture-key"}
+        assert b"G6 first turn settled" in state.response(headers, json.dumps({"model": "gpt-5.6", "input": inputs}).encode())
+        inputs += [{"role": "assistant", "content": "G6 first turn settled"}, {"role": "user", "content": SECOND_PROMPT}]
+        assert b"G6 second turn settled" in state.response(headers, json.dumps({"model": "gpt-5.6", "input": inputs}).encode())
+        inputs += [{"role": "assistant", "content": "G6 second turn settled"}, {"role": "user", "content": RESUMED_PROMPT}]
+        state.set_restart_generation(1)
+        assert b"G6 resumed turn settled" in state.response(headers, json.dumps({"model": "gpt-5.6", "input": inputs}).encode())
+        print("fixture self-check: framing, credential, typed pair and settled history passed")
     finally:
         server.shutdown()
         server.server_close()
         thread.join(timeout=2)
+        if thread.is_alive():
+            raise RuntimeError("fixture provider thread did not stop")
+        shutil.rmtree(root)
 
 
 def main():
@@ -222,38 +281,53 @@ def main():
         parser.error("--binary is required unless --self-check is used")
     binary = pathlib.Path(args.binary).resolve()
     artifacts = pathlib.Path(args.artifact_dir).resolve()
-    artifacts.mkdir(parents=True, exist_ok=True)
     manifest = pathlib.Path(args.build_json or artifacts / "build.json").resolve()
     source_sha, binary_sha = check_build(binary, manifest)
-    if not str(artifacts).startswith(str(APPROVED_ARTIFACT_ROOT)):
+    if APPROVED_ARTIFACT_ROOT not in artifacts.parents:
         raise ValueError("artifact directory must be under the approved OpenCode temporary root")
+    artifacts.mkdir(parents=True, exist_ok=True)
+    if (artifacts / "fixture-metadata.json").exists():
+        raise ValueError("artifact directory already contains a fixture; preserve it and use a fresh directory")
     root = pathlib.Path(tempfile.mkdtemp(prefix="g6-web-", dir=str(ROOT)))
     home, data, project = (root / name for name in ("home", "data", "project"))
     for path in (home, data, project): path.mkdir()
+    if len(os.fsencode(data / "runtime" / "opencode-rk.sock")) > 100:
+        raise ValueError("fixture data path is too long for the Unix socket")
     auth = data / "opencode" / "auth.json"; auth.parent.mkdir(); auth.write_text(json.dumps({"openai": {"type": "api", "key": "fixture-key"}}) + "\n"); os.chmod(auth, 0o600)
     state = ProviderState(project)
     server = Provider(("127.0.0.1", 0), Handler); server.state = state; server.timeout = 0.05
+    server.evidence_path = artifacts / "provider-requests.json"
+    server.persist_evidence()
+    models = root / "models.json"
+    atomic_json(models, {"openai": {"name": "OpenAI fixture", "models": {"gpt-5.6": {"name": "G6 fixture model", "tool_call": True, "reasoning": True, "limit": {"context": 200000}}}}})
     provider_url = "http://127.0.0.1:%d/v1" % server.server_address[1]
-    env = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"), "XDG_DATA_HOME": str(data), "OPENCODE_RK_HOME": str(data), "PATH": "/usr/bin:/bin", "LANG": "C", "OPENAI_BASE_URL": provider_url, "OPENCODE_RK_TURN_TOOLS": "write", "OPENCODE_RK_TURN_MAX_STEPS": "4"}
+    env = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"), "XDG_DATA_HOME": str(data), "OPENCODE_RK_HOME": str(data), "PATH": "/usr/bin:/bin", "LANG": "C", "TMPDIR": str(root), "OPENAI_BASE_URL": provider_url, "OPENCODE_RK_TURN_TOOLS": "write", "OPENCODE_RK_TURN_MAX_STEPS": "4"}
+    command = [str(binary), "serve", "--listen", "127.0.0.1:0", "--models-file", str(models)]
     child = None; control = artifacts / "control"; control.mkdir(exist_ok=True); metadata_path = artifacts / "fixture-metadata.json"; descriptor_path = data / "runtime" / "backend.json"
     try:
-        child = subprocess.Popen([str(binary), "serve", "--listen", "127.0.0.1:0"], cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        current = descriptor(descriptor_path, time.monotonic() + 15)
+        child = subprocess.Popen(command, cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        current = descriptor(descriptor_path, time.monotonic() + 15, child)
         meta = {"origin": current["http_origin"], "launch_fragment": current["http_origin"] + "#oc2-token=" + current["auth_token"], "pid": child.pid, "restart_generation": 0, "project": str(project), "marker": str(project / "g6-browser-marker.txt"), "source_sha": source_sha, "binary_sha256": binary_sha, "provider": provider_url, "control_dir": str(control), "request_evidence": str(artifacts / "provider-requests.json"), "auth_json": str(auth), "auth_json_mode": "0600"}
         atomic_json(metadata_path, meta)
-        while True:
+        deadline = time.monotonic() + 600
+        while time.monotonic() < deadline:
             server.handle_request()
             if (control / "restart.request").exists():
-                (control / "restart.request").unlink(); old_pid = child.pid; stop(child); child = subprocess.Popen([str(binary), "serve", "--listen", "127.0.0.1:0"], cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                fresh = descriptor(descriptor_path, time.monotonic() + 15, old_pid)
+                (control / "restart.request").unlink(); old_pid = child.pid; stop(child); child = subprocess.Popen(command, cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                fresh = descriptor(descriptor_path, time.monotonic() + 15, child)
                 if fresh["pid"] == old_pid or not healthy(fresh): raise RuntimeError("restart did not publish a fresh healthy descriptor")
                 state.set_restart_generation(1); meta.update(origin=fresh["http_origin"], launch_fragment=fresh["http_origin"] + "#oc2-token=" + fresh["auth_token"], pid=child.pid, restart_generation=1); atomic_json(metadata_path, meta)
             if state.failed: raise RuntimeError(state.failed)
-            if (control / "stop.request").exists() or time.monotonic() > meta.setdefault("deadline", time.monotonic() + 600): break
+            if child.poll() is not None:
+                raise RuntimeError("owned daemon exited during browser verification")
+            if (control / "stop.request").exists(): break
     finally:
-        evidence = json.dumps(state.requests, indent=2).encode()
-        if len(evidence) > MAX_EVIDENCE_BYTES: raise RuntimeError("provider evidence exceeded 512 KiB")
-        (artifacts / "provider-requests.json").write_bytes(evidence + b"\n"); stop(child); server.server_close()
+        try:
+            server.persist_evidence()
+            atomic_json(artifacts / "fixture-result.json", {"provider_failure": state.failed, "provider_requests": len(state.requests), "restart_generation": state.restart_generation, "source_sha": source_sha})
+        finally:
+            stop(child)
+            server.server_close()
 
 
 if __name__ == "__main__":
