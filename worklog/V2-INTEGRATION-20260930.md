@@ -837,3 +837,62 @@ open. This acceptance does not certify the complete G0–G8 release.
   independent candidate evidence is `v2-approval-expiry-independent-c886`.
   State **ACCEPTED for expiry/terminal retention on integrated `dddb8d4`**.
   This does not accept the complete APP012 interactive approval story.
+
+## Native stream/tool/restart accepted on paired installed releases
+
+- Package `NATIVE-STREAM-TOOL-RESTART`; independent candidate
+  `ed727a6577527fc560a6dfc736fbdb0479654f06`; integration base
+  `85dfa9df6927e73922b33020d88c32a2204e01cc`; exact integrated release
+  **`de7e05fefba5374246078674432dcba07b0b5ff2`**.
+- Six net paths, exact upstream/current-requirement evidence and complete scoped
+  verification are in `worklog/V2-NATIVE-STREAM-TOOL-LIVE.md`. All candidate
+  history, failed input/cleanup attempts, old contract revisions and historical
+  refs remain preserved.
+- Native now streams early text while processing raw input, presents the actual
+  broker-authorized write, persists partial-plus-final text across tool rounds,
+  completes a second turn and resumes typed history after both CLI and daemon
+  restart. Mac and Ubuntu each pass exactly four actual provider requests with
+  owned cleanup; onboarding still passes with two requests and the non-default
+  model. Both platforms pass all eight auth controls, raw PTY restoration and ten
+  packaging controls. Mac additionally passes four daemon flows, 73 bridge + ten
+  lifecycle checks and two server-stream tests. Ubuntu verifies relative RPATH,
+  normalized adjacent-library resolution and ten required native exports.
+- Same-SHA real Playwright passes write/continuation, second turn, authenticated
+  fresh-document reopen, daemon restart and resumed third turn, with four actual
+  requests, seven unique durable messages and one typed tool result. The owned
+  fixture exits 0. Web regressions pass 49 Vitest tests + 11 Node assertions.
+- Evidence roots under the approved artifact parent:
+  `v2-native-integrated-de7e05f-slroa5md`,
+  `v2-ubuntu-arm64-release-dqhrz_mn/ubuntu-native-de7e05f`,
+  `v2-browser-de7e05f`. Independent verifier
+  `ses_f0b98d797ffeWTf7GuNITBHwlW` confirmed **ACCEPTED on exact `de7e05f` for
+  the scoped native streaming/tool/restart and paired-release/Web journeys**.
+  This does not certify complete G0–G8 release acceptance.
+
+## Fresh workspace failures after scoped streaming acceptance
+
+Read-only, serial gates ran on `de7e05f`, with two Cargo jobs, one test thread,
+fresh disposable HOME/XDG directories, the short fixture TMPDIR and staged
+native library. Actual commands and outcomes:
+
+```text
+cargo fmt --all -- --check
+  exit 1 in 1.60s: workspace formatting differences
+cargo clippy --offline --locked --workspace --all-targets --all-features -- -D warnings
+  exit 101 in 10.31s: 30 storage-library diagnostics
+cargo test --offline --locked --workspace --all-targets --all-features -- --test-threads=1
+  exit 101 in 42.14s: MCP config test fixtures do not compile
+```
+
+Evidence is retained at `v2-workspace-gates-de7e05f-nspragpt` under the approved
+artifact parent. Exact log SHA-256 values:
+
+- Formatting: `213e620ea45671eeedbce79e8ee02c1491f4b81aa02360ef5458ad26b83ab9fd`.
+- Clippy: `9acdc4b943b640e39f78382f7ba4dbe6f79da1b07c784513042efec9eaa64899`.
+- Test build: `d281dbee32386015f672e98e19da423c4f4a0ffd6a1853d5cbb64a5101682758`.
+
+The workspace test failure is mechanical compiler RED, not feature RED or a
+running test result. An independent test owner is repairing invalid JSON array
+fixtures and missing imports without changing assertions. A separate source-only
+storage package repairs diagnostics while preserving public APIs, SQL,
+transactional admission, error checks, schema, byte bounds and protected tests.

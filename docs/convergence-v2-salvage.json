@@ -15647,7 +15647,7 @@
       "analysisFailure": false,
       "ancestryExact": false,
       "behind": 74,
-      "disposition": "SALVAGE_PRODUCT",
+      "disposition": "SUPERSEDED_BY",
       "inheritedCommitCount": 0,
       "mergeOnly": false,
       "novelChangedPathCount": 7,
@@ -15664,10 +15664,13 @@
       "objectPresent": true,
       "primaryKind": "head",
       "primaryRef": "proposal/APP012-EXPIRY-RETENTION-INTEGRATION",
-      "reason": "novel content vs base",
-      "recommendedAction": "content-review",
+      "reason": "approval expiry/retention product and tests selectively salvaged and superseded by exact integrated dddb8d4 acceptance; real expiry transition timestamps additionally repaired; old claims/proposal/test revisions preserved as evidence",
+      "recommendedAction": "heritage-only",
       "sha": "dc3331ee257dbb21197f5310b8455d32a38b34ed",
-      "supersededBy": null,
+      "supersededBy": {
+        "ref": "main-v2",
+        "sha": "dddb8d4ab1de0d4501353451651bec979058f84f"
+      },
       "uniqueMergeCount": 0
     },
     {
