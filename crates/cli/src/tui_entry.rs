@@ -491,6 +491,10 @@ fn native_loop(
     let _ = renderer.enable_kitty_keyboard(1);
     renderer.set_title("OpenCode RK")?;
     let mut draft = String::new();
+    let mut setup = false;
+    let mut provider = String::new();
+    let mut model = "openai/gpt-5.6".to_owned();
+    let mut key_saved = false;
     let mut transcript = Vec::new();
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
@@ -536,7 +540,17 @@ fn native_loop(
             })
             .collect::<Vec<_>>();
         lines.extend(visible.into_iter().rev().cloned());
-        lines.push(format!("> {draft}"));
+        lines.push(if setup {
+            if provider.is_empty() {
+                "Connect a provider".to_owned()
+            } else if !key_saved {
+                "API key".to_owned()
+            } else {
+                format!("Select model (current: {model})")
+            }
+        } else {
+            format!("> {draft}")
+        });
         native_paint(&mut renderer, &lines)?;
         if input.read(&mut byte)? == 0 {
             break;
@@ -551,10 +565,42 @@ fn native_loop(
                 if text == ":q" || text == ":quit" || text == "/exit" || text == "/quit" {
                     break;
                 }
+                if setup {
+                    if provider.is_empty() {
+                        if text == "/connect" {
+                            provider.clear();
+                        } else {
+                            provider = text;
+                        }
+                    } else if !key_saved {
+                        let payload = serde_json::json!({"type":"api", "key": text}).to_string();
+                        let response = live.ok_or("daemon unavailable")?;
+                        http_request(
+                            &response.origin,
+                            "PUT",
+                            &format!("/api/auth/{provider}"),
+                            Some(&payload),
+                            auth,
+                        )?;
+                        key_saved = true;
+                        draft.clear();
+                    } else {
+                        model = text;
+                        setup = false;
+                    }
+                    draft.clear();
+                    continue;
+                }
+                if text == "/connect" {
+                    setup = true;
+                    provider.clear();
+                    draft.clear();
+                    continue;
+                }
                 if !text.is_empty() {
                     append_transcript(&mut transcript, format!("you: {text}"));
                     if let Some(snapshot) = live {
-                        match execute_turn(snapshot, &text, auth) {
+                        match execute_turn(snapshot, &text, auth, &model) {
                             Ok(reply) => {
                                 append_transcript(&mut transcript, format!("assistant: {reply}"))
                             }
@@ -608,10 +654,14 @@ fn append_transcript(transcript: &mut Vec<String>, mut line: String) {
 }
 
 #[cfg(feature = "native")]
-fn execute_turn(snapshot: &LiveSnapshot, text: &str, auth: Option<&str>) -> Result<String, String> {
+fn execute_turn(
+    snapshot: &LiveSnapshot,
+    text: &str,
+    auth: Option<&str>,
+    model: &str,
+) -> Result<String, String> {
     let body =
-        serde_json::json!({"text": text, "model": "openai/gpt-5.6", "reasoning_effort": "high"})
-            .to_string();
+        serde_json::json!({"text": text, "model": model, "reasoning_effort": "high"}).to_string();
     let response = http_request(
         &snapshot.origin,
         "POST",

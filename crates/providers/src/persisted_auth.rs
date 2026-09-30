@@ -1,6 +1,11 @@
 //! Narrow, schema-filtered access to OpenCode's persisted API credentials.
 use serde_json::Value;
-use std::{env, fs::OpenOptions, io::Read, path::PathBuf};
+use std::{
+    env,
+    fs::{self, OpenOptions},
+    io::{Read, Write},
+    path::PathBuf,
+};
 const MAX_AUTH_BYTES: usize = 1024 * 1024;
 const MAX_AUTH_ENTRIES: usize = 256;
 const MAX_API_KEY_BYTES: usize = 16 * 1024;
@@ -37,6 +42,51 @@ pub async fn api_key(provider: &str, ambient_name: &str) -> Option<String> {
                 .ok()
                 .filter(|v| !v.trim().is_empty() && v.len() <= MAX_API_KEY_BYTES)
         })
+}
+
+/// Persist one API credential in the upstream auth.json shape, preserving all
+/// other valid entries. Disk work is never performed on the async executor.
+pub async fn save_api_key(provider: String, key: String) -> Result<(), String> {
+    if provider.is_empty() || key.trim().is_empty() || key.len() > MAX_API_KEY_BYTES {
+        return Err("invalid provider credential".to_owned());
+    }
+    let path = auth_path().ok_or_else(|| "unable to resolve auth path".to_owned())?;
+    tokio::task::spawn_blocking(move || {
+        let mut root = fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .filter(|v| v.as_object().map_or(false, |o| o.len() <= MAX_AUTH_ENTRIES))
+            .unwrap_or_else(|| Value::Object(serde_json::Map::new()));
+        let object = root
+            .as_object_mut()
+            .ok_or_else(|| "auth root is not an object".to_owned())?;
+        object.insert(provider, serde_json::json!({"type":"api","key":key}));
+        let bytes = serde_json::to_vec_pretty(&root).map_err(|e| e.to_string())?;
+        if bytes.len() > MAX_AUTH_BYTES {
+            return Err("auth file exceeds size limit".to_owned());
+        }
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        let tmp = path.with_extension(format!("json.{}.tmp", std::process::id()));
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .open(&tmp)
+            .map_err(|e| e.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            file.set_permissions(fs::Permissions::from_mode(0o600))
+                .map_err(|e| e.to_string())?;
+        }
+        file.write_all(&bytes).map_err(|e| e.to_string())?;
+        file.sync_all().map_err(|e| e.to_string())?;
+        fs::rename(&tmp, &path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 fn auth_path() -> Option<PathBuf> {
     env::var_os("XDG_DATA_HOME")
