@@ -86,6 +86,7 @@ def reap_cli_then_daemon(child, descriptor_value, master):
     """
     if child is None:
         return
+    timed_out = False
     if child.poll() is None:
         if master is not None:
             try:
@@ -97,6 +98,7 @@ def reap_cli_then_daemon(child, descriptor_value, master):
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait(timeout=3)
+            timed_out = True
     daemon_pid = descriptor_value.get("_validated_pid") if descriptor_value else None
     if not isinstance(daemon_pid, int) or daemon_pid <= 1:
         if timed_out:
@@ -115,6 +117,10 @@ def reap_cli_then_daemon(child, descriptor_value, master):
     except PermissionError as error:
         raise AssertionError("validated daemon ownership probe was denied") from error
     stop_owned_daemon(descriptor_value)
+    if timed_out:
+        raise AssertionError("native CLI did not exit after Ctrl-C")
+    if child.returncode != 0:
+        raise AssertionError(f"native CLI exited with status {child.returncode}")
 
 
 def sse(event, data):
@@ -338,8 +344,8 @@ def run(binary, library, manifest, artifacts):
         if daemon is not None:
             try:
                 reap_cli_then_daemon(daemon, descriptors[-1] if descriptors else None, master)
-            except (OSError, RuntimeError):
-                pass
+            except (OSError, RuntimeError, AssertionError) as error:
+                state.fail(f"owned cleanup failed: {redact(str(error))}")
         if slave is not None: os.close(slave)
         if master is not None: os.close(master)
         server.shutdown(); server.server_close(); provider_thread.join(timeout=10)
@@ -354,13 +360,18 @@ def run(binary, library, manifest, artifacts):
                 try:
                     os.kill(pid, 0)
                     owned_daemon_gone = False
-                except (ProcessLookupError, PermissionError):
+                except ProcessLookupError:
                     pass
+                except PermissionError:
+                    owned_daemon_gone = False
+                    state.fail("validated daemon ownership probe denied")
         evidence = {"phase": state.phase, "error": redact(state.error or ""), "source_sha": source, "binary_sha256": binary_sha, "native_library_sha256": library_sha, "test_sha256": sha256(pathlib.Path(__file__)), "fixture_root": str(root), "provider_requests": len(state.requests), "requests": [{"model": x.get("model"), "stream": x.get("stream", False), "input": x.get("input")} for x in state.requests], "screen": redact(screen.text()), "captured_output": redact(bytes(captures[:MAX_PTY]).decode("utf-8", "replace")), "owned_process_cleanup": bool(daemon is None or daemon.poll() is not None) and owned_daemon_gone, "owned_descriptors": descriptors}
         raw_evidence = json.dumps(evidence, indent=2) + "\n"
         if len(raw_evidence.encode()) > 512 * 1024: raise RuntimeError("evidence exceeded 512 KiB")
         evidence_name = "native-stream-tool-result.json" if state.phase == "success" and not state.error else "native-stream-tool-failure.json"
         (artifacts / evidence_name).write_text(raw_evidence)
+        if state.error or not evidence["owned_process_cleanup"]:
+            raise AssertionError(redact(state.error or "owned process cleanup was not proven"))
         if secret_echo:
             raise AssertionError("fixture API key appeared in terminal output")
 

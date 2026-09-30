@@ -41,3 +41,14 @@ git diff --check
 The known initial product RED remains the missing native early-delta path from
 the frozen `f7d8` contract; this patch only repairs owned-process cleanup.
 It is not a product GREEN, PREVERIFIED, ACCEPTED, or release claim.
+
+## Controller source correction
+
+The committed `86c4d232` tree did not contain the complete reported correction:
+`timed_out` was referenced without assignment, final cleanup still suppressed
+errors, and a denied ownership probe still counted as a stopped daemon. The
+controller completes those mechanical corrections, preserving the provider,
+history, framing, barrier and self-check ASTs. Forced CLI termination and
+unproven daemon cleanup always fail the gate after writing bounded evidence.
+The existing helper's ownership guard remains active. Actual installed runtime
+verification and an exact new contract hash are required before acceptance.
