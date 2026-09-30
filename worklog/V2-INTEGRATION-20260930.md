@@ -4,6 +4,7 @@
 
 `0759e01464a7a0dbed614163a14b6f60673e2412`, pushed to `origin/main-v2`.
 Native lifecycle package: `425d617a3576c791e7027b2cc332a75e7441fd4e`.
+Typed live writer/restart package: `31ea2b0d39e4cf23e8eae5f894763edf88678cb9`.
 Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-v2`.
 
 ## V2-SALVAGE-PRESERVATION
@@ -104,13 +105,72 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
 - State: **ACCEPTED for the native renderer lifecycle package on `425d617`**.
   Full release-built CLI/provider/session golden journey, G5 and G8 remain pending.
 
+## V2-TYPED-HISTORY — exact integrated live writer/restart acceptance
+
+- Gate/package: G3/G4 typed call/result admission, continuation, second turn,
+  and settled-history restart replay.
+- Product base: `fc2d201f450b6020b1dce12268a550053d65235d`.
+- Product candidate: `6291cafbfbb16824c577f4d530e4371c96be7455`.
+- Independent original-contract maintenance candidate:
+  `88923f185975482c24ad2ef8d589200954eaea74`.
+- Integration: product `588ab24`, contract maintenance `31ea2b0`; accepted
+  integrated revision `31ea2b0d39e4cf23e8eae5f894763edf88678cb9`.
+- Exact changed paths: `crates/providers/src/responses.rs`,
+  `crates/server/src/lib.rs`, `crates/sessions/src/lib.rs`,
+  `crates/storage/src/lib.rs`, `crates/storage/tests/typed_tool_history_http.rs`,
+  and `worklog/V2-TYPED-CONTRACT-MAINTENANCE.md`. The already-integrated
+  `crates/storage/tests/typed_history_http_restart.rs` retains its frozen bytes.
+- Authority: G3/G4 in `docs/CONVERGENCE.md`; pinned OpenCode `95daf906`,
+  `packages/core/src/session/runner/llm.ts:249-278` publishes the durable call
+  before settlement and result publication;
+  `packages/core/src/session/runner/to-llm-message.ts:70-112` lowers assistant
+  calls before tool results. Historical `61d473ab` supersedes the obsolete
+  non-201 late-fault assertion; security-905 requires non-disclosing output
+  `write success`. Independent evaluator records these corrections without
+  weakening identities, payload lengths, transactional absence, or side effects.
+- Frozen restart target SHA-256:
+  `1ca3559f49e7f85cb2f7d483372a7ed8104665d43577888a44fc55445d4ab928`.
+- Corrected original target SHA-256:
+  `8eb0b453cf5844d2d5956f1a56c3b481624c14507d27f2a54b9d2954aa79863f`.
+- Independent candidate verification: Xkiro GPT-6 Luna reviewed the actual
+  `fc2d201..6291caf` delta, independently checked source/binary hashes, and ran
+  the frozen restart gate: **2/2 passed**. Independent corrected original gate
+  produced baseline RED (`QueryReturnedNoRows`) then candidate GREEN **1/1**.
+- Integrated binary was built from clean exact `31ea2b0` with:
+
+  ```text
+  rtk /usr/bin/arch -arm64 env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo build --offline --locked -p opencode-rk-cli --bin oc2
+  ```
+
+  Installed into disposable fixture
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-typed-integrated-31ea2b0-oj1sr8d3/bin/oc2`;
+  binary SHA-256
+  `87715143372e8ae96163b4807f69fd07c7281c70b0d9192e497e51589ea0ae1e`.
+  Profile is dev, native feature off; this is not a release/platform certificate.
+- Commands rerun serially on exact integrated revision:
+
+  ```text
+  rtk env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 OC2_TEST_BINARY=/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-typed-integrated-31ea2b0-oj1sr8d3/bin/oc2 /usr/bin/arch -arm64 cargo test --offline --locked -p opencode-rk-storage --test typed_history_http_restart --test typed_tool_history_http --test typed_history_boundary_regression --test typed_history_component
+  rtk /usr/bin/arch -arm64 env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 cargo test --offline --locked -p opencode-rk-server --test agent_loop_turns
+  git diff 6291caf..31ea2b0 -- crates/providers/src/responses.rs crates/server/src/lib.rs crates/sessions/src/lib.rs crates/storage/src/lib.rs crates/storage/tests/typed_history_http_restart.rs
+  ```
+
+  Results: **15/15 storage gates**, including both installed-daemon targets;
+  **1/1 agent-loop integration gate**. Product/restart paths match candidate
+  byte-for-byte. Candidate focused regressions also passed: 19 storage tests,
+  11 Responses protocol tests, 73 provider + 42 session + 205 server library tests.
+- State: **ACCEPTED for this scoped typed writer/restart package on `31ea2b0`**.
+  Interrupted incomplete rounds still fail closed and are never automatically
+  re-executed. Explicit recovery/quarantine, large-history compaction, concurrent
+  client admission, and full native/browser/platform golden journeys remain open.
+
 ## Remaining observed product failures
 
 - G2 persisted/in-app credentials are not connected to the outbound provider
   request; current turn execution reads environment credentials.
-- G3/G4 typed tool persistence is not called by the live server, and second-turn
-  history rejects Tool messages. The independent durability fixture is being
-  frozen before the isolated source candidate is validated.
+- G3/G4 settled typed history now passes the scoped live writer/restart gate;
+  interruption recovery and second-client ownership still require golden-journey
+  validation.
 - Native renderer lifecycle is accepted as above; the complete native CLI golden
   journey still requires G1–G4 integration.
 - Docker server is ready (`29.8.0`). Ubuntu 24.04 arm64 image acquired at digest
