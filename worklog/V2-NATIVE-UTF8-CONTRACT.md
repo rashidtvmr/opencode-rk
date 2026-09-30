@@ -13,8 +13,10 @@
 Pinned upstream is `95daf90670b7c039c436c85537da5fbfe2205b41`, inspected in
 `/Users/mymac/Projects/opencode-upstream-reference`. In
 `packages/tui/src/component/prompt/index.tsx`, textarea `onContentChange`
-reads `input.plainText` (1369-1383), and `onSubmit` submits after the normal
-defer (1391-1395). Ordinary Unicode remains Unicode input.
+reads `input.plainText` (1369-1383), and `onSubmit` calls `submit()` after the
+normal defer (1391-1395); `submitInner` forwards the current prompt through
+the session submission path at lines 947-1000. Ordinary Unicode remains
+Unicode input.
 
 Current native evidence is `crates/cli/src/tui_entry.rs:660-810`: input is read
 one byte at a time and line 809 does `draft.push(char::from(b))`; lines
@@ -37,12 +39,17 @@ bounded SSE uses ASCII completion markers. No mojibake normalization, fake
 client, manually inserted history, or fake success screen is used.
 
 Named checks are accented 2-byte input, CJK 3-byte input, emoji 4-byte input,
-split multibyte writes, one-DEL removal of one completed emoji, and exact
-durable/restarted provider input/history. Lifecycle checks include source/full
-build hashes, installed copies, 100-byte socket bound, no secret echo, true
-stream mode, bounded capture/request/response, owned CLI-then-daemon cleanup,
-provider thread join, and terminal restoration. Failure cannot write a success
-artifact; parent must inspect and run the installed test to establish RED.
+split multibyte writes, one-DEL removal of one completed single-scalar emoji,
+and exact durable/restarted provider input/history. Semantic mismatches are
+recorded after retaining the actual JSON request and returning valid bounded
+SSE, so wrong native decoding is an observed provider-history mismatch rather
+than an HTTP 500 timeout. Lifecycle checks include source/full build hashes,
+installed copies, 100-byte socket bound, credential non-echo, true stream mode,
+bounded capture/request/response, owned CLI-then-daemon cleanup, both CLI and
+validated daemon exit checks, provider thread join, per-PTY raw-mode and
+original-attribute restoration, and one final result-or-failure evidence file.
+Failure cannot write a success artifact; parent must inspect and run the
+installed test to establish RED.
 
 ## Ownership and handoff
 
@@ -51,5 +58,7 @@ thread, and its artifact directory. It imports existing
 `native_provider_setup.py` helpers and corrected
 `native_stream_tool.py::reap_cli_then_daemon`; neither is edited. No host DB,
 credentials, Docker, Node runtime, product code, config, lockfile, or existing
-test was changed. Parent owns semantic review, self-check, real installed RED,
+test was changed. Its pure-state self-check exercises valid SSE, exact Unicode
+state, retained mismatch, request cap, and auth negative without live PTY or
+provider threads. Parent owns semantic review, self-check, real installed RED,
 test-hash freezing, and independent integration.
