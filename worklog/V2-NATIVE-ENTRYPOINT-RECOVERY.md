@@ -2,6 +2,46 @@
 
 Candidate source handoff, not an integration or acceptance claim.
 
+## Renderer ABI repair follow-up
+
+Pinned OpenTUI `c01292fd` defines `currentRenderBuffer` as the presented
+buffer and `nextRenderBuffer` as the writable scene (`renderer.zig`:
+`getCurrentBuffer`, `getNextBuffer`, and `render`). The persistent native
+frame was incorrectly painting current, so the renderer diff saw an unchanged
+next buffer and emitted only blank cells. The bridge now paints next and the
+one-shot memory helper commits one frame before reading its snapshot.
+
+Candidate follow-up commit: bridge-owned `safe_renderer.rs` only.
+
+## Validation after ABI repair
+
+Focused command (shared target, offline locked native feature):
+
+```text
+CARGO_TARGET_DIR=/Users/mymac/Projects/opencode-rk-main-v2/target \
+CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 \
+TMPDIR=/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp \
+RUSTFLAGS='-C link-arg=-Wl,-rpath,@executable_path/../lib' \
+/usr/bin/arch -arm64 cargo test --offline --locked \
+-p opencode-rk-cli --features native --test native_daemon_flow -- --nocapture
+```
+
+Result: **4/4 GREEN** (`native_daemon_spawns_when_none_running`,
+`native_no_tty_entry_routes_headless_without_raw_mode_or_daemon`,
+`status_frame_carries_live_daemon_values`,
+`tui_attaches_to_running_serve_daemon_without_origin`).
+
+Installed/native PTY command using the candidate binary and worktree dylib:
+
+```text
+OC2_NATIVE_BINARY=/Users/mymac/Projects/opencode-rk-main-v2/target/debug/oc2 \
+MAC_OPENTUI_FIXTURE=$PWD/crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib \
+python3 tests/e2e/native_interactive_pty.py
+```
+
+Result: **1/1 GREEN**. This is candidate-local evidence only; parent must
+rerun both gates on the exact integrated SHA.
+
 ## Authority and base
 
 - Base: `0b00ae4` (candidate worktree branch `v2/native-entrypoint-recovery`).
