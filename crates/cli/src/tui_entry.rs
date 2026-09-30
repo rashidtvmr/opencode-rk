@@ -38,6 +38,9 @@ const LIVE_MAX_BODY_BYTES: u64 = 1_048_576;
 const LIVE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Max characters shown from the last message preview.
 const LIVE_PREVIEW_CHARS: usize = 80;
+const MAX_NATIVE_DRAFT_BYTES: usize = 32 * 1024;
+const MAX_NATIVE_TRANSCRIPT_BYTES: usize = 64 * 1024;
+const MAX_NATIVE_LINE_CHARS: usize = 1024;
 
 /// Composer submit keymap selectable by flag or env.
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -486,10 +489,16 @@ fn native_loop(
     let mut renderer = NativeRenderer::create(cols, rows)?;
     renderer.setup_terminal()?;
     let _ = renderer.enable_kitty_keyboard(1);
+    renderer.set_title("OpenCode RK")?;
     let mut draft = String::new();
     let mut transcript = Vec::new();
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
+    }
+    if let Some(snapshot) = live {
+        if let Some(text) = &snapshot.last_text {
+            transcript.push(format!("last: {text}"));
+        }
     }
     let mut input = std::io::stdin();
     let mut byte = [0u8; 1];
@@ -499,7 +508,34 @@ fn native_loop(
             live.map(|s| format!("session: {} (live)", s.title))
                 .unwrap_or_else(|| "daemon: offline".to_string()),
         ];
-        lines.extend(transcript.iter().cloned());
+        if let Some(snapshot) = live {
+            lines.push(format!(
+                "state: {}, updated: {}",
+                snapshot.state, snapshot.updated_at
+            ));
+            lines.push(format!(
+                "{} message{}",
+                snapshot.message_count,
+                if snapshot.message_count == 1 { "" } else { "s" }
+            ));
+            if let Some(last) = &snapshot.last_text {
+                lines.push(format!("last: {last}"));
+            }
+        }
+        let visible = transcript
+            .iter()
+            .rev()
+            .scan(0usize, |bytes, line| {
+                let next = bytes.saturating_add(line.len());
+                if next > MAX_NATIVE_TRANSCRIPT_BYTES {
+                    None
+                } else {
+                    *bytes = next;
+                    Some(line)
+                }
+            })
+            .collect::<Vec<_>>();
+        lines.extend(visible.into_iter().rev().cloned());
         lines.push(format!("> {draft}"));
         native_paint(&mut renderer, &lines)?;
         if input.read(&mut byte)? == 0 {
@@ -516,22 +552,30 @@ fn native_loop(
                     break;
                 }
                 if !text.is_empty() {
-                    transcript.push(format!("you: {text}"));
+                    append_transcript(&mut transcript, format!("you: {text}"));
                     if let Some(snapshot) = live {
                         match execute_turn(snapshot, &text, auth) {
-                            Ok(reply) => transcript.push(format!("assistant: {reply}")),
-                            Err(error) => transcript.push(format!("error: {error}")),
+                            Ok(reply) => {
+                                append_transcript(&mut transcript, format!("assistant: {reply}"))
+                            }
+                            Err(error) => {
+                                append_transcript(&mut transcript, format!("error: {error}"))
+                            }
                         }
                     } else {
-                        transcript.push("offline: turn not executed".to_string());
-                    }
-                    if transcript.len() > 500 {
-                        transcript.drain(..transcript.len() - 500);
+                        append_transcript(
+                            &mut transcript,
+                            "offline: turn not executed".to_string(),
+                        );
                     }
                 }
                 draft.clear();
             }
-            b if b >= 0x20 && b != b'\t' => draft.push(char::from(b)),
+            b if b >= 0x20 && b != b'\t' => {
+                if draft.len() < MAX_NATIVE_DRAFT_BYTES {
+                    draft.push(char::from(b));
+                }
+            }
             _ => {}
         }
     }
@@ -539,6 +583,28 @@ fn native_loop(
     let _ = renderer.restore_terminal_modes();
     renderer.close();
     Ok(())
+}
+
+#[cfg(feature = "native")]
+fn append_transcript(transcript: &mut Vec<String>, mut line: String) {
+    if line.chars().count() > MAX_NATIVE_LINE_CHARS {
+        line = line.chars().take(MAX_NATIVE_LINE_CHARS).collect();
+    }
+    transcript.push(line);
+    let mut bytes = 0usize;
+    let first = transcript.len().saturating_sub(1);
+    let keep_from = transcript
+        .iter()
+        .enumerate()
+        .rev()
+        .find_map(|(index, item)| {
+            bytes = bytes.saturating_add(item.len());
+            (bytes <= MAX_NATIVE_TRANSCRIPT_BYTES).then_some(index)
+        })
+        .unwrap_or(first);
+    if keep_from > 0 {
+        transcript.drain(..keep_from);
+    }
 }
 
 #[cfg(feature = "native")]
@@ -625,12 +691,28 @@ pub fn run_with_dir(
     mut args: TuiArgs,
     data_dir: Option<&Path>,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    let owned_data_dir;
+    let effective_data_dir = match data_dir {
+        Some(path) => path,
+        None => {
+            owned_data_dir =
+                resolve_cli_data_dir().ok_or("unable to resolve CLI data directory")?;
+            &owned_data_dir
+        }
+    };
+    let interactive = !args.once && !args.follow;
+    if interactive && (!std::io::stdin().is_terminal() || !std::io::stdout().is_terminal()) {
+        return Err(
+            "refusing interactive TUI without both stdin and stdout TTYs; pass --once or --follow"
+                .into(),
+        );
+    }
     // A no-origin TUI invocation is still a real client: acquire the same
     // singleton lease as default chat, then bind the live snapshot to its
     // published authenticated origin.  DaemonLease's Drop owns cleanup only
     // for a child spawned by this invocation.
-    let _daemon_lease = if args.origin.is_none() {
-        data_dir.map(crate::chat::prepare_daemon)
+    let _daemon_lease = if args.origin.is_none() && interactive {
+        Some(crate::chat::prepare_daemon(effective_data_dir))
     } else {
         None
     };
@@ -642,7 +724,7 @@ pub fn run_with_dir(
     let keymap = resolve_keymap(args.submit_keymap)
         .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
     let memory = load_memory(&args.memory);
-    let auth_owned = resolve_origin_bearer(args.origin.as_deref(), data_dir);
+    let auth_owned = resolve_origin_bearer(args.origin.as_deref(), Some(effective_data_dir));
     let auth = auth_owned.as_deref();
     if args.follow {
         let Some(origin) = args.origin else {
@@ -657,7 +739,25 @@ pub fn run_with_dir(
         );
     }
     if let Some(origin) = &args.origin {
-        match fetch_snapshot(origin, args.session.as_deref(), auth) {
+        let snapshot_result = match fetch_snapshot(origin, args.session.as_deref(), auth) {
+            Err(error) if error.contains("has no sessions yet") && auth.is_some() => {
+                let body = serde_json::json!({ "title": "Chat" }).to_string();
+                let created = http_request(origin, "POST", "/api/sessions", Some(&body), auth)
+                    .map_err(|error| format!("session create failed: {error}"))?;
+                let value: serde_json::Value = serde_json::from_str(&created)
+                    .map_err(|e| format!("malformed session create response: {e}"))?;
+                if value
+                    .pointer("/session/id")
+                    .and_then(|v| v.as_str())
+                    .is_none()
+                {
+                    return Err("session create response missing id".into());
+                }
+                fetch_snapshot(origin, args.session.as_deref(), auth)
+            }
+            result => result,
+        };
+        match snapshot_result {
             Ok(snapshot) => {
                 if args.once {
                     let frame = render_frame(keymap, &memory, "unset", Some(&snapshot));

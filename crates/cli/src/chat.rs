@@ -128,7 +128,9 @@ pub fn prepare_daemon(data_dir: &Path) -> DaemonLease {
         auth = reuse_credential(data_dir, &origin, true);
     }
     DaemonLease {
-        origin: attached.then_some(origin),
+        // Never expose an origin as attached unless its descriptor was
+        // validated and a credential was recovered for that exact origin.
+        origin: (attached && auth.is_some()).then_some(origin),
         auth,
         owned,
     }
