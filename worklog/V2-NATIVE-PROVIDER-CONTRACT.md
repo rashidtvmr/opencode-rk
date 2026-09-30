@@ -7,9 +7,9 @@ Contract-only test owner handoff; no product paths were changed. Base revision:
 
 Pinned OpenCode `95daf90670b7c039c436c85537da5fbfe2205b41` native evidence is
 `packages/tui/src/app.tsx:739-745` (`/connect`),
-`packages/tui/src/components/dialog-provider.tsx:352-417` (API-key prompt and
+`packages/tui/src/component/dialog-provider.tsx:352-417` (API-key prompt and
 `sdk.auth.set({type:"api", key})`, then sync/bootstrap and model dialog),
-`packages/tui/src/components/dialog-model.tsx:23-154` (catalogue and
+`packages/tui/src/component/dialog-model.tsx:23-154` (catalogue and
 `local.model.set`), and `packages/tui/src/context/local.tsx` (durable model
 selection/recents). The test freezes those observable roles while allowing the
 native terminal renderer to remain compact.
@@ -31,7 +31,16 @@ contains no Authorization header or key.
 
 ## Verification status
 
-Preparation only; no PTY/Cargo/build execution was performed. Suggested command
+Preparation only; no PTY/Cargo/build execution was performed. The helper-only
+protocol check is:
+
+```sh
+python3 tests/e2e/native_provider_setup.py --self-check --artifact-dir /absolute/ignored
+```
+
+It checks wrong-key rejection, third-request rejection, model identity, ordered
+history, bounded request handling, and SSE framing without a product binary;
+this is not G2 acceptance. Suggested actual command
 for the parent after an attested release build:
 
 ```sh
@@ -43,5 +52,9 @@ python3 tests/e2e/native_provider_setup.py \
 ```
 
 No acceptance claim is made. A current product failure should be recorded as a
-semantic G2 RED only after the frame reaches `/connect` and the missing native
-provider/model binding is observed, not as a timeout-only failure.
+semantic G2 RED only after a healthy owned daemon publishes its authenticated
+descriptor, `/api/models` proves both fixture models, the frame reaches
+`/connect`, and the missing native provider/model binding is observed—not as a
+timeout-only failure. Failure artifacts retain sanitized result/PTTY evidence
+and preserve the disposable fixture root; successful runs remove it only after
+bounded fixture shutdown.
