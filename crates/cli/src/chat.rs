@@ -85,6 +85,55 @@ pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     result
 }
 
+/// Owned daemon lease used by the native entrypoint.  The lease deliberately
+/// reuses the same descriptor validation and readiness path as line chat.
+pub struct DaemonLease {
+    pub origin: Option<String>,
+    pub auth: Option<String>,
+    owned: Option<Child>,
+}
+
+impl DaemonLease {
+    pub fn close(mut self) {
+        if let Some(mut child) = self.owned.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+impl Drop for DaemonLease {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.owned.take() {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+    }
+}
+
+/// Acquire or attach to the singleton daemon without opening a second
+/// lifecycle implementation.  Foreign listeners are never given a bearer:
+/// the descriptor origin must match the probed origin and the descriptor must
+/// pass `decide_lifecycle_authed`.
+pub fn prepare_daemon(data_dir: &Path) -> DaemonLease {
+    let addr = daemon_addr();
+    let origin = daemon_origin(&addr);
+    let mut owned = None;
+    if !probe_daemon(&origin) {
+        owned = spawn_daemon(&addr, data_dir);
+    }
+    let attached = probe_daemon(&origin);
+    let mut auth = reuse_credential(data_dir, &origin, attached);
+    if attached && auth.is_none() && owned.is_some() {
+        auth = reuse_credential(data_dir, &origin, true);
+    }
+    DaemonLease {
+        origin: attached.then_some(origin),
+        auth,
+        owned,
+    }
+}
+
 struct Chat {
     origin: Option<String>,
     /// Bearer for `/api/*` (`"Bearer <64-hex>"`), threaded from
@@ -123,8 +172,7 @@ impl Chat {
     fn bind_recent_session(&mut self) {
         let Some(origin) = &self.origin else { return };
         let auth = self.auth.clone();
-        let Ok((status, body)) =
-            request(origin, "GET", "/api/sessions", None, auth.as_deref())
+        let Ok((status, body)) = request(origin, "GET", "/api/sessions", None, auth.as_deref())
         else {
             return;
         };
@@ -184,7 +232,13 @@ impl Chat {
         let title = if title.is_empty() { "Chat" } else { title };
         let body = serde_json::json!({ "title": title }).to_string();
         let auth = self.auth.clone();
-        match request(origin, "POST", "/api/sessions", Some(&body), auth.as_deref()) {
+        match request(
+            origin,
+            "POST",
+            "/api/sessions",
+            Some(&body),
+            auth.as_deref(),
+        ) {
             Ok((201, response)) => match serde_json::from_str::<Value>(&response) {
                 Ok(value) => {
                     let id = value
@@ -246,9 +300,7 @@ impl Chat {
             return;
         }
         let auth = self.auth.clone();
-        let Ok((200, body)) =
-            request(origin, "GET", "/api/sessions", None, auth.as_deref())
-        else {
+        let Ok((200, body)) = request(origin, "GET", "/api/sessions", None, auth.as_deref()) else {
             println!("[error] could not list sessions to resolve {prefix}");
             return;
         };
@@ -272,7 +324,10 @@ impl Chat {
             .collect();
         match matches.as_slice() {
             [session] => {
-                let id = session.get("id").and_then(Value::as_str).unwrap_or_default();
+                let id = session
+                    .get("id")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default();
                 let title = session.get("title").and_then(Value::as_str).unwrap_or("?");
                 self.session = Some(id.to_owned());
                 println!("session: {id} ({title})");
@@ -303,8 +358,7 @@ impl Chat {
                         );
                     }
                     for model in models.iter().take(25) {
-                        let provider =
-                            model.get("provider").and_then(Value::as_str).unwrap_or("?");
+                        let provider = model.get("provider").and_then(Value::as_str).unwrap_or("?");
                         let id = model.get("id").and_then(Value::as_str).unwrap_or("?");
                         let name = model.get("name").and_then(Value::as_str).unwrap_or("?");
                         println!("{provider}/{id}  {name}");
@@ -425,10 +479,7 @@ fn message_text(message: &Value) -> Option<String> {
 /// be mistaken for the daemon. `/health` stays public (`daemon_auth.rs:1-7`):
 /// no bearer is sent here.
 fn probe_daemon(origin: &str) -> bool {
-    matches!(
-        request(origin, "GET", "/health", None, None),
-        Ok((200, _))
-    )
+    matches!(request(origin, "GET", "/health", None, None), Ok((200, _)))
 }
 
 /// Bearer for `/api/*` reuse, threaded from
@@ -602,7 +653,9 @@ fn build_request_wire(
     if path.starts_with("/api/") {
         let credential = auth.unwrap_or("").trim();
         if credential.is_empty() {
-            return Err("missing daemon credential: refusing unauthenticated /api/* request".to_owned());
+            return Err(
+                "missing daemon credential: refusing unauthenticated /api/* request".to_owned(),
+            );
         }
         return Ok(format!(
             "{method} {path} HTTP/1.1\r\nhost: {host}\r\nauthorization: {credential}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{payload}",
