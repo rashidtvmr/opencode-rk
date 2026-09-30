@@ -1,19 +1,20 @@
 # V2 web authenticated-launch fixture
 
-Source-only candidate based on `684032a`.
+Source-only mechanical fixture candidate based on `684032a`, carried through
+the restored product source at `de6b81d8a8bd3d2e141e939fbe8f4beb76bd6ce9`.
 
-The browser API transport now fails closed for every `/api/*` request unless a
-successfully validated launcher fragment has been consumed into tab memory.
-An unrecognized or malformed non-empty fragment no longer bypasses the guard.
-Valid `#oc2-token=<64 hex>` fragments retain the existing behavior: the token
-is consumed, removed from the URL while preserving path/query, and used only
-as an in-memory bearer header. SSR behavior and public non-API requests are
-unchanged.
+The substantive browser API transport is byte-identical to the accepted base:
+valid `#oc2-token=<64 hex>` fragments are consumed into tab memory, malformed
+fragments send no bearer and remain subject to the server's real `401`, and
+public non-API requests remain unchanged. The earlier `45ed373` malformed
+preflight proposal is superseded as a conflicting product change, not used as
+the contract.
 
 Frozen evidence supplied by the test owner:
 
 - setup fixture hash: `d8ffbf5e1aaee39f3dd33d18c1fe9629b39ce2831e826832faa834687f2726a7`
-- auth tests hash: `b528f74158eae54a60720a8feb3e286298516a81d7cca086fae620a172dd1291`
+- auth tests hash: updated after the mechanical response-fixture correction;
+  the stub now uses the product reader's `message` field.
 - baseline runtime source: `684032a`
 - focused pre-fix result: original stream test and two auth controls GREEN;
   malformed-fragment fail-closed control RED because `listModels` reached

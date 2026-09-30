@@ -28,7 +28,7 @@ describe('browser daemon credential boundary', () => {
 
   it('sends no bearer for a malformed fragment and propagates the server rejection', async () => {
     window.history.replaceState(null, '', '/#oc2-token=invalid')
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ error: 'missing bearer credential' }), {
+    fetchMock.mockResolvedValue(new Response(JSON.stringify({ message: 'missing bearer credential' }), {
       status: 401,
       headers: { 'content-type': 'application/json' },
     }))
