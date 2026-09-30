@@ -87,6 +87,12 @@ maintenance only; auth schema/mode, exact bearer, non-default payload model,
 two-request limit, prompt/assistant history, and key non-echo assertions are
 unchanged.
 
+The observer now drives the real `read_until(..., screen, predicate)` path in
+helper checks and validates the preserved sanitized 7db4a837 provider result
+capture shape before any product run. It handles fragmented UTF-8, private VT
+queries, split-key visibility, stale picker text, and current status projection
+without changing the provider/request/history contract.
+
 ## Executable RED and freeze
 
 The controller independently ran the actual installed Mac native release from

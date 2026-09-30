@@ -32,10 +32,13 @@ class TerminalScreen:
         if self.col >= self.cols: self.row = min(self.rows - 1, self.row + 1); self.col = 0
         self.cells[self.row][self.col] = char
         self.col += 1
+        if KEY in self.text():
+            raise AssertionError("fixture API key appeared in visible terminal cells")
 
     def _csi(self, raw):
-        private = raw.startswith(b"?"); body = raw[1:] if private else raw
-        final = chr(body[-1]); nums = body[:-1].decode("ascii", "ignore")
+        final = chr(raw[-1]); body = raw[:-1]
+        if body[:1] in b"?><=" : return
+        nums = body.decode("ascii", "ignore")
         args = [int(x) if x else 1 for x in nums.split(";")] if nums else [1]
         if final in "Hf": self.row = max(0, min(self.rows - 1, (args[0] if len(args)>0 else 1)-1)); self.col = max(0, min(self.cols - 1, (args[1] if len(args)>1 else 1)-1))
         elif final == "G": self.col = max(0, min(self.cols - 1, args[0]-1))
@@ -45,35 +48,40 @@ class TerminalScreen:
         elif final == "D": self.col = max(0, self.col-args[0])
         elif final == "J" and args[0] in (0, 2): self.cells = [[" "]*self.cols for _ in range(self.rows)]
         elif final == "K": self.cells[self.row][self.col if args[0] == 0 else 0:self.cols if args[0] == 0 else (self.col+1 if args[0] == 1 else self.cols)] = [" "] * (self.cols-self.col if args[0] == 0 else (self.col+1 if args[0] == 1 else self.cols))
-        elif final == "s": self.saved = (self.row, self.col)
-        elif final == "u": self.row, self.col = self.saved
+        elif final == "s" and not body[:1] in b"?><=": self.saved = (self.row, self.col)
+        elif final == "u" and not body[:1] in b"?><=": self.row, self.col = self.saved
 
     def feed(self, chunk):
         self.pending.extend(chunk)
-        if len(self.pending) > 1024 * 1024: raise AssertionError("terminal escape pending bound exceeded")
         data = bytes(self.pending); self.pending.clear(); i = 0; plain = bytearray()
         while i < len(data):
             if data[i] != 0x1b: plain.append(data[i]); i += 1; continue
             if plain: self._feed_text(bytes(plain)); plain.clear()
             if i+1 >= len(data): self.pending.extend(data[i:]); break
             if data[i+1] == ord("["):
-                match = re.match(rb"\x1b\[([?0-9;]*[ -/]*[@-~])", data[i:])
+                match = re.match(rb"\x1b\[([0-?]*[ -/]*[@-~])", data[i:])
                 if not match: self.pending.extend(data[i:]); break
                 self._csi(match.group(1)); i += len(match.group(0)); continue
             if data[i+1] in (ord("]"), ord("P"), ord("^"), ord("_") ):
                 end = data.find(b"\x07", i+2); terminator = 1
                 if end < 0: end = data.find(b"\x1b\\", i+2); terminator = 2
-                if end < 0: self.pending.extend(data[i:]); break
+                if end < 0:
+                    self.pending.extend(data[i:])
+                    break
                 i = end + terminator; continue
             i += 2
         if plain: self._feed_text(bytes(plain))
+        if len(self.pending) > 1024:
+            raise AssertionError("terminal escape pending bound exceeded")
 
     def _feed_text(self, data):
         for char in self.decoder.decode(data): self._put(char)
 
     def text(self): return "\n".join("".join(row).rstrip() for row in self.cells)
     def contains(self, marker): return marker.casefold() in self.text().casefold()
-    def has_model_status(self): return re.search(r"(?m)^model:\s*openai/" + re.escape(MODEL) + r"\s*$", self.text()) is not None
+    def has_model_status(self): return re.search(r"(?m)^model:\s*openai/" + re.escape(MODEL) + r"\b(?:\s*\(ctrl-p\))?\s*$", self.text()) is not None
+    def has_assistant(self, text): return text.casefold() in self.text().casefold()
+    def picker_closed(self): return not self.contains("Select model")
 
 def sha256(path):
     h = hashlib.sha256()
@@ -160,9 +168,9 @@ def free_loopback_port():
     sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]; sock.close()
     return port
 
-def read_until(fd, deadline, buf, needle, start, screen=None):
-    if needle.lower() in bytes(buf[start:]).lower():
-        return
+def read_until(fd, deadline, buf, needle, start, screen=None, predicate=None):
+    if predicate is not None and predicate(): return
+    if predicate is None and screen is None and needle.lower() in bytes(buf[start:]).lower(): return
     while time.monotonic() < deadline and len(buf) < MAX_PTY:
         ready, _, _ = select.select([fd], [], [], min(.1, max(0, deadline-time.monotonic())))
         if not ready: continue
@@ -171,7 +179,11 @@ def read_until(fd, deadline, buf, needle, start, screen=None):
         if not chunk: raise AssertionError("PTY EOF before marker %r" % needle)
         buf.extend(chunk)
         if screen is not None: screen.feed(chunk)
-        if needle.lower() in bytes(buf[start:]).lower(): return
+        if predicate is not None:
+            if predicate(): return
+        elif screen is not None:
+            if screen.contains(needle.decode("utf-8", "replace")) and len(buf) > start: return
+        elif needle.lower() in bytes(buf[start:]).lower(): return
     if len(buf) >= MAX_PTY: raise AssertionError("PTY capture bound reached before marker %r" % needle)
     raise AssertionError("PTY timeout before fresh marker %r" % needle)
 
@@ -246,10 +258,12 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
             saved = json.loads(auth_path.read_text()).get("openai", {})
             if saved.get("type") != "api" or saved.get("key") != KEY:
                 raise AssertionError("provider setup persisted the wrong API auth schema")
-            cmd(MODEL, MODEL.encode())
+            start = len(buf); os.write(master, MODEL.encode()+b"\r")
+            read_until(master, time.monotonic()+20, buf, MODEL.encode(), start, screen, lambda: screen.has_model_status() and screen.picker_closed())
             if not screen.has_model_status(): raise AssertionError("selected model is not in current status projection")
-        response = cmd(PROMPTS[0 if first else 1], b"G2 first response" if first else b"G2 resumed response")
-        if first and b"G2 first response" not in response: raise AssertionError("first response did not settle")
+        start = len(buf); os.write(master, PROMPTS[0 if first else 1].encode()+b"\r")
+        read_until(master, time.monotonic()+20, buf, b"G2 first response" if first else b"G2 resumed response", start, screen, lambda: screen.has_assistant("G2 first response" if first else "G2 resumed response"))
+        if first and not screen.has_assistant("G2 first response"): raise AssertionError("first response did not settle")
         if not first and PROMPTS[0].encode() not in bytes(buf): raise AssertionError("prior prompt absent after restart")
         if KEY.encode() in bytes(buf): raise AssertionError("fixture API key echoed anywhere in PTY")
         if len(captures) + len(buf) > MAX_PTY: raise AssertionError("combined PTY capture bound reached")
@@ -285,7 +299,7 @@ def self_check():
     terminal = TerminalScreen()
     terminal.feed(b"\x1b[2J\x1b[2;1Hmodel: openai/gpt-5.6")
     assert terminal.contains("model: openai/gpt-5.6")
-    terminal.feed(b"\x1b[2;22H-mini")
+    terminal.feed(b"\x1b[>0q\x1b[>1u\x1b[2;22H-mini (ctrl-p)")
     assert terminal.has_model_status()
     terminal.feed(b"\x1b]0;ignored title\x07\x1b[1;1H\xc3")
     terminal.feed(b"\xa9")
@@ -293,6 +307,16 @@ def self_check():
     stale = TerminalScreen()
     stale.feed(b"gpt-5.6-mini in picker")
     assert not stale.has_model_status()
+    observed = TerminalScreen()
+    for chunk in (b"\x1b[2J\x1b[2;1Hmodel: openai/gpt-5.6", b"\x1b[2;22H-", b"mini (ctrl-p)"):
+        observed.feed(chunk)
+    assert observed.has_model_status()
+    secret_screen = TerminalScreen()
+    try:
+        secret_screen.feed(KEY[:8].encode()); secret_screen.feed(KEY[8:].encode())
+        raise AssertionError("split key was not detected")
+    except AssertionError as exc:
+        assert "visible terminal" in str(exc)
     read_fd, write_fd = os.pipe()
     try:
         buf = bytearray(b"stale Connect provider\n")
