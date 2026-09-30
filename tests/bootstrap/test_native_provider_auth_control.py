@@ -13,6 +13,7 @@ import re
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import unittest
@@ -27,6 +28,7 @@ HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 FAKE_KEY = "fixture-api-key-never-print-7f3a"
 CATALOG_IDS = {"gpt-5.6", "gpt-5.6-mini"}
 NO_AUTH_HEADER = object()
+DAEMON_AUTH = object()
 
 
 def sha256(path: pathlib.Path) -> str:
@@ -52,6 +54,11 @@ def required_absolute_file(name: str, suffixes=()):
 def checked_artifacts():
     binary = required_absolute_file("OC2_TEST_BINARY")
     library = required_absolute_file("OC2_TEST_NATIVE_LIBRARY", {".dylib", ".so"})
+    if not os.access(binary, os.X_OK):
+        raise AssertionError("installed binary must be executable")
+    suffix = ".dylib" if sys.platform == "darwin" else ".so"
+    if library.suffix != suffix:
+        raise AssertionError("native library does not match the host platform")
     manifest = required_absolute_file("OC2_TEST_BUILD_JSON", {".json"})
     receipt = json.loads(manifest.read_text(encoding="utf-8"))
     expected_source = receipt.get("source_sha")
@@ -77,6 +84,8 @@ def bounded_json(response):
         raw = response.read(MAX_RESPONSE + 1)
         if len(raw) > MAX_RESPONSE:
             raise AssertionError("HTTP response exceeded bounded contract")
+        if FAKE_KEY.encode() in raw:
+            raise AssertionError("HTTP response leaked fixture API key")
         return json.loads(raw.decode("utf-8"))
     finally:
         response.close()
@@ -87,6 +96,8 @@ def bounded_discard(response):
         raw = response.read(MAX_RESPONSE + 1)
         if len(raw) > MAX_RESPONSE:
             raise AssertionError("HTTP response exceeded bounded contract")
+        if FAKE_KEY.encode() in raw:
+            raise AssertionError("HTTP response leaked fixture API key")
         return raw
     finally:
         response.close()
@@ -98,6 +109,9 @@ class NativeAuthService:
         try:
             self._initialize(test_case)
         except BaseException:
+            log_stream = getattr(self, "log_stream", None)
+            if log_stream is not None:
+                log_stream.close()
             if self.temp is not None:
                 self.temp.cleanup()
             raise
@@ -109,6 +123,8 @@ class NativeAuthService:
         self.home = self.root / "home"
         self.project = self.root / "project"
         self.data = self.root / "d"
+        if len(str(self.data / "runtime" / "opencode-rk.sock").encode()) > 100:
+            raise AssertionError("fixture Unix socket path exceeds 100 bytes")
         self.catalog = self.data / "catalog" / "models.dev.api.json"
         self.runtime = self.data / "runtime"
         for path in (self.home, self.project, self.data, self.runtime):
@@ -120,6 +136,7 @@ class NativeAuthService:
         self.executable = install / "bin" / "oc2"
         shutil.copy2(self.binary, self.executable)
         shutil.copy2(self.library, install / "lib" / f"libopentui{self.library.suffix}")
+        self.catalog.parent.mkdir(parents=True)
         self.catalog.write_text(
             json.dumps({"openai": {"name": "fixture", "models": {
                 model: {"name": model, "limit": {"context": 200000}}
@@ -140,8 +157,8 @@ class NativeAuthService:
             if not artifact_root.is_absolute():
                 raise AssertionError("OC2_AUTH_CONTROL_ARTIFACT_ROOT must be absolute")
             artifact_root.mkdir(parents=True, exist_ok=True)
-            self.artifacts = artifact_root / f"test-{os.getpid()}-{id(self)}"
-            self.artifacts.mkdir()
+            self.artifacts = pathlib.Path(tempfile.mkdtemp(
+                prefix=test_case.id().rsplit(".", 1)[-1] + "-", dir=artifact_root))
 
     def start(self):
         env = {
@@ -168,6 +185,7 @@ class NativeAuthService:
             stderr=subprocess.STDOUT,
             start_new_session=True,
             close_fds=True,
+            umask=0o022,
         )
         self.log_stream.close()
         self.log_stream = None
@@ -178,8 +196,8 @@ class NativeAuthService:
             if self.process.poll() is not None:
                 raise AssertionError("owned daemon exited before descriptor")
             try:
-                if not descriptor.is_file() or descriptor.stat().st_mode & 0o777 != 0o600:
-                    raise ValueError("descriptor ownership/mode")
+                if not descriptor.is_file():
+                    raise ValueError("descriptor is not a regular file")
                 raw_descriptor = descriptor.read_bytes()
                 if len(raw_descriptor) > 8192:
                     raise ValueError("descriptor too large")
@@ -202,16 +220,20 @@ class NativeAuthService:
                         }
                         if ids == CATALOG_IDS:
                             return
+                    else:
+                        bounded_discard(response[1])
             except (OSError, KeyError, ValueError, urllib.error.URLError):
                 pass
             time.sleep(0.03)
         raise AssertionError("owned authenticated daemon/models readiness failed")
 
-    def request(self, method, path, body=None, bearer=NO_AUTH_HEADER):
+    def request(self, method, path, body=None, bearer=DAEMON_AUTH):
         raw = None if body is None else json.dumps(body, separators=(",", ":")).encode()
         if raw is not None and len(raw) > MAX_REQUEST:
             raise AssertionError("test request exceeded contract bound")
         request = urllib.request.Request(self.origin + path, data=raw, method=method)
+        if bearer is DAEMON_AUTH:
+            bearer = self.token
         if bearer is not NO_AUTH_HEADER:
             request.add_header("Authorization", "Bearer " + bearer)
         if raw is not None:
@@ -240,11 +262,20 @@ class NativeAuthService:
                     os.killpg(self.process.pid, signal.SIGKILL)
                     self.process.wait(timeout=3)
             self._check_log_limit(final=True)
-            log_bytes = self.log_path.read_bytes()[: MAX_RESPONSE + 1]
+            with self.log_path.open("rb") as stream:
+                log_bytes = stream.read(MAX_RESPONSE + 1)
             if FAKE_KEY.encode() in log_bytes:
                 raise AssertionError("bounded daemon output leaked fixture API key")
             if self.artifacts is not None:
                 shutil.copy2(self.log_path, self.artifacts / "daemon.log")
+                (self.artifacts / "receipt.json").write_text(json.dumps({
+                    "source_sha": self.receipt["source_sha"],
+                    "test": self.test_case.id(),
+                    "pid": self.process.pid,
+                    "owned_process_reaped": self.process.poll() is not None,
+                    "fixture_root": str(self.root),
+                    "log_sha256": sha256(self.log_path),
+                }, indent=2) + "\n")
         finally:
             if self.log_stream is not None:
                 self.log_stream.close()
@@ -289,17 +320,22 @@ class NativeProviderAuthControlTests(unittest.TestCase):
         service.start()
         return service, auth
 
+    def test_daemon_bearer_descriptor_is_owner_only(self):
+        service, _ = self.run_service()
+        try:
+            descriptor = service.runtime / "backend.json"
+            self.assertEqual(descriptor.stat().st_mode & 0o777, 0o600)
+        finally:
+            service.stop()
+
     def test_unauthorized_valid_put_has_no_side_effect(self):
         service, auth = self.run_service()
         try:
             before = tree_snapshot(service.data)
-            for bearer in (None, "wrong-token"):
-                if bearer is None:
-                    status, response = service.request("PUT", "/auth/openai", api_info())
-                else:
-                    status, response = service.request("PUT", "/auth/openai", api_info(), bearer)
-                self.assertIn(status, (401, 403))
-                bounded_discard(response)
+            for bearer, expected_status in ((NO_AUTH_HEADER, 401), ("wrong-token", 403)):
+                status, response = service.request("PUT", "/auth/openai", api_info(), bearer)
+                self.assertEqual(status, expected_status)
+                self.assertNotIn(FAKE_KEY.encode(), bounded_discard(response))
                 self.assertFalse(auth.exists())
                 self.assertEqual(tree_snapshot(service.data), before)
         finally:
@@ -315,7 +351,6 @@ class NativeProviderAuthControlTests(unittest.TestCase):
             self.assertEqual(auth.stat().st_mode & 0o777, 0o600)
             saved = json.loads(auth.read_text())
             self.assertEqual(saved["openai"], api_info(metadata={"account": "fixture"}))
-            self.assertNotIn(FAKE_KEY.encode(), bytes(service.logs))
         finally:
             service.stop()
 
@@ -326,7 +361,7 @@ class NativeProviderAuthControlTests(unittest.TestCase):
             before = json.loads(auth.read_text())
             status, response = service.request("PUT", "/auth/openai%2F", api_info(metadata={"account": "fixture"}))
             self.assertEqual(status, 200)
-            bounded_discard(response)
+            self.assertNotIn(FAKE_KEY.encode(), bounded_discard(response))
             saved = json.loads(auth.read_text())
             self.assertEqual(saved["other"], before["other"])
             self.assertEqual(saved["legacy"], before["legacy"])
@@ -343,7 +378,7 @@ class NativeProviderAuthControlTests(unittest.TestCase):
                 status, response = service.request("PUT", "/auth/openai", body)
                 self.assertGreaterEqual(status, 400)
                 self.assertLess(status, 500)
-                bounded_discard(response)
+                self.assertNotIn(FAKE_KEY.encode(), bounded_discard(response))
                 self.assertEqual(auth.read_bytes(), before)
         finally:
             service.stop()

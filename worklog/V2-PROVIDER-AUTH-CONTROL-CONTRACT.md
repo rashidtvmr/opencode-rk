@@ -72,3 +72,31 @@ No runtime, Cargo, PTY, Docker, or product validation was run in this
 source-only package.  Parent must run the test against the baseline to capture
 the compiling RED, freeze the exact source hash/command manifest, then rerun
 after product implementation.  This handoff makes no acceptance claim.
+# Executable RED and controller freeze
+
+The controller repaired pre-freeze fixture errors: missing catalogue directory,
+the default bearer-header sentinel, a missing log field, reused artifact IDs,
+host library/executable checks and correct XDG auth-root setup. Earlier failures
+are retained as infrastructure evidence. Readiness checks ownership, descriptor
+PID/group, loopback origin, bearer authentication and the two exact model IDs.
+
+The actual installed native release source
+`710a410e0ce32c716c40217696b515caa6c52310` now runs all seven controls. The missing
+auth route falls through to the Web SPA and returns HTML/HTTP 200 instead of
+authenticated API auth behavior. A separate seventh control captures an observed
+credential-publication failure: `backend.json` is mode `0644` under a `0022`
+process umask; the bearer descriptor must be `0600`. This follows the approved
+owner-only daemon credential requirement. The generated fixture directory itself
+is private and no user state is accessed.
+
+Exact command/environment/receipt hashes and logs:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-auth-control-red-710a410-z1r9xq_s`.
+Result: exit 1 in 0.58s, seven executed controls, five assertion failures and two
+product response/schema errors. All seven owned daemons were reaped and each
+case has a sanitized source/PID/cleanup/log receipt. The two response errors are
+the product returning SPA HTML or failing to create the requested auth entry;
+they are not source/compiler/harness failures.
+
+Frozen test SHA-256:
+`1f08cd2968e4867f7eed26efe2c4534ea005bac1fa9f961c862ce31aa8b4f419`.
+No product acceptance is claimed. Implementation cannot edit this contract.
