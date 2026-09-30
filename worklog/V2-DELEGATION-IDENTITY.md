@@ -73,3 +73,28 @@ The parent must independently verify the frozen test hash, run the focused
 gate and agents regressions, integrate this candidate, and rerun the required
 gate on the exact integrated SHA. No source-only pass or acceptance claim is
 made here.
+
+## Exact integrated contract acceptance
+
+Final candidate `2f06dc6fb3f5162e6aa9cde6a6267a4f11ec00d2` was independently
+PREVERIFIED by `ses_f0b4ae7dbffeEfFB4wLruGJkYg`. The unchanged frozen
+`delegation_live` target passes all 11 tests, and all agents targets pass
+**126 tests, 0 failed, 0 ignored**. Candidate receipts are retained at
+`v2-verify-child-2f06dc6` under the approved artifact parent.
+
+The controller integrated the net identity repair as `ce913a7`, then reran the
+same focused and all-target commands on exact integrated
+**`7ffdc6e13385027a1ecabff66d570ad88b963502`**:
+
+```text
+cargo test --offline --locked -p opencode-rk-agents --test delegation_live -- --test-threads=1
+  11 passed, exit 0
+cargo test --offline --locked -p opencode-rk-agents --all-targets -- --test-threads=1
+  126 passed, 0 failed, 0 ignored, exit 0
+```
+
+Workspace formatting also passes. Actual command/environment/source/log hashes
+and test counts are at `v2-identity-provider-integrated-7ffdc6e-alf5eet2` under
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/`.
+State: **ACCEPTED for the child-spawn identity composition contract on exact
+`7ffdc6e`**. The earlier production-wiring limitation remains the scope boundary.

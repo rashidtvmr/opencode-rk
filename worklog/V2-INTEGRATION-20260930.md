@@ -950,3 +950,24 @@ the same clock-only session identity. These exact failures and return codes are
 retained at `v2-workspace-gates-f6e2d3b-20jfnwb5` under the approved artifact
 parent. Focused identity and provider maintenance candidates require independent
 verification before integration.
+
+### Identity and provider packages accepted on exact integrated SHA
+
+Independent verifier `ses_f0b4ae7dbffeEfFB4wLruGJkYg` PREVERIFIED identity
+candidate `2f06dc6` and provider candidate `bbdfff2`. The controller integrated
+them as coherent commits and reran the required commands on exact
+**`7ffdc6e13385027a1ecabff66d570ad88b963502`**: 11 focused identity tests,
+**126 agents tests**, provider-library Clippy with `-D warnings`, and
+**397 provider tests** pass. Workspace formatting also passes. All protected
+tests, manifests and the lockfile remain unchanged. Exact evidence:
+`v2-identity-provider-integrated-7ffdc6e-alf5eet2`, under the approved artifact
+parent. Scope and paths are in `worklog/V2-DELEGATION-IDENTITY.md` and
+`worklog/V2-PROVIDER-LINT.md`; these are **ACCEPTED for the composition identity
+contract and provider-library diagnostic maintenance on exact `7ffdc6e`**.
+
+Native valid-Unicode input has a newly frozen real installed PTY RED at
+`f6e2d3b`: actual provider text is mojibake, with partial temporary-emoji
+backspace. CLI exit, terminal restoration, validated daemon termination and
+provider-thread cleanup are proven. The independent test contract and exact
+frozen hash are in `worklog/V2-NATIVE-UTF8-CONTRACT.md`; product implementation
+requires separate installed candidate and exact integrated verification.
