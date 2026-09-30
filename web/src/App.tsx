@@ -514,6 +514,7 @@ function App() {
       )
     }
     const previousIds = new Set(baselineMessages.map((message) => message.id))
+    let observedToolEvents = false
 
     try {
       const turn = await runTurnStream(
@@ -530,10 +531,12 @@ function App() {
           },
           onToolCall: (toolCall: ToolCall) => {
             if (activeTurnRef.current?.controller !== controller) return
+            observedToolEvents = true
             setStreamingToolProgress(`Running ${toolCall.name}`.slice(0, 160))
           },
           onToolOutput: (toolOutput: ToolOutput) => {
             if (activeTurnRef.current?.controller !== controller) return
+            observedToolEvents = true
             setStreamingToolProgress(`Finished ${toolOutput.name}`.slice(0, 160))
           },
           onReasoningSummaryDelta: (delta) => {
@@ -560,6 +563,25 @@ function App() {
         },
         controller.signal,
       )
+      if (activeTurnRef.current?.controller !== controller) return false
+      if (observedToolEvents) {
+        try {
+          const [refreshed, refreshedActivity] = await Promise.all([
+            listMessages(sessionId, 200, controller.signal),
+            listAssistantActivity(sessionId, 200, controller.signal),
+          ])
+          if (activeTurnRef.current?.controller !== controller) return false
+          setMessages(refreshed)
+          setAssistantActivity(
+            Object.fromEntries(
+              refreshedActivity.map((entry) => [entry.message_id, entry]),
+            ) as Record<string, AssistantActivity>,
+          )
+        } catch {
+          // The turn already completed. A best-effort refresh must not report
+          // the completed turn as failed or trigger an irreversible retry.
+        }
+      }
       if (activeTurnRef.current?.controller !== controller) return false
       activeTurnRef.current = null
       setActiveTurnSessionId(null)
