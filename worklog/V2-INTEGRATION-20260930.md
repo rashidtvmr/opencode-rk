@@ -7,6 +7,7 @@ Native lifecycle package: `425d617a3576c791e7027b2cc332a75e7441fd4e`.
 Typed live writer/restart package: `31ea2b0d39e4cf23e8eae5f894763edf88678cb9`.
 Browser transport: `25b64488cfc4282b867a924570ba267fbcd46c32`.
 Persisted API auth and rooted tool continuation: `f5cfb012369f3a4187cfa4f50ad01eb4051081c6`.
+Installer native closure/transaction: `14ff5fb4d93b25ab1c8e6ccc64603b2dbf3ea9a9`.
 Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-v2`.
 
 ## V2-SALVAGE-PRESERVATION
@@ -274,6 +275,172 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
   rooted continuation**. In-app setup, OAuth/provider breadth, real-browser
   journey, and release/platform acceptance remain open.
 
+## G6 real-browser settled tool/reopen/restart journey
+
+- Exact installed product revision: `f5cfb012369f3a4187cfa4f50ad01eb4051081c6`;
+  binary SHA-256 `1870d7627875ae450d2dcea2691d7b00e2127a30860726efeb2b43cdab434321`.
+  Build/installation provenance is the G2 fixture above (dev, native off).
+- Fixture candidates `ebd319b` and `c665fd6` required parent repairs before use:
+  settled assistant-history accounting, exact typed ordering/model checks, bounded
+  HTTP framing, an offline catalog, and descriptor PID/authenticated API readiness.
+  Parent correction `81fddef` is selectively integrated as `289f361`. The fixture's
+  `--self-check` passed loopback framing, credentials, typed pair, and settled
+  history. Launch from the fixture worktree:
+
+  ```text
+  /usr/bin/arch -arm64 python3 tests/e2e/web_tool_journey_fixture.py --binary /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-integrated-f5cfb01-np94vwxp/bin/oc2 --artifact-dir /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/g6-integrated-f5cfb01-yt__rzd4 --build-json /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-integrated-f5cfb01-np94vwxp/build.json
+  ```
+
+- Main drove a real Playwright browser through authenticated launch, chat creation,
+  `write the browser marker`, visible `[write] write success`, settled assistant
+  output, and `confirm the browser marker`. Bare reload correctly demanded
+  re-authentication. A fresh-document authenticated relaunch restored the same
+  chat, tool result and both assistant replies. A fragment-only same-document
+  navigation does not reinitialize authentication; the verified relaunch uses
+  `about:blank` followed by the authenticated launch URL.
+- Fixture-owned daemon PID 72371 was stopped/reaped. A fresh authenticated
+  descriptor for PID 74191 had a new port/token. The browser attached, reopened
+  the same chat, and settled `resume after restart` successfully.
+- Bounded authenticated HTTP transcript verification found exactly seven unique
+  messages in user/tool/assistant/user/assistant/user/assistant order. Read-only
+  inspection of the disposable SQLite fixture found one tool message and exactly
+  two typed records: ordered call/output for `g6_write_1`, unchanged relative-path
+  arguments and `write success`. Exactly four provider requests carried expected
+  settled assistant and user history. Marker bytes were exactly
+  `G6 browser fixture marker\n`, SHA-256
+  `09e053899d28ee2f132b9671ffe2378a9d9b0d48986152752dd0047da2c8ac1b`.
+- Evidence root:
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/g6-integrated-f5cfb01-yt__rzd4`.
+  `provider-requests.json` SHA-256
+  `1dd5f4387067ce259b76597e61725291d72dd46704f3dbe73181f89c60859e5f`;
+  `typed-records.json` SHA-256
+  `82e43a2bcf44b35852af8ff2dc73dc1c0737c4978d82f0de68c995eac410f486`;
+  `http-transcript.json` SHA-256
+  `a76d371fc9fffc0d1a02621882be331a4cd06c5c55a6f2550c38f7bc41da5fd9`.
+  Screenshots and accessibility snapshots are retained there. Fixture exited 0;
+  final evidence reports no provider failure, four requests, one restart.
+- State: **ACCEPTED on integrated `f5cfb01` for the scoped real-browser settled
+  tool/second-turn/authenticated-reopen/restart journey**. The real broker admitted
+  write under the fixture's explicit operator allowlist. Interactive permission
+  requests, denial/interruption, concurrent second-client admission and release
+  profile/platform journeys remain open; this is not full G6/G8 acceptance.
+
+## G7 installer native closure and paired rollback
+
+- Frozen contract base `13616a440808d40947192126454140d955161986`;
+  main-owned source candidate `7a06cc89feb8a694063356dcfdfe34798deee353`.
+  Source/contracts were selectively integrated as `349e4da`, `9592556`, `fc47763`,
+  and `14ff5fb`. Changed paths: `scripts/install-oc2.sh`, the three
+  `tests/bootstrap/test_tui011_installer_{native_closure,rollback,signal_layout}.py`
+  modules, `worklog/V2-UBUNTU-INSTALLER-CONTRACT.md`, and
+  `worklog/V2-UBUNTU-INSTALLER.md`. Authority: paired replacement failures and
+  historical producer layout `2f1692987ed0e27d928b290d8f2168ea37b81185`.
+- Independent verifier reproduced both immutable-baseline signal/layout REDs
+  against script SHA-256
+  `6962df6e9998dcf86c7b7ba2793f4e9d6fe3289e36833483ed6e5757246bdf97`,
+  then passed eight candidate controls. Source-independent frozen expectations
+  remain identical. On exact integrated
+  `14ff5fb4d93b25ab1c8e6ccc64603b2dbf3ea9a9`, independently confirmed before and
+  after the gate:
+
+  ```text
+  rtk /usr/bin/arch -arm64 /usr/bin/python3 -m unittest tests.bootstrap.test_tui011_installer_native_closure tests.bootstrap.test_tui011_installer_rollback tests.bootstrap.test_tui011_installer_signal_layout -v
+  /bin/sh -n scripts/install-oc2.sh
+  git diff --check
+  ```
+
+  Results: **8/8 passed**, shell syntax/diff checks GREEN, source/tests byte-identical
+  to candidate/frozen contracts. Script SHA-256
+  `92525d449da6b5f2737e26708851d268c6741280e4bf7ce6e814697c5cdc08fe`;
+  signal/layout SHA-256
+  `db1b32d5472cf5c2b23bac079cf7eca7ad622667fe21b80335e3f94efefb237a`.
+  Independent log: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/g7-integrated-verify/integrated-gate.log`.
+- State: **ACCEPTED on integrated `14ff5fb` for the host-profile installer gate**.
+  Real release-built Ubuntu installation and native golden journey remain open.
+
+## APP-010 packaged executable identity
+
+- Frozen contract imported through `0638c58`, SHA-256
+  `44b00a50a307e4a7e039b39e84ee783670c7670d125e2dedbaca6563df054e97`.
+  Main independently reran against installed `f5cfb01`: one semantic RED
+  (`--version` reports `opencode-rk 0.1.0-alpha.1`) and one help/side-effect control
+  GREEN. Exact command:
+
+  ```text
+  rtk env TMPDIR=/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp OC2_TEST_BINARY=/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-integrated-f5cfb01-np94vwxp/bin/oc2 /usr/bin/arch -arm64 python3 -m unittest tests.bootstrap.test_app010_packaged_cli_identity
+  ```
+
+- Only the one-line `Cli` command-name correction in `crates/cli/src/main.rs` from
+  historical `3e8dc0e328c07a0937a4e20c970fc1854649085f` was salvaged as `b899afc`.
+  Authority is the approved `oc2` package name, installer gate, and
+  `install_commands::BINARY_NAME`. Native release/installed identity and independent
+  verification are pending; status is **CANDIDATE**, not acceptance.
+
+### Installed Mac native release at `289f361`
+
+- Serial build succeeded in 1m17s:
+
+  ```text
+  rtk /usr/bin/arch -arm64 env CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=1 RUSTFLAGS='-C link-arg=-Wl,-rpath,@executable_path/../lib' cargo build --offline --locked --release -p opencode-rk-cli --bin oc2 --features native
+  ```
+
+  Source SHA `289f36110d03f80185d6db0c6e48949b6fee8cc7`. Product sources were
+  committed; only this evidence document changed during validation.
+- The real five-entry archive was installed with the integrated shell installer
+  into a disposable HOME/layout, exit 0, then inspected with no `DYLD_*` override.
+  Fixture root:
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-release-macos-289f361-n_b22vl0`.
+  `build.json` retains full build/installer commands and all hashes.
+  Native release binary SHA-256
+  `f2ca98fe5bd151f0da669ba7a5879a23395a41f523bfe2aabfa5b4e3378b5354`;
+  library `798f30dd7f4fbe36d52c8834652ed7bcd7f20dfd2a1203d09cc24880eeb13a91`;
+  archive `6c51f2b4a9834534ae7eb37965851a79919113da73b3ef56d6a173bea98ddb54`.
+- Independent verifier confirmed these hashes, the installed `oc2 0.1.0-alpha.1`
+  identity and native `@rpath/libopentui.dylib` closure with relative executable/
+  loader paths. Frozen packaged identity plus eight installer controls passed
+  **10/10**. Command (ROOT is the fixture above):
+
+  ```text
+  OC2_TEST_BINARY=$ROOT/install/bin/oc2 OC2_TEST_NATIVE_LIBRARY=$ROOT/install/lib/libopentui.dylib TMPDIR=/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp python3 -m unittest tests.bootstrap.test_app010_packaged_cli_identity tests.bootstrap.test_tui011_installer_native_closure tests.bootstrap.test_tui011_installer_rollback tests.bootstrap.test_tui011_installer_signal_layout
+  ```
+
+- The required installed-CLI PTY regression exposed a real product RED:
+
+  ```text
+  OC2_NATIVE_BINARY=$ROOT/install/bin/oc2 MAC_OPENTUI_FIXTURE=$ROOT/install/lib/libopentui.dylib TMPDIR=/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp /usr/bin/arch -arm64 python3 tests/e2e/native_interactive_pty.py
+  ```
+
+  This target contains **one** test, distinct from the ten bridge lifecycle tests.
+  It failed at line 156: `ICANON` remained 256 after the eight-second readiness
+  deadline. Log `/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp/app010-pty.log`,
+  SHA-256 `cc25c53a1d54fe4006d34552e9808d6bce95476722eba26e046b6925417de793`.
+  Source review confirms `tui_entry::interactive_loop` still uses canonical lines;
+  `render_once` does not own terminal input. Identity/closure are independently
+  GREEN; the combined release handoff is **not ACCEPTED** with this G5 RED.
+
+## Ubuntu native dependency recovery
+
+- Main restored only the missing aarch64 Linux blob from preserved
+  `552bc16309fbe7f56d3d84cf6513eab56a47b494`:
+  `crates/opentui-bridge/native/lib/aarch64-unknown-linux-gnu/libopentui.so`.
+  Git blob `0ac6a19a10d33930d56e84a082dac1bad74d1919`, 26,598,960 bytes,
+  SHA-256 `e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89`.
+  Actual bytes match the retained audit fixture and preserved blob exactly.
+- Historical `552bc16:worklog/TUI-011.md` records pinned fork `c01292fd`, Zig
+  0.16.0, ReleaseSafe, `aarch64-linux-gnu.2.17`, five required ABI exports and
+  bounded ELF dependency verification. The arm64 artifact is ELF aarch64,
+  SONAME `libopentui.so`, without absolute RPATH. This is dependency recovery,
+  not a passing Ubuntu product journey.
+- The current canonical x64 artifact has SHA-256 `e84ced36…`; the audited fresh
+  historical x64 blob has `9f074adf…`. Historical worklog explicitly distinguishes
+  these. Existing x64 bytes remain preserved pending their own runtime/audit gate.
+- Disposable Ubuntu arm64 container `oc2-v2-ubuntu-build` uses the exact acquired
+  Ubuntu digest, two CPU/four-GiB limits and only an approved temporary bind mount:
+  `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-ubuntu-arm64-release-dqhrz_mn`.
+  Public package setup and Rust 1.98.1 installation passed; the host registry cache
+  was copied without user auth/config. Release build, native loading/installation,
+  and actual Ubuntu golden behavior remain to be verified.
+
 ## Remaining observed product failures
 
 - G2 persisted OpenAI API auth is connected and accepted for the scope above;
@@ -283,10 +450,9 @@ Integration writer: the main session in `/Users/mymac/Projects/opencode-rk-main-
   validation.
 - Native renderer lifecycle is accepted as above; the complete native CLI golden
   journey still requires G1–G4 integration.
-- Docker server is ready (`29.8.0`). Ubuntu 24.04 arm64 image acquired at digest
+- Docker server is ready. Ubuntu 24.04 arm64 image acquired at digest
   `sha256:008173c23f95b170204355c12626cb5a965d779a7e1283b09e9cffbb1bf33ca3`.
-  The frozen native installer closure test independently reproduces one failing
-  test with three missing-library/atomicity assertions against `b323e2b`.
+  Host-profile installer closure/transaction is accepted as recorded above.
   Ubuntu packaging and its real native golden journey remain unrun.
 
 These component acceptances are not G0–G8 release acceptance.
