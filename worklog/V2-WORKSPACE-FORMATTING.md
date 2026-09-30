@@ -31,4 +31,4 @@ No Cargo build, test, clippy, Python product, PTY, Docker, browser, Node, or hea
 
 ## Handoff
 
-Candidate SHA is recorded after the normal new commit and must be supplied with the final handoff. Exact changed paths and the manifest are the source of truth. Remaining observed failure: none in the permitted formatting gate; independent verification/integration remains required.
+Candidate SHA: `3fb53b00859f09e2daf524da1a9a2b67a9e5e484`. This is a candidate only; independent verification and integration remain required. Exact changed paths and the manifest are the source of truth. Remaining observed failure: none in the permitted formatting gate; independent verification/integration remains required.

@@ -1,7 +1,7 @@
 {
   "package": "WORKSPACE-FORMAT",
   "base_sha": "ed6e78736ae8aad091ba2f0ba182754cbbbe155c",
-  "candidate_sha": "pending_commit",
+  "candidate_sha": "3fb53b00859f09e2daf524da1a9a2b67a9e5e484",
   "source_only": true,
   "format_tool": "cargo fmt --all (rustfmt)",
   "rustfmt_version": "rustfmt 1.9.0-stable (48a229ceae 2026-09-01)",
