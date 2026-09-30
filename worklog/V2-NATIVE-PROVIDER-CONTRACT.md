@@ -74,6 +74,19 @@ owned process/FD cleanup. The controller also records the current UI phase and
 preserved fixture root. The contract has not yet been frozen; provider/auth/model,
 no-key-echo, request-count and durable-history assertions remain mandatory.
 
+## Terminal observer maintenance
+
+The native renderer legitimately emits VT100 dirty-cell updates rather than
+repeating full frames. The contract now reconstructs an 80x24 visible screen,
+with bounded CSI cursor/erase/save-restore handling, OSC/DCS/APC skip, and
+incremental UTF-8 decoding. The model assertion is the current status
+projection `model: openai/gpt-5.6-mini`, not an arbitrary stale picker/filter
+occurrence. Pinned native roles remain `Connect a provider`, `API key`, and the
+catalogue's advertised non-default model. This is mechanical observer
+maintenance only; auth schema/mode, exact bearer, non-default payload model,
+two-request limit, prompt/assistant history, and key non-echo assertions are
+unchanged.
+
 ## Executable RED and freeze
 
 The controller independently ran the actual installed Mac native release from

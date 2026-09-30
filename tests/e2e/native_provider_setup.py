@@ -5,7 +5,7 @@ This file is a test owner artifact, not product code.  It deliberately refuses
 to turn missing build/source/runtime evidence into a product RED.
 """
 import argparse, hashlib, http.client, http.server, json, os, pathlib, pty
-import fcntl, re, select, shutil, signal, socket, struct, subprocess, sys, tempfile, termios, time
+import codecs, fcntl, re, select, shutil, signal, socket, struct, subprocess, sys, tempfile, termios, time
 import urllib.error, urllib.request
 
 MAX_PTY, MAX_REQUEST, MAX_RESPONSE = 256 * 1024, 128 * 1024, 256 * 1024
@@ -13,6 +13,67 @@ KEY, MODEL = "fixture-generated-key-7f3a", "gpt-5.6-mini"
 PROMPTS = ["native provider contract first", "native provider contract second"]
 HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 HOST_LIBRARY_SUFFIX = ".dylib" if sys.platform == "darwin" else ".so"
+
+class TerminalScreen:
+    """Small bounded ANSI screen model; assertions use visible cells, not diffs."""
+    def __init__(self, cols=80, rows=24):
+        self.cols, self.rows = cols, rows
+        self.cells = [[" "] * cols for _ in range(rows)]
+        self.row = self.col = 0
+        self.saved = (0, 0)
+        self.pending = bytearray()
+        self.decoder = codecs.getincrementaldecoder("utf-8")("replace")
+
+    def _put(self, char):
+        if char == "\n": self.row = min(self.rows - 1, self.row + 1); self.col = 0; return
+        if char == "\r": self.col = 0; return
+        if char == "\b": self.col = max(0, self.col - 1); return
+        if ord(char) < 0x20: return
+        if self.col >= self.cols: self.row = min(self.rows - 1, self.row + 1); self.col = 0
+        self.cells[self.row][self.col] = char
+        self.col += 1
+
+    def _csi(self, raw):
+        private = raw.startswith(b"?"); body = raw[1:] if private else raw
+        final = chr(body[-1]); nums = body[:-1].decode("ascii", "ignore")
+        args = [int(x) if x else 1 for x in nums.split(";")] if nums else [1]
+        if final in "Hf": self.row = max(0, min(self.rows - 1, (args[0] if len(args)>0 else 1)-1)); self.col = max(0, min(self.cols - 1, (args[1] if len(args)>1 else 1)-1))
+        elif final == "G": self.col = max(0, min(self.cols - 1, args[0]-1))
+        elif final == "A": self.row = max(0, self.row-args[0])
+        elif final == "B": self.row = min(self.rows-1, self.row+args[0])
+        elif final == "C": self.col = min(self.cols-1, self.col+args[0])
+        elif final == "D": self.col = max(0, self.col-args[0])
+        elif final == "J" and args[0] in (0, 2): self.cells = [[" "]*self.cols for _ in range(self.rows)]
+        elif final == "K": self.cells[self.row][self.col if args[0] == 0 else 0:self.cols if args[0] == 0 else (self.col+1 if args[0] == 1 else self.cols)] = [" "] * (self.cols-self.col if args[0] == 0 else (self.col+1 if args[0] == 1 else self.cols))
+        elif final == "s": self.saved = (self.row, self.col)
+        elif final == "u": self.row, self.col = self.saved
+
+    def feed(self, chunk):
+        self.pending.extend(chunk)
+        if len(self.pending) > 1024 * 1024: raise AssertionError("terminal escape pending bound exceeded")
+        data = bytes(self.pending); self.pending.clear(); i = 0; plain = bytearray()
+        while i < len(data):
+            if data[i] != 0x1b: plain.append(data[i]); i += 1; continue
+            if plain: self._feed_text(bytes(plain)); plain.clear()
+            if i+1 >= len(data): self.pending.extend(data[i:]); break
+            if data[i+1] == ord("["):
+                match = re.match(rb"\x1b\[([?0-9;]*[ -/]*[@-~])", data[i:])
+                if not match: self.pending.extend(data[i:]); break
+                self._csi(match.group(1)); i += len(match.group(0)); continue
+            if data[i+1] in (ord("]"), ord("P"), ord("^"), ord("_") ):
+                end = data.find(b"\x07", i+2); terminator = 1
+                if end < 0: end = data.find(b"\x1b\\", i+2); terminator = 2
+                if end < 0: self.pending.extend(data[i:]); break
+                i = end + terminator; continue
+            i += 2
+        if plain: self._feed_text(bytes(plain))
+
+    def _feed_text(self, data):
+        for char in self.decoder.decode(data): self._put(char)
+
+    def text(self): return "\n".join("".join(row).rstrip() for row in self.cells)
+    def contains(self, marker): return marker.casefold() in self.text().casefold()
+    def has_model_status(self): return re.search(r"(?m)^model:\s*openai/" + re.escape(MODEL) + r"\s*$", self.text()) is not None
 
 def sha256(path):
     h = hashlib.sha256()
@@ -99,7 +160,7 @@ def free_loopback_port():
     sock.bind(("127.0.0.1", 0)); port = sock.getsockname()[1]; sock.close()
     return port
 
-def read_until(fd, deadline, buf, needle, start):
+def read_until(fd, deadline, buf, needle, start, screen=None):
     if needle.lower() in bytes(buf[start:]).lower():
         return
     while time.monotonic() < deadline and len(buf) < MAX_PTY:
@@ -109,6 +170,7 @@ def read_until(fd, deadline, buf, needle, start):
         except OSError as exc: raise AssertionError("PTY read failed before marker: %s" % exc)
         if not chunk: raise AssertionError("PTY EOF before marker %r" % needle)
         buf.extend(chunk)
+        if screen is not None: screen.feed(chunk)
         if needle.lower() in bytes(buf[start:]).lower(): return
     if len(buf) >= MAX_PTY: raise AssertionError("PTY capture bound reached before marker %r" % needle)
     raise AssertionError("PTY timeout before fresh marker %r" % needle)
@@ -160,7 +222,7 @@ def stop_owned_daemon(descriptor_value):
         return
 
 def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, auth_path):
-    master, slave = pty.openpty(); child = None; buf = bytearray(); descriptor_value = None; capture_added = False
+    master, slave = pty.openpty(); child = None; buf = bytearray(); descriptor_value = None; capture_added = False; screen = TerminalScreen()
     try:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
         child = subprocess.Popen([str(exe), "--data-dir", str(root/"d")], cwd=root/"project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
@@ -168,10 +230,11 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
         descriptor_value = descriptor(root/"d", daemon_port, child, time.monotonic()+20)
         descriptor_records.append({"pid": descriptor_value["_validated_pid"], "owner_pgid": descriptor_value["_owner_pgid"], "origin": descriptor_value["http_origin"], "port": daemon_port})
         descriptor_records[-1]["phase"] = "initial_frame"
-        read_until(master, time.monotonic()+20, buf, b"OpenCode", 0)
+        read_until(master, time.monotonic()+20, buf, b"OpenCode", 0, screen)
         def cmd(text, marker):
             descriptor_records[-1]["phase"] = "await_" + marker.decode("ascii")
-            start = len(buf); os.write(master, text.encode()+b"\r"); read_until(master, time.monotonic()+20, buf, marker, start)
+            start = len(buf); previous = screen.text(); os.write(master, text.encode()+b"\r"); read_until(master, time.monotonic()+20, buf, marker, start, screen)
+            if screen.text() == previous: raise AssertionError("command produced no visible terminal update")
             return bytes(buf[start:])
         if first:
             cmd("/connect", b"Connect a provider")
@@ -184,6 +247,7 @@ def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, aut
             if saved.get("type") != "api" or saved.get("key") != KEY:
                 raise AssertionError("provider setup persisted the wrong API auth schema")
             cmd(MODEL, MODEL.encode())
+            if not screen.has_model_status(): raise AssertionError("selected model is not in current status projection")
         response = cmd(PROMPTS[0 if first else 1], b"G2 first response" if first else b"G2 resumed response")
         if first and b"G2 first response" not in response: raise AssertionError("first response did not settle")
         if not first and PROMPTS[0].encode() not in bytes(buf): raise AssertionError("prior prompt absent after restart")
@@ -218,6 +282,17 @@ def self_check():
     assert HOST_LIBRARY_SUFFIX in (".dylib", ".so")
     catalog = models_json()
     assert set(catalog["openai"]["models"]) == {"gpt-5.6", MODEL}
+    terminal = TerminalScreen()
+    terminal.feed(b"\x1b[2J\x1b[2;1Hmodel: openai/gpt-5.6")
+    assert terminal.contains("model: openai/gpt-5.6")
+    terminal.feed(b"\x1b[2;22H-mini")
+    assert terminal.has_model_status()
+    terminal.feed(b"\x1b]0;ignored title\x07\x1b[1;1H\xc3")
+    terminal.feed(b"\xa9")
+    assert terminal.text().startswith("model") or "model:" in terminal.text()
+    stale = TerminalScreen()
+    stale.feed(b"gpt-5.6-mini in picker")
+    assert not stale.has_model_status()
     read_fd, write_fd = os.pipe()
     try:
         buf = bytearray(b"stale Connect provider\n")
