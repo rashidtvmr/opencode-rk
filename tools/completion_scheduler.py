@@ -183,17 +183,17 @@ async def run_rolling(tasks: list[Task], adapter: TrustedAdapter, *, capacity: i
                       max_attempts: int = 3, stage_timeout: float = 3600) -> Report:
     """Run packages with parallel preverification and one integration writer.
 
-    Implementations may run concurrently on non-overlapping grants. At most
-    ``max_unverified`` candidates may enter the candidate pipeline at once;
-    additional implementers block before publishing their candidate. Independent
-    preverification runs in parallel, while VCS integration plus post-integration
+    Implementations may run concurrently on non-overlapping grants. Reserve a
+    candidate slot before starting implementation so unpublished candidates
+    cannot accumulate behind the pipeline's hard high-water mark of four.
+    Independent preverification runs in parallel, while VCS integration plus post-integration
     verification remains serialized through exactly one integration future.
     """
     by_id = validate_tasks(tasks)
     if type(capacity) is not int or not 1 <= capacity <= 20:
         raise ValueError("capacity must be between 1 and 20")
-    if type(max_unverified) is not int or not 1 <= max_unverified <= 20:
-        raise ValueError("unverified candidate cap must be between 1 and 20")
+    if type(max_unverified) is not int or not 1 <= max_unverified <= 4:
+        raise ValueError("unverified candidate cap must be between 1 and 4")
     if type(max_preverify) is not int or not 1 <= max_preverify <= 20:
         raise ValueError("preverification capacity must be between 1 and 20")
     if type(max_attempts) is not int or not 1 <= max_attempts <= 3:
@@ -213,10 +213,10 @@ async def run_rolling(tasks: list[Task], adapter: TrustedAdapter, *, capacity: i
     async def execute(task: Task) -> Candidate:
         acquired = False
         try:
-            candidate = await asyncio.wait_for(adapter.execute(task), timeout=stage_timeout)
-            validate_candidate(task, candidate)
             await asyncio.wait_for(candidate_slots.acquire(), timeout=stage_timeout)
             acquired = True
+            candidate = await asyncio.wait_for(adapter.execute(task), timeout=stage_timeout)
+            validate_candidate(task, candidate)
             return candidate
         except BaseException:
             if acquired:
@@ -276,7 +276,9 @@ async def run_rolling(tasks: list[Task], adapter: TrustedAdapter, *, capacity: i
                 integrating = asyncio.create_task(integrate_verified(task, candidate))
 
             for task in tasks:
-                if len(running) >= capacity:
+                retained = (len(running) + len(candidates) + len(verifying)
+                            + len(integration_ready) + int(integrating is not None))
+                if len(running) >= capacity or retained >= max_unverified:
                     break
                 if report.statuses[task.id] != "pending":
                     continue
