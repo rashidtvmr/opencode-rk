@@ -1,40 +1,23 @@
-# V2 Web authenticated-launch fixture maintenance
+# V2 web authenticated-launch fixture
 
-Base: `710a410e0ce32c716c40217696b515caa6c52310`.
+Source-only candidate based on `684032a`.
 
-The accepted browser transport requires the launcher credential before `/api/*`
-requests. Legacy component tests launched a fresh jsdom page without it. On the
-unchanged base, the focused streaming suite fails before reaching its streaming
-assertions: `Unable to find role="heading" and name "Streaming turn"`.
-Baseline command: `pnpm exec vitest run src/App.stream.test.tsx --maxWorkers=1
---minWorkers=1`, exit 1 in 2.95s. Retained command/log evidence:
-`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-web-auth-baseline-710a410-ru8e8iny`.
+The browser API transport now fails closed for every `/api/*` request unless a
+successfully validated launcher fragment has been consumed into tab memory.
+An unrecognized or malformed non-empty fragment no longer bypasses the guard.
+Valid `#oc2-token=<64 hex>` fragments retain the existing behavior: the token
+is consumed, removed from the URL while preserving path/query, and used only
+as an in-memory bearer header. SSR behavior and public non-API requests are
+unchanged.
 
-This independent test-owner maintenance supplies a synthetic launcher fragment
-in `web/src/test/setup.ts`. Existing test-method source and all product files
-remain byte-identical to the base. New credential-boundary controls explicitly
-clear that fragment and verify missing/malformed credentials fail before fetch,
-valid credentials leave the URL before fetch, and a new document needs a fresh
-credential. They guard against accidentally making authentication optional for
-the older component fixtures.
+Frozen evidence supplied by the test owner:
 
-No product acceptance is claimed by this fixture repair. Commands, hashes and
-remaining failures are recorded after execution below.
+- setup fixture hash: `d8ffbf5e1aaee39f3dd33d18c1fe9629b39ce2831e826832faa834687f2726a7`
+- auth tests hash: `b528f74158eae54a60720a8feb3e286298516a81d7cca086fae620a172dd1291`
+- baseline runtime source: `684032a`
+- focused pre-fix result: original stream test and two auth controls GREEN;
+  malformed-fragment fail-closed control RED because `listModels` reached
+  `fetch` instead of throwing `Re-authentication required`.
 
-## Focused executable evidence and new transport RED
-
-With the synthetic launcher fragment, the original streaming test passes with
-all its assertions unchanged. The new missing-credential and valid-fragment
-controls also pass. The malformed-fragment control fails: the production API
-client falls through to fetch when a nonempty unrecognized fragment is present.
-The expected fail-closed request boundary is already enforced for an empty
-fragment. This is a reproduced transport failure ready for a minimal product
-repair, with the three new assertions frozen before that repair.
-
-Evidence:
-`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-web-auth-fixture-qf9n1tbx`.
-Command: `node /Users/mymac/Projects/opencode-rk-main-v2/web/node_modules/vitest/vitest.mjs
-run src/App.stream.test.tsx src/lib/api.auth.test.ts --maxWorkers=1 --minWorkers=1`.
-Result: 3/4 passed, malformed-credential test RED. The direct pinned Vitest
-entrypoint avoids a pnpm auto-install check rejecting a shared dependency symlink;
-that earlier infrastructure failure is retained separately.
+No tests, setup files, manifests, or dependencies were modified by this
+candidate. Parent must run the focused and full web suites independently.
