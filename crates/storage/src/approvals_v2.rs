@@ -134,7 +134,10 @@ impl ApprovalsV2 {
     ) -> Result<usize, StorageError> {
         let limit = limit.clamp(1, MAX_SWEEP_ROWS) as i64;
         let changed = connection.execute(
-            "UPDATE approvals SET state = 3 WHERE pk IN (
+            "UPDATE approvals
+             SET state = 3,
+                 resolved_at_us = ?1
+             WHERE pk IN (
                SELECT pk FROM approvals
                WHERE state = 0 AND expires_at_us <= ?1
                ORDER BY expires_at_us ASC, pk ASC LIMIT ?2
