@@ -1,80 +1,260 @@
 #!/usr/bin/env python3
-"""Bounded loopback provider/daemon harness for the real-browser G6 journey."""
-import argparse, hashlib, http.server, json, os, pathlib, subprocess, tempfile, threading, time
+"""Bounded loopback provider and owned-daemon harness for G6 browser proof."""
 
-ROOT = pathlib.Path('/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp')
-MARKER = 'G6 browser fixture marker\n'; CALL_ID = 'g6_write_1'; MAX_BODY = 512 * 1024
+import argparse
+import hashlib
+import http.server
+import json
+import os
+import pathlib
+import re
+import signal
+import socket
+import subprocess
+import tempfile
+import time
+import urllib.request
+import urllib.error
+
+ROOT = pathlib.Path("/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp")
+APPROVED_ARTIFACT_ROOT = pathlib.Path("/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode")
+MARKER = "G6 browser fixture marker\n"
+CALL_ID = "g6_write_1"
+FIRST_PROMPT = "write the browser marker"
+SECOND_PROMPT = "confirm the browser marker"
+RESUMED_PROMPT = "resume after restart"
+MAX_REQUESTS = 4
+MAX_REQUEST_BYTES = 128 * 1024
+MAX_EVIDENCE_BYTES = 512 * 1024
+TOKEN_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
 
 def sha256(path):
-    h = hashlib.sha256()
-    with open(path, 'rb') as f:
-        for b in iter(lambda: f.read(65536), b''): h.update(b)
-    return h.hexdigest()
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(65536), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
-class State:
-    def __init__(self, project): self.project, self.requests, self.failed = str(project), [], None
-    def response(self, raw):
-        if len(raw) > MAX_BODY: raise ValueError('provider request exceeded bound')
-        head, _, body = raw.partition(b'\r\n\r\n')
-        if b'authorization: bearer fixture-key' not in head.lower(): raise ValueError('wrong provider key')
-        value = json.loads(body); self.requests.append(value)
-        if len(self.requests) > 8: raise ValueError('provider request count exceeded bound')
-        items = value.get('input', []); pair = [x for x in items if x.get('type') in ('function_call', 'function_call_output') and x.get('call_id') == CALL_ID]
-        if len(self.requests) == 1:
-            if pair: raise ValueError('first request unexpectedly contains tool pair')
-            args = {'path': os.path.join(self.project, 'g6-browser-marker.txt'), 'content': MARKER, 'append': False}
-            event = {'type':'response.output_item.done','item':{'type':'function_call','id':'g6-item-1','call_id':CALL_ID,'name':'write','arguments':json.dumps(args,separators=(',',':'))}}
-            return self.sse(event, '')
-        calls = [x for x in pair if x.get('type') == 'function_call']; outputs = [x for x in pair if x.get('type') == 'function_call_output']
-        if len(calls) != 1 or len(outputs) != 1 or calls[0].get('name') != 'write' or outputs[0].get('output') != 'write success': raise ValueError('typed call/output pair missing or duplicated')
-        text = {2:'G6 first turn settled', 3:'G6 second turn settled', 4:'G6 resumed turn settled'}.get(len(self.requests))
-        if not text: raise ValueError('unexpected extra provider request')
-        return self.sse(None, text)
-    @staticmethod
-    def sse(event, text):
-        out = ''
-        if event: out += 'event: response.output_item.done\ndata: '+json.dumps(event)+'\n\n'
-        if text: out += 'event: response.output_text.delta\ndata: '+json.dumps({'type':'response.output_text.delta','delta':text})+'\n\n'
-        return (out+'event: response.completed\ndata: {"type":"response.completed","response":{"id":"g6-fixture","status":"completed"}}\n\n').encode()
+
+def atomic_json(path, value):
+    temporary = path.with_name(path.name + ".tmp")
+    temporary.write_text(json.dumps(value, indent=2) + "\n")
+    os.replace(temporary, path)
+
+
+def check_build(binary, manifest):
+    if not binary.is_absolute() or not binary.is_file():
+        raise ValueError("--binary must be an absolute regular file")
+    build = json.loads(manifest.read_text())
+    source = build.get("source_sha") or build.get("sourceSha") or build.get("git_sha")
+    expected = (build.get("binary_sha256") or build.get("binarySha256") or "").lower()
+    if not isinstance(source, str) or not re.fullmatch(r"[0-9a-fA-F]{40}", source):
+        raise ValueError("build.json source SHA must be 40 hexadecimal characters")
+    if not re.fullmatch(r"[0-9a-f]{64}", expected) or sha256(binary) != expected:
+        raise ValueError("installed binary hash does not match build.json")
+    return source, expected
+
+
+class ProviderState:
+    def __init__(self, project):
+        self.project = project
+        self.requests = []
+        self.restart_generation = 0
+        self.failed = None
+
+    def set_restart_generation(self, generation):
+        self.restart_generation = generation
+
+    def response(self, headers, body):
+        if len(body) > MAX_REQUEST_BYTES:
+            raise ValueError("provider request exceeded 128 KiB")
+        if headers.get("Authorization") != "Bearer fixture-key":
+            raise ValueError("provider did not receive exact fixture credential")
+        value = json.loads(body.decode("utf-8"))
+        self.requests.append(value)
+        number = len(self.requests)
+        if number > MAX_REQUESTS:
+            raise ValueError("provider request count exceeded four")
+        inputs = value.get("input")
+        if not isinstance(inputs, list):
+            raise ValueError("provider input is not an array")
+        users = [item.get("content") for item in inputs if item.get("role") == "user"]
+        expected_users = {
+            1: [FIRST_PROMPT],
+            2: [FIRST_PROMPT],
+            3: [FIRST_PROMPT, SECOND_PROMPT],
+            4: [FIRST_PROMPT, SECOND_PROMPT, RESUMED_PROMPT],
+        }[number]
+        if users != expected_users:
+            raise ValueError(f"unexpected durable user history on request {number}: {users!r}")
+        calls = [x for x in inputs if x.get("type") == "function_call"]
+        outputs = [x for x in inputs if x.get("type") == "function_call_output"]
+        if number == 1:
+            if calls or outputs:
+                raise ValueError("first request contains an unexpected tool pair")
+            arguments = json.dumps({"path": "g6-browser-marker.txt", "content": MARKER, "append": False}, separators=(",", ":"))
+            return sse_function_call(arguments)
+        if not (pathlib.Path(self.project, "g6-browser-marker.txt").is_file() and pathlib.Path(self.project, "g6-browser-marker.txt").read_text() == MARKER):
+            raise ValueError("write success was reported without the exact marker bytes")
+        if len(calls) != 1 or len(outputs) != 1 or len(inputs) != len([x for x in inputs if x.get("role") == "user"]) + 2:
+            raise ValueError("request does not contain exactly one typed call and output")
+        call, output = calls[0], outputs[0]
+        expected_args = json.dumps({"path": "g6-browser-marker.txt", "content": MARKER, "append": False}, separators=(",", ":"))
+        if call != {"type": "function_call", "call_id": CALL_ID, "name": "write", "arguments": expected_args}:
+            raise ValueError("typed call identity or arguments changed")
+        if output != {"type": "function_call_output", "call_id": CALL_ID, "output": "write success"}:
+            raise ValueError("typed output identity or result changed")
+        if number == 4 and self.restart_generation < 1:
+            raise ValueError("resumed request arrived before a fresh daemon restart")
+        return sse_text({2: "G6 first turn settled", 3: "G6 second turn settled", 4: "G6 resumed turn settled"}[number])
+
+
+def sse_function_call(arguments):
+    event = {"type": "response.output_item.done", "item": {"type": "function_call", "id": "g6-item-1", "call_id": CALL_ID, "name": "write", "arguments": arguments}}
+    return ("event: response.output_item.done\ndata: " + json.dumps(event) + "\n\n" + completed()).encode()
+
+
+def sse_text(text):
+    return ("event: response.output_text.delta\ndata: " + json.dumps({"type": "response.output_text.delta", "delta": text}) + "\n\n" + completed()).encode()
+
+
+def completed():
+    return 'event: response.completed\ndata: {"type":"response.completed","response":{"id":"g6-fixture","status":"completed"}}\n\n'
+
 
 class Handler(http.server.BaseHTTPRequestHandler):
     def do_POST(self):
-        n = int(self.headers.get('Content-Length', '-1'))
-        if n < 0 or n > MAX_BODY: self.send_error(413); return
+        length = int(self.headers.get("Content-Length", "-1"))
+        if length < 0 or length > MAX_REQUEST_BYTES:
+            self.send_error(413)
+            return
         try:
-            raw = ('POST '+self.path+' HTTP/1.1\r\n'+str(self.headers)+'\r\n').encode() + self.rfile.read(n)
-            body = self.server.state.response(raw); self.send_response(200); self.send_header('Content-Type','text/event-stream'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
-        except Exception as e: self.server.state.failed = str(e); self.send_error(500, str(e))
-    def log_message(self, *_): pass
+            response = self.server.state.response(self.headers, self.rfile.read(length))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(response)))
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(response)
+        except Exception as error:
+            self.server.state.failed = str(error)
+            self.send_error(500, str(error))
+
+    def log_message(self, *_):
+        return
+
+
+class Provider(http.server.HTTPServer):
+    allow_reuse_address = True
+
 
 def stop(child):
     if child and child.poll() is None:
         child.terminate()
-        try: child.wait(2)
-        except subprocess.TimeoutExpired: child.kill(); child.wait(2)
+        try:
+            child.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            child.kill()
+            child.wait(timeout=2)
+
+
+def descriptor(path, deadline, different_pid=None):
+    while time.monotonic() < deadline:
+        try:
+            value = json.loads(path.read_text())
+            if (isinstance(value.get("pid"), int) and (different_pid is None or value["pid"] != different_pid)
+                    and TOKEN_RE.fullmatch(value.get("auth_token", ""))):
+                return value
+        except (OSError, ValueError):
+            pass
+        time.sleep(0.02)
+    raise RuntimeError("authenticated daemon descriptor readiness timeout")
+
+
+def healthy(value):
+    host = value["http_origin"].removeprefix("http://")
+    request = urllib.request.Request("http://" + host + "/health", headers={"Authorization": "Bearer " + value["auth_token"]})
+    try:
+        with urllib.request.urlopen(request, timeout=1) as response:
+            return response.status == 200
+    except (OSError, urllib.error.URLError):
+        return False
+
+
+def self_check():
+    """Exercise the real loopback HTTP framing without launching a daemon."""
+    root = pathlib.Path(tempfile.mkdtemp(prefix="g6-self-check-", dir=str(ROOT)))
+    project = root / "project"
+    project.mkdir(parents=True)
+    state = ProviderState(project)
+    server = Provider(("127.0.0.1", 0), Handler)
+    server.state = state
+    server.timeout = 0.05
+    try:
+        import http.client
+        thread = __import__("threading").Thread(target=server.serve_forever)
+        thread.start()
+        connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
+        body = json.dumps({"input": [{"role": "user", "content": FIRST_PROMPT}]}).encode()
+        connection.request("POST", "/v1/responses", body, {"Authorization": "Bearer fixture-key", "Content-Length": str(len(body))})
+        assert connection.getresponse().status == 200
+        connection.close()
+        assert len(state.requests) == 1
+        print("fixture self-check: loopback HTTP framing and credential assertion passed")
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=2)
+
 
 def main():
-    p = argparse.ArgumentParser(); p.add_argument('--binary', required=True); p.add_argument('--artifact-dir', required=True); p.add_argument('--build-json'); a = p.parse_args()
-    binary = pathlib.Path(a.binary).resolve(); artifact = pathlib.Path(a.artifact_dir).resolve(); artifact.mkdir(parents=True, exist_ok=True)
-    build = json.loads(pathlib.Path(a.build_json or artifact/'build.json').read_text()); source = build.get('source_sha') or build.get('sourceSha') or build.get('git_sha'); expected = (build.get('binary_sha256') or build.get('binarySha256') or '').lower(); actual = sha256(binary)
-    if not source or not expected or actual != expected: raise SystemExit('build.json identity/hash mismatch')
-    ROOT.mkdir(parents=True, exist_ok=True); root = pathlib.Path(tempfile.mkdtemp(prefix='g6-web-', dir=ROOT)); home, data, project = [root/x for x in ('home','data','project')]
-    for x in (home,data,project): x.mkdir()
-    (home/'.codex').mkdir(); auth = home/'.codex/auth.json'; auth.write_text('{"access_token":"fixture-key"}\n'); os.chmod(auth, 0o600)
-    state = State(project); server = http.server.ThreadingHTTPServer(('127.0.0.1',0), Handler); server.state = state; threading.Thread(target=server.serve_forever, daemon=True).start(); base = 'http://127.0.0.1:%d/v1' % server.server_address[1]
-    env = {'HOME':str(home),'XDG_CONFIG_HOME':str(home/'.config'),'XDG_DATA_HOME':str(data),'OPENCODE_RK_HOME':str(data),'PATH':'/usr/bin:/bin','LANG':'C','OPENAI_API_KEY':'fixture-key','OPENAI_BASE_URL':base,'OPENCODE_RK_TURN_TOOLS':'write','OPENCODE_RK_TURN_MAX_STEPS':'4'}
-    def launch(): return subprocess.Popen([str(binary),'serve','--listen','127.0.0.1:0'], cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    child = launch(); control = artifact/'control'; control.mkdir(exist_ok=True); descriptor = data/'runtime/backend.json'; end = time.monotonic()+15
-    while time.monotonic() < end and not descriptor.exists(): time.sleep(.02)
-    if not descriptor.exists(): stop(child); raise SystemExit('daemon descriptor readiness timeout')
-    d = json.loads(descriptor.read_text()); meta = {'origin':d['http_origin'],'launch_fragment':d['http_origin']+'#oc2-token='+d['auth_token'],'pid':child.pid,'project':str(project),'marker':str(project/'g6-browser-marker.txt'),'source_sha':str(source),'binary_sha256':actual,'provider':base,'control_dir':str(control),'request_evidence':str(artifact/'provider-requests.json'),'auth_json_mode':'0600'}; (artifact/'fixture-metadata.json').write_text(json.dumps(meta,indent=2)+'\n')
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--binary")
+    parser.add_argument("--artifact-dir", required=True)
+    parser.add_argument("--build-json")
+    parser.add_argument("--self-check", action="store_true")
+    args = parser.parse_args()
+    if args.self_check:
+        self_check()
+        return
+    if not args.binary:
+        parser.error("--binary is required unless --self-check is used")
+    binary = pathlib.Path(args.binary).resolve()
+    artifacts = pathlib.Path(args.artifact_dir).resolve()
+    artifacts.mkdir(parents=True, exist_ok=True)
+    manifest = pathlib.Path(args.build_json or artifacts / "build.json").resolve()
+    source_sha, binary_sha = check_build(binary, manifest)
+    if not str(artifacts).startswith(str(APPROVED_ARTIFACT_ROOT)):
+        raise ValueError("artifact directory must be under the approved OpenCode temporary root")
+    root = pathlib.Path(tempfile.mkdtemp(prefix="g6-web-", dir=str(ROOT)))
+    home, data, project = (root / name for name in ("home", "data", "project"))
+    for path in (home, data, project): path.mkdir()
+    auth = data / "opencode" / "auth.json"; auth.parent.mkdir(); auth.write_text(json.dumps({"openai": {"type": "api", "key": "fixture-key"}}) + "\n"); os.chmod(auth, 0o600)
+    state = ProviderState(project)
+    server = Provider(("127.0.0.1", 0), Handler); server.state = state; server.timeout = 0.05
+    provider_url = "http://127.0.0.1:%d/v1" % server.server_address[1]
+    env = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"), "XDG_DATA_HOME": str(data), "OPENCODE_RK_HOME": str(data), "PATH": "/usr/bin:/bin", "LANG": "C", "OPENAI_BASE_URL": provider_url, "OPENCODE_RK_TURN_TOOLS": "write", "OPENCODE_RK_TURN_MAX_STEPS": "4"}
+    child = None; control = artifacts / "control"; control.mkdir(exist_ok=True); metadata_path = artifacts / "fixture-metadata.json"; descriptor_path = data / "runtime" / "backend.json"
     try:
-        started = time.monotonic()
-        while time.monotonic()-started < 600 and not (control/'stop.request').exists():
-            if (control/'restart.request').exists(): (control/'restart.request').unlink(); stop(child); child=launch(); meta['pid']=child.pid; (artifact/'fixture-metadata.json').write_text(json.dumps(meta,indent=2)+'\n')
+        child = subprocess.Popen([str(binary), "serve", "--listen", "127.0.0.1:0"], cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        current = descriptor(descriptor_path, time.monotonic() + 15)
+        meta = {"origin": current["http_origin"], "launch_fragment": current["http_origin"] + "#oc2-token=" + current["auth_token"], "pid": child.pid, "restart_generation": 0, "project": str(project), "marker": str(project / "g6-browser-marker.txt"), "source_sha": source_sha, "binary_sha256": binary_sha, "provider": provider_url, "control_dir": str(control), "request_evidence": str(artifacts / "provider-requests.json"), "auth_json": str(auth), "auth_json_mode": "0600"}
+        atomic_json(metadata_path, meta)
+        while True:
+            server.handle_request()
+            if (control / "restart.request").exists():
+                (control / "restart.request").unlink(); old_pid = child.pid; stop(child); child = subprocess.Popen([str(binary), "serve", "--listen", "127.0.0.1:0"], cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                fresh = descriptor(descriptor_path, time.monotonic() + 15, old_pid)
+                if fresh["pid"] == old_pid or not healthy(fresh): raise RuntimeError("restart did not publish a fresh healthy descriptor")
+                state.set_restart_generation(1); meta.update(origin=fresh["http_origin"], launch_fragment=fresh["http_origin"] + "#oc2-token=" + fresh["auth_token"], pid=child.pid, restart_generation=1); atomic_json(metadata_path, meta)
             if state.failed: raise RuntimeError(state.failed)
-            time.sleep(.05)
+            if (control / "stop.request").exists() or time.monotonic() > meta.setdefault("deadline", time.monotonic() + 600): break
     finally:
-        (artifact/'provider-requests.json').write_text(json.dumps(state.requests,indent=2)[:MAX_BODY]+'\n'); stop(child); server.shutdown(); server.server_close()
+        evidence = json.dumps(state.requests, indent=2).encode()
+        if len(evidence) > MAX_EVIDENCE_BYTES: raise RuntimeError("provider evidence exceeded 512 KiB")
+        (artifacts / "provider-requests.json").write_bytes(evidence + b"\n"); stop(child); server.server_close()
 
-if __name__ == '__main__': main()
+
+if __name__ == "__main__":
+    main()
