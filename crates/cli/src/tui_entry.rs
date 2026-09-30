@@ -553,6 +553,7 @@ fn native_loop(
                 .unwrap_or_else(|| "daemon: offline".to_string()),
         ];
         if let Some(active) = worker.as_mut() {
+            let mut settled = false;
             while let Some(event) = active.try_next() {
                 match event {
                     native_turn::Event::User => {}
@@ -578,6 +579,7 @@ fn native_loop(
                     }
                     native_turn::Event::Assistant(text) => {
                         partial.clear();
+                        settled = true;
                         append_transcript(
                             &mut transcript,
                             format!("assistant: {}", native_transcript::strip_ansi(&text)),
@@ -585,6 +587,7 @@ fn native_loop(
                     }
                     native_turn::Event::Error(error) => {
                         partial.clear();
+                        settled = true;
                         append_transcript(
                             &mut transcript,
                             format!("error: {}", native_transcript::strip_ansi(&error)),
@@ -592,7 +595,7 @@ fn native_loop(
                     }
                 }
             }
-            if active.is_finished() {
+            if settled || active.is_finished() {
                 worker = None;
             }
         }
@@ -758,10 +761,12 @@ fn native_loop(
                     continue;
                 }
                 if !text.is_empty() {
+                    if worker.is_some() {
+                        // Do not consume or echo this draft while busy.
+                        continue;
+                    }
                     if let Some(snapshot) = live {
-                        if worker.is_some() {
-                            continue;
-                        } else {
+                        {
                             append_transcript(&mut transcript, format!("you: {text}"));
                             let result = selected
                                 .as_ref()
