@@ -4,9 +4,11 @@
 mod mcp_config;
 
 use mcp_config::{
-    load_config, McpConfigBounds, McpConfigSchema, McpConfigStatus, merge_configs, validate_url_scheme,
+    McpConfigBounds, McpConfigSchema, McpConfigStatus, load_config, merge_configs,
+    validate_url_scheme,
 };
 use serde_json::json;
+use std::collections::HashMap;
 
 const DEFAULT_BOUNDS: McpConfigBounds = McpConfigBounds {
     max_args: 64,
@@ -44,7 +46,10 @@ fn full_config() -> McpConfigSchema {
 fn config_schema_valid_minimal() {
     let cfg = valid_config();
     let result = load_config(&json!(cfg), &DEFAULT_BOUNDS);
-    assert!(result.is_ok(), "valid minimal config should pass: {result:?}");
+    assert!(
+        result.is_ok(),
+        "valid minimal config should pass: {result:?}"
+    );
 }
 
 #[test]
@@ -73,9 +78,15 @@ fn config_schema_missing_command_fails() {
 fn config_schema_args_count_bounds() {
     let cfg = json!({
         "command": "/bin/echo",
-        "args": [format!("--arg{}", i).to_string(); 100],
+        "args": (0..100).map(|i| format!("--arg{i}")).collect::<Vec<_>>(),
     });
-    let result = load_config(&cfg, &McpConfigBounds { max_args: 64, ..DEFAULT_BOUNDS });
+    let result = load_config(
+        &cfg,
+        &McpConfigBounds {
+            max_args: 64,
+            ..DEFAULT_BOUNDS
+        },
+    );
     assert!(result.is_err(), "100 args must exceed max 64");
 }
 
@@ -84,9 +95,15 @@ fn config_schema_args_bytes_bounds() {
     let long_arg = " very long argument that exceeds the maximum allowed bytes total".to_owned();
     let cfg = json!({
         "command": "/bin/echo",
-        "args": [long_arg.clone(); 10],
+        "args": vec![long_arg.clone(); 10],
     });
-    let result = load_config(&cfg, &McpConfigBounds { max_args_bytes: 50, ..DEFAULT_BOUNDS });
+    let result = load_config(
+        &cfg,
+        &McpConfigBounds {
+            max_args_bytes: 50,
+            ..DEFAULT_BOUNDS
+        },
+    );
     assert!(result.is_err(), "args bytes must exceed max 50");
 }
 
@@ -99,21 +116,32 @@ fn config_schema_env_count_bounds() {
         "command": "/bin/echo",
         "env": many_env,
     });
-    let result = load_config(&cfg, &McpConfigBounds { max_env: 32, ..DEFAULT_BOUNDS });
+    let result = load_config(
+        &cfg,
+        &McpConfigBounds {
+            max_env: 32,
+            ..DEFAULT_BOUNDS
+        },
+    );
     assert!(result.is_err(), "50 env entries must exceed max 32");
 }
 
 #[test]
 fn config_schema_env_bytes_bounds() {
     let big_val = " ".repeat(200);
-    let many_env: HashMap<String, String> = (0..=5)
-        .map(|i| (format!("VAR"), big_val.clone()))
-        .collect();
+    let many_env: HashMap<String, String> =
+        (0..=5).map(|i| (format!("VAR"), big_val.clone())).collect();
     let cfg = json!({
         "command": "/bin/echo",
         "env": many_env,
     });
-    let result = load_config(&cfg, &McpConfigBounds { max_env_bytes: 10, ..DEFAULT_BOUNDS });
+    let result = load_config(
+        &cfg,
+        &McpConfigBounds {
+            max_env_bytes: 10,
+            ..DEFAULT_BOUNDS
+        },
+    );
     assert!(result.is_err(), "env bytes must exceed max 10");
 }
 
@@ -124,7 +152,13 @@ fn config_schema_url_length_bounds() {
         "command": "/bin/echo",
         "url": long_url,
     });
-    let result = load_config(&cfg, &McpConfigBounds { max_url_len: 100, ..DEFAULT_BOUNDS });
+    let result = load_config(
+        &cfg,
+        &McpConfigBounds {
+            max_url_len: 100,
+            ..DEFAULT_BOUNDS
+        },
+    );
     assert!(result.is_err(), "URL length must exceed max 100");
 }
 
@@ -145,7 +179,10 @@ fn config_schema_traversal_partial() {
         "command": "/bin/true",
     });
     let result = load_config(&cfg, &DEFAULT_BOUNDS);
-    assert!(result.is_ok(), "partial config with only command should be OK");
+    assert!(
+        result.is_ok(),
+        "partial config with only command should be OK"
+    );
     let loaded = result.unwrap();
     assert_eq!(loaded.command, "/bin/true");
     assert!(loaded.args.is_empty());
@@ -192,13 +229,23 @@ fn merge_precedence_project_fallback_when_user_missing() {
     let project = McpConfigSchema {
         command: "/bin/echo".to_owned(),
         args: vec!["--project".to_owned()],
-        env: [("FROM".to_owned(), "project".to_owned())].iter().cloned().collect(),
+        env: [("FROM".to_owned(), "project".to_owned())]
+            .iter()
+            .cloned()
+            .collect(),
         ..Default::default()
     };
     let user = McpConfigSchema::default();
     let merged = merge_configs(&project, &user);
-    assert_eq!(merged.command, "/bin/echo", "project command used when user empty");
-    assert_eq!(merged.args, vec!["--project"], "project args used when user empty");
+    assert_eq!(
+        merged.command, "/bin/echo",
+        "project command used when user empty"
+    );
+    assert_eq!(
+        merged.args,
+        vec!["--project"],
+        "project args used when user empty"
+    );
     assert_eq!(
         merged.env.get("FROM"),
         Some(&"project".to_owned()),
@@ -222,7 +269,10 @@ fn status_summary_with_errors() {
     });
     let result = load_config(&cfg, &DEFAULT_BOUNDS);
     let status = McpConfigStatus::from_result(&result, &cfg);
-    assert!(!status.valid, "status should be invalid when command missing");
+    assert!(
+        !status.valid,
+        "status should be invalid when command missing"
+    );
     assert!(!status.errors.is_empty(), "should have validation errors");
 }
 
