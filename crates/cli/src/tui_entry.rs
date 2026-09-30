@@ -26,11 +26,12 @@ use clap::{Args, ValueEnum};
 #[cfg(feature = "native")]
 use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use opencode_rk_sessions::tui_state::{
-    Composer, MAX_MEMORY_FILES, MAX_SOURCES, MemoryFile, MemoryViewer, SourceUsage, StatusAction,
-    StatusItem, SubmitKeymap, context_breakdown, footer_hints, keybinding_help, status_click,
+    context_breakdown, footer_hints, keybinding_help, status_click, Composer, MemoryFile,
+    MemoryViewer, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES,
+    MAX_SOURCES,
 };
 #[cfg(feature = "native")]
-use rustix::event::{PollFd, PollFlags, Timespec, poll};
+use rustix::event::{poll, PollFd, PollFlags, Timespec};
 #[cfg(feature = "native")]
 use std::os::fd::AsFd;
 use std::{
@@ -560,10 +561,10 @@ fn native_loop(
                         partial.push_str(&delta);
                         replace_partial(&mut transcript, &partial);
                     }
-                    native_turn::Event::ToolCall { name } => {
+                    native_turn::Event::ToolCall(name) => {
                         append_transcript(&mut transcript, format!("tool: {name}"));
                     }
-                    native_turn::Event::ToolOutput { name, output } => {
+                    native_turn::Event::ToolOutput(name, output) => {
                         append_transcript(&mut transcript, format!("tool {name}: {output}"));
                     }
                     native_turn::Event::Assistant(text) => {
@@ -630,8 +631,12 @@ fn native_loop(
         lines.extend(panel);
         native_paint(&mut renderer, &lines)?;
         let timeout = if worker.is_some() { 20 } else { 250 };
-        let mut fds = [PollFd::new(input.as_fd(), PollFlags::IN)];
-        let wait = Timespec::from(Duration::from_millis(timeout));
+        let fd = input.as_fd();
+        let mut fds = [PollFd::new(&fd, PollFlags::IN)];
+        let wait = Timespec {
+            tv_sec: 0,
+            tv_nsec: (timeout as i64) * 1_000_000,
+        };
         if poll(&mut fds, Some(&wait))? == 0 {
             continue;
         }
