@@ -3,7 +3,8 @@
 
 Only trusted adapters may implement execution, independent verification and VCS
 integration. This module launches no CLI processes and writes no accepted flags.
-Tasks represent frozen, one-file child lanes, NOT entire multi-file parents.
+Tasks represent bounded observable work packages. A package may own multiple
+explicit paths when one product behavior genuinely spans them.
 Durable leases, OS isolation, resource measurement and provider credentials must
 be supplied by the host; COORD tasks keep those obligations explicitly open.
 """
@@ -36,6 +37,7 @@ class Task:
     frozen_tests_sha256: str
     test_obligations: tuple[str, ...]
     dependencies: tuple[str, ...] = ()
+    owned_paths: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -78,7 +80,7 @@ class Report:
 
 class TrustedAdapter(Protocol):
     async def execute(self, task: Task) -> Candidate:
-        """Use actual native subagent API with a frozen one-file OS grant."""
+        """Use the native subagent API with the package's explicit path grant."""
         ...
 
     async def verify(self, task: Task, candidate: Candidate) -> Verification:
@@ -96,7 +98,7 @@ class TrustedAdapter(Protocol):
 
 def normalized_path(value: str) -> str:
     if not isinstance(value, str) or not value or "\\" in value or value.endswith("/"):
-        raise ValueError("one explicit relative owned file is required")
+        raise ValueError("an explicit relative owned path is required")
     if pathlib.PurePosixPath(value).is_absolute() or any(p in {"", ".", ".."} for p in value.split("/")) or any(c in value for c in "*?["):
         raise ValueError("wildcard, traversal or absolute ownership is forbidden")
     return value
@@ -104,6 +106,19 @@ def normalized_path(value: str) -> str:
 
 def overlaps(a: str, b: str) -> bool:
     return a == b or a.startswith(b + "/") or b.startswith(a + "/")
+
+
+def task_paths(task: Task) -> tuple[str, ...]:
+    """Return the exact bounded grant while preserving the V1 constructor API."""
+    paths = (task.owned_path, *task.owned_paths)
+    if len(set(paths)) != len(paths):
+        raise ValueError("duplicate owned path in package grant")
+    for path in paths:
+        normalized_path(path)
+    for index, path in enumerate(paths):
+        if any(overlaps(path, other) for other in paths[index + 1:]):
+            raise ValueError("overlapping owned paths inside one package are redundant")
+    return paths
 
 
 def validate_tasks(tasks: list[Task]) -> dict[str, Task]:
@@ -116,7 +131,7 @@ def validate_tasks(tasks: list[Task]) -> dict[str, Task]:
     for task in tasks:
         if not task.id or not HASH.fullmatch(task.frozen_tests_sha256):
             raise ValueError("task requires identity and trusted frozen test hash")
-        normalized_path(task.owned_path)
+        task_paths(task)
         if not task.test_obligations or len(set(task.test_obligations)) != len(task.test_obligations):
             raise ValueError("nonempty unique test obligations required")
         if not set(task.dependencies) <= by_id.keys():
@@ -136,8 +151,9 @@ def validate_tasks(tasks: list[Task]) -> dict[str, Task]:
 def validate_candidate(task: Task, candidate: Candidate) -> None:
     if not isinstance(candidate, Candidate) or candidate.task_id != task.id or not REV.fullmatch(candidate.revision) or not candidate.worker:
         raise Rejected("candidate identity/revision missing")
-    if candidate.changed_paths != (task.owned_path,):
-        raise Rejected("candidate does not match one-file grant")
+    grant = task_paths(task)
+    if len(set(candidate.changed_paths)) != len(candidate.changed_paths) or set(candidate.changed_paths) != set(grant):
+        raise Rejected("candidate does not match explicit package path grant")
 
 
 def validate_proof(task: Task, candidate: Candidate, proof: Verification, revision: str) -> None:
@@ -156,7 +172,7 @@ def validate_proof(task: Task, candidate: Candidate, proof: Verification, revisi
 
 
 async def run_rolling(tasks: list[Task], adapter: TrustedAdapter, *, capacity: int = 20,
-                      max_unverified: int = 20, max_attempts: int = 3,
+                      max_unverified: int = 4, max_attempts: int = 3,
                       stage_timeout: float = 3600) -> Report:
     """Refill on individual completion; retain locks until post-merge proof.
 
@@ -221,8 +237,13 @@ async def run_rolling(tasks: list[Task], adapter: TrustedAdapter, *, capacity: i
                     continue
                 if any(report.statuses[dep] != "accepted" for dep in task.dependencies):
                     continue
-                held = [by_id[tid].owned_path for tid, status in report.statuses.items() if status in {"running", "queued", "verifying"}]
-                if any(overlaps(task.owned_path, path) for path in held):
+                held = [
+                    path
+                    for tid, status in report.statuses.items()
+                    if status in {"running", "queued", "verifying"}
+                    for path in task_paths(by_id[tid])
+                ]
+                if any(overlaps(path, other) for path in task_paths(task) for other in held):
                     continue
                 report.statuses[task.id] = "running"
                 report.attempts[task.id] += 1

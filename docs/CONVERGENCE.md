@@ -1,109 +1,51 @@
-# Convergence mode: build the product, not more islands
+# Convergence V2: integrated product gates
 
-This repository now has substantial implementation code, but isolated GREEN lanes are
-not the same thing as a working application. Convergence mode exists to force the
-project toward one executable end-to-end product before breadth work can be called
-complete.
+The integrated running product is the completion authority. See `docs/AGENT_STRATEGY_V2.md` and `AGENTS.md`.
 
-## Hard product boundary
+## Hard golden journey
 
-The local application is not "built" until one clean installed `opencode2` journey
-passes on the exact integrated revision:
+The core application is not accepted until a release-built `oc2`/`opencode2` from a fresh disposable HOME can, on the exact integrated revision:
 
-1. run `opencode2` with no subcommand from a fresh disposable HOME;
-2. detect an interactive terminal, discover or start exactly one authenticated daemon,
-   and attach without manual `serve`, browser, database, or session setup;
-3. if provider credentials are absent, open in-app setup;
-4. render the real native OpenTUI-backed interface rather than the line fallback;
-5. submit a prompt through the same daemon-owned execution engine used by web/headless;
-6. make a real provider fixture request, stream output, request a tool, authorize it
-   through the real security broker, execute it, and feed its result back to the model;
-7. persist the session/tool result, exit, restart, and resume the same history;
-8. attach a second client and observe the same durable session without duplicate work;
-9. exercise denial, interruption, daemon restart, and terminal restoration;
-10. rerun the frozen end-to-end test on the exact integrated commit.
+1. launch with no subcommand into the native interactive path;
+2. discover/start exactly one authenticated daemon and attach without manual `serve`;
+3. configure a provider in-app when missing and use that persisted configuration in the actual request;
+4. render native OpenTUI and accept raw interactive input;
+5. submit a prompt through the same daemon-owned engine used by web/headless;
+6. stream provider output, receive a tool call, authorize through the real broker, execute it, persist typed call/result metadata and continue the provider turn;
+7. submit a second user turn after the tool call;
+8. exit/restart and resume identical typed history;
+9. attach a second client without duplicate work;
+10. exercise denial, interruption, daemon restart and terminal restoration;
+11. rerun the gate on the exact integrated SHA.
 
-A parent task cannot be complete while its own note says repair child, follow-up,
-unwired, unproven, state-only, missing, partial, or no acceptance. Such language is
-evidence that the parent remains open.
+## Gates
 
-## Convergence-before-breadth rule
+- G0 Salvage: every pre-V2 worktree/branch has disposition and detached/dirty work is preserved.
+- G1 Startup: fresh launch and authenticated daemon ownership/reuse.
+- G2 Provider: persisted/in-app provider config drives a real request and first response.
+- G3 Tool: real permission broker + tool + typed result + provider continuation.
+- G4 Durability: second turn, restart/resume and second-client attachment.
+- G5 Native TUI: real PTY/raw input/render/resize/suspend/resume/restoration.
+- G6 Web: same daemon/session engine from a real browser, including tool + reload/resume.
+- G7 Ubuntu: release archive installs and same golden path runs on Ubuntu.
+- G8 Release: Mac + Web + Ubuntu pass on one exact candidate SHA with security/adversarial smoke checks.
 
-Until the hard local boundary above is GREEN, do not spend the majority of workers on
-new leaf/state-machine modules. Use at least four concurrent lanes on the integration
-spine when the harness can safely provide them:
+Gates may advance in parallel when path ownership does not overlap. A gate is GREEN only on the exact integrated revision.
 
-- entrypoint/daemon/auth client wiring;
-- shared runtime + provider + agent + security-broker wiring;
-- native OpenTUI renderer/input integration;
-- installed end-to-end test and independent verifier.
+## Scheduling
 
-The remaining safe capacity can continue independent feature work, but every wave must
-land at least one integration/wiring improvement. A wave that only adds leaf modules is
-not progress toward product completion.
+Work from observed gate failures. Packages may span the files required by one behavior. Active path grants must not overlap. Keep at most four verified/unintegrated candidates and one integration writer.
 
-After the local boundary is GREEN, expand in this order:
-
-1. TUI feature parity on the shared engine;
-2. web parity, including graph/canvas, tools, approvals, sessions, artifacts, files,
-   terminal, providers, agents, settings, research/voice where required;
-3. remote gateway/pairing/control;
-4. native iOS and Android parity;
-5. full four-client parity and release evidence.
-
-## Current integration blockers to verify first
-
-The gate intentionally checks structural facts that have repeatedly caused false
-completion:
-
-- no-subcommand must actually call the launch/daemon decision path;
-- the serve path must enforce bearer auth, not merely mint a token;
-- the native renderer bridge must have a real caller;
-- server must depend on and call the real agent and security crates;
-- the live turn path must not directly bypass authorization with bare ToolExecutor;
-- completed claims must belong to the plan and must not admit missing follow-up work.
-
-These are necessary wiring checks, not sufficient release evidence. Passing the static
-gate never substitutes for behavioral RED/GREEN, installed E2E, real OS isolation,
-provider canaries, remote deployment, or device tests.
-
-## Orchestrator-neutral parallelism
-
-Any main orchestrator may be used if it can provide these capabilities: native worker
-spawn, completion notifications, cancellation/join, isolated ownership, independent
-verification, and serialized integration. Target 20 workers, keep at least 15 useful
-workers when the harness/provider/resource budget supports it, and refill on individual
-completion rather than batch barriers.
-
-Reserve capacity by role rather than letting all twenty workers create leaves:
-
-- 4 integration-spine implementation lanes;
-- 2 independent test/verifier lanes;
-- up to 14 independent feature/audit lanes.
-
-If fewer than 20 workers are available, preserve the integration/test lanes first.
-Twenty parallel planners with zero integration writer is a failure mode.
-
-## Immutable-test rule
-
-Existing and frozen tests are read-only for implementers and orchestrators. They may not
-be edited, deleted, renamed, moved, skipped, ignored, snapshot-regenerated, assertion-
-weakened, selector-narrowed, or replaced to achieve GREEN. A genuinely wrong frozen test
-is a blocked contract review requiring independent authorization; it is never fixed by
-the implementation worker.
-
-New tests may be authored only by the independent test-author role before freeze. After
-freeze, only product code changes until GREEN. Candidate GREEN, integration, and
-post-integration GREEN must all use the same frozen test hash.
+Historical `ralph.json`, claims and worklogs are evidence/requirements inventory, not the V2 execution queue.
 
 ## Acceptance
 
-`tasks/completion/claims.json` is coordination state, not acceptance authority.
-"completed" in that ledger cannot unlock a release claim by itself. Trusted acceptance
-requires independent verification, successful integration, and a rerun on the exact
-integrated revision. Off-plan lane IDs and self-reported logs never count as parent
-completion.
+Only `ACCEPTED` on the exact integrated revision unlocks dependencies. Claim completion, a candidate branch, source presence and self-reported GREEN do not.
 
-Run `python3 tools/convergence_gate.py` before choosing new breadth work and after every
-integration wave. While it fails, fix its product-spine findings before declaring parent
-tasks complete.
+## Tests
+
+Implementers cannot weaken semantic contracts. Independent test owners may repair non-semantic harness/compiler/fixture problems. A wrong historical contract may be superseded by an independent evaluator when a higher authority unambiguously contradicts it. HITL is reserved for actual product ambiguity or unavailable external authority.
+
+## Breadth after core convergence
+
+After G1-G8 are GREEN, resume approved extensions such as remote gateway/control, infinite delegation canvas, iOS, Android, notifications and broader client parity using the same failure-driven package model.

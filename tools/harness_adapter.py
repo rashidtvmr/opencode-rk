@@ -4,8 +4,8 @@ Binds the real host harness to ``tools.completion_scheduler.TrustedAdapter``
 with explicit capabilities, role separation and bounded resources.
 
 What this module does:
-  - mints one-file :class:`Capability` grants per scheduler call;
-  - enforces implementer != verifier/integrator and one-file write scope;
+  - mints explicit bounded-path :class:`Capability` grants per scheduler call;
+  - enforces implementer != verifier/integrator and package write scope;
   - delegates to a host-supplied :class:`NativeHarness` (real native API);
   - tracks owned inner tasks so :meth:`HarnessAdapter.shutdown` cancels/joins;
   - keeps per-task logs byte-bounded and redacted.
@@ -31,6 +31,7 @@ from tools.completion_scheduler import (
     Task,
     Verification,
     normalized_path,
+    task_paths,
     validate_candidate,
     validate_proof,
 )
@@ -82,21 +83,22 @@ def assert_role_separation(implementer: str, verifiers: tuple[str, ...], integra
 
 @dataclass(frozen=True)
 class Capability:
-    """Explicit one-file grant for a single task and role."""
+    """Explicit bounded-path grant for a single package and role."""
 
     task_id: str
     owned_path: str
     role: str
     owner: str
     log_byte_budget: int = MAX_LOG_BYTES
+    owned_paths: tuple[str, ...] = ()
 
     def allows_write(self, path: str) -> bool:
-        """True only for the exact owned file; implementers get no protected writes."""
+        """True only for an exact granted path; implementers get no protected writes."""
         try:
             want = normalized_path(path)
         except ValueError:
             return False
-        if want != self.owned_path:
+        if want not in (self.owned_path, *self.owned_paths):
             return False
         if self.role == IMPLEMENT and _is_protected(want):
             return False
@@ -104,17 +106,17 @@ class Capability:
 
 
 def mint_capability(task: Task, role: str, owner: str, *, log_byte_budget: int = MAX_LOG_BYTES) -> Capability:
-    """Build a validated one-file grant; rejects protected implementer scope."""
+    """Build a validated package grant; rejects protected implementer scope."""
     if not isinstance(task, Task) or not task.id:
         raise AuthorityError("task identity required")
-    owned = normalized_path(task.owned_path)
+    owned = task_paths(task)
     if role not in ROLES or not isinstance(owner, str) or not owner:
         raise AuthorityError("role and owner identity required")
     if type(log_byte_budget) is not int or not 1 <= log_byte_budget <= 1 << 20:
         raise ValueError("log byte budget must be between 1 and 1048576")
-    if role == IMPLEMENT and _is_protected(owned):
+    if role == IMPLEMENT and any(_is_protected(path) for path in owned):
         raise AuthorityError("implementer grant excludes protected paths")
-    return Capability(task.id, owned, role, owner, log_byte_budget)
+    return Capability(task.id, owned[0], role, owner, log_byte_budget, owned[1:])
 
 
 _SECRET = re.compile(r"(?im)^(?P<k>[^\n:=]*(?:api[_-]?key|bearer|secret|password|token)[^\n:=]*)\s*[:=]\s*[^\n]+")
@@ -268,8 +270,8 @@ class HarnessAdapter:
         if not isinstance(result, Candidate):
             raise AuthorityError("backend must return a Candidate")
         validate_candidate(task, result)
-        if not cap.allows_write(result.changed_paths[0]):
-            raise AuthorityError("candidate outside one-file grant")
+        if not all(cap.allows_write(path) for path in result.changed_paths):
+            raise AuthorityError("candidate outside package path grant")
         self._note(task.id, "execute", f"worker={result.worker} rev={result.revision}")
         return result
 

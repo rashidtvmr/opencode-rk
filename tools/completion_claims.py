@@ -192,17 +192,37 @@ def save_ledger(root: pathlib.Path, document: dict) -> None:
     path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
+def _accepted_v2_ids(root: pathlib.Path) -> set[str]:
+    """Return ids accepted by the trusted V2 integration state."""
+    path = root / "state" / "convergence-v2.json"
+    if not path.is_file():
+        return set()
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return set()
+    packages = payload.get("packages", {})
+    if not isinstance(packages, dict):
+        return set()
+    return {
+        str(task_id)
+        for task_id, row in packages.items()
+        if isinstance(row, dict) and row.get("status") == "ACCEPTED"
+    }
+
+
 def ready_tasks(root: pathlib.Path, plan_stories: dict[str, dict]) -> list[str]:
-    """Task ids whose deps are all completed and which no live claim holds."""
+    """Task ids whose deps are ACCEPTED and which no live claim holds."""
     document = load_ledger(root)
     claims = document["claims"]
+    accepted = _accepted_v2_ids(root)
     ready = []
     for tid, story in plan_stories.items():
         row = claims.get(tid, {})
         if row.get("status") in {"in-progress", "blocked"}:
             continue
         deps = story.get("deps", [])
-        if all(claims.get(dep, {}).get("status") == "completed" for dep in deps):
+        if all(dep in accepted for dep in deps):
             ready.append(tid)
     return sorted(ready)
 
