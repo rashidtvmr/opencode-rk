@@ -50,3 +50,15 @@ seven-control installed credential contract hash
 `1f08cd2968e4867f7eed26efe2c4534ea005bac1fa9f961c862ce31aa8b4f419`.
 Release build/runtime evidence remains pending for this exact candidate. The
 controller's product changes require independent verification before acceptance.
+
+The exact installed release candidate `aedc2894397dafcc101cd9249395d9743c840a89`
+reached the real provider/key/model setup, persisted auth and accepted the model.
+The frozen PTY then failed its 256 KiB capture bound before the first response:
+forcing every renderer frame emitted the full terminal for every input byte.
+Evidence is retained at
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-native-provider-aedc289-yeclxljv`.
+The corrective bridge change uses the pinned persistent renderer's normal dirty
+cell presentation (`packages/native/src/renderer.zig:932–970,2372+`). The native
+renderer already owns initial/resize/restoration full repaints. The frozen byte
+budget and assertions remain unchanged; another exact-candidate build/run is
+required after this product change.

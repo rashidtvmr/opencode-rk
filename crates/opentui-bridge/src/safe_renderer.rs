@@ -545,7 +545,7 @@ impl Renderer {
         }
     }
 
-    /// Run `paint` on the current buffer, then present it.
+    /// Run `paint` on the writable buffer, then present its changes.
     pub fn frame(&mut self, paint: impl FnOnce(NativeHandle)) -> Result<(), BridgeError> {
         let handle = self.live()?;
         #[cfg(not(feature = "native"))]
@@ -567,7 +567,10 @@ impl Renderer {
             }
             paint(buf);
             // SAFETY: live handle; `render` takes no pointers.
-            let status = unsafe { render(handle, true) };
+            // The pinned renderer tracks dirty cells and forces its own initial,
+            // resize and terminal-restoration repaints. Forcing every frame
+            // emits a full terminal even for one composer character.
+            let status = unsafe { render(handle, false) };
             BridgeError::classify(i32::from(status))
         }
     }
