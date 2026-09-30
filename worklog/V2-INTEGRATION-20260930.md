@@ -896,3 +896,16 @@ running test result. An independent test owner is repairing invalid JSON array
 fixtures and missing imports without changing assertions. A separate source-only
 storage package repairs diagnostics while preserving public APIs, SQL,
 transactional admission, error checks, schema, byte bounds and protected tests.
+
+### MCP compiler blocker repaired
+
+Independent test-owner candidate `2db02c0dcc7b37af4a989f8c3bc8dfa427b6543e`
+was reviewed and independently run before integration. The controller reran the
+same focused target after integration on exact
+`4ab19b78edd7f31ed76d1b06deb5ec3ed26573bc`: **20 passed, 0 failed, exit 0**.
+Only `crates/tools/tests/mcp_config.rs` and
+`worklog/V2-MCP-CONFIG-COMPILER.md` change. Argument counts/byte bounds,
+URL/merge/status assertions and all named tests are preserved. State **ACCEPTED
+for mechanical MCP fixture compilation on integrated `4ab19b7`**. Exact receipt
+roots are `v2-mcp-compile-preverify-dg2lsi4n` and
+`v2-mcp-compile-integrated-6ihhaphu` under the approved artifact parent.
