@@ -68,6 +68,8 @@ import {
   type MessageRecord,
   type ModelSummary,
   type SessionSummary,
+  type ToolCall,
+  type ToolOutput,
   type WebCapabilities,
   type WorkspaceCatalogState,
 } from '@/lib/api'
@@ -237,6 +239,7 @@ function App() {
   const [editingTitle, setEditingTitle] = useState('')
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
   const [streamingReasoningSummary, setStreamingReasoningSummary] = useState('')
+  const [streamingToolProgress, setStreamingToolProgress] = useState('')
   const [activeTurnSessionId, setActiveTurnSessionId] = useState<string | null>(null)
   const activeTurnRef = useRef<{ sessionId: string; controller: AbortController } | null>(null)
   // Set when a turn seeds the transcript for a session whose load effect has
@@ -371,6 +374,7 @@ function App() {
       setActiveTurnSessionId(null)
       setStreamingAssistantText('')
       setStreamingReasoningSummary('')
+      setStreamingToolProgress('')
     }
   }, [selectedSessionId])
 
@@ -498,6 +502,7 @@ function App() {
     setActiveTurnSessionId(sessionId)
     setStreamingAssistantText('')
     setStreamingReasoningSummary('')
+    setStreamingToolProgress('')
     const baselineMessages = initialMessages ?? messages
     if (initialMessages) setMessages(initialMessages)
     if (initialActivity) {
@@ -522,6 +527,14 @@ function App() {
             setMessages((current) =>
               current.some((item) => item.id === message.id) ? current : [...current, message],
             )
+          },
+          onToolCall: (toolCall: ToolCall) => {
+            if (activeTurnRef.current?.controller !== controller) return
+            setStreamingToolProgress(`Running ${toolCall.name}`.slice(0, 160))
+          },
+          onToolOutput: (toolOutput: ToolOutput) => {
+            if (activeTurnRef.current?.controller !== controller) return
+            setStreamingToolProgress(`Finished ${toolOutput.name}`.slice(0, 160))
           },
           onReasoningSummaryDelta: (delta) => {
             if (activeTurnRef.current?.controller !== controller) return
@@ -550,6 +563,7 @@ function App() {
       if (activeTurnRef.current?.controller !== controller) return false
       activeTurnRef.current = null
       setActiveTurnSessionId(null)
+      setStreamingToolProgress('')
       setMessageLoadState('ready')
       setNotice(
         turn.executed
@@ -564,6 +578,7 @@ function App() {
         setActiveTurnSessionId((current) => (current === sessionId ? null : current))
         setStreamingAssistantText('')
         setStreamingReasoningSummary('')
+        setStreamingToolProgress('')
         setNotice('Turn stopped.')
         return false
       }
@@ -572,6 +587,7 @@ function App() {
       setActiveTurnSessionId((current) => (current === sessionId ? null : current))
       setStreamingAssistantText('')
       setStreamingReasoningSummary('')
+      setStreamingToolProgress('')
       let persisted = false
       try {
         const [refreshed, refreshedActivity] = await Promise.all([
@@ -1287,11 +1303,11 @@ function App() {
                   </div>
                 ) : null}
 
-                {messages.length > 0 || streamingAssistantText || streamingReasoningSummary ? (
+                {messages.length > 0 || streamingAssistantText || streamingReasoningSummary || streamingToolProgress ? (
                   <ol
                     className="codex-transcript"
                     aria-label="Conversation messages"
-                    aria-busy={streamingAssistantText || streamingReasoningSummary ? true : undefined}
+                    aria-busy={streamingAssistantText || streamingReasoningSummary || streamingToolProgress ? true : undefined}
                   >
                     {messages.map((message) => (
                       <li
@@ -1376,7 +1392,7 @@ function App() {
                         </div>
                       </li>
                     ))}
-                    {streamingAssistantText || streamingReasoningSummary ? (
+                    {streamingAssistantText || streamingReasoningSummary || streamingToolProgress ? (
                       <li className="codex-message codex-message-row codex-message-assistant">
                         <div className="codex-message-stack">
                           {streamingReasoningSummary ? (
@@ -1384,6 +1400,11 @@ function App() {
                               <summary>Reasoning summary</summary>
                               <p>{streamingReasoningSummary}</p>
                             </details>
+                          ) : null}
+                          {streamingToolProgress ? (
+                            <p className="codex-transcript-status" role="status">
+                              {streamingToolProgress}
+                            </p>
                           ) : null}
                           {streamingAssistantText ? (
                             <div className="codex-message-content">
