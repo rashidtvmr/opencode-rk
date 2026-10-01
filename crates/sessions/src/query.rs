@@ -53,12 +53,8 @@ pub fn query_sessions(
 
     // Sort results
     match query.sort_by {
-        SortField::Created => {
-            results.sort_by_key(|session| session.created_at.as_datetime())
-        }
-        SortField::Updated => {
-            results.sort_by_key(|session| session.updated_at.as_datetime())
-        }
+        SortField::Created => results.sort_by_key(|session| session.created_at.as_datetime()),
+        SortField::Updated => results.sort_by_key(|session| session.updated_at.as_datetime()),
         SortField::Title => results.sort_by(|a, b| a.title.cmp(&b.title)),
     }
 

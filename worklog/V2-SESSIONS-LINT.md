@@ -21,3 +21,12 @@ worker's earlier source-hash transcription is superseded. All existing
 above. `query.rs`'s protected test suffix is unchanged at
 `1be82023bdcae1d7166e4bc89555312507401d6623af6ccb411e533751ca6fd1`;
 the other four changed source files contain no in-module test region.
+
+Independent preverification of prepared `bc7a49f` stopped at formatting, before
+Clippy or tests ran. The retained receipt is `v2-sessions-preverify-bc7a49f-6nqnhibq`
+under the approved artifact parent. The controller applied rustfmt's two-arm
+layout in `query.rs` without changing its protected tests. The prepared query
+source hash is now
+`382a1958adb0a7cd2fdbc4bcdd2f319edf67f94bc55dcbf9c11dee9b21ea228d`,
+superseding the original worker query after-hash above. This mechanical repair
+still requires the same complete independent verification sequence.
