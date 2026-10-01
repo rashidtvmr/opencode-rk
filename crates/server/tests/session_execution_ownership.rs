@@ -19,26 +19,72 @@ use opencode_rk_server::{daemon_auth::DaemonAuth, router_with_auth, AppState};
 use opencode_rk_sessions::SessionService;
 use opencode_rk_storage::Storage;
 use serde_json::{json, Value};
-use tempfile::tempdir;
+use tempfile::{tempdir, TempDir};
 use tower::ServiceExt;
 
 const MAX_WIRE: usize = 128 * 1024;
-const MODEL: &str = "openai/gpt-5.6";
+const MODEL: &str = "gpt-5.6";
 
-static ENV_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+static ENV_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
 
 struct EnvGuard {
     old_base: Option<String>,
     old_key: Option<String>,
+    old_home: Option<String>,
+    old_config: Option<String>,
+    old_data: Option<String>,
+    old_state: Option<String>,
+    old_cache: Option<String>,
+    old_rk_home: Option<String>,
+    old_auth_json: Option<String>,
+    _home: TempDir,
+    _config: TempDir,
+    _data: TempDir,
+    _state: TempDir,
+    _cache: TempDir,
 }
 
 impl EnvGuard {
     fn install(base: &str) -> Self {
+        let home = tempdir().expect("fixture HOME");
+        let config = tempdir().expect("fixture config");
+        let data = tempdir().expect("fixture data");
+        let state = tempdir().expect("fixture state");
+        let cache = tempdir().expect("fixture cache");
         let old_base = std::env::var("OPENAI_BASE_URL").ok();
         let old_key = std::env::var("OPENAI_API_KEY").ok();
+        let old_home = std::env::var("HOME").ok();
+        let old_config = std::env::var("XDG_CONFIG_HOME").ok();
+        let old_data = std::env::var("XDG_DATA_HOME").ok();
+        let old_state = std::env::var("XDG_STATE_HOME").ok();
+        let old_cache = std::env::var("XDG_CACHE_HOME").ok();
+        let old_rk_home = std::env::var("OPENCODE_RK_HOME").ok();
+        let old_auth_json = std::env::var("OPENAI_AUTH_JSON").ok();
         std::env::set_var("OPENAI_BASE_URL", base);
         std::env::set_var("OPENAI_API_KEY", "fixture-bearer");
-        Self { old_base, old_key }
+        std::env::set_var("HOME", home.path());
+        std::env::set_var("XDG_CONFIG_HOME", config.path());
+        std::env::set_var("XDG_DATA_HOME", data.path());
+        std::env::set_var("XDG_STATE_HOME", state.path());
+        std::env::set_var("XDG_CACHE_HOME", cache.path());
+        std::env::set_var("OPENCODE_RK_HOME", home.path());
+        std::env::remove_var("OPENAI_AUTH_JSON");
+        Self {
+            old_base,
+            old_key,
+            old_home,
+            old_config,
+            old_data,
+            old_state,
+            old_cache,
+            old_rk_home,
+            old_auth_json,
+            _home: home,
+            _config: config,
+            _data: data,
+            _state: state,
+            _cache: cache,
+        }
     }
 }
 
@@ -51,6 +97,23 @@ impl Drop for EnvGuard {
         match &self.old_key {
             Some(value) => std::env::set_var("OPENAI_API_KEY", value),
             None => std::env::remove_var("OPENAI_API_KEY"),
+        }
+        for (key, value) in [
+            ("HOME", &self.old_home),
+            ("XDG_CONFIG_HOME", &self.old_config),
+            ("XDG_DATA_HOME", &self.old_data),
+            ("XDG_STATE_HOME", &self.old_state),
+            ("XDG_CACHE_HOME", &self.old_cache),
+            ("OPENCODE_RK_HOME", &self.old_rk_home),
+        ] {
+            match value {
+                Some(value) => std::env::set_var(key, value),
+                None => std::env::remove_var(key),
+            }
+        }
+        match &self.old_auth_json {
+            Some(value) => std::env::set_var("OPENAI_AUTH_JSON", value),
+            None => std::env::remove_var("OPENAI_AUTH_JSON"),
         }
     }
 }
@@ -85,8 +148,14 @@ impl Provider {
             let deadline = Instant::now() + Duration::from_secs(8);
             let mut workers = Vec::new();
             while Instant::now() < deadline {
+                if worker_counts.0.lock().expect("counts").accepted >= 2 {
+                    break;
+                }
                 match listener.accept() {
                     Ok((stream, _)) => {
+                        if worker_counts.0.lock().expect("counts").accepted >= 2 {
+                            break;
+                        }
                         let c = Arc::clone(&worker_counts);
                         let r = Arc::clone(&worker_release);
                         workers.push(thread::spawn(move || provider_request(stream, c, r)));
@@ -95,9 +164,6 @@ impl Provider {
                         thread::sleep(Duration::from_millis(2));
                     }
                     Err(error) => panic!("provider accept: {error}"),
-                }
-                if worker_counts.0.lock().expect("counts").accepted >= 2 {
-                    break;
                 }
             }
             for worker in workers {
@@ -159,7 +225,7 @@ fn provider_request(
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .expect("provider read timeout");
-    let request = read_http(&mut stream, true).expect("provider request");
+    let request = read_request(&mut stream).expect("provider request");
     let text = String::from_utf8(request.clone()).expect("provider utf8");
     let (headers, body) = text.split_once("\r\n\r\n").expect("provider body");
     let parsed: Value = serde_json::from_str(body).expect("provider json");
@@ -168,7 +234,15 @@ fn provider_request(
             .to_ascii_lowercase()
             .contains("authorization: bearer fixture-bearer\r\n")
         && parsed["model"] == MODEL
-        && parsed["input"][0]["role"] == "user";
+        && parsed["input"].as_array().is_some_and(|items| {
+            items.last().is_some_and(|item| {
+                item["role"] == "user"
+                    && matches!(
+                        item["content"].as_str(),
+                        Some("a" | "b" | "good" | "denied")
+                    )
+            })
+        });
     let streaming = parsed["stream"] == true;
     let (lock, wake) = &*counts;
     {
@@ -181,14 +255,28 @@ fn provider_request(
         }
         wake.notify_all();
     }
+    let streaming = streaming;
+    if streaming {
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"fixture\"}\n\n")
+            .expect("provider partial response");
+        stream.flush().expect("provider partial flush");
+    }
     let (release_lock, release_wake) = &*release;
     let mut done = release_lock.lock().expect("release");
-    while !*done {
-        done = release_wake.wait(done).expect("release wait");
+    let deadline = Instant::now() + Duration::from_secs(6);
+    while !*done && Instant::now() < deadline {
+        let (next, _) = release_wake
+            .wait_timeout(done, deadline.saturating_duration_since(Instant::now()))
+            .expect("release wait");
+        done = next;
+    }
+    if !*done {
+        panic!("provider release deadline");
     }
     drop(done);
     let response = if streaming {
-        "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\nevent: response.output_text.delta\ndata: {\"type\":\"response.output_text.delta\",\"delta\":\"fixture\"}\n\nevent: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_owned()
+        "event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"status\":\"completed\"}}\n\n".to_owned()
     } else {
         let body = json!({"id":"fixture","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"fixture"}]}]}).to_string();
         format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len())
@@ -200,7 +288,7 @@ fn provider_request(
     lock.lock().expect("counts").active -= 1;
 }
 
-fn read_http(stream: &mut TcpStream, body_required: bool) -> std::io::Result<Vec<u8>> {
+fn read_request(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     let mut bytes = Vec::new();
     let mut buf = [0_u8; 4096];
     let mut total = None;
@@ -220,11 +308,8 @@ fn read_http(stream: &mut TcpStream, body_required: bool) -> std::io::Result<Vec
                             .strip_prefix("content-length:")
                             .and_then(|v| v.trim().parse().ok())
                     })
-                    .unwrap_or(0);
+                    .ok_or_else(|| std::io::Error::other("missing content length"))?;
                 total = Some(end + 4 + length);
-                if !body_required && bytes.len() >= end + 4 {
-                    break;
-                }
             }
         }
         if bytes.len() > MAX_WIRE {
@@ -237,11 +322,40 @@ fn read_http(stream: &mut TcpStream, body_required: bool) -> std::io::Result<Vec
     Ok(bytes)
 }
 
+fn read_response(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    let deadline = Instant::now() + Duration::from_secs(8);
+    stream.set_read_timeout(Some(Duration::from_millis(250)))?;
+    while Instant::now() < deadline {
+        match stream.read(&mut buffer) {
+            Ok(0) => break,
+            Ok(n) => {
+                bytes.extend_from_slice(&buffer[..n]);
+                if bytes.len() > MAX_WIRE {
+                    return Err(std::io::Error::other("response wire bound"));
+                }
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::WouldBlock
+                    || error.kind() == std::io::ErrorKind::TimedOut =>
+            {
+                continue
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    if bytes.is_empty() {
+        return Err(std::io::Error::other("empty response"));
+    }
+    Ok(bytes)
+}
+
 fn client(address: SocketAddr, token: Option<&str>, path: &str, body: &Value) -> Vec<u8> {
     let mut stream =
         TcpStream::connect_timeout(&address, Duration::from_secs(2)).expect("client connect");
     stream
-        .set_read_timeout(Some(Duration::from_secs(7)))
+        .set_read_timeout(Some(Duration::from_secs(8)))
         .expect("client timeout");
     let body = body.to_string();
     let auth = token
@@ -249,7 +363,7 @@ fn client(address: SocketAddr, token: Option<&str>, path: &str, body: &Value) ->
         .unwrap_or_default();
     let request = format!("POST {path} HTTP/1.1\r\nhost: {address}\r\n{auth}content-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
     stream.write_all(request.as_bytes()).expect("client write");
-    read_http(&mut stream, true).expect("client response")
+    read_response(&mut stream).expect("client response")
 }
 
 async fn harness() -> (
@@ -312,9 +426,9 @@ async fn make_session(app: &axum::Router, token: &str, title: &str) -> String {
 
 async fn run_pair(stream_a: bool, stream_b: bool, same: bool) {
     let serial = ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
+        .get_or_init(|| tokio::sync::Mutex::new(()))
         .lock()
-        .expect("env lock");
+        .await;
     let (address, token, app, server, provider, _dir, _env) = harness().await;
     let first = make_session(&app, &token, "ownership-a").await;
     let second = if same {
@@ -407,9 +521,9 @@ async fn different_sessions_can_use_two_provider_slots() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn unauthenticated_second_client_has_no_provider_side_effect() {
     let serial = ENV_LOCK
-        .get_or_init(|| Mutex::new(()))
+        .get_or_init(|| tokio::sync::Mutex::new(()))
         .lock()
-        .expect("env lock");
+        .await;
     let (address, token, app, server, provider, _dir, _env) = harness().await;
     let session = make_session(&app, &token, "auth ownership").await;
     let good_path = format!("/api/sessions/{session}/turns");
