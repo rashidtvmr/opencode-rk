@@ -4,10 +4,13 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Result of schema validation.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Default)]
 pub enum ValidationResult {
+    #[default]
     Valid,
-    Invalid { errors: Vec<String> },
+    Invalid {
+        errors: Vec<String>,
+    },
 }
 
 impl ValidationResult {
@@ -42,12 +45,6 @@ impl ValidationResult {
             Self::Valid => None,
             Self::Invalid { errors } => Some(errors),
         }
-    }
-}
-
-impl Default for ValidationResult {
-    fn default() -> Self {
-        Self::Valid
     }
 }
 
@@ -166,40 +163,43 @@ impl SchemaValidator {
         let mut errors = Vec::new();
 
         // Type validation
-        if let Some(type_val) = schema_obj.get("type") {
-            if let Some(type_str) = type_val.as_str() {
-                if !self.matches_type(value, type_str) {
-                    errors.push(format!(
-                        "value type '{}' does not match schema type '{}'",
-                        self.value_type(value),
-                        type_str
-                    ));
-                }
-            }
+        if let Some(type_str) = schema_obj
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|type_str| !self.matches_type(value, type_str))
+        {
+            errors.push(format!(
+                "value type '{}' does not match schema type '{}'",
+                self.value_type(value),
+                type_str
+            ));
         }
 
         // Properties validation
-        if let Some(props) = schema_obj.get("properties").and_then(|p| p.as_object()) {
-            if let Some(obj) = value.as_object() {
-                for (key, prop_schema) in props {
-                    if let Some(val) = obj.get(key) {
-                        if let Some(prop_errors) = self.validate_against_schema(val, prop_schema) {
-                            errors.extend(prop_errors);
-                        }
-                    }
+        if let Some((props, obj)) = schema_obj
+            .get("properties")
+            .and_then(Value::as_object)
+            .zip(value.as_object())
+        {
+            for (key, prop_schema) in props {
+                if let Some(prop_errors) = obj
+                    .get(key)
+                    .and_then(|val| self.validate_against_schema(val, prop_schema))
+                {
+                    errors.extend(prop_errors);
                 }
             }
         }
 
         // Required fields validation
-        if let Some(required) = schema_obj.get("required").and_then(|r| r.as_array()) {
-            if let Some(obj) = value.as_object() {
-                for req in required {
-                    if let Some(req_str) = req.as_str() {
-                        if !obj.contains_key(req_str) {
-                            errors.push(format!("missing required field '{}'", req_str));
-                        }
-                    }
+        if let Some((required, obj)) = schema_obj
+            .get("required")
+            .and_then(Value::as_array)
+            .zip(value.as_object())
+        {
+            for req_str in required.iter().filter_map(Value::as_str) {
+                if !obj.contains_key(req_str) {
+                    errors.push(format!("missing required field '{}'", req_str));
                 }
             }
         }

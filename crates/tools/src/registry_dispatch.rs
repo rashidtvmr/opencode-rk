@@ -311,8 +311,8 @@ impl RegistryDispatcher {
         records.sort_by_key(|r| r.as_ref().map(|(i, _)| *i).unwrap_or(usize::MAX));
 
         // Durable write-back in request order; only successful spawns recorded.
-        let mut by_idx: std::collections::HashMap<usize, DispatchRecord> =
-            records.into_iter().flatten().map(|(i, r)| (i, r)).collect();
+        let by_idx: std::collections::HashMap<usize, DispatchRecord> =
+            records.into_iter().flatten().collect();
         let mut out: Vec<Result<DispatchRecord, DispatchError>> =
             Vec::with_capacity(ready.len() + spawned_idx.len());
         // Rebuild in original order: immediates stay, spawns pull from by_idx.

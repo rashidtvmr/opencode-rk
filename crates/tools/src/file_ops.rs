@@ -9,6 +9,11 @@ use std::path::{Path, PathBuf};
 use std::{fs, io::Write};
 use thiserror::Error;
 
+type WriteHook = Option<fn(&Path, bool) -> Result<(), ToolError>>;
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+type RootObserver<'a> = Option<&'a mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>;
+
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use rustix::fs::{self as rustix_fs, Mode, OFlags, fstat, mkdirat, openat};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -262,7 +267,7 @@ pub fn execute(op: FileOperation) -> Result<FileResult, ToolError> {
 /// leaf open. It cannot bypass broker authorization (earlier in [`execute_authorized`]).
 pub(crate) fn execute_with_preopen_hook(
     op: FileOperation,
-    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+    hook: WriteHook,
 ) -> Result<FileResult, ToolError> {
     match op {
         FileOperation::Read {
@@ -315,11 +320,11 @@ fn write_file(
     path: &Path,
     content: &str,
     append: bool,
-    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+    hook: WriteHook,
 ) -> Result<FileResult, ToolError> {
     #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
-        return write_file_descriptor_relative(path, content, append, hook);
+        write_file_descriptor_relative(path, content, append, hook)
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     {
@@ -446,7 +451,7 @@ fn write_file_descriptor_relative(
     path: &Path,
     content: &str,
     append: bool,
-    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+    hook: WriteHook,
 ) -> Result<FileResult, ToolError> {
     let (anchor, normalized) = legacy_write_anchor(path)?;
     if path_has_symlink_component_from(&anchor, &normalized_path(&anchor, &normalized))? {
@@ -463,7 +468,7 @@ fn write_file_rooted(
     path: &Path,
     content: &str,
     append: bool,
-    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+    hook: WriteHook,
 ) -> Result<FileResult, ToolError> {
     let normalized = normalize_rooted_path(root, path)?;
     if path_has_symlink_component_from(root, &normalized_path(root, &normalized))? {
@@ -492,7 +497,7 @@ fn write_file_descriptor_at(
     display_path: &Path,
     content: &str,
     append: bool,
-    hook: Option<fn(&Path, bool) -> Result<(), ToolError>>,
+    hook: WriteHook,
 ) -> Result<FileResult, ToolError> {
     let leaf = normalized
         .components
@@ -661,7 +666,7 @@ fn is_symlink_error(error: &std::io::Error) -> bool {
     error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 /// Root directory file descriptor opened for descriptor-relative operations.
 ///
 /// The root FD is opened ONCE per write operation with O_NOFOLLOW|O_DIRECTORY,
@@ -669,7 +674,7 @@ fn is_symlink_error(error: &std::io::Error) -> bool {
 /// This observer seam allows tests to observe the root descriptor's metadata
 /// (device/inode identity) for verification without modifying production behavior.
 pub(crate) fn open_write_root_with_observer(
-    mut observer: Option<&mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>,
+    observer: RootObserver<'_>,
 ) -> Result<std::os::fd::OwnedFd, ToolError> {
     open_write_root_at(
         &normalize_platform_path(&std::env::current_dir().map_err(ToolError::IoError)?),
@@ -680,7 +685,7 @@ pub(crate) fn open_write_root_with_observer(
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn open_write_root_at(
     root: &Path,
-    mut observer: Option<&mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>,
+    observer: RootObserver<'_>,
 ) -> Result<std::os::fd::OwnedFd, ToolError> {
     if !root.is_absolute() {
         return Err(ToolError::FileError(
@@ -699,7 +704,7 @@ fn open_write_root_at(
         Mode::empty(),
     )
     .map_err(|error| ToolError::IoError(error.into()))?;
-    if let Some(obs) = observer.as_mut() {
+    if let Some(obs) = observer {
         obs(&fd)?;
     }
     Ok(fd)
@@ -707,8 +712,10 @@ fn open_write_root_at(
 
 /// Opens the root directory as a file descriptor for descriptor-relative operations.
 ///
-/// This is the production entry point: calls `open_write_root_with_observer` with
-/// no observer, preserving exact byte-for-byte behavior.
+/// Test-compatibility helper for opening the current directory root without an
+/// observer. Production writes use `open_write_root_at` with their descriptor
+/// rooted in the approved project directory.
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 pub(crate) fn open_write_root() -> Result<std::os::fd::OwnedFd, ToolError> {
     open_write_root_with_observer(None)
 }
