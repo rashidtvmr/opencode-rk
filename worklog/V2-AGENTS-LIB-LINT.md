@@ -27,3 +27,25 @@ Input diagnostics were read from `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sg
 `rustfmt --edition 2021` was run only on the three granted Rust source files. `git diff --check` passed. No Cargo/test/build/runtime command was run by this worker per slot instructions.
 
 This is a candidate handoff only. It is not a PREVERIFIED or ACCEPTED source claim; the parent/controller must independently run the specified diagnostics and frozen agents-crate tests against the original RED comparison.
+
+## Exact integrated acceptance
+
+Independent verifier `ses_f0a83e047ffeNv7VrYJ4cu18E9` PREVERIFIED exact
+`72e5aa499b124937ed8e193ca0f0d2d9689b5122`. After fast-forward integration,
+the controller repeated the same bounded isolated gate on that exact SHA:
+
+```text
+cargo fmt --all -- --check
+  exit 0
+cargo clippy --offline --locked -p opencode-rk-agents --lib -- -D warnings
+  exit 0
+cargo test --offline --locked -p opencode-rk-agents --all-targets --all-features -- --test-threads=1
+  126 passed; 0 failed; 0 ignored; exit 0
+```
+
+Exact receipts/command/environment/log hashes are under the approved artifact
+parent at `v2-agents-library-preverify-72e5aa4-vhjp3wxc` and
+`v2-agents-library-integrated-72e5aa4-w1co3hte`. Existing tests and Cargo.lock
+remain unchanged. State: **ACCEPTED for the three agents-library mechanical
+diagnostics and crate regressions on exact integrated `72e5aa4`**. Test-target
+warnings and full workspace Clippy are separate gates.

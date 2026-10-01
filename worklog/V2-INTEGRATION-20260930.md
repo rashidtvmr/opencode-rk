@@ -1097,3 +1097,21 @@ pinned V2's per-session `SessionRunCoordinator`, and do not wire the existing
 cancellation state machines into an authenticated interrupt operation. This is
 research evidence, not a frozen runtime RED or acceptance; a separate live
 two-client ownership gate is required.
+
+### Fresh workspace agents-library diagnostics accepted
+
+Fresh formatting passes on `af3c8ca`; full workspace Clippy advances beyond
+tools/sessions, then records three agents-library diagnostics. Their equivalent
+source repairs were independently PREVERIFIED and integrated as exact
+**`72e5aa499b124937ed8e193ca0f0d2d9689b5122`**. Formatting, agents-library
+Clippy and all **126 agents crate tests** pass on the integrated revision,
+zero failed/ignored. State **ACCEPTED for scoped library maintenance**;
+`worklog/V2-AGENTS-LIB-LINT.md` records paths, preserved tests and receipts.
+
+The controller also rebuilt, archived and installed native Mac release
+`af3c8ca` before the agents integration. Frozen Unicode, four-request stream/tool
+continuation, onboarding, eight auth controls, PTY restoration, four daemon
+flows, 314 CLI units, 83 bridge/lifecycle tests and two server streams pass.
+Evidence is retained at `v2-native-workspace-repairs-af3c8ca-cye52df1` under the
+approved artifact parent. Independent auditing is pending; that artifact does
+not attest the later `72e5aa4` source or full release readiness.
