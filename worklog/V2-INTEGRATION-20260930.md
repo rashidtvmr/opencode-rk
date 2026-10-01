@@ -985,3 +985,32 @@ three focused paging tests and **314 native CLI unit tests** pass on exact
 paging contract**. Exact paths and evidence are in
 `worklog/V2-NATIVE-TRANSCRIPT-PAGING.md`. Unicode requires renewed preverification
 against this repaired canonical base before acceptance.
+
+### Native Unicode accepted on exact paired installed release
+
+Source-only UTF-8 candidate `cfe6cbf` was prepared against repaired base
+`3086fc1` without changing its product bytes. Independent verifier
+`ses_f0b3f6f38ffe7tuTisQyuMpbX9` PREVERIFIED all required installed and native
+regression gates. After fast-forward integration, the controller repeated the
+entire Mac build/archive/install/gate sequence on exact
+**`a79ae96b93f9a0ab94ceafadcd9425db08f28027`**, then built/archived/installed
+and verified Ubuntu ARM64 at that same SHA. Both pass two-request fragmented
+Unicode/backspace/restart, four-request stream/tool/second-turn/restart,
+two-request onboarding, eight auth controls and original PTY restoration.
+Mac also passes 314 CLI units, 73 bridge + ten lifecycle checks, four daemon
+flows and two server streams. Ubuntu passes ten packaging controls, relative
+`$ORIGIN/../lib`, adjacent native loader closure and ten ABI exports.
+
+State **ACCEPTED for scoped native valid UTF-8 input and paired installed
+release regressions on exact `a79ae96`**, independently confirmed from actual
+receipts. Full command/hash/path evidence is in `worklog/V2-NATIVE-UTF8-LIVE.md`.
+The earlier same-SHA Mac/Ubuntu/Web streaming acceptance at `de7e05f` remains
+preserved; this Unicode acceptance does not certify full G0–G8.
+
+Fresh serial workspace gates on exact installed `a79ae96` retain actual results
+at `v2-workspace-gates-a79ae96-llxq2uon` under the approved artifact parent:
+formatting passes; Clippy exits 101 at tools-library and **19 session-library
+diagnostics**; all-feature/all-target tests compile and run **807 passed,
+1 failed, 0 ignored** before Cargo stops. The current failure is
+`ci_ext_t03_max_steps_one_completes_like_baseline`, receiving usage exit 64
+instead of success or budget-exhausted. This is not a full workspace pass.
