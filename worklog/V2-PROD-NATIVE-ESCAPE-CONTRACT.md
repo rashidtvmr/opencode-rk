@@ -5,16 +5,16 @@
 - Package/gate: production native input salvage / G5 Native TUI.
 - Base SHA: `96edb1b18438e1d7311b280374e43ffa8b6e22d9`.
 - Candidate status: **CANDIDATE**; runtime execution is intentionally untested
-  by this test owner.  This is a frozen source-only contract, not RED,
+   by this test owner. This is a proposed source-only contract, not frozen RED,
   PREVERIFIED, or ACCEPTED evidence.
 - Allowed writes: `tests/e2e/native_escape_input.py` and this worklog only.
 
-## Frozen observable contract
+## Proposed observable contract
 
 The installed `oc2` native PTY must preserve a draft containing `native escape
 seed`, followed by fragmented CSI `RIGHT` (`ESC [ C`), fragmented SS3 `RIGHT`
-(`ESC O D`), a harmless cursor-position report query (`ESC [ 6 n`), and Kitty
-Unicode-key `CSI 99;1u` (Unicode code point `c`, press flag 1).  These protocol
+(`ESC O C`), a harmless cursor-position report (`ESC [ 12 ; 34 R`), and Kitty
+Unicode-key `CSI 99;1u` (Unicode code point `c`, modifier value 1). These protocol
 bytes must not become literal draft text or submit the draft.  UTF-8 `café😀`
 is sent one byte at a time; one scalar backspace must remove only the emoji.
 The provider must receive exactly `native escape seed c café` as the first user
@@ -88,3 +88,20 @@ No runtime RED/GREEN command was run.  The independent verifier must first
 review/freeze this source, then run the actual command with the attested
 release artifacts.  A future product grant is limited to `crates/cli/src/tui_entry.rs`
 plus a new private native input decoder module, serialized through integration.
+
+## Controller pre-freeze source review
+
+Original owner candidate `d6d36a1c478e20ef5969b4a5d78e0ddae8e198d0` remains
+preserved. Review corrected SS3 `D` (left) to `C` (right at the end of the draft)
+and a DSR query to an actual terminal cursor-position reply. This keeps the
+contract at framing/consumption without imposing ignored-left-arrow semantics.
+The standalone Escape now waits for an observed closed picker before subsequent
+text, preventing an ambiguous Alt-key prefix from becoming fixture behavior.
+
+The helper sets a real 80x24 PTY size, checks raw mode, validates descriptor
+schema, bounds input writes and total provider body-read time, isolates all XDG
+paths, and requires normal CLI exit rather than accepting forced cleanup as
+success. After two completed responses it queries authenticated canonical history
+and requires exactly the two user/assistant pairs. It also checks the fixture
+credential is absent from captured and visible text. Actual runtime RED and an
+independent source/authority check are still required before freezing.

@@ -7,8 +7,8 @@ decoder or inspect renderer internals.  The first turn exercises fragmented
 CSI/SS3/cursor-report/kitty input, Unicode scalar backspace, and the second
 turn proves that Escape closes a model dialog without submitting its filter.
 """
-import argparse, hashlib, http.server, json, os, pathlib, pty, shutil, signal
-import subprocess, sys, tempfile, termios, threading, time
+import argparse, fcntl, hashlib, http.server, json, os, pathlib, pty, select, shutil, struct
+import subprocess, sys, tempfile, termios, threading, time, urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
@@ -82,7 +82,17 @@ class Handler(http.server.BaseHTTPRequestHandler):
             length = int(self.headers.get("Content-Length", "-1"))
             if length < 0 or length > MAX_REQUEST:
                 raise RuntimeError("invalid content length")
-            raw = self.rfile.read(length)
+            deadline = time.monotonic() + 5
+            raw = bytearray()
+            while len(raw) < length:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise RuntimeError("provider request deadline")
+                self.connection.settimeout(remaining)
+                chunk = self.rfile.read(min(65536, length - len(raw)))
+                if not chunk:
+                    raise RuntimeError("truncated provider request")
+                raw.extend(chunk)
             if len(raw) != length:
                 raise RuntimeError("truncated provider request")
             payload = self.server.state.body(self.headers, raw)
@@ -117,9 +127,46 @@ class Fixture(http.server.HTTPServer):
 
 def send_fragments(master, data, delay=0.012):
     """Write one-byte fragments; delay stays below the decoder carry window."""
+    deadline = time.monotonic() + 5
     for byte in data:
-        os.write(master, bytes((byte,)))
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise RuntimeError("PTY input write deadline")
+            _, writable, _ = select.select([], [master], [], min(remaining, .1))
+            if not writable:
+                continue
+            try:
+                if os.write(master, bytes((byte,))) != 1:
+                    raise RuntimeError("PTY input short write")
+                break
+            except BlockingIOError:
+                continue
         time.sleep(delay)
+
+
+def history(descriptor_value):
+    def get(path):
+        request = urllib.request.Request(
+            descriptor_value["http_origin"] + path,
+            headers={"Authorization": "Bearer " + descriptor_value["auth_token"]})
+        with urllib.request.urlopen(request, timeout=3) as response:
+            raw = response.read(MAX_RESPONSE + 1)
+            if response.status != 200 or len(raw) > MAX_RESPONSE:
+                raise RuntimeError("bounded authenticated history response failed")
+            return json.loads(raw)
+    sessions = get("/api/sessions").get("sessions")
+    if not isinstance(sessions, list) or len(sessions) != 1:
+        raise RuntimeError("expected exactly one fixture session")
+    messages = get("/api/sessions/%s/messages?limit=20" % sessions[0]["id"]).get("messages")
+    if not isinstance(messages, list):
+        raise RuntimeError("canonical messages are absent")
+    observed = [(item.get("role"), item.get("body", {}).get("text")) for item in messages]
+    expected = [("user", FIRST), ("assistant", FIRST_REPLY),
+                ("user", SECOND), ("assistant", SECOND_REPLY)]
+    if observed != expected:
+        raise AssertionError("durable history differs from the exact two completed turns")
+    return messages
 
 
 def launch(exe, root, env, slave):
@@ -131,10 +178,17 @@ def launch(exe, root, env, slave):
 
 def run(binary, library, manifest, artifacts):
     binary, library, source, binary_sha, library_sha = checked_artifact(binary, library, manifest)
+    if not artifacts.is_absolute():
+        raise RuntimeError("artifact directory must be absolute")
+    build = json.loads(manifest.read_text())
+    if build.get("native") is not True or build.get("profile") != "release":
+        raise RuntimeError("the contract requires an attested native release")
     root = pathlib.Path(tempfile.mkdtemp(prefix="nescape-"))
     for name in ("home", "project", "data"):
         (root / name).mkdir()
     (root / "data" / "runtime").mkdir()
+    if len(os.fsencode(root / "data" / "runtime" / "opencode-rk.sock")) > 100:
+        raise RuntimeError("fixture Unix socket path exceeds 100 bytes")
     install = root / "install"
     (install / "bin").mkdir(parents=True)
     (install / "lib").mkdir()
@@ -165,6 +219,9 @@ def run(binary, library, manifest, artifacts):
     termios_restored = False
     child_reaped = False
     daemon_gone = False
+    raw_seen = False
+    messages = []
+    forced_kill = False
     try:
         port = free_loopback_port()
         env = {
@@ -172,6 +229,8 @@ def run(binary, library, manifest, artifacts):
             "TERM": "xterm-256color", "TMPDIR": str(root),
             "XDG_CONFIG_HOME": str(root / "home" / ".config"),
             "XDG_DATA_HOME": str(root / "data"),
+            "XDG_STATE_HOME": str(root / "home" / "state"),
+            "XDG_CACHE_HOME": str(root / "home" / "cache"),
             "XDG_RUNTIME_DIR": str(root / "data" / "runtime"),
             "OPENCODE_RK_HOME": str(root / "data"),
             "OPENCODE_PROJECT_DIR": str(root / "project"),
@@ -180,16 +239,21 @@ def run(binary, library, manifest, artifacts):
         }
         (root / "home" / ".config").mkdir()
         master, slave = pty.openpty()
+        fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+        os.set_blocking(master, False)
         saved_attrs = termios.tcgetattr(master)
         child = launch(install / "bin" / "oc2", root, env, slave)
         os.close(slave); slave = None
         descriptor_value = descriptor(root / "data", port, child, time.monotonic() + TIMEOUT)
+        if descriptor_value.get("schema_version") != 1:
+            raise RuntimeError("unexpected daemon descriptor schema")
         read_until(master, time.monotonic() + TIMEOUT, captures, b"OpenCode", 0,
-                   screen, lambda: screen.contains("model: openai/" + MODEL))
+                    screen, lambda: screen.contains("model: openai/" + MODEL))
+        raw_seen = not bool(termios.tcgetattr(master)[3] & termios.ICANON)
         # Seed, fragmented CSI/SS3 arrows, cursor report, Kitty Unicode 'c',
         # then a scalar backspace that removes the temporary emoji.
         send_fragments(master, b"native escape seed ")
-        for sequence in (b"\x1b[", b"C", b"\x1bO", b"D", b"\x1b[6n"):
+        for sequence in (b"\x1b[", b"C", b"\x1bO", b"C", b"\x1b[12;34R"):
             send_fragments(master, sequence)
         send_fragments(master, b"\x1b[99;1u")
         send_fragments(master, " café😀".encode("utf-8"))
@@ -205,19 +269,23 @@ def run(binary, library, manifest, artifacts):
                    len(captures), screen, lambda: screen.contains("Select model"))
         send_fragments(master, b"fixture-filter")
         send_fragments(master, b"\x1b")
+        read_until(master, time.monotonic() + TIMEOUT, captures, b"picker closed",
+                   len(captures), screen, screen.picker_closed)
         send_fragments(master, SECOND.encode("utf-8") + b"\r")
         read_until(master, time.monotonic() + TIMEOUT, captures, SECOND_REPLY.encode(),
                    len(captures), screen, lambda: screen.contains(SECOND_REPLY))
         if state.error or state.semantic_errors or len(state.requests) != 2:
             raise AssertionError(state.error or state.semantic_errors or "second request missing")
+        messages = history(descriptor_value)
     except BaseException as exc:
         semantic_error = str(exc)
     finally:
         if child is not None and child.poll() is None:
             try:
-                os.write(master, b"\x03")
+                send_fragments(master, b"\x03", delay=0)
                 child.wait(timeout=10)
-            except (OSError, subprocess.TimeoutExpired):
+            except (OSError, RuntimeError, subprocess.TimeoutExpired):
+                forced_kill = True
                 try: child.kill(); child.wait(timeout=3)
                 except (OSError, subprocess.TimeoutExpired): pass
         child_reaped = child is not None and child.poll() is not None
@@ -237,10 +305,13 @@ def run(binary, library, manifest, artifacts):
         server.shutdown(); server.server_close(); provider_thread.join(timeout=10)
         provider_joined = not provider_thread.is_alive()
         capture_bound = len(captures) <= MAX_PTY
+        secret_echo = KEY.encode() in captures or KEY in screen.text()
         success = (semantic_error is None and state.error is None and
-                   not state.semantic_errors and len(state.requests) == 2 and
-                   child_reaped and daemon_gone and termios_restored and
-                   provider_joined and capture_bound)
+                    not state.semantic_errors and len(state.requests) == 2 and
+                    child_reaped and child.returncode == 0 and not forced_kill and
+                    daemon_gone and termios_restored and raw_seen and
+                    provider_joined and capture_bound and not secret_echo and
+                    len(messages) == 4)
         evidence = {"phase": "success" if success else "failed",
                     "error": semantic_error or state.error or "",
                     "source_sha": source, "binary_sha256": binary_sha,
@@ -248,7 +319,11 @@ def run(binary, library, manifest, artifacts):
                     "test_sha256": sha256(pathlib.Path(__file__)),
                     "requests": state.requests, "semantic_errors": state.semantic_errors,
                     "termios_restored": termios_restored,
-                    "child_reaped": child_reaped, "daemon_gone": daemon_gone,
+                     "child_reaped": child_reaped, "daemon_gone": daemon_gone,
+                     "cli_exit_code": child.returncode if child is not None else None,
+                     "forced_kill": forced_kill, "raw_mode_seen": raw_seen,
+                     "secret_echo": secret_echo, "messages": messages,
+                     "fixture_root": str(root),
                     "provider_thread_joined": provider_joined,
                     "captured_bytes": len(captures), "max_capture": MAX_PTY}
         output = json.dumps(evidence, ensure_ascii=False, indent=2) + "\n"
