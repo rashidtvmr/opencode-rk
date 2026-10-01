@@ -6,7 +6,7 @@
 - **Base:** `7ffdc6e13385027a1ecabff66d570ad88b963502`.
 - **Branch/worktree:** `v2/shell-cancel-contract`, `/Users/mymac/Projects/opencode-rk-v2-shell-cancel-contract`.
 - **Writable paths:** only `crates/tools/tests/shell_owned_lifetime.rs` and this file.
-- **Status:** reviewed test contract awaiting current-canonical compiling RED.
+- **Status:** frozen compiling RED on current canonical `59dc523`.
 
 The tests freeze the narrow ownership guarantee that a live direct child belongs
 to the async execution owner. They do not cover timeout policy, shell parsing,
@@ -145,3 +145,37 @@ shell abort/timeout path at the exact reference checkout. Library source
 `shell_tool.rs` is unchanged from the earlier RED; its lifetime repair has not
 yet been leased. The final hash will be frozen after the current-canonical
 fixture compiles and produces the same two semantic failures.
+
+## Frozen exact canonical RED
+
+On exact integrated test revision
+**`59dc52365a288d67b904e01252f7c2031e0f6336`**, the controller ran:
+
+```text
+/usr/bin/arch -arm64 cargo test --offline --locked -p opencode-rk-tools --test shell_owned_lifetime -- --test-threads=1 --nocapture
+3 passed; 2 failed; 0 ignored; exit 101
+```
+
+The fixture compiles. `aborting_owned_task_reclaims_live_direct_child` reports
+owned PID 27762 alive after abort/await and the two-second deadline;
+`dropping_timeout_owner_reclaims_live_direct_child` reports owned PID 27944
+alive after consuming/dropping the execution future. Normal completion,
+broker denial with no marker, and unpolled-future no-spawn controls pass.
+The two forced `-KILL` cleanups are failure evidence, not acceptance. After
+the fixture process exits, controller `ps` probes show both PIDs absent
+(exit 1, empty stdout/stderr); those observations are separately retained.
+
+Frozen SHA-256 values:
+
+- Test: `8b39c6eafcbb065e42752c8c1d19bac53be6928612fc59b1da654465353097fd`.
+- Command spec: `e163ef1c17aebe7cd91fc169c58873ad84f44e5ee45a6f2856872df8274b26fe`.
+- Serial isolated runner: `ea83e4503525a18d913da80f329e4f5d9de9f2079e9d95f0f9d835a9595c59a6`.
+- RED log: `68ac42a3234e05b357ed939e399045f14d3dfc072889f1f1f7bf8364d5ba0d5f`.
+
+Receipts and `post-red-owned-pid-probes.json` are retained at
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-shell-lifetime-canonical-red-59dc523-aq7hnycg`.
+The manifest uses disposable HOME/XDG paths, literal Cargo/Rustup homes,
+whitelisted environment, two build jobs, one test thread, a 90-second deadline
+and 32 MiB log bound. Product `shell_tool.rs` and existing in-module tests
+remain unchanged. Only the direct-child lifetime implementation is unlocked;
+native daemon interruption and process-tree semantics require their own gates.
