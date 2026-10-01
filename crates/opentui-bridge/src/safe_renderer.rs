@@ -24,6 +24,8 @@ use std::sync::atomic::{AtomicU32, AtomicU8};
 use std::sync::Mutex;
 #[cfg(feature = "native")]
 use std::time::Duration;
+#[cfg(feature = "native")]
+use std::time::SystemTime;
 
 #[cfg(all(feature = "native", unix))]
 use rustix::event::{poll, PollFd, PollFlags, Timespec};
@@ -58,6 +60,42 @@ const TERMINAL_ACTIVE: u8 = 1;
 const MOUSE_ENABLED: u8 = 2;
 #[cfg(feature = "native")]
 const KITTY_KEYBOARD_ENABLED: u8 = 4;
+
+#[cfg(feature = "native")]
+fn native_reset_trace(event: &str) {
+    let Ok(path) = std::env::var("OC2_NATIVE_RESET_TRACE") else {
+        return;
+    };
+    if !path.starts_with("/private/var/folders/") || path.len() > 512 {
+        return;
+    }
+    let Ok(meta) = std::fs::metadata(&path) else {
+        if std::path::Path::new(&path).exists() {
+            return;
+        }
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(file) => drop(file),
+            Err(_) => return,
+        }
+    };
+    if !meta.file_type().is_file() || meta.len() >= 16 * 1024 {
+        return;
+    }
+    let line = format!("{:?} {event}\n", SystemTime::now());
+    if line.len() > 512 {
+        return;
+    }
+    if let Ok(mut file) = std::fs::OpenOptions::new().append(true).open(&path) {
+        use std::io::Write as _;
+        if meta.len().saturating_add(line.len() as u64) <= 16 * 1024 {
+            let _ = file.write_all(line.as_bytes());
+        }
+    }
+}
 
 /// OpenTUI's native library owns ANSI modes, while its TypeScript wrapper
 /// owns stdin raw mode. Retain the same input descriptor and exact attributes
@@ -172,20 +210,37 @@ fn reset_bracketed_paste(input: &OwnedFd) -> Result<(), BridgeError> {
     // Resolve the device from the already-owned input capability. Do not use a
     // generic `/dev/tty`: the pathname and fstat identity must describe the
     // same PTY as the captured descriptor before any output is attempted.
-    let path = ttyname(input, Vec::new()).map_err(|_| BridgeError::TerminalFailed)?;
+    native_reset_trace("reset:begin");
+    let path = ttyname(input, Vec::new()).map_err(|error| {
+        native_reset_trace(&format!("reset:ttyname:{error}"));
+        BridgeError::TerminalFailed
+    })?;
     let fd = openat(
         CWD,
         &path,
         OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY,
         Mode::empty(),
     )
-    .map_err(|_| BridgeError::TerminalFailed)?;
-    let input_stat = fstat(input).map_err(|_| BridgeError::TerminalFailed)?;
-    let output_stat = fstat(&fd).map_err(|_| BridgeError::TerminalFailed)?;
+    .map_err(|error| {
+        native_reset_trace(&format!("reset:openat:{error}"));
+        BridgeError::TerminalFailed
+    })?;
+    let input_stat = fstat(input).map_err(|error| {
+        native_reset_trace(&format!("reset:fstat-input:{error}"));
+        BridgeError::TerminalFailed
+    })?;
+    let output_stat = fstat(&fd).map_err(|error| {
+        native_reset_trace(&format!("reset:fstat-output:{error}"));
+        BridgeError::TerminalFailed
+    })?;
     if input_stat.st_dev != output_stat.st_dev || input_stat.st_rdev != output_stat.st_rdev {
+        native_reset_trace("reset:identity-mismatch");
         return Err(BridgeError::TerminalFailed);
     }
-    tcgetattr(&fd).map_err(|_| BridgeError::TerminalFailed)?;
+    tcgetattr(&fd).map_err(|error| {
+        native_reset_trace(&format!("reset:tcgetattr:{error}"));
+        BridgeError::TerminalFailed
+    })?;
     let deadline = std::time::Instant::now() + BUDGET;
     let mut written = 0;
     while written < RESET.len() {
@@ -199,22 +254,36 @@ fn reset_bracketed_paste(input: &OwnedFd) -> Result<(), BridgeError> {
         };
         let mut descriptors = [PollFd::new(&fd, PollFlags::OUT)];
         match poll(&mut descriptors, Some(&wait)) {
-            Ok(0) => return Err(BridgeError::TerminalFailed),
+            Ok(0) => {
+                native_reset_trace("reset:poll-timeout");
+                return Err(BridgeError::TerminalFailed);
+            }
             Err(Errno::INTR) => continue,
-            Err(_) => return Err(BridgeError::TerminalFailed),
+            Err(error) => {
+                native_reset_trace(&format!("reset:poll:{error}"));
+                return Err(BridgeError::TerminalFailed);
+            }
             Ok(_) if !descriptors[0].revents().contains(PollFlags::OUT) => {
-                return Err(BridgeError::TerminalFailed)
+                native_reset_trace("reset:poll-not-writable");
+                return Err(BridgeError::TerminalFailed);
             }
             Ok(_) => {}
         }
         match write(&fd, &RESET[written..]) {
-            Ok(0) => return Err(BridgeError::TerminalFailed),
+            Ok(0) => {
+                native_reset_trace("reset:write-zero");
+                return Err(BridgeError::TerminalFailed);
+            }
             Ok(count) => written += count,
             Err(Errno::INTR) => continue,
             Err(Errno::AGAIN) => continue,
-            Err(_) => return Err(BridgeError::TerminalFailed),
+            Err(error) => {
+                native_reset_trace(&format!("reset:write:{error}"));
+                return Err(BridgeError::TerminalFailed);
+            }
         }
     }
+    native_reset_trace("reset:success");
     Ok(())
 }
 
@@ -510,6 +579,7 @@ impl Renderer {
         // SAFETY: live handle owned by self; owned terminal/input modes are
         // restored before the exactly-once destroy.
         unsafe {
+            native_reset_trace("release:entry");
             let owned = LIFECYCLE_HANDLE.load(Ordering::Acquire) == self.handle;
             let flags = if owned {
                 LIFECYCLE_FLAGS.swap(0, Ordering::AcqRel)
@@ -549,6 +619,7 @@ impl Renderer {
                 }
             }
             destroyRenderer(self.handle, true);
+            native_reset_trace("release:after-destroy");
             if owned {
                 LIFECYCLE_DEST.store(1, Ordering::Release);
             }
@@ -578,6 +649,7 @@ impl Renderer {
 
     pub fn setup_terminal(&self) -> Result<(), BridgeError> {
         let handle = self.live()?;
+        native_reset_trace("setup:entry");
         #[cfg(not(feature = "native"))]
         {
             let _ = handle;
@@ -589,6 +661,7 @@ impl Renderer {
             activate_terminal_input(handle)?;
             // SAFETY: live handle; plain integers only.
             unsafe { setupTerminal(handle, true) };
+            native_reset_trace("setup:after-native");
             if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle {
                 LIFECYCLE_FLAGS.fetch_or(TERMINAL_ACTIVE, Ordering::AcqRel);
             }
@@ -598,6 +671,7 @@ impl Renderer {
 
     pub fn restore_terminal_modes(&self) -> Result<(), BridgeError> {
         let handle = self.live()?;
+        native_reset_trace("restore:entry");
         #[cfg(not(feature = "native"))]
         {
             let _ = handle;
@@ -611,6 +685,7 @@ impl Renderer {
                 // SAFETY: live owned handle. This existing export runs the
                 // linked fork's shutdown sequence; it does not re-enable modes.
                 unsafe { suspendRenderer(handle) };
+                native_reset_trace("restore:after-suspend");
             }
             #[cfg(unix)]
             {
@@ -626,6 +701,7 @@ impl Renderer {
                     None
                 };
                 let restore = restore_terminal_input(handle, true);
+                native_reset_trace("restore:after-termios");
                 if let Some(error) = reset {
                     return Err(error);
                 }
