@@ -1,23 +1,23 @@
 # V2 Worktree / Branch / Merge Status
 
-> Snapshot UTC: `2026-10-01T09:30:10Z` | captured full `main-v2`: `c7a6121e96ee3bb391f11a8842c6a97e97d2f900` | generator: `tools/update_worktree_merge_status.py`
+> Snapshot UTC: `2026-10-01T09:35:39Z` | captured full `main-v2`: `c7a6121e96ee3bb391f11a8842c6a97e97d2f900` | generator: `tools/update_worktree_merge_status.py`
 > LEDGER CENSUS DONE; full release OPEN. Dirty provider files remain preserved as unknown-owner bytes and are not integrated.
 
 ## Active package summary
 
 | Package | Status | Evidence / scope note |
 |---|---|---|
-| resize | DONE | Controller-accepted scoped package; no full release claim. |
-| bridge | DONE | Controller-accepted scoped package; no full release claim. |
-| G4 ownership | DONE | Controller-accepted ownership evidence; do not claim full G4/G5/G8. |
-| receipt docs | DONE (evidence only) | Documentation audit, not product acceptance. |
+| G5-NATIVE-LIVE-RESIZE | DONE — G5-NATIVE-LIVE-RESIZE controller receipt; candidate 2e7c9a35cb78 integrated 2e7c9a35cb78; file hash ba0dfb7375681087cfffa0d968c6012582b846c6ddc31e686c5ab4fc46e85f3d | Scoped acceptance only; no full release claim. |
+| G5-BRIDGE-LIBRARY-MAINTENANCE | UNKNOWN — no verified controller acceptance receipt available | Scoped acceptance only; no full release claim. |
+| G4-SESSION-EXECUTION-SERIALIZATION | DONE — G4-SESSION-EXECUTION-SERIALIZATION controller receipt; candidate 1f1969123a0f integrated 15179b280731; file hash be7f050dcb28c3aea58a40dcb20a4a34f659a0b377d5acc5d4819f8f33384ad1 | Ownership evidence only; do not claim full G4/G5/G8. |
+| receipt docs | INTEGRATED (evidence only) | Requires docs-integration.json audit record; not product acceptance. |
 | paste fixture `0c26...`, integrated `7628b61...` | IN PROGRESS | Genuine installed RED frozen; implementation branch `v2/native-paste-repair-y52o0gi3`. |
 | server quality | IN PROGRESS | `v2/server-quality-y52o0gi3`, base `7628b61...`. |
 | CLI mechanical | IN PROGRESS | `v2/cli-mechanical-y52o0gi3`, base `8fce379...`. |
 | DISC fixture lead | IN PROGRESS | Still running; no acceptance inferred. |
 | release G8 | OPEN | Requires all release gates on one exact SHA. |
 
-**Coverage counts:** worktrees=183; all-local-refs=412; all-remote-tracking-refs=321; unique tips=411; ledger rows=780. Rows are worktrees + local refs without worktrees + remote refs without worktrees (not naive addition of overlapping sets).
+**Coverage counts:** worktrees=183; all-local-refs=412; all-remote-tracking-refs=321; unique tips=412; ledger rows=780. Rows are worktrees + local refs without worktrees + remote refs without worktrees (not naive addition of overlapping sets).
 **Alias note:** symbolic refs (for example `refs/remotes/origin/HEAD`) are excluded from branch counts and listed here rather than emitted as rows.
 **Worktree-prefix note:** rows marked `worktree` come directly from `git worktree list --porcelain`; ref rows without worktrees follow.
 
@@ -154,7 +154,7 @@
 | 127 | /Users/mymac/Projects/opencode-rk-v2-foundation-library-current | v2/foundation-library-current | `7b8b5f6e5218` (`7b8b5f6e5218802806e608b712ab0855fcd1102e`) | **DIVERGED / NOT MERGED** | `41 1` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 128 | /Users/mymac/Projects/opencode-rk-v2-foundation-library-integration-ready | v2/foundation-library-integration-ready | `6a71db3898ab` (`6a71db3898abde832ff4ccce023a80f3bff252f9`) | **MERGED (tip ancestor)** | `37 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 129 | /Users/mymac/Projects/opencode-rk-v2-integration-y52o0gi3 | v2/today-integration-y52o0gi3 | `c7a6121e96ee` (`c7a6121e96ee3bb391f11a8842c6a97e97d2f900`) | **MAIN-V2** | `0 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
-| 130 | /Users/mymac/Projects/opencode-rk-v2-ledger-y52o0gi3 | v2/merge-ledger-y52o0gi3 | `6ca6614f25f7` (`6ca6614f25f74b4ca529dd78297b60c45e8970d4`) | **MERGED (tip ancestor)** | `17 0` | DIRTY | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
+| 130 | /Users/mymac/Projects/opencode-rk-v2-ledger-y52o0gi3 | v2/merge-ledger-y52o0gi3 | `c2da42609b70` (`c2da42609b70080975b9c45d9208057f1276ca49`) | **DIVERGED / NOT MERGED** | `17 1` | DIRTY | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 131 | /Users/mymac/Projects/opencode-rk-v2-mcp-config-test-compile | v2/mcp-config-test-compile | `2db02c0dcc7b` (`2db02c0dcc7b37af4a989f8c3bc8dfa427b6543e`) | **DIVERGED / NOT MERGED** | `75 2` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 132 | /Users/mymac/Projects/opencode-rk-v2-mcp-spawn-baseline-89aeaa8 | v2/mcp-spawn-baseline-89aeaa8 | `89aeaa81be72` (`89aeaa81be72e4af95dc6fb39c28f54c07c92ae1`) | **MERGED (tip ancestor)** | `56 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 133 | /Users/mymac/Projects/opencode-rk-v2-native-bridge-library-current | v2/native-bridge-library-current | `4a88077f8065` (`4a88077f80657f44ed439f948fcc3560cca61ad5`) | **MERGED (tip ancestor)** | `23 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
@@ -170,10 +170,10 @@
 | 143 | /Users/mymac/Projects/opencode-rk-v2-native-utf8-contract | v2/native-utf8-contract | `cc532734033d` (`cc532734033d7d9f26c7a50536b83d1d73138058`) | **DIVERGED / NOT MERGED** | `71 3` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 144 | /Users/mymac/Projects/opencode-rk-v2-native-utf8-integration-ready | v2/native-utf8-integration-ready | `a79ae96b93f9` (`a79ae96b93f9a0ab94ceafadcd9425db08f28027`) | **MERGED (tip ancestor)** | `59 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 145 | /Users/mymac/Projects/opencode-rk-v2-native-utf8-live | v2/native-utf8-live | `cfe6cbfdc96d` (`cfe6cbfdc96dbe6d3cf76b284da7e614e40c5a9a`) | **DIVERGED / NOT MERGED** | `65 2` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
-| 146 | /Users/mymac/Projects/opencode-rk-v2-owner-today-y52o0gi3 | v2/session-owner-today-y52o0gi3 | `1f1969123a0f` (`1f1969123a0f30257449b0d37226ab26b0513fc3`) | **MERGED (tip ancestor)** | `18 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
+| 146 | /Users/mymac/Projects/opencode-rk-v2-owner-today-y52o0gi3 | v2/session-owner-today-y52o0gi3 | `1f1969123a0f` (`1f1969123a0f30257449b0d37226ab26b0513fc3`) | **MERGED (tip ancestor)** | `18 0` | CLEAN | — | — | worktree; DONE — G4-SESSION-EXECUTION-SERIALIZATION controller receipt; candidate 1f1969123a0f integrated 15179b280731; file hash be7f050dcb28c3aea58a40dcb20a4a34f659a0b377d5acc5d4819f8f33384ad1; accepted SHA is ancestral to captured main-v2 |
 | 147 | /Users/mymac/Projects/opencode-rk-v2-packaged-identity | v2/packaged-identity | `ab159b240d81` (`ab159b240d81a8c4b9ae75130d0f1583742ac652`) | **DIVERGED / NOT MERGED** | `139 2` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 148 | /Users/mymac/Projects/opencode-rk-v2-paste-contract-y52o0gi3 | v2/native-paste-contract-y52o0gi3 | `0c26eab0a57c` (`0c26eab0a57c88404299d9b5d2a5f8123717f774`) | **MERGED (tip ancestor)** | `17 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
-| 149 | /Users/mymac/Projects/opencode-rk-v2-paste-repair-y52o0gi3 | v2/native-paste-repair-y52o0gi3 | `7628b61d1062` (`7628b61d10625ea35aa09392394c7b689b20d55d`) | **MERGED (tip ancestor)** | `3 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
+| 149 | /Users/mymac/Projects/opencode-rk-v2-paste-repair-y52o0gi3 | v2/native-paste-repair-y52o0gi3 | `7628b61d1062` (`7628b61d10625ea35aa09392394c7b689b20d55d`) | **MERGED (tip ancestor)** | `3 0` | DIRTY | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 150 | /Users/mymac/Projects/opencode-rk-v2-prod-native-priority | v2/prod-native-priority | `fe9830b2e61c` (`fe9830b2e61c07f2aee91c9d5a29c2111b495579`) | **MERGED (tip ancestor)** | `31 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 151 | /Users/mymac/Projects/opencode-rk-v2-prod-native-resize | v2/prod-native-resize | `f8bde4923cb0` (`f8bde4923cb0f6fdf9c86cbb9341d82d50a89209`) | **MERGED (tip ancestor)** | `21 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 152 | /Users/mymac/Projects/opencode-rk-v2-provider-auth-bound-contract | v2/provider-auth-bound-contract | `e29a9e9e0ada` (`e29a9e9e0adaf49b14295e4e2511ae81f38b0575`) | **DIVERGED / NOT MERGED** | `108 1` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
@@ -181,12 +181,12 @@
 | 154 | /Users/mymac/Projects/opencode-rk-v2-provider-auth-security-contract | v2/provider-auth-security-contract | `538f848a3c73` (`538f848a3c73c86387497d08b4e1b3c037695263`) | **DIVERGED / NOT MERGED** | `112 3` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 155 | /Users/mymac/Projects/opencode-rk-v2-provider-auth-wiring | v2/provider-auth-wiring | `f9eb056a2edc` (`f9eb056a2edccc12f4fb0898f905b829ce26b4ab`) | **DIVERGED / NOT MERGED** | `151 6` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 156 | /Users/mymac/Projects/opencode-rk-v2-provider-lint | v2/provider-lint | `bbdfff2a0033` (`bbdfff2a0033621c771bcb5f89c09df5a55df5a7`) | **DIVERGED / NOT MERGED** | `67 1` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
-| 157 | /Users/mymac/Projects/opencode-rk-v2-resize-luna-y52o0gi3 | v2/native-resize-luna-y52o0gi3 | `2e7c9a35cb78` (`2e7c9a35cb78a9ba12b4d2387b3ba99cfb77a5d9`) | **MERGED (tip ancestor)** | `16 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
+| 157 | /Users/mymac/Projects/opencode-rk-v2-resize-luna-y52o0gi3 | v2/native-resize-luna-y52o0gi3 | `2e7c9a35cb78` (`2e7c9a35cb78a9ba12b4d2387b3ba99cfb77a5d9`) | **MERGED (tip ancestor)** | `16 0` | CLEAN | — | — | worktree; DONE — G5-NATIVE-LIVE-RESIZE controller receipt; candidate 2e7c9a35cb78 integrated 2e7c9a35cb78; file hash ba0dfb7375681087cfffa0d968c6012582b846c6ddc31e686c5ab4fc46e85f3d; accepted SHA is ancestral to captured main-v2 |
 | 158 | /Users/mymac/Projects/opencode-rk-v2-resize-today-y52o0gi3 | v2/native-resize-today-y52o0gi3 | `f8bde4923cb0` (`f8bde4923cb0f6fdf9c86cbb9341d82d50a89209`) | **MERGED (tip ancestor)** | `21 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 159 | /Users/mymac/Projects/opencode-rk-v2-salvage-preservation | v2/salvage-preservation | `3fd4b8144378` (`3fd4b81443787deafb1dbb02890b241b4bb70772`) | **MERGED (tip ancestor)** | `162 0` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 160 | /Users/mymac/Projects/opencode-rk-v2-security-lint | v2/security-lint | `3634145d6661` (`3634145d6661b31421529d27e45dba24395d73d7`) | **DIVERGED / NOT MERGED** | `93 3` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 161 | /Users/mymac/Projects/opencode-rk-v2-server-library-current | v2/server-library-current | `353821578700` (`353821578700cf9b22ef1b429042f41989f756cc`) | **DIVERGED / NOT MERGED** | `36 3` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
-| 162 | /Users/mymac/Projects/opencode-rk-v2-server-quality-y52o0gi3 | v2/server-quality-y52o0gi3 | `7628b61d1062` (`7628b61d10625ea35aa09392394c7b689b20d55d`) | **MERGED (tip ancestor)** | `3 0` | DIRTY | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
+| 162 | /Users/mymac/Projects/opencode-rk-v2-server-quality-y52o0gi3 | v2/server-quality-y52o0gi3 | `ce400481a036` (`ce400481a036d7aa684b94352658797df19420b7`) | **DIVERGED / NOT MERGED** | `3 1` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 163 | /Users/mymac/Projects/opencode-rk-v2-session-owner-contract | v2/session-owner-contract | `787cd8d383f2` (`787cd8d383f25369309e31f8868ea60169eea7f4`) | **DIVERGED / NOT MERGED** | `45 3` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 164 | /Users/mymac/Projects/opencode-rk-v2-session-owner-contract-ready | v2/session-owner-contract-ready | `2a9903ebcdbb` (`2a9903ebcdbb2406238a1110b1cbb48ebdf53438`) | **DIVERGED / NOT MERGED** | `36 3` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |
 | 165 | /Users/mymac/Projects/opencode-rk-v2-sessions-lint-current | v2/sessions-lint-current | `a75b761dab23` (`a75b761dab23e58f49f93ec0ebb3a2f1fc0fc9c3`) | **DIVERGED / NOT MERGED** | `58 2` | CLEAN | — | — | worktree; acceptance unknown; ancestry is not product acceptance |

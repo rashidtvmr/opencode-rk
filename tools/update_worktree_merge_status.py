@@ -19,7 +19,9 @@ from pathlib import Path
 
 def git(repo: Path, args: list[str], timeout: float = 15.0) -> tuple[int, str, str]:
     try:
-        p = subprocess.run(["git", *args], cwd=repo, text=True,
+        env = os.environ.copy()
+        env["GIT_OPTIONAL_LOCKS"] = "0"
+        p = subprocess.run(["git", *args], cwd=repo, text=True, env=env,
                            capture_output=True, timeout=timeout)
         return p.returncode, p.stdout, p.stderr
     except subprocess.TimeoutExpired:
@@ -32,7 +34,9 @@ def esc(value: object) -> str:
 
 def sha(repo: Path, ref: str) -> str:
     rc, out, _ = git(repo, ["rev-parse", ref])
-    return out.strip() if rc == 0 else "UNKNOWN"
+    if rc != 0 or len(out.strip()) != 40:
+        raise RuntimeError(f"cannot capture {ref}: {out.strip()} {_}")
+    return out.strip()
 
 
 def ancestry(repo: Path, main: str, tip: str) -> str:
@@ -44,8 +48,8 @@ def ancestry(repo: Path, main: str, tip: str) -> str:
         return "MERGED (tip ancestor)"
     if b == 0:
         return "AHEAD (main-v2 ancestor)"
-    if a == 124 or b == 124:
-        return "UNKNOWN (ancestry timeout)"
+    if a not in (1,) or b not in (1,):
+        return "UNKNOWN (ancestry command error)"
     return "DIVERGED / NOT MERGED"
 
 
@@ -100,26 +104,35 @@ def receipt_facts(repo: Path, root: Path | None, main: str) -> dict[str, str]:
     if root is None or not root.is_dir():
         return {}
     facts: dict[str, str] = {}
-    for path in sorted(root.rglob("*.json")):
+    for path in sorted(root.glob("*-accepted.json")):
         try:
             data = json.loads(path.read_text())
         except (OSError, ValueError):
             continue
         if not isinstance(data, dict):
             continue
-        text = json.dumps(data, sort_keys=True)
-        accepted = str(data.get("status", data.get("state", ""))).upper() in {"ACCEPTED", "DONE"}
-        if not accepted:
-            accepted = any(str(v).upper() in {"ACCEPTED", "DONE"} for v in data.values() if isinstance(v, str))
-        exact = None
-        for key in ("accepted_sha", "integrated_sha", "main_v2_sha", "exact_sha", "sha"):
-            value = data.get(key)
-            if isinstance(value, str) and len(value) == 40 and all(c in "0123456789abcdef" for c in value.lower()):
-                exact = value
-                break
-        if accepted and exact:
-            if git(repo, ["merge-base", "--is-ancestor", exact, main])[0] == 0:
-                facts[exact] = f"DONE — controller receipt {path.name}; receipt SHA ancestral; receipt hash {hashlib.sha256(text.encode()).hexdigest()[:16]}"
+        if data.get("lifecycle") != "ACCEPTED" or not isinstance(data.get("package"), str):
+            continue
+        candidate, integrated = data.get("candidate_sha"), data.get("integrated_main_v2_sha")
+        valid = lambda x: isinstance(x, str) and len(x) == 40 and all(c in "0123456789abcdef" for c in x.lower())
+        if not (valid(candidate) and valid(integrated)):
+            continue
+        def verified(path_key: str, hash_key: str) -> bool:
+            p, expected = data.get(path_key), data.get(hash_key)
+            if not (isinstance(p, str) and isinstance(expected, str) and os.path.isfile(p)):
+                return False
+            raw = Path(p).read_bytes()
+            return hashlib.sha256(raw).hexdigest() == expected
+        if data.get("integrated_receipt") and not verified("integrated_receipt", "receipt_sha256"):
+            continue
+        if data.get("quality_receipt") and not verified("quality_receipt", "quality_receipt_sha256"):
+            continue
+        if data.get("native_commands_sha256") and not (isinstance(data.get("native_release"), str) and os.path.isfile(data["native_release"])):
+            continue
+        if git(repo, ["merge-base", "--is-ancestor", candidate, integrated])[0] != 0 or git(repo, ["merge-base", "--is-ancestor", integrated, main])[0] != 0:
+            continue
+        raw = path.read_bytes()
+        facts[candidate] = f"DONE — {data['package']} controller receipt; candidate {candidate[:12]} integrated {integrated[:12]}; file hash {hashlib.sha256(raw).hexdigest()}"
     return facts
 
 
@@ -165,14 +178,18 @@ def main() -> int:
             return "PARTIAL SALVAGE / NOT MERGED — selective salvage only"
         return "acceptance unknown; ancestry is not product acceptance"
 
+    def package_status(package: str) -> str:
+        matches = [value for value in facts.values() if package in value]
+        return matches[0] if matches else "UNKNOWN — no verified controller acceptance receipt available"
+
     lines = ["# V2 Worktree / Branch / Merge Status", "",
              f"> Snapshot UTC: `{snapshot}` | captured full `main-v2`: `{captured}` | generator: `tools/update_worktree_merge_status.py`",
              "> LEDGER CENSUS DONE; full release OPEN. Dirty provider files remain preserved as unknown-owner bytes and are not integrated.", "",
              "## Active package summary", "", "| Package | Status | Evidence / scope note |", "|---|---|---|",
-             "| resize | DONE | Controller-accepted scoped package; no full release claim. |",
-             "| bridge | DONE | Controller-accepted scoped package; no full release claim. |",
-             "| G4 ownership | DONE | Controller-accepted ownership evidence; do not claim full G4/G5/G8. |",
-             "| receipt docs | DONE (evidence only) | Documentation audit, not product acceptance. |",
+             f"| G5-NATIVE-LIVE-RESIZE | {esc(package_status('G5-NATIVE-LIVE-RESIZE'))} | Scoped acceptance only; no full release claim. |",
+             f"| G5-BRIDGE-LIBRARY-MAINTENANCE | {esc(package_status('G5-BRIDGE-LIBRARY-MAINTENANCE'))} | Scoped acceptance only; no full release claim. |",
+             f"| G4-SESSION-EXECUTION-SERIALIZATION | {esc(package_status('G4-SESSION-EXECUTION-SERIALIZATION'))} | Ownership evidence only; do not claim full G4/G5/G8. |",
+             "| receipt docs | INTEGRATED (evidence only) | Requires docs-integration.json audit record; not product acceptance. |",
              "| paste fixture `0c26...`, integrated `7628b61...` | IN PROGRESS | Genuine installed RED frozen; implementation branch `v2/native-paste-repair-y52o0gi3`. |",
              "| server quality | IN PROGRESS | `v2/server-quality-y52o0gi3`, base `7628b61...`. |",
              "| CLI mechanical | IN PROGRESS | `v2/cli-mechanical-y52o0gi3`, base `8fce379...`. |",
