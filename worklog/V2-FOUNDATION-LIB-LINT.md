@@ -43,3 +43,27 @@ crates/foundation/src/lib.rs
 crates/foundation/src/repo_cache_store.rs
 worklog/V2-FOUNDATION-LIB-LINT.md
 ```
+
+## Exact integrated acceptance
+
+Original worker `7b8b5f6e5218802806e608b712ab0855fcd1102e` is preserved.
+Prepared current-base candidate
+`6a71db3898abde832ff4ccce023a80f3bff252f9` is based on integrated CI fixture
+`3abcc87`. Independent verifier `ses_f0a5d77f7ffe7M7dDPA1Oz1DGZ` PREVERIFIED
+the candidate, then the controller fast-forwarded canonical and repeated the
+same bounded isolated manifest on that exact SHA:
+
+```text
+cargo fmt --all -- --check
+  exit 0
+cargo clippy --offline --locked -p opencode-rk-foundation --lib -- -D warnings
+  exit 0
+cargo test --offline --locked -p opencode-rk-foundation --all-targets --all-features -- --test-threads=1
+  168 passed; 0 failed; 0 ignored; exit 0
+```
+
+Exact receipts and hashes are under the approved artifact parent at
+`v2-foundation-library-preverify-6a71db3-xq0xjndb` and
+`v2-foundation-library-integrated-6a71db3-5_0_ne3r`. All existing tests and
+Cargo.lock remain unchanged. State: **ACCEPTED for the three foundation-library
+mechanical diagnostics and crate regressions on exact integrated `6a71db3`**.

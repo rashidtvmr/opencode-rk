@@ -1147,3 +1147,23 @@ a bounded process-table probe confirmed the exact hung test executable absent
 after the runner's SIGTERM. This is an incomplete workspace run, not GREEN.
 The independent fixture owner is preparing bounded authenticated readiness with
 the three original test bodies and assertions preserved.
+
+### CI-mode fixture and foundation maintenance accepted
+
+Independent source review corrected CI-mode helper preparation while preserving
+all three original test bodies byte-for-byte. Independent preverification and
+the identical exact integrated rerun pass on
+**`3abcc879dd68f5cf7df413d3118d03785f86fca2`**: formatting and all **9 CI-mode
+tests**, zero failed/ignored and no provider/cleanup errors. State **ACCEPTED for
+CI-MODE-AUTH-READINESS**. `worklog/V2-CI-MODE-FIXTURE.md` records source-only
+preservation and receipts; product authentication and exit/determinism assertions
+are unchanged.
+
+Fresh workspace Clippy then records three foundation diagnostics. Equivalent
+source-only repairs were prepared on the CI-mode integration, independently
+PREVERIFIED and fast-forwarded as exact
+**`6a71db3898abde832ff4ccce023a80f3bff252f9`**. The unchanged integrated
+manifest passes formatting, foundation-library Clippy and all **168 foundation
+tests**, zero failed/ignored. State **ACCEPTED for scoped foundation maintenance**;
+`worklog/V2-FOUNDATION-LIB-LINT.md` records the retained root allocation,
+overflow-denial behavior, protected tests and exact receipts.

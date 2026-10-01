@@ -74,3 +74,28 @@ commits remain preserved in `v2/ci-mode-fixture-current`; normal cherry-picks
 Full prepared fixture SHA-256:
 `12adcc77ad0f245c548e04e9917a8f370f32ecdc1d73737a5a121f0367abfa37`.
 Independent runtime preverification is still pending.
+
+## Exact integrated acceptance
+
+Independent verifier `ses_f0a624a71ffeCRLPv0cbD4wDZ8` PREVERIFIED exact
+`3abcc879dd68f5cf7df413d3118d03785f86fca2`. After fast-forward integration,
+the controller repeated the same bounded isolated manifest on that exact SHA:
+
+```text
+cargo fmt --all -- --check
+  exit 0
+cargo test --offline --locked -p opencode-rk-cli --test ci_mode -- --test-threads=1 --nocapture
+  9 passed; 0 failed; 0 ignored; exit 0
+```
+
+The actual successful turn and both deterministic runs reach the real
+authenticated daemon and exactly one provider request each. Provider and output
+guards report no protocol, overflow, read, timeout or cleanup failure. The three
+original test function bodies remain frozen at the suffix hash above. Product
+code and Cargo.lock are unchanged by this package.
+
+Receipts are retained under the approved artifact parent at
+`v2-ci-mode-preverify-3abcc87-504tj1l4` and
+`v2-ci-mode-integrated-3abcc87-pg4t_2n_`. State: **ACCEPTED for mechanical
+CI-MODE-AUTH-READINESS on exact integrated `3abcc87`**. The original workspace
+timeout and source-only worker preparation remain preserved.
