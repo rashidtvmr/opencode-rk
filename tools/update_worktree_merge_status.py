@@ -127,8 +127,38 @@ def receipt_facts(repo: Path, root: Path | None, main: str) -> dict[str, str]:
             continue
         if data.get("quality_receipt") and not verified("quality_receipt", "quality_receipt_sha256"):
             continue
-        if data.get("native_commands_sha256") and not (isinstance(data.get("native_release"), str) and os.path.isfile(data["native_release"])):
-            continue
+        if data.get("integrated_receipt"):
+            try:
+                nested = json.loads(Path(data["integrated_receipt"]).read_bytes())
+            except (OSError, ValueError):
+                continue
+            if nested.get("source_sha") != integrated:
+                continue
+            if any((item.get("exit") != 0 or item.get("timeout") or item.get("limit_failure"))
+                   for item in nested.get("commands", []) if isinstance(item, dict)):
+                continue
+        if data.get("quality_receipt"):
+            try:
+                quality = json.loads(Path(data["quality_receipt"]).read_bytes())
+            except (OSError, ValueError):
+                continue
+            if quality.get("source_sha") != integrated:
+                continue
+            commands = quality.get("commands", [])
+            if not commands or any((item.get("exit") != 0 or item.get("timeout") or item.get("limit_failure"))
+                                   for item in commands if isinstance(item, dict)):
+                continue
+        if data.get("native_commands_sha256"):
+            native = data.get("native_release")
+            command_file = Path(native) / "commands.json" if isinstance(native, str) else Path("")
+            if not command_file.is_file() or hashlib.sha256(command_file.read_bytes()).hexdigest() != data["native_commands_sha256"]:
+                continue
+            try:
+                commands = json.loads(command_file.read_bytes())
+            except (OSError, ValueError):
+                continue
+            if not isinstance(commands, list) or not commands or any((x.get("exit") != 0 or x.get("timeout") or x.get("limit_failure")) for x in commands if isinstance(x, dict)):
+                continue
         if git(repo, ["merge-base", "--is-ancestor", candidate, integrated])[0] != 0 or git(repo, ["merge-base", "--is-ancestor", integrated, main])[0] != 0:
             continue
         raw = path.read_bytes()
