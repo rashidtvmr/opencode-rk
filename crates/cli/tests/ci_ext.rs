@@ -293,7 +293,10 @@ fn spawn_openai_fixture(home: &TestHome, extra_args: Vec<String>) -> Child {
                     Some("gpt-5.6")
                 );
                 assert!(
-                    matches!(json.get("stream"), None | Some(serde_json::Value::Bool(false))),
+                    matches!(
+                        json.get("stream"),
+                        None | Some(serde_json::Value::Bool(false))
+                    ),
                     "CI fixture requires a non-streaming Responses request"
                 );
                 assert!(

@@ -85,3 +85,9 @@ non-boolean values. Responses JSON remains required. No original test function
 or assertion was changed. The provider-thread panic and cleanup failure remain
 preserved in `v2-ci-ext-preverify-9b0051e-2x25uxio`; the complete same gate must
 pass before integration.
+
+Preverification of `2773aa7` stopped before runtime on rustfmt's multiline
+`matches!` layout. That exact layout was applied; the failed formatting receipt
+`v2-ci-ext-preverify-2773aa7-5a7ssq7s` remains preserved. Original six test bodies
+remain unchanged. The command manifest, resource limits and required test count
+remain unchanged.
