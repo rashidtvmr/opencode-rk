@@ -116,3 +116,12 @@ browser, Docker, Node, or unrelated subprocess fixture gate was run.
 That historical result is candidate evidence only and is superseded by this
 stricter source revision. The parent/controller must independently classify any
 forced cleanup as failure evidence rather than GREEN.
+
+The controller's final source review makes the timeout handshake explicitly
+owner-confirmed: the test first proves the live direct-child PID, then signals
+the task to start its timeout. The timeout consumes the owned execution future,
+and the result must report cancellation. PID marker reads retain at most 65
+bytes and only `NotFound` establishes absence; permission/read failures cannot
+be mistaken for a no-spawn or cleanup success. Earlier fixture revisions remain
+preserved. This final source still requires an isolated locked/offline compiled
+RED before the hash is frozen.

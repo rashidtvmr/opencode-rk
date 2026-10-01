@@ -6,6 +6,7 @@
 #![cfg(unix)]
 
 use std::fs;
+use std::io::Read;
 use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
@@ -75,9 +76,15 @@ impl OwnedFixture {
     }
 
     fn pid(&self) -> Result<Option<u32>, ProbeError> {
-        let Ok(bytes) = fs::read(&self.pid_file) else {
-            return Ok(None);
+        let file = match fs::File::open(&self.pid_file) {
+            Ok(file) => file,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(ProbeError(format!("PID marker open failed: {error}"))),
         };
+        let mut bytes = Vec::with_capacity(65);
+        file.take(65)
+            .read_to_end(&mut bytes)
+            .map_err(|error| ProbeError(format!("PID marker read failed: {error}")))?;
         if bytes.len() > 64 {
             return Err(ProbeError("fixture PID marker too large".to_owned()));
         }
@@ -203,7 +210,7 @@ async fn wait_until(mut condition: impl FnMut() -> bool, limit: Duration) -> boo
 async fn wait_for_started(fixture: &OwnedFixture) -> u32 {
     let deadline = tokio::time::Instant::now() + WAIT_LIMIT;
     loop {
-        if let Ok(Some(pid)) = fixture.pid() {
+        if let Some(pid) = fixture.pid().expect("authoritative PID marker read") {
             assert_ne!(
                 pid,
                 std::process::id(),
@@ -298,33 +305,26 @@ async fn dropping_timeout_owner_reclaims_live_direct_child() {
     let fixture = OwnedFixture::new();
     let tool = fixture.tool("sleep");
     let config = fixture.config();
-    let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
-    let marker = fixture.pid_file.clone();
+    let (start_timeout_tx, start_timeout_rx) = tokio::sync::oneshot::channel();
     let task = tokio::spawn(async move {
-        let future = tool.execute(config);
-        tokio::pin!(future);
-        loop {
-            tokio::select! {
-                result = &mut future => return result,
-                _ = tokio::time::sleep(Duration::from_millis(10)) => {
-                    if fs::metadata(&marker).is_ok() {
-                        let _ = ready_tx.send(());
-                        break;
-                    }
-                }
-            }
+        let mut future = Box::pin(tool.execute(config));
+        tokio::select! {
+            result = &mut future => return result,
+            started = start_timeout_rx => started.expect("live child confirmed by test owner"),
         }
-        tokio::time::timeout(Duration::from_millis(50), &mut future)
+        tokio::time::timeout(Duration::from_millis(50), future)
             .await
             .map_err(|_| ShellError::Cancelled)
             .and_then(|result| result)
     });
     let pid = wait_for_started(&fixture).await;
-    ready_rx.await.expect("owner readiness signal");
-    let timeout_result = task.await;
+    start_timeout_tx
+        .send(())
+        .expect("start timeout after live PID proof");
+    let timeout_result = task.await.expect("timeout owner task must finish");
     assert!(
-        timeout_result.is_ok(),
-        "timeout owner task should report its bounded timeout"
+        matches!(timeout_result, Err(ShellError::Cancelled)),
+        "owner must report the bounded timeout"
     );
     assert!(
         wait_until(|| matches!(process_row(pid), Ok(None)), WAIT_LIMIT).await,
