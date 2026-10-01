@@ -45,6 +45,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -64,6 +65,59 @@ SENTINEL = "sentinel keep"
 MALFORMED_TOKEN = "MALFORMED-INJECT-NEG-7f2a"
 OVERSIZED_BYTES = 32 * 1024 + 1
 FIRST_REPLY, SECOND_REPLY = "PASTE_FIRST_RESPONSE", "PASTE_SECOND_RESPONSE"
+
+
+class PasteTerminalScreen(TerminalScreen):
+    """Render the fixture with OpenTUI's authoritative terminal-cell widths."""
+
+    CONTINUATION = "\x00"
+
+    @staticmethod
+    def _width(char):
+        if unicodedata.combining(char):
+            return 0
+        # The pinned native `unicode` method maps only East Asian W/F to two
+        # cells.  A is one here; the separate `unicode_wide` profile is not
+        # the xterm fixture's default and must not be guessed from Python EAW.
+        return 2 if unicodedata.east_asian_width(char) in "WF" else 1
+
+    def _put(self, char):
+        if char == "\n":
+            self.row = min(self.rows - 1, self.row + 1)
+            self.col = 0
+            return
+        if char == "\r":
+            self.col = 0
+            return
+        if char == "\b":
+            self.col = max(0, self.col - 1)
+            return
+        if ord(char) < 0x20:
+            return
+        width = self._width(char)
+        if width == 0:
+            index = self.col - 1
+            while index >= 0 and self.cells[self.row][index] == self.CONTINUATION:
+                index -= 1
+            if index >= 0:
+                self.cells[self.row][index] += char
+            return
+        if width == 2 and self.col == self.cols - 1:
+            self.row = min(self.rows - 1, self.row + 1)
+            self.col = 0
+        if self.col >= self.cols:
+            self.row = min(self.rows - 1, self.row + 1)
+            self.col = 0
+        self.cells[self.row][self.col] = char
+        if width == 2 and self.col + 1 < self.cols:
+            self.cells[self.row][self.col + 1] = self.CONTINUATION
+        self.col = min(self.cols, self.col + width)
+        if KEY in self.text():
+            raise AssertionError("fixture API key appeared in visible terminal cells")
+
+    def text(self):
+        return "\n".join("".join(cell for cell in row if cell != self.CONTINUATION).rstrip()
+                         for row in self.cells)
 
 
 def normalize_paste(raw: bytes) -> str:
@@ -358,7 +412,7 @@ def run(binary, library, manifest, artifacts):
     master = slave = child = None
     descriptor_value = None
     captures = bytearray()
-    screen = TerminalScreen()
+    screen = PasteTerminalScreen()
     saved_attrs = None
     semantic_error = None
     termios_restored = False
