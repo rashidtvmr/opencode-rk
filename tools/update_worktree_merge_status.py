@@ -264,6 +264,7 @@ def main() -> int:
         ("receipt docs", integration_status("docs-integration.json"), "Evidence-only documentation; no product acceptance."),
         ("G5-NATIVE-BRACKETED-PASTE", package_status("G5-NATIVE-BRACKETED-PASTE"), "Frozen installed gate; repair branch v2/native-paste-repair-y52o0gi3."),
         ("V2-SERVER-LIBRARY-QUALITY", package_status("V2-SERVER-LIBRARY-QUALITY") if "V2-SERVER-LIBRARY-QUALITY" in facts else integration_status("server-quality-integration.json"), "Library quality and focused regressions; full server gate remains open."),
+        ("V2-OWNERSHIP-FIXTURE-MAINTENANCE", package_status("V2-OWNERSHIP-FIXTURE-MAINTENANCE"), "Mechanical provider-fixture readiness repair; frozen ownership assertions preserved."),
         ("CLI mechanical", integration_status("cli-mechanical-integration.json"), "Global CLI quality remains open."),
         ("DISC-101 identity", package_status("DISC-101-IDENTITY"), "Actual native caller identity contract; no worker acceptance inferred."),
         ("Live interruption", package_status("G4-LIVE-SESSION-INTERRUPTION"), "Authenticated daemon cancellation and cleanup."),
