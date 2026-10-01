@@ -172,14 +172,14 @@ def run(binary, library, manifest, artifacts):
         if not isinstance(token, str) or len(token) != 64 or not re.fullmatch(r"[0-9a-fA-F]{64}", token):
             raise AssertionError("descriptor auth token is not a 64-hex capability")
         read_until(master, time.monotonic() + TIMEOUT, captured, b"OpenCode", 0,
-                    initial_screen, lambda: initial_screen.has_model_status())
+                    initial_screen, lambda: initial_screen.contains("model: openai/" + MODEL))
         raw_mode_seen = not bool(termios.tcgetattr(master)[3] & termios.ICANON)
         send_fragments(master, FIRST.encode() + b"\r")
         read_until(master, time.monotonic() + TIMEOUT, captured, FIRST_REPLY.encode(),
-                   len(captured), initial_screen, lambda: initial_screen.has_assistant(FIRST_REPLY))
+                    len(captured), initial_screen, lambda: initial_screen.contains("assistant: " + FIRST_REPLY))
         send_fragments(master, SECOND.encode() + b"\r")
         read_until(master, time.monotonic() + TIMEOUT, captured, SECOND_REPLY.encode(),
-                   len(captured), initial_screen, lambda: initial_screen.has_assistant(SECOND_REPLY))
+                    len(captured), initial_screen, lambda: initial_screen.contains("assistant: " + SECOND_REPLY))
         messages = history(descriptor_value)
         if state.error or state.semantic_errors or len(state.requests) != 2:
             raise AssertionError(state.error or state.semantic_errors or "expected exactly two provider requests")

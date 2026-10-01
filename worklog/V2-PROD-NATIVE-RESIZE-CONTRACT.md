@@ -1,5 +1,12 @@
 # V2 production native resize contract (NATIVE-RESIZE)
 
+Controller pre-freeze source review corrected readiness to use the selected
+fixture model `gpt-5.6`: the imported `has_model_status` helper is deliberately
+fixed to the onboarding fixture's `gpt-5.6-mini`. Completed-turn waits now require
+the visible `assistant: <reply>` row, preventing a streaming delta or pending
+old-geometry frame from being used as idle-resize readiness. Candidate `65074c9`
+is preserved; no runtime RED or acceptance has been established yet.
+
 ## Candidate scope
 
 This is a source-only test-owner repair of candidate `79fc3e6` (which remains
