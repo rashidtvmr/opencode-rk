@@ -131,6 +131,7 @@ def run(binary, library, manifest, artifacts):
     resized_screen = TerminalScreen(RESIZED_COLS, RESIZED_ROWS)
     semantic_error = None
     raw_mode_seen = False
+    controlling_terminal_seen = False
     termios_restored = False
     child_reaped = False
     daemon_gone = False
@@ -159,9 +160,18 @@ def run(binary, library, manifest, artifacts):
         set_winsize(slave, INITIAL_ROWS, INITIAL_COLS)
         os.set_blocking(master, False)
         saved_attrs = termios.tcgetattr(master)
-        child = subprocess.Popen([str(install / "bin" / "oc2"), "--data-dir", str(root / "data")],
-                                 cwd=root / "project", env=env, stdin=slave, stdout=slave,
-                                 stderr=slave, start_new_session=True, close_fds=True)
+        # Acquire a controlling terminal in the fresh child process before exec.
+        # Keeping this out of preexec_fn avoids Python-thread/fork lock hazards;
+        # exec preserves the PID and process group used by ownership checks.
+        terminal_exec = (
+            "import fcntl, os, sys, termios; "
+            "fcntl.ioctl(0, termios.TIOCSCTTY, 0); "
+            "os.execve(sys.argv[1], sys.argv[1:], dict(os.environ))"
+        )
+        child = subprocess.Popen([sys.executable, "-c", terminal_exec,
+                                  str(install / "bin" / "oc2"), "--data-dir", str(root / "data")],
+                                  cwd=root / "project", env=env, stdin=slave, stdout=slave,
+                                  stderr=slave, start_new_session=True, close_fds=True)
         os.close(slave); slave = None
         descriptor_value = descriptor(root / "data", port, child, time.monotonic() + TIMEOUT)
         if descriptor_value.get("schema_version") != 1:
@@ -174,6 +184,9 @@ def run(binary, library, manifest, artifacts):
         read_until(master, time.monotonic() + TIMEOUT, captured, b"OpenCode", 0,
                     initial_screen, lambda: initial_screen.contains("model: openai/" + MODEL))
         raw_mode_seen = not bool(termios.tcgetattr(master)[3] & termios.ICANON)
+        controlling_terminal_seen = os.tcgetpgrp(master) == child.pid
+        if not controlling_terminal_seen:
+            raise AssertionError("CLI does not own the foreground controlling-terminal group")
         send_fragments(master, FIRST.encode() + b"\r")
         read_until(master, time.monotonic() + TIMEOUT, captured, FIRST_REPLY.encode(),
                     len(captured), initial_screen, lambda: initial_screen.contains("assistant: " + FIRST_REPLY))
@@ -257,7 +270,8 @@ def run(binary, library, manifest, artifacts):
         success = (semantic_error is None and state.error is None and not state.semantic_errors and
                    len(state.requests) == 2 and len(messages) == 4 and resize_observed and
                    child_reaped and child.returncode == 0 and not forced_kill and daemon_gone and
-                   termios_restored and raw_mode_seen and provider_joined and capture_bound and
+                    termios_restored and raw_mode_seen and controlling_terminal_seen and
+                    provider_joined and capture_bound and
                    not secret_echo and time.monotonic() - started <= TOTAL_TIMEOUT)
         evidence = {
             "phase": "success" if success else "failed", "error": semantic_error or state.error or "",
@@ -267,6 +281,7 @@ def run(binary, library, manifest, artifacts):
             "initial_geometry": [INITIAL_COLS, INITIAL_ROWS], "resized_geometry": [RESIZED_COLS, RESIZED_ROWS],
             "resize_observed": resize_observed, "resize_cursor_rows": resize_rows,
             "termios_restored": termios_restored, "raw_mode_seen": raw_mode_seen,
+            "controlling_terminal_seen": controlling_terminal_seen,
             "child_reaped": child_reaped, "cli_exit_code": child.returncode if child else None,
             "daemon_gone": daemon_gone, "provider_thread_joined": provider_joined,
             "forced_kill": forced_kill, "secret_echo": secret_echo,

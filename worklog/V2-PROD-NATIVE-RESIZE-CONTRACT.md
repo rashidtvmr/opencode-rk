@@ -7,6 +7,15 @@ the visible `assistant: <reply>` row, preventing a streaming delta or pending
 old-geometry frame from being used as idle-resize readiness. Candidate `65074c9`
 is preserved; no runtime RED or acceptance has been established yet.
 
+The fixture also explicitly acquires the controlling PTY before executing the
+CLI and checks that its foreground process group equals the owned child PID.
+Pinned OpenTUI 0.4.5 (`0c8c4f7cff2927e3df63a9757a45eff9a343611c`, selected by
+OpenCode `95daf906`'s package catalog) registers a SIGWINCH handler in
+`packages/core/src/renderer.ts`. A slave descriptor with `isatty` alone does not
+establish that the kernel's resize signal reaches the CLI. A fresh Python child
+performs `TIOCSCTTY` then `execve` with the existing isolated environment and
+fixed argv; this preserves the PID/group and avoids threaded `preexec_fn`.
+
 ## Candidate scope
 
 This is a source-only test-owner repair of candidate `79fc3e6` (which remains
