@@ -66,7 +66,7 @@ Pinned upstream is OpenCode commit
 - `packages/core/src/cross-spawn-spawner.ts:338-340,395-397,432-434` contains
   the shared process kill/escalation lifecycle.
 - `packages/core/src/session/execution.ts:16-18` defines interruption as work
-  owned by this process; `packages/core/src/run-coordinator.ts:94-103` interrupts
+  owned by this process; `packages/core/src/session/run-coordinator.ts:94-103` interrupts
   the owning fiber.
 
 These are upstream lifecycle authorities, not a demand to reproduce the
@@ -89,7 +89,17 @@ engine or CLI executor.
 
 ## Verification record
 
-Focused command run on candidate `1cf7377`:
+The earlier focused command run on candidate `1cf7377` is retained only as
+historical, non-acceptance evidence. It used the pre-review permissive probe,
+was not run under the parent's final locked/isolated command manifest, and
+must not be used to freeze this stricter contract or claim acceptance.
+
+The revised source-only candidate intentionally has not run Cargo or any
+runtime/process fixture after this review. The parent/controller must run the
+final compiling RED with an offline locked Cargo command, isolated HOME, and
+one approved heavy slot, then freeze the exact test hash and command manifest.
+
+Historical command run on candidate `1cf7377`:
 
 ```text
 CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 cargo test -p opencode-rk-tools --test shell_owned_lifetime -- --nocapture
@@ -103,6 +113,6 @@ marker-verified PID remained alive after the two-second deadline. The existing
 library warnings include the known unpolled `child.kill()` issue. No PTY,
 browser, Docker, Node, or unrelated subprocess fixture gate was run.
 
-This is a candidate RED result only. The parent/controller must freeze the exact
-test hash and command manifest, and must independently classify the forced
-failure cleanup as failure evidence rather than GREEN.
+That historical result is candidate evidence only and is superseded by this
+stricter source revision. The parent/controller must independently classify any
+forced cleanup as failure evidence rather than GREEN.
