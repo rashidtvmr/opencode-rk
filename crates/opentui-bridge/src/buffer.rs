@@ -37,9 +37,7 @@ impl CellBuffer {
     /// upgrade path: add `cells: Vec<Cell>`, `copy_within`/row loop here.
     /// Self-blit safe: geometry only, aliasing is no-op safe.
     pub fn blit(&mut self, src: &CellBuffer, dx: u32, dy: u32) {
-        if self.blit_region(src, dx, dy).is_none() {
-            return;
-        }
+        let _ = self.blit_region(src, dx, dy);
         // No store to copy yet; region math above is the contract.
     }
 
@@ -63,10 +61,10 @@ impl CellBuffer {
     }
 }
 
-/// Raw C-ABI buffer entry points. Every declaration matches an
-/// `export fn` in `packages/native/src/lib.zig`. Nullable Zig pointers
-/// (`?[*]`) map to raw pointers (null tolerated natively); colors are
-/// `[u16; 4]` RGBA lanes. Linked only under `native`.
+// Raw C-ABI buffer entry points. Every declaration matches an
+// `export fn` in `packages/native/src/lib.zig`. Nullable Zig pointers
+// (`?[*]`) map to raw pointers (null tolerated natively); colors are
+// `[u16; 4]` RGBA lanes. Linked only under `native`.
 #[cfg(feature = "native")]
 #[link(name = "opentui")]
 unsafe extern "C" {
