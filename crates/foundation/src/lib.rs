@@ -214,7 +214,7 @@ impl ByteBudget {
             let available = self.limit.saturating_sub(current);
             if current
                 .checked_add(bytes)
-                .map_or(true, |next| next > self.limit)
+                .is_none_or(|next| next > self.limit)
             {
                 return Err(RuntimeError::BudgetExceeded {
                     requested: bytes,
