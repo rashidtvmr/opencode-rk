@@ -47,6 +47,8 @@ static CLAIMED: AtomicBool = AtomicBool::new(false);
 #[cfg(feature = "native")]
 static LIFECYCLE_HANDLE: AtomicU32 = AtomicU32::new(INVALID_HANDLE);
 #[cfg(feature = "native")]
+static LIFECYCLE_DEST: AtomicU8 = AtomicU8::new(1);
+#[cfg(feature = "native")]
 static LIFECYCLE_FLAGS: AtomicU8 = AtomicU8::new(0);
 #[cfg(feature = "native")]
 const TERMINAL_ACTIVE: u8 = 1;
@@ -162,14 +164,46 @@ fn restore_terminal_input(handle: NativeHandle, release: bool) -> Result<(), Bri
 /// eight-byte sequence is written to that owned descriptor.  Memory/headless
 /// renderers never enter this path.
 #[cfg(all(feature = "native", unix))]
-fn reset_bracketed_paste(fd: &OwnedFd) -> Result<(), BridgeError> {
+fn reset_bracketed_paste() -> Result<(), BridgeError> {
     const RESET: &[u8] = b"\x1b[?2004l";
+    const BUDGET: Duration = Duration::from_millis(50);
+    // `/dev/tty` is the process' controlling terminal, and opening it read/write
+    // avoids assuming that stdin was opened writable. `OpenOptions` creates a
+    // CLOEXEC descriptor on supported Unix targets; this descriptor is local to
+    // this bounded operation and is closed on every return path.
+    let tty = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open("/dev/tty")
+        .map_err(|_| BridgeError::TerminalFailed)?;
+    let fd = tty.as_fd();
+    tcgetattr(fd).map_err(|_| BridgeError::TerminalFailed)?;
+    let deadline = std::time::Instant::now() + BUDGET;
     let mut written = 0;
     while written < RESET.len() {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(BridgeError::TerminalFailed);
+        }
+        let wait = Timespec {
+            tv_sec: remaining.as_secs() as i64,
+            tv_nsec: remaining.subsec_nanos() as _,
+        };
+        let mut descriptors = [PollFd::new(fd, PollFlags::OUT)];
+        match poll(&mut descriptors, Some(&wait)) {
+            Ok(0) => return Err(BridgeError::TerminalFailed),
+            Err(Errno::INTR) => continue,
+            Err(_) => return Err(BridgeError::TerminalFailed),
+            Ok(_) if !descriptors[0].revents().contains(PollFlags::OUT) => {
+                return Err(BridgeError::TerminalFailed)
+            }
+            Ok(_) => {}
+        }
         match write(fd, &RESET[written..]) {
             Ok(0) => return Err(BridgeError::TerminalFailed),
             Ok(count) => written += count,
             Err(Errno::INTR) => continue,
+            Err(Errno::AGAIN) => continue,
             Err(_) => return Err(BridgeError::TerminalFailed),
         }
     }
@@ -426,6 +460,7 @@ impl Renderer {
                 return Err(BridgeError::CreateFailed);
             }
             LIFECYCLE_FLAGS.store(0, Ordering::Release);
+            LIFECYCLE_DEST.store(dest, Ordering::Release);
             LIFECYCLE_HANDLE.store(handle, Ordering::Release);
             Ok(Self {
                 handle,
@@ -490,16 +525,14 @@ impl Renderer {
             }
             destroyRenderer(self.handle, true);
             #[cfg(unix)]
-            if owned && flags & TERMINAL_ACTIVE != 0 {
-                let slot = TERMINAL_INPUT
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                if let Some(input) = slot.as_ref().filter(|input| input.handle == self.handle) {
-                    if let Err(error) = reset_bracketed_paste(&input.fd) {
-                        eprintln!("native renderer cleanup: {error}");
-                    }
+            if owned && flags & TERMINAL_ACTIVE != 0 && LIFECYCLE_DEST.load(Ordering::Acquire) == 0
+            {
+                if let Err(error) = reset_bracketed_paste() {
+                    eprintln!("native renderer cleanup: {error}");
                 }
-                drop(slot);
+            }
+            if owned {
+                LIFECYCLE_DEST.store(1, Ordering::Release);
             }
         }
         #[cfg(all(feature = "native", unix))]
@@ -564,14 +597,16 @@ impl Renderer {
             }
             #[cfg(unix)]
             {
-                let slot = TERMINAL_INPUT
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                if let Some(input) = slot.as_ref().filter(|input| input.handle == handle) {
-                    reset_bracketed_paste(&input.fd)?;
+                let reset = if LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
+                    reset_bracketed_paste().err()
+                } else {
+                    None
+                };
+                let restore = restore_terminal_input(handle, true);
+                if let Some(error) = reset {
+                    return Err(error);
                 }
-                drop(slot);
-                restore_terminal_input(handle, true)?;
+                restore?;
             }
             Ok(())
         }
@@ -590,14 +625,16 @@ impl Renderer {
             unsafe { suspendRenderer(handle) };
             #[cfg(unix)]
             {
-                let slot = TERMINAL_INPUT
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner());
-                if let Some(input) = slot.as_ref().filter(|input| input.handle == handle) {
-                    reset_bracketed_paste(&input.fd)?;
+                let reset = if LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
+                    reset_bracketed_paste().err()
+                } else {
+                    None
+                };
+                let restore = restore_terminal_input(handle, false);
+                if let Some(error) = reset {
+                    return Err(error);
                 }
-                drop(slot);
-                restore_terminal_input(handle, false)?;
+                restore?;
             }
             Ok(())
         }

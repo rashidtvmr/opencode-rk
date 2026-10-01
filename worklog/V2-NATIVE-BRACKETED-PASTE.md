@@ -50,6 +50,27 @@ validation only in this worker: `rustfmt --edition 2021` and `git diff --check`
 pass. Native build, PTY fixture, and integrated acceptance remain owned by the
 single integrator.
 
+## Rejected-candidate repair
+
+The prior fallback was rejected because stdin is not necessarily writable,
+could spin indefinitely on `EINTR`/partial writes, and ran after renderer
+destruction without a backend/descriptor lifetime proof. This candidate instead
+uses a separately opened read/write `/dev/tty` only for the stdout-backed
+renderer. `/dev/tty` resolves the process controlling terminal, rather than
+assuming stdin's access mode or writing to an arbitrary pipe; `tcgetattr` is
+required before emission. The descriptor is a short-lived owned `File` and is
+closed on every return path. Memory-backed renderers are excluded by the
+destination flag and never open or write it.
+
+Emission is readiness-polled with the existing rustix poll API and a 50ms
+absolute deadline, with bounded eight-byte output, partial writes, `EINTR`, and
+`EAGAIN` handling. Explicit restore/suspend paths retain the first reset error
+but always attempt captured-kernel-attribute restoration before returning it.
+Drop remains best-effort and reports failure without panic; existing owned FD
+and claim cleanup still runs. Native shutdown remains first, so the linked
+renderer/backend has completed its own `resetState`/thread teardown before the
+short-lived controlling-TTY fallback is attempted.
+
 ## Frozen runtime RED
 
 The supplied freeze is
