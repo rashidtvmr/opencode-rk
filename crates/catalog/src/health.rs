@@ -73,18 +73,14 @@ impl HealthChecker {
 
     /// Gets the current health record for a plugin by ID.
     pub fn check(&self, plugin_id: &str) -> Option<&PluginHealth> {
-        self.checks.back().and_then(|latest| {
-            if latest.plugin_id == plugin_id {
-                Some(latest)
-            } else {
-                None
-            }
-        })
+        self.checks
+            .back()
+            .filter(|latest| latest.plugin_id == plugin_id)
     }
 
     /// Returns true if all recorded plugins are healthy.
     pub fn is_healthy(&self) -> bool {
-        self.checks.front().map_or(true, |_| {
+        self.checks.front().is_none_or(|_| {
             self.checks
                 .iter()
                 .all(|c| matches!(c.status, HealthStatus::Healthy))

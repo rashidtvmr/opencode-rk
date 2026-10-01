@@ -39,8 +39,7 @@ impl CatalogConfig {
 
     /// Save configuration to a TOML file at the given path.
     pub fn save(&self, path: &std::path::Path) -> std::io::Result<()> {
-        let content = toml::to_string_pretty(self)
-            .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+        let content = toml::to_string_pretty(self).map_err(std::io::Error::other)?;
         fs::write(path, content)
     }
 
