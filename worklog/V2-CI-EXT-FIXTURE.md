@@ -73,3 +73,15 @@ edition orders the atomic import before `Arc`. The controller applied that exact
 two-line mechanical correction. No compiler or runtime test had run. Receipt
 `v2-ci-ext-preverify-c59fa7e-g4n41l15` remains preserved under the approved
 artifact parent; the full unchanged gate is required again.
+
+Actual runtime preverification on `9b0051e` compiled and ran all 12 tests:
+10 passed, 2 failed, 0 ignored. The new provider helper incorrectly required
+an explicit `stream: false` field. The inspected product builder
+`responses_request_payload` (`crates/providers/src/responses.rs:143–205`)
+intentionally omits `stream` when false and sets it only for streaming requests.
+The controller corrected that newly added helper check to accept the two
+equivalent non-streaming shapes (omitted or false), while rejecting true and
+non-boolean values. Responses JSON remains required. No original test function
+or assertion was changed. The provider-thread panic and cleanup failure remain
+preserved in `v2-ci-ext-preverify-9b0051e-2x25uxio`; the complete same gate must
+pass before integration.

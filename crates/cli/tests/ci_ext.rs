@@ -292,7 +292,10 @@ fn spawn_openai_fixture(home: &TestHome, extra_args: Vec<String>) -> Child {
                     json.get("model").and_then(|value| value.as_str()),
                     Some("gpt-5.6")
                 );
-                assert_eq!(json.get("stream"), Some(&serde_json::json!(false)));
+                assert!(
+                    matches!(json.get("stream"), None | Some(serde_json::Value::Bool(false))),
+                    "CI fixture requires a non-streaming Responses request"
+                );
                 assert!(
                     json.to_string().contains("Say hello"),
                     "provider prompt mismatch"
