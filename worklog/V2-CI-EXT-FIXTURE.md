@@ -4,6 +4,9 @@ Package: `CI-EXT-AUTH-READINESS` (independent test/fixture owner)
 
 Base SHA: `89aeaa8` (actual resolve used by the evaluator: `a79`)
 
+Correction pass is based on normal fixture commit `4bf7dea`; candidate commit is
+reported with the final handoff.
+
 ## Observed RED
 
 The frozen `crates/cli/tests/ci_ext.rs` tests `ci_ext_t03_max_steps_one_completes_like_baseline`
@@ -33,3 +36,8 @@ Frozen test-body SHA-256 (from the first `#[test]` through EOF):
 The before and after hashes are identical.  No test/build/runtime gate was run by
 this fixture owner, per package scope and parent heavy-slot policy.  This is a
 source-only candidate, not a GREEN or ACCEPTED claim.
+
+Correction details: the fixture uses qualified `openai/gpt-5.6` while sending
+`gpt-5.6` upstream, supplies an absolute disposable `models.json` through
+`serve --models-file`, validates exact provider routes/auth/model/prompt, and
+owns resources immediately after each spawn. No runtime/build gate was run.
