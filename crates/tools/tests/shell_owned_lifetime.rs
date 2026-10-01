@@ -5,7 +5,7 @@
 //! particular, aborting the Tokio owner must not orphan the direct child.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::process::Command;
 use std::time::{Duration, Instant};
 
@@ -88,17 +88,27 @@ impl Drop for OwnedFixture {
 }
 
 fn is_alive(pid: u32) -> bool {
-    process_row(pid).is_some()
+    process_row(pid).is_some_and(|(_, _, state)| state != "Z")
 }
 
 fn is_owned_child(pid: u32) -> bool {
-    process_row(pid)
-        .is_some_and(|(observed_pid, parent)| observed_pid == pid && parent == std::process::id())
+    process_row(pid).is_some_and(|(observed_pid, parent, state)| {
+        observed_pid == pid && parent == std::process::id() && state != "Z"
+    })
 }
 
-fn process_row(pid: u32) -> Option<(u32, u32)> {
+fn process_row(pid: u32) -> Option<(u32, u32, String)> {
     let output = Command::new("/bin/ps")
-        .args(["-p", &pid.to_string(), "-o", "pid=", "-o", "ppid="])
+        .args([
+            "-p",
+            &pid.to_string(),
+            "-o",
+            "pid=",
+            "-o",
+            "ppid=",
+            "-o",
+            "state=",
+        ])
         .output()
         .ok()?;
     if !output.status.success() {
@@ -106,10 +116,14 @@ fn process_row(pid: u32) -> Option<(u32, u32)> {
     }
     let text = String::from_utf8(output.stdout).ok()?;
     let fields: Vec<_> = text.split_whitespace().collect();
-    if fields.len() != 2 {
+    if fields.len() != 3 {
         return None;
     }
-    Some((fields[0].parse().ok()?, fields[1].parse().ok()?))
+    Some((
+        fields[0].parse().ok()?,
+        fields[1].parse().ok()?,
+        fields[2].to_owned(),
+    ))
 }
 
 fn wait_until(mut condition: impl FnMut() -> bool, limit: Duration) -> bool {
@@ -149,9 +163,9 @@ async fn wait_for_started(fixture: &OwnedFixture) -> u32 {
 #[tokio::test]
 async fn normal_completion_has_no_live_process_or_marker_requirement() {
     let fixture = OwnedFixture::new();
-    let tool = ShellTool::new("/bin/true", vec![]);
+    let tool = ShellTool::new("/usr/bin/true", vec![]);
     let config = ShellConfig {
-        allowed_commands: vec!["/bin/true".to_owned()],
+        allowed_commands: vec!["/usr/bin/true".to_owned()],
         ..fixture.config()
     };
     let result = tool
@@ -213,17 +227,18 @@ async fn aborting_owned_task_reclaims_live_direct_child() {
 #[tokio::test]
 async fn dropping_timeout_owner_reclaims_live_direct_child() {
     let fixture = OwnedFixture::new();
-    let handle = tokio::spawn(fixture.tool().execute(fixture.config()));
+    let tool = fixture.tool();
+    let config = fixture.config();
+    let task = tokio::spawn(async move {
+        let result = tokio::time::timeout(Duration::from_millis(50), tool.execute(config)).await;
+        assert!(result.is_err(), "fixture must still be running at timeout");
+    });
     let pid = wait_for_started(&fixture).await;
-    let timed = tokio::time::timeout(Duration::from_millis(50), handle);
-    let timeout_result = timed.await;
+    let timeout_result = task.await;
     assert!(
-        timeout_result.is_err(),
-        "fixture must still be running at timeout"
+        timeout_result.is_ok(),
+        "timeout owner task should report its bounded timeout"
     );
-    // timeout drops its JoinHandle, which is detach semantics, not ownership;
-    // this test intentionally freezes the stronger contract for the product
-    // implementation: its execution owner must still reclaim the child.
     assert!(
         wait_until(|| !is_alive(pid), WAIT_LIMIT),
         "timeout owner left child PID {pid} alive"

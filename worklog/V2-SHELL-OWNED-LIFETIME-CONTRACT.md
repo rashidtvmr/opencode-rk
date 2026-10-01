@@ -89,8 +89,20 @@ engine or CLI executor.
 
 ## Verification record
 
-The test file is intentionally submitted for the parent/controller to run as a
-genuine compiling RED test and freeze its exact hash and command manifest. This
-worker has not run Cargo, PTY, browser, Docker, Node, or subprocess-fixture
-gates, per grant. Candidate SHA and final RED result therefore remain to be
-recorded by the parent after the allowed focused run.
+Focused command run on candidate `1cf7377`:
+
+```text
+CARGO_BUILD_JOBS=2 RUST_TEST_THREADS=2 cargo test -p opencode-rk-tools --test shell_owned_lifetime -- --nocapture
+```
+
+The test target compiled and ran five tests. Three passed (normal completion,
+broker denial, and unpolled future); two correctly failed RED:
+`aborting_owned_task_reclaims_live_direct_child` and
+`dropping_timeout_owner_reclaims_live_direct_child`, each reporting its
+marker-verified PID remained alive after the two-second deadline. The existing
+library warnings include the known unpolled `child.kill()` issue. No PTY,
+browser, Docker, Node, or unrelated subprocess fixture gate was run.
+
+This is a candidate RED result only. The parent/controller must freeze the exact
+test hash and command manifest, and must independently classify the forced
+failure cleanup as failure evidence rather than GREEN.
