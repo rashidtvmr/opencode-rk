@@ -28,6 +28,8 @@ use std::time::Duration;
 #[cfg(all(feature = "native", unix))]
 use rustix::event::{poll, PollFd, PollFlags, Timespec};
 #[cfg(all(feature = "native", unix))]
+use rustix::io::{write, Errno};
+#[cfg(all(feature = "native", unix))]
 use rustix::termios::{tcgetattr, tcgetwinsize, tcsetattr, OptionalActions, Termios};
 
 use crate::buffer::NativeHandle;
@@ -145,6 +147,30 @@ fn restore_terminal_input(handle: NativeHandle, release: bool) -> Result<(), Bri
         }
         if release {
             *slot = None;
+        }
+    }
+    Ok(())
+}
+
+/// Ensure the one terminal mode whose reset is externally observable by the
+/// native paste contract is disabled before the owned TTY is released.
+///
+/// The linked native fork emits this sequence from `Terminal::resetState` via
+/// `performShutdownSequence`, but its backend may deliver that write
+/// asynchronously.  This is a deliberately bounded, real-TTY-only fallback:
+/// `TERMINAL_INPUT` exists only after a successful `tcgetattr`, and the exact
+/// eight-byte sequence is written to that owned descriptor.  Memory/headless
+/// renderers never enter this path.
+#[cfg(all(feature = "native", unix))]
+fn reset_bracketed_paste(fd: &OwnedFd) -> Result<(), BridgeError> {
+    const RESET: &[u8] = b"\x1b[?2004l";
+    let mut written = 0;
+    while written < RESET.len() {
+        match write(fd, &RESET[written..]) {
+            Ok(0) => return Err(BridgeError::TerminalFailed),
+            Ok(count) => written += count,
+            Err(Errno::INTR) => continue,
+            Err(_) => return Err(BridgeError::TerminalFailed),
         }
     }
     Ok(())
@@ -463,6 +489,18 @@ impl Renderer {
                 LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
             }
             destroyRenderer(self.handle, true);
+            #[cfg(unix)]
+            if owned && flags & TERMINAL_ACTIVE != 0 {
+                let slot = TERMINAL_INPUT
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                if let Some(input) = slot.as_ref().filter(|input| input.handle == self.handle) {
+                    if let Err(error) = reset_bracketed_paste(&input.fd) {
+                        eprintln!("native renderer cleanup: {error}");
+                    }
+                }
+                drop(slot);
+            }
         }
         #[cfg(all(feature = "native", unix))]
         if let Err(error) = restore_terminal_input(self.handle, true) {
@@ -525,7 +563,16 @@ impl Renderer {
                 unsafe { suspendRenderer(handle) };
             }
             #[cfg(unix)]
-            restore_terminal_input(handle, true)?;
+            {
+                let slot = TERMINAL_INPUT
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                if let Some(input) = slot.as_ref().filter(|input| input.handle == handle) {
+                    reset_bracketed_paste(&input.fd)?;
+                }
+                drop(slot);
+                restore_terminal_input(handle, true)?;
+            }
             Ok(())
         }
     }
@@ -542,7 +589,16 @@ impl Renderer {
             // SAFETY: live renderer handle owned by self.
             unsafe { suspendRenderer(handle) };
             #[cfg(unix)]
-            restore_terminal_input(handle, false)?;
+            {
+                let slot = TERMINAL_INPUT
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                if let Some(input) = slot.as_ref().filter(|input| input.handle == handle) {
+                    reset_bracketed_paste(&input.fd)?;
+                }
+                drop(slot);
+                restore_terminal_input(handle, false)?;
+            }
             Ok(())
         }
     }

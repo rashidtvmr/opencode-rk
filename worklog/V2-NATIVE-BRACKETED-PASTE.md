@@ -24,6 +24,32 @@ crates/opentui-bridge/src/safe_renderer.rs
 worklog/V2-NATIVE-BRACKETED-PASTE.md
 ```
 
+## Follow-up candidate: owned TTY reset
+
+The linked native fork's `packages/native/src/renderer.zig` calls
+`performShutdownSequence()` from both `suspendRenderer` and `destroy`; that
+sequence calls `Terminal.resetState()` (`packages/native/src/terminal.zig`),
+which emits `CSI ?2004 l` when its tracked `bracketed_paste` state is enabled.
+The ABI's `destroyRenderer(handle, flush_input)` only joins/deinitializes the
+backend and flushes kernel input (`packages/native/src/lib.zig`), so it does
+not provide a Rust-visible output-drain acknowledgment. The observed normal
+exit therefore can restore termios while the asynchronous backend reset is not
+visible to the PTY capture.
+
+The candidate adds a bounded fallback in `safe_renderer.rs`: after the native
+shutdown call and before releasing the owned terminal descriptor, it writes
+the exact eight-byte `ESC [ ? 2 0 0 4 l` sequence to the duplicated descriptor
+only when `TERMINAL_INPUT` owns a real Unix TTY. Partial writes and EINTR are
+handled; zero/error returns are surfaced by the explicit `restore_terminal_modes`
+and `suspend` paths, while `Drop` reports cleanup failure without panicking.
+Memory/headless renderers have no `TERMINAL_INPUT` slot and never emit it.
+
+This preserves the linked ABI (including the two-argument destroy call), raw
+termios restoration, bounded cleanup, and existing lifecycle flags. Source
+validation only in this worker: `rustfmt --edition 2021` and `git diff --check`
+pass. Native build, PTY fixture, and integrated acceptance remain owned by the
+single integrator.
+
 ## Frozen runtime RED
 
 The supplied freeze is
