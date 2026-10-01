@@ -103,10 +103,69 @@ use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    convert::Infallible,
+    path::PathBuf,
+    str::FromStr,
+    sync::{Arc, Mutex},
+};
 use tokio::sync::{Semaphore, SemaphorePermit};
 
-static TURN_PERMITS: Semaphore = Semaphore::const_new(2);
+const MAX_ACTIVE_TURNS: usize = 2;
+static TURN_PERMITS: Semaphore = Semaphore::const_new(MAX_ACTIVE_TURNS);
+static ACTIVE_SESSION_TURNS: Mutex<[Option<SessionId>; MAX_ACTIVE_TURNS]> =
+    Mutex::new([None; MAX_ACTIVE_TURNS]);
+
+/// Owns one session execution and its existing process-wide capacity slot.
+///
+/// Admission is nonblocking and precedes provider access and durable input.
+/// The fixed registry has no queue, and its short critical sections never span
+/// an await. Streaming responses retain this guard until their body is dropped.
+struct TurnExecutionPermit {
+    _global: SemaphorePermit<'static>,
+    session_id: SessionId,
+}
+
+impl TurnExecutionPermit {
+    fn acquire(session_id: SessionId) -> Result<Self, ApiFailure> {
+        let global = TURN_PERMITS
+            .try_acquire()
+            .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+        let mut active = ACTIVE_SESSION_TURNS
+            .lock()
+            .map_err(|_| ApiFailure::internal("turn ownership registry unavailable"))?;
+        if active.contains(&Some(session_id)) {
+            return Err(ApiFailure::too_many_requests(
+                "session already has an active turn",
+            ));
+        }
+        let slot = active
+            .iter_mut()
+            .find(|slot| slot.is_none())
+            .ok_or_else(|| ApiFailure::too_many_requests("too many active turns"))?;
+        *slot = Some(session_id);
+        Ok(Self {
+            _global: global,
+            session_id,
+        })
+    }
+}
+
+impl Drop for TurnExecutionPermit {
+    fn drop(&mut self) {
+        // Reclaim an owned slot even if an earlier admission panicked while
+        // holding the mutex; subsequent admissions still fail closed on poison.
+        let mut active = ACTIVE_SESSION_TURNS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        for slot in active.iter_mut() {
+            if *slot == Some(self.session_id) {
+                *slot = None;
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub sessions: SessionService,
@@ -776,10 +835,8 @@ async fn create_turn(
     Path(id): Path<String>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
-    let _permit = TURN_PERMITS
-        .try_acquire()
-        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
     let id = parse_session_id(&id)?;
+    let _permit = TurnExecutionPermit::acquire(id)?;
     state.sessions.get(id).await.map_err(ApiFailure::internal)?;
 
     if body.text.trim().is_empty() {
@@ -850,7 +907,7 @@ struct TurnStreamState {
     assistant_text: String,
     reasoning_summary: String,
     stage: TurnStreamStage,
-    _permit: SemaphorePermit<'static>,
+    _permit: TurnExecutionPermit,
     /// Agentic loop state: provider tool schema + step budget + typed history.
     tools: Vec<ResponsesTool>,
     enabled_tools: Vec<String>,
@@ -970,14 +1027,12 @@ async fn create_turn_stream(
     Path(id): Path<String>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<Response, ApiFailure> {
-    let permit = TURN_PERMITS
-        .try_acquire()
-        .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
+    let id = parse_session_id(&id)?;
+    let permit = TurnExecutionPermit::acquire(id)?;
     let project_root = std::env::current_dir()
         .map_err(|_| ApiFailure::internal("could not determine project root"))?;
     let file_tool = FileTool::with_project_root(project_root.clone());
     let broker = PermissionBroker::new(SecurityPolicy::lean_default(project_root));
-    let id = parse_session_id(&id)?;
     state.sessions.get(id).await.map_err(ApiFailure::internal)?;
 
     if body.text.trim().is_empty() {
