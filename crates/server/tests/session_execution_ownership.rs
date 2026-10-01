@@ -244,6 +244,8 @@ fn provider_request(
     counts: Arc<(Mutex<Counts>, Condvar)>,
     release: Arc<(Mutex<bool>, Condvar)>,
 ) {
+    // Accepted sockets may inherit the listener's nonblocking mode on macOS.
+    stream.set_nonblocking(false).expect("provider blocking");
     stream
         .set_read_timeout(Some(Duration::from_secs(5)))
         .expect("provider read timeout");
@@ -322,13 +324,34 @@ fn read_request(stream: &mut TcpStream) -> std::io::Result<Vec<u8>> {
     let mut total = None;
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        if Instant::now() >= deadline {
+        let remaining = deadline.saturating_duration_since(Instant::now());
+        if remaining.is_zero() {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::TimedOut,
                 "provider request deadline",
             ));
         }
-        let n = stream.read(&mut buf)?;
+        // Partial reads and transient errors must not restart the absolute deadline.
+        stream.set_read_timeout(Some(remaining.min(Duration::from_millis(500))))?;
+        let n = match stream.read(&mut buf) {
+            Ok(n) => n,
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::WouldBlock
+                        | std::io::ErrorKind::TimedOut
+                        | std::io::ErrorKind::Interrupted
+                ) =>
+            {
+                thread::sleep(
+                    deadline
+                        .saturating_duration_since(Instant::now())
+                        .min(Duration::from_millis(2)),
+                );
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
         if n == 0 {
             return Err(std::io::Error::new(
                 std::io::ErrorKind::UnexpectedEof,
