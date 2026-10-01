@@ -117,3 +117,11 @@ relative rpath. The fixture now supplies only the pinned repository native
 library directory on macOS and emits bounded startup stderr on an early exit.
 This is fixture-loader maintenance, not a product or assertion change; the same
 two-plus-four native gate remains required before preverification.
+
+Exact-`4a7d812` verification reached the loader and reported the daemon's actual
+startup error: `daemon io: path must be shorter than SUN_LEN`. The long fixture
+directory prefix plus the supplied macOS TMPDIR and runtime socket suffix
+exceeded the Unix-domain path limit. The prefix is now `dn-<pid>-<id>`, retaining
+per-process/case isolation with sufficient room for the socket. The recorded
+failed receipt is `v2-default-tui-loader-preverify-4a7d812-f1yj9vh6`; assertions,
+descriptor checks, and the required six-control gate are unchanged.

@@ -35,10 +35,9 @@ mod native_controls {
     impl TestHome {
         fn new() -> Self {
             let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-            let root = std::env::temp_dir().join(format!(
-                "opencode-rk-default-native-{}-{id}",
-                std::process::id()
-            ));
+            // Leave room for runtime/opencode-rk.sock below the platform's
+            // Unix-domain socket path bound, including a long macOS TMPDIR.
+            let root = std::env::temp_dir().join(format!("dn-{}-{id}", std::process::id()));
             for part in [
                 "home",
                 "xdg-config",
