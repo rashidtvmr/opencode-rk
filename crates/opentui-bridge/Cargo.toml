@@ -14,4 +14,4 @@ default = []
 native = ["dep:rustix"]
 
 [target.'cfg(unix)'.dependencies]
-rustix = { workspace = true, features = ["termios", "event"], optional = true }
+rustix = { workspace = true, features = ["termios", "event", "fs"], optional = true }
