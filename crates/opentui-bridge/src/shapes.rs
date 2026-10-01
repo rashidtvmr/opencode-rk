@@ -96,7 +96,7 @@ pub fn render_slice(points: &[f32]) -> Option<String> {
     if !(min.is_finite() && max.is_finite()) {
         return None;
     }
-    if (max - min) < f32::EPSILON {
+    if (max - min).abs() < f32::EPSILON {
         return Some(core::iter::repeat_n(SPARK_BLOCKS[4], points.len()).collect());
     }
     Some(

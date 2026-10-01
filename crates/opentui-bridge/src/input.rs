@@ -118,6 +118,11 @@ impl FocusRing {
     }
 
     /// Advance with wrap, return newly focused id.
+    ///
+    /// This is cyclic navigation rather than iterator advancement, and returns
+    /// an error for an empty ring, so implementing `Iterator` would change the
+    /// public failure and wraparound semantics.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Result<u32, FocusError> {
         if self.is_empty() {
             return Err(FocusError::Empty);

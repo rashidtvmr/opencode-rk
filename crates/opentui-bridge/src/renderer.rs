@@ -44,6 +44,10 @@ pub struct ExternalBuildOptions {
 
 #[cfg(feature = "native")]
 #[link(name = "opentui")]
+#[expect(
+    dead_code,
+    reason = "the native ABI inventory is consumed by the native renderer integration"
+)]
 unsafe extern "C" {
     /// Safety: handle must be a live renderer; null feed_ptr selects buffered backend.
     fn createRenderer(

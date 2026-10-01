@@ -51,7 +51,7 @@ pub struct Camera {
 impl Camera {
     /// Fail-closed: zoom outside 25-400 is `Err`.
     pub const fn new(pos_x: i32, pos_y: i32, zoom_pct: u16) -> Result<Self, ZoomError> {
-        if zoom_pct < MIN_ZOOM_PCT || zoom_pct > MAX_ZOOM_PCT {
+        if !(MIN_ZOOM_PCT..=MAX_ZOOM_PCT).contains(&zoom_pct) {
             return Err(ZoomError::OutOfRange(zoom_pct));
         }
         Ok(Self {
@@ -63,7 +63,7 @@ impl Camera {
 
     /// Fail-closed zoom setter.
     pub fn set_zoom(&mut self, zoom_pct: u16) -> Result<(), ZoomError> {
-        if zoom_pct < MIN_ZOOM_PCT || zoom_pct > MAX_ZOOM_PCT {
+        if !(MIN_ZOOM_PCT..=MAX_ZOOM_PCT).contains(&zoom_pct) {
             return Err(ZoomError::OutOfRange(zoom_pct));
         }
         self.zoom_pct = zoom_pct;

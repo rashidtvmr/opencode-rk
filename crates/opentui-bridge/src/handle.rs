@@ -18,7 +18,7 @@ pub const RENDER_STATUS_FAILED: RenderStatus = 2;
 /// Fail-closed discriminant check.
 #[must_use]
 pub const fn render_status_is_known(status: u8) -> bool {
-    matches!(status, 0 | 1 | 2)
+    matches!(status, 0..=2)
 }
 
 /// Opaque single-owner bridge handle (mirrors `Renderer` claim pattern).
