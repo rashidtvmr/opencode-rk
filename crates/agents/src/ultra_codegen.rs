@@ -250,12 +250,10 @@ edition = "2021"
 
     /// Check source text against the denylist. Returns first matching pattern.
     fn check_denylist(source: &str) -> Option<&'static str> {
-        for &pattern in DENYLIST {
-            if source.contains(pattern) {
-                return Some(pattern);
-            }
-        }
-        None
+        DENYLIST
+            .iter()
+            .find(|&&pattern| source.contains(pattern))
+            .copied()
     }
 
     /// SHA-256 hex hash of source text.

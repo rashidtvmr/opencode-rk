@@ -253,8 +253,8 @@ fn find_cycle(wf: &Workflow) -> Vec<String> {
     let mut stack: HashSet<String> = HashSet::new();
     let mut path: Vec<String> = Vec::new();
 
-    fn dfs<'a>(
-        node: &'a str,
+    fn dfs(
+        node: &str,
         adj: &HashMap<&str, Vec<&str>>,
         visited: &mut HashSet<String>,
         stack: &mut HashSet<String>,

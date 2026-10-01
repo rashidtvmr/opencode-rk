@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
+use std::fmt;
 
 /// Resource limits for an execution context.
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -47,7 +48,7 @@ impl ExecutionContext {
 }
 
 /// Manager for execution contexts with push/pop scoping.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ContextManager {
     /// Stack of variable maps for scoping.
     variables: Vec<HashMap<String, String>>,
@@ -57,6 +58,18 @@ pub struct ContextManager {
     limits: Vec<ContextLimits>,
     /// Global metadata map.
     metadata: HashMap<String, String>,
+}
+
+impl fmt::Debug for ContextManager {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ContextManager")
+            .field("variables", &self.variables)
+            .field("secrets", &self.secrets)
+            .field("limits", &self.limits)
+            .field("metadata", &self.metadata)
+            .finish()
+    }
 }
 
 impl ContextManager {
