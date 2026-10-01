@@ -45,6 +45,7 @@ import tempfile
 import termios
 import threading
 import time
+import unicodedata
 import urllib.request
 
 HERE = pathlib.Path(__file__).resolve().parent
@@ -64,6 +65,67 @@ SENTINEL = "sentinel keep"
 MALFORMED_TOKEN = "MALFORMED-INJECT-NEG-7f2a"
 OVERSIZED_BYTES = 32 * 1024 + 1
 FIRST_REPLY, SECOND_REPLY = "PASTE_FIRST_RESPONSE", "PASTE_SECOND_RESPONSE"
+
+
+class PasteTerminalScreen(TerminalScreen):
+    """Local cell adapter with the text-cell widths used by OpenTUI.
+
+    ``native_provider_setup.TerminalScreen`` is shared and intentionally remains
+    frozen.  Its one-column-per-scalar model inserts a visible filler cell
+    between wide glyphs, making a visually correct CJK line fail a substring
+    assertion.  Keep continuation cells as a private sentinel instead: real
+    spaces remain spaces, and the assertions below still inspect the rendered
+    visible text rather than normalizing whitespace away.
+    """
+
+    CONTINUATION = "\x00"
+
+    @staticmethod
+    def _width(char):
+        if unicodedata.combining(char):
+            return 0
+        return 2 if unicodedata.east_asian_width(char) in "WFA" else 1
+
+    def _put(self, char):
+        if char == "\n":
+            self.row = min(self.rows - 1, self.row + 1)
+            self.col = 0
+            return
+        if char == "\r":
+            self.col = 0
+            return
+        if char == "\b":
+            self.col = max(0, self.col - 1)
+            return
+        if ord(char) < 0x20:
+            return
+
+        width = self._width(char)
+        if width == 0:
+            # Combining scalars occupy no cell; attach them to the preceding
+            # base cell without changing cursor position.
+            index = self.col - 1
+            while index >= 0 and self.cells[self.row][index] == self.CONTINUATION:
+                index -= 1
+            if index >= 0:
+                self.cells[self.row][index] += char
+            return
+        if width == 2 and self.col == self.cols - 1:
+            self.row = min(self.rows - 1, self.row + 1)
+            self.col = 0
+        if self.col >= self.cols:
+            self.row = min(self.rows - 1, self.row + 1)
+            self.col = 0
+        self.cells[self.row][self.col] = char
+        if width == 2 and self.col + 1 < self.cols:
+            self.cells[self.row][self.col + 1] = self.CONTINUATION
+        self.col = min(self.cols, self.col + width)
+        if KEY in self.text():
+            raise AssertionError("fixture API key appeared in visible terminal cells")
+
+    def text(self):
+        return "\n".join("".join(cell for cell in row if cell != self.CONTINUATION).rstrip()
+                         for row in self.cells)
 
 
 def normalize_paste(raw: bytes) -> str:
@@ -358,7 +420,9 @@ def run(binary, library, manifest, artifacts):
     master = slave = child = None
     descriptor_value = None
     captures = bytearray()
-    screen = TerminalScreen()
+    # The shared helper remains frozen; this contract needs terminal cell
+    # widths so a visually correct wide-glyph line is represented faithfully.
+    screen = PasteTerminalScreen()
     saved_attrs = None
     semantic_error = None
     termios_restored = False

@@ -1,7 +1,7 @@
 # V2 Native Bracketed-Paste Contract — Candidate Handoff
 
 Package: G5 native PTY bracketed-paste contract
-Base: `edd84569b5c49254148c37861164b5fb5c06be91` (declared parent base `75ad`)
+Base: `0c26eab0a57c88404299d9b5d2a5f8123717f774`
 Status: **CANDIDATE DONE; product acceptance PENDING**
 
 ## Scope
@@ -14,6 +14,20 @@ paste rejection; normal CLI exit code 0; terminal restoration; daemon absence;
 bounded provider-thread join; no secret echo; and bounded PTY capture.
 
 ## Mechanical repairs
+
+- Added a fixture-local `PasteTerminalScreen` adapter.  It preserves the
+  shared helper unchanged while modeling OpenTUI 0.4.5-style text cells:
+  East-Asian wide glyphs occupy two cells, continuation cells are private
+  non-text sentinels, combining scalars attach without advancing, and ASCII
+  spaces remain ordinary visible spaces.  The existing 80x24 cursor,
+  erase, bounds, and every assertion are unchanged; in particular the exact
+  Japanese assertion remains `screen.contains("日本語")`, not a partial or
+  whitespace-stripped substitute.
+- Source-only proof: the provider/history inputs, `FIRST_EXPECTED` exact
+  normalization, request/history assertions, negative unterminated and
+  oversized checks, enable/restore checks, exit/cleanup checks, and all
+  timeout/bound constants are unchanged.  Only screen construction is routed
+  through the local width-aware adapter.
 
 - Oversized framed input drains PTY output concurrently with bounded writes, avoiding
   producer/renderer PTY backpressure deadlock while retaining the strict 32 KiB
@@ -46,3 +60,11 @@ git diff --check
 
 Candidate source hash and exact integrated acceptance SHA must be recorded by the
 trusted verifier. This candidate must not be marked ACCEPTED on the worker branch.
+
+The prior display failure is mechanically superseded: the captured wire/render
+evidence showed `> paste contract alpha café`, `日本語  line 🦀`, and
+`:quit /connect stays inert`; the old helper advanced every Unicode scalar by
+one column, unlike the pinned OpenCode `95daf906...` / OpenTUI `0.4.5`
+text-cell behavior.  This candidate changes only fixture interpretation of
+those captured bytes.  Runtime freeze and product acceptance remain pending;
+the unresolved `ESC[?2004l` observation is not weakened or reclassified.
