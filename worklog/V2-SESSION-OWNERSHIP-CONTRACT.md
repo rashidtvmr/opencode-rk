@@ -53,3 +53,28 @@ cargo test --offline --locked -p opencode-rk-server --test session_execution_own
 
 Status: CANDIDATE / pending parent compilation, actual RED run, hash freeze, and
 independent verification. No GREEN or ACCEPTED claim is made.
+
+## Controller review before any freeze
+
+Source-only attempts `17f1627` and `593852d` remain preserved. Review found
+fixture defects: qualified/unqualified model confusion, an ineffective inline
+auth override name, last-header bearer parsing, a worker cap checked after
+spawn, blocking synchronization inside async workers, incomplete-response
+success, and insufficient negative-side-effect assertions. No compiling RED
+or test freeze had occurred.
+
+The controller repaired these fixture issues and retains the five-case scope.
+Requests use qualified `openai/gpt-5.6` at the daemon and actual unqualified
+`gpt-5.6` at the provider. Provider workers are capped at two before spawning;
+HTTP lengths are checked before allocation, reads/writes have deadlines, and
+responses must reach EOF and decode complete JSON/NDJSON. Stream client A must
+observe an actual assistant delta before client B is launched. Shared durable
+history is fetched over authenticated TCP and unauthorized or rejected requests
+must not append a user message. Actual responses must complete successfully or
+use the existing typed capacity rejection without side effects.
+
+All client results are collected, the owned listener is aborted and awaited,
+and provider workers joined before final behavior assertions. Environment
+restoration occurs before releasing the async environment lock. Full prepared
+test SHA-256: `9fdb5a6c01eb7d663421956fda1cc6c5bbf3ffcd43f7873f44bfb8e1f1cbb70c`.
+This still requires independent compilation, actual RED execution and freeze.
