@@ -138,7 +138,7 @@ fn parse_marker(bytes: &[u8]) -> Option<u64> {
 }
 
 pub struct CacheStore {
-    root: PathBuf,
+    _root: PathBuf,
     slots_dir: PathBuf,
     cfg: CacheCfg,
     registry: Mutex<BTreeSet<String>>,
@@ -158,11 +158,11 @@ impl CacheStore {
             return Err(StoreError::RootUnreadable);
         }
         let slots_dir = root.join("slots");
-        if let Err(_) = std::fs::create_dir_all(&slots_dir) {
+        if std::fs::create_dir_all(&slots_dir).is_err() {
             return Err(StoreError::RootUnreadable);
         }
         Ok(CacheStore {
-            root: root.to_path_buf(),
+            _root: root.to_path_buf(),
             slots_dir,
             cfg,
             registry: Mutex::new(BTreeSet::new()),
