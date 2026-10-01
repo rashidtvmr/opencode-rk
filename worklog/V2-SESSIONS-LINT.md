@@ -40,3 +40,36 @@ source hash is now
 `382a1958adb0a7cd2fdbc4bcdd2f319edf67f94bc55dcbf9c11dee9b21ea228d`,
 superseding the original worker query after-hash above. This mechanical repair
 still requires the same complete independent verification sequence.
+
+## Exact integrated acceptance
+
+Independent verifier `ses_f0ab9e7a1ffeKXHnW61AlOIwJ0` reviewed the complete
+prepared candidate and PREVERIFIED exact
+`0f01432793a599b312226b522c479a757ab34f5e`. The controller fast-forwarded the
+sole canonical branch to that exact revision and repeated the same gates:
+
+```text
+cargo fmt --all -- --check
+  exit 0
+cargo clippy --offline --locked -p opencode-rk-sessions --lib -- -D warnings
+  exit 0
+cargo test --offline --locked -p opencode-rk-sessions --all-targets --all-features -- --test-threads=1
+  300 passed; 0 failed; 0 ignored; exit 0
+```
+
+The serial runner uses isolated disposable HOME/XDG directories, whitelisted
+environment, literal Cargo/Rustup homes, two build jobs, one test thread,
+offline locked dependencies, bounded logs and per-command deadlines.
+Exact commands, source/environment/log hashes and counts are retained under
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/` at:
+
+- `v2-sessions-preverify-0f01432-veq2qzrg`.
+- `v2-sessions-integrated-0f01432-guwuv4zd`.
+
+Exact changed product paths are the six declared session sources; the additional
+path is this worklog. Frozen existing tests and Cargo.lock remain unchanged.
+Original source-only candidates `a5254ee`, `a75b761`, formatting failure
+`bc7a49f` and remaining constructor-lint failure `e5e0289` remain preserved.
+State: **ACCEPTED for session-library diagnostic maintenance and the 300-test
+crate regression gate on exact integrated `0f01432`**. Workspace-wide checks
+and installed release/platform acceptance require their separate exact gates.

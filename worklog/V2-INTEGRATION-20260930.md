@@ -1014,3 +1014,42 @@ diagnostics**; all-feature/all-target tests compile and run **807 passed,
 1 failed, 0 ignored** before Cargo stops. The current failure is
 `ci_ext_t03_max_steps_one_completes_like_baseline`, receiving usage exit 64
 instead of success or budget-exhausted. This is not a full workspace pass.
+
+### Shell compiling RED frozen; session diagnostics accepted
+
+The strict independent shell lifetime fixture is integrated as `59dc523` and
+frozen after actual current-canonical compiling RED: three controls pass;
+aborted and timeout owners leave live direct-child PIDs after their deadlines.
+Forced failure cleanup is recorded and subsequent controller probes prove the
+owned PIDs absent. Fixture SHA-256 is
+`8b39c6eafcbb065e42752c8c1d19bac53be6928612fc59b1da654465353097fd`;
+full authority/command/hash evidence is in
+`worklog/V2-SHELL-OWNED-LIFETIME-CONTRACT.md`.
+
+Source-only session-library repairs were independently PREVERIFIED, then
+fast-forward integrated and rerun on exact
+**`0f01432793a599b312226b522c479a757ab34f5e`**. Formatting and session-library
+Clippy pass; all **300 all-target/all-feature session tests** pass with zero
+ignored. Existing constructor API, zeroizing secret drop, SQL and all frozen
+test bodies are preserved. State **ACCEPTED for scoped session maintenance**;
+exact paths/receipts are in `worklog/V2-SESSIONS-LINT.md`.
+
+The combined tools/owned-shell candidate `35779c7` independently passes
+formatting, tools-library Clippy and all five strict owned-process cases, then
+fails its required full crate gate: 122 pass, one pre-existing MCP fixture
+fails with `ENOENT`. The controller reproduces that failure on clean canonical
+`89aeaa8` source. `/bin/false` is absent on macOS; independent fixture maintenance
+changes only its authored pathname to `/usr/bin/false`, retaining every retry,
+typed-error and no-silent-restart assertion. The combined candidate remains
+unaccepted pending complete renewed verification.
+
+During CI fixture preparation, two worker-owned files were accidentally written
+to the canonical working directory. The controller moved that worker session
+to its granted worktree, preserved all unexpected bytes in a fresh artifact
+snapshot and append-only stash, and anchored them at
+`archive/v2-canonical-ci-fixture-18cb219b96e9` (stash
+`18cb219b96e91c69281805c6028324d93bfc1b3f`). No historical ref or stash was
+removed. Canonical source was clean before the accepted session integration.
+Preservation receipts: `v2-preserved-canonical-ci-fixture-e2o9nmxt` under the
+approved artifact parent. CI assertions remain protected; fixture readiness
+repair is not yet product or workspace acceptance.
