@@ -1,443 +1,352 @@
 #![forbid(unsafe_code)]
-//! Default-entrypoint chat lane: `opencode-rk` with no subcommand must open an
-//! interactive chat TUI that auto-attaches (or auto-spawns) the singleton
-//! daemon, executes real provider turns, and persists sessions. Binary-driven
-//! with a disposable home and a fake OpenAI-compatible provider fixture.
-//! Each test pins its own daemon port via OPENCODE_RK_DAEMON_ADDR so tests
-//! never cross-attach or leak orphans.
+//! Native default-entrypoint renderer controls.
+//!
+//! The four former pipe-driven chat tests belonged to the legacy line-chat
+//! contract.  They are intentionally not retained here: current default
+//! launch refuses redirected interactive input/output before daemon discovery
+//! or raw-mode setup.  The current default-entrypoint startup/ownership
+//! contract is frozen in `native_daemon_flow.rs` and is run as a separate
+//! four-test target.
 
-use std::{
-    fs,
-    io::{Read, Write},
-    net::{TcpListener, TcpStream},
-    path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
-    thread,
-    time::{Duration, Instant},
-};
+#[cfg(feature = "native")]
+mod native_controls {
+    use std::{
+        fs,
+        io::{Read, Write},
+        net::TcpStream,
+        path::{Path, PathBuf},
+        process::{Child, Command, Stdio},
+        sync::{
+            atomic::{AtomicU64, Ordering},
+            Arc, Mutex,
+        },
+        thread,
+        time::{Duration, Instant},
+    };
 
-static NEXT_ID: AtomicU64 = AtomicU64::new(0);
+    use opencode_rk_opentui_bridge::Renderer;
 
-struct TestHome(PathBuf);
+    const PIPE_CAP: usize = 256 * 1024;
+    const EXIT_LIMIT: Duration = Duration::from_secs(20);
+    static NEXT_ID: AtomicU64 = AtomicU64::new(0);
 
-impl TestHome {
-    fn new() -> Self {
-        let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let path =
-            std::env::temp_dir().join(format!("opencode-rk-default-{}-{id}", std::process::id()));
-        fs::create_dir_all(&path).unwrap();
-        Self(path)
+    struct TestHome(PathBuf);
+
+    impl TestHome {
+        fn new() -> Self {
+            let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
+            let root = std::env::temp_dir().join(format!(
+                "opencode-rk-default-native-{}-{id}",
+                std::process::id()
+            ));
+            for part in ["home", "xdg-config", "xdg-data", "xdg-cache", "runtime"] {
+                fs::create_dir_all(root.join(part)).expect("create disposable fixture directory");
+            }
+            Self(root)
+        }
+
+        fn root(&self) -> &Path {
+            &self.0
+        }
+        fn descriptor(&self) -> PathBuf {
+            self.0.join("runtime/backend.json")
+        }
+        fn models(&self) -> PathBuf {
+            self.0.join("models.json")
+        }
     }
 
-    fn path(&self) -> &Path {
-        &self.0
+    impl Drop for TestHome {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
     }
-}
 
-impl Drop for TestHome {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+    struct Capture {
+        bytes: Arc<Mutex<Vec<u8>>>,
+        overflow: Arc<std::sync::atomic::AtomicBool>,
+        thread: Option<thread::JoinHandle<()>>,
     }
-}
 
-struct ChildGuard(Child);
-
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-impl std::ops::Deref for ChildGuard {
-    type Target = Child;
-    fn deref(&self) -> &Child {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for ChildGuard {
-    fn deref_mut(&mut self) -> &mut Child {
-        &mut self.0
-    }
-}
-
-fn free_loopback_addr() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("127.0.0.1:{}", listener.local_addr().unwrap().port())
-}
-
-/// Background reader accumulating child stdout so tests can wait for markers
-/// without blocking on a pipe read.
-struct StdoutReader {
-    buffer: std::sync::Arc<std::sync::Mutex<String>>,
-    handle: Option<thread::JoinHandle<()>>,
-}
-
-impl StdoutReader {
-    fn spawn(pipe: impl Read + Send + 'static) -> Self {
-        let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let shared = std::sync::Arc::clone(&buffer);
-        let handle = thread::spawn(move || {
-            let mut pipe = pipe;
-            let mut buf = [0_u8; 4096];
-            loop {
-                match pipe.read(&mut buf) {
-                    Ok(0) | Err(_) => break,
-                    Ok(read) => {
-                        let mut guard = shared.lock().unwrap();
-                        guard.push_str(&String::from_utf8_lossy(&buf[..read]));
+    impl Capture {
+        fn spawn(pipe: impl Read + Send + 'static) -> Self {
+            let bytes = Arc::new(Mutex::new(Vec::new()));
+            let overflow = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let dst = Arc::clone(&bytes);
+            let full = Arc::clone(&overflow);
+            let thread = thread::spawn(move || {
+                let mut pipe = pipe;
+                let mut buf = [0_u8; 4096];
+                loop {
+                    match pipe.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            let mut out = dst.lock().expect("capture lock");
+                            let room = PIPE_CAP.saturating_sub(out.len());
+                            if room == 0 {
+                                full.store(true, Ordering::Relaxed);
+                            } else {
+                                out.extend_from_slice(&buf[..n.min(room)]);
+                                if n > room {
+                                    full.store(true, Ordering::Relaxed);
+                                }
+                            }
+                        }
                     }
                 }
+            });
+            Self {
+                bytes,
+                overflow,
+                thread: Some(thread),
             }
-        });
-        Self {
-            buffer,
-            handle: Some(handle),
+        }
+
+        fn text(&self) -> String {
+            String::from_utf8_lossy(&self.bytes.lock().expect("capture lock")).into_owned()
+        }
+
+        fn join(&mut self) {
+            let thread = self.thread.take().expect("capture joined once");
+            thread.join().expect("capture reader must terminate");
+            assert!(
+                !self.overflow.load(Ordering::Relaxed),
+                "child output exceeded {PIPE_CAP} bytes"
+            );
         }
     }
 
-    fn text(&self) -> String {
-        self.buffer.lock().unwrap().clone()
+    struct OwnedServe {
+        child: Child,
+        stdout: Capture,
+        stderr: Capture,
+        cleaned: bool,
     }
 
-    fn wait_for(&self, needle: &str, timeout: Duration) -> String {
-        let deadline = Instant::now() + timeout;
-        loop {
-            let text = self.text();
-            if text.contains(needle) {
-                return text;
+    impl OwnedServe {}
+
+    impl Drop for OwnedServe {
+        fn drop(&mut self) {
+            if self.cleaned {
+                return;
             }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for {needle:?}; stdout so far:\n{}",
-                self.text()
-            );
+            self.cleaned = true;
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+            self.stdout.join();
+            self.stderr.join();
+        }
+    }
+
+    fn command_env(command: &mut Command, home: &TestHome) {
+        command
+            .env_clear()
+            .current_dir(home.root())
+            .env("OPENCODE_RK_HOME", home.root())
+            .env("HOME", home.root().join("home"))
+            .env("XDG_CONFIG_HOME", home.root().join("xdg-config"))
+            .env("XDG_DATA_HOME", home.root().join("xdg-data"))
+            .env("XDG_CACHE_HOME", home.root().join("xdg-cache"));
+    }
+
+    fn wait_descriptor(home: &TestHome) {
+        let deadline = Instant::now() + EXIT_LIMIT;
+        while !home.descriptor().exists() && Instant::now() < deadline {
             thread::sleep(Duration::from_millis(25));
         }
-    }
-}
-
-impl Drop for StdoutReader {
-    fn drop(&mut self) {
-        // Deliberately detached: joining here can block forever when the
-        // child outlives the test (e.g. a panic while the chat loop waits on
-        // stdin). Leaking the thread is bounded and keeps teardown live.
-        let _ = self.handle.take();
-    }
-}
-
-/// One-shot OpenAI-compatible /v1/responses fixture: reads exactly one
-/// content-length framed request, replies with a fixed assistant message
-/// (same seam as the server's own turn tests).
-fn spawn_openai_fixture() -> (String, thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider fixture");
-    let address = listener.local_addr().expect("fixture address");
-    let task = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept provider request");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .expect("fixture read timeout");
-        let mut request = Vec::new();
-        let mut expected_len = None;
-        loop {
-            let mut chunk = [0_u8; 4096];
-            let read = stream.read(&mut chunk).expect("read provider request");
-            assert!(read > 0, "provider request ended before the full body");
-            request.extend_from_slice(&chunk[..read]);
-            if expected_len.is_none() {
-                if let Some(header_end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                    let headers = String::from_utf8_lossy(&request[..header_end]);
-                    let content_length = headers
-                        .lines()
-                        .find_map(|line| {
-                            line.to_ascii_lowercase()
-                                .strip_prefix("content-length:")
-                                .map(str::trim)
-                                .map(str::parse::<usize>)
-                        })
-                        .transpose()
-                        .expect("valid content length")
-                        .unwrap_or(0);
-                    expected_len = Some(header_end + 4 + content_length);
-                }
-            }
-            if expected_len.is_some_and(|len| request.len() >= len) {
-                break;
-            }
-            assert!(request.len() <= 128 * 1024, "fixture request bound");
-        }
-        let body = serde_json::json!({
-            "id": "resp_fixture",
-            "status": "completed",
-            "output": [{
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "Fixture assistant reply"}]
-            }]
-        })
-        .to_string();
-        let wire = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-            body.len(),
-            body
+        assert!(
+            home.descriptor().exists(),
+            "serve did not publish its descriptor"
         );
-        let _ = stream.write_all(wire.as_bytes());
-        let _ = stream.flush();
-    });
-    (format!("http://{address}/v1"), task)
-}
-
-fn chat_command(home: &TestHome, daemon_addr: &str, extra_env: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
-    command
-        .env_clear()
-        .env("OPENCODE_RK_HOME", home.path())
-        .env("OPENCODE_RK_DAEMON_ADDR", daemon_addr)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    for (key, value) in extra_env {
-        command.env(key, value);
-    }
-    command
-}
-
-fn send_line(child: &mut Child, line: &str) {
-    let stdin = child.stdin.as_mut().expect("piped stdin");
-    writeln!(stdin, "{line}").expect("write chat line");
-    stdin.flush().expect("flush chat line");
-}
-
-/// Ensure the chat child never outlives a panicking test: a leaked child
-/// holding the stdout pipe would hang the test harness at teardown.
-fn spawn_guarded(mut command: Command) -> (ChildGuard, StdoutReader) {
-    let mut child = command.spawn().expect("spawn chat TUI");
-    let stdout = StdoutReader::spawn(child.stdout.take().expect("piped stdout"));
-    (ChildGuard(child), stdout)
-}
-
-#[test]
-fn bare_launch_opens_chat_tui_and_completes_a_provider_turn() {
-    let home = TestHome::new();
-    let daemon_addr = free_loopback_addr();
-    let (provider_base, provider_task) = spawn_openai_fixture();
-
-    let command = chat_command(
-        &home,
-        &daemon_addr,
-        &[
-            ("OPENAI_BASE_URL", provider_base.as_str()),
-            ("OPENAI_API_KEY", "fixture-secret"),
-        ],
-    );
-    let (mut chat, stdout) = spawn_guarded(command);
-
-    stdout.wait_for("OpenCode RK", Duration::from_secs(20));
-    stdout.wait_for("model:", Duration::from_secs(5));
-
-    send_line(&mut chat, "/new Probe");
-    stdout.wait_for("created:", Duration::from_secs(10));
-
-    send_line(&mut chat, "Hello agent");
-    stdout.wait_for("Fixture assistant reply", Duration::from_secs(60));
-
-    send_line(&mut chat, "/exit");
-    let status = chat.wait().expect("chat exits cleanly after /exit");
-    let _ = provider_task.join();
-    assert!(
-        status.success(),
-        "chat TUI must exit 0 after /exit; stdout:\n{}",
-        stdout.text()
-    );
-    let transcript = stdout.text();
-    assert!(
-        transcript.contains("you: Hello agent"),
-        "echoed user turn missing:\n{transcript}"
-    );
-    assert!(
-        transcript.contains("assistant:"),
-        "assistant reply rendering missing:\n{transcript}"
-    );
-}
-
-#[test]
-fn chat_tui_reports_missing_provider_auth_as_turn_error() {
-    let home = TestHome::new();
-    let daemon_addr = free_loopback_addr();
-
-    let command = chat_command(&home, &daemon_addr, &[]);
-    let (mut chat, stdout) = spawn_guarded(command);
-
-    stdout.wait_for("OpenCode RK", Duration::from_secs(20));
-
-    send_line(&mut chat, "/new AuthProbe");
-    stdout.wait_for("created:", Duration::from_secs(10));
-
-    send_line(&mut chat, "hi");
-    let transcript = stdout.wait_for("[error", Duration::from_secs(60));
-    assert!(
-        transcript.to_lowercase().contains("provider"),
-        "turn error must name the provider failure:\n{transcript}"
-    );
-
-    send_line(&mut chat, "/exit");
-    let status = chat.wait().expect("chat exits cleanly");
-    assert!(status.success());
-}
-
-#[test]
-fn chat_tui_auto_spawns_daemon_and_sessions_persist_after_exit() {
-    let home = TestHome::new();
-    let daemon_addr = free_loopback_addr();
-
-    let command = chat_command(&home, &daemon_addr, &[]);
-    let (mut chat, stdout) = spawn_guarded(command);
-
-    stdout.wait_for("OpenCode RK", Duration::from_secs(20));
-
-    send_line(&mut chat, "/new Saved Chat");
-    stdout.wait_for("created:", Duration::from_secs(10));
-
-    send_line(&mut chat, "/exit");
-    let status = chat.wait().expect("chat exits cleanly");
-    assert!(status.success());
-
-    // The auto-spawned daemon must persist the session for later processes.
-    let listing = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
-        .env_clear()
-        .env("OPENCODE_RK_HOME", home.path())
-        .args(["session", "list"])
-        .output()
-        .expect("list sessions after chat exit");
-    assert!(listing.status.success());
-    let list = String::from_utf8_lossy(&listing.stdout);
-    assert!(
-        list.contains("Saved Chat"),
-        "session created in the chat TUI must persist: {list}"
-    );
-}
-
-#[test]
-fn chat_tui_offline_hint_when_daemon_cannot_start() {
-    let home = TestHome::new();
-    // Occupy the default daemon port so the in-process auto-spawn cannot bind.
-    let blocker = TcpListener::bind("127.0.0.1:4096")
-        .expect("bind default daemon port to force offline degradation");
-
-    let command = chat_command(&home, "127.0.0.1:4096", &[]);
-    let (mut chat, stdout) = spawn_guarded(command);
-
-    let transcript = stdout.wait_for("[offline", Duration::from_secs(30));
-    assert!(
-        transcript.contains("serve"),
-        "offline hint must tell the user how to start the daemon:\n{transcript}"
-    );
-
-    send_line(&mut chat, "/exit");
-    let status = chat.wait().expect("chat exits cleanly");
-    assert!(status.success());
-    drop(blocker);
-}
-
-/// E2E NATIVE TUI: native OpenTUI bridge render_once produces non-empty snapshot
-/// with frame content (OpenCode RK TUI, status bar, composer). Tests the
-/// real Rust caller for opentui_bridge without requiring the .so library in CI.
-#[test]
-fn native_render_once_snapshot_contains_frame_content() {
-    // Native feature is optional; skip if not compiled with --features native
-    if std::env::var_os("CARGO_FEATURE_NATIVE").is_none() {
-        eprintln!("skipping: native feature not enabled");
-        return;
     }
 
-    // Use render_once directly to verify frame content
-    use opencode_rk_opentui_bridge::Renderer;
-    let frame_lines = vec![
-        "OpenCode RK TUI".to_string(),
-        "status: ready".to_string(),
-        "> ".to_string(),
-    ];
-    let snapshot = Renderer::render_once(80, 24, &frame_lines);
-    assert!(
-        snapshot.is_ok(),
-        "render_once should succeed with valid input"
-    );
-    let output = snapshot.unwrap();
-    assert!(
-        !output.trim().is_empty(),
-        "render_once snapshot must be non-empty"
-    );
-    assert!(
-        output.contains("OpenCode RK"),
-        "render_once output must contain frame text: {output}"
-    );
-}
-
-/// E2E: --once path with Bearer auth renders native snapshot on success.
-#[test]
-fn once_mode_with_bearer_auth_shows_native_or_fallback() {
-    if std::env::var_os("CARGO_FEATURE_NATIVE").is_none() {
-        eprintln!("skipping: native feature not enabled");
-        return;
+    fn descriptor(home: &TestHome) -> (u32, String, String) {
+        let value: serde_json::Value = serde_json::from_slice(
+            &fs::read(home.descriptor()).expect("read published descriptor"),
+        )
+        .expect("published descriptor JSON");
+        let pid = value["pid"].as_u64().expect("descriptor pid") as u32;
+        let origin = value["http_origin"]
+            .as_str()
+            .expect("descriptor origin")
+            .to_owned();
+        let token = value["auth_token"]
+            .as_str()
+            .expect("descriptor token")
+            .to_owned();
+        assert_eq!(token.len(), 64, "published bearer length");
+        assert!(
+            token.bytes().all(|byte| byte.is_ascii_hexdigit()),
+            "published bearer shape"
+        );
+        assert!(
+            origin.starts_with("http://127.0.0.1:"),
+            "published origin must be loopback"
+        );
+        (pid, origin, token)
     }
 
-    // Start daemon with test bearer
-    let home = TestHome::new();
-    let port = free_loopback_addr();
+    fn address(origin: &str) -> &str {
+        origin
+            .strip_prefix("http://")
+            .expect("fixture only uses http origin")
+    }
 
-    // Spawn daemon with a test descriptor
-    let mut daemon = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
-        .env_clear()
-        .env("OPENCODE_RK_HOME", home.path())
-        .env("OPENCODE_RK_DAEMON_ADDR", &port)
-        .args(["serve"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .spawn()
-        .expect("spawn daemon");
+    fn request(origin: &str, token: &str, method: &str, path: &str, body: Option<&str>) -> String {
+        let body = body.unwrap_or("");
+        format!("{method} {path} HTTP/1.1\r\nHost: {}\r\nAuthorization: Bearer {token}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", address(origin), body.len())
+    }
 
-    // Wait for daemon to initialize (write descriptor file)
-    thread::sleep(Duration::from_secs(2));
+    fn authenticated_request(
+        origin: &str,
+        token: &str,
+        method: &str,
+        path: &str,
+        body: Option<&str>,
+    ) -> String {
+        let mut stream = TcpStream::connect_timeout(
+            &address(origin).parse().expect("socket address"),
+            Duration::from_secs(5),
+        )
+        .expect("connect owned serve");
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("set read timeout");
+        stream
+            .set_write_timeout(Some(Duration::from_secs(5)))
+            .expect("set write timeout");
+        stream
+            .write_all(request(origin, token, method, path, body).as_bytes())
+            .expect("write owned request");
+        let mut response = Vec::new();
+        stream
+            .take(PIPE_CAP as u64)
+            .read_to_end(&mut response)
+            .expect("read owned response");
+        assert!(
+            response.len() < PIPE_CAP,
+            "HTTP response exceeded fixture cap"
+        );
+        String::from_utf8(response).expect("owned response UTF-8")
+    }
 
-    // Create a test descriptor file (64-hex bearer per is_wellformed_token)
-    let descriptor_path = home.path().join("runtime/backend.json");
-    fs::create_dir_all(descriptor_path.parent().unwrap()).expect("runtime dir");
-    let token: String = "ab".repeat(32);
-    let descriptor_content = serde_json::json!({
-        "pid": daemon.id(),
-        "http_origin": format!("http://127.0.0.1:{}", port),
-        "schema_version": 1,
-        "auth_token": token
-    });
-    fs::write(
-        &descriptor_path,
-        serde_json::to_string(&descriptor_content).unwrap(),
-    )
-    .expect("write descriptor");
+    fn spawn_serve(home: &TestHome) -> (OwnedServe, u32, String, String) {
+        fs::write(&home.models(), r#"{"openai":{"name":"OpenAI","models":{"gpt-5.6":{"name":"GPT-5.6","tool_call":true,"reasoning":true,"limit":{"context":200000}}}}}"#)
+            .expect("write offline model catalogue");
+        let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
+        command_env(&mut command, home);
+        command
+            .args(["serve", "--listen", "127.0.0.1:0", "--models-file"])
+            .arg(home.models())
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = command.spawn().expect("spawn owned serve");
+        let stdout = Capture::spawn(child.stdout.take().expect("serve stdout pipe"));
+        let stderr = Capture::spawn(child.stderr.take().expect("serve stderr pipe"));
+        let mut serve = OwnedServe {
+            child,
+            stdout,
+            stderr,
+            cleaned: false,
+        };
+        wait_descriptor(home);
+        let (pid, origin, token) = descriptor(home);
+        let health = authenticated_request(&origin, &token, "GET", "/health", None);
+        assert!(
+            health.starts_with("HTTP/1.1 200"),
+            "owned daemon health failed: {health}"
+        );
+        let models = authenticated_request(
+            &origin,
+            &token,
+            "GET",
+            "/api/models?provider=openai&limit=500",
+            None,
+        );
+        assert!(
+            models.starts_with("HTTP/1.1 200"),
+            "owned daemon model catalogue failed: {models}"
+        );
+        assert!(
+            serve.child.try_wait().expect("poll owned serve").is_none(),
+            "serve exited before attachment"
+        );
+        (serve, pid, origin, token)
+    }
 
-    // Run tui --once via the subcommand path and verify frame content
-    let result = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
-        .env_clear()
-        .env("OPENCODE_RK_HOME", home.path())
-        .args(["tui", "--once"])
-        .output()
-        .expect("run tui --once");
+    #[test]
+    fn native_render_once_snapshot_contains_frame_content() {
+        let frame_lines = vec![
+            "OpenCode RK TUI".to_owned(),
+            "status: ready".to_owned(),
+            "> ".to_owned(),
+        ];
+        let output =
+            Renderer::render_once(80, 24, &frame_lines).expect("native memory renderer snapshot");
+        assert!(
+            !output.trim().is_empty(),
+            "render_once snapshot must be non-empty"
+        );
+        assert!(
+            output.contains("OpenCode RK"),
+            "render_once output must contain frame text: {output}"
+        );
+        assert!(
+            output.contains("status: ready"),
+            "render_once output must preserve status text: {output}"
+        );
+    }
 
-    let stdout = String::from_utf8_lossy(&result.stdout);
-    let stderr = String::from_utf8_lossy(&result.stderr);
+    #[test]
+    fn once_mode_with_bearer_auth_shows_native_or_fallback() {
+        let home = TestHome::new();
+        let (mut serve, pid, origin, token) = spawn_serve(&home);
+        let title = "Native Once Live Probe";
+        let body = serde_json::json!({"title": title}).to_string();
+        let created = authenticated_request(&origin, &token, "POST", "/api/sessions", Some(&body));
+        assert!(
+            created.starts_with("HTTP/1.1 201") || created.starts_with("HTTP/1.1 200"),
+            "session creation failed: {created}"
+        );
 
-    assert!(
-        result.status.success(),
-        "tui --once should exit successfully: stderr={stderr}"
-    );
-    assert!(
-        stdout.contains("OpenCode RK TUI"),
-        "tui --once must render frame content: stdout={stdout} stderr={stderr}"
-    );
-
-    // Cleanup: kill daemon
-    let _ = daemon.kill();
-    let _ = daemon.wait();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
+        command_env(&mut command, &home);
+        let output = command
+            .args(["tui", "--once", "--origin", &origin])
+            .output()
+            .expect("run native tui once");
+        assert!(
+            output.status.success(),
+            "tui --once must exit successfully: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("OpenCode RK TUI"),
+            "frame banner missing: {stdout}"
+        );
+        assert!(
+            stdout.contains("(live)"),
+            "live frame marker missing: {stdout}"
+        );
+        assert!(
+            stdout.contains(title),
+            "actual authenticated session title missing: {stdout}"
+        );
+        assert_eq!(
+            descriptor(&home).0,
+            pid,
+            "published daemon identity changed during attachment"
+        );
+        assert!(
+            serve
+                .child
+                .try_wait()
+                .expect("poll owned serve after tui")
+                .is_none(),
+            "owned serve exited during attachment"
+        );
+        drop(serve);
+    }
 }
