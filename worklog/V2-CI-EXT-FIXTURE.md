@@ -67,3 +67,9 @@ selectively prepared their helper-only changes against current canonical
 All six frozen test function bodies and their assertions remain byte-identical.
 This is mechanical fixture maintenance, not a product/authentication change.
 Runtime preverification remains required before integration and acceptance.
+
+Independent preverification of `c59fa7e` stopped at formatting: Cargo's workspace
+edition orders the atomic import before `Arc`. The controller applied that exact
+two-line mechanical correction. No compiler or runtime test had run. Receipt
+`v2-ci-ext-preverify-c59fa7e-g4n41l15` remains preserved under the approved
+artifact parent; the full unchanged gate is required again.
