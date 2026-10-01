@@ -1167,3 +1167,38 @@ manifest passes formatting, foundation-library Clippy and all **168 foundation
 tests**, zero failed/ignored. State **ACCEPTED for scoped foundation maintenance**;
 `worklog/V2-FOUNDATION-LIB-LINT.md` records the retained root allocation,
 overflow-denial behavior, protected tests and exact receipts.
+
+## 2026-10-01 receipt durability audit (DOCS_RECEIPT_DURABILITY)
+
+This append is an evidence audit only; it is not a product acceptance or release
+certificate. The audited synthesis is
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-grouped-salvage-priority-9_dtmq3z/synthesis/integrated-acceptance.json`, whose SHA-256 is
+`e1d1aeead2b06d45cc225c440d4b9df2d0726d17b82e671b4972d6141ea75517`.
+It reports base `0bf0274ad863a7a60fd6631042871ec3c8016256` and final
+`9f6428c1763381d57ab83cf82a42bda284c8fd0f`; the current clean canonical
+worktree was independently observed at that final SHA.
+
+### Hash and scope findings
+
+The referenced receipt/build/freeze hashes were recomputed without rerunning
+product gates. All 11 referenced existing receipt/freeze/build/log files that
+were checked matched their declared SHA-256 values, including:
+
+- scoped native-input probe `c90c219f...e55d583`, behavior `db77d1bd...1c10b`,
+  escape `3b1668c5...5ba402d`, freeze `232196a1...efeb301`, and build
+  `88ec275a...a483fac`;
+- default-TUI receipt `ff44314f...57aa9c`;
+- final-9f probe `db22af34...d34848`, behavior `0151f082...0675a`, escape
+  `77e3d9d0...2dc2f63`, and build `ca4685e2...7f09c7c`;
+- the open quality-probe receipt `7ad4e312...c02201` and its declared log
+  hash `bd2dd67d...eeb339`.
+
+The full values and paths are preserved in the external audit JSON. The
+synthesis itself explicitly records `SCOPED_ACCEPTED_NOT_GLOBAL_RELEASE_ACCEPTED`.
+Package A is accepted only for scoped native input framing at `fe9830b...`; it
+is not full G5. Package B is accepted only for the default-TUI contract at
+`9f6428c...`. The final-9f native attestation confirms the same controls on the
+current final revision. This evidence does **not** claim all G5 or G8, nor that
+241 tips were reviewed or merged. Open boundaries remain resize/full G5,
+workspace quality, bridge/server diagnostics, web/Ubuntu release, and G4
+same-session durability.
