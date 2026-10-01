@@ -66,3 +66,11 @@ are bounded; output overflow/read failure and provider panic cannot pass through
 the original ignored join result. The provider checks actual unqualified
 `gpt-5.6` and the final user message. Both subprocess environments include all
 disposable HOME/XDG paths. The three frozen test bodies remain byte-identical.
+
+Prepared current-base source is based on
+`358690524cb82c5f9d49ce3043868195686d23b6`. Original worker and controller
+commits remain preserved in `v2/ci-mode-fixture-current`; normal cherry-picks
+`314d833` and `beeaf3a` carry only this helper and worklog to the current base.
+Full prepared fixture SHA-256:
+`12adcc77ad0f245c548e04e9917a8f370f32ecdc1d73737a5a121f0367abfa37`.
+Independent runtime preverification is still pending.
