@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicU32, AtomicU8};
 #[cfg(all(feature = "native", unix))]
 use std::sync::Mutex;
-#[cfg(all(feature = "native", unix))]
+#[cfg(feature = "native")]
 use std::time::Duration;
 
 #[cfg(all(feature = "native", unix))]
@@ -220,7 +220,6 @@ extern "C" {
     ) -> NativeHandle;
     fn destroyRenderer(renderer_handle: NativeHandle, flush_input: bool);
     fn setupTerminal(renderer_handle: NativeHandle, useAlternateScreen: bool);
-    fn restoreTerminalModes(renderer_handle: NativeHandle);
     fn suspendRenderer(renderer_handle: NativeHandle);
     fn resumeRenderer(renderer_handle: NativeHandle);
     fn enableMouse(renderer_handle: NativeHandle, enableMovement: bool);
@@ -261,7 +260,7 @@ extern "C" {
 }
 
 impl Renderer {
-    /// Wait for native terminal input without taking the lifecycle mutex.
+    /// Wait for native terminal input without holding the lifecycle mutex.
     #[cfg(all(feature = "native", unix))]
     pub fn input_ready(&self, timeout: Option<Duration>) -> Result<bool, BridgeError> {
         let handle = self.live()?;
@@ -330,6 +329,20 @@ impl Renderer {
                 Err(_) => return Err(BridgeError::TerminalFailed),
             }
         }
+    }
+
+    /// Raw descriptor polling is supported by the Unix input owner. Other
+    /// native targets fail explicitly instead of calling a Unix-only API.
+    #[cfg(all(feature = "native", not(unix)))]
+    pub fn input_ready(&self, _timeout: Option<Duration>) -> Result<bool, BridgeError> {
+        self.live()?;
+        Err(BridgeError::TerminalFailed)
+    }
+
+    #[cfg(all(feature = "native", not(unix)))]
+    pub fn read_input(&self, _buffer: &mut [u8]) -> Result<usize, BridgeError> {
+        self.live()?;
+        Err(BridgeError::TerminalFailed)
     }
 
     /// Read the live geometry from the same owned descriptor used for input.
@@ -441,7 +454,10 @@ impl Renderer {
                 disableKittyKeyboard(self.handle);
             }
             if owned && flags & TERMINAL_ACTIVE != 0 {
-                restoreTerminalModes(self.handle);
+                // The linked fork's restoreTerminalModes re-enables modes
+                // after focus-in. suspendRenderer performs full shutdown,
+                // including bracketed-paste reset, through the owned backend.
+                suspendRenderer(self.handle);
             }
             if owned {
                 LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
@@ -500,14 +516,16 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            #[cfg(unix)]
-            restore_terminal_input(handle, true)?;
             if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
                 && LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel) & TERMINAL_ACTIVE
                     != 0
             {
-                unsafe { restoreTerminalModes(handle) };
+                // SAFETY: live owned handle. This existing export runs the
+                // linked fork's shutdown sequence; it does not re-enable modes.
+                unsafe { suspendRenderer(handle) };
             }
+            #[cfg(unix)]
+            restore_terminal_input(handle, true)?;
             Ok(())
         }
     }
