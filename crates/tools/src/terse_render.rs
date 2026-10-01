@@ -130,11 +130,9 @@ fn is_guarded(input: &str) -> bool {
         if t.starts_with("SECURITY:") || t.starts_with("CONFIRM:") {
             return true;
         }
-        if let Some(n) = leading_step(t) {
-            if n == expected {
-                expected += 1;
-                numbered += 1;
-            }
+        if leading_step(t).is_some_and(|n| n == expected) {
+            expected += 1;
+            numbered += 1;
         }
     }
     numbered >= 3

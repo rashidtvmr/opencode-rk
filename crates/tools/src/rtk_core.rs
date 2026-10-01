@@ -191,7 +191,6 @@ fn shrink(kind: FilterKind, input: &[u8]) -> (Vec<u8>, usize) {
             let rest = &input[start..];
             let take = floor_char_boundary(rest, rest.len().min(MAX_LINE_BYTES));
             out.extend_from_slice(&rest[..take]);
-            kept += 1;
         } else {
             dropped += 1;
         }

@@ -103,7 +103,7 @@ impl ToolExecutor {
             .unwrap_or_else(|| Duration::from_millis(self.timeout_config.default_timeout_ms));
 
         // For now, shell/bash tools are supported for demonstration
-        let result = if call.name == "bash" || call.name == "shell" {
+        if call.name == "bash" || call.name == "shell" {
             self.execute_shell(&call, effective_timeout).await
         } else if call.name == "echo" {
             self.execute_echo(&call, effective_timeout).await
@@ -116,9 +116,7 @@ impl ToolExecutor {
                 duration_ms,
                 error: Some(format!("Unknown tool: {}", call.name)),
             }
-        };
-
-        result
+        }
     }
 
     async fn execute_shell(&self, call: &ToolCall, timeout_duration: Duration) -> ToolResult {
@@ -224,13 +222,13 @@ impl ToolExecutor {
 
     /// Execute multiple tool calls concurrently.
     pub async fn execute_batch(&self, calls: Vec<ToolCall>) -> Vec<ToolResult> {
-        let config = self.timeout_config.clone();
+        let config = self.timeout_config;
         let mut set = tokio::task::JoinSet::new();
         let mut results: Vec<Option<ToolResult>> = (0..calls.len()).map(|_| None).collect();
 
         for (idx, call) in calls.into_iter().enumerate() {
             set.spawn(async move {
-                let executor = ToolExecutor::with_timeout_config(config.clone());
+                let executor = ToolExecutor::with_timeout_config(config);
                 let result = executor.execute(call).await;
                 (idx, result)
             });

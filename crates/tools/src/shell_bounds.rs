@@ -187,9 +187,8 @@ fn kill_tree(child_id: u32) {
 /// Read exactly the retained prefix of `pipe` while draining the rest to /dev/null
 /// accounting: `kept` never exceeds `cap`; returns (kept bytes, saw-overflow).
 fn drain_capped<R: Read>(pipe: R, cap: usize, done: &Arc<AtomicBool>) -> (Vec<u8>, bool) {
-    let mut kept = Vec::new();
     // Reserve only the cap so a huge child cannot balloon this buffer.
-    kept.reserve(cap.min(64 * 1024));
+    let mut kept = Vec::with_capacity(cap.min(64 * 1024));
     let mut truncated = false;
     let mut buf = [0u8; 8192];
     let mut pipe = pipe;

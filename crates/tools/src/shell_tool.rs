@@ -10,6 +10,7 @@ use opencode_rk_security::{Decision, OperationIntent, PermissionBroker};
 use thiserror::Error;
 use tokio::io::AsyncReadExt;
 use tokio::process::Child;
+#[cfg(test)]
 use tokio::time::{Duration, timeout as tokio_timeout};
 
 /// Maximum output bytes retained for stdout/stderr (10 MiB).
@@ -143,7 +144,7 @@ impl ShellTool {
         if cfg.allowed_commands.is_empty() {
             return false;
         }
-        cfg.allowed_commands.iter().any(|a| a == &self.command)
+        cfg.allowed_commands.contains(&self.command)
     }
 
     fn max_bytes(&self, cfg: &ShellConfig) -> usize {
@@ -204,7 +205,8 @@ impl ShellTool {
 
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
-        let mut child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
+        cmd.kill_on_drop(true);
+        let child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
         self.child = Some(child);
 
         // Borrow child for reading; take it back before we await kill on drop.
@@ -255,7 +257,7 @@ impl ShellTool {
     /// Hard-cancel an in-flight command. Safe to call when no child exists.
     pub fn cancel(&mut self) {
         if let Some(child) = self.child.as_mut() {
-            let _ = child.kill();
+            let _ = child.start_kill();
         }
     }
 
@@ -274,6 +276,7 @@ impl Drop for ShellTool {
 }
 
 /// Enforce a hard timeout on execution, returning `Cancelled` on timeout.
+#[cfg(test)]
 async fn with_timeout<T, F>(secs: u64, fut: F) -> Result<T, ShellError>
 where
     T: std::fmt::Debug,

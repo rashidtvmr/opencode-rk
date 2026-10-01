@@ -171,7 +171,7 @@ pub fn filter_test_output(
         kept.extend(b.iter().copied());
     }
     for v in &verdicts {
-        if !kept.iter().any(|k| *k == *v) {
+        if !kept.contains(v) {
             kept.push(v);
         }
     }
@@ -233,10 +233,7 @@ pub fn filter_test_output(
 
     // Over budget: keep first failing block + verdict + marker.
     let marker = truncation_marker(&opts.log_path);
-    let mut first: Vec<&str> = blocks
-        .first()
-        .map(|b| b.iter().copied().collect())
-        .unwrap_or_default();
+    let mut first: Vec<&str> = blocks.first().map(|b| b.to_vec()).unwrap_or_default();
     let mut head = first.join("\n");
     let tail_reserve = verdict.len() + marker.len() + 2;
     let mut head_budget = budget.saturating_sub(tail_reserve);

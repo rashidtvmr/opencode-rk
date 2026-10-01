@@ -175,16 +175,14 @@ pub fn query(index: &[IndexedDoc], q: &str, cfg: &QueryConfig) -> Result<Result_
     // Dropped relative to every matcher (max_hits cut + byte-budget cut).
     let dropped_hits = matched_total.saturating_sub(hits.len());
     let truncated = matched_total > hits.len() || cut_bytes > 0;
-    if truncated {
-        if let Some(tail) = hits.last_mut() {
-            let n = if dropped_hits > 0 {
-                dropped_hits
-            } else {
-                cut_bytes
-            };
-            let marker = render_marker(n);
-            tail.snippet.push_str(&marker);
-        }
+    if let Some(tail) = hits.last_mut().filter(|_| truncated) {
+        let n = if dropped_hits > 0 {
+            dropped_hits
+        } else {
+            cut_bytes
+        };
+        let marker = render_marker(n);
+        tail.snippet.push_str(&marker);
     }
 
     Ok(Result_ { hits, truncated })
