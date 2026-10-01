@@ -1095,6 +1095,12 @@
       "session": "ses_complete_app_21sep",
       "status": "completed"
     },
+    "SHIP-001": {
+      "blockedNote": "RED 5FAIL/1ok T01,02 yml absent T03 codesign missing T04 foreign-arch deletes preexist T05 v1 not restored; sha 2decf1d2; impl/freeze/signing pending",
+      "scratchpad": "worklog/SHIP-001.md",
+      "session": "ses_f114747d5ffe4NBs8gtP1q3PDv",
+      "status": "blocked"
+    },
     "TUI-001": {
       "completedNote": "GREEN 51/51 lib (46 existing + 5 new suspend/resume/buffer) zero test edits post-freeze sha256 aba2dc78; default-build gate only",
       "scratchpad": "worklog/TUI-001.md",
