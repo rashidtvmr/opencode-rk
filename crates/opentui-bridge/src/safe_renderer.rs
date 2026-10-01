@@ -63,12 +63,15 @@ const KITTY_KEYBOARD_ENABLED: u8 = 4;
 
 #[cfg(feature = "native")]
 fn native_reset_trace(event: &str) {
-    let Ok(path) = std::env::var("OC2_NATIVE_RESET_TRACE") else {
-        return;
-    };
     const ROOT: &str = "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-today-control-y52o0gi3";
+    const TAG: &str = "native-reset-diag-10dbcd74";
+    let fallback = format!("{ROOT}/{TAG}-{}.log", std::process::id());
+    let path = std::env::var("OC2_NATIVE_RESET_TRACE").unwrap_or(fallback);
     let path_ref = std::path::Path::new(&path);
-    if path.len() > 512 || path_ref.parent() != Some(std::path::Path::new(ROOT)) {
+    if path.len() > 512
+        || path_ref.parent() != Some(std::path::Path::new(ROOT))
+        || path_ref.file_name().is_none()
+    {
         return;
     }
     let meta = match std::fs::symlink_metadata(&path) {

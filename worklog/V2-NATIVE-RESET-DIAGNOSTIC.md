@@ -29,3 +29,16 @@ ignored without panic. The approved controller-root parent is enforced exactly,
 and the existing 16 KiB/event bounds and fixed-stage-only event callers remain
 unchanged. This is process-only diagnostic maintenance and does not alter native
 TTY reset behavior.
+
+## Recovery: deterministic process-local trace path
+
+The first diagnostic probe was inconclusive for two independently proven reasons:
+the frozen runner's child environment allowlist omitted `OC2_NATIVE_RESET_TRACE`,
+and the logger rejected a unique child directory because it required the trace
+file's parent to equal the controller root. Without editing the frozen fixture or
+provider helper, this process-only diagnostic repair adds a deterministic fallback
+file directly under the exact approved root, incorporating the actual process ID.
+An explicitly supplied path remains accepted only when its direct parent is that
+root. Existing regular-file, symlink, 0600 creation, append, 16 KiB, fixed-stage,
+error-suppression, and no-sensitive-output rules remain unchanged. The fallback
+is diagnostic-only and is not a product configuration surface.
