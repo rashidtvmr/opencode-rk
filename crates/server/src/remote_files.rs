@@ -182,7 +182,7 @@ fn check_workspace(workspace: &str, allowed: &[&str]) -> Result<(), RemotePathEr
     {
         return Err(RemotePathError::NotAllowed);
     }
-    if allowed.iter().any(|a| *a == workspace) {
+    if allowed.contains(&workspace) {
         Ok(())
     } else {
         Err(RemotePathError::UnknownWorkspace)
