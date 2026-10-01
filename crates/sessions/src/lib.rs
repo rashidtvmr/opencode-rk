@@ -35,6 +35,7 @@ pub mod store;
 pub mod task_quota;
 pub mod tui_info_panel;
 pub mod tui_state;
+#[cfg(test)]
 mod types;
 pub mod ui_001;
 pub mod ui_002;

@@ -20,6 +20,8 @@ use opencode_rk_storage::{
 use rusqlite::{params, OptionalExtension};
 use std::path::Path;
 
+type RetryRequestRow = (Vec<u8>, Option<Vec<u8>>, Option<i64>);
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ForkProvenance {
     pub parent_session_id: SessionId,
@@ -367,7 +369,7 @@ impl SessionManager {
                 .ok_or(SessionError::InvalidBranchBoundary)?,
             _ => return Err(SessionError::InvalidBranchBoundary),
         };
-        let request: Option<(Vec<u8>, Option<Vec<u8>>, Option<i64>)> = conn
+        let request: Option<RetryRequestRow> = conn
             .query_row(
                 "SELECT m.id,p.inline_data,p.blob_pk FROM messages m
                  JOIN sessions s ON s.pk=m.session_pk

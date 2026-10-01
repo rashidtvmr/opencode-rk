@@ -251,7 +251,7 @@ pub struct ContextBreakdown {
 /// Largest-first ordering with explicit truncation marker.
 #[must_use]
 pub fn context_breakdown(mut sources: Vec<SourceUsage>) -> ContextBreakdown {
-    sources.sort_by(|a, b| b.tokens.cmp(&a.tokens));
+    sources.sort_by_key(|source| std::cmp::Reverse(source.tokens));
     let truncated = sources.len() > MAX_SOURCES;
     sources.truncate(MAX_SOURCES);
     ContextBreakdown {

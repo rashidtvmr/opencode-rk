@@ -68,6 +68,14 @@ impl ShareSecret {
     }
 }
 
+impl std::str::FromStr for ShareSecret {
+    type Err = std::convert::Infallible;
+
+    fn from_str(secret: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_str(secret))
+    }
+}
+
 impl Drop for ShareSecret {
     fn drop(&mut self) {
         for b in self.0.iter_mut() {
