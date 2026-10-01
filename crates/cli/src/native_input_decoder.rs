@@ -113,8 +113,15 @@ impl TerminalInputDecoder {
 
     pub(crate) fn expire(&mut self, now: Instant) {
         if self.deadline.is_some_and(|deadline| now >= deadline) {
-            self.reset();
-            self.emit(InputEvent::Escape);
+            // Only a bare ESC has an ambiguous user meaning.  A timed-out
+            // CSI/SS3 (including an overflow discard state) is protocol
+            // garbage and must not clear the composer or synthesize Escape.
+            if self.state == State::Escape {
+                self.reset();
+                self.emit(InputEvent::Escape);
+            } else {
+                self.reset();
+            }
         }
     }
 
@@ -135,8 +142,19 @@ impl TerminalInputDecoder {
             self.state = State::Escape;
             self.len = 0;
         } else if self.len < MAX_SEQUENCE {
-            self.sequence[self.len] = byte;
-            self.len += 1;
+            // CSI parameter/intermediate bytes are printable protocol bytes;
+            // other controls are malformed and enter fail-closed discard.
+            if byte < 0x20 {
+                self.state = if self.state == State::Csi {
+                    State::DiscardCsi
+                } else {
+                    State::DiscardSs3
+                };
+                self.deadline = None;
+            } else {
+                self.sequence[self.len] = byte;
+                self.len += 1;
+            }
         } else {
             self.state = if self.state == State::Csi {
                 State::DiscardCsi
@@ -144,38 +162,39 @@ impl TerminalInputDecoder {
                 State::DiscardSs3
             };
             self.len = 0;
+            self.deadline = None;
         }
     }
 
     fn decode_kitty(&mut self) {
-        let mut values = [0u32; 3];
-        let mut n = 0usize;
-        let mut value = 0u32;
-        let mut have_digit = false;
-        for &byte in &self.sequence[..self.len] {
-            if byte.is_ascii_digit() {
-                have_digit = true;
-                value = value
-                    .checked_mul(10)
-                    .and_then(|v| v.checked_add((byte - b'0') as u32))
-                    .unwrap_or(u32::MAX);
-            } else if byte == b';' && have_digit && n < values.len() {
-                values[n] = value;
-                n += 1;
-                value = 0;
-                have_digit = false;
-            } else {
-                return;
-            }
-        }
-        if !have_digit || n >= values.len() {
+        // Kitty keyboard: codepoint;mod[:event]u.  The event field is after
+        // the colon, not a third semicolon-separated parameter.  A missing
+        // event means press (the frozen c fixture is CSI 99;1u).
+        let mut split = self.sequence[..self.len].splitn(2, |byte| *byte == b';');
+        let Some(codepoint) = parse_number(split.next().unwrap_or_default()) else {
             return;
-        }
-        values[n] = value;
-        let codepoint = values[0];
-        let modifier = values[1];
-        let event_type = values[2];
-        if event_type > 0 && event_type != 1 {
+        };
+        let Some(modifiers) = split.next() else {
+            return;
+        };
+        let (modifier, event_type) = match modifiers.iter().position(|byte| *byte == b':') {
+            Some(index) => {
+                let Some(modifier) = parse_number(&modifiers[..index]) else {
+                    return;
+                };
+                let Some(event) = parse_number(&modifiers[index + 1..]) else {
+                    return;
+                };
+                (modifier, event)
+            }
+            None => {
+                let Some(modifier) = parse_number(modifiers) else {
+                    return;
+                };
+                (modifier, 1)
+            }
+        };
+        if event_type != 1 {
             return;
         } // release/repeat are not text
         if (0xE000..=0xF8FF).contains(&codepoint) || codepoint > 0x10FFFF {
@@ -185,9 +204,16 @@ impl TerminalInputDecoder {
             return;
         };
         let modifier_bits = modifier.saturating_sub(1);
-        if modifier_bits & 0b100 != 0 && character.is_ascii() {
-            self.emit(InputEvent::Byte((character as u8) & 0x1f));
-        } else if modifier_bits == 0 {
+        // Only the explicit Ctrl-letter mapping is text-safe.  In particular,
+        // never turn modified punctuation into arbitrary C0 controls.
+        if modifier_bits & 0b100 != 0
+            && character.is_ascii_alphabetic()
+            && modifier_bits & !0b100 == 0
+        {
+            self.emit(InputEvent::Byte(
+                character.to_ascii_uppercase() as u8 & 0x1f,
+            ));
+        } else if modifier_bits & !0b011 == 0 {
             let mut bytes = [0u8; 4];
             for &byte in character.encode_utf8(&mut bytes).as_bytes() {
                 self.emit(InputEvent::Byte(byte));
@@ -209,4 +235,20 @@ impl TerminalInputDecoder {
         self.len = 0;
         self.deadline = None;
     }
+}
+
+fn parse_number(bytes: &[u8]) -> Option<u32> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut value = 0u32;
+    for byte in bytes {
+        if !byte.is_ascii_digit() {
+            return None;
+        }
+        value = value
+            .checked_mul(10)
+            .and_then(|value| value.checked_add((byte - b'0') as u32))?;
+    }
+    Some(value)
 }

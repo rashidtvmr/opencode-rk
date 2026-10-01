@@ -17,6 +17,7 @@
 
 use crate::daemon_client;
 #[cfg(feature = "native")]
+#[path = "native_input_decoder.rs"]
 mod native_input_decoder;
 #[cfg(feature = "native")]
 #[path = "native_setup.rs"]
@@ -727,6 +728,12 @@ fn native_loop(
         if !input.has_event() {
             if renderer.read_input(&mut byte)? == 0 {
                 break;
+            }
+            // A terminal protocol prefix is a control boundary.  Do not let
+            // an incomplete UTF-8 scalar straddle it; bytes emitted later by
+            // a decoded Kitty event are ordinary input and remain eligible.
+            if byte[0] == 0x1b {
+                utf8.reset();
             }
             input.push(byte[0], Instant::now());
         }
