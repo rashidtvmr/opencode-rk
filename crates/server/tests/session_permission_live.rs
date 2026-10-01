@@ -729,7 +729,7 @@ impl Fixture {
             "POST",
             format!("/api/session/{session}/permission/{request}/reply"),
             token,
-            Some(&json!({"reply":reply})),
+            Some(json!({"reply":reply})),
         )
         .await
     }
@@ -777,7 +777,8 @@ impl Fixture {
                 "permission target must be outside the server current-directory root".to_owned(),
             );
         }
-        self.start_turn(&self.target);
+        let target = self.target.clone();
+        self.start_turn(&target);
         let (id, request) = self.pending().await?;
         if self.target.exists() {
             return Err("pending request already wrote target".to_owned());
@@ -869,7 +870,8 @@ impl Fixture {
                 "permission target must be outside the current server project root".to_owned(),
             );
         }
-        self.start_turn(&self.target);
+        let target = self.target.clone();
+        self.start_turn(&target);
         let (id, _) = self.pending().await?;
         if self.target.exists() || self.turn_finished() || self.provider.count() != 1 {
             return Err(
@@ -913,7 +915,8 @@ impl Fixture {
                 "permission target must be outside the current server project root".to_owned(),
             );
         }
-        self.start_turn(&self.target);
+        let target = self.target.clone();
+        self.start_turn(&target);
         let (id, _) = self.pending().await?;
         let missing = self.reply(&self.session, &id, "once", None).await?;
         let wrong = self
@@ -954,7 +957,8 @@ impl Fixture {
                 "permission target must be outside the current server project root".to_owned(),
             );
         }
-        self.start_turn(&self.target);
+        let target = self.target.clone();
+        self.start_turn(&target);
         let (id, _) = self.pending().await?;
         let wrong_session = self
             .reply(&self.other_session, &id, "once", Some(self.token.clone()))
