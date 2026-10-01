@@ -42,6 +42,7 @@
 //!   on `Drop` (unwind-safe; abort/`SIGKILL`/power-loss ceiling applies).
 //! - `app_start::TerminalRestoreGuard` (`app_start.rs`) runs a boxed
 //!   `FnOnce() + Send` on drop unless disarmed via `disarm()`.
+//!
 //! All three share one ceiling: `Drop` never runs under `panic=abort`,
 //! `SIGKILL`, or power loss, so the host's real exit path must restore via
 //! its supported mechanism and mark/record the flag/receipt there too. The

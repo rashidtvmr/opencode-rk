@@ -82,12 +82,9 @@ pub fn lookup_command(name: &str) -> Option<InstalledCommand> {
     if name.is_empty() || name.len() > MAX_COMMAND_NAME_LEN {
         return None;
     }
-    for cmd in command_inventory() {
-        if cmd.name() == name {
-            return Some(cmd);
-        }
-    }
-    None
+    command_inventory()
+        .into_iter()
+        .find(|&cmd| cmd.name() == name)
 }
 
 /// No-subcommand entry: discover/start daemon and open native TUI.

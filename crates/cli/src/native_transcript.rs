@@ -59,12 +59,12 @@ impl ToolState {
 
     /// Allowed transitions; terminal states have none.
     pub fn can_transition(self, next: Self) -> bool {
-        match (self, next) {
-            (Self::Approval, Self::Running | Self::Approval) => true,
-            (Self::Running, Self::Failed | Self::Completed) => true,
-            (Self::Running, Self::Running) => true,
-            _ => false,
-        }
+        matches!(
+            (self, next),
+            (Self::Approval, Self::Running | Self::Approval)
+                | (Self::Running, Self::Failed | Self::Completed)
+                | (Self::Running, Self::Running)
+        )
     }
 }
 

@@ -142,7 +142,7 @@ fn kind_label(kind: ModalKind) -> &'static str {
 fn fit_cell(text: &str, width: usize) -> String {
     let mut out: String = text.chars().take(width).collect();
     let missing = width.saturating_sub(out.chars().count());
-    out.extend(core::iter::repeat(' ').take(missing));
+    out.extend(std::iter::repeat_n(' ', missing));
     out
 }
 
