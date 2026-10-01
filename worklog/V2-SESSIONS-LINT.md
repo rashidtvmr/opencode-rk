@@ -13,6 +13,16 @@
 - **Changed paths:** six granted source files above, plus this worklog. `types.rs` and all test bodies remain unchanged.
 - **Verification status:** no Cargo/build/test/runtime command was run per workspace ownership. This is a **CANDIDATE only**, not PREVERIFIED or ACCEPTED; parent/integrator owns verification.
 
+## Narrow follow-up: legacy constructor lint exception
+
+- **Prepared base:** `e5e02894cefc31992be17fe5167fae59d49140ac` (`v2/sessions-lint-integration-ready`).
+- **Evidence:** `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-sessions-preverify-e5e0289-1roefgrp/sessions-clippy.log`, controller-reported SHA-256 prefix `eec18044`; the only remaining session diagnostic was `clippy::should_implement_trait` on the existing inherent `ShareSecret::from_str(&str) -> Self` at line 62. Full tests were not run.
+- **Superseded candidate:** the earlier `std::str::FromStr<Err = Infallible>` implementation is removed. It did not resolve the diagnostic because the existing inherent method retains its legacy `Self` return type and remains the method Clippy diagnoses. No new trait API is needed.
+- **Authorized narrow exception:** added exactly one method-local `#[expect(clippy::should_implement_trait, reason = "legacy infallible constructor signature is preserved for existing callers")]`. This preserves the existing public constructor, zeroizing secret representation, all callers, and frozen tests without changing the return type or semantics. No global allowance or other style suppression was added.
+- **Whole-file SHA-256:** `share_merge.rs` before `bc9e5d21a663fb5b42fa7d5f65682fb9086007ec2568dcc9ba900f4d7db41a89`, after `d01862f35262a4a03f6fce7e0f266e779c42445578716d876fc24c6a9e0fbe97`. `Cargo.lock` remains `63ef5299dd93286950af00388796375b06aefc5a4a3eedfa38361954fefb6f03`.
+- **Scope:** only `crates/sessions/src/share_merge.rs` and this worklog were changed. No in-module tests exist in `share_merge.rs`; other protected test suffixes remain unchanged from the prepared controller revision.
+- **Status:** candidate only; no Cargo, runtime, test, or Clippy command was run by this worker. Parent owns the same focused verification sequence.
+
 The controller prepared the preserved `a5254ee` + `a75b761` net source against
 current canonical `89aeaa8`, with byte-identical product paths. The before-source
 `lib.rs` and `branch_v2.rs` hashes above are recomputed controller values; the

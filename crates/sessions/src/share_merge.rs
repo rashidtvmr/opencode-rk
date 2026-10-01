@@ -59,20 +59,16 @@ pub struct ShareSecret(Vec<u8>);
 
 impl ShareSecret {
     #[must_use]
+    #[expect(
+        clippy::should_implement_trait,
+        reason = "legacy infallible constructor signature is preserved for existing callers"
+    )]
     pub fn from_str(secret: &str) -> Self {
         Self(secret.as_bytes().to_vec())
     }
 
     fn equals(&self, other: &Self) -> bool {
         ct_eq(&self.0, &other.0)
-    }
-}
-
-impl std::str::FromStr for ShareSecret {
-    type Err = std::convert::Infallible;
-
-    fn from_str(secret: &str) -> Result<Self, Self::Err> {
-        Ok(Self::from_str(secret))
     }
 }
 
