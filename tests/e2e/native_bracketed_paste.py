@@ -84,7 +84,7 @@ class PasteTerminalScreen(TerminalScreen):
     def _width(char):
         if unicodedata.combining(char):
             return 0
-        return 2 if unicodedata.east_asian_width(char) in "WFA" else 1
+        return 2 if unicodedata.east_asian_width(char) in "WF" else 1
 
     def _put(self, char):
         if char == "\n":
