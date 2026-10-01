@@ -367,15 +367,23 @@ impl Transcript {
 
     /// Pinned-to-bottom page: the last `height` retained lines, shifted up
     /// by `page` scroll offset. `height` hard-capped to `MAX_WINDOW`.
-    /// A scrolled-up view is stable across pushes; [`TranscriptPage::reset`]
-    /// re-pins to the bottom. Empty when `height == 0` or no lines.
+    /// A scrolled-up view is positionally stable across pushes; the
+    /// [`TranscriptPage::reset`] (or scroll-to-bottom) re-pins to the bottom.
+    /// Empty when `height == 0` or no lines. The freeze is relative to the
+    /// retained vector at the time scrolling begins; it is not a persistent
+    /// line-identity anchor across scrollback eviction.
     pub fn page(&self, page: &TranscriptPage, height: usize) -> &[TranscriptLine] {
         let height = height.min(MAX_WINDOW);
         if height == 0 {
             return &[];
         }
         let len = self.lines.len();
-        let end = len.saturating_sub(page.scroll.min(len));
+        let frozen = page.anchor.min(len);
+        let end = if page.scroll == 0 {
+            len
+        } else {
+            frozen.saturating_sub(page.scroll.min(frozen))
+        };
         let start = end.saturating_sub(height);
         &self.lines[start..end]
     }
@@ -389,10 +397,13 @@ impl Transcript {
 /// Pinned-to-bottom scroll state for [`Transcript::page`].
 ///
 /// `scroll == 0` follows the latest line; scrolling up freezes the view so
-/// arriving tokens do not move it. Pure state: caller supplies lengths.
+/// arriving tokens do not move it. The freeze records a bounded positional
+/// end index, rather than retaining an unbounded line map. Pure state: caller
+/// supplies lengths.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct TranscriptPage {
     scroll: usize,
+    anchor: usize,
 }
 
 impl TranscriptPage {
@@ -402,18 +413,28 @@ impl TranscriptPage {
     }
 
     /// Scroll up (away from latest) by `delta`, clamped to `len`.
+    /// Leaving the pinned state records the current positional end so pushes
+    /// do not shift the visible window.
     pub fn scroll_up(&mut self, delta: usize, len: usize) {
-        self.scroll = self.scroll.saturating_add(delta).min(len);
+        if self.scroll == 0 {
+            self.anchor = len;
+        }
+        let cap = self.anchor.min(len).max(self.scroll);
+        self.scroll = self.scroll.saturating_add(delta).min(cap);
     }
 
-    /// Scroll down (toward latest) by `delta`.
+    /// Scroll down (toward latest) by `delta`. Reaching zero re-pins.
     pub fn scroll_down(&mut self, delta: usize) {
         self.scroll = self.scroll.saturating_sub(delta);
+        if self.scroll == 0 {
+            self.anchor = 0;
+        }
     }
 
     /// Re-pin to the latest line.
     pub fn reset(&mut self) {
         self.scroll = 0;
+        self.anchor = 0;
     }
 
     #[must_use]
