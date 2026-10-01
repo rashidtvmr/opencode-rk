@@ -728,7 +728,7 @@ mod tests {
                 // security contract), so an approved spawn could never run.
                 // Crash codes below are caller-observed literals passed to
                 // `note_crash`, independent of the child binary.
-                program: "/bin/false".to_owned(),
+                program: "/usr/bin/false".to_owned(),
                 args: Vec::new(),
                 env: HashMap::new(),
                 cwd: PathBuf::from("/tmp"),
