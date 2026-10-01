@@ -591,6 +591,8 @@ fn native_loop(
     let mut partial = String::new();
     let mut utf8 = NativeUtf8Decoder::default();
     let mut input = native_input_decoder::TerminalInputDecoder::default();
+    let mut observed_size = (cols, rows);
+    let mut needs_paint = true;
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
@@ -601,6 +603,13 @@ fn native_loop(
     }
     let mut byte = [0u8; 1];
     loop {
+        if let Ok(Some(size)) = renderer.terminal_size() {
+            if size != observed_size {
+                renderer.resize(size.0, size.1)?;
+                observed_size = size;
+                needs_paint = true;
+            }
+        }
         let mut lines = vec![
             "OpenCode RK (native)".to_string(),
             selected
@@ -613,6 +622,7 @@ fn native_loop(
         if let Some(active) = worker.as_mut() {
             let mut settled = false;
             while let Some(event) = active.try_next() {
+                needs_paint = true;
                 match event {
                     native_turn::Event::User => {}
                     native_turn::Event::Delta(delta) => {
@@ -707,7 +717,10 @@ fn native_loop(
         let visible = transcript.iter().rev().take(slots).collect::<Vec<_>>();
         lines.extend(visible.into_iter().rev().cloned());
         lines.extend(panel);
-        native_paint(&mut renderer, &lines)?;
+        if needs_paint {
+            native_paint(&mut renderer, &lines)?;
+            needs_paint = false;
+        }
         let now = Instant::now();
         input.expire(now);
         let worker_deadline = worker.is_some().then(|| now + Duration::from_millis(20));
@@ -715,7 +728,10 @@ fn native_loop(
             (Some(a), Some(b)) => Some(a.min(b).saturating_duration_since(now)),
             (Some(a), None) => Some(a.saturating_duration_since(now)),
             (None, Some(b)) => Some(b.saturating_duration_since(now)),
-            (None, None) => None,
+            // There is no SIGWINCH path in this small native bridge.  A
+            // bounded idle wake lets us observe kernel geometry without
+            // repainting unchanged frames or waiting for input.
+            (None, None) => Some(Duration::from_millis(100)),
         };
         let ready = if input.has_event() {
             true
@@ -738,6 +754,7 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(event) = input.pop() else { continue };
+        needs_paint = true;
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             // Preserve the existing standalone-escape action (clear dialog /

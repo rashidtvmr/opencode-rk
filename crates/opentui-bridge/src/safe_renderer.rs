@@ -28,7 +28,7 @@ use std::time::Duration;
 #[cfg(all(feature = "native", unix))]
 use rustix::event::{poll, PollFd, PollFlags, Timespec};
 #[cfg(all(feature = "native", unix))]
-use rustix::termios::{tcgetattr, tcsetattr, OptionalActions, Termios};
+use rustix::termios::{tcgetattr, tcgetwinsize, tcsetattr, OptionalActions, Termios};
 
 use crate::buffer::NativeHandle;
 use crate::color::Rgba;
@@ -329,6 +329,35 @@ impl Renderer {
                 Err(error) if error == rustix::io::Errno::INTR => continue,
                 Err(_) => return Err(BridgeError::TerminalFailed),
             }
+        }
+    }
+
+    /// Read the live geometry from the same owned descriptor used for input.
+    ///
+    /// A renderer backed by a pipe or memory has no terminal geometry; that is
+    /// a normal condition rather than a renderer failure.  The descriptor is
+    /// cloned while holding the slot lock so the ioctl cannot race terminal
+    /// teardown, then queried without borrowing a raw file descriptor.
+    #[cfg(all(feature = "native", unix))]
+    pub fn terminal_size(&self) -> Result<Option<(u32, u32)>, BridgeError> {
+        let handle = self.live()?;
+        let slot = TERMINAL_INPUT
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let input = slot
+            .as_ref()
+            .filter(|input| input.handle == handle)
+            .ok_or(BridgeError::TerminalFailed)?;
+        let fd = input
+            .fd
+            .try_clone()
+            .map_err(|_| BridgeError::TerminalFailed)?;
+        drop(slot);
+        match tcgetwinsize(&fd) {
+            Ok(size) if size.ws_col != 0 && size.ws_row != 0 => {
+                Ok(Some((u32::from(size.ws_col), u32::from(size.ws_row))))
+            }
+            Ok(_) | Err(_) => Ok(None),
         }
     }
 
