@@ -17,6 +17,9 @@
 
 use crate::daemon_client;
 #[cfg(feature = "native")]
+#[path = "native_input_decoder.rs"]
+mod native_input_decoder;
+#[cfg(feature = "native")]
 #[path = "native_setup.rs"]
 mod native_setup;
 #[cfg(feature = "native")]
@@ -587,6 +590,7 @@ fn native_loop(
     let mut worker: Option<native_turn::TurnWorker> = None;
     let mut partial = String::new();
     let mut utf8 = NativeUtf8Decoder::default();
+    let mut input = native_input_decoder::TerminalInputDecoder::default();
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
@@ -704,18 +708,42 @@ fn native_loop(
         lines.extend(visible.into_iter().rev().cloned());
         lines.extend(panel);
         native_paint(&mut renderer, &lines)?;
-        let ready = renderer.input_ready(if worker.is_some() {
-            Some(Duration::from_millis(20))
+        let now = Instant::now();
+        input.expire(now);
+        let worker_deadline = worker.is_some().then(|| now + Duration::from_millis(20));
+        let timeout = match (worker_deadline, input.next_deadline()) {
+            (Some(a), Some(b)) => Some(a.min(b).saturating_duration_since(now)),
+            (Some(a), None) => Some(a.saturating_duration_since(now)),
+            (None, Some(b)) => Some(b.saturating_duration_since(now)),
+            (None, None) => None,
+        };
+        let ready = if input.has_event() {
+            true
         } else {
-            None
-        })?;
+            renderer.input_ready(timeout)?
+        };
         if !ready {
             continue;
         }
-        if renderer.read_input(&mut byte)? == 0 {
-            break;
+        if !input.has_event() {
+            if renderer.read_input(&mut byte)? == 0 {
+                break;
+            }
+            // A terminal protocol prefix is a control boundary.  Do not let
+            // an incomplete UTF-8 scalar straddle it; bytes emitted later by
+            // a decoded Kitty event are ordinary input and remain eligible.
+            if byte[0] == 0x1b {
+                utf8.reset();
+            }
+            input.push(byte[0], Instant::now());
         }
-        let byte = byte[0];
+        let Some(event) = input.pop() else { continue };
+        let byte = match event {
+            native_input_decoder::InputEvent::Byte(byte) => byte,
+            // Preserve the existing standalone-escape action (clear dialog /
+            // draft) while keeping protocol escape bytes out of the composer.
+            native_input_decoder::InputEvent::Escape => 27,
+        };
         match byte {
             3 | 4 => break,
             27 => {
