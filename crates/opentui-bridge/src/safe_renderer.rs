@@ -531,10 +531,14 @@ impl Renderer {
             if owned {
                 LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
             }
-            destroyRenderer(self.handle, true);
             #[cfg(unix)]
-            if owned && flags & TERMINAL_ACTIVE != 0 && LIFECYCLE_DEST.load(Ordering::Acquire) == 0
-            {
+            // `restore_terminal_modes` clears TERMINAL_ACTIVE only after its
+            // reset and captured-termios restoration complete. If that
+            // explicit cleanup reported an output error, close still retries
+            // against the same owned terminal capability; cleanup must not be
+            // made contingent on the lifecycle bit having survived an earlier
+            // best-effort call.
+            if owned && LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
                 let slot = TERMINAL_INPUT
                     .lock()
                     .unwrap_or_else(|error| error.into_inner());
@@ -544,6 +548,7 @@ impl Renderer {
                     }
                 }
             }
+            destroyRenderer(self.handle, true);
             if owned {
                 LIFECYCLE_DEST.store(1, Ordering::Release);
             }
@@ -600,10 +605,9 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
-                && LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel) & TERMINAL_ACTIVE
-                    != 0
-            {
+            let owns_terminal = LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.load(Ordering::Acquire) & TERMINAL_ACTIVE != 0;
+            if owns_terminal {
                 // SAFETY: live owned handle. This existing export runs the
                 // linked fork's shutdown sequence; it does not re-enable modes.
                 unsafe { suspendRenderer(handle) };
@@ -626,6 +630,9 @@ impl Renderer {
                     return Err(error);
                 }
                 restore?;
+                if owns_terminal {
+                    LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel);
+                }
             }
             Ok(())
         }

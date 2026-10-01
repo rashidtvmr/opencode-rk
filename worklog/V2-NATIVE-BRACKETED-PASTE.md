@@ -245,3 +245,9 @@ Status is **CANDIDATE only**, neither PREVERIFIED nor ACCEPTED; this package
 does not certify full G5/G8 or broader TUI parity.
 
 **CANDIDATE DONE; exact main-v2 acceptance PENDING.**
+
+## Runtime-failure continuation
+
+The prepared runtime receipt showed normal exit (`cli_exit_code: 0`), termios restoration, and a controlling terminal, but no observed `CSI ?2004l`. Source tracing identified the lifecycle guard: `native_loop` calls `restore_terminal_modes()` and ignores its result before `close()`. The explicit method previously cleared `TERMINAL_ACTIVE` before reset completion, so a reset error prevented `release()` from retrying the owned-terminal fallback.
+
+The successor retains `TERMINAL_ACTIVE` until reset and captured-termios restoration complete. `release()` retries the owned-terminal fallback for the active stdout destination before releasing the captured terminal slot. The retry remains bounded and uses the existing owner/handle and destination guards; memory renderers, input framing, and user text are unchanged. Native destruction remains the existing two-argument call after the fallback while the captured FD remains alive.
