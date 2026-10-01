@@ -1115,3 +1115,35 @@ flows, 314 CLI units, 83 bridge/lifecycle tests and two server streams pass.
 Evidence is retained at `v2-native-workspace-repairs-af3c8ca-cye52df1` under the
 approved artifact parent. Independent auditing is pending; that artifact does
 not attest the later `72e5aa4` source or full release readiness.
+
+### Catalog library maintenance accepted
+
+Fresh workspace Clippy on `364c92d` exposed three catalog-library diagnostics.
+Their equivalent rewrites in `config.rs` and `health.rs` were independently
+PREVERIFIED and fast-forward integrated as exact
+**`97774583c6b008581fb26cc85a11b74b9d0692a1`**. The unchanged focused manifest
+passes on the integrated revision: formatting, library Clippy and **42 crate
+tests**, zero failed/ignored. Protected test bodies, latest-record health
+behavior and Cargo.lock remain unchanged. State **ACCEPTED for scoped catalog
+maintenance**; `worklog/V2-CATALOG-LIB-LINT.md` records the exact evidence.
+
+### Installed Mac audit and subsequent workspace timeout
+
+Independent verifier `ses_f0a8218c7fferXW1tN7e3tegZ9` audited the retained
+Mac release `af3c8ca1989868110f2de4db0cc924fc712406ae`, recomputed all artifact
+and command/log hashes and inspected observed PTY, provider, durable history,
+authentication and cleanup receipts. State **ACCEPTED for the scoped Mac ARM64
+installed regression on exact integrated `af3c8ca`**. The 11-command evidence
+is `v2-native-workspace-repairs-af3c8ca-cye52df1`. This supersedes the pending
+audit note above, not the same-current-SHA Mac/Web/Ubuntu release gate.
+
+The later exact `364c92d` workspace run used an attested installed native binary
+from `v2-native-workspace-tests-364c92d-fqin_b5i`. It completed **808 passing
+tests, zero failures/ignored**, including all 12 repaired CI-extension tests,
+then reached the 300-second deadline in `ci_mode::ci_t01`. The original provider
+fixture blocks in `join()` after CI fails closed without a daemon bearer.
+Receipt and timeout logs are `v2-workspace-tests-current-364c92d-70_oode8`;
+a bounded process-table probe confirmed the exact hung test executable absent
+after the runner's SIGTERM. This is an incomplete workspace run, not GREEN.
+The independent fixture owner is preparing bounded authenticated readiness with
+the three original test bodies and assertions preserved.

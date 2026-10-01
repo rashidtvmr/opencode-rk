@@ -58,3 +58,26 @@ the exact canonical rerun.
 Candidate commit is required to be a normal new commit on this branch with a
 clean tree and full SHA; acceptance remains solely with the parent verifier on
 the integrated SHA.
+
+## Exact integrated acceptance
+
+Independent verifier `ses_f0a7032ceffeVqr3UffgEY1xzd` PREVERIFIED exact
+`97774583c6b008581fb26cc85a11b74b9d0692a1`. The controller verified the
+receipt/log hashes, fast-forwarded canonical `main-v2`, and reran the same
+bounded isolated manifest on that exact integrated SHA:
+
+```text
+cargo fmt --all -- --check
+  exit 0
+cargo clippy --offline --locked -p opencode-rk-catalog --lib -- -D warnings
+  exit 0
+cargo test --offline --locked -p opencode-rk-catalog --all-targets --all-features -- --test-threads=1
+  42 passed; 0 failed; 0 ignored; exit 0
+```
+
+Receipts are retained under the approved artifact parent at
+`v2-catalog-library-preverify-9777458-p0ft9jkc` and
+`v2-catalog-library-integrated-9777458-8npmauz_`. All protected tests and
+Cargo.lock remain unchanged. State: **ACCEPTED for the three catalog-library
+mechanical diagnostics and crate regressions on exact integrated `9777458`**.
+Workspace-wide validation remains a separate gate.
