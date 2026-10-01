@@ -195,15 +195,36 @@ def send_fragments(master, data, delay=0.012):
         time.sleep(delay)
 
 
-def send_bulk(master, data, chunk=4096):
-    """Bounded bulk write for the oversized negative (fragment timing N/A)."""
+def send_bulk(master, data, chunk=4096, captures=None, screen=None):
+    """Bounded bulk write while concurrently draining the PTY output.
+
+    The oversized negative deliberately writes more than the terminal input
+    buffer can hold.  Draining here is part of the fixture contract: a native
+    renderer is allowed to redraw/reject the frame while the producer is
+    still writing, and a writer which does not service output can deadlock
+    both sides of the PTY.
+    """
+    if captures is None:
+        captures = bytearray()
     deadline = time.monotonic() + 20
     offset = 0
     while offset < len(data):
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise RuntimeError("PTY bulk write deadline")
-        _, writable, _ = select.select([], [master], [], min(remaining, .1))
+        readable, writable, _ = select.select([master], [master], [], min(remaining, .1))
+        if readable:
+            if len(captures) >= MAX_PTY:
+                raise RuntimeError("PTY capture bound reached during oversized paste")
+            try:
+                output = os.read(master, min(65536, MAX_PTY - len(captures)))
+            except OSError as exc:
+                raise RuntimeError("PTY read failed during oversized paste: %s" % exc)
+            if not output:
+                raise RuntimeError("PTY EOF during oversized paste")
+            captures.extend(output)
+            if screen is not None:
+                screen.feed(output)
         if not writable:
             continue
         try:
@@ -213,6 +234,41 @@ def send_bulk(master, data, chunk=4096):
         if written <= 0:
             raise RuntimeError("PTY bulk short write")
         offset += written
+
+
+def wait_history(descriptor_value, expected, deadline):
+    """Require canonical full-history persistence, not merely a streamed delta."""
+    last = None
+    while time.monotonic() < deadline:
+        try:
+            last = history_raw(descriptor_value)
+        except (OSError, ValueError, urllib.error.URLError):
+            last = None
+        if last == expected:
+            return last
+        time.sleep(.05)
+    raise AssertionError("durable full history did not settle: %r" % (last,))
+
+
+def drain_exit_output(master, captures, screen, deadline):
+    """Drain bounded post-exit bytes; macOS PTYs report terminal EOF as EIO."""
+    while time.monotonic() < deadline:
+        if len(captures) >= MAX_PTY:
+            raise RuntimeError("PTY capture bound reached while draining CLI exit")
+        ready, _, _ = select.select([master], [], [], min(.1, max(0, deadline - time.monotonic())))
+        if not ready:
+            continue
+        try:
+            output = os.read(master, min(65536, MAX_PTY - len(captures)))
+        except OSError as exc:
+            if exc.errno == 5:  # EIO is terminal EOF for a closed macOS PTY slave.
+                return
+            raise RuntimeError("PTY read failed while draining CLI exit: %s" % exc)
+        if not output:
+            return
+        captures.extend(output)
+        screen.feed(output)
+    raise RuntimeError("timed out draining CLI exit output")
 
 
 def settle(master, captures, screen, seconds):
@@ -387,12 +443,19 @@ def run(binary, library, manifest, artifacts):
         send_fragments(master, b"\r")
         read_until(master, time.monotonic() + TIMEOUT, captures, FIRST_REPLY.encode(),
                    len(captures), screen, lambda: screen.contains(FIRST_REPLY))
+        wait_history(descriptor_value,
+                     [("user", FIRST_EXPECTED), ("assistant", FIRST_REPLY)],
+                     time.monotonic() + TIMEOUT)
         if state.error or state.semantic_errors or len(state.requests) != 1:
             raise AssertionError(state.error or state.semantic_errors or "first request missing")
         # Second plain turn, then the exact durable two-turn history.
         send_fragments(master, SECOND.encode("utf-8") + b"\r")
         read_until(master, time.monotonic() + TIMEOUT, captures, SECOND_REPLY.encode(),
                    len(captures), screen, lambda: screen.contains(SECOND_REPLY))
+        wait_history(descriptor_value,
+                     [("user", FIRST_EXPECTED), ("assistant", FIRST_REPLY),
+                      ("user", SECOND), ("assistant", SECOND_REPLY)],
+                     time.monotonic() + TIMEOUT)
         if state.error or state.semantic_errors or len(state.requests) != 2:
             raise AssertionError(state.error or state.semantic_errors or "second request missing")
         messages = history(descriptor_value)
@@ -421,7 +484,8 @@ def run(binary, library, manifest, artifacts):
         send_fragments(master, b"\x1b")  # standalone Escape clears any draft
         settle(master, captures, screen, 0.5)
         # Oversized framed paste: rejected, draft untouched, still 2 requests.
-        send_bulk(master, PASTE_BEGIN + b"x" * OVERSIZED_BYTES + PASTE_END)
+        send_bulk(master, PASTE_BEGIN + b"x" * OVERSIZED_BYTES + PASTE_END,
+                  captures=captures, screen=screen)
         settle(master, captures, screen, 2.0)
         if child.poll() is not None:
             raise AssertionError("CLI exited during oversized paste")
@@ -452,6 +516,11 @@ def run(binary, library, manifest, artifacts):
                 except (OSError, subprocess.TimeoutExpired) as kill_error:
                     semantic_error = semantic_error or "forced CLI cleanup failed: %s" % kill_error
         child_reaped = child is not None and child.poll() is not None
+        if master is not None and child_reaped and not forced_kill:
+            try:
+                drain_exit_output(master, captures, screen, time.monotonic() + 5)
+            except (OSError, RuntimeError) as exc:
+                semantic_error = semantic_error or "normal CLI output drain failed: %s" % exc
         disable_observed = bytes(DISABLE_PASTE) in bytes(captures)
         if master is not None and saved_attrs is not None:
             try:
