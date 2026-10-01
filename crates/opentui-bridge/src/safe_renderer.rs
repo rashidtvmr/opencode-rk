@@ -268,9 +268,10 @@ impl Renderer {
         let slot = TERMINAL_INPUT
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let Some(input) = slot.as_ref().filter(|input| input.handle == handle) else {
-            return Ok(None);
-        };
+        let input = slot
+            .as_ref()
+            .filter(|input| input.handle == handle)
+            .ok_or(BridgeError::TerminalFailed)?;
         let fd = input
             .fd
             .try_clone()
@@ -343,10 +344,9 @@ impl Renderer {
         let slot = TERMINAL_INPUT
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let input = slot
-            .as_ref()
-            .filter(|input| input.handle == handle)
-            .ok_or(BridgeError::TerminalFailed)?;
+        let Some(input) = slot.as_ref().filter(|input| input.handle == handle) else {
+            return Ok(None);
+        };
         let fd = input
             .fd
             .try_clone()
