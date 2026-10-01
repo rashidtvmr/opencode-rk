@@ -38,10 +38,20 @@ pub struct LoadDecision {
 pub const HYSTERESIS_ROUNDS: usize = 3;
 pub const MAX_LOADED: usize = 32;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 struct RuleState {
     last_match_round: i64,
     round_started_loaded: bool,
+}
+
+impl std::fmt::Debug for RuleState {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("RuleState")
+            .field("last_match_round", &self.last_match_round)
+            .field("round_started_loaded", &self.round_started_loaded)
+            .finish()
+    }
 }
 
 #[derive(Debug)]

@@ -73,12 +73,14 @@ fn valid_event(event: &SyncEvent) -> bool {
         && event.payload.len() <= MAX_PAYLOAD_BYTES
 }
 
+type SyncProjector = Box<dyn Fn(&SequencedEvent) + Send + Sync>;
+
 /// Caller-owned versioned sync log.
 #[derive(Default)]
 pub struct SyncLog {
     events: Vec<SequencedEvent>,
     by_id: HashMap<String, u64>,
-    projectors: Vec<(String, Box<dyn Fn(&SequencedEvent) + Send + Sync>)>,
+    projectors: Vec<(String, SyncProjector)>,
     frozen: bool,
     seen_types: HashMap<String, ()>,
 }

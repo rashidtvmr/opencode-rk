@@ -410,7 +410,7 @@ impl RuntimeWiring {
     /// [`MAX_RUNTIME_SESSIONS`].
     pub fn register_session(&self, session: SessionId) -> Result<(), WiringError> {
         let mut sessions = self.inner.sessions.lock().expect("session registry");
-        if sessions.iter().any(|known| *known == session) {
+        if sessions.contains(&session) {
             return Ok(());
         }
         if sessions.len() >= MAX_RUNTIME_SESSIONS {
@@ -426,7 +426,7 @@ impl RuntimeWiring {
         self.inner
             .sessions
             .lock()
-            .map(|sessions| sessions.iter().any(|known| *known == session))
+            .map(|sessions| sessions.contains(&session))
             .unwrap_or(false)
     }
 

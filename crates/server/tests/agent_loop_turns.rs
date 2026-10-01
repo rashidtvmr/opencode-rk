@@ -25,7 +25,7 @@ use std::{
     env,
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
-    sync::{mpsc, Arc},
+    sync::Arc,
     thread,
     time::Duration,
 };
@@ -307,7 +307,12 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
         .iter()
         .find(|event| event["type"] == "assistant_message")
         .expect("final assistant event");
-    assert_eq!(final_event["message"]["body"]["text"], "Loop done");
+    // The first-round text is part of the same assistant message and must
+    // survive the tool round; the continuation is appended to it.
+    assert_eq!(
+        final_event["message"]["body"]["text"],
+        "Running ls…Loop done"
+    );
     assert_eq!(final_event["stop_reason"], "completed");
 
     let bodies = provider_task.join().expect("provider fixture finished");

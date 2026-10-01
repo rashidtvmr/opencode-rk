@@ -129,6 +129,7 @@ impl DaemonEvent {
         }
     }
 
+    #[cfg(test)]
     fn kind(&self) -> &'static str {
         match self {
             Self::SessionStarted { .. } => "started",
