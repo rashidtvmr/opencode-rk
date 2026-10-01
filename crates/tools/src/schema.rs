@@ -163,14 +163,16 @@ impl SchemaValidator {
         let mut errors = Vec::new();
 
         // Type validation
-        if let Some(type_str) = schema_obj.get("type").and_then(Value::as_str) {
-            if !self.matches_type(value, type_str) {
-                errors.push(format!(
-                    "value type '{}' does not match schema type '{}'",
-                    self.value_type(value),
-                    type_str
-                ));
-            }
+        if let Some(type_str) = schema_obj
+            .get("type")
+            .and_then(Value::as_str)
+            .filter(|type_str| !self.matches_type(value, type_str))
+        {
+            errors.push(format!(
+                "value type '{}' does not match schema type '{}'",
+                self.value_type(value),
+                type_str
+            ));
         }
 
         // Properties validation
@@ -180,10 +182,11 @@ impl SchemaValidator {
             .zip(value.as_object())
         {
             for (key, prop_schema) in props {
-                if let Some(val) = obj.get(key) {
-                    if let Some(prop_errors) = self.validate_against_schema(val, prop_schema) {
-                        errors.extend(prop_errors);
-                    }
+                if let Some(prop_errors) = obj
+                    .get(key)
+                    .and_then(|val| self.validate_against_schema(val, prop_schema))
+                {
+                    errors.extend(prop_errors);
                 }
             }
         }

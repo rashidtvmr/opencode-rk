@@ -140,16 +140,17 @@ pub fn search(index: &[CatalogEntry], query: &CatalogQuery) -> Result<SearchResu
     let mut ranked = Vec::with_capacity(limit);
     let mut matched = 0usize;
     for (position, entry) in index.iter().enumerate() {
-        if let Some(filter) = tag_lower.as_deref()
-            && !entry
+        if tag_lower.as_deref().is_some_and(|filter| {
+            !entry
                 .tags
                 .iter()
                 .any(|candidate| candidate.to_lowercase() == filter)
-        {
+        }) {
             continue;
         }
-        if let Some(filter) = provider_lower.as_deref()
-            && entry.provider.to_lowercase() != filter
+        if provider_lower
+            .as_deref()
+            .is_some_and(|filter| entry.provider.to_lowercase() != filter)
         {
             continue;
         }

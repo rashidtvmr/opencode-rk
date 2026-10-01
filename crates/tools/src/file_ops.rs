@@ -11,7 +11,7 @@ use thiserror::Error;
 
 type WriteHook = Option<fn(&Path, bool) -> Result<(), ToolError>>;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 type RootObserver<'a> = Option<&'a mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -666,7 +666,7 @@ fn is_symlink_error(error: &std::io::Error) -> bool {
     error.raw_os_error() == Some(rustix::io::Errno::LOOP.raw_os_error())
 }
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
 /// Root directory file descriptor opened for descriptor-relative operations.
 ///
 /// The root FD is opened ONCE per write operation with O_NOFOLLOW|O_DIRECTORY,
@@ -685,7 +685,7 @@ pub(crate) fn open_write_root_with_observer(
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn open_write_root_at(
     root: &Path,
-    observer: RootObserver<'_>,
+    observer: Option<&mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>,
 ) -> Result<std::os::fd::OwnedFd, ToolError> {
     if !root.is_absolute() {
         return Err(ToolError::FileError(

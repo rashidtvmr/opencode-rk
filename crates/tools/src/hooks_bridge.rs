@@ -45,8 +45,9 @@ fn pattern_matches(pattern: &str, tool: &str) -> bool {
     if (pattern == "*") || (pattern == tool) {
         return true;
     }
-    if let Some(prefix) = pattern.strip_suffix('*')
-        && prefix.ends_with('.')
+    if let Some(prefix) = pattern
+        .strip_suffix('*')
+        .filter(|prefix| prefix.ends_with('.'))
     {
         return tool.starts_with(prefix);
     }
