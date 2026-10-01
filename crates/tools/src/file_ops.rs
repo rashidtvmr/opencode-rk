@@ -11,7 +11,7 @@ use thiserror::Error;
 
 type WriteHook = Option<fn(&Path, bool) -> Result<(), ToolError>>;
 
-#[cfg(all(test, any(target_os = "linux", target_os = "macos")))]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 type RootObserver<'a> = Option<&'a mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -685,7 +685,7 @@ pub(crate) fn open_write_root_with_observer(
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn open_write_root_at(
     root: &Path,
-    observer: Option<&mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>,
+    observer: RootObserver<'_>,
 ) -> Result<std::os::fd::OwnedFd, ToolError> {
     if !root.is_absolute() {
         return Err(ToolError::FileError(

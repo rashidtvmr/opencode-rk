@@ -52,3 +52,10 @@ Protected global fixture/config evidence: `Cargo.lock` SHA-256 is
 and candidate); no manifests, SQL, fixtures, or test files changed. The
 comparison located the actual `#[cfg(test)] mod tests` marker, rather than
 mistaking test-only imports or helper code for the protected test body.
+
+Final source-only correction: `RootObserver<'_>` is also used by the
+production `open_write_root_at` signature, eliminating the remaining
+`clippy::type_complexity` diagnostic while preserving the exact `FnMut` borrow
+and single observer invocation. The two current-working-directory observer
+compatibility wrappers remain test-only. Protected test-region hashes above
+remain unchanged.
