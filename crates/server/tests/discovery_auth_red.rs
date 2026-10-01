@@ -10,7 +10,7 @@ use axum::{
 };
 use opencode_rk_catalog::Catalog;
 use opencode_rk_server::{
-    daemon::{read_backend_descriptor, DaemonPaths},
+    daemon::{read_backend_descriptor, DaemonError, DaemonPaths},
     daemon_auth::DaemonAuth,
     router_with_auth, AppState,
 };
@@ -70,14 +70,6 @@ impl Drop for OwnedChild {
     }
 }
 
-struct OwnedTask(tokio::task::JoinHandle<()>);
-
-impl Drop for OwnedTask {
-    fn drop(&mut self) {
-        self.0.abort();
-    }
-}
-
 #[tokio::test]
 async fn disc101_t01_stale_descriptor_rejected() {
     let dir = tempdir().expect("data dir");
@@ -112,40 +104,69 @@ async fn disc101_t02_pid_mismatch_rejected() {
     let (app, _guard) = build_app(Some(DaemonAuth::from_published(&token).expect("auth")));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.expect("listener");
     let origin = format!("http://{}", listener.local_addr().expect("address"));
-    let task = OwnedTask(tokio::spawn(async move {
+    let task = tokio::spawn(async move {
         axum::serve(listener, app).await.expect("serve");
-    }));
+    });
     write_descriptor(dir.path(), foreign_pid, &origin, &token);
 
-    // A live PID is not endpoint identity.  The authenticated health
-    // response must serialize the daemon registration identity, and an
-    // identity mismatch must be rejected before `/api/*` trust.  Current
-    // health has no identity field, so this is a meaningful product RED, not
-    // a same-process PID assertion.
+    // A live PID is not endpoint identity.  Exercise the actual endpoint with
+    // the published credential, but deliberately forged PID.  The native
+    // caller must reject this identity mismatch before trusting `/api/*`;
+    // this direct endpoint gate is a genuine RED until that handshake exists.
     let address = origin.strip_prefix("http://").expect("loopback origin");
-    let mut socket = tokio::net::TcpStream::connect(address).await.expect("health connect");
+    let mut socket = tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        tokio::net::TcpStream::connect(address),
+    )
+    .await
+    .expect("health connect timeout")
+    .expect("health connect");
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
-    socket
-        .write_all(b"GET /health HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+    let request = format!(
+        "GET /api/sessions HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer {token}\r\nConnection: close\r\n\r\n"
+    );
+    tokio::time::timeout(
+        std::time::Duration::from_secs(2),
+        socket.write_all(request.as_bytes()),
+    )
+    .await
+    .expect("API request timeout")
+    .expect("API request");
+    const MAX_WIRE_BYTES: usize = 64 * 1024;
+    let mut bytes = Vec::with_capacity(4096);
+    let mut chunk = [0_u8; 4096];
+    loop {
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            socket.read(&mut chunk),
+        )
         .await
-        .expect("health request");
-    let mut bytes = Vec::new();
-    socket.read_to_end(&mut bytes).await.expect("health response");
+        .expect("API response timeout")
+        .expect("API response");
+        if read == 0 {
+            break;
+        }
+        assert!(bytes.len().saturating_add(read) <= MAX_WIRE_BYTES, "API response exceeded bound");
+        bytes.extend_from_slice(&chunk[..read]);
+    }
     let response = String::from_utf8_lossy(&bytes);
-    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
-    let body = response.split_once("\r\n\r\n").expect("health body").1;
-    let health: serde_json::Value = serde_json::from_str(body).expect("health json");
-    assert_eq!(health["pid"].as_u64(), Some(foreign_pid as u64));
+    let status_line = response.lines().next().unwrap_or_default().to_owned();
+    task.abort();
+    let _ = task.await;
+    assert!(status_line.starts_with("HTTP/1.1 403"), "{response}");
 }
 
 #[tokio::test]
 async fn disc101_t03_legacy_empty_token_rejected() {
     let dir = tempdir().expect("data dir");
     write_descriptor(dir.path(), std::process::id(), "http://127.0.0.1:4096", "");
-    assert_eq!(
-        read_backend_descriptor(dir.path()).expect_err("legacy descriptor must be loud").to_string(),
-        "descriptor predates bearer auth (empty auth_token); refusing to attach"
-    );
+    match read_backend_descriptor(dir.path()).expect_err("legacy descriptor must be loud") {
+        DaemonError::Descriptor(payload) => assert_eq!(
+            payload,
+            "descriptor predates bearer auth (empty auth_token); refusing to attach"
+        ),
+        other => panic!("unexpected descriptor result: {other:?}"),
+    }
     assert!(DaemonAuth::from_published("").is_err());
     // Legacy descriptor must never authenticate `/api/*`: no credential → 401.
     let (app, _guard) = build_app(Some(DaemonAuth::mint().expect("mint")));

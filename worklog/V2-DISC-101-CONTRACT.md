@@ -45,9 +45,12 @@ waits before assertion completion or unwind.
 ## Test status and remaining product gap
 
 This worker did not run Cargo, PTY, native, container, network, or heavy gates.
-The repaired test is intentionally a compiling RED for the missing serialized
-endpoint identity: current `/health` has no PID/registration identity, so the
-foreign-live endpoint assertion must fail until the product protocol is wired.
+The repaired test is intentionally a compiling RED for the missing native
+caller identity refusal: it publishes a forged live PID, contacts the actual
+endpoint with its bearer, and requires `/api/*` denial before trust. It does
+not pretend that a public `/health` PID field is authentication. The current
+server accepts the credential because no serialized registration identity
+handshake exists; this is the genuine product gap.
 The parent must run the focused server test and native G1 gate with the supplied
 `OC2_TEST_BINARY`/`OC2_TEST_BUILD_JSON` artifact, then freeze the resulting
 hash and command manifest. This candidate is **PREVERIFIED only after parent
@@ -59,5 +62,11 @@ integrated SHA.
 Parent: AST-parse the test, inspect `git diff --check`, record old assertion
 blob/hash and new blob/hash, compile and capture RED/GREEN, then integrate only
 these granted paths. Preserve the evaluator receipt and old assertion history.
+The t01/t03 server checks remain lower-level executable evidence only; their
+native no-contact/no-side-effect composite gate is not falsely claimed here.
+Closing that caller contract needs the existing CLI native flow fixture or,
+if its controls cannot be reused from this server target, the separately
+granted `tests/e2e/discovery_identity.py` using `OC2_TEST_BINARY` and
+`OC2_TEST_BUILD_JSON`.
 Next gates: focused `discovery_auth_red`, `native_daemon_flow`, installed
 default entrypoint, and the complete fresh-HOME G1 startup journey.
