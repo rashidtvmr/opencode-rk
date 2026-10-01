@@ -456,37 +456,38 @@ pub struct ArtifactControl {
 /// preserved across toggle/undo by [`toggle_preview`]/[`undo_edit`].
 #[must_use]
 pub fn artifact_controls(kind: ArtifactKind) -> Vec<ArtifactControl> {
-    let mut controls = alloc::vec::Vec::new();
-    controls.push(ArtifactControl {
-        id: "artifact-edit",
-        label: "Edit artifact",
-        role: "textbox",
-        shortcut: "e",
-    });
-    controls.push(ArtifactControl {
-        id: "artifact-copy",
-        label: "Copy artifact text",
-        role: "button",
-        shortcut: "c",
-    });
-    controls.push(ArtifactControl {
-        id: "artifact-preview",
-        label: "Toggle preview",
-        role: "switch",
-        shortcut: "p",
-    });
-    controls.push(ArtifactControl {
-        id: "artifact-undo",
-        label: "Undo edit",
-        role: "button",
-        shortcut: "u",
-    });
-    controls.push(ArtifactControl {
-        id: "artifact-redo",
-        label: "Redo edit",
-        role: "button",
-        shortcut: "r",
-    });
+    let mut controls = std::vec![
+        ArtifactControl {
+            id: "artifact-edit",
+            label: "Edit artifact",
+            role: "textbox",
+            shortcut: "e",
+        },
+        ArtifactControl {
+            id: "artifact-copy",
+            label: "Copy artifact text",
+            role: "button",
+            shortcut: "c",
+        },
+        ArtifactControl {
+            id: "artifact-preview",
+            label: "Toggle preview",
+            role: "switch",
+            shortcut: "p",
+        },
+        ArtifactControl {
+            id: "artifact-undo",
+            label: "Undo edit",
+            role: "button",
+            shortcut: "u",
+        },
+        ArtifactControl {
+            id: "artifact-redo",
+            label: "Redo edit",
+            role: "button",
+            shortcut: "r",
+        },
+    ];
     if kind == ArtifactKind::Code {
         controls.push(ArtifactControl {
             id: "artifact-run",

@@ -68,7 +68,7 @@ impl ClientRegistry {
     }
     pub fn broadcast(&self, msg: ClientMessage) {
         let guard = self.inner.clients.lock().unwrap();
-        for (_, handle) in guard.iter() {
+        for handle in guard.values() {
             let _ = handle.sender.try_send(msg.clone());
         }
     }

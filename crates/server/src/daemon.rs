@@ -88,6 +88,7 @@ impl PidLock {
         }
         let mut file = OpenOptions::new()
             .create(true)
+            .truncate(false)
             .read(true)
             .write(true)
             .open(&path)?;
@@ -417,14 +418,11 @@ impl Drop for SingletonDaemon {
 async fn hold_client(conn: ClientConnection) {
     let ClientConnection { stream: ref s, .. } = conn;
     let mut buf = [0u8; 512];
-    loop {
-        match s.readable().await {
-            Ok(()) => match s.try_read(&mut buf) {
-                Ok(0) => break,
-                Ok(_) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(_) => break,
-            },
+    while let Ok(()) = s.readable().await {
+        match s.try_read(&mut buf) {
+            Ok(0) => break,
+            Ok(_) => {}
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(_) => break,
         }
     }

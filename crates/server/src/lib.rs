@@ -279,7 +279,7 @@ async fn web_capabilities() -> Json<Value> {
         .map(|tool| {
             // Honest capability report: a tool is turn-executable exactly when
             // the operator's allowlist (OPENCODE_RK_TURN_TOOLS) admits it.
-            let turn_enabled = turn_tool_config().iter().any(|name| *name == tool.id);
+            let turn_enabled = turn_tool_config().contains(&tool.id);
             json!({
                 "id": tool.id,
                 "name": tool.name,
@@ -925,7 +925,7 @@ struct TurnStreamState {
     /// Set when the loop must finalize with this stop reason (step cap hit).
     forced_stop: Option<TurnStop>,
     /// Agents-crate executor: mirror of the real agent loop plan (CONVERGENCE AGENTS).
-    agent_plan: AgentExecutor,
+    _agent_plan: AgentExecutor,
     /// Ordinal of the current tool round within this turn.
     round_ordinal: u32,
 }
@@ -1083,7 +1083,7 @@ async fn create_turn_stream(
     let tools: Vec<ResponsesTool> = registry
         .list()
         .into_iter()
-        .filter(|tool| turn_tools.iter().any(|name| *name == tool.id))
+        .filter(|tool| turn_tools.contains(&tool.id))
         .map(|tool| {
             ResponsesTool::function(
                 tool.id.clone(),
@@ -1129,7 +1129,7 @@ async fn create_turn_stream(
             model: model_id.to_owned(),
             reasoning_effort: body.reasoning_effort.clone(),
             forced_stop: None,
-            agent_plan: AgentExecutor::new(vec![
+            _agent_plan: AgentExecutor::new(vec![
                 opencode_rk_agents::agent_executor::LoopStep::ProviderCall,
                 opencode_rk_agents::agent_executor::LoopStep::ToolDispatch,
                 opencode_rk_agents::agent_executor::LoopStep::PolicyCheck,
@@ -1367,10 +1367,7 @@ async fn create_turn_stream(
                         for (index, (call, message_id)) in
                             batch.into_iter().zip(message_ids).enumerate()
                         {
-                            let permitted = state
-                                .enabled_tools
-                                .iter()
-                                .any(|enabled| *enabled == call.name);
+                            let permitted = state.enabled_tools.contains(&call.name);
                             let raw_output = if index >= MAX_CALLS_PER_ROUND {
                                 format!(
                                     "error: step budget per round exceeded (max {MAX_CALLS_PER_ROUND} calls); call not executed"
