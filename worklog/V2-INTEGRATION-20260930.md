@@ -971,3 +971,17 @@ backspace. CLI exit, terminal restoration, validated daemon termination and
 provider-thread cleanup are proven. The independent test contract and exact
 frozen hash are in `worklog/V2-NATIVE-UTF8-CONTRACT.md`; product implementation
 requires separate installed candidate and exact integrated verification.
+
+### Transcript paging regression repaired
+
+Unicode candidate `cfe6cbf` passes its real installed UTF-8/restart, stream,
+provider, auth and PTY checks, but its required native-unit gate exposed two
+existing transcript-paging failures. The controller reproduced both on canonical
+baseline `06eadf1`, with the unchanged frozen in-module test body. Source-only
+candidate `5c6f9cb` adds a bounded positional anchor matching the existing native
+timeline helper. After independent candidate verification and integration, all
+three focused paging tests and **314 native CLI unit tests** pass on exact
+**`7c39feef3a3282831522ea226708e6aee8ff847b`**. State **ACCEPTED for the helper
+paging contract**. Exact paths and evidence are in
+`worklog/V2-NATIVE-TRANSCRIPT-PAGING.md`. Unicode requires renewed preverification
+against this repaired canonical base before acceptance.
