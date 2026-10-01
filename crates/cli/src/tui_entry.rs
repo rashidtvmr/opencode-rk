@@ -51,6 +51,60 @@ const MAX_NATIVE_DRAFT_BYTES: usize = 32 * 1024;
 const MAX_NATIVE_TRANSCRIPT_BYTES: usize = 64 * 1024;
 const MAX_NATIVE_LINE_CHARS: usize = 1024;
 
+/// Assemble terminal bytes into complete UTF-8 scalars without ever storing a
+/// partial sequence in the draft.  The input buffer is intentionally fixed:
+/// terminal input is untrusted and a malformed sequence must not grow state.
+#[cfg(feature = "native")]
+#[derive(Debug, Default)]
+struct NativeUtf8Decoder {
+    carry: [u8; 4],
+    len: usize,
+    expected: usize,
+}
+
+#[cfg(feature = "native")]
+impl NativeUtf8Decoder {
+    fn reset(&mut self) {
+        self.len = 0;
+        self.expected = 0;
+    }
+
+    fn push(&mut self, byte: u8) -> Option<char> {
+        if self.len == 0 {
+            if byte < 0x80 {
+                return char::from_u32(byte as u32);
+            }
+            self.expected = match byte {
+                0xC2..=0xDF => 2,
+                0xE0..=0xEF => 3,
+                0xF0..=0xF4 => 4,
+                _ => {
+                    self.reset();
+                    return None;
+                }
+            };
+            self.carry[0] = byte;
+            self.len = 1;
+            return None;
+        }
+
+        if !(0x80..=0xBF).contains(&byte) {
+            self.reset();
+            return (byte < 0x80).then(|| char::from(byte));
+        }
+        self.carry[self.len] = byte;
+        self.len += 1;
+        if self.len != self.expected {
+            return None;
+        }
+        let result = std::str::from_utf8(&self.carry[..self.len])
+            .ok()
+            .and_then(|text| text.chars().next());
+        self.reset();
+        result
+    }
+}
+
 /// Composer submit keymap selectable by flag or env.
 #[derive(Clone, Copy, Debug, ValueEnum)]
 pub enum SubmitKeymapArg {
@@ -532,6 +586,7 @@ fn native_loop(
     let mut transcript = Vec::new();
     let mut worker: Option<native_turn::TurnWorker> = None;
     let mut partial = String::new();
+    let mut utf8 = NativeUtf8Decoder::default();
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
@@ -666,15 +721,19 @@ fn native_loop(
             27 => {
                 dialog = native_setup::Dialog::None;
                 draft.clear();
+                utf8.reset();
             }
             16 => {
                 dialog = native_setup::Dialog::Model;
                 draft.clear();
+                utf8.reset();
             }
             8 | 127 => {
                 draft.pop();
+                utf8.reset();
             }
             b'\r' | b'\n' => {
+                utf8.reset();
                 let text = draft.trim().to_owned();
                 if matches!(dialog, native_setup::Dialog::None)
                     && matches!(text.as_str(), ":q" | ":quit" | "/exit" | "/quit")
@@ -749,16 +808,19 @@ fn native_loop(
                         native_setup::Dialog::None => {}
                     }
                     draft.clear();
+                    utf8.reset();
                     continue;
                 }
                 if text == "/connect" {
                     dialog = native_setup::Dialog::Provider;
                     draft.clear();
+                    utf8.reset();
                     continue;
                 }
                 if text == "/models" {
                     dialog = native_setup::Dialog::Model;
                     draft.clear();
+                    utf8.reset();
                     continue;
                 }
                 if !text.is_empty() {
@@ -798,6 +860,7 @@ fn native_loop(
                     }
                 }
                 draft.clear();
+                utf8.reset();
             }
             b if b >= 0x20 && b != b'\t' => {
                 let limit = if matches!(dialog, native_setup::Dialog::ApiKey) {
@@ -805,11 +868,20 @@ fn native_loop(
                 } else {
                     MAX_NATIVE_DRAFT_BYTES
                 };
-                if draft.len() < limit {
-                    draft.push(char::from(b));
+                if let Some(character) = utf8.push(b) {
+                    let width = character.len_utf8();
+                    if draft
+                        .len()
+                        .checked_add(width)
+                        .is_some_and(|len| len <= limit)
+                    {
+                        draft.push(character);
+                    }
                 }
             }
-            _ => {}
+            _ => {
+                utf8.reset();
+            }
         }
     }
     let _ = renderer.disable_kitty_keyboard();
