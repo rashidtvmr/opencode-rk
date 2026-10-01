@@ -22,13 +22,17 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::atomic::{AtomicU32, AtomicU8};
 #[cfg(all(feature = "native", unix))]
 use std::sync::Mutex;
-#[cfg(all(feature = "native", unix))]
+#[cfg(feature = "native")]
 use std::time::Duration;
 
 #[cfg(all(feature = "native", unix))]
 use rustix::event::{poll, PollFd, PollFlags, Timespec};
 #[cfg(all(feature = "native", unix))]
-use rustix::termios::{tcgetattr, tcgetwinsize, tcsetattr, OptionalActions, Termios};
+use rustix::fs::{fstat, openat, Mode, OFlags, CWD};
+#[cfg(all(feature = "native", unix))]
+use rustix::io::{write, Errno};
+#[cfg(all(feature = "native", unix))]
+use rustix::termios::{tcgetattr, tcgetwinsize, tcsetattr, ttyname, OptionalActions, Termios};
 
 use crate::buffer::NativeHandle;
 use crate::color::Rgba;
@@ -44,6 +48,8 @@ static CLAIMED: AtomicBool = AtomicBool::new(false);
 /// changing the frozen test-only struct literal or retaining a handle map.
 #[cfg(feature = "native")]
 static LIFECYCLE_HANDLE: AtomicU32 = AtomicU32::new(INVALID_HANDLE);
+#[cfg(feature = "native")]
+static LIFECYCLE_DEST: AtomicU8 = AtomicU8::new(1);
 #[cfg(feature = "native")]
 static LIFECYCLE_FLAGS: AtomicU8 = AtomicU8::new(0);
 #[cfg(feature = "native")]
@@ -150,6 +156,68 @@ fn restore_terminal_input(handle: NativeHandle, release: bool) -> Result<(), Bri
     Ok(())
 }
 
+/// Ensure the one terminal mode whose reset is externally observable by the
+/// native paste contract is disabled before the owned TTY is released.
+///
+/// The linked native fork emits this sequence from `Terminal::resetState` via
+/// `performShutdownSequence`, but its backend may deliver that write
+/// asynchronously.  This is a deliberately bounded, real-TTY-only fallback:
+/// `TERMINAL_INPUT` exists only after a successful `tcgetattr`, and the exact
+/// eight-byte sequence is written to that owned descriptor.  Memory/headless
+/// renderers never enter this path.
+#[cfg(all(feature = "native", unix))]
+fn reset_bracketed_paste(input: &OwnedFd) -> Result<(), BridgeError> {
+    const RESET: &[u8] = b"\x1b[?2004l";
+    const BUDGET: Duration = Duration::from_millis(50);
+    // Resolve the device from the already-owned input capability. Do not use a
+    // generic `/dev/tty`: the pathname and fstat identity must describe the
+    // same PTY as the captured descriptor before any output is attempted.
+    let path = ttyname(input, Vec::new()).map_err(|_| BridgeError::TerminalFailed)?;
+    let fd = openat(
+        CWD,
+        &path,
+        OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY,
+        Mode::empty(),
+    )
+    .map_err(|_| BridgeError::TerminalFailed)?;
+    let input_stat = fstat(input).map_err(|_| BridgeError::TerminalFailed)?;
+    let output_stat = fstat(&fd).map_err(|_| BridgeError::TerminalFailed)?;
+    if input_stat.st_dev != output_stat.st_dev || input_stat.st_rdev != output_stat.st_rdev {
+        return Err(BridgeError::TerminalFailed);
+    }
+    tcgetattr(&fd).map_err(|_| BridgeError::TerminalFailed)?;
+    let deadline = std::time::Instant::now() + BUDGET;
+    let mut written = 0;
+    while written < RESET.len() {
+        let remaining = deadline.saturating_duration_since(std::time::Instant::now());
+        if remaining.is_zero() {
+            return Err(BridgeError::TerminalFailed);
+        }
+        let wait = Timespec {
+            tv_sec: remaining.as_secs() as i64,
+            tv_nsec: remaining.subsec_nanos() as _,
+        };
+        let mut descriptors = [PollFd::new(&fd, PollFlags::OUT)];
+        match poll(&mut descriptors, Some(&wait)) {
+            Ok(0) => return Err(BridgeError::TerminalFailed),
+            Err(Errno::INTR) => continue,
+            Err(_) => return Err(BridgeError::TerminalFailed),
+            Ok(_) if !descriptors[0].revents().contains(PollFlags::OUT) => {
+                return Err(BridgeError::TerminalFailed)
+            }
+            Ok(_) => {}
+        }
+        match write(&fd, &RESET[written..]) {
+            Ok(0) => return Err(BridgeError::TerminalFailed),
+            Ok(count) => written += count,
+            Err(Errno::INTR) => continue,
+            Err(Errno::AGAIN) => continue,
+            Err(_) => return Err(BridgeError::TerminalFailed),
+        }
+    }
+    Ok(())
+}
+
 /// Byte cap for one [`Renderer::draw_text`] call.
 pub const MAX_TEXT_BYTES: usize = 64 * 1024;
 /// [`Renderer::snapshot_text`] buffer bounds.
@@ -220,7 +288,6 @@ extern "C" {
     ) -> NativeHandle;
     fn destroyRenderer(renderer_handle: NativeHandle, flush_input: bool);
     fn setupTerminal(renderer_handle: NativeHandle, useAlternateScreen: bool);
-    fn restoreTerminalModes(renderer_handle: NativeHandle);
     fn suspendRenderer(renderer_handle: NativeHandle);
     fn resumeRenderer(renderer_handle: NativeHandle);
     fn enableMouse(renderer_handle: NativeHandle, enableMovement: bool);
@@ -261,7 +328,7 @@ extern "C" {
 }
 
 impl Renderer {
-    /// Wait for native terminal input without taking the lifecycle mutex.
+    /// Wait for native terminal input without holding the lifecycle mutex.
     #[cfg(all(feature = "native", unix))]
     pub fn input_ready(&self, timeout: Option<Duration>) -> Result<bool, BridgeError> {
         let handle = self.live()?;
@@ -332,6 +399,20 @@ impl Renderer {
         }
     }
 
+    /// Raw descriptor polling is supported by the Unix input owner. Other
+    /// native targets fail explicitly instead of calling a Unix-only API.
+    #[cfg(all(feature = "native", not(unix)))]
+    pub fn input_ready(&self, _timeout: Option<Duration>) -> Result<bool, BridgeError> {
+        self.live()?;
+        Err(BridgeError::TerminalFailed)
+    }
+
+    #[cfg(all(feature = "native", not(unix)))]
+    pub fn read_input(&self, _buffer: &mut [u8]) -> Result<usize, BridgeError> {
+        self.live()?;
+        Err(BridgeError::TerminalFailed)
+    }
+
     /// Read the live geometry from the same owned descriptor used for input.
     ///
     /// A renderer backed by a pipe or memory has no terminal geometry; that is
@@ -387,6 +468,7 @@ impl Renderer {
                 return Err(BridgeError::CreateFailed);
             }
             LIFECYCLE_FLAGS.store(0, Ordering::Release);
+            LIFECYCLE_DEST.store(dest, Ordering::Release);
             LIFECYCLE_HANDLE.store(handle, Ordering::Release);
             Ok(Self {
                 handle,
@@ -441,12 +523,37 @@ impl Renderer {
                 disableKittyKeyboard(self.handle);
             }
             if owned && flags & TERMINAL_ACTIVE != 0 {
-                restoreTerminalModes(self.handle);
+                // The linked fork's restoreTerminalModes re-enables modes
+                // after focus-in. suspendRenderer performs full shutdown,
+                // including bracketed-paste reset, through the owned backend.
+                suspendRenderer(self.handle);
             }
             if owned {
                 LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
             }
             destroyRenderer(self.handle, true);
+            #[cfg(unix)]
+            // The pinned native fork's `CliRenderer::destroy` first calls
+            // `performShutdownSequence`, then `BufferedBackend::deinit`,
+            // which joins its render thread (renderer.zig:464-472 and
+            // renderer-output.zig:537-552). Emit the final paired reset only
+            // after that join, while this owned terminal slot is still live;
+            // otherwise the backend's final shutdown write can race or follow
+            // an earlier reset and the PTY need not observe the reset as the
+            // final terminal-owner operation.
+            if owned && LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
+                let slot = TERMINAL_INPUT
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                if let Some(input) = slot.as_ref().filter(|input| input.handle == self.handle) {
+                    if let Err(error) = reset_bracketed_paste(&input.fd) {
+                        eprintln!("native renderer cleanup: {error}");
+                    }
+                }
+            }
+            if owned {
+                LIFECYCLE_DEST.store(1, Ordering::Release);
+            }
         }
         #[cfg(all(feature = "native", unix))]
         if let Err(error) = restore_terminal_input(self.handle, true) {
@@ -500,13 +607,34 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
+            let owns_terminal = LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
+                && LIFECYCLE_FLAGS.load(Ordering::Acquire) & TERMINAL_ACTIVE != 0;
+            if owns_terminal {
+                // SAFETY: live owned handle. This existing export runs the
+                // linked fork's shutdown sequence; it does not re-enable modes.
+                unsafe { suspendRenderer(handle) };
+            }
             #[cfg(unix)]
-            restore_terminal_input(handle, true)?;
-            if LIFECYCLE_HANDLE.load(Ordering::Acquire) == handle
-                && LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel) & TERMINAL_ACTIVE
-                    != 0
             {
-                unsafe { restoreTerminalModes(handle) };
+                let reset = if LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
+                    let slot = TERMINAL_INPUT
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    slot.as_ref()
+                        .filter(|input| input.handle == handle)
+                        .map(|input| reset_bracketed_paste(&input.fd).err())
+                        .flatten()
+                } else {
+                    None
+                };
+                let restore = restore_terminal_input(handle, true);
+                if let Some(error) = reset {
+                    return Err(error);
+                }
+                restore?;
+                if owns_terminal {
+                    LIFECYCLE_FLAGS.fetch_and(!TERMINAL_ACTIVE, Ordering::AcqRel);
+                }
             }
             Ok(())
         }
@@ -524,7 +652,24 @@ impl Renderer {
             // SAFETY: live renderer handle owned by self.
             unsafe { suspendRenderer(handle) };
             #[cfg(unix)]
-            restore_terminal_input(handle, false)?;
+            {
+                let reset = if LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
+                    let slot = TERMINAL_INPUT
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    slot.as_ref()
+                        .filter(|input| input.handle == handle)
+                        .map(|input| reset_bracketed_paste(&input.fd).err())
+                        .flatten()
+                } else {
+                    None
+                };
+                let restore = restore_terminal_input(handle, false);
+                if let Some(error) = reset {
+                    return Err(error);
+                }
+                restore?;
+            }
             Ok(())
         }
     }

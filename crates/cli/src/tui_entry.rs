@@ -553,7 +553,20 @@ fn native_paint(
         Rgba::new(0, 0, 0, 255),
     )?;
     for (row, line) in lines.iter().enumerate().take(renderer.rows() as usize) {
-        renderer.draw_text(0, row as u32, line)?;
+        // Paste remains literal in the draft, including control-like text.
+        // Only printable, bounded row text may cross the renderer boundary.
+        let text: String = line
+            .chars()
+            .take((renderer.cols() as usize).min(MAX_NATIVE_LINE_CHARS))
+            .map(|character| {
+                if character.is_control() {
+                    ' '
+                } else {
+                    character
+                }
+            })
+            .collect();
+        renderer.draw_text(0, row as u32, &text)?;
     }
     renderer.frame(|_| {})?;
     Ok(())
@@ -684,7 +697,12 @@ fn native_loop(
             }
         }
         let panel = match dialog {
-            native_setup::Dialog::None => vec![format!("> {draft}")],
+            native_setup::Dialog::None => draft
+                .split('\n')
+                .take((renderer.rows() as usize).saturating_sub(lines.len()))
+                .enumerate()
+                .map(|(row, text)| format!("{}{text}", if row == 0 { "> " } else { "  " }))
+                .collect(),
             native_setup::Dialog::Provider => {
                 let mut panel = vec!["Connect a provider".to_owned()];
                 if !models.is_empty() && "openai".contains(&draft.trim().to_lowercase()) {
@@ -725,18 +743,19 @@ fn native_loop(
         input.expire(now);
         let worker_deadline = worker.is_some().then(|| now + Duration::from_millis(20));
         let timeout = match (worker_deadline, input.next_deadline()) {
-            (Some(a), Some(b)) => Some(a.min(b).saturating_duration_since(now)),
-            (Some(a), None) => Some(a.saturating_duration_since(now)),
-            (None, Some(b)) => Some(b.saturating_duration_since(now)),
+            (Some(a), Some(b)) => a.min(b).saturating_duration_since(now),
+            (Some(a), None) => a.saturating_duration_since(now),
+            (None, Some(b)) => b.saturating_duration_since(now),
             // There is no SIGWINCH path in this small native bridge.  A
             // bounded idle wake lets us observe kernel geometry without
             // repainting unchanged frames or waiting for input.
-            (None, None) => Some(Duration::from_millis(100)),
-        };
+            (None, None) => Duration::from_millis(100),
+        }
+        .min(Duration::from_millis(100));
         let ready = if input.has_event() {
             true
         } else {
-            renderer.input_ready(timeout)?
+            renderer.input_ready(Some(timeout))?
         };
         if !ready {
             continue;
@@ -757,6 +776,23 @@ fn native_loop(
         needs_paint = true;
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
+            native_input_decoder::InputEvent::Paste(text) => {
+                utf8.reset();
+                let limit = if matches!(dialog, native_setup::Dialog::ApiKey) {
+                    16 * 1024
+                } else {
+                    MAX_NATIVE_DRAFT_BYTES
+                };
+                if draft
+                    .len()
+                    .checked_add(text.len())
+                    .is_some_and(|len| len <= limit)
+                {
+                    draft.push_str(&text);
+                }
+                // Paste has no key actions, even in a dialog or a busy turn.
+                continue;
+            }
             // Preserve the existing standalone-escape action (clear dialog /
             // draft) while keeping protocol escape bytes out of the composer.
             native_input_decoder::InputEvent::Escape => 27,
@@ -779,9 +815,14 @@ fn native_loop(
             }
             b'\r' | b'\n' => {
                 utf8.reset();
-                let text = draft.trim().to_owned();
+                let text = if matches!(dialog, native_setup::Dialog::None) {
+                    draft.clone()
+                } else {
+                    draft.trim().to_owned()
+                };
+                let command = text.trim();
                 if matches!(dialog, native_setup::Dialog::None)
-                    && matches!(text.as_str(), ":q" | ":quit" | "/exit" | "/quit")
+                    && matches!(command, ":q" | ":quit" | "/exit" | "/quit")
                 {
                     break;
                 }
@@ -856,19 +897,19 @@ fn native_loop(
                     utf8.reset();
                     continue;
                 }
-                if text == "/connect" {
+                if command == "/connect" {
                     dialog = native_setup::Dialog::Provider;
                     draft.clear();
                     utf8.reset();
                     continue;
                 }
-                if text == "/models" {
+                if command == "/models" {
                     dialog = native_setup::Dialog::Model;
                     draft.clear();
                     utf8.reset();
                     continue;
                 }
-                if !text.is_empty() {
+                if !command.is_empty() {
                     if worker.is_some() {
                         // Do not consume or echo this draft while busy.
                         continue;

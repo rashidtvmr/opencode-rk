@@ -1,21 +1,25 @@
-//! Fixed-size framing for raw terminal input.
+//! Bounded framing for raw terminal input.
 //!
 //! Terminal escape sequences are a protocol, not composer text.  This decoder
-//! deliberately has no allocation: an incomplete prefix is retained for a
-//! short, bounded grace period and malformed sequences are discarded through
-//! their terminator.  The caller can therefore keep its existing UTF-8
-//! decoder unchanged for ordinary bytes.
+//! retains fixed-size keyboard prefixes and at most one 32 KiB paste body.
+//! Only a complete, valid UTF-8 paste becomes an atomic event; rejected frames
+//! are consumed through their closing marker without leaking keyboard events.
+//! The caller's four-byte UTF-8 decoder still handles ordinary input.
 
 use std::time::{Duration, Instant};
 
 pub(crate) const ESCAPE_GRACE: Duration = Duration::from_millis(150);
+pub(crate) const MAX_PASTE_BYTES: usize = 32 * 1024;
+const PASTE_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
+const PASTE_END: &[u8] = b"\x1b[201~";
 const MAX_SEQUENCE: usize = 32;
 const MAX_EVENTS: usize = 8;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum InputEvent {
     Byte(u8),
     Escape,
+    Paste(String),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -26,6 +30,9 @@ enum State {
     Ss3,
     DiscardCsi,
     DiscardSs3,
+    Paste,
+    DiscardPaste,
+    AbandonedPaste,
 }
 
 #[derive(Debug)]
@@ -34,6 +41,9 @@ pub(crate) struct TerminalInputDecoder {
     sequence: [u8; MAX_SEQUENCE],
     len: usize,
     deadline: Option<Instant>,
+    paste: Vec<u8>,
+    paste_end_len: usize,
+    paste_deadline: Option<Instant>,
     events: [Option<InputEvent>; MAX_EVENTS],
     head: usize,
     count: usize,
@@ -46,7 +56,10 @@ impl Default for TerminalInputDecoder {
             sequence: [0; MAX_SEQUENCE],
             len: 0,
             deadline: None,
-            events: [None; MAX_EVENTS],
+            paste: Vec::new(),
+            paste_end_len: 0,
+            paste_deadline: None,
+            events: std::array::from_fn(|_| None),
             head: 0,
             count: 0,
         }
@@ -73,9 +86,15 @@ impl TerminalInputDecoder {
     }
 
     pub(crate) fn push(&mut self, byte: u8, now: Instant) {
+        self.expire(now);
         // Ctrl-C/Ctrl-D must remain immediate even while a hostile sequence is
-        // incomplete; they are never swallowed by protocol framing.
-        if matches!(byte, 3 | 4) {
+        // incomplete, but inside paste framing they are literal payload bytes.
+        if matches!(byte, 3 | 4)
+            && !matches!(
+                self.state,
+                State::Paste | State::DiscardPaste | State::AbandonedPaste
+            )
+        {
             self.reset();
             self.emit(InputEvent::Byte(byte));
             return;
@@ -100,6 +119,9 @@ impl TerminalInputDecoder {
                 }
             },
             State::Csi | State::Ss3 => self.sequence_byte(byte, now),
+            State::Paste | State::DiscardPaste | State::AbandonedPaste => {
+                self.paste_byte(byte, now)
+            }
             State::DiscardCsi | State::DiscardSs3 => {
                 if (0x40..=0x7e).contains(&byte) {
                     self.reset();
@@ -113,10 +135,19 @@ impl TerminalInputDecoder {
 
     pub(crate) fn expire(&mut self, now: Instant) {
         if self.deadline.is_some_and(|deadline| now >= deadline) {
+            if self.state == State::Paste {
+                self.discard_paste();
+                self.state = State::AbandonedPaste;
+                return;
+            }
             // Only a bare ESC has an ambiguous user meaning.  A timed-out
             // CSI/SS3 (including an overflow discard state) is protocol
             // garbage and must not clear the composer or synthesize Escape.
-            if self.state == State::Escape {
+            // After an abandoned paste, a fresh, quiet standalone ESC allows
+            // explicit recovery. Oversized frames never use this escape hatch.
+            if self.state == State::Escape
+                || (self.state == State::AbandonedPaste && self.paste_end_len == 1)
+            {
                 self.reset();
                 self.emit(InputEvent::Escape);
             } else {
@@ -125,6 +156,7 @@ impl TerminalInputDecoder {
                     State::Ss3 => State::DiscardSs3,
                     State::DiscardCsi => State::DiscardCsi,
                     State::DiscardSs3 => State::DiscardSs3,
+                    State::Paste | State::DiscardPaste | State::AbandonedPaste => self.state,
                     State::Ground | State::Escape => State::Ground,
                 };
                 self.len = 0;
@@ -142,6 +174,10 @@ impl TerminalInputDecoder {
     fn sequence_byte(&mut self, byte: u8, now: Instant) {
         self.deadline = Some(now + ESCAPE_GRACE);
         if (0x40..=0x7e).contains(&byte) {
+            if self.state == State::Csi && byte == b'~' && &self.sequence[..self.len] == b"200" {
+                self.begin_paste(now);
+                return;
+            }
             if self.state == State::Csi && byte == b'u' {
                 self.decode_kitty();
             }
@@ -172,6 +208,78 @@ impl TerminalInputDecoder {
             self.len = 0;
             self.deadline = None;
         }
+    }
+
+    fn begin_paste(&mut self, now: Instant) {
+        self.state = State::Paste;
+        self.len = 0;
+        self.paste = Vec::with_capacity(MAX_PASTE_BYTES);
+        self.paste_end_len = 0;
+        self.paste_deadline = Some(now + PASTE_FRAME_TIMEOUT);
+        self.deadline = Some(now + ESCAPE_GRACE);
+    }
+
+    fn paste_byte(&mut self, byte: u8, now: Instant) {
+        if self.state == State::Paste {
+            // Bound both idle time and total frame lifetime: repeated bytes
+            // cannot keep an incomplete frame alive indefinitely.
+            self.deadline = self.paste_deadline.map(|end| end.min(now + ESCAPE_GRACE));
+        }
+        if byte == PASTE_END[self.paste_end_len] {
+            self.paste_end_len += 1;
+            if self.paste_end_len == PASTE_END.len() {
+                let body = std::mem::take(&mut self.paste);
+                let complete = self.state == State::Paste;
+                self.reset();
+                if complete {
+                    // Reject invalid UTF-8 as a whole. Normalize only after
+                    // framing, so CR/LF can never reach keyboard dispatch.
+                    if let Ok(text) = String::from_utf8(body) {
+                        self.emit(InputEvent::Paste(
+                            text.replace("\r\n", "\n").replace('\r', "\n"),
+                        ));
+                    }
+                }
+                return;
+            }
+        } else {
+            // The retained marker prefix is literal body if it fails to
+            // match. The marker has no overlapping prefix except a new ESC.
+            self.append_paste(&PASTE_END[..self.paste_end_len]);
+            self.paste_end_len = 0;
+            if byte == 0x1b {
+                self.paste_end_len = 1;
+            } else {
+                self.append_paste(&[byte]);
+            }
+        }
+        if self.state == State::AbandonedPaste {
+            self.deadline = (self.paste_end_len == 1).then(|| now + ESCAPE_GRACE);
+        }
+    }
+
+    fn append_paste(&mut self, bytes: &[u8]) {
+        if self.state != State::Paste {
+            return;
+        }
+        if self
+            .paste
+            .len()
+            .checked_add(bytes.len())
+            .is_some_and(|len| len <= MAX_PASTE_BYTES)
+        {
+            self.paste.extend_from_slice(bytes);
+        } else {
+            self.discard_paste();
+        }
+    }
+
+    fn discard_paste(&mut self) {
+        self.state = State::DiscardPaste;
+        self.paste = Vec::new();
+        self.paste_deadline = None;
+        self.deadline = None;
+        // Keep marker progress while consuming the rest of a rejected frame.
     }
 
     fn decode_kitty(&mut self) {
@@ -256,6 +364,9 @@ impl TerminalInputDecoder {
         self.state = State::Ground;
         self.len = 0;
         self.deadline = None;
+        self.paste.clear();
+        self.paste_end_len = 0;
+        self.paste_deadline = None;
     }
 }
 
