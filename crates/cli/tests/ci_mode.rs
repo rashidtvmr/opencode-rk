@@ -1,214 +1,349 @@
 #![forbid(unsafe_code)]
 //! LANE-CI-FLAG frozen tests: CI mode end-to-end.
-//!
-//! Scenario A (jsonl): binary `run --ci --output jsonl` emits parseable JSONL
-//! events ending with TurnFinished, exits 0.
-//! Scenario B (approval fail-closed): render_approval_required ALWAYS produces
-//! exit 20 and valid JSONL naming the tool — never auto-approves.
-//! Scenario C (determinism): two identical binary runs produce byte-identical
-//! JSONL output (timestamps excluded).
 
 #[path = "../src/ci_output.rs"]
 mod ci_output;
-
 use ci_output::{CiEvent, CiExitCode, OutputFormat};
-
 use std::{
-    fs,
+    cell::RefCell,
+    fs::{self, File},
     io::{Read, Write},
-    net::TcpListener,
+    net::{TcpListener, TcpStream},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
-    sync::atomic::{AtomicU64, Ordering},
-    thread,
+    process::{Child, Command, ExitStatus, Stdio},
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, Mutex,
+    },
+    thread::{self, JoinHandle},
     time::{Duration, Instant},
 };
-
 static NEXT_ID: AtomicU64 = AtomicU64::new(0);
-
-struct TestHome(PathBuf);
-
+const DEADLINE: Duration = Duration::from_secs(30);
+const MAX: usize = 128 * 1024;
+const MODEL: &str = "openai/gpt-5.6";
+struct TestHome {
+    dir: PathBuf,
+    fixture: RefCell<Option<FixtureResources>>,
+}
 impl TestHome {
     fn new() -> Self {
         let id = NEXT_ID.fetch_add(1, Ordering::Relaxed);
-        let path = std::env::temp_dir().join(format!("opencode-rk-ci-{}-{id}", std::process::id()));
-        fs::create_dir_all(&path).unwrap();
-        Self(path)
+        let dir = std::env::temp_dir().join(format!("opencode-rk-ci-{}-{id}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        Self {
+            dir,
+            fixture: RefCell::new(None),
+        }
     }
-
     fn path(&self) -> &Path {
-        &self.0
+        &self.dir
     }
 }
-
 impl Drop for TestHome {
     fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.0);
+        if let Some(mut f) = self.fixture.get_mut().take() {
+            f.stop();
+        }
+        let _ = fs::remove_dir_all(&self.dir);
     }
 }
-
-struct ChildGuard(Child);
-
+struct FixtureResources {
+    stopping: Arc<AtomicBool>,
+    daemon: Option<Child>,
+}
+impl FixtureResources {
+    fn stop(&mut self) {
+        self.stopping.store(true, Ordering::Release);
+        if let Some(mut c) = self.daemon.take() {
+            stop_child(&mut c);
+        }
+    }
+}
+fn stop_child(c: &mut Child) {
+    if c.try_wait().ok().flatten().is_some() {
+        return;
+    }
+    let _ = c.kill();
+    let d = Instant::now() + Duration::from_secs(3);
+    while Instant::now() < d {
+        match c.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => thread::sleep(Duration::from_millis(10)),
+        }
+    }
+    if !thread::panicking() {
+        panic!("owned child cleanup deadline");
+    }
+}
+struct ChildGuard {
+    child: Arc<Mutex<Child>>,
+}
+impl ChildGuard {
+    fn wait(&mut self) -> std::io::Result<ExitStatus> {
+        let mut child = self.child.lock().unwrap();
+        child.wait()
+    }
+}
 impl Drop for ChildGuard {
     fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
+        stop_child(&mut self.child.lock().unwrap());
     }
 }
-
-impl std::ops::Deref for ChildGuard {
-    type Target = Child;
-    fn deref(&self) -> &Child {
-        &self.0
-    }
-}
-
-impl std::ops::DerefMut for ChildGuard {
-    fn deref_mut(&mut self) -> &mut Child {
-        &mut self.0
-    }
-}
-
 fn free_loopback_addr() -> String {
-    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
-    format!("127.0.0.1:{}", listener.local_addr().unwrap().port())
+    "127.0.0.1:0".into()
 }
-
 struct StdoutReader {
-    buffer: std::sync::Arc<std::sync::Mutex<String>>,
-    handle: Option<thread::JoinHandle<()>>,
+    buffer: Arc<Mutex<Vec<u8>>>,
+    child: Arc<Mutex<Child>>,
+    handle: Option<JoinHandle<()>>,
 }
-
 impl StdoutReader {
-    fn spawn(pipe: impl Read + Send + 'static) -> Self {
-        let buffer = std::sync::Arc::new(std::sync::Mutex::new(String::new()));
-        let shared = std::sync::Arc::clone(&buffer);
-        let handle = thread::spawn(move || {
-            let mut pipe = pipe;
-            let mut buf = [0_u8; 4096];
+    fn spawn(mut pipe: impl Read + Send + 'static, child: Arc<Mutex<Child>>) -> Self {
+        let b = Arc::new(Mutex::new(Vec::new()));
+        let s = Arc::clone(&b);
+        let h = thread::spawn(move || {
+            let mut x = [0; 4096];
             loop {
-                match pipe.read(&mut buf) {
+                match pipe.read(&mut x) {
                     Ok(0) | Err(_) => break,
-                    Ok(read) => {
-                        let mut guard = shared.lock().unwrap();
-                        guard.push_str(&String::from_utf8_lossy(&buf[..read]));
+                    Ok(n) => {
+                        let mut o = s.lock().unwrap();
+                        let k = n.min(MAX.saturating_sub(o.len()));
+                        o.extend_from_slice(&x[..k]);
+                        if k < n {
+                            break;
+                        }
                     }
                 }
             }
         });
         Self {
-            buffer,
-            handle: Some(handle),
+            buffer: b,
+            child,
+            handle: Some(h),
         }
     }
-
     fn text(&self) -> String {
-        self.buffer.lock().unwrap().clone()
+        String::from_utf8_lossy(&self.buffer.lock().unwrap()).into_owned()
     }
-
-    fn wait_for(&self, needle: &str, timeout: Duration) -> String {
-        let deadline = Instant::now() + timeout;
+    fn wait_for(&self, n: &str, t: Duration) -> String {
+        let d = Instant::now() + t;
         loop {
-            let text = self.text();
-            if text.contains(needle) {
-                return text;
+            let s = self.text();
+            if s.contains(n) {
+                return s;
             }
-            assert!(
-                Instant::now() < deadline,
-                "timed out waiting for {needle:?}; stdout so far:\n{}",
-                self.text()
-            );
+            if Instant::now() >= d {
+                stop_child(&mut self.child.lock().unwrap());
+                panic!("timed out waiting for {n:?}; stdout so far:\n{s}")
+            }
             thread::sleep(Duration::from_millis(25));
         }
     }
 }
-
 impl Drop for StdoutReader {
     fn drop(&mut self) {
-        let _ = self.handle.take();
+        if let Some(h) = self.handle.take() {
+            stop_child(&mut self.child.lock().unwrap());
+            let _ = h.join();
+        }
     }
 }
-
-/// One-shot OpenAI-compatible /v1/responses fixture.
-fn spawn_openai_fixture() -> (String, thread::JoinHandle<()>) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider fixture");
-    let address = listener.local_addr().expect("fixture address");
-    let task = thread::spawn(move || {
-        let (mut stream, _) = listener.accept().expect("accept provider request");
-        stream
-            .set_read_timeout(Some(Duration::from_secs(10)))
-            .expect("fixture read timeout");
-        let mut request = Vec::new();
-        let mut expected_len = None;
-        loop {
-            let mut chunk = [0_u8; 4096];
-            let read = stream.read(&mut chunk).expect("read provider request");
-            assert!(read > 0, "provider request ended before the full body");
-            request.extend_from_slice(&chunk[..read]);
-            if expected_len.is_none() {
-                if let Some(header_end) = request.windows(4).position(|w| w == b"\r\n\r\n") {
-                    let headers = String::from_utf8_lossy(&request[..header_end]);
-                    let content_length = headers
-                        .lines()
-                        .find_map(|line| {
-                            line.to_ascii_lowercase()
-                                .strip_prefix("content-length:")
-                                .map(str::trim)
-                                .map(str::parse::<usize>)
-                        })
-                        .transpose()
-                        .expect("valid content length")
-                        .unwrap_or(0);
-                    expected_len = Some(header_end + 4 + content_length);
-                }
-            }
-            if expected_len.is_some_and(|len| request.len() >= len) {
-                break;
-            }
-            assert!(request.len() <= 128 * 1024, "fixture request bound");
-        }
-        let body = serde_json::json!({
-            "id": "resp_fixture",
-            "status": "completed",
-            "output": [{
-                "type": "message",
-                "role": "assistant",
-                "content": [{"type": "output_text", "text": "CI fixture response"}]
-            }]
-        })
-        .to_string();
-        let wire = format!(
-            "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
-            body.len(),
-            body
-        );
-        let _ = stream.write_all(wire.as_bytes());
-        let _ = stream.flush();
-    });
-    (format!("http://{address}/v1"), task)
+struct ProviderTask {
+    stop: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
 }
-
-fn ci_command(home: &TestHome, daemon_addr: &str, extra_env: &[(&str, &str)]) -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
-    command
+impl ProviderTask {
+    fn join(mut self) -> Result<(), ()> {
+        self.stop.store(true, Ordering::Release);
+        self.handle.take().unwrap().join().map_err(|_| ())
+    }
+}
+impl Drop for ProviderTask {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(h) = self.handle.take() {
+            let _ = h.join();
+        }
+    }
+}
+fn request(s: &mut TcpStream) -> Vec<u8> {
+    let mut b = Vec::new();
+    let d = Instant::now() + Duration::from_secs(3);
+    loop {
+        assert!(Instant::now() < d, "provider request deadline");
+        let mut x = [0; 4096];
+        let n = s.read(&mut x).expect("provider request read");
+        assert!(n > 0, "provider request ended early");
+        assert!(b.len() <= MAX.saturating_sub(n), "provider request bound");
+        b.extend_from_slice(&x[..n]);
+        if let Some(e) = b.windows(4).position(|w| w == b"\r\n\r\n") {
+            let h = String::from_utf8_lossy(&b[..e]);
+            let l = h
+                .lines()
+                .find_map(|v| {
+                    v.to_ascii_lowercase()
+                        .strip_prefix("content-length:")
+                        .and_then(|x| x.trim().parse().ok())
+                })
+                .unwrap_or(0);
+            assert!(l <= MAX - e - 4, "provider body bound");
+            if b.len() >= e + 4 + l {
+                return b;
+            }
+        }
+    }
+}
+fn spawn_openai_fixture(home: &TestHome) -> (String, ProviderTask) {
+    let l = TcpListener::bind("127.0.0.1:0").unwrap();
+    let a = l.local_addr().unwrap();
+    l.set_nonblocking(true).unwrap();
+    let stop = Arc::new(AtomicBool::new(false));
+    let st = Arc::clone(&stop);
+    let h = thread::spawn(move || {
+        let d = Instant::now() + DEADLINE;
+        let mut got = false;
+        while !st.load(Ordering::Acquire) && Instant::now() < d {
+            let (mut s, _) = match l.accept() {
+                Ok(x) => x,
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(10));
+                    continue;
+                }
+                Err(e) => panic!("provider accept: {e}"),
+            };
+            s.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+            s.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
+            let b = request(&mut s);
+            let e = b.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+            let t = String::from_utf8_lossy(&b);
+            let mut q = t.lines().next().unwrap().split_whitespace();
+            assert_eq!(
+                (q.next(), q.next(), q.next()),
+                (Some("POST"), Some("/v1/responses"), Some("HTTP/1.1"))
+            );
+            assert!(t[..e]
+                .to_ascii_lowercase()
+                .contains("authorization: bearer fixture-secret"));
+            let j: serde_json::Value = serde_json::from_slice(&b[e + 4..]).unwrap();
+            assert_eq!(j["model"].as_str(), Some(MODEL));
+            assert!(matches!(
+                j.get("stream"),
+                None | Some(serde_json::Value::Bool(false))
+            ));
+            assert!(
+                j.to_string().contains("say hi") || j.to_string().contains("determinism probe")
+            );
+            let body=serde_json::json!({"id":"resp_fixture","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"CI fixture response"}]}]}).to_string();
+            let w=format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",body.len(),body);
+            s.write_all(w.as_bytes()).unwrap();
+            s.flush().unwrap();
+            assert!(!got, "provider received more than one request");
+            got = true
+        }
+        assert!(got, "provider did not receive request")
+    });
+    let m = home.path().join("models.json");
+    fs::write(&m,r#"{"openai":{"name":"OpenAI","models":{"gpt-5.6":{"name":"GPT-5.6","tool_call":true,"reasoning":true,"limit":{"context":200000}}}}}"#).unwrap();
+    let mut c = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
+    c.args(["serve", "--listen", "127.0.0.1:0", "--models-file"])
+        .arg(&m)
+        .current_dir(home.path())
         .env_clear()
         .env("OPENCODE_RK_HOME", home.path())
-        .env("OPENCODE_RK_DAEMON_ADDR", daemon_addr)
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join("xdg-config"))
+        .env("XDG_DATA_HOME", home.path().join("xdg-data"))
+        .env("XDG_CACHE_HOME", home.path().join("xdg-cache"))
+        .env("OPENAI_BASE_URL", format!("http://{a}/v1"))
+        .env("OPENAI_API_KEY", "fixture-secret")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    let c = c.spawn().unwrap();
+    home.fixture.borrow_mut().replace(FixtureResources {
+        stopping: Arc::clone(&stop),
+        daemon: Some(c),
+    });
+    let p = home.path().join("runtime/backend.json");
+    let d = Instant::now() + DEADLINE;
+    loop {
+        if let Ok(b) = fs::read(&p) {
+            assert!(b.len() <= 8192);
+            if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
+                let o = v["http_origin"].as_str();
+                let tok = v["auth_token"].as_str();
+                if o.is_some_and(|x| {
+                    x.starts_with("http://127.0.0.1:")
+                        && x.rsplit(':').next().unwrap().parse::<u16>().unwrap() != 0
+                }) && tok
+                    .is_some_and(|x| x.len() == 64 && x.bytes().all(|z| z.is_ascii_hexdigit()))
+                {
+                    let o = o.unwrap().to_owned();
+                    let tok = tok.unwrap();
+                    let host = o.strip_prefix("http://").unwrap();
+                    let mut s =
+                        TcpStream::connect_timeout(&host.parse().unwrap(), Duration::from_secs(1))
+                            .unwrap();
+                    s.set_read_timeout(Some(Duration::from_secs(1))).unwrap();
+                    s.set_write_timeout(Some(Duration::from_secs(1))).unwrap();
+                    write!(s,"GET /api/models?provider=openai&limit=500 HTTP/1.1\r\nhost: {host}\r\nauthorization: Bearer {tok}\r\nconnection: close\r\n\r\n").unwrap();
+                    let mut r = Vec::new();
+                    s.take((MAX + 1) as u64).read_to_end(&mut r).unwrap();
+                    assert!(
+                        r.len() <= MAX && String::from_utf8_lossy(&r).starts_with("HTTP/1.1 200")
+                    );
+                    return (
+                        o,
+                        ProviderTask {
+                            stop,
+                            handle: Some(h),
+                        },
+                    );
+                }
+            }
+        }
+        assert!(Instant::now() < d, "daemon descriptor readiness timeout");
+        thread::sleep(Duration::from_millis(20))
+    }
+}
+fn ci_command(home: &TestHome, _: &str, extra: &[(&str, &str)]) -> Command {
+    let b = fs::read(home.path().join("runtime/backend.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&b).unwrap();
+    let o = v["http_origin"]
+        .as_str()
+        .unwrap()
+        .strip_prefix("http://")
+        .unwrap();
+    let tok = v["auth_token"].as_str().unwrap();
+    let mut c = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
+    c.args(["run", "--ci"])
+        .env_clear()
+        .current_dir(home.path())
+        .env("OPENCODE_RK_HOME", home.path())
+        .env("HOME", home.path())
+        .env("XDG_CONFIG_HOME", home.path().join("xdg-config"))
+        .env("XDG_DATA_HOME", home.path().join("xdg-data"))
+        .env("XDG_CACHE_HOME", home.path().join("xdg-cache"))
+        .env("OPENCODE_RK_DAEMON_ADDR", o)
+        .env("OPENCODE_RK_DAEMON_TOKEN", tok)
+        .env("OPENCODE_RK_CI_MODEL", MODEL)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    for (key, value) in extra_env {
-        command.env(key, value);
+    for (k, x) in extra {
+        c.env(k, x);
     }
-    command
+    c
 }
-
-fn spawn_guarded(mut command: Command) -> (ChildGuard, StdoutReader) {
-    let mut child = command.spawn().expect("spawn CI binary");
-    let stdout = StdoutReader::spawn(child.stdout.take().expect("piped stdout"));
-    (ChildGuard(child), stdout)
+fn spawn_guarded(mut c: Command) -> (ChildGuard, StdoutReader) {
+    let mut x = c.spawn().unwrap();
+    let out = x.stdout.take().unwrap();
+    let a = Arc::new(Mutex::new(x));
+    let r = StdoutReader::spawn(out, Arc::clone(&a));
+    (ChildGuard { child: a.clone() }, r)
 }
-
 // ── LANE-CI-FLAG-T01: JSONL output parseable, ends TurnFinished, exit 0 ──
 
 #[test]
