@@ -456,7 +456,7 @@ pub struct ArtifactControl {
 /// preserved across toggle/undo by [`toggle_preview`]/[`undo_edit`].
 #[must_use]
 pub fn artifact_controls(kind: ArtifactKind) -> Vec<ArtifactControl> {
-    let mut controls = alloc::vec![
+    let mut controls = std::vec![
         ArtifactControl {
             id: "artifact-edit",
             label: "Edit artifact",
@@ -489,20 +489,18 @@ pub fn artifact_controls(kind: ArtifactKind) -> Vec<ArtifactControl> {
         },
     ];
     if kind == ArtifactKind::Code {
-        controls.extend(alloc::vec![
-            ArtifactControl {
-                id: "artifact-run",
-                label: "Run code with explicit authorization",
-                role: "button",
-                shortcut: "R",
-            },
-            ArtifactControl {
-                id: "artifact-apply",
-                label: "Apply code with explicit authorization",
-                role: "button",
-                shortcut: "A",
-            },
-        ]);
+        controls.push(ArtifactControl {
+            id: "artifact-run",
+            label: "Run code with explicit authorization",
+            role: "button",
+            shortcut: "R",
+        });
+        controls.push(ArtifactControl {
+            id: "artifact-apply",
+            label: "Apply code with explicit authorization",
+            role: "button",
+            shortcut: "A",
+        });
     }
     controls
 }

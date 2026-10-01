@@ -8,3 +8,13 @@
 - Verification performed: `rustfmt --edition 2021` on the nine granted sources; `git diff --check`; byte-exact protected suffix verification. No Cargo/build/clippy/test/runtime/network commands were run per package constraints.
 - Remaining observed failure: the clippy log remains a baseline diagnostic artifact; no post-change clippy gate was run. No product behavior completion or GREEN is claimed.
 - Candidate status: source candidate only; parent owns preverification and integrated acceptance.
+
+Independent preverification of `78d968f3d96037437802697f9aa0141ddd260571`
+passed formatting, then compilation failed: the local `alloc` module reexports
+only `Vec`, not the `vec!` macro. Receipt
+`v2-server-library-preverify-78d968f-qvw1o81q` is preserved under the approved
+artifact parent. No test gate ran and no equivalence/acceptance was inferred.
+The controller corrected the new constructor to `std::vec!` and restored the
+original two conditional code-control pushes, avoiding an unnecessary temporary
+vector. All five initial controls and the two conditional controls retain their
+exact order and fields. The full same gate remains required.
