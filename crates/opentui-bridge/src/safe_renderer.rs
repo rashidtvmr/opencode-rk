@@ -531,13 +531,16 @@ impl Renderer {
             if owned {
                 LIFECYCLE_HANDLE.store(INVALID_HANDLE, Ordering::Release);
             }
+            destroyRenderer(self.handle, true);
             #[cfg(unix)]
-            // `restore_terminal_modes` clears TERMINAL_ACTIVE only after its
-            // reset and captured-termios restoration complete. If that
-            // explicit cleanup reported an output error, close still retries
-            // against the same owned terminal capability; cleanup must not be
-            // made contingent on the lifecycle bit having survived an earlier
-            // best-effort call.
+            // The pinned native fork's `CliRenderer::destroy` first calls
+            // `performShutdownSequence`, then `BufferedBackend::deinit`,
+            // which joins its render thread (renderer.zig:464-472 and
+            // renderer-output.zig:537-552). Emit the final paired reset only
+            // after that join, while this owned terminal slot is still live;
+            // otherwise the backend's final shutdown write can race or follow
+            // an earlier reset and the PTY need not observe the reset as the
+            // final terminal-owner operation.
             if owned && LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
                 let slot = TERMINAL_INPUT
                     .lock()
@@ -548,7 +551,6 @@ impl Renderer {
                     }
                 }
             }
-            destroyRenderer(self.handle, true);
             if owned {
                 LIFECYCLE_DEST.store(1, Ordering::Release);
             }
