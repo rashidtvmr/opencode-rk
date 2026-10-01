@@ -106,3 +106,14 @@ and reader joins have explicit deadlines, read/overflow failures are observable,
 the descriptor is bounded before allocation, and exact PID/schema/numeric-loopback
 validation precedes authenticated readiness. The fixture contains two actual
 native-feature tests; no implementation or runtime acceptance has been claimed.
+
+Independent exact-`e058ddb` verification passed formatting and the memory-render
+control, then the owned daemon exited before publishing its descriptor. Receipt
+`v2-default-tui-contract-preverify-e058ddb-vw1ps4hu` is retained. The test process
+was native-linked and Cargo supplied its loader paths, but `env_clear` removed
+those paths from its native-linked children. `otool -L target/debug/opencode-rk`
+confirms the child requires `@rpath/libopentui.dylib`; the gate uses the installed
+relative rpath. The fixture now supplies only the pinned repository native
+library directory on macOS and emits bounded startup stderr on an early exit.
+This is fixture-loader maintenance, not a product or assertion change; the same
+two-plus-four native gate remains required before preverification.

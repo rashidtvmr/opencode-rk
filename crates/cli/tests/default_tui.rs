@@ -239,19 +239,29 @@ mod native_controls {
             .env("XDG_DATA_HOME", home.root().join("xdg-data"))
             .env("XDG_STATE_HOME", home.root().join("xdg-state"))
             .env("XDG_CACHE_HOME", home.root().join("xdg-cache"));
+        #[cfg(target_os = "macos")]
+        {
+            // Cargo supplies its native search paths to the test process.
+            // env_clear deliberately removes them from the fixture children,
+            // so restore only the pinned repository library directory.
+            let library_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("../opentui-bridge/native/lib")
+                .join(format!("{}-apple-darwin", std::env::consts::ARCH));
+            assert!(library_dir.join("libopentui.dylib").is_file());
+            command.env("DYLD_LIBRARY_PATH", library_dir);
+        }
     }
 
     fn wait_descriptor(home: &TestHome, child: &mut OwnedChild) {
         let deadline = Instant::now() + EXIT_LIMIT;
         while !home.descriptor().exists() && Instant::now() < deadline {
-            assert!(
-                child
-                    .child
-                    .try_wait()
-                    .expect("poll fixture daemon")
-                    .is_none(),
-                "fixture daemon exited before readiness"
-            );
+            if let Some(status) = child.child.try_wait().expect("poll fixture daemon") {
+                child.drain().expect("drain failed daemon output");
+                panic!(
+                    "fixture daemon exited before readiness: {status}; stderr: {}",
+                    child.stderr.as_ref().unwrap().text()
+                );
+            }
             thread::sleep(Duration::from_millis(25));
         }
         assert!(
