@@ -17,3 +17,15 @@ instrumentation is diagnostic-only and must not be integrated as product code.
 Static checks performed by this leaf: `rustfmt --edition 2021 --check` on the
 instrumented bridge source and `git diff --check`. No build, runtime, PTY,
 network, or Cargo command was run.
+
+## Mechanical compiler repair
+
+The original diagnostic candidate failed Rust E0308 because a `let ... else`
+branch could fall through after creating the trace file. The diagnostic owner
+replaced that branch with explicit `symlink_metadata` matching, a private 0600
+creation path, and a second metadata read before append. Existing regular files
+are appended; symlinks, non-regular files, path collisions, and I/O errors are
+ignored without panic. The approved controller-root parent is enforced exactly,
+and the existing 16 KiB/event bounds and fixed-stage-only event callers remain
+unchanged. This is process-only diagnostic maintenance and does not alter native
+TTY reset behavior.

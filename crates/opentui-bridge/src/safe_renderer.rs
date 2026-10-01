@@ -66,21 +66,30 @@ fn native_reset_trace(event: &str) {
     let Ok(path) = std::env::var("OC2_NATIVE_RESET_TRACE") else {
         return;
     };
-    if !path.starts_with("/private/var/folders/") || path.len() > 512 {
+    const ROOT: &str = "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-today-control-y52o0gi3";
+    let path_ref = std::path::Path::new(&path);
+    if path.len() > 512 || path_ref.parent() != Some(std::path::Path::new(ROOT)) {
         return;
     }
-    let Ok(meta) = std::fs::metadata(&path) else {
-        if std::path::Path::new(&path).exists() {
-            return;
+    let meta = match std::fs::symlink_metadata(&path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            use std::os::unix::fs::OpenOptionsExt;
+            let Ok(file) = std::fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .mode(0o600)
+                .open(&path)
+            else {
+                return;
+            };
+            drop(file);
+            match std::fs::symlink_metadata(&path) {
+                Ok(meta) => meta,
+                Err(_) => return,
+            }
         }
-        match std::fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&path)
-        {
-            Ok(file) => drop(file),
-            Err(_) => return,
-        }
+        Err(_) => return,
     };
     if !meta.file_type().is_file() || meta.len() >= 16 * 1024 {
         return;
