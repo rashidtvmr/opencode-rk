@@ -93,3 +93,16 @@ shasum -a 256 crates/cli/tests/default_tui.rs
 
 No Cargo/build/runtime/network/child/verifier command was run. This report is
 source evidence and a corrected candidate, not completion or acceptance.
+
+## Controller fixture review
+
+Independent owner preparation is preserved as `bf8c62f951ee293bc514bcacc6e7dae7560ad870`.
+Its initial helper still used unbounded `Command::output`, child `wait`, and reader
+`join`, did not compare the descriptor PID to the spawned child, and omitted
+XDG_STATE_HOME. Thus the earlier claimed bounded cleanup was not established.
+The controller repaired only those fixture mechanics before freezing: both
+children are immediately owned, output is capped and drained, child exit/reaping
+and reader joins have explicit deadlines, read/overflow failures are observable,
+the descriptor is bounded before allocation, and exact PID/schema/numeric-loopback
+validation precedes authenticated readiness. The fixture contains two actual
+native-feature tests; no implementation or runtime acceptance has been claimed.

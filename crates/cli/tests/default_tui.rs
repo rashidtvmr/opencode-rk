@@ -11,11 +11,11 @@
 #[cfg(feature = "native")]
 mod native_controls {
     use std::{
-        fs,
+        fs::{self, File},
         io::{Read, Write},
         net::TcpStream,
         path::{Path, PathBuf},
-        process::{Child, Command, Stdio},
+        process::{Child, Command, ExitStatus, Stdio},
         sync::{
             atomic::{AtomicU64, Ordering},
             Arc, Mutex,
@@ -39,7 +39,14 @@ mod native_controls {
                 "opencode-rk-default-native-{}-{id}",
                 std::process::id()
             ));
-            for part in ["home", "xdg-config", "xdg-data", "xdg-cache", "runtime"] {
+            for part in [
+                "home",
+                "xdg-config",
+                "xdg-data",
+                "xdg-state",
+                "xdg-cache",
+                "runtime",
+            ] {
                 fs::create_dir_all(root.join(part)).expect("create disposable fixture directory");
             }
             Self(root)
@@ -65,6 +72,7 @@ mod native_controls {
     struct Capture {
         bytes: Arc<Mutex<Vec<u8>>>,
         overflow: Arc<std::sync::atomic::AtomicBool>,
+        failed: Arc<std::sync::atomic::AtomicBool>,
         thread: Option<thread::JoinHandle<()>>,
     }
 
@@ -74,12 +82,19 @@ mod native_controls {
             let overflow = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let dst = Arc::clone(&bytes);
             let full = Arc::clone(&overflow);
+            let failed = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let worker_failed = Arc::clone(&failed);
             let thread = thread::spawn(move || {
                 let mut pipe = pipe;
                 let mut buf = [0_u8; 4096];
                 loop {
                     match pipe.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
+                        Ok(0) => break,
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(_) => {
+                            worker_failed.store(true, Ordering::Release);
+                            break;
+                        }
                         Ok(n) => {
                             let mut out = dst.lock().expect("capture lock");
                             let room = PIPE_CAP.saturating_sub(out.len());
@@ -98,6 +113,7 @@ mod native_controls {
             Self {
                 bytes,
                 overflow,
+                failed,
                 thread: Some(thread),
             }
         }
@@ -106,35 +122,110 @@ mod native_controls {
             String::from_utf8_lossy(&self.bytes.lock().expect("capture lock")).into_owned()
         }
 
-        fn join(&mut self) {
-            let thread = self.thread.take().expect("capture joined once");
-            thread.join().expect("capture reader must terminate");
-            assert!(
-                !self.overflow.load(Ordering::Relaxed),
-                "child output exceeded {PIPE_CAP} bytes"
-            );
+        fn join(&mut self) -> std::io::Result<()> {
+            if let Some(reader) = self.thread.take() {
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while !reader.is_finished() && Instant::now() < deadline {
+                    thread::sleep(Duration::from_millis(10));
+                }
+                if !reader.is_finished() {
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "output reader join deadline",
+                    ));
+                }
+                if reader.join().is_err() || self.failed.load(Ordering::Acquire) {
+                    return Err(std::io::Error::other("output reader failed"));
+                }
+            }
+            if self.overflow.load(Ordering::Acquire) {
+                return Err(std::io::Error::other(
+                    "child output exceeded fixture byte bound",
+                ));
+            }
+            Ok(())
         }
     }
 
-    struct OwnedServe {
+    struct OwnedChild {
         child: Child,
-        stdout: Capture,
-        stderr: Capture,
-        cleaned: bool,
+        stdout: Option<Capture>,
+        stderr: Option<Capture>,
     }
 
-    impl OwnedServe {}
+    impl OwnedChild {
+        fn spawn(command: &mut Command) -> Self {
+            let child = command
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .expect("spawn owned fixture child");
+            let mut owned = Self {
+                child,
+                stdout: None,
+                stderr: None,
+            };
+            owned.stdout = Some(Capture::spawn(
+                owned.child.stdout.take().expect("child stdout"),
+            ));
+            owned.stderr = Some(Capture::spawn(
+                owned.child.stderr.take().expect("child stderr"),
+            ));
+            owned
+        }
 
-    impl Drop for OwnedServe {
-        fn drop(&mut self) {
-            if self.cleaned {
-                return;
+        fn wait(&mut self) -> std::io::Result<ExitStatus> {
+            let deadline = Instant::now() + EXIT_LIMIT;
+            loop {
+                if let Some(status) = self.child.try_wait()? {
+                    self.drain()?;
+                    return Ok(status);
+                }
+                if Instant::now() >= deadline {
+                    self.stop()?;
+                    return Err(std::io::Error::new(
+                        std::io::ErrorKind::TimedOut,
+                        "child exit deadline",
+                    ));
+                }
+                thread::sleep(Duration::from_millis(10));
             }
-            self.cleaned = true;
-            let _ = self.child.kill();
-            let _ = self.child.wait();
-            self.stdout.join();
-            self.stderr.join();
+        }
+
+        fn drain(&mut self) -> std::io::Result<()> {
+            let stdout = self.stdout.as_mut().map(Capture::join).unwrap_or(Ok(()));
+            let stderr = self.stderr.as_mut().map(Capture::join).unwrap_or(Ok(()));
+            stdout.and(stderr)
+        }
+
+        fn stop(&mut self) -> std::io::Result<()> {
+            if self.child.try_wait()?.is_none() {
+                self.child.kill()?;
+                let deadline = Instant::now() + Duration::from_secs(2);
+                while self.child.try_wait()?.is_none() {
+                    if Instant::now() >= deadline {
+                        return Err(std::io::Error::new(
+                            std::io::ErrorKind::TimedOut,
+                            "child reaping deadline",
+                        ));
+                    }
+                    thread::sleep(Duration::from_millis(10));
+                }
+            }
+            self.drain()
+        }
+    }
+
+    impl Drop for OwnedChild {
+        fn drop(&mut self) {
+            if let Err(error) = self.stop() {
+                if thread::panicking() {
+                    eprintln!("default TUI fixture failure cleanup: {error}");
+                } else {
+                    panic!("default TUI fixture cleanup failed: {error}");
+                }
+            }
         }
     }
 
@@ -146,12 +237,21 @@ mod native_controls {
             .env("HOME", home.root().join("home"))
             .env("XDG_CONFIG_HOME", home.root().join("xdg-config"))
             .env("XDG_DATA_HOME", home.root().join("xdg-data"))
+            .env("XDG_STATE_HOME", home.root().join("xdg-state"))
             .env("XDG_CACHE_HOME", home.root().join("xdg-cache"));
     }
 
-    fn wait_descriptor(home: &TestHome) {
+    fn wait_descriptor(home: &TestHome, child: &mut OwnedChild) {
         let deadline = Instant::now() + EXIT_LIMIT;
         while !home.descriptor().exists() && Instant::now() < deadline {
+            assert!(
+                child
+                    .child
+                    .try_wait()
+                    .expect("poll fixture daemon")
+                    .is_none(),
+                "fixture daemon exited before readiness"
+            );
             thread::sleep(Duration::from_millis(25));
         }
         assert!(
@@ -161,11 +261,18 @@ mod native_controls {
     }
 
     fn descriptor(home: &TestHome) -> (u32, String, String) {
-        let value: serde_json::Value = serde_json::from_slice(
-            &fs::read(home.descriptor()).expect("read published descriptor"),
-        )
-        .expect("published descriptor JSON");
-        let pid = value["pid"].as_u64().expect("descriptor pid") as u32;
+        let mut bytes = Vec::new();
+        File::open(home.descriptor())
+            .expect("open published descriptor")
+            .take(8193)
+            .read_to_end(&mut bytes)
+            .expect("bounded descriptor read");
+        assert!(bytes.len() <= 8192, "descriptor byte bound");
+        let value: serde_json::Value =
+            serde_json::from_slice(&bytes).expect("published descriptor JSON");
+        assert_eq!(value["schema_version"], 1);
+        let pid = u32::try_from(value["pid"].as_u64().expect("descriptor pid"))
+            .expect("descriptor PID bound");
         let origin = value["http_origin"]
             .as_str()
             .expect("descriptor origin")
@@ -180,8 +287,10 @@ mod native_controls {
             "published bearer shape"
         );
         assert!(
-            origin.starts_with("http://127.0.0.1:"),
-            "published origin must be loopback"
+            origin
+                .strip_prefix("http://127.0.0.1:")
+                .is_some_and(|port| port.parse::<u16>().is_ok_and(|port| port != 0)),
+            "published origin must be numeric loopback with nonzero port"
         );
         (pid, origin, token)
     }
@@ -210,7 +319,7 @@ mod native_controls {
         )
         .expect("connect owned serve");
         stream
-            .set_read_timeout(Some(Duration::from_secs(5)))
+            .set_read_timeout(Some(Duration::from_millis(100)))
             .expect("set read timeout");
         stream
             .set_write_timeout(Some(Duration::from_secs(5)))
@@ -219,18 +328,36 @@ mod native_controls {
             .write_all(request(origin, token, method, path, body).as_bytes())
             .expect("write owned request");
         let mut response = Vec::new();
-        stream
-            .take(PIPE_CAP as u64)
-            .read_to_end(&mut response)
-            .expect("read owned response");
-        assert!(
-            response.len() < PIPE_CAP,
-            "HTTP response exceeded fixture cap"
-        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut buffer = [0_u8; 4096];
+        loop {
+            assert!(Instant::now() < deadline, "owned HTTP response deadline");
+            match stream.read(&mut buffer) {
+                Ok(0) => break,
+                Ok(n) => {
+                    assert!(
+                        response.len() <= PIPE_CAP.saturating_sub(n),
+                        "HTTP response exceeded fixture cap"
+                    );
+                    response.extend_from_slice(&buffer[..n]);
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::TimedOut
+                            | std::io::ErrorKind::WouldBlock
+                            | std::io::ErrorKind::Interrupted
+                    ) =>
+                {
+                    continue
+                }
+                Err(error) => panic!("owned HTTP response read failed: {error}"),
+            }
+        }
         String::from_utf8(response).expect("owned response UTF-8")
     }
 
-    fn spawn_serve(home: &TestHome) -> (OwnedServe, u32, String, String) {
+    fn spawn_serve(home: &TestHome) -> (OwnedChild, u32, String, String) {
         fs::write(&home.models(), r#"{"openai":{"name":"OpenAI","models":{"gpt-5.6":{"name":"GPT-5.6","tool_call":true,"reasoning":true,"limit":{"context":200000}}}}}"#)
             .expect("write offline model catalogue");
         let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
@@ -241,17 +368,14 @@ mod native_controls {
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        let mut child = command.spawn().expect("spawn owned serve");
-        let stdout = Capture::spawn(child.stdout.take().expect("serve stdout pipe"));
-        let stderr = Capture::spawn(child.stderr.take().expect("serve stderr pipe"));
-        let mut serve = OwnedServe {
-            child,
-            stdout,
-            stderr,
-            cleaned: false,
-        };
-        wait_descriptor(home);
+        let mut serve = OwnedChild::spawn(&mut command);
+        wait_descriptor(home, &mut serve);
         let (pid, origin, token) = descriptor(home);
+        assert_eq!(
+            pid,
+            serve.child.id(),
+            "descriptor must name the actual owned daemon child"
+        );
         let health = authenticated_request(&origin, &token, "GET", "/health", None);
         assert!(
             health.starts_with("HTTP/1.1 200"),
@@ -306,22 +430,21 @@ mod native_controls {
         let body = serde_json::json!({"title": title}).to_string();
         let created = authenticated_request(&origin, &token, "POST", "/api/sessions", Some(&body));
         assert!(
-            created.starts_with("HTTP/1.1 201") || created.starts_with("HTTP/1.1 200"),
+            created.starts_with("HTTP/1.1 201"),
             "session creation failed: {created}"
         );
 
         let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
         command_env(&mut command, &home);
-        let output = command
-            .args(["tui", "--once", "--origin", &origin])
-            .output()
-            .expect("run native tui once");
+        command.args(["tui", "--once", "--origin", &origin]);
+        let mut once = OwnedChild::spawn(&mut command);
+        let status = once.wait().expect("bounded native tui once exit");
         assert!(
-            output.status.success(),
+            status.success(),
             "tui --once must exit successfully: {}",
-            String::from_utf8_lossy(&output.stderr)
+            once.stderr.as_ref().unwrap().text()
         );
-        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stdout = once.stdout.as_ref().unwrap().text();
         assert!(
             stdout.contains("OpenCode RK TUI"),
             "frame banner missing: {stdout}"
@@ -347,6 +470,14 @@ mod native_controls {
                 .is_none(),
             "owned serve exited during attachment"
         );
-        drop(serve);
+        drop(once);
+        serve
+            .stop()
+            .expect("reap owned daemon and join output readers");
+        assert!(serve
+            .child
+            .try_wait()
+            .expect("verify reaped daemon")
+            .is_some());
     }
 }
