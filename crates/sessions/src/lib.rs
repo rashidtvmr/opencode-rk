@@ -35,6 +35,7 @@ pub mod store;
 pub mod task_quota;
 pub mod tui_info_panel;
 pub mod tui_state;
+#[cfg(test)]
 mod types;
 pub mod ui_001;
 pub mod ui_002;
@@ -112,7 +113,7 @@ impl SessionManager {
         let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
         let mut stmt = conn.prepare("SELECT id, title, state, created_at_us, updated_at_us, archived_at_us FROM sessions WHERE state=?1 ORDER BY updated_at_us DESC, pk DESC LIMIT ?2 OFFSET ?3")?;
         let rows = stmt.query_map(
-            params![ACTIVE, clamp_page(limit) as i64, offset.max(0) as i64],
+            params![ACTIVE, clamp_page(limit) as i64, offset as i64],
             decode_summary_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -128,7 +129,7 @@ impl SessionManager {
         let conn = self.conn.lock().map_err(|_| SessionError::Poisoned)?;
         let mut stmt = conn.prepare("SELECT id, title, state, created_at_us, updated_at_us, archived_at_us FROM sessions ORDER BY updated_at_us DESC, pk DESC LIMIT ?1 OFFSET ?2")?;
         let rows = stmt.query_map(
-            params![clamp_page(limit) as i64, offset.max(0) as i64],
+            params![clamp_page(limit) as i64, offset as i64],
             decode_summary_row,
         )?;
         rows.collect::<Result<Vec<_>, _>>()
@@ -416,7 +417,7 @@ impl SessionService {
             return session.ok_or(SessionError::NotFound(id));
         }
         let storage = Arc::clone(&self.storage);
-        Ok(run_blocking(move || storage.get_session(id)).await?)
+        run_blocking(move || storage.get_session(id)).await
     }
     pub async fn list(&self, all: bool) -> Result<Vec<SessionSummary>, SessionError> {
         let storage = Arc::clone(&self.storage);
@@ -426,7 +427,7 @@ impl SessionService {
             let mut forks =
                 run_session_blocking(move || manager.list_fork_sessions(all, 500)).await?;
             sessions.append(&mut forks);
-            sessions.sort_by(|left, right| right.updated_at.cmp(&left.updated_at));
+            sessions.sort_by_key(|session| std::cmp::Reverse(session.updated_at));
         }
         Ok(sessions)
     }
@@ -538,7 +539,7 @@ impl SessionService {
         let text = text.into();
         if reasoning_summary
             .as_ref()
-            .is_some_and(|summary| summary.as_bytes().len() > MAX_REASONING_SUMMARY_BYTES)
+            .is_some_and(|summary| summary.len() > MAX_REASONING_SUMMARY_BYTES)
         {
             return Err(SessionError::Contract(
                 "reasoning summary exceeds the transcript activity bound".to_owned(),
@@ -628,7 +629,7 @@ impl SessionService {
             return Err(SessionError::DraftAttachmentUnavailable);
         }
         let storage = Arc::clone(&self.storage);
-        Ok(run_blocking(move || storage.list_draft_attachments(session_id)).await?)
+        run_blocking(move || storage.list_draft_attachments(session_id)).await
     }
     pub async fn delete_draft_attachment(
         &self,
@@ -658,7 +659,7 @@ impl SessionService {
                 .await;
         }
         let storage = Arc::clone(&self.storage);
-        Ok(run_blocking(move || storage.list_messages(session_id, limit)).await?)
+        run_blocking(move || storage.list_messages(session_id, limit)).await
     }
     pub async fn history_page(
         &self,
@@ -694,7 +695,7 @@ impl SessionService {
             .await;
         }
         let storage = Arc::clone(&self.storage);
-        Ok(run_blocking(move || storage.list_assistant_activity(session_id, limit)).await?)
+        run_blocking(move || storage.list_assistant_activity(session_id, limit)).await
     }
     pub async fn create_artifact(
         &self,

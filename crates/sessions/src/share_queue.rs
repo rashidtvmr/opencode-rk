@@ -280,6 +280,11 @@ impl CoalescingQueue {
     }
 
     #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
+
+    #[must_use]
     pub fn bytes(&self) -> usize {
         self.bytes
     }

@@ -1,0 +1,23 @@
+# V2 sessions lint mechanical candidate
+
+- **Package/gate:** `WORKSPACE-SESSION-LIB-MECHANICAL` / session-library diagnostics from the workspace clippy gate.
+- **Base:** `d87ec3bfb40a0ecb954f4a9518e72c9b31e9027b` (worktree branch `v2/sessions-lint-current`).
+- **Observed RED evidence:** `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-workspace-gates-a79ae96-llxq2uon/clippy.log`, exact diagnostics at `crates/sessions/src/lib.rs` lines 115, 131, 419, 429, 541, 631, 661, and 697 on the source-library lane.
+- **Mechanical authority:** Clippy's suggested equivalent forms: remove `max(0)` from `usize` offsets; remove enclosing `Ok`/`?` where `run_blocking` already returns `Result<_, SessionError>`; use `sort_by_key(Reverse(...))`; use `str::len()`; preserve all SQL, ordering direction, error conversion, and timestamp behavior.
+- **Return-type check:** `run_blocking<T, F>` in `crates/sessions/src/lib.rs` returns `Result<T, SessionError>` and maps join/storage errors to `SessionError`; the changed call sites have no additional mapping or wrapper behavior. The removed `Ok(...await?)` forms therefore preserve error and success values exactly.
+- **Pinned upstream authority:** `sources/upstream.lock.json` pins OpenCode to `95daf90670b7c039c436c85537da5fbfe2205b41`; this package is compiler/lint mechanical maintenance and does not alter upstream-observable session behavior.
+- **Cargo.lock:** unchanged; SHA-256 before/after `63ef5299dd93286950af00388796375b06aefc5a4a3eedfa38361954fefb6f03`.
+- **Expanded diagnostics:** handled the remaining session diagnostics at `clippy.log` lines 618-725: test-only private `types` module gating, the branch retry tuple alias, ascending query sorts, descending token sort, `ShareSecret`'s `FromStr<Err = Infallible>` delegation, and `CoalescingQueue::is_empty`.
+- **Protected test suffix:** the actual in-module test suffix remains byte-identical for `lib.rs`: before/after `156fa7c1648558ab1b39eac787cc5595f074e66bd26df69d2def88fd1bd02723`. `types.rs` was not modified and remains hash `78d52625bb6b8481b48299f8046376a17c9fa0544a9fb6fc5c233dbb640dc2c5`.
+- **All six source SHA-256 hashes, before -> after:** `lib.rs` `4a4095e5f428f9f849dfa848250687e30508d931b69123e976f8d2d08db14bdf` -> `9a026c5f5a1bf5f8acf9a788e7c5935b1ca5c9258817214946d3a33bcf4bc26d`; `branch_v2.rs` `8ce6cf7132872ab84990a1466ddda84669a844eabc6b99058093a7bc0eb38d2b` -> `cd55c09ca8fd6192c1fa0b52ee565e39d65f5b246d276e1cf34d70a6844d0e96`; `query.rs` `446f43463f3306af8f639aab9066a7ae1e69e1a777b69b2df3dc2870abe30fdd` -> `5a3dac7ab9df403e6664225ec21fab51d6cfc85bc59cf36566349c9e494fe112`; `share_merge.rs` `c97d3aabaae7151f4c4babc85e1a80c800eb0b0f01cea724f61c634d1e910fba` -> `bc9e5d21a663fb5b42fa7d5f65682fb9086007ec2568dcc9ba900f4d7db41a89`; `share_queue.rs` `25057f590658ece1038e8ff59af9885412f9d780b1a04cc00b2071376dd000cd` -> `099cb12c843564e15bedc9cc35a661d9dab25165c6c62a207516d0662985719d`; `tui_state.rs` `2f6fa918401099f58f73644f6d54d113db55eb716b47a2dcdbb52c846af59a2a` -> `b27b19e405a1a466fa97e9f1f4fa61106fbd8cf8c2f66e3c0026bd62fd528edf`.
+- **Changed paths:** six granted source files above, plus this worklog. `types.rs` and all test bodies remain unchanged.
+- **Verification status:** no Cargo/build/test/runtime command was run per workspace ownership. This is a **CANDIDATE only**, not PREVERIFIED or ACCEPTED; parent/integrator owns verification.
+
+The controller prepared the preserved `a5254ee` + `a75b761` net source against
+current canonical `89aeaa8`, with byte-identical product paths. The before-source
+`lib.rs` and `branch_v2.rs` hashes above are recomputed controller values; the
+worker's earlier source-hash transcription is superseded. All existing
+`manager_tests` plus `tests` content remains frozen at the complete suffix hash
+above. `query.rs`'s protected test suffix is unchanged at
+`1be82023bdcae1d7166e4bc89555312507401d6623af6ccb411e533751ca6fd1`;
+the other four changed source files contain no in-module test region.
