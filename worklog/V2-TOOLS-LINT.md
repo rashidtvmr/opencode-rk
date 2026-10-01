@@ -59,3 +59,31 @@ production `open_write_root_at` signature, eliminating the remaining
 and single observer invocation. The two current-working-directory observer
 compatibility wrappers remain test-only. Protected test-region hashes above
 remain unchanged.
+
+## Exact integrated acceptance
+
+The controller prepared preserved `3b43b20`, `cf6e962` and `2e59657` source
+against accepted canonical `a6b188e`, alongside the separately frozen shell
+ownership repair. Independent fixture maintenance replaces only the absent
+macOS `/bin/false` pathname in the MCP crash case, preserving every assertion;
+the companion worklog records original and corrected module hashes. Every other
+protected test region and Cargo.lock remain unchanged.
+
+Independent verifier `ses_f0ab46518ffepDee7uyTjYb2YY` PREVERIFIED complete
+candidate **`e1acd5258fed50b1f79f54b412921266f07dc8ed`**. The same bounded
+isolated commands pass after fast-forward integration on that exact SHA:
+
+- Formatting: exit 0.
+- Tools-library Clippy with `-D warnings`: exit 0, including the separately
+  repaired four shell-file diagnostics.
+- Frozen real-process ownership target: five pass, zero failed/ignored,
+  no forced cleanup.
+- Full all-target/all-feature tools crate: **458 pass, zero failed/ignored**,
+  exit 0.
+
+Receipt roots: `v2-tools-owned-preverify-e1acd52-swt6njq0` and
+`v2-tools-owned-integrated-e1acd52-mg5gxwlw` under the approved artifact parent.
+State: **ACCEPTED for tools-library mechanical diagnostics on exact integrated
+`e1acd52`**. The mechanical package remains the 15 declared source paths;
+ownership and fixture maintenance are separately documented. Workspace-wide
+Clippy and tests remain required.

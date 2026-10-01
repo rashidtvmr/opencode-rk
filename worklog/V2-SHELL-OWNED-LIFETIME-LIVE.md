@@ -82,3 +82,39 @@ Both `Duration` and `timeout` imports are test-only because the existing private
 timeout helper is used only by frozen in-module tests. This final import cfg is
 mechanical compiler maintenance; the test suffix and external fixture remain
 unchanged. Independent combined verification is still required.
+
+## Exact integrated acceptance
+
+Prepared current candidate `e1acd5258fed50b1f79f54b412921266f07dc8ed`, based on
+accepted canonical `a6b188e`, combines this narrow ownership repair with the
+reviewed tools diagnostics and independent MCP crash fixture-path maintenance.
+Original implementation `5c6fd50` and all preparation/failure revisions remain
+preserved. Independent verifier `ses_f0ab46518ffepDee7uyTjYb2YY` PREVERIFIED all
+four gates; after fast-forward integration, the controller repeated them on
+that **exact integrated SHA**:
+
+```text
+cargo fmt --all -- --check
+  exit 0
+cargo clippy --offline --locked -p opencode-rk-tools --lib -- -D warnings
+  exit 0
+cargo test --offline --locked -p opencode-rk-tools --test shell_owned_lifetime -- --test-threads=1 --nocapture
+  5 passed; 0 failed; 0 ignored; exit 0
+cargo test --offline --locked -p opencode-rk-tools --all-targets --all-features -- --test-threads=1
+  458 passed; 0 failed; 0 ignored; exit 0
+```
+
+Focused and full-crate shell logs contain no forced cleanup. The strict fixture
+proves live owned PIDs are absent after abort/await and timeout-future drop;
+normal completion, denied no-spawn and unpolled no-spawn controls also pass.
+External and in-module test hashes remain unchanged. The isolated serial runner
+retains bounded logs/deadlines, whitelisted environment, two build jobs and one
+test thread. Exact command/source/environment/log hashes and counts are under
+the approved artifact parent at `v2-tools-owned-preverify-e1acd52-swt6njq0`
+and `v2-tools-owned-integrated-e1acd52-mg5gxwlw`.
+
+State: **ACCEPTED for the Mac-verified compatibility-library direct-child
+ownership invariant on exact integrated `e1acd52`**, with required tools crate
+regressions. Native daemon interruption, process trees, timeout policy,
+capture-memory bounds and Ubuntu execution of this new library contract remain
+separate gates.

@@ -76,3 +76,19 @@ preserved combined candidate, and all other in-module test regions, the strict
 external shell fixture and Cargo.lock remain byte-identical. The worker's
 source-only response label does not constitute runtime PREVERIFIED evidence;
 the full controlled sequence must pass on this prepared current candidate.
+
+## Exact integrated acceptance
+
+Independent verifier PREVERIFIED the current combined candidate on exact
+`e1acd5258fed50b1f79f54b412921266f07dc8ed`; the controller fast-forwarded the
+sole canonical branch and repeated the unchanged tools gate manifest on that
+exact integrated SHA. Formatting, tools-library Clippy, all five strict owned
+process cases, and **458 full all-target/all-feature tools tests** pass with
+zero failed/ignored and no forced cleanup. The crash fixture now executes its
+unchanged typed-error, two-retry budget and no-silent-restart assertions.
+
+The controller also probed the existing Ubuntu verification container:
+`docker exec oc2-v2-ubuntu-build /usr/bin/test -x /usr/bin/false` exits 0.
+This is executable-presence evidence; Ubuntu runtime verification remains
+separate. State: **ACCEPTED for mechanical Mac fixture-path maintenance on
+exact integrated `e1acd52`**. Complete receipts are in the companion worklogs.

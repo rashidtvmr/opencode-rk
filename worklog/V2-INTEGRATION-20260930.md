@@ -1053,3 +1053,22 @@ removed. Canonical source was clean before the accepted session integration.
 Preservation receipts: `v2-preserved-canonical-ci-fixture-e2o9nmxt` under the
 approved artifact parent. CI assertions remain protected; fixture readiness
 repair is not yet product or workspace acceptance.
+
+### Owned shell children and tools diagnostics accepted
+
+After the one-literal MCP fixture-path correction, the current combined tools
+candidate was independently PREVERIFIED against accepted session base `a6b188e`.
+After fast-forward integration, all required commands were repeated on exact
+**`e1acd5258fed50b1f79f54b412921266f07dc8ed`**: formatting and tools-library
+Clippy pass; the strict real-process target passes all five cases; all **458
+full all-target/all-feature tools tests** pass with zero ignored. Focused and
+full logs contain no forced cleanup.
+
+State **ACCEPTED for Mac-verified library direct-child ownership, tools
+diagnostics and MCP fixture maintenance on exact integrated `e1acd52`**.
+Exact path/hash/authority evidence is in the three companion worklogs; receipts
+are `v2-tools-owned-preverify-e1acd52-swt6njq0` and
+`v2-tools-owned-integrated-e1acd52-mg5gxwlw` under the approved artifact parent.
+This clears the recorded tools-library failures; native interruption, Ubuntu
+execution of the new process contract, the CI fixture and fresh workspace/
+installed-release journeys remain open.
