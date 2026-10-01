@@ -268,10 +268,9 @@ impl Renderer {
         let slot = TERMINAL_INPUT
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        let input = slot
-            .as_ref()
-            .filter(|input| input.handle == handle)
-            .ok_or(BridgeError::TerminalFailed)?;
+        let Some(input) = slot.as_ref().filter(|input| input.handle == handle) else {
+            return Ok(None);
+        };
         let fd = input
             .fd
             .try_clone()
@@ -359,6 +358,14 @@ impl Renderer {
             }
             Ok(_) | Err(_) => Ok(None),
         }
+    }
+
+    /// Native platforms without a Unix terminal descriptor retain the
+    /// caller's configured geometry. Closed renderers still fail validation.
+    #[cfg(all(feature = "native", not(unix)))]
+    pub fn terminal_size(&self) -> Result<Option<(u32, u32)>, BridgeError> {
+        self.live()?;
+        Ok(None)
     }
 
     fn create_inner(cols: u32, rows: u32, dest: u8) -> Result<Self, BridgeError> {
