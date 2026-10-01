@@ -91,3 +91,37 @@ Preverification of `2773aa7` stopped before runtime on rustfmt's multiline
 `v2-ci-ext-preverify-2773aa7-5a7ssq7s` remains preserved. Original six test bodies
 remain unchanged. The command manifest, resource limits and required test count
 remain unchanged.
+
+## Exact integrated acceptance
+
+Independent verifier `ses_f0a953343ffenu07G2OqT4T2rZ` PREVERIFIED the complete
+prepared fixture on exact `8563c4d6442e496573b35dbef6e117ebce938ba5`. The
+controller fast-forwarded canonical `main-v2` to that exact revision and repeated
+the unchanged bounded isolated manifest:
+
+```text
+cargo fmt --all -- --check
+  exit 0
+cargo test --offline --locked -p opencode-rk-cli --test ci_ext -- --test-threads=1 --nocapture
+  12 passed; 0 failed; 0 ignored; exit 0
+```
+
+Both live provider cases reach one actual non-streaming Responses request using
+the fake bearer, exact model and user prompt; resource guards reap the owned CI
+and daemon children and join the provider without reported cleanup failures.
+All six original test function bodies remain frozen at the hash above. Only
+the helper region and this worklog change; product source and Cargo.lock remain
+unchanged. The final full fixture SHA-256 is
+`ea8b3ee202e41793386f57bd8b5dca4badb7415614ef52a3f8ac082bc5a5be7b`.
+
+Receipts, exact environment/command/source/log hashes and counts are under the
+approved artifact parent at:
+
+- `v2-ci-ext-preverify-8563c4d-p_kqm01h`.
+- `v2-ci-ext-integrated-8563c4d-hdlip8ez`.
+
+State: **ACCEPTED for CI-EXT-AUTH-READINESS mechanical fixture maintenance on
+exact integrated `8563c4d`**. Earlier formatting and protocol-helper failures
+remain preserved. The former workspace `t03` failure is repaired without changing
+authentication, budget semantics or its asserted exits; full workspace validation
+must expose and retain any subsequent failure.

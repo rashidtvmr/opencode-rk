@@ -1072,3 +1072,28 @@ are `v2-tools-owned-preverify-e1acd52-swt6njq0` and
 This clears the recorded tools-library failures; native interruption, Ubuntu
 execution of the new process contract, the CI fixture and fresh workspace/
 installed-release journeys remain open.
+
+### Authenticated CI fixture accepted
+
+The independent evaluator classified the earlier `ci_ext_t03` exit 64 as a
+missing-authentication/readiness fixture defect. The independent test owner and
+controller prepared a real loopback provider, actual authenticated daemon,
+offline advertised model and bounded owned-process/drain cleanup. All six test
+function bodies remain byte-identical, including the success/budget exit check.
+Source-only originals and intermediate failures remain preserved.
+
+Independent verification passed on exact
+**`8563c4d6442e496573b35dbef6e117ebce938ba5`**; after fast-forward integration,
+the controller repeated the unchanged gates on that same SHA. Formatting and
+all **12 CI-extension tests** pass, zero failed/ignored, with no provider or
+cleanup failures. State **ACCEPTED for scoped mechanical CI fixture readiness**.
+Detailed path/hash/authority evidence is in `worklog/V2-CI-EXT-FIXTURE.md`;
+receipts are `v2-ci-ext-preverify-8563c4d-p_kqm01h` and
+`v2-ci-ext-integrated-8563c4d-hdlip8ez` under the approved artifact parent.
+
+The source investigator additionally confirms the remaining live session-owner
+gap: the actual HTTP turn handlers use a global two-slot semaphore rather than
+pinned V2's per-session `SessionRunCoordinator`, and do not wire the existing
+cancellation state machines into an authenticated interrupt operation. This is
+research evidence, not a frozen runtime RED or acceptance; a separate live
+two-client ownership gate is required.
