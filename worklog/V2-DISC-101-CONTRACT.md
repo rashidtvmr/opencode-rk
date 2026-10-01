@@ -39,6 +39,8 @@ waits before assertion completion or unwind.
   matching; published PID is not a same-process ownership proof.
 - `crates/cli/src/daemon_client.rs:647-729`: credentialed discovery is a
   file/parser gate and explicitly promises no origin contact on refusal.
+- `crates/cli/src/chat.rs:47-85,483-518`: the real native line caller probes
+  health, recovers the descriptor bearer, and owns spawned-daemon cleanup.
 - Pinned upstream `95daf906...`, `packages/cli/src/services/daemon.ts`:
   `healthy` authenticates health and `sameRegistration` gates ownership.
 
@@ -62,11 +64,13 @@ integrated SHA.
 Parent: AST-parse the test, inspect `git diff --check`, record old assertion
 blob/hash and new blob/hash, compile and capture RED/GREEN, then integrate only
 these granted paths. Preserve the evaluator receipt and old assertion history.
-The t01/t03 server checks remain lower-level executable evidence only; their
-native no-contact/no-side-effect composite gate is not falsely claimed here.
-Closing that caller contract needs the existing CLI native flow fixture or,
-if its controls cannot be reused from this server target, the separately
-granted `tests/e2e/discovery_identity.py` using `OC2_TEST_BINARY` and
-`OC2_TEST_BUILD_JSON`.
+The t01/t03 server checks remain lower-level executable evidence. The added
+`tests/e2e/discovery_identity.py` is the explicit native composite gate: it
+uses the attested artifact in a fresh HOME/XDG/project, an owned PTY, a real
+loopback health/API endpoint, and an owned live-but-forged descriptor PID. It
+allows health contact, requires zero API contact, and cleans up the native
+child, forged-PID child, PTY, listener thread, and terminal state with bounds.
+The Rust test invokes this fixture and fails clearly when the artifact
+environment is absent; it is not skipped or conditionally passed.
 Next gates: focused `discovery_auth_red`, `native_daemon_flow`, installed
 default entrypoint, and the complete fresh-HOME G1 startup journey.
