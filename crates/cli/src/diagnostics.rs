@@ -178,19 +178,10 @@ impl<T: Clone> LastValid<T> {
 }
 
 /// Export selection: secrets and transcripts are excluded unless opted in.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ExportOptions {
     pub include_secrets: bool,
     pub include_transcripts: bool,
-}
-
-impl Default for ExportOptions {
-    fn default() -> Self {
-        Self {
-            include_secrets: false,
-            include_transcripts: false,
-        }
-    }
 }
 
 /// Redacted diagnostic bundle ready for display/upload.

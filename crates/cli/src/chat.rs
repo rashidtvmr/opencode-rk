@@ -377,7 +377,7 @@ impl Chat {
         let model = model.trim();
         if model
             .split_once('/')
-            .map_or(true, |(provider, id)| provider.is_empty() || id.is_empty())
+            .is_none_or(|(provider, id)| provider.is_empty() || id.is_empty())
         {
             println!("[error] model must use provider/model format");
             return;

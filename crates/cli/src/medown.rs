@@ -51,7 +51,7 @@ pub fn parse_inline(input: &str) -> Vec<Span> {
     let mut buf = String::new();
     let mut bold = false;
     let mut code = false;
-    let mut flush = |buf: &mut String, spans: &mut Vec<Span>, bold: bool, code: bool| {
+    let flush = |buf: &mut String, spans: &mut Vec<Span>, bold: bool, code: bool| {
         if !buf.is_empty() {
             spans.push(Span {
                 text: std::mem::take(buf),

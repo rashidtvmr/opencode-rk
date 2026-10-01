@@ -169,13 +169,11 @@ fn line_starts(text: &str) -> Vec<usize> {
 /// a boundary), clamped to `end`.
 fn offset_at_col(text: &str, start: usize, end: usize, col: usize) -> usize {
     let mut off = start;
-    let mut n = 0;
-    for c in text[start..end].chars() {
+    for (n, c) in text[start..end].chars().enumerate() {
         if n == col {
             break;
         }
         off += c.len_utf8();
-        n += 1;
     }
     off
 }
@@ -695,8 +693,8 @@ impl ComposerPage {
         Ok(())
     }
 
-    /// Bounded render lines for the native shell: status header (idle/busy
-    /// + queue depth), wrapped draft lines, queued previews. Every line is
+    /// Bounded render lines for the native shell: status header (idle/busy +
+    /// queue depth), wrapped draft lines, queued previews. Every line is
     /// wrapped to `width` chars (clamped to `1..=MAX_PAGE_COLS`, char-wise
     /// so no code point splits); total lines capped at [`MAX_PAGE_LINES`]
     /// with an explicit truncation marker.

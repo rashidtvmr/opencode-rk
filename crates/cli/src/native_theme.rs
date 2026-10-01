@@ -362,7 +362,6 @@ pub fn builtin_for_marker(marker: &str) -> Option<ThemeDef> {
 }
 
 /// Populate a registry with the built-in OpenCode themes.
-#[must_use]
 pub fn register_builtins(reg: &mut ThemeRegistry) {
     let _ = reg.register(opencode_dark());
     let _ = reg.register(opencode_light());

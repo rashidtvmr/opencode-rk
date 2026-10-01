@@ -730,6 +730,7 @@ pub fn discover_from_path(
 
 /// Map backend.json state to [`app_start::DaemonPresence`]: validated descriptor
 /// + live pid + loopback origin = Reusable; stale/missing = Stale/Absent.
+///
 /// Never contacts any origin; refusal or unreadable descriptor means Absent/Stale.
 pub fn discover_presence(data_dir: &std::path::Path) -> crate::app_start::DaemonPresence {
     use opencode_rk_server::daemon::DaemonPaths;

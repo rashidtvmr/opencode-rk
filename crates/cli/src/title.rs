@@ -95,7 +95,7 @@ impl AppTitle {
         } else {
             // ponytail: space-pad only; upgrade to alignment/ellipsis when TUI needs it.
             let mut out = base;
-            out.extend(std::iter::repeat(' ').take(width - len));
+            out.extend(std::iter::repeat_n(' ', width - len));
             out
         }
     }

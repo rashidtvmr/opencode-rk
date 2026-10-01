@@ -144,7 +144,7 @@ impl AppComposer {
             s.push('…');
             return s;
         }
-        if n + 1 <= max_chars {
+        if n < max_chars {
             let mut s = String::with_capacity(self.draft.len() + 1);
             s.extend(chars[..c_idx].iter());
             s.push('|');
