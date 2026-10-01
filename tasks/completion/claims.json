@@ -66,6 +66,12 @@
       "session": "ses_orch_APP011",
       "status": "completed"
     },
+    "APP-012": {
+      "blockedNote": "RED source compiles on staging; no OC2_TEST_BINARY available, so execution/freeze unavailable. Staging convergence gate has 69 pre-existing findings. Related APP-012-TOOL-RED owns crates/server/tests, no path overlap.",
+      "scratchpad": "worklog/APP-012.md",
+      "session": "ses_f183c1ff7ffewqBsNsBh26FxKe",
+      "status": "blocked"
+    },
     "APP-012-LIVE-FILE-TOOL-INROOT-W3": {
       "scratchpad": "worklog/APP-012-LIVE-FILE-TOOL-INROOT-W3.md",
       "session": "ses_f1e63517dffePCNFlr4qGy6zP4",
