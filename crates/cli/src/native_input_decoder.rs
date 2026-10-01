@@ -120,7 +120,15 @@ impl TerminalInputDecoder {
                 self.reset();
                 self.emit(InputEvent::Escape);
             } else {
-                self.reset();
+                self.state = match self.state {
+                    State::Csi => State::DiscardCsi,
+                    State::Ss3 => State::DiscardSs3,
+                    State::DiscardCsi => State::DiscardCsi,
+                    State::DiscardSs3 => State::DiscardSs3,
+                    State::Ground | State::Escape => State::Ground,
+                };
+                self.len = 0;
+                self.deadline = None;
             }
         }
     }
@@ -194,26 +202,40 @@ impl TerminalInputDecoder {
                 (modifier, 1)
             }
         };
-        if event_type != 1 {
+        if !matches!(event_type, 1 | 2) {
             return;
-        } // release/repeat are not text
+        } // release is not text; repeat has the same printable press value
         if (0xE000..=0xF8FF).contains(&codepoint) || codepoint > 0x10FFFF {
             return;
         }
         let Some(character) = char::from_u32(codepoint) else {
             return;
         };
-        let modifier_bits = modifier.saturating_sub(1);
+        if modifier == 0 {
+            return;
+        }
+        let modifier_bits = modifier - 1;
         // Only the explicit Ctrl-letter mapping is text-safe.  In particular,
         // never turn modified punctuation into arbitrary C0 controls.
-        if modifier_bits & 0b100 != 0
+        const SHIFT: u32 = 0b001;
+        const CTRL: u32 = 0b100;
+        const CAPS_LOCK: u32 = 0b1_000_000;
+        const NUM_LOCK: u32 = 0b10_000_000;
+        let harmless_locks = CAPS_LOCK | NUM_LOCK;
+        if modifier_bits & CTRL != 0
             && character.is_ascii_alphabetic()
-            && modifier_bits & !0b100 == 0
+            && modifier_bits & !(CTRL | SHIFT | harmless_locks) == 0
         {
             self.emit(InputEvent::Byte(
                 character.to_ascii_uppercase() as u8 & 0x1f,
             ));
-        } else if modifier_bits & !0b011 == 0 {
+        } else if modifier_bits & !(SHIFT | harmless_locks) == 0 {
+            let character =
+                if character.is_ascii_alphabetic() && (modifier_bits & (SHIFT | CAPS_LOCK)) != 0 {
+                    character.to_ascii_uppercase()
+                } else {
+                    character
+                };
             let mut bytes = [0u8; 4];
             for &byte in character.encode_utf8(&mut bytes).as_bytes() {
                 self.emit(InputEvent::Byte(byte));
