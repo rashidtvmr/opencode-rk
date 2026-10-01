@@ -34,7 +34,9 @@ python3 /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/audit_receipts_
 The auditor output is the external immutable-by-hash artifact:
 `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-today-control-y52o0gi3/acceptance/integrated-acceptance-audit-20261001-r2.json`
 with SHA-256
-`f3a04a88cade8b742ee86fee3bdf62485fb956a4dba9e5286e36a71fe872ca53`.
+`60f1d9eec2a5067e6a85d17176bc95a41a4880dc737cd9a34f621e48e5644c98`. The
+auditor script itself is SHA-256
+`18cd6564ba2bef1cdbda9059c5743540653560a35bc036e4bc97a695f2023f03`.
 It reports 13/13 declared path-hash pairs matched, 32 expanded evidence
 artifacts hashed, and 2 literal command manifests audited. It records the
 actual installed binary/library/archive hashes for both the `fe9830b` release
