@@ -71,6 +71,24 @@ and claim cleanup still runs. Native shutdown remains first, so the linked
 renderer/backend has completed its own `resetState`/thread teardown before the
 short-lived controlling-TTY fallback is attempted.
 
+## Successor source correction
+
+The fallback now uses rustix's public `termios::ttyname` on the captured
+`TERMINAL_INPUT` capability, then opens that exact device with
+`WRONLY|CLOEXEC|NONBLOCK|NOCTTY` through rustix `fs::openat`. It compares
+`fstat` `st_dev` and `st_rdev` for the captured and output descriptors and
+requires `tcgetattr` on the opened descriptor before writing. Thus it does not
+mutate stdin flags, assume `/dev/tty` names the right PTY, or emit for memory
+renderers. The existing rustix dependency only gains its `fs` feature.
+
+The operation keeps one monotonic 50ms deadline across every readiness poll,
+partial write, `EINTR`, and `EAGAIN` retry; the deadline is checked before
+each poll and write attempt. Explicit lifecycle paths attempt termios
+restoration regardless of reset failure and return the first reset error after
+essential cleanup. Native shutdown occurs first, while `TERMINAL_INPUT`
+remains alive through the fallback; Drop reports errors and still releases its
+owned descriptor and global claim.
+
 ## Frozen runtime RED
 
 The supplied freeze is

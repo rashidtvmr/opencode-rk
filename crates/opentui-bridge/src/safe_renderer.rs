@@ -28,9 +28,11 @@ use std::time::Duration;
 #[cfg(all(feature = "native", unix))]
 use rustix::event::{poll, PollFd, PollFlags, Timespec};
 #[cfg(all(feature = "native", unix))]
+use rustix::fs::{fstat, openat, Mode, OFlags, CWD};
+#[cfg(all(feature = "native", unix))]
 use rustix::io::{write, Errno};
 #[cfg(all(feature = "native", unix))]
-use rustix::termios::{tcgetattr, tcgetwinsize, tcsetattr, OptionalActions, Termios};
+use rustix::termios::{tcgetattr, tcgetwinsize, tcsetattr, ttyname, OptionalActions, Termios};
 
 use crate::buffer::NativeHandle;
 use crate::color::Rgba;
@@ -164,20 +166,26 @@ fn restore_terminal_input(handle: NativeHandle, release: bool) -> Result<(), Bri
 /// eight-byte sequence is written to that owned descriptor.  Memory/headless
 /// renderers never enter this path.
 #[cfg(all(feature = "native", unix))]
-fn reset_bracketed_paste() -> Result<(), BridgeError> {
+fn reset_bracketed_paste(input: &OwnedFd) -> Result<(), BridgeError> {
     const RESET: &[u8] = b"\x1b[?2004l";
     const BUDGET: Duration = Duration::from_millis(50);
-    // `/dev/tty` is the process' controlling terminal, and opening it read/write
-    // avoids assuming that stdin was opened writable. `OpenOptions` creates a
-    // CLOEXEC descriptor on supported Unix targets; this descriptor is local to
-    // this bounded operation and is closed on every return path.
-    let tty = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open("/dev/tty")
-        .map_err(|_| BridgeError::TerminalFailed)?;
-    let fd = tty.as_fd();
-    tcgetattr(fd).map_err(|_| BridgeError::TerminalFailed)?;
+    // Resolve the device from the already-owned input capability. Do not use a
+    // generic `/dev/tty`: the pathname and fstat identity must describe the
+    // same PTY as the captured descriptor before any output is attempted.
+    let path = ttyname(input, Vec::new()).map_err(|_| BridgeError::TerminalFailed)?;
+    let fd = openat(
+        CWD,
+        &path,
+        OFlags::WRONLY | OFlags::CLOEXEC | OFlags::NONBLOCK | OFlags::NOCTTY,
+        Mode::empty(),
+    )
+    .map_err(|_| BridgeError::TerminalFailed)?;
+    let input_stat = fstat(input).map_err(|_| BridgeError::TerminalFailed)?;
+    let output_stat = fstat(&fd).map_err(|_| BridgeError::TerminalFailed)?;
+    if input_stat.st_dev != output_stat.st_dev || input_stat.st_rdev != output_stat.st_rdev {
+        return Err(BridgeError::TerminalFailed);
+    }
+    tcgetattr(&fd).map_err(|_| BridgeError::TerminalFailed)?;
     let deadline = std::time::Instant::now() + BUDGET;
     let mut written = 0;
     while written < RESET.len() {
@@ -189,7 +197,7 @@ fn reset_bracketed_paste() -> Result<(), BridgeError> {
             tv_sec: remaining.as_secs() as i64,
             tv_nsec: remaining.subsec_nanos() as _,
         };
-        let mut descriptors = [PollFd::new(fd, PollFlags::OUT)];
+        let mut descriptors = [PollFd::new(&fd, PollFlags::OUT)];
         match poll(&mut descriptors, Some(&wait)) {
             Ok(0) => return Err(BridgeError::TerminalFailed),
             Err(Errno::INTR) => continue,
@@ -199,7 +207,7 @@ fn reset_bracketed_paste() -> Result<(), BridgeError> {
             }
             Ok(_) => {}
         }
-        match write(fd, &RESET[written..]) {
+        match write(&fd, &RESET[written..]) {
             Ok(0) => return Err(BridgeError::TerminalFailed),
             Ok(count) => written += count,
             Err(Errno::INTR) => continue,
@@ -527,8 +535,13 @@ impl Renderer {
             #[cfg(unix)]
             if owned && flags & TERMINAL_ACTIVE != 0 && LIFECYCLE_DEST.load(Ordering::Acquire) == 0
             {
-                if let Err(error) = reset_bracketed_paste() {
-                    eprintln!("native renderer cleanup: {error}");
+                let slot = TERMINAL_INPUT
+                    .lock()
+                    .unwrap_or_else(|error| error.into_inner());
+                if let Some(input) = slot.as_ref().filter(|input| input.handle == self.handle) {
+                    if let Err(error) = reset_bracketed_paste(&input.fd) {
+                        eprintln!("native renderer cleanup: {error}");
+                    }
                 }
             }
             if owned {
@@ -598,7 +611,13 @@ impl Renderer {
             #[cfg(unix)]
             {
                 let reset = if LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
-                    reset_bracketed_paste().err()
+                    let slot = TERMINAL_INPUT
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    slot.as_ref()
+                        .filter(|input| input.handle == handle)
+                        .map(|input| reset_bracketed_paste(&input.fd).err())
+                        .flatten()
                 } else {
                     None
                 };
@@ -626,7 +645,13 @@ impl Renderer {
             #[cfg(unix)]
             {
                 let reset = if LIFECYCLE_DEST.load(Ordering::Acquire) == 0 {
-                    reset_bracketed_paste().err()
+                    let slot = TERMINAL_INPUT
+                        .lock()
+                        .unwrap_or_else(|error| error.into_inner());
+                    slot.as_ref()
+                        .filter(|input| input.handle == handle)
+                        .map(|input| reset_bracketed_paste(&input.fd).err())
+                        .flatten()
                 } else {
                     None
                 };
