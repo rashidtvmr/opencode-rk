@@ -1,5 +1,9 @@
 #![forbid(unsafe_code)]
 //! LANE-CI-FLAG frozen tests: CI mode end-to-end.
+//!
+//! Scenario A: valid JSONL ending with TurnFinished and exit 0.
+//! Scenario B: approval fails closed with exit 20, never auto-approved.
+//! Scenario C: identical runs produce identical JSONL after removing timestamps.
 
 #[path = "../src/ci_output.rs"]
 mod ci_output;
@@ -42,52 +46,70 @@ impl TestHome {
 }
 impl Drop for TestHome {
     fn drop(&mut self) {
-        if let Some(mut f) = self.fixture.get_mut().take() {
-            f.stop();
-        }
+        drop(self.fixture.get_mut().take());
         let _ = fs::remove_dir_all(&self.dir);
     }
 }
 struct FixtureResources {
-    stopping: Arc<AtomicBool>,
     daemon: Option<Child>,
 }
-impl FixtureResources {
-    fn stop(&mut self) {
-        self.stopping.store(true, Ordering::Release);
-        if let Some(mut c) = self.daemon.take() {
-            stop_child(&mut c);
+impl Drop for FixtureResources {
+    fn drop(&mut self) {
+        if let Some(mut child) = self.daemon.take() {
+            report_cleanup(stop_child(&mut child), "fixture daemon");
         }
     }
 }
-fn stop_child(c: &mut Child) {
-    if c.try_wait().ok().flatten().is_some() {
-        return;
-    }
-    let _ = c.kill();
-    let d = Instant::now() + Duration::from_secs(3);
-    while Instant::now() < d {
-        match c.try_wait() {
-            Ok(Some(_)) | Err(_) => return,
-            Ok(None) => thread::sleep(Duration::from_millis(10)),
+fn report_cleanup(result: std::io::Result<()>, resource: &str) {
+    if let Err(error) = result {
+        if thread::panicking() {
+            eprintln!("CI-mode {resource} failure cleanup: {error}");
+        } else {
+            panic!("CI-mode {resource} cleanup failed: {error}");
         }
     }
-    if !thread::panicking() {
-        panic!("owned child cleanup deadline");
+}
+fn stop_child(child: &mut Child) -> std::io::Result<()> {
+    if child.try_wait()?.is_some() {
+        return Ok(());
     }
+    child.kill()?;
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while child.try_wait()?.is_none() {
+        if Instant::now() >= deadline {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "owned child cleanup deadline",
+            ));
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    Ok(())
 }
 struct ChildGuard {
     child: Arc<Mutex<Child>>,
 }
 impl ChildGuard {
     fn wait(&mut self) -> std::io::Result<ExitStatus> {
-        let mut child = self.child.lock().unwrap();
-        child.wait()
+        let deadline = Instant::now() + DEADLINE;
+        loop {
+            if let Some(status) = self.child.lock().unwrap().try_wait()? {
+                return Ok(status);
+            }
+            if Instant::now() >= deadline {
+                stop_child(&mut self.child.lock().unwrap())?;
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "CI-mode child exit deadline",
+                ));
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
     }
 }
 impl Drop for ChildGuard {
     fn drop(&mut self) {
-        stop_child(&mut self.child.lock().unwrap());
+        report_cleanup(stop_child(&mut self.child.lock().unwrap()), "CI child");
     }
 }
 fn free_loopback_addr() -> String {
@@ -96,24 +118,32 @@ fn free_loopback_addr() -> String {
 struct StdoutReader {
     buffer: Arc<Mutex<Vec<u8>>>,
     child: Arc<Mutex<Child>>,
+    overflow: Arc<AtomicBool>,
+    read_failed: Arc<AtomicBool>,
     handle: Option<JoinHandle<()>>,
 }
 impl StdoutReader {
     fn spawn(mut pipe: impl Read + Send + 'static, child: Arc<Mutex<Child>>) -> Self {
         let b = Arc::new(Mutex::new(Vec::new()));
         let s = Arc::clone(&b);
+        let overflow = Arc::new(AtomicBool::new(false));
+        let read_failed = Arc::new(AtomicBool::new(false));
+        let worker_overflow = Arc::clone(&overflow);
+        let worker_failed = Arc::clone(&read_failed);
         let h = thread::spawn(move || {
             let mut x = [0; 4096];
             loop {
                 match pipe.read(&mut x) {
-                    Ok(0) | Err(_) => break,
+                    Ok(0) => break,
+                    Err(_) => {
+                        worker_failed.store(true, Ordering::Release);
+                        break;
+                    }
                     Ok(n) => {
                         let mut o = s.lock().unwrap();
                         let k = n.min(MAX.saturating_sub(o.len()));
                         o.extend_from_slice(&x[..k]);
-                        if k < n {
-                            break;
-                        }
+                        worker_overflow.fetch_or(k < n, Ordering::AcqRel);
                     }
                 }
             }
@@ -121,22 +151,45 @@ impl StdoutReader {
         Self {
             buffer: b,
             child,
+            overflow,
+            read_failed,
             handle: Some(h),
         }
     }
     fn text(&self) -> String {
-        String::from_utf8_lossy(&self.buffer.lock().unwrap()).into_owned()
+        String::from_utf8(self.buffer.lock().unwrap().clone()).expect("CI stdout UTF-8")
     }
     fn wait_for(&self, n: &str, t: Duration) -> String {
         let d = Instant::now() + t;
         loop {
-            let s = self.text();
-            if s.contains(n) {
-                return s;
+            let exited = self
+                .child
+                .lock()
+                .unwrap()
+                .try_wait()
+                .expect("poll CI child");
+            if exited.is_some() && self.handle.as_ref().unwrap().is_finished() {
+                assert!(
+                    !self.overflow.load(Ordering::Acquire),
+                    "CI output exceeded bound"
+                );
+                assert!(
+                    !self.read_failed.load(Ordering::Acquire),
+                    "CI stdout read failed"
+                );
+                let text = self.text();
+                assert!(
+                    text.contains(n),
+                    "expected {n:?} in complete CI stdout: {text}"
+                );
+                return text;
             }
             if Instant::now() >= d {
-                stop_child(&mut self.child.lock().unwrap());
-                panic!("timed out waiting for {n:?}; stdout so far:\n{s}")
+                stop_child(&mut self.child.lock().unwrap()).expect("reclaim timed-out CI child");
+                panic!(
+                    "timed out waiting for {n:?}; bounded stdout: {}",
+                    self.text()
+                );
             }
             thread::sleep(Duration::from_millis(25));
         }
@@ -145,8 +198,24 @@ impl StdoutReader {
 impl Drop for StdoutReader {
     fn drop(&mut self) {
         if let Some(h) = self.handle.take() {
-            stop_child(&mut self.child.lock().unwrap());
-            let _ = h.join();
+            let child_result = stop_child(&mut self.child.lock().unwrap());
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !h.is_finished() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            let reader_result = if !h.is_finished() {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "CI stdout join deadline",
+                ))
+            } else if h.join().is_err() || self.read_failed.load(Ordering::Acquire) {
+                Err(std::io::Error::other("CI stdout reader failed"))
+            } else if self.overflow.load(Ordering::Acquire) {
+                Err(std::io::Error::other("CI output exceeded bound"))
+            } else {
+                Ok(())
+            };
+            report_cleanup(child_result.and(reader_result), "stdout reader");
         }
     }
 }
@@ -155,17 +224,35 @@ struct ProviderTask {
     handle: Option<JoinHandle<()>>,
 }
 impl ProviderTask {
-    fn join(mut self) -> Result<(), ()> {
+    fn finish(&mut self) -> std::io::Result<()> {
         self.stop.store(true, Ordering::Release);
-        self.handle.take().unwrap().join().map_err(|_| ())
+        if let Some(handle) = self.handle.take() {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !handle.is_finished() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(10));
+            }
+            if !handle.is_finished() {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "provider join deadline",
+                ));
+            }
+            handle
+                .join()
+                .map_err(|_| std::io::Error::other("provider fixture panicked"))?;
+        }
+        Ok(())
+    }
+    fn join(mut self) -> Result<(), ()> {
+        self.finish()
+            .expect("CI-mode provider must finish without protocol or cleanup failures");
+        Ok(())
     }
 }
 impl Drop for ProviderTask {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
-        if let Some(h) = self.handle.take() {
-            let _ = h.join();
-        }
+        let result = self.finish();
+        report_cleanup(result, "provider");
     }
 }
 fn request(s: &mut TcpStream) -> Vec<u8> {
@@ -195,7 +282,7 @@ fn request(s: &mut TcpStream) -> Vec<u8> {
         }
     }
 }
-fn spawn_openai_fixture(home: &TestHome) -> (String, ProviderTask) {
+fn spawn_openai_fixture() -> (String, ProviderTask) {
     let l = TcpListener::bind("127.0.0.1:0").unwrap();
     let a = l.local_addr().unwrap();
     l.set_nonblocking(true).unwrap();
@@ -223,27 +310,56 @@ fn spawn_openai_fixture(home: &TestHome) -> (String, ProviderTask) {
                 (q.next(), q.next(), q.next()),
                 (Some("POST"), Some("/v1/responses"), Some("HTTP/1.1"))
             );
-            assert!(t[..e]
-                .to_ascii_lowercase()
-                .contains("authorization: bearer fixture-secret"));
+            assert!(
+                t[..e].lines().any(|line| {
+                    line.split_once(':').is_some_and(|(name, value)| {
+                        name.eq_ignore_ascii_case("authorization")
+                            && value.trim() == "Bearer fixture-secret"
+                    })
+                }),
+                "provider bearer mismatch"
+            );
             let j: serde_json::Value = serde_json::from_slice(&b[e + 4..]).unwrap();
-            assert_eq!(j["model"].as_str(), Some(MODEL));
+            assert_eq!(j["model"].as_str(), Some("gpt-5.6"));
             assert!(matches!(
                 j.get("stream"),
                 None | Some(serde_json::Value::Bool(false))
             ));
             assert!(
-                j.to_string().contains("say hi") || j.to_string().contains("determinism probe")
+                j["input"].as_array().is_some_and(|items| {
+                    items.last().is_some_and(|item| {
+                        item["role"] == "user"
+                            && matches!(
+                                item["content"].as_str(),
+                                Some("say hi" | "determinism probe")
+                            )
+                    })
+                }),
+                "provider prompt mismatch"
             );
+            assert!(!got, "provider received more than one request");
             let body=serde_json::json!({"id":"resp_fixture","status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"CI fixture response"}]}]}).to_string();
             let w=format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",body.len(),body);
             s.write_all(w.as_bytes()).unwrap();
             s.flush().unwrap();
-            assert!(!got, "provider received more than one request");
             got = true
         }
         assert!(got, "provider did not receive request")
     });
+    (
+        format!("http://{a}/v1"),
+        ProviderTask {
+            stop,
+            handle: Some(h),
+        },
+    )
+}
+
+fn start_daemon(home: &TestHome, extra: &[(&str, &str)]) -> (String, String) {
+    assert!(
+        home.fixture.borrow().is_none(),
+        "one daemon per CI-mode home"
+    );
     let m = home.path().join("models.json");
     fs::write(&m,r#"{"openai":{"name":"OpenAI","models":{"gpt-5.6":{"name":"GPT-5.6","tool_call":true,"reasoning":true,"limit":{"context":200000}}}}}"#).unwrap();
     let mut c = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
@@ -255,33 +371,54 @@ fn spawn_openai_fixture(home: &TestHome) -> (String, ProviderTask) {
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join("xdg-config"))
         .env("XDG_DATA_HOME", home.path().join("xdg-data"))
+        .env("XDG_STATE_HOME", home.path().join("xdg-state"))
         .env("XDG_CACHE_HOME", home.path().join("xdg-cache"))
-        .env("OPENAI_BASE_URL", format!("http://{a}/v1"))
-        .env("OPENAI_API_KEY", "fixture-secret")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    for &(key, value) in extra {
+        assert!(matches!(key, "OPENAI_BASE_URL" | "OPENAI_API_KEY"));
+        c.env(key, value);
+    }
     let c = c.spawn().unwrap();
-    home.fixture.borrow_mut().replace(FixtureResources {
-        stopping: Arc::clone(&stop),
-        daemon: Some(c),
-    });
+    let pid = c.id();
+    home.fixture
+        .borrow_mut()
+        .replace(FixtureResources { daemon: Some(c) });
     let p = home.path().join("runtime/backend.json");
     let d = Instant::now() + DEADLINE;
     loop {
-        if let Ok(b) = fs::read(&p) {
+        let alive = home
+            .fixture
+            .borrow_mut()
+            .as_mut()
+            .unwrap()
+            .daemon
+            .as_mut()
+            .unwrap()
+            .try_wait()
+            .expect("poll fixture daemon")
+            .is_none();
+        assert!(alive, "fixture daemon exited before readiness");
+        if let Ok(file) = File::open(&p) {
+            let mut b = Vec::new();
+            file.take(8193)
+                .read_to_end(&mut b)
+                .expect("bounded daemon descriptor read");
             assert!(b.len() <= 8192);
             if let Ok(v) = serde_json::from_slice::<serde_json::Value>(&b) {
                 let o = v["http_origin"].as_str();
                 let tok = v["auth_token"].as_str();
-                if o.is_some_and(|x| {
-                    x.starts_with("http://127.0.0.1:")
-                        && x.rsplit(':').next().unwrap().parse::<u16>().unwrap() != 0
-                }) && tok
-                    .is_some_and(|x| x.len() == 64 && x.bytes().all(|z| z.is_ascii_hexdigit()))
+                if v["pid"].as_u64() == Some(u64::from(pid))
+                    && o.is_some_and(|x| {
+                        x.strip_prefix("http://127.0.0.1:")
+                            .is_some_and(|port| port.parse::<u16>().is_ok_and(|port| port != 0))
+                    })
+                    && tok
+                        .is_some_and(|x| x.len() == 64 && x.bytes().all(|z| z.is_ascii_hexdigit()))
                 {
                     let o = o.unwrap().to_owned();
-                    let tok = tok.unwrap();
+                    let tok = tok.unwrap().to_owned();
                     let host = o.strip_prefix("http://").unwrap();
                     let mut s =
                         TcpStream::connect_timeout(&host.parse().unwrap(), Duration::from_secs(1))
@@ -294,13 +431,7 @@ fn spawn_openai_fixture(home: &TestHome) -> (String, ProviderTask) {
                     assert!(
                         r.len() <= MAX && String::from_utf8_lossy(&r).starts_with("HTTP/1.1 200")
                     );
-                    return (
-                        o,
-                        ProviderTask {
-                            stop,
-                            handle: Some(h),
-                        },
-                    );
+                    return (o, tok);
                 }
             }
         }
@@ -309,31 +440,28 @@ fn spawn_openai_fixture(home: &TestHome) -> (String, ProviderTask) {
     }
 }
 fn ci_command(home: &TestHome, _: &str, extra: &[(&str, &str)]) -> Command {
-    let b = fs::read(home.path().join("runtime/backend.json")).unwrap();
-    let v: serde_json::Value = serde_json::from_slice(&b).unwrap();
-    let o = v["http_origin"]
-        .as_str()
-        .unwrap()
+    let (origin, token) = start_daemon(home, extra);
+    let address = origin
         .strip_prefix("http://")
-        .unwrap();
-    let tok = v["auth_token"].as_str().unwrap();
+        .expect("loopback daemon origin");
     let mut c = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
-    c.args(["run", "--ci"])
-        .env_clear()
+    c.env_clear()
         .current_dir(home.path())
         .env("OPENCODE_RK_HOME", home.path())
         .env("HOME", home.path())
         .env("XDG_CONFIG_HOME", home.path().join("xdg-config"))
         .env("XDG_DATA_HOME", home.path().join("xdg-data"))
+        .env("XDG_STATE_HOME", home.path().join("xdg-state"))
         .env("XDG_CACHE_HOME", home.path().join("xdg-cache"))
-        .env("OPENCODE_RK_DAEMON_ADDR", o)
-        .env("OPENCODE_RK_DAEMON_TOKEN", tok)
+        .env("OPENCODE_RK_DAEMON_ADDR", address)
+        .env("OPENCODE_RK_DAEMON_TOKEN", token)
         .env("OPENCODE_RK_CI_MODEL", MODEL)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::null());
-    for (k, x) in extra {
-        c.env(k, x);
+    for &(key, value) in extra {
+        assert!(matches!(key, "OPENAI_BASE_URL" | "OPENAI_API_KEY"));
+        c.env(key, value);
     }
     c
 }

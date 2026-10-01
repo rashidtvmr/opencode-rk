@@ -47,3 +47,22 @@ the source-only suffix hash check above. No Cargo/build/runtime/network command
 was run as required. This is **CANDIDATE/source-prepared only**, not PREVERIFIED
 or ACCEPTED. Parent must run the focused nine-test gate on the exact candidate,
 then repeat it after integration.
+
+## Controller source review
+
+Worker preparation is preserved as normal commit
+`6eb99f1c8036b851f86cc95283e161227f70b415`. Review found that its helper changed
+the provider function signature while frozen callers still supply no home,
+duplicated `run --ci`, checked the qualified model on the provider wire, omitted
+descriptor PID equality, and could silently ignore a provider-thread panic.
+No runtime or compiler verification was claimed for that source-only attempt.
+
+The controller repaired only the helper region: the no-argument provider owns
+its thread immediately; `ci_command` starts and owns the authenticated daemon
+using the original caller's fake provider settings. The daemon descriptor is
+bounded before allocation, checked against the spawned PID and live child, and
+probed with its exact minted token. Child completion and complete stdout drain
+are bounded; output overflow/read failure and provider panic cannot pass through
+the original ignored join result. The provider checks actual unqualified
+`gpt-5.6` and the final user message. Both subprocess environments include all
+disposable HOME/XDG paths. The three frozen test bodies remain byte-identical.
