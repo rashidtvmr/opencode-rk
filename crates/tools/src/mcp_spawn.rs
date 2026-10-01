@@ -339,6 +339,10 @@ impl SpawnedServer {
 /// guards. Check order: id/caps shape caps first (`Bounds`), broker approval
 /// (`Denied`), endpoint SSRF screen (`SsrfBlocked`), then exactly one real
 /// spawn. Any early failure spawns no process and opens no socket.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "explicit capability, ownership, limits, and restart fields keep the bounded MCP spawn contract visible"
+)]
 pub async fn spawn_server(
     id: &str,
     endpoint: McpEndpoint,
@@ -421,6 +425,10 @@ pub fn check_endpoint_ssrf(url: &str, allow_loopback: bool) -> Result<(), SpawnE
 /// Argv-direct stdio spawn: policy-validated program, secrets filtered from
 /// env, `env_clear`, inherited handles closed (stdout piped, stderr null,
 /// stdin null), `kill_on_drop`. Exactly one `Command::spawn`.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "explicit capability, ownership, limits, and restart fields keep bounded process spawn auditable"
+)]
 async fn spawn_stdio_inner(
     id: &str,
     program: &str,

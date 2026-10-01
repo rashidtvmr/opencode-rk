@@ -132,7 +132,7 @@ pub fn bound_output(output: &str, budget: usize) -> (String, bool) {
     }
     let dropped = output.len() - end;
     let mut bounded = output[..end].to_owned();
-    bounded.push_str("\n");
+    bounded.push('\n');
     bounded.push_str(TRUNCATION_MARKER);
     bounded.push_str(&format!(" (dropped {dropped} bytes)"));
     (bounded, true)

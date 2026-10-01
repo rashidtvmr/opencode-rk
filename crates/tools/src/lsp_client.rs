@@ -37,7 +37,7 @@ pub const MAX_ROOT_BYTES: usize = 4096;
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(5);
 /// `ponytail:` full LSP needs initialize/handshake + notifications + progress
 /// tokens; add when a live turn path consumes this lane.
-
+///
 /// Broker authorization input: workspace root plus the LSP method about to
 /// run. Byte payloads are never attached, never logged.
 #[derive(Clone, PartialEq, Eq)]
@@ -278,7 +278,7 @@ fn parse_response(body: &str) -> Result<(u64, Option<String>), LspError> {
             let message = raw_field(rest, "message")
                 .and_then(|m| parse_string(m.trim_start()).map(|(m, _)| m.to_string()))
                 .unwrap_or_default();
-            if code < -32768 || code > 0 || message.len() > MAX_FRAME_BYTES {
+            if !(-32768..=0).contains(&code) || message.len() > MAX_FRAME_BYTES {
                 return Err(LspError::Malformed("bad-error".into()));
             }
             let message = if message.is_empty() {
@@ -314,7 +314,7 @@ fn parse_response(body: &str) -> Result<(u64, Option<String>), LspError> {
                 || rest.starts_with("true")
                 || rest.starts_with("false")
             {
-                let n = rest.find(|c| c == ',' || c == '}').unwrap_or(rest.len());
+                let n = rest.find([',', '}']).unwrap_or(rest.len());
                 Some(rest[..n].trim_end().to_string())
             } else {
                 return Err(LspError::Malformed("bad-result".into()));
@@ -332,7 +332,7 @@ pub fn drain_frames(buf: &mut Vec<u8>) -> Result<Vec<Vec<u8>>, LspError> {
         let header_end = buf
             .windows(4)
             .position(|w| w == b"\r\n\r\n")
-            .or_else(|| buf.windows(2).position(|w| w == b"\n\n").map(|p| p));
+            .or_else(|| buf.windows(2).position(|w| w == b"\n\n"));
         let Some(hend) = header_end else {
             break;
         };

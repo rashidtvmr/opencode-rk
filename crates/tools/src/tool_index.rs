@@ -148,7 +148,7 @@ pub fn lookup_file<'a>(snap: &'a Snapshot, path: &str) -> Option<&'a FileEntry> 
 /// Exact-name symbol lookup, sorted by (file, start_line).
 pub fn lookup_symbol<'a>(snap: &'a Snapshot, name: &str) -> Vec<&'a Symbol> {
     let mut hits: Vec<&'a Symbol> = snap.symbols.iter().filter(|s| s.name == name).collect();
-    hits.sort_by(|a, b| (a.file.clone(), a.start_line).cmp(&(b.file.clone(), b.start_line)));
+    hits.sort_by_key(|a| (a.file.clone(), a.start_line));
     hits
 }
 
@@ -571,7 +571,7 @@ impl Sha256 {
             0xc67178f2,
         ];
         let mut w = [0u32; 64];
-        for (i, chunk) in block.chunks_exact(4).enumerate().take(16) {
+        for (i, chunk) in block.chunks(4).enumerate().take(16) {
             w[i] = u32::from_be_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         }
         for i in 16..64 {
