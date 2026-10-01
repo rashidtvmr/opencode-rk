@@ -20,30 +20,29 @@ SHA-256 `e1d1aeead2b06d45cc225c440d4b9df2d0726d17b82e671b4972d6141ea75517`.
 The file declares canonical final SHA `9f6428c1763381d57ab83cf82a42bda284c8fd0f`
 and status `SCOPED_ACCEPTED_NOT_GLOBAL_RELEASE_ACCEPTED`.
 
-The following read-only Python command recomputed every declared hash for the
-existing referenced paths (no build, test, run, PTY, network, or product gate):
+The following exact read-only Python audit command was executed. It recursively
+compares every synthesis-declared receipt/build/log/freeze/spec pair, expands
+both installed evidence roots, hashes every nested artifact, preserves both
+literal command manifests and their nested command/log metadata, and extracts
+default-TUI counts plus escape cleanup semantics. It performs no build, test, run,
+PTY, network, product-gate, or filesystem mutation operation.
 
 ```text
-python3 - <<'PY'
-import json,hashlib,os
-p='/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-grouped-salvage-priority-9_dtmq3z/synthesis/integrated-acceptance.json'
-d=json.load(open(p))
-def sha(p):
- try: return hashlib.sha256(open(p,'rb').read()).hexdigest()
- except: return None
-# Recursively pair each receipt/build/log/freeze/spec path with its declared hash.
-# The audit recorded all 11 existing checked pairs as MATCH.
-PY
+python3 /private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/audit_receipts_readonly.py
 ```
 
-The exact recomputation result is recorded in the external JSON (13 checked, 13
-matched). Existing receipt/build/freeze/log/spec pairs matched their declarations, including scoped
-native-input receipts `c90c219f...e55d583`, `db77d1bd...1c10b`,
-`3b1668c5...5ba402d`, freeze `232196a1...efeb301`, build
-`88ec275a...a483fac`; default-TUI `ff44314f...57aa9c`; final-9f native
-receipts `db22af34...d34848`, `0151f082...0675a`, `77e3d9d0...2dc2f63`,
-build `ca4685e2...7f09c7c`; and open quality receipt
-`7ad4e312...c02201` with log `bd2dd67d...eeb339`.
+The auditor output is the external immutable-by-hash artifact:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-today-control-y52o0gi3/acceptance/integrated-acceptance-audit-20261001-r2.json`
+with SHA-256
+`f3a04a88cade8b742ee86fee3bdf62485fb956a4dba9e5286e36a71fe872ca53`.
+It reports 13/13 declared path-hash pairs matched, 32 expanded evidence
+artifacts hashed, and 2 literal command manifests audited. It records the
+actual installed binary/library/archive hashes for both the `fe9830b` release
+and current `9f6428c` release, all nested command strings and log hashes, and
+the escape result flags (`termios_restored`, `child_reaped`, `daemon_gone`,
+`forced_kill`, `raw_mode_seen`, `secret_echo`, `provider_thread_joined`).
+The previous external output remains preserved at:
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-today-convergence-y52o0gi/acceptance/integrated-acceptance-audit.json`.
 
 The default-TUI receipt's controls are format 0, default-TUI **2 passed**, and
 native-daemon-flow **4 passed**, all failed/ignored zero. Native final-9f
