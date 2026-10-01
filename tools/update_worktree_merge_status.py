@@ -132,10 +132,13 @@ def receipt_facts(repo: Path, root: Path | None, main: str) -> dict[str, str]:
                 nested = json.loads(Path(data["integrated_receipt"]).read_bytes())
             except (OSError, ValueError):
                 continue
-            if nested.get("source_sha") != integrated:
+            if nested.get("source_sha", nested.get("product_sha")) != integrated:
                 continue
             if any((item.get("exit") != 0 or item.get("timeout") or item.get("limit_failure"))
                    for item in nested.get("commands", []) if isinstance(item, dict)):
+                continue
+            result_path, result_sha = nested.get("result_path"), nested.get("result_sha256")
+            if result_path and (not isinstance(result_sha, str) or not os.path.isfile(result_path) or hashlib.sha256(Path(result_path).read_bytes()).hexdigest() != result_sha):
                 continue
         if data.get("quality_receipt"):
             try:
