@@ -71,7 +71,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       - name: Fetch external trusted provenance
-        run: gh run download "$PROVENANCE_RUN_ID" -n trusted-provenance.json -D "$RUNNER_TEMP" --repo "$GITHUB_REPOSITORY"
+        run: gh run download "$PROVENANCE_RUN_ID" -n mac-trusted-provenance.json -D "$RUNNER_TEMP" --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
           PROVENANCE_RUN_ID: ${{ inputs.provenance_run_id }}
@@ -110,7 +110,7 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       - name: Fetch external trusted provenance
-        run: gh run download "$PROVENANCE_RUN_ID" -n trusted-provenance.json -D "$RUNNER_TEMP" --repo "$GITHUB_REPOSITORY"
+        run: gh run download "$PROVENANCE_RUN_ID" -n web-trusted-provenance.json -D "$RUNNER_TEMP" --repo "$GITHUB_REPOSITORY"
         env:
           GH_TOKEN: ${{ github.token }}
           PROVENANCE_RUN_ID: ${{ inputs.provenance_run_id }}
