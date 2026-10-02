@@ -47,10 +47,30 @@ class GateError(RuntimeError):
     pass
 
 
-def load_manifest(path: pathlib.Path) -> dict:
+def load_manifest(path: pathlib.Path, source_sha: str) -> dict:
+    """Load and validate a concrete (already materialized) manifest.
+
+    Rejects template sentinels and stale cross-SHA binding.
+    """
     manifest = receipts.load_json(path)
-    receipts.validate_manifest(manifest["artifact_contract"])
+    if manifest.get("source_sha") == receipts.TEMPLATE_SHA:
+        raise GateError("stale/template sentinel passed as --manifest; use --manifest-template")
+    receipts.validate_materialized_manifest(manifest, source_sha)
     return manifest
+
+
+def load_template(path: pathlib.Path, source_sha: str, evidence: pathlib.Path) -> tuple[dict, pathlib.Path]:
+    """Materialize a tracked trusted template for the requested exact SHA.
+
+    The materialized concrete manifest is written exclusively (no overwrite).
+    """
+    concrete_path = evidence / "materialized-manifest.json"
+    try:
+        template = receipts.load_json(path)
+        manifest = receipts.materialize_template(template, source_sha, concrete_path)
+    except (receipts.ReceiptError, KeyError) as exc:
+        raise GateError(f"template materialization failed: {exc}") from exc
+    return manifest, concrete_path
 
 
 def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
@@ -101,6 +121,33 @@ def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
         receipts.validate_artifact_hashes(build, artifact_dir)
         receipts.validate_frozen_tests(build, root)
         args.artifact_sha = build["source_sha"]
+
+
+def validate_exact_source_root(root: pathlib.Path, source_sha: str) -> str:
+    """Bind execution to an actual, clean Git checkout at the requested SHA."""
+    if root.is_symlink() or not root.is_dir():
+        raise GateError("repo root must be a real directory, not a symlink")
+    dotgit = root / ".git"
+    if dotgit.is_symlink() or not dotgit.exists():
+        raise GateError("repo root must contain a non-symlink .git directory")
+    if not dotgit.is_dir():
+        raise GateError("repo root .git must be a directory")
+    def git(*argv: str) -> str:
+        try:
+            result = subprocess.run(["git", *argv], cwd=str(root), text=True,
+                                    capture_output=True, timeout=10, check=True)
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise GateError(f"unable to inspect repository: {exc}") from exc
+        if len(result.stdout) > 4096:
+            raise GateError("git output exceeds bound")
+        return result.stdout.strip()
+    head = git("rev-parse", "HEAD")
+    if head != source_sha:
+        raise GateError(f"repository HEAD {head} != requested source SHA {source_sha}")
+    status = git("status", "--porcelain=v1", "--untracked-files=all")
+    if status:
+        raise GateError("repository has dirty or untracked files")
+    return git("rev-parse", "HEAD^{tree}")
 
 
 def run_gate(label: str, command: list[str], cwd: pathlib.Path, env: dict,
@@ -235,6 +282,7 @@ def main() -> int:
     parser.add_argument("--platform", action="append", dest="platforms",
                         choices=["mac", "web", "ubuntu"], required=True)
     parser.add_argument("--artifact-dir", help="installed artifact dir with build.json (validated when given)")
+    parser.add_argument("--trusted-provenance", help="controller-issued build receipt outside artifact root")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-contract", action="store_true",
                       help="static validation only; no heavy platform gates")
@@ -244,12 +292,31 @@ def main() -> int:
     args = parser.parse_args()
     if args.tool_gates and "ubuntu" not in args.platforms:
         parser.error("--tool-gates applies only when --platform ubuntu is selected")
-    root = pathlib.Path(args.repo_root).resolve()
+    root_input = pathlib.Path(args.repo_root)
+    if root_input.is_symlink():
+        print("GATE CONTRACT FAIL: repo root must not be a symlink", file=sys.stderr, flush=True)
+        return 1
+    root = root_input.resolve()
     manifest_path = pathlib.Path(args.manifest)
     evidence = pathlib.Path(args.evidence_dir).resolve()
     try:
         if not SHA_RE.fullmatch(args.source_sha):
             raise GateError("source sha must be 40 hex characters")
+        tree_sha = validate_exact_source_root(root, args.source_sha)
+        if args.run and args.artifact_dir:
+            if not args.trusted_provenance:
+                raise GateError("--run with --artifact-dir requires trusted controller provenance")
+            provenance_path = pathlib.Path(args.trusted_provenance).resolve()
+            artifact_path = pathlib.Path(args.artifact_dir).resolve()
+            try:
+                provenance_path.relative_to(artifact_path)
+            except ValueError:
+                pass
+            else:
+                raise GateError("trusted provenance must be outside artifact root")
+            provenance = receipts.load_json(provenance_path)
+        else:
+            provenance = None
         receipts.reject_nonempty_dir(evidence)
         manifest = load_manifest(manifest_path)
         if not manifest.get("source_sha") or manifest["source_sha"] != args.source_sha:
@@ -258,6 +325,10 @@ def main() -> int:
                 "stale manifest reuse rejected"
             )
         check_contract(args, manifest, root)
+        if provenance is not None:
+            receipts.validate_trusted_provenance(
+                provenance, args.source_sha, tree_sha=tree_sha,
+                manifest=manifest, artifact_dir=pathlib.Path(args.artifact_dir).resolve())
         if args.tool_gates:
             ubuntu = manifest["platforms"].get("ubuntu", {})
             if not ubuntu.get("tool_gates"):
