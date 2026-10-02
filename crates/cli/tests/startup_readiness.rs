@@ -102,9 +102,7 @@ impl HttpFixture {
         let worker = thread::spawn(move || {
             while !worker_stop.load(Ordering::Acquire) {
                 match listener.accept() {
-                    Ok((mut stream, _)) => {
-                        serve_one(&mut stream, &worker_requests, health_status)
-                    }
+                    Ok((mut stream, _)) => serve_one(&mut stream, &worker_requests, health_status),
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(5));
                     }
@@ -151,7 +149,13 @@ impl HttpFixture {
             return false;
         };
         let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
-        if write!(stream, "GET /health HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", self.address).is_err() {
+        if write!(
+            stream,
+            "GET /health HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+            self.address
+        )
+        .is_err()
+        {
             return false;
         }
         let mut response = Vec::new();
@@ -200,18 +204,19 @@ fn serve_one(stream: &mut TcpStream, log: &Mutex<Vec<ObservedRequest>>, health_s
         name.eq_ignore_ascii_case("authorization")
             .then(|| value.trim().to_owned())
     });
-    log.lock()
-        .expect("request log lock")
-        .push(ObservedRequest {
-            path: path.clone(),
-            authorization: authorization.clone(),
-        });
+    log.lock().expect("request log lock").push(ObservedRequest {
+        path: path.clone(),
+        authorization: authorization.clone(),
+    });
 
     let (status, body) = if path == "/health" && health_status == 200 {
         ("200 OK", r#"{"status":"ok"}"#)
     } else if path == "/health" {
         ("503 Service Unavailable", r#"{"status":"unavailable"}"#)
-    } else if path.starts_with("/api/") && authorization.as_deref() == Some("Bearer ".to_owned() + &TEST_TOKEN.repeat(32)).as_deref() {
+    } else if path.starts_with("/api/")
+        && authorization.as_deref()
+            == Some("Bearer ".to_owned() + &TEST_TOKEN.repeat(32)).as_deref()
+    {
         ("200 OK", r#"{"sessions":[]}"#)
     } else {
         ("401 Unauthorized", r#"{"message":"unauthorized"}"#)
@@ -395,7 +400,9 @@ finally:
         }
         thread::sleep(Duration::from_millis(10));
     };
-    let output = child.wait_with_output().expect("collect bounded PTY driver output");
+    let output = child
+        .wait_with_output()
+        .expect("collect bounded PTY driver output");
     if status.code() == Some(90) {
         panic!(
             "infrastructure blocker: {}",
@@ -407,7 +414,10 @@ finally:
         "PTY driver failed: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert!(output.stdout.len() <= MAX_CAPTURE + 16, "outer PTY output bound");
+    assert!(
+        output.stdout.len() <= MAX_CAPTURE + 16,
+        "outer PTY output bound"
+    );
     let split = output
         .stdout
         .iter()
@@ -438,13 +448,25 @@ fn app017_t01_matching_descriptor_and_healthy_peer_attach_with_its_bearer() {
 
     let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
 
-    assert_eq!(code, 0, "real no-subcommand CLI should exit cleanly: {transcript}");
-    assert!(transcript.contains(&format!("daemon: {origin}")), "real chat attach banner: {transcript}");
-    assert!(!fixture.health_requests().is_empty(), "fixture must observe public readiness probe");
+    assert_eq!(
+        code, 0,
+        "real no-subcommand CLI should exit cleanly: {transcript}"
+    );
+    assert!(
+        transcript.contains(&format!("daemon: {origin}")),
+        "real chat attach banner: {transcript}"
+    );
+    assert!(
+        !fixture.health_requests().is_empty(),
+        "fixture must observe public readiness probe"
+    );
     assert_no_token_output(&transcript);
     assert_no_token_output(&driver_stderr);
     let api = fixture.api_requests();
-    assert!(!api.is_empty(), "the actual CLI must reach the fixture API after attach");
+    assert!(
+        !api.is_empty(),
+        "the actual CLI must reach the fixture API after attach"
+    );
     assert!(
         api.iter().all(|request| request.authorization.as_deref()
             == Some(format!("Bearer {}", TEST_TOKEN.repeat(32)).as_str())),
@@ -459,14 +481,26 @@ fn app017_t02_healthy_foreign_listener_without_descriptor_is_not_attached_or_kil
 
     let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
 
-    assert_eq!(code, 0, "foreign listener is a refusal, not a CLI crash: {transcript}");
+    assert_eq!(
+        code, 0,
+        "foreign listener is a refusal, not a CLI crash: {transcript}"
+    );
     assert!(
         !transcript.contains(&format!("daemon: {}", fixture.origin())),
         "public liveness alone must not yield an attached lease: {transcript}"
     );
-    assert!(!fixture.health_requests().is_empty(), "CLI must make a public health probe");
-    assert!(fixture.api_requests().is_empty(), "no descriptor means no API activity");
-    assert!(fixture.health_still_responds(), "refusal must leave the foreign listener alive");
+    assert!(
+        !fixture.health_requests().is_empty(),
+        "CLI must make a public health probe"
+    );
+    assert!(
+        fixture.api_requests().is_empty(),
+        "no descriptor means no API activity"
+    );
+    assert!(
+        fixture.health_still_responds(),
+        "refusal must leave the foreign listener alive"
+    );
     assert_no_token_output(&driver_stderr);
 }
 
@@ -499,8 +533,18 @@ fn app017_t03_bad_descriptor_shapes_never_authorize_foreign_api_requests() {
                 fs::create_dir_all(path.parent().expect("runtime parent")).expect("runtime dir");
                 fs::write(path, vec![b'x'; 8 * 1024 + 1]).expect("oversized descriptor");
             }
-            "schema-mismatch" => root.publish(&configured_origin, std::process::id(), &TEST_TOKEN.repeat(32), 77),
-            "origin-mismatch" => root.publish(&other.origin(), std::process::id(), &TEST_TOKEN.repeat(32), 1),
+            "schema-mismatch" => root.publish(
+                &configured_origin,
+                std::process::id(),
+                &TEST_TOKEN.repeat(32),
+                77,
+            ),
+            "origin-mismatch" => root.publish(
+                &other.origin(),
+                std::process::id(),
+                &TEST_TOKEN.repeat(32),
+                1,
+            ),
             "symlink" => {
                 let path = root.descriptor_path();
                 fs::create_dir_all(path.parent().expect("runtime parent")).expect("runtime dir");
@@ -525,12 +569,18 @@ fn app017_t03_bad_descriptor_shapes_never_authorize_foreign_api_requests() {
         }
 
         let (code, transcript, driver_stderr) = run_default_cli(&root, &configured.address);
-        assert_eq!(code, 0, "invalid descriptor {case} must fail closed: {transcript}");
+        assert_eq!(
+            code, 0,
+            "invalid descriptor {case} must fail closed: {transcript}"
+        );
         assert!(
             !transcript.contains(&format!("daemon: {configured_origin}")),
             "invalid descriptor {case} must not be presented as an attached daemon: {transcript}"
         );
-        assert!(!configured.health_requests().is_empty(), "CLI must probe configured health origin");
+        assert!(
+            !configured.health_requests().is_empty(),
+            "CLI must probe configured health origin"
+        );
         assert!(
             configured.api_requests().is_empty(),
             "invalid descriptor {case} must not authorize API requests"
@@ -578,20 +628,38 @@ fn app017_t07_wrong_owner_descriptor_is_refused_or_explicitly_classified_unsuppo
         eprintln!(
             "APP017 WRONG-OWNER UNSUPPORTED: effective user cannot chown its disposable descriptor; chat uses server::daemon owner gate, unit-covered at daemon.rs::rc02_foreign_owner_refused"
         );
-        assert!(fixture.health_still_responds(), "unsupported fixture leaves listener intact");
-        assert!(fixture.api_requests().is_empty(), "unsupported fixture sends no API requests");
+        assert!(
+            fixture.health_still_responds(),
+            "unsupported fixture leaves listener intact"
+        );
+        assert!(
+            fixture.api_requests().is_empty(),
+            "unsupported fixture sends no API requests"
+        );
         return;
     }
 
     let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
-    assert_eq!(code, 0, "wrong-owner descriptor must fail closed: {transcript}");
+    assert_eq!(
+        code, 0,
+        "wrong-owner descriptor must fail closed: {transcript}"
+    );
     assert!(
         !transcript.contains(&format!("daemon: {}", fixture.origin())),
         "wrong-owner descriptor must not establish an attached lease"
     );
-    assert!(!fixture.health_requests().is_empty(), "CLI must probe wrong-owner listener");
-    assert!(fixture.api_requests().is_empty(), "wrong-owner token must never authorize API traffic");
-    assert!(fixture.health_still_responds(), "wrong-owner refusal must not kill its listener");
+    assert!(
+        !fixture.health_requests().is_empty(),
+        "CLI must probe wrong-owner listener"
+    );
+    assert!(
+        fixture.api_requests().is_empty(),
+        "wrong-owner token must never authorize API traffic"
+    );
+    assert!(
+        fixture.health_still_responds(),
+        "wrong-owner refusal must not kill its listener"
+    );
     assert_no_token_output(&transcript);
     assert_no_token_output(&driver_stderr);
 }
@@ -609,14 +677,26 @@ fn app017_t06_non_200_public_health_never_yields_an_authenticated_lease() {
 
     let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
 
-    assert_eq!(code, 0, "failed health must be handled as startup failure: {transcript}");
+    assert_eq!(
+        code, 0,
+        "failed health must be handled as startup failure: {transcript}"
+    );
     assert!(
         !transcript.contains(&format!("daemon: {}", fixture.origin())),
         "non-200 readiness must not attach an authenticated lease"
     );
-    assert!(!fixture.health_requests().is_empty(), "CLI must receive the non-200 health response");
-    assert!(fixture.api_requests().is_empty(), "health failure must precede any API request");
-    assert!(fixture.health_still_responds(), "the pre-existing 503 listener must remain untouched");
+    assert!(
+        !fixture.health_requests().is_empty(),
+        "CLI must receive the non-200 health response"
+    );
+    assert!(
+        fixture.api_requests().is_empty(),
+        "health failure must precede any API request"
+    );
+    assert!(
+        fixture.health_still_responds(),
+        "the pre-existing 503 listener must remain untouched"
+    );
     assert_no_token_output(&transcript);
     assert_no_token_output(&driver_stderr);
 }
@@ -636,15 +716,23 @@ fn app017_t04_actual_spawn_waits_for_published_readiness_and_reaps_only_its_chil
     let (code, transcript, driver_stderr) = run_default_cli(&root, &address);
 
     assert_eq!(code, 0, "real child startup should complete: {transcript}");
-    assert!(transcript.contains("OpenCode RK"), "real chat startup banner observed: {transcript}");
-    assert!(root.descriptor_path().is_file(), "owned daemon published its descriptor");
+    assert!(
+        transcript.contains("OpenCode RK"),
+        "real chat startup banner observed: {transcript}"
+    );
+    assert!(
+        root.descriptor_path().is_file(),
+        "owned daemon published its descriptor"
+    );
     let descriptor: serde_json::Value = serde_json::from_slice(
         &fs::read(root.descriptor_path()).expect("read published descriptor"),
     )
     .expect("valid published descriptor");
     let pid = descriptor["pid"].as_u64().expect("published child PID") as u32;
     assert_ne!(pid, 0, "published daemon PID is positive");
-    let actual_bearer = descriptor["auth_token"].as_str().expect("serve-minted bearer");
+    let actual_bearer = descriptor["auth_token"]
+        .as_str()
+        .expect("serve-minted bearer");
     assert!(
         !transcript.contains(actual_bearer),
         "actual daemon bearer must not appear in PTY output"
@@ -662,7 +750,10 @@ fn app017_t04_actual_spawn_waits_for_published_readiness_and_reaps_only_its_chil
         if TcpStream::connect_timeout(&socket, Duration::from_millis(100)).is_err() {
             break;
         }
-        assert!(Instant::now() < deadline, "CLI exit must stop its owned daemon listener");
+        assert!(
+            Instant::now() < deadline,
+            "CLI exit must stop its owned daemon listener"
+        );
         thread::sleep(Duration::from_millis(20));
     }
 }
@@ -677,16 +768,31 @@ fn app017_t05_valid_existing_service_is_reused_without_descriptor_replacement() 
 
     let (code, transcript, driver_stderr) = run_default_cli(&root, &fixture.address);
 
-    assert_eq!(code, 0, "existing healthy daemon must be reusable: {transcript}");
-    assert!(transcript.contains(&format!("daemon: {origin}")), "existing service attach observed: {transcript}");
+    assert_eq!(
+        code, 0,
+        "existing healthy daemon must be reusable: {transcript}"
+    );
+    assert!(
+        transcript.contains(&format!("daemon: {origin}")),
+        "existing service attach observed: {transcript}"
+    );
     assert_eq!(
         fs::read(root.descriptor_path()).expect("descriptor after CLI exit"),
         before,
         "attach must not republish/replace the existing daemon descriptor"
     );
-    assert!(fixture.health_still_responds(), "attaching client must not stop a pre-existing service");
-    assert!(!fixture.health_requests().is_empty(), "fixture observed existing-service health probe");
-    assert!(!fixture.api_requests().is_empty(), "existing valid service saw real API requests");
+    assert!(
+        fixture.health_still_responds(),
+        "attaching client must not stop a pre-existing service"
+    );
+    assert!(
+        !fixture.health_requests().is_empty(),
+        "fixture observed existing-service health probe"
+    );
+    assert!(
+        !fixture.api_requests().is_empty(),
+        "existing valid service saw real API requests"
+    );
     assert_no_token_output(&transcript);
     assert_no_token_output(&driver_stderr);
 }
@@ -786,7 +892,11 @@ fn app017_t08_two_clients_reuse_one_live_authenticated_serve_daemon() {
     let deadline = Instant::now() + Duration::from_secs(10);
     let (descriptor_before, descriptor): (Vec<u8>, serde_json::Value) = loop {
         assert!(
-            serve.0.try_wait().expect("poll owned serve process").is_none(),
+            serve
+                .0
+                .try_wait()
+                .expect("poll owned serve process")
+                .is_none(),
             "real serve exited before becoming ready"
         );
         if let Ok(file) = fs::File::open(&descriptor_path) {
@@ -807,7 +917,10 @@ fn app017_t08_two_clients_reuse_one_live_authenticated_serve_daemon() {
                 }
             }
         }
-        assert!(Instant::now() < deadline, "real serve readiness exceeded 10 seconds");
+        assert!(
+            Instant::now() < deadline,
+            "real serve readiness exceeded 10 seconds"
+        );
         thread::sleep(Duration::from_millis(20));
     };
 
@@ -860,7 +973,11 @@ fn app017_t08_two_clients_reuse_one_live_authenticated_serve_daemon() {
             "real daemon bearer must not appear in client output or diagnostics"
         );
         assert!(
-            serve.0.try_wait().expect("poll owned serve after client").is_none(),
+            serve
+                .0
+                .try_wait()
+                .expect("poll owned serve after client")
+                .is_none(),
             "client {client_number} must not stop the separately-owned daemon"
         );
         assert!(

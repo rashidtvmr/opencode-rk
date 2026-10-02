@@ -5,9 +5,10 @@
 //! Pure, caller-owned, bounded. No I/O, clock, threads or provider calls.
 
 use opencode_rk_sessions::compaction::{
-    is_overflow, plan_prune, preserve_recent_budget, truncate_tool_output, usable_context, MessageRef,
-    PruneError, PrunePlan, Role, ToolPartRef, COMPACTION_BUFFER, MAX_PRESERVE_RECENT_TOKENS,
-    MIN_PRESERVE_RECENT_TOKENS, PRUNE_MINIMUM, PRUNE_PROTECT, TOOL_OUTPUT_MAX_CHARS,
+    is_overflow, plan_prune, preserve_recent_budget, truncate_tool_output, usable_context,
+    MessageRef, PruneError, PrunePlan, Role, ToolPartRef, COMPACTION_BUFFER,
+    MAX_PRESERVE_RECENT_TOKENS, MIN_PRESERVE_RECENT_TOKENS, PRUNE_MINIMUM, PRUNE_PROTECT,
+    TOOL_OUTPUT_MAX_CHARS,
 };
 
 fn tool(tool: &str, completed: bool, compacted: bool, tokens: u64) -> ToolPartRef {
@@ -53,7 +54,10 @@ fn p1_t01_upstream_constants_and_usable_overflow() {
     assert_eq!(MAX_PRESERVE_RECENT_TOKENS, 15_000);
 
     assert_eq!(usable_context(0, None, None, 32_000), 0);
-    assert_eq!(usable_context(200_000, Some(180_000), None, 32_000), 160_000);
+    assert_eq!(
+        usable_context(200_000, Some(180_000), None, 32_000),
+        160_000
+    );
     assert_eq!(usable_context(200_000, None, None, 32_000), 168_000);
     assert_eq!(
         usable_context(200_000, Some(180_000), Some(5_000), 32_000),

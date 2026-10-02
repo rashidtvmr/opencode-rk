@@ -216,12 +216,18 @@ mod tests {
         let value: String = "\u{00e9}".repeat(TOOL_OUTPUT_MAX_CHARS + 5);
         let out = truncate_tool_output(&value);
         assert!(out.ends_with("\n[truncated]"));
-        assert_eq!(out.chars().filter(|c| *c == '\u{00e9}').count(), TOOL_OUTPUT_MAX_CHARS);
+        assert_eq!(
+            out.chars().filter(|c| *c == '\u{00e9}').count(),
+            TOOL_OUTPUT_MAX_CHARS
+        );
     }
 
     #[test]
     fn preserve_recent_budget_boundaries() {
         assert_eq!(preserve_recent_budget(0, None), MIN_PRESERVE_RECENT_TOKENS);
-        assert_eq!(preserve_recent_budget(1_000_000, None), MAX_PRESERVE_RECENT_TOKENS);
+        assert_eq!(
+            preserve_recent_budget(1_000_000, None),
+            MAX_PRESERVE_RECENT_TOKENS
+        );
     }
 }
