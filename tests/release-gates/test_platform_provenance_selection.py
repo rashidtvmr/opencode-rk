@@ -40,12 +40,23 @@ def _download_selection(job: dict) -> tuple[dict, list[str]]:
     raise AssertionError("trusted provenance download step missing")
 
 
-def _selector(job: dict) -> tuple[str, str, str, str]:
+def _selector(job: dict) -> tuple[str, str, str]:
     env, argv = _download_selection(job)
     name = argv[argv.index("-n") + 1]
-    repo = argv[argv.index("--repo") + 1]
-    destination = argv[argv.index("-D") + 1]
-    return name, str(env["PROVENANCE_RUN_ID"]), str(env["GITHUB_REPOSITORY"]), destination
+    run_arg = argv[3]
+    repo_arg = argv[argv.index("--repo") + 1]
+
+    def resolve(expression: str, label: str) -> str:
+        if not expression.startswith("$") or expression[1:] not in env:
+            raise AssertionError(f"{label} must reference an environment variable")
+        value = str(env[expression[1:]])
+        if label == "run" and value != "${{ inputs.provenance_run_id }}":
+            raise AssertionError("run variable is not bound to provenance_run_id")
+        if label == "repository" and value not in ("${{ github.repository }}", "${{ inputs.repository }}"):
+            raise AssertionError("repository variable is not bound to controller repository")
+        return value
+
+    return name, resolve(run_arg, "run"), resolve(repo_arg, "repository")
 
 
 def _assert_distinct(a: dict, b: dict) -> None:
@@ -53,9 +64,8 @@ def _assert_distinct(a: dict, b: dict) -> None:
     # The same run and repository are allowed; the selected trusted payload must not be.
     if left == right:
         raise AssertionError("Mac and Web download the same trusted provenance selection")
-    if left[1:] == right[1:]:
-        if left[0] == right[0]:
-            raise AssertionError("Mac and Web share artifact name, run input, repository, and path")
+    if left[1:] == right[1:] and left[0] == right[0]:
+        raise AssertionError("Mac and Web share artifact name, run input, and repository")
 
 
 class PlatformProvenanceSelectionTests(unittest.TestCase):
@@ -82,6 +92,19 @@ class PlatformProvenanceSelectionTests(unittest.TestCase):
         job = {"steps": [{"run": 'gh run download "$PROVENANCE_RUN_ID" -n trusted-provenance.json -D "$RUNNER_TEMP" --repo "$GITHUB_REPOSITORY"', "env": env}]}
         with self.assertRaises(AssertionError):
             _assert_distinct(job, job)
+
+    def test_same_remote_selector_with_different_destination_is_rejected(self) -> None:
+        env = {"PROVENANCE_RUN_ID": "${{ inputs.provenance_run_id }}", "GITHUB_REPOSITORY": "${{ github.repository }}"}
+        def job(destination: str) -> dict:
+            return {"steps": [{"run": f'gh run download "$PROVENANCE_RUN_ID" -n trusted.json -D "{destination}" --repo "$GITHUB_REPOSITORY"', "env": env}]}
+        with self.assertRaises(AssertionError):
+            _assert_distinct(job("$RUNNER_TEMP/mac"), job("$RUNNER_TEMP/web"))
+
+    def test_missing_or_mismatched_run_binding_is_rejected(self) -> None:
+        env = {"OTHER_RUN": "${{ inputs.provenance_run_id }}", "GITHUB_REPOSITORY": "${{ github.repository }}"}
+        job = {"steps": [{"run": 'gh run download "$PROVENANCE_RUN_ID" -n mac.json -D "$RUNNER_TEMP" --repo "$GITHUB_REPOSITORY"', "env": env}]}
+        with self.assertRaises(AssertionError):
+            _selector(job)
 
     def test_validator_binds_platform_to_distinct_synthetic_receipts(self) -> None:
         source, tree = "a" * 40, "b" * 40
