@@ -24,7 +24,7 @@
       "tests/e2e/native_provider_setup.py": "32edfa5c0ac5eacef9cfa949e02fce0d3440fe1cd8f75580efb584bc0a7780dc",
       "tests/bootstrap/test_native_provider_auth_control.py": "f5b7dd3372b1d0aac4e285d16fb4295833854c8ab9b6ec836bacdb9205d8809d",
       "tests/e2e/native_interactive_pty.py": "51c37cfe066987ab94b3bba8e8496c7632a37902702e4caf571f8b1dc4ebc9b5",
-      "tests/e2e/native_bracketed_paste.py": "6b3c91db2240103c2aa3c13cd2b12831b6a3235891a553f5cd1d0f7d5a134526",
+      "tests/e2e/native_bracketed_paste.py": "144c7d17d771ed3ec6368a4ea8fd2892f02cd3a6a2b35f34690affb869fdb022",
       "tests/e2e/web_tool_journey_fixture.py": "1e473b89c947ef1edbe03cabf59c2111a84ffbd0ecfb0e357b53a52f2d71b89a"
     }
   },
