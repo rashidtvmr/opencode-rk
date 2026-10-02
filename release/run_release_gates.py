@@ -212,12 +212,23 @@ def run_platforms(args, manifest: dict, root: pathlib.Path, evidence: pathlib.Pa
                 raise GateError("--tool-gates requested but manifest ubuntu tool_gates absent")
             platform_gates += list(extra)
         gates = []
+        macros = {
+            "{root}": str(root), "{evidence}": str(evidence / name),
+            "{python}": sys.executable, "{artifact}": str(args.artifact_dir or ""),
+            "{sha}": args.source_sha, "{archive_sha256}": contract["archive_sha256"],
+            "{node}": args.node or "", "{playwright_preload}": args.playwright_preload or "",
+            "{browser_cache}": args.browser_cache or "", "{mac_cargo}": args.mac_cargo or "",
+            "{mac_home}": str(evidence / "mac" / "cargo-home"),
+            "{mac_cargo_home}": str(evidence / "mac" / "cargo-home"),
+            "{mac_target_dir}": str(evidence / "mac" / "cargo-target"),
+        }
         def expand(token: str) -> str:
-            return (token.replace("{root}", str(root))
-                        .replace("{evidence}", str(evidence / name))
-                        .replace("{python}", sys.executable)
-                        .replace("{artifact}", str(args.artifact_dir or ""))
-                        .replace("{sha}", args.source_sha))
+            result = token
+            for macro, value in macros.items():
+                result = result.replace(macro, value)
+            if "{" in result or "}" in result:
+                raise GateError(f"unknown or unresolved gate macro: {token}")
+            return result
 
         for gate in platform_gates:
             command = [expand(part) for part in gate["command"]]
@@ -264,6 +275,10 @@ def main() -> int:
     parser.add_argument("--artifact-dir", help="installed artifact dir with build.json (validated when given)")
     parser.add_argument("--trusted-provenance", help="controller-supplied provenance receipt (external to artifact)")
     parser.add_argument("--expected-receipt-digest", help="controller-supplied SHA-256 of trusted provenance")
+    parser.add_argument("--node", help="absolute existing Node executable for the web browser gate")
+    parser.add_argument("--playwright-preload", help="absolute owned Playwright preload file")
+    parser.add_argument("--browser-cache", help="absolute owned Playwright browser cache directory")
+    parser.add_argument("--mac-cargo", help="absolute existing Cargo executable for the Mac loader gate")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-contract", action="store_true",
                       help="static validation only; no heavy platform gates")
@@ -275,6 +290,22 @@ def main() -> int:
         parser.error("--tool-gates applies only when --platform ubuntu is selected")
     if args.run and len(args.platforms) != 1:
         parser.error("--run accepts exactly one platform")
+    if args.run and "web" in args.platforms:
+        for option, value in (("--node", args.node), ("--playwright-preload", args.playwright_preload),
+                              ("--browser-cache", args.browser_cache)):
+            if not value or not pathlib.Path(value).is_absolute():
+                parser.error(f"{option} must be an absolute existing capability")
+        if not pathlib.Path(args.node).is_file() or not os.access(args.node, os.X_OK):
+            parser.error("--node must be an existing executable")
+        if not pathlib.Path(args.playwright_preload).is_file():
+            parser.error("--playwright-preload must be an existing file")
+        if not pathlib.Path(args.browser_cache).is_dir():
+            parser.error("--browser-cache must be an existing directory")
+    if args.run and "mac" in args.platforms:
+        if not args.mac_cargo or not pathlib.Path(args.mac_cargo).is_absolute():
+            parser.error("--mac-cargo must be an absolute existing executable")
+        if not pathlib.Path(args.mac_cargo).is_file() or not os.access(args.mac_cargo, os.X_OK):
+            parser.error("--mac-cargo must be an existing executable")
     # Preserve the caller-supplied root identity until validate_git_source has
     # rejected symlink aliases.  Resolving here would erase that security
     # boundary and turn an alias into an apparently real repository root.

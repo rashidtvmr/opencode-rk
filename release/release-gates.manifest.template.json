@@ -25,7 +25,10 @@
       "tests/bootstrap/test_native_provider_auth_control.py": "f5b7dd3372b1d0aac4e285d16fb4295833854c8ab9b6ec836bacdb9205d8809d",
       "tests/e2e/native_interactive_pty.py": "51c37cfe066987ab94b3bba8e8496c7632a37902702e4caf571f8b1dc4ebc9b5",
       "tests/e2e/native_bracketed_paste.py": "144c7d17d771ed3ec6368a4ea8fd2892f02cd3a6a2b35f34690affb869fdb022",
-      "tests/e2e/web_tool_journey_fixture.py": "1e473b89c947ef1edbe03cabf59c2111a84ffbd0ecfb0e357b53a52f2d71b89a"
+      "tests/e2e/web_tool_journey_fixture.py": "d950994a50e9edd9b251c310c0c3a2f176774a509271158cc1343ffb8926a73e",
+      "tests/e2e/web_browser_gate.py": "ad890a6291482abe04739248f17e10974b603b27a677565a1f5810e0b4bcd988",
+      "tests/e2e/web_browser_journey.mjs": "f656201ff6fe7d8f474ee7bad5a8fa66a7e58b1f5e84e8c8a73625e9d5103b42",
+      "tests/e2e/ubuntu_installed_golden.py": "3a44106b1efc912575b6a7ccfd4f3888aa3a4dba204687f54e023ac9ecd09378"
     }
   },
   "platforms": {
@@ -41,7 +44,8 @@
         },
         {
           "label": "macos-loader",
-          "command": ["cargo", "test", "--offline", "--locked", "-p", "opencode-rk-cli", "--test", "macos_loader", "--", "--test-threads=1"],
+          "command": ["{mac_cargo}", "test", "--offline", "--locked", "-p", "opencode-rk-cli", "--test", "macos_loader", "--", "--test-threads=1"],
+          "env": {"OC2_NATIVE_BINARY": "{artifact}/install/bin/oc2", "MAC_OPENTUI_FIXTURE": "{artifact}/install/lib/libopentui.dylib", "HOME": "{mac_home}", "CARGO_HOME": "{mac_cargo_home}", "CARGO_TARGET_DIR": "{mac_target_dir}", "CARGO_BUILD_JOBS": "2", "RUST_TEST_THREADS": "1"},
           "timeout_seconds": 900,
           "requires": "installed Mach-O release binary attested by --artifact-dir build.json"
         },
@@ -65,7 +69,7 @@
         },
         {
           "label": "web-journey-real-router",
-          "command": ["{python}", "{root}/tests/e2e/web_tool_journey_fixture.py", "--binary", "{artifact}/install/bin/oc2", "--build-json", "{artifact}/build.json", "--artifact-dir", "{evidence}/journey"],
+          "command": ["{python}", "{root}/tests/e2e/web_browser_gate.py", "--source-sha", "{sha}", "--binary", "{artifact}/install/bin/oc2", "--build-json", "{artifact}/build.json", "--artifact-dir", "{evidence}/journey", "--node", "{node}", "--playwright-preload", "{playwright_preload}", "--browser-cache", "{browser_cache}"],
           "timeout_seconds": 660,
           "requires": "real Rust router/auth daemon (serve + backend.json descriptor + token); no Python re-enactment of product routes"
         }
@@ -78,9 +82,15 @@
       "gates": [
         {
           "label": "tool-contract-self-check",
-          "command": ["{python}", "{root}/release/verify-native-utf8.py", "--help"],
+          "command": ["{python}", "{root}/tests/e2e/ubuntu_installed_golden.py", "--archive", "{artifact}/oc2-linux-arm64.tar.gz", "--checksum", "{archive_sha256}", "--build-json", "{artifact}/build.json", "--artifact-dir", "{evidence}/ubuntu-installed-golden", "--expected-source-sha", "{sha}"],
           "timeout_seconds": 30,
           "notes": "retained runner invocation surface preserved (--sha/--source-name/--output-name/--tool-gates)"
+        },
+        {
+          "label": "ubuntu-installed-golden",
+          "command": ["{python}", "{root}/tests/e2e/ubuntu_installed_golden.py", "--archive", "{artifact}/oc2-linux-arm64.tar.gz", "--checksum", "{archive_sha256}", "--build-json", "{artifact}/build.json", "--artifact-dir", "{evidence}/ubuntu-installed-golden", "--expected-source-sha", "{sha}"],
+          "timeout_seconds": 900,
+          "requires": "real installed arm64 release archive and exact source/build bindings"
         }
       ],
       "tool_gates": [
