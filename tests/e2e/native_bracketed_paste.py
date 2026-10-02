@@ -325,6 +325,41 @@ def drain_exit_output(master, captures, screen, deadline):
     raise RuntimeError("timed out draining CLI exit output")
 
 
+def capture_until_child_exit(child, master, captures, screen, deadline):
+    """Observe output while the child is alive, then let the caller reap it.
+
+    A PTY can retain bytes written by the child until its slave closes.  Waiting
+    first loses those bytes on platforms where the master reports EOF as soon
+    as the last slave closes, so the bounded wait must service the master too.
+    This is deliberately only an observer: it never keeps the slave open or
+    changes the child lifecycle.
+    """
+    while child.poll() is None and time.monotonic() < deadline:
+        remaining = max(0, deadline - time.monotonic())
+        try:
+            ready, _, _ = select.select([master], [], [], min(.1, remaining))
+        except InterruptedError:
+            continue
+        if not ready:
+            continue
+        if len(captures) >= MAX_PTY:
+            raise RuntimeError("PTY capture bound reached while waiting for CLI exit")
+        try:
+            output = os.read(master, min(65536, MAX_PTY - len(captures)))
+        except (InterruptedError, BlockingIOError):
+            continue
+        except OSError as exc:
+            if exc.errno == 5 and child.poll() is not None:
+                return
+            raise RuntimeError("PTY read failed while waiting for CLI exit: %s" % exc)
+        if not output:
+            if child.poll() is not None:
+                return
+            raise RuntimeError("PTY EOF while waiting for CLI exit")
+        captures.extend(output)
+        screen.feed(output)
+
+
 def settle(master, captures, screen, seconds):
     """Drain PTY output for a bounded window; feeds screen, respects MAX_PTY."""
     deadline = time.monotonic() + seconds
@@ -560,7 +595,9 @@ def run(binary, library, manifest, artifacts):
         if child is not None and child.poll() is None:
             try:
                 send_fragments(master, b"\x03", delay=0)
-                child.wait(timeout=10)
+                reap_deadline = time.monotonic() + 10
+                capture_until_child_exit(child, master, captures, screen, reap_deadline)
+                child.wait(timeout=max(0, reap_deadline - time.monotonic()))
             except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                 semantic_error = semantic_error or "normal CLI reap failed: %s" % exc
                 forced_kill = True
