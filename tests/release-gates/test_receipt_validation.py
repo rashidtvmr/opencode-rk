@@ -613,7 +613,6 @@ class MultiPlatformRejection(unittest.TestCase):
             manifest["artifact_contract"]["source_sha"] = SHA
             manifest_path = pathlib.Path(td) / "manifest.json"
             manifest_path.write_text(json.dumps(manifest))
-
             evidence_dir = pathlib.Path(td) / "evidence"
             r = subprocess.run(
                 [sys.executable, str(DRIVER), "--source-sha", SHA,
@@ -637,6 +636,7 @@ class MultiPlatformRejection(unittest.TestCase):
                 "label": "marker", "command": [sys.executable, "-c", "from pathlib import Path; Path('marker').write_text('ran')"],
             }]
             (root / "release" / "release-gates.manifest.template.json").write_text(json.dumps(template))
+            (root / ".gitignore").write_text("release/release-gates.manifest.template.json\n__pycache__/\n")
             shutil.copy(ROOT / "release" / "receipts.py", root / "release" / "receipts.py")
             shutil.copy(ROOT / "release" / "run_release_gates.py", root / "release" / "run_release_gates.py")
             shutil.copy(ROOT / "release" / "verify-native-utf8.py", root / "release" / "verify-native-utf8.py")
@@ -644,9 +644,18 @@ class MultiPlatformRejection(unittest.TestCase):
                 dest = root / rel
                 dest.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(ROOT / rel, dest)
+            subprocess.run(["git", "init", "-q", str(root)], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.email", "r1@test"], check=True)
+            subprocess.run(["git", "-C", str(root), "config", "user.name", "R1"], check=True)
+            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
+            source_sha = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
+            tree = subprocess.check_output(
+                ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"], text=True).strip()
             manifest = template
-            manifest["source_sha"] = SHA
-            manifest["artifact_contract"]["source_sha"] = SHA
+            manifest["source_sha"] = source_sha
+            manifest["artifact_contract"]["source_sha"] = source_sha
             marker = root / "marker"
             manifest["platforms"]["mac"]["gates"] = [{
                 "label": "marker", "command": [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('ran')"],
@@ -661,17 +670,24 @@ class MultiPlatformRejection(unittest.TestCase):
             (art / "install/bin/oc2").write_bytes(b"BIN")
             (art / "install/lib/libopentui.dylib").write_bytes(b"LIB")
             (art / "oc2-macos-arm64.tar.gz").write_bytes(b"ARC")
-            build = {**manifest["artifact_contract"], "source_sha": SHA, "platform": "mac"}
+            build = {**manifest["artifact_contract"], "source_sha": source_sha, "platform": "mac"}
             build["binary_sha256"] = digest(art / "install/bin/oc2")
             build["native_library_sha256"] = digest(art / "install/lib/libopentui.dylib")
             build["archive_sha256"] = digest(art / "oc2-macos-arm64.tar.gz")
+            for key in ("binary_sha256", "native_library_sha256", "archive_sha256"):
+                manifest["artifact_contract"][key] = build[key]
+            manifest_path.write_text(json.dumps(manifest))
             (art / "build.json").write_text(json.dumps(build))
+            provenance = pathlib.Path(td) / "trusted-provenance.json"
+            provenance.write_text(json.dumps({**build, "tree": tree, "profile": "release", "native": True}))
             evidence_dir = pathlib.Path(td) / "evidence"
             r = subprocess.run(
-                [sys.executable, str(DRIVER), "--source-sha", SHA,
+                [sys.executable, str(DRIVER), "--source-sha", source_sha,
                  "--manifest", str(manifest_path), "--repo-root", str(root),
                  "--evidence-dir", str(evidence_dir),
-                 "--artifact-dir", str(art), "--platform", "mac", "--run"],
+                 "--artifact-dir", str(art), "--platform", "mac", "--run",
+                 "--trusted-provenance", str(provenance),
+                 "--expected-receipt-digest", digest(provenance)],
                 capture_output=True, text=True, timeout=10)
             self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
             self.assertTrue((root / "marker").is_file(), r.stdout + r.stderr)

@@ -11,6 +11,9 @@ on:
       artifact_run_id:
         description: Run id of the release-build job that produced build.json
         required: false
+      trusted_receipt_digest:
+        description: Controller-supplied SHA-256 for external trusted provenance receipt
+        required: false
 
 permissions:
   contents: read
@@ -56,9 +59,11 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       - name: Run frozen native paste-reset gate (exact SHA)
-        run: /usr/bin/python3 release/run_release_gates.py --source-sha "$SOURCE_SHA" --manifest "$RUNNER_TEMP/r1-mac-manifest.json" --evidence-dir "$RUNNER_TEMP/r1-mac" --artifact-dir "$RUNNER_TEMP/artifact" --platform mac --run
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+         run: /usr/bin/python3 release/run_release_gates.py --source-sha "$SOURCE_SHA" --manifest "$RUNNER_TEMP/r1-mac-manifest.json" --evidence-dir "$RUNNER_TEMP/r1-mac" --artifact-dir "$RUNNER_TEMP/artifact" --trusted-provenance "$TRUSTED_PROVENANCE" --expected-receipt-digest "$TRUSTED_RECEIPT_DIGEST" --platform mac --run
+         env:
+           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+           TRUSTED_PROVENANCE: ${{ runner.temp }}/trusted-provenance.json
+           TRUSTED_RECEIPT_DIGEST: ${{ inputs.trusted_receipt_digest }}
       - uses: actions/upload-artifact@5d5d22a31266ced26887403a3e7a1b2a4a8c88a0 # v4.3.4
         if: always()
         with:
@@ -86,9 +91,11 @@ jobs:
         env:
           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       - name: Run web journey gate (real Rust auth/router daemon)
-        run: /usr/bin/python3 release/run_release_gates.py --source-sha "$SOURCE_SHA" --manifest "$RUNNER_TEMP/r1-web-manifest.json" --evidence-dir "$RUNNER_TEMP/r1-web" --artifact-dir "$RUNNER_TEMP/artifact" --platform web --run
-        env:
-          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+         run: /usr/bin/python3 release/run_release_gates.py --source-sha "$SOURCE_SHA" --manifest "$RUNNER_TEMP/r1-web-manifest.json" --evidence-dir "$RUNNER_TEMP/r1-web" --artifact-dir "$RUNNER_TEMP/artifact" --trusted-provenance "$TRUSTED_PROVENANCE" --expected-receipt-digest "$TRUSTED_RECEIPT_DIGEST" --platform web --run
+         env:
+           SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+           TRUSTED_PROVENANCE: ${{ runner.temp }}/trusted-provenance.json
+           TRUSTED_RECEIPT_DIGEST: ${{ inputs.trusted_receipt_digest }}
       - uses: actions/upload-artifact@5d5d22a31266ced26887403a3e7a1b2a4a8c88a0 # v4.3.4
         if: always()
         with:

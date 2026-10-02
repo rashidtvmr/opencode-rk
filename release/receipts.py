@@ -16,6 +16,7 @@ import os
 import pathlib
 import re
 import tempfile
+import subprocess
 
 SHA40 = re.compile(r"[0-9a-f]{40}")
 SHA64 = re.compile(r"[0-9a-f]{64}")
@@ -23,6 +24,7 @@ TEMPLATE_SHA = "<SOURCE_SHA>"
 CREDENTIAL_KEY = re.compile(
     r"(API|AUTH|TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|SIGNING|NOTARY|APPLE_ID|AZURE)", re.I
 )
+MAX_JSON_BYTES = 2 * 1024 * 1024
 
 REQUIRED_MANIFEST_KEYS = (
     "source_sha",
@@ -47,6 +49,13 @@ def sha256_file(path: pathlib.Path) -> str:
 
 
 def load_json(path: pathlib.Path) -> dict:
+    if path.is_symlink():
+        raise ReceiptError(f"symlink JSON is not trusted: {path}")
+    try:
+        if path.stat().st_size > MAX_JSON_BYTES:
+            raise ReceiptError(f"JSON exceeds bounded size: {path}")
+    except FileNotFoundError:
+        pass
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError as exc:
@@ -56,6 +65,69 @@ def load_json(path: pathlib.Path) -> dict:
     if not isinstance(value, dict):
         raise ReceiptError(f"{path} must contain a JSON object")
     return value
+
+
+def git_output(root: pathlib.Path, *argv: str) -> str:
+    try:
+        return subprocess.check_output(["git", "-C", str(root), *argv],
+                                       text=True, stderr=subprocess.STDOUT,
+                                       timeout=10).strip()
+    except (OSError, subprocess.SubprocessError) as exc:
+        raise ReceiptError(f"git repository validation failed: {exc}") from exc
+
+
+def validate_git_source(root: pathlib.Path, source_sha: str, expected_tree: str | None = None) -> str:
+    """Validate the actual repository before any child gate is permitted."""
+    if root.is_symlink() or not root.is_dir():
+        raise ReceiptError("repo root must be a real directory")
+    dotgit = root / ".git"
+    if dotgit.is_symlink():
+        raise ReceiptError(".git symlink rejected")
+    actual_root = pathlib.Path(git_output(root, "rev-parse", "--show-toplevel")).resolve()
+    if actual_root != root.resolve():
+        raise ReceiptError("repo root differs from git worktree root")
+    if git_output(root, "rev-parse", "HEAD") != source_sha:
+        raise ReceiptError("stale HEAD: repository is not the requested source SHA")
+    tree = git_output(root, "rev-parse", "HEAD^{tree}")
+    if expected_tree is not None and tree != expected_tree:
+        raise ReceiptError("exact tree mismatch")
+    dirty = git_output(root, "status", "--porcelain=v1", "--untracked-files=all")
+    if dirty:
+        # Ignored build outputs are harmless; tracked changes and untracked source
+        # are not.  Explicitly inspect status rather than trusting a clean claim.
+        for line in dirty.splitlines():
+            if line.startswith("!! "):
+                continue
+            if line.startswith("?? ") and (line.endswith(".pyc") or "/__pycache__/" in line):
+                continue
+            raise ReceiptError("tracked or source-untracked worktree is dirty")
+    return tree
+
+
+def validate_trusted_provenance(path: pathlib.Path, expected_digest: str,
+                                source_sha: str, tree: str, platform: str,
+                                manifest: dict, artifact_dir: pathlib.Path | None = None) -> dict:
+    """Controller capability: artifact assertions never establish trust."""
+    if not SHA64.fullmatch(expected_digest):
+        raise ReceiptError("trusted receipt digest must be 64 hex characters")
+    if path.is_symlink() or (artifact_dir and path.resolve().is_relative_to(artifact_dir.resolve())):
+        raise ReceiptError("trusted provenance must be external and non-symlinked")
+    if sha256_file(path) != expected_digest:
+        raise ReceiptError("trusted receipt digest mismatch")
+    data = load_json(path)
+    required = ("source_sha", "tree", "platform", "profile", "native", "frozen_tests",
+                "runner_sha256", "binary_sha256", "native_library_sha256", "archive_sha256")
+    if any(k not in data for k in required):
+        raise ReceiptError("trusted provenance missing required controller fields")
+    if data["source_sha"] != source_sha or data["tree"] != tree or data["platform"] != platform:
+        raise ReceiptError("trusted provenance source/tree/platform mismatch")
+    if data["profile"] != "release" or data["native"] is not True:
+        raise ReceiptError("trusted provenance profile/native mismatch")
+    contract = manifest["artifact_contract"]
+    for key in ("frozen_tests", "runner_sha256", "binary_sha256", "native_library_sha256", "archive_sha256"):
+        if data[key] != contract[key]:
+            raise ReceiptError(f"trusted provenance {key} mismatch")
+    return data
 
 
 def validate_manifest(manifest: dict) -> None:

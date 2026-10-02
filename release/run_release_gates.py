@@ -262,6 +262,8 @@ def main() -> int:
     parser.add_argument("--platform", action="append", dest="platforms",
                         choices=["mac", "web", "ubuntu"], required=True)
     parser.add_argument("--artifact-dir", help="installed artifact dir with build.json (validated when given)")
+    parser.add_argument("--trusted-provenance", help="controller-supplied provenance receipt (external to artifact)")
+    parser.add_argument("--expected-receipt-digest", help="controller-supplied SHA-256 of trusted provenance")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-contract", action="store_true",
                       help="static validation only; no heavy platform gates")
@@ -281,6 +283,10 @@ def main() -> int:
             raise GateError("source sha must be 40 hex characters")
         receipts.reject_nonempty_dir(evidence)
         evidence.mkdir(parents=True, exist_ok=True)
+        if args.run:
+            if not args.trusted_provenance or not args.expected_receipt_digest:
+                raise GateError("--run requires explicit trusted provenance and expected receipt digest")
+            tree = receipts.validate_git_source(root, args.source_sha)
         if args.manifest_template:
             if args.run:
                 raise GateError("--manifest-template is allowed only with --check-contract")
@@ -303,6 +309,16 @@ def main() -> int:
                 raise GateError("--tool-gates requested but manifest ubuntu tool_gates absent")
         if args.run and args.artifact_dir is None:
             raise GateError("--run requires --artifact-dir")
+        if args.run:
+            selected = args.platforms[0]
+            try:
+                receipts.validate_trusted_provenance(
+                    pathlib.Path(args.trusted_provenance), args.expected_receipt_digest,
+                    args.source_sha, tree, selected, manifest,
+                    pathlib.Path(args.artifact_dir),
+                )
+            except receipts.ReceiptError as exc:
+                raise GateError(str(exc)) from exc
         if args.check_contract:
             # materialize_template already emitted this exact evidence once.
             if not (evidence / "materialized-manifest.json").is_file():
