@@ -759,22 +759,26 @@ pub fn discover_presence(data_dir: &std::path::Path) -> crate::app_start::Daemon
     }
 }
 
-/// Provider credential check: any non-empty provider env var counts as configured.
-pub fn creds_configured(_data_dir: &std::path::Path) -> Option<bool> {
-    const KEYS: &[&str] = &[
-        "OPENAI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "GOOGLE_API_KEY",
-        "GEMINI_API_KEY",
+/// Discover credential *presence* through the provider crate's bounded,
+/// redacting discovery API.  Models.dev metadata is deliberately not used as
+/// an authentication signal: an advertised model does not mean an account is
+/// configured.  The returned value contains no credential material.
+pub async fn creds_configured(_data_dir: &std::path::Path) -> Option<bool> {
+    const PROVIDERS: &[(&str, &str)] = &[
+        ("openai", "OPENAI_API_KEY"),
+        ("anthropic", "ANTHROPIC_API_KEY"),
+        ("google", "GOOGLE_API_KEY"),
+        ("gemini", "GEMINI_API_KEY"),
     ];
-    if KEYS
-        .iter()
-        .any(|k| std::env::var_os(k).is_some_and(|v| !v.is_empty()))
-    {
-        Some(true)
-    } else {
-        Some(false)
+    for &(provider, ambient) in PROVIDERS {
+        if opencode_rk_providers::persisted_auth::api_key(provider, ambient)
+            .await
+            .is_some()
+        {
+            return Some(true);
+        }
     }
+    Some(false)
 }
 
 /// One-shot startup election across concurrent launches. The first caller

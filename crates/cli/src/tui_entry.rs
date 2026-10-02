@@ -577,6 +577,7 @@ fn native_loop(
     memory: &[MemoryFile],
     live: Option<&LiveSnapshot>,
     auth: Option<&str>,
+    startup_view: Option<crate::app_start::StartupView>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cols, rows) = native_size();
     let mut renderer = NativeRenderer::create(cols, rows)?;
@@ -584,7 +585,11 @@ fn native_loop(
     let _ = renderer.enable_kitty_keyboard(1);
     renderer.set_title("OpenCode RK")?;
     let mut draft = String::new();
-    let mut dialog = native_setup::Dialog::None;
+    let mut dialog = if startup_view == Some(crate::app_start::StartupView::Setup) {
+        native_setup::Dialog::Provider
+    } else {
+        native_setup::Dialog::None
+    };
     let models = live
         .and_then(|snapshot| {
             http_request(
@@ -1066,6 +1071,7 @@ pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
 pub fn run_with_dir(
     mut args: TuiArgs,
     data_dir: Option<&Path>,
+    startup_view: Option<crate::app_start::StartupView>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let owned_data_dir;
     let effective_data_dir = match data_dir {
@@ -1142,7 +1148,7 @@ pub fn run_with_dir(
                 }
                 #[cfg(feature = "native")]
                 {
-                    return native_loop(&memory, Some(&snapshot), auth);
+                    return native_loop(&memory, Some(&snapshot), auth, startup_view);
                 }
                 #[cfg(not(feature = "native"))]
                 {
@@ -1176,7 +1182,7 @@ pub fn run_with_dir(
     }
     #[cfg(feature = "native")]
     {
-        native_loop(&memory, None, auth)
+        native_loop(&memory, None, auth, startup_view)
     }
     #[cfg(not(feature = "native"))]
     {

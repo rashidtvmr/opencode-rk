@@ -7,8 +7,9 @@
 //! states are explicit (`[offline]`, `[error]`), and nothing buffers without
 //! a cap.
 //!
-//! Daemon ownership rule: a daemon this process spawned is terminated on
-//! exit; a pre-existing daemon is left running. The default listen address
+//! Daemon ownership rule: a daemon this process spawned is owned by the
+//! per-data-directory service and survives client exit; a pre-existing daemon
+//! is left running. The default listen address
 //! is `127.0.0.1:4096`, overridable with `OPENCODE_RK_DAEMON_ADDR`.
 
 use std::{
@@ -77,10 +78,13 @@ pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
     chat.banner(&origin, attached);
     chat.bind_recent_session();
     let result = chat.loop_until_exit();
-    if let Some(mut child) = owned_daemon {
-        // Owned lifecycle: the auto-spawned daemon dies with this chat.
-        let _ = child.kill();
-        let _ = child.wait();
+    if let Some(child) = owned_daemon {
+        // The daemon is shared service state.  Reap only the child spawned by
+        // this invocation, without terminating it when this client exits.
+        std::thread::spawn(move || {
+            let mut child = child;
+            let _ = child.wait();
+        });
     }
     result
 }
@@ -95,18 +99,27 @@ pub struct DaemonLease {
 
 impl DaemonLease {
     pub fn close(mut self) {
-        if let Some(mut child) = self.owned.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(child) = self.owned.take() {
+            std::thread::spawn(move || {
+                let mut child = child;
+                let _ = child.wait();
+            });
         }
     }
 }
 
 impl Drop for DaemonLease {
     fn drop(&mut self) {
-        if let Some(mut child) = self.owned.take() {
-            let _ = child.kill();
-            let _ = child.wait();
+        if let Some(child) = self.owned.take() {
+            // The daemon is a service singleton, not a client child.  Move
+            // the handle to a bounded-lifetime reaper so dropping the client
+            // neither kills the shared daemon nor leaves a zombie behind.
+            // `Child` is the only process handle we ever reap here; a
+            // descriptor/PID from another origin is never acted upon.
+            std::thread::spawn(move || {
+                let mut child = child;
+                let _ = child.wait();
+            });
         }
     }
 }
@@ -518,7 +531,7 @@ fn reuse_credential(data_dir: &Path, probed_origin: &str, healthy: bool) -> Opti
 }
 
 /// Spawn `serve` from this same binary and wait for readiness. Returns the
-/// owned child process; the caller terminates it when the chat exits.
+/// owned child process; the service remains alive after this client exits.
 ///
 /// The child inherits this chat's data directory explicitly (`--data-dir`):
 /// `serve` resolves its HOME/descriptor from it (`main.rs:resolve_data_dir`),
@@ -543,21 +556,21 @@ fn spawn_daemon(addr: &str, data_dir: &Path) -> Option<Child> {
         .stderr(Stdio::null())
         .spawn()
         .ok()?;
-    let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    loop {
-        if probe_daemon(&daemon_origin(addr)) {
-            return Some(child);
+    // Keep the frozen startup bound: at most 200 probes, 10ms apart.
+    for _ in 0..200 {
+        loop {
+            if probe_daemon(&daemon_origin(addr)) {
+                return Some(child);
+            }
+            if let Ok(Some(_status)) = child.try_wait() {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
         }
-        if let Ok(Some(_status)) = child.try_wait() {
-            return None;
-        }
-        if std::time::Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return None;
-        }
-        std::thread::sleep(Duration::from_millis(100));
     }
+    let _ = child.kill();
+    let _ = child.wait();
+    None
 }
 
 /// Bounded std-only HTTP/1.1 request. Returns `(status, body)` with the body

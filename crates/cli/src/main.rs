@@ -227,7 +227,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             };
             let data = resolve_data_dir(cli.data_dir)?;
             let presence = daemon_client::discover_presence(&data);
-            let creds = daemon_client::creds_configured(&data);
+            let creds = daemon_client::creds_configured(&data).await;
             let plan = app_start::plan_default_launch(&probe, presence, creds);
             match plan.mode {
                 app_start::LaunchMode::NativeTui => {
@@ -242,7 +242,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                             submit_keymap: None,
                             memory: vec![],
                         };
-                        tui_entry::run_with_dir(args, Some(&data))?;
+                        tui_entry::run_with_dir(args, Some(&data), plan.view)?;
                     } else {
                         chat::run(&data)?;
                     }
@@ -281,7 +281,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
             // typed data-dir channel: its descriptor lookup honors
             // OPENCODE_RK_HOME first, so an explicit --data-dir applies.
             std::env::set_var("OPENCODE_RK_HOME", &data);
-            tui_entry::run_with_dir(args, Some(&data))?;
+            tui_entry::run_with_dir(args, Some(&data), None)?;
         }
         Some(Command::Run(args)) => {
             // Prompt via positional or --prompt; absent only matters for usage
