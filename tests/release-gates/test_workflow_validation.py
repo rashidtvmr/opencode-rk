@@ -49,6 +49,17 @@ def expression_input(value: object) -> Optional[str]:
     return match.group(1) if match else None
 
 
+def checkout_source_input(value: object) -> Optional[str]:
+    if expression_input(value) == "source_sha":
+        return "source_sha"
+    if re.fullmatch(
+        r"\s*\$\{\{\s*inputs\.source_sha\s*\|\|\s*github\.sha\s*}}\s*",
+        str(value),
+    ):
+        return "source_sha"
+    return None
+
+
 def shell_variable(command: str, option: str) -> Optional[str]:
     match = re.search(rf"{re.escape(option)}\s+['\"]?\$([A-Za-z_][A-Za-z0-9_]*)", command)
     return match.group(1) if match else None
@@ -62,7 +73,7 @@ def explicit_repository(command: str) -> bool:
     return re.search(r"(?:--repo|-R)\s+[^\s]+", command) is not None
 
 
-def valid_control_workflow() -> str:
+def valid_control_workflow(source_ref: str = "${{ inputs.source_sha }}") -> str:
     return """name: control
 on:
   workflow_dispatch:
@@ -93,7 +104,7 @@ jobs:
     steps:
       - uses: actions/checkout@1111111111111111111111111111111111111111
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: SOURCE_REF
       - name: Download build artifact
         run: gh run download "$ARTIFACT_RUN_ID" -n macos-arm64-release -D "$RUNNER_TEMP/artifact" --repo "$GITHUB_REPOSITORY"
         env:
@@ -115,7 +126,7 @@ jobs:
     steps:
       - uses: actions/checkout@2222222222222222222222222222222222222222
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: SOURCE_REF
       - name: Download build artifact
         run: gh run download "$ARTIFACT_RUN_ID" -n linux-x64-release -D "$RUNNER_TEMP/artifact" --repo "$GITHUB_REPOSITORY"
         env:
@@ -131,7 +142,7 @@ jobs:
         env:
           TRUSTED_PROVENANCE: ${{ runner.temp }}/trusted-provenance.json
           TRUSTED_RECEIPT_DIGEST: ${{ inputs.web_receipt_digest }}
-"""
+""".replace("SOURCE_REF", source_ref)
 
 
 class ReleaseWorkflowValidationTests(unittest.TestCase):
@@ -200,16 +211,37 @@ jobs:
         control = valid_control_workflow()
         parsed = parse_yaml(control)
         self.assertEqual(parsed["name"], "control")
-        with tempfile.TemporaryDirectory() as temp_dir:
-            workflow_path = Path(temp_dir) / "release-gates.yml"
-            workflow_path.write_text(control, encoding="utf-8")
-            with patch(__name__ + ".WORKFLOW", workflow_path):
-                parser = ReleaseWorkflowValidationTests()
-                parser.test_real_workflow_parses_as_yaml_and_has_github_actions_shape()
-                parser.test_dispatch_requires_build_and_independent_provenance_run_ids()
-                parser.test_platform_digest_inputs_are_distinct_required_controller_values()
-                parser.test_mac_and_web_download_build_artifacts_from_explicit_repository()
-                parser.test_each_runtime_gate_downloads_external_provenance_before_run()
+        controls = (
+            control,
+            valid_control_workflow("${{ inputs.source_sha || github.sha }}"),
+        )
+        for fixture in controls:
+            with self.subTest(source_ref=fixture.split("ref: ", 1)[1].splitlines()[0]):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    workflow_path = Path(temp_dir) / "release-gates.yml"
+                    workflow_path.write_text(fixture, encoding="utf-8")
+                    with patch(__name__ + ".WORKFLOW", workflow_path):
+                        parser = ReleaseWorkflowValidationTests()
+                        parser.test_real_workflow_parses_as_yaml_and_has_github_actions_shape()
+                        parser.test_dispatch_requires_build_and_independent_provenance_run_ids()
+                        parser.test_platform_digest_inputs_are_distinct_required_controller_values()
+                        parser.test_mac_and_web_download_build_artifacts_from_explicit_repository()
+                        parser.test_each_runtime_gate_downloads_external_provenance_before_run()
+        for invalid_ref in (
+            "refs/heads/main",
+            "${{ github.sha }}",
+            "${{ inputs.other_sha }}",
+            "${{ inputs.source_sha || github.ref }}",
+            "${{ inputs.source_sha || 'release' }}",
+            "prefix-${{ inputs.source_sha }}",
+        ):
+            with self.subTest(invalid_checkout_ref=invalid_ref):
+                with tempfile.TemporaryDirectory() as temp_dir:
+                    workflow_path = Path(temp_dir) / "release-gates.yml"
+                    workflow_path.write_text(valid_control_workflow(invalid_ref), encoding="utf-8")
+                    with patch(__name__ + ".WORKFLOW", workflow_path):
+                        with self.assertRaises(AssertionError):
+                            ReleaseWorkflowValidationTests().test_each_runtime_gate_downloads_external_provenance_before_run()
 
     def test_dispatch_requires_build_and_independent_provenance_run_ids(self) -> None:
         document = self.load_workflow()
@@ -299,7 +331,7 @@ jobs:
         for platform, job_name in (("mac", "mac-native"), ("web", "web-journey")):
             steps = document["jobs"][job_name]["steps"]
             self.assertEqual(
-                expression_input(steps[0].get("with", {}).get("ref")), "source_sha",
+                checkout_source_input(steps[0].get("with", {}).get("ref")), "source_sha",
                 f"{platform} gates must check out exact dispatched SHA",
             )
             run_indexes = [
