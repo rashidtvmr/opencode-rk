@@ -1394,3 +1394,129 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
+
+#[cfg(test)]
+mod d1_real_discovery_auth {
+    //! D1: real end-to-end discovery+auth. Publishes a live descriptor via
+    //! `server::daemon::publish_backend_descriptor_with_auth`, discovers it
+    //! through the module-private `discover_from_path`, then exercises the
+    //! actual `router_with_auth` app over a real TCP connection with raw
+    //! HTTP (no tower fake): discovered bearer => 200, missing => 401,
+    //! distinct minted wrong => 403.
+    use super::discover_from_path;
+    use opencode_rk_catalog::Catalog;
+    use opencode_rk_server::{
+        daemon::{publish_backend_descriptor_with_auth, DaemonPaths},
+        daemon_auth::DaemonAuth,
+        router_with_auth, AppState,
+    };
+    use opencode_rk_sessions::SessionService;
+    use opencode_rk_storage::Storage;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    /// Bounded raw HTTP GET over real TCP: `Connection: close`, 64KiB cap,
+    /// overall timeout. Returns the response status code.
+    async fn raw_get_status(addr: std::net::SocketAddr, bearer: Option<&str>) -> u16 {
+        let request = format!(
+            "GET /api/sessions HTTP/1.1\r\nHost: {addr}\r\n{}\r\nConnection: close\r\n\r\n",
+            bearer.map_or_else(String::new, |t| format!("Authorization: Bearer {t}"))
+        );
+        let bytes = tokio::time::timeout(Duration::from_secs(5), async move {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let mut stream = tokio::net::TcpStream::connect(addr).await?;
+            stream.write_all(request.as_bytes()).await?;
+            let mut buf = Vec::new();
+            let mut chunk = [0u8; 8192];
+            loop {
+                let n = stream.read(&mut chunk).await?;
+                if n == 0 {
+                    break;
+                }
+                buf.extend_from_slice(&chunk[..n]);
+                if buf.len() > 64 * 1024 {
+                    return Err(std::io::Error::other("response exceeds 64KiB cap"));
+                }
+            }
+            Ok::<Vec<u8>, std::io::Error>(buf)
+        })
+        .await
+        .expect("raw request timed out")
+        .expect("raw io");
+        let text = String::from_utf8_lossy(&bytes);
+        let status_line = text.lines().next().expect("status line");
+        status_line
+            .split_whitespace()
+            .nth(1)
+            .expect("status code")
+            .parse()
+            .expect("numeric status")
+    }
+
+    #[tokio::test]
+    async fn real_descriptor_discovery_and_bearer_enforcement() {
+        let root = std::env::temp_dir().join(format!(
+            "d1_real_disc_auth_{}_{}",
+            std::process::id(),
+            "t01"
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).expect("temp root");
+
+        let auth = DaemonAuth::mint().expect("mint");
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let addr = listener.local_addr().expect("local addr");
+
+        // Disposable app state (pattern from server/tests/discovery_auth_red.rs).
+        let storage = Storage::open_in_memory(root.join("blobs")).expect("storage");
+        let app = router_with_auth(
+            AppState {
+                sessions: SessionService::new(Arc::new(storage)),
+                catalog: Arc::new(Catalog::default()),
+            },
+            Some(auth.clone()),
+        );
+        let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+        let serve = tokio::spawn(async move {
+            axum::serve(listener, app)
+                .with_graceful_shutdown(async {
+                    let _ = rx.await;
+                })
+                .await
+                .expect("serve");
+        });
+
+        let descriptor = publish_backend_descriptor_with_auth(&root, addr, auth.token().to_owned())
+            .expect("publish");
+
+        let paths = DaemonPaths::for_data_dir(&root);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::{MetadataExt, PermissionsExt};
+            let meta = std::fs::symlink_metadata(&paths.descriptor).expect("stat");
+            assert_eq!(meta.permissions().mode() & 0o777, 0o600, "0600");
+            let uid = meta.uid();
+            let pid = std::process::id();
+            assert_eq!(descriptor.pid, pid, "published pid is current");
+            let found = discover_from_path(&paths.descriptor, uid, |p| p == pid)
+                .expect("own live descriptor must discover");
+            assert_eq!(found.descriptor.http_origin, format!("http://{addr}"));
+            assert_eq!(found.auth_token, auth.token().to_owned());
+        }
+
+        assert_eq!(raw_get_status(addr, Some(auth.token())).await, 200);
+        assert_eq!(raw_get_status(addr, None).await, 401);
+        let wrong = DaemonAuth::mint().expect("mint wrong");
+        assert_ne!(wrong.token(), auth.token());
+        assert_eq!(raw_get_status(addr, Some(wrong.token())).await, 403);
+
+        tx.send(()).expect("shutdown signal");
+        tokio::time::timeout(Duration::from_secs(5), serve)
+            .await
+            .expect("serve shutdown")
+            .expect("serve join");
+        std::fs::remove_dir_all(&root).expect("cleanup temp root");
+    }
+}
