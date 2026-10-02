@@ -51,6 +51,7 @@ pub mod repo_ops;
 pub mod route_table;
 pub mod rules_globs;
 pub mod rules_loader;
+pub mod run_owner;
 pub mod runtime_wiring;
 pub mod sdk_client;
 pub mod sdk_spawns;
@@ -82,7 +83,7 @@ use axum::{
     routing::{delete, get, post},
     Json, Router,
 };
-use futures_util::stream;
+use futures_util::{stream, StreamExt};
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
@@ -103,68 +104,12 @@ use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use std::{
-    convert::Infallible,
-    path::PathBuf,
-    str::FromStr,
-    sync::{Arc, Mutex},
+use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
+
+use run_owner::{
+    ApprovedPermission, PendingPermissionGuard, PermissionReply, PermissionRequest,
+    PermissionSource, RunOwner, TurnExecutionPermit,
 };
-use tokio::sync::{Semaphore, SemaphorePermit};
-
-const MAX_ACTIVE_TURNS: usize = 2;
-static TURN_PERMITS: Semaphore = Semaphore::const_new(MAX_ACTIVE_TURNS);
-static ACTIVE_SESSION_TURNS: Mutex<[Option<SessionId>; MAX_ACTIVE_TURNS]> =
-    Mutex::new([None; MAX_ACTIVE_TURNS]);
-
-/// Owns one session execution and its existing process-wide capacity slot.
-///
-/// Admission is nonblocking and precedes provider access and durable input.
-/// The fixed registry has no queue, and its short critical sections never span
-/// an await. Streaming responses retain this guard until their body is dropped.
-struct TurnExecutionPermit {
-    _global: SemaphorePermit<'static>,
-    session_id: SessionId,
-}
-
-impl TurnExecutionPermit {
-    fn acquire(session_id: SessionId) -> Result<Self, ApiFailure> {
-        let global = TURN_PERMITS
-            .try_acquire()
-            .map_err(|_| ApiFailure::too_many_requests("too many active turns"))?;
-        let mut active = ACTIVE_SESSION_TURNS
-            .lock()
-            .map_err(|_| ApiFailure::internal("turn ownership registry unavailable"))?;
-        if active.contains(&Some(session_id)) {
-            return Err(ApiFailure::too_many_requests(
-                "session already has an active turn",
-            ));
-        }
-        let slot = active
-            .iter_mut()
-            .find(|slot| slot.is_none())
-            .ok_or_else(|| ApiFailure::too_many_requests("too many active turns"))?;
-        *slot = Some(session_id);
-        Ok(Self {
-            _global: global,
-            session_id,
-        })
-    }
-}
-
-impl Drop for TurnExecutionPermit {
-    fn drop(&mut self) {
-        // Reclaim an owned slot even if an earlier admission panicked while
-        // holding the mutex; subsequent admissions still fail closed on poison.
-        let mut active = ACTIVE_SESSION_TURNS
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        for slot in active.iter_mut() {
-            if *slot == Some(self.session_id) {
-                *slot = None;
-            }
-        }
-    }
-}
 
 #[derive(Clone)]
 pub struct AppState {
@@ -233,6 +178,15 @@ pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) 
         .route("/api/sessions/{id}/fork", get(get_fork_provenance))
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
+        .route("/api/session/{id}/interrupt", post(interrupt_session))
+        .route(
+            "/api/session/{id}/permission",
+            get(list_session_permissions),
+        )
+        .route(
+            "/api/session/{id}/permission/{request_id}/reply",
+            post(reply_session_permission),
+        )
         .fallback(web_assets::serve)
         .with_state(state);
     match auth {
@@ -268,6 +222,95 @@ async fn save_provider_auth(
         .map_err(ApiFailure::internal)?;
     Ok(Json(json!(true)))
 }
+async fn interrupt_session(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<StatusCode, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    state.sessions.get(id).await.map_err(|error| {
+        if error.to_string().contains("session not found") {
+            ApiFailure::not_found(error.to_string())
+        } else {
+            ApiFailure::internal(error)
+        }
+    })?;
+    run_owner::cancel_and_wait(id).await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn list_session_permissions(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    state.sessions.get(id).await.map_err(|error| {
+        if error.to_string().contains("session not found") {
+            ApiFailure::not_found(error.to_string())
+        } else {
+            ApiFailure::internal(error)
+        }
+    })?;
+    let data = run_owner::active(id)
+        .and_then(|owner| owner.pending())
+        .into_iter()
+        .collect::<Vec<_>>();
+    Ok(Json(json!({"data":data})))
+}
+
+#[derive(Deserialize)]
+struct PermissionReplyBody {
+    reply: String,
+    message: Option<String>,
+}
+
+async fn reply_session_permission(
+    Path((id, request_id)): Path<(String, String)>,
+    State(state): State<AppState>,
+    Json(body): Json<PermissionReplyBody>,
+) -> Result<StatusCode, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    state.sessions.get(id).await.map_err(|error| {
+        if error.to_string().contains("session not found") {
+            ApiFailure::not_found(error.to_string())
+        } else {
+            ApiFailure::internal(error)
+        }
+    })?;
+    let Some(owner) = run_owner::active(id) else {
+        return Err(ApiFailure::not_found("permission request not found"));
+    };
+    let Some(pending) = owner.pending() else {
+        return Err(ApiFailure::not_found("permission request not found"));
+    };
+    if pending.id != request_id || pending.session_id != id.to_string() {
+        return Err(ApiFailure::not_found("permission request not found"));
+    }
+    match body.reply.as_str() {
+        "once" => {
+            if !owner.reply_once(&request_id) {
+                return Err(ApiFailure::not_found("permission request not found"));
+            }
+        }
+        "always" => {
+            if !owner.reply_always(&request_id, pending.action, pending.resources[0].clone()) {
+                return Err(ApiFailure::not_found("permission request not found"));
+            }
+        }
+        "reject" => {
+            let _ = body.message;
+            if !owner.reply_reject(&request_id) {
+                return Err(ApiFailure::not_found("permission request not found"));
+            }
+        }
+        _ => {
+            return Err(ApiFailure::bad_request(
+                "reply must be once, always, or reject",
+            ))
+        }
+    }
+    Ok(StatusCode::NO_CONTENT)
+}
+
 async fn health() -> Json<Value> {
     Json(json!({"schema_version":WIRE_SCHEMA_VERSION,"status":"ok","runtime":"native-rust"}))
 }
@@ -830,13 +873,31 @@ struct CreateTurnBody {
     reasoning_effort: String,
 }
 
+fn turn_admission_failure(error: run_owner::AdmissionError) -> ApiFailure {
+    match error {
+        run_owner::AdmissionError::Capacity | run_owner::AdmissionError::SessionActive => {
+            ApiFailure::too_many_requests(match error {
+                run_owner::AdmissionError::SessionActive => "session already has an active turn",
+                run_owner::AdmissionError::Capacity => "too many active turns",
+                run_owner::AdmissionError::RegistryUnavailable => {
+                    "turn ownership registry unavailable"
+                }
+            })
+        }
+        run_owner::AdmissionError::RegistryUnavailable => {
+            ApiFailure::internal("turn ownership registry unavailable")
+        }
+    }
+}
+
 async fn create_turn(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
     let id = parse_session_id(&id)?;
-    let _permit = TurnExecutionPermit::acquire(id)?;
+    let permit = TurnExecutionPermit::acquire(id).map_err(turn_admission_failure)?;
+    let owner = permit.owner();
     state.sessions.get(id).await.map_err(ApiFailure::internal)?;
 
     if body.text.trim().is_empty() {
@@ -877,10 +938,17 @@ async fn create_turn(
     )
     .await
     .map_err(ApiFailure::internal)?;
-    let assistant_text = provider
-        .create_with_items(model_id, &body.reasoning_effort, &input)
-        .await
-        .map_err(provider_failure)?;
+    let mut cancelled = owner.cancellation_receiver();
+    let assistant_text = tokio::select! {
+        biased;
+        _ = cancelled.changed() => return Err(ApiFailure::bad_gateway("turn cancelled")),
+        result = provider.create_with_items(model_id, &body.reasoning_effort, &input) => {
+            result.map_err(provider_failure)?
+        },
+    };
+    if owner.is_cancelled() {
+        return Err(ApiFailure::bad_gateway("turn cancelled"));
+    }
     let assistant_message = state
         .sessions
         .append_text(id, MessageRole::Assistant, assistant_text)
@@ -908,6 +976,7 @@ struct TurnStreamState {
     reasoning_summary: String,
     stage: TurnStreamStage,
     _permit: TurnExecutionPermit,
+    owner: Arc<RunOwner>,
     /// Agentic loop state: provider tool schema + step budget + typed history.
     tools: Vec<ResponsesTool>,
     enabled_tools: Vec<String>,
@@ -924,6 +993,9 @@ struct TurnStreamState {
     reasoning_effort: String,
     /// Set when the loop must finalize with this stop reason (step cap hit).
     forced_stop: Option<TurnStop>,
+    /// A human rejection/cancellation settles the admitted tool output but
+    /// must not start another provider round.
+    stop_after_outputs: bool,
     /// Agents-crate executor: mirror of the real agent loop plan (CONVERGENCE AGENTS).
     _agent_plan: AgentExecutor,
     /// Ordinal of the current tool round within this turn.
@@ -988,24 +1060,121 @@ fn file_write_operation(arguments: &str) -> Result<FileOperation, String> {
 /// Dispatch the builtin write only through the file capability broker.
 ///
 /// The public/provider result deliberately contains no path or file payload.
-fn execute_write(arguments: &str, broker: &PermissionBroker, file_tool: &FileTool) -> String {
+struct WriteOutcome {
+    output: String,
+    stop_after_outputs: bool,
+}
+
+async fn execute_write(
+    arguments: &str,
+    broker: &PermissionBroker,
+    file_tool: &FileTool,
+    owner: &Arc<RunOwner>,
+    message_id: MessageId,
+    call_id: &str,
+) -> WriteOutcome {
+    let outcome = |output: String, stop_after_outputs: bool| WriteOutcome {
+        output,
+        stop_after_outputs,
+    };
     let operation = match file_write_operation(arguments) {
         Ok(operation) => operation,
-        Err(error) => return format!("error: {error}"),
+        Err(error) => return outcome(format!("error: {error}"), false),
     };
-    match file_tool.execute_authorized(operation, broker) {
-        Ok(result) if result.success => "write success".to_owned(),
+    let FileOperation::Write { ref path, .. } = operation else {
+        return outcome("write denied".to_owned(), false);
+    };
+    let resource = file_tool
+        .project_root_path()
+        .filter(|_| !path.is_absolute())
+        .map(|root| root.join(path))
+        .unwrap_or_else(|| path.clone())
+        .to_string_lossy()
+        .into_owned();
+    let intent = OperationIntent::File {
+        action: opencode_rk_security::FileAction::Write,
+        path: PathBuf::from(&resource),
+    };
+    let decision = broker.authorize(&intent);
+    let approved = match decision {
+        Decision::Allow => None,
+        Decision::Deny { .. } => return outcome("write denied".to_owned(), false),
+        Decision::RequireHuman { .. }
+            if run_owner::has_always_grant(
+                owner.session_id,
+                "write",
+                &resource,
+                &broker.policy_context(),
+            ) =>
+        {
+            match broker.approve_human(
+                &intent,
+                owner.session_id.to_string(),
+                owner.run_id,
+                call_id.to_owned(),
+            ) {
+                Some(capability) => Some(capability),
+                None => return outcome("write requires human approval".to_owned(), false),
+            }
+        }
+        Decision::RequireHuman { .. } => {
+            let request = PermissionRequest {
+                id: format!("per_{}", opencode_rk_contracts::ApprovalId::new()),
+                session_id: owner.session_id.to_string(),
+                action: "write".to_owned(),
+                resources: vec![resource.clone()],
+                source: PermissionSource {
+                    kind: "tool",
+                    message_id: message_id.to_string(),
+                    call_id: call_id.to_owned(),
+                },
+            };
+            let request_id = request.id.clone();
+            let receiver = match owner.install_pending(request, intent.clone(), broker) {
+                Ok(receiver) => receiver,
+                Err(_) => return outcome("write requires human approval".to_owned(), false),
+            };
+            let _pending_guard = PendingPermissionGuard::new(Arc::clone(owner), request_id);
+            let mut cancelled = owner.cancellation_receiver();
+            let approved = tokio::select! {
+                biased;
+                _ = cancelled.changed() => ApprovedPermission { reply: PermissionReply::Cancelled, capability: None },
+                result = receiver => result.unwrap_or(ApprovedPermission { reply: PermissionReply::Cancelled, capability: None }),
+            };
+            match approved.reply {
+                PermissionReply::Once | PermissionReply::Always => approved.capability,
+                PermissionReply::Reject => return outcome("write rejected".to_owned(), true),
+                PermissionReply::Cancelled => return outcome("write cancelled".to_owned(), true),
+            }
+        }
+    };
+    let Some(_effect_guard) = owner.begin_effect() else {
+        return outcome("write cancelled".to_owned(), true);
+    };
+    let result = match approved {
+        Some(approval) => file_tool.execute_human_approved(
+            operation,
+            broker,
+            approval,
+            &owner.session_id.to_string(),
+            owner.run_id,
+            call_id,
+        ),
+        None => file_tool.execute_authorized(operation, broker),
+    };
+    match result {
+        Ok(result) if result.success => outcome("write success".to_owned(), false),
         Ok(result) => {
             let error = result.error.unwrap_or_default();
             if error.contains("requires human approval") {
-                "write requires human approval".to_owned()
+                outcome("write requires human approval".to_owned(), false)
             } else if error.contains("denied") {
-                "write denied".to_owned()
+                outcome("write denied".to_owned(), false)
             } else {
-                "write failed".to_owned()
+                outcome("write failed".to_owned(), false)
             }
         }
-        Err(_) => "write failed".to_owned(),
+        Err(_) => outcome("write failed".to_owned(), false),
     }
 }
 
@@ -1028,7 +1197,8 @@ async fn create_turn_stream(
     Json(body): Json<CreateTurnBody>,
 ) -> Result<Response, ApiFailure> {
     let id = parse_session_id(&id)?;
-    let permit = TurnExecutionPermit::acquire(id)?;
+    let permit = TurnExecutionPermit::acquire(id).map_err(turn_admission_failure)?;
+    let owner = permit.owner();
     let project_root = std::env::current_dir()
         .map_err(|_| ApiFailure::internal("could not determine project root"))?;
     let file_tool = FileTool::with_project_root(project_root.clone());
@@ -1117,6 +1287,7 @@ async fn create_turn_stream(
             reasoning_summary: String::new(),
             stage: TurnStreamStage::User,
             _permit: permit,
+            owner,
             tools,
             enabled_tools: turn_tools,
             broker,
@@ -1129,6 +1300,7 @@ async fn create_turn_stream(
             model: model_id.to_owned(),
             reasoning_effort: body.reasoning_effort.clone(),
             forced_stop: None,
+            stop_after_outputs: false,
             _agent_plan: AgentExecutor::new(vec![
                 opencode_rk_agents::agent_executor::LoopStep::ProviderCall,
                 opencode_rk_agents::agent_executor::LoopStep::ToolDispatch,
@@ -1156,7 +1328,19 @@ async fn create_turn_stream(
                         ));
                     }
                     TurnStreamStage::Provider => {
-                        let event = state.provider.next_event().await;
+                        if state.owner.is_cancelled() {
+                            state.stage = TurnStreamStage::Done;
+                            return None;
+                        }
+                        let mut cancelled = state.owner.cancellation_receiver();
+                        let event = tokio::select! {
+                            biased;
+                            _ = cancelled.changed() => {
+                                state.stage = TurnStreamStage::Done;
+                                return None;
+                            }
+                            event = state.provider.next_event() => event,
+                        };
                         match event {
                             Ok(Some(ResponsesStreamEvent::OutputTextDelta(delta))) => {
                                 state.assistant_text.push_str(&delta);
@@ -1368,13 +1552,29 @@ async fn create_turn_stream(
                             batch.into_iter().zip(message_ids).enumerate()
                         {
                             let permitted = state.enabled_tools.contains(&call.name);
-                            let raw_output = if index >= MAX_CALLS_PER_ROUND {
+                            let mut stop_after_output = false;
+                            let raw_output = if state.owner.is_cancelled() {
+                                "error: call not executed because turn was cancelled".to_owned()
+                            } else if state.stop_after_outputs {
+                                "error: call not executed after an earlier permission rejection"
+                                    .to_owned()
+                            } else if index >= MAX_CALLS_PER_ROUND {
                                 format!(
                                     "error: step budget per round exceeded (max {MAX_CALLS_PER_ROUND} calls); call not executed"
                                 )
                             } else if permitted {
                                 if call.name == "write" {
-                                    execute_write(&call.arguments, &state.broker, &state.file_tool)
+                                    let outcome = execute_write(
+                                        &call.arguments,
+                                        &state.broker,
+                                        &state.file_tool,
+                                        &state.owner,
+                                        state.turn_message_id,
+                                        &call.call_id,
+                                    )
+                                    .await;
+                                    stop_after_output = outcome.stop_after_outputs;
+                                    outcome.output
                                 } else {
                                     match state.broker.authorize(&OperationIntent::Tool {
                                         name: call.name.clone(),
@@ -1443,11 +1643,20 @@ async fn create_turn_stream(
                                     state,
                                 ));
                             }
-                            round_outputs.push(CallOutputItem {
-                                call_id: call.call_id.clone(),
-                                name: call.name,
-                                output: bounded,
-                            });
+                            if !state.owner.is_cancelled() && !state.stop_after_outputs {
+                                round_outputs.push(CallOutputItem {
+                                    call_id: call.call_id.clone(),
+                                    name: call.name,
+                                    output: bounded,
+                                });
+                            }
+                            if stop_after_output {
+                                state.stop_after_outputs = true;
+                            }
+                        }
+                        if state.owner.is_cancelled() {
+                            state.stage = TurnStreamStage::Done;
+                            return None;
                         }
                         state.executed_outputs = round_outputs;
                         state.stage = TurnStreamStage::EmitOutputs;
@@ -1468,6 +1677,10 @@ async fn create_turn_stream(
                             ));
                         }
                         state.emit_cursor = 0;
+                        if state.stop_after_outputs {
+                            state.stop_after_outputs = false;
+                            state.forced_stop = Some(TurnStop::Completed);
+                        }
                         state.stage = TurnStreamStage::NextRound;
                         continue;
                     }
@@ -1545,6 +1758,10 @@ async fn create_turn_stream(
                             .await
                         {
                             Ok(next_stream) => {
+                                if state.owner.is_cancelled() {
+                                    state.stage = TurnStreamStage::Done;
+                                    return None;
+                                }
                                 state.provider = next_stream;
                                 state.stage = TurnStreamStage::Provider;
                                 continue;
@@ -1568,13 +1785,32 @@ async fn create_turn_stream(
         },
     );
 
+    // Keep execution/settlement owned by a bounded producer rather than by the
+    // HTTP response body. A disconnected client stops receiving events but
+    // cannot cancel a tool output persistence future midway through a typed
+    // admission batch. The task exits only after the stream has durably settled
+    // its admitted calls and dropped the turn permit.
+    let (event_tx, event_rx) = tokio::sync::mpsc::channel::<Result<Bytes, Infallible>>(16);
+    tokio::spawn(async move {
+        let mut stream = Box::pin(stream);
+        while let Some(event) = stream.next().await {
+            if event_tx.send(event).await.is_err() {
+                while stream.next().await.is_some() {}
+                break;
+            }
+        }
+    });
+    let response_stream = stream::unfold(event_rx, |mut receiver| async move {
+        receiver.recv().await.map(|event| (event, receiver))
+    });
+
     Ok((
         StatusCode::CREATED,
         [
             (header::CONTENT_TYPE, "application/x-ndjson"),
             (header::CACHE_CONTROL, "no-store"),
         ],
-        Body::from_stream(stream),
+        Body::from_stream(response_stream),
     )
         .into_response())
 }

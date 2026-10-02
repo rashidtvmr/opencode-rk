@@ -3,7 +3,9 @@
 //! Provides FileTool for file system operations including read, write,
 //! list directory, and create directory.
 
-use opencode_rk_security::{Decision, FileAction, OperationIntent, PermissionBroker};
+use opencode_rk_security::{
+    Decision, FileAction, HumanApproval, OperationIntent, PermissionBroker,
+};
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::{fs, io::Write};
@@ -15,7 +17,7 @@ type WriteHook = Option<fn(&Path, bool) -> Result<(), ToolError>>;
 type RootObserver<'a> = Option<&'a mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use rustix::fs::{self as rustix_fs, Mode, OFlags, fstat, mkdirat, openat};
+use rustix::fs::{self as rustix_fs, fstat, mkdirat, openat, Mode, OFlags};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::OsStr;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -177,6 +179,10 @@ impl FileTool {
     }
 
     /// Executes a file operation and returns the result.
+    pub fn project_root_path(&self) -> Option<&Path> {
+        self.project_root.as_deref()
+    }
+
     pub fn execute(&self, op: FileOperation) -> Result<FileResult, ToolError> {
         match self.project_root.as_deref() {
             Some(root) => execute_rooted(root, op),
@@ -193,6 +199,35 @@ impl FileTool {
         op: FileOperation,
         broker: &PermissionBroker,
     ) -> Result<FileResult, ToolError> {
+        self.execute_authorized_with_generation(op, broker, None)
+    }
+
+    /// Execute after a live session/run-owned human approval, rechecking the
+    /// exact operation against current mandatory policy at the effect boundary.
+    pub fn execute_human_approved(
+        &self,
+        op: FileOperation,
+        broker: &PermissionBroker,
+        approval: HumanApproval,
+        session_id: &str,
+        run_id: u64,
+        call_id: &str,
+    ) -> Result<FileResult, ToolError> {
+        // An approved absolute target may intentionally be outside the ordinary
+        // project root. It still goes through the descriptor-relative writer;
+        // only the ordinary rooted tool path remains project-scoped.
+        self.execute_authorized_with_approval(op, broker, approval, session_id, run_id, call_id)
+    }
+
+    fn execute_authorized_with_approval(
+        &self,
+        op: FileOperation,
+        broker: &PermissionBroker,
+        approval: HumanApproval,
+        session_id: &str,
+        run_id: u64,
+        call_id: &str,
+    ) -> Result<FileResult, ToolError> {
         if let FileOperation::Write { ref path, .. } = op {
             let authorized_path = self
                 .project_root
@@ -204,7 +239,56 @@ impl FileTool {
                 action: FileAction::Write,
                 path: authorized_path,
             };
-            match broker.authorize(&intent) {
+            match broker
+                .authorize_with_human_approval(&intent, approval, session_id, run_id, call_id)
+            {
+                Decision::Allow => (),
+                Decision::Deny { reason } => {
+                    return Ok(FileResult::failure(format!("write denied: {reason}")))
+                }
+                Decision::RequireHuman { reason, .. } => {
+                    return Ok(FileResult::failure(format!(
+                        "write requires human approval: {reason}"
+                    )))
+                }
+            }
+        }
+        // Authorization above is the single exact recheck. Approved absolute
+        // writes outside the captured project root intentionally use the
+        // descriptor-relative writer; ordinary rooted paths keep the captured
+        // root and its symlink checks.
+        let outside_root = matches!(&op, FileOperation::Write { path, .. }
+            if path.is_absolute()
+                && self.project_root.as_deref().is_some_and(|root| !path.starts_with(root)));
+        if outside_root {
+            execute(op)
+        } else {
+            self.execute(op)
+        }
+    }
+
+    fn execute_authorized_with_generation(
+        &self,
+        op: FileOperation,
+        broker: &PermissionBroker,
+        approved_generation: Option<u64>,
+    ) -> Result<FileResult, ToolError> {
+        if let FileOperation::Write { ref path, .. } = op {
+            let authorized_path = self
+                .project_root
+                .as_deref()
+                .filter(|_| !path.is_absolute())
+                .map(|root| root.join(path))
+                .unwrap_or_else(|| path.clone());
+            let intent = OperationIntent::File {
+                action: FileAction::Write,
+                path: authorized_path,
+            };
+            let decision = match approved_generation {
+                Some(generation) => broker.authorize_human_approved(&intent, generation),
+                None => broker.authorize(&intent),
+            };
+            match decision {
                 Decision::Allow => (),
                 Decision::Deny { reason } => {
                     return Ok(FileResult::failure(format!("write denied: {reason}")));
@@ -216,7 +300,17 @@ impl FileTool {
                 }
             }
         }
-        self.execute(op)
+        match approved_generation {
+            Some(_)
+                if self.project_root.as_deref().is_some_and(|root| {
+                    matches!(&op, FileOperation::Write { path, .. }
+                    if path.is_absolute() && !path.starts_with(root))
+                }) =>
+            {
+                execute(op)
+            }
+            _ => self.execute(op),
+        }
     }
 }
 
@@ -1267,13 +1361,12 @@ mod tests {
         );
 
         let outside_path = outside.path().join("escape.txt");
-        assert!(
-            tool.execute(FileOperation::write(
+        assert!(tool
+            .execute(FileOperation::write(
                 outside_path.clone(),
                 "escape".to_owned()
             ))
-            .is_err()
-        );
+            .is_err());
         assert!(!outside_path.exists());
     }
 
@@ -1284,13 +1377,12 @@ mod tests {
         let escaped = outside.join("rooted-traversal-denied.txt");
         let tool = FileTool::with_project_root(project.path().to_path_buf());
 
-        assert!(
-            tool.execute(FileOperation::write(
+        assert!(tool
+            .execute(FileOperation::write(
                 PathBuf::from("../rooted-traversal-denied.txt"),
                 "escape".to_owned(),
             ))
-            .is_err()
-        );
+            .is_err());
         assert!(!escaped.exists());
     }
 

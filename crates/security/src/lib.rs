@@ -27,7 +27,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     path::{Component, Path, PathBuf},
     sync::{Arc, Mutex},
-    time::SystemTime,
+    time::{Duration, Instant, SystemTime},
 };
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -143,6 +143,25 @@ impl PermissionSet {
         self.rules.iter().find(|rule| rule.matches(intent))
     }
 }
+
+/// Exact authorization configuration, independent of per-turn broker generations.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PolicyContext {
+    policy: SecurityPolicy,
+    permissions: PermissionSet,
+}
+
+/// Opaque, one-use proof from a trusted live human-reply path.
+pub struct HumanApproval {
+    intent: OperationIntent,
+    session_id: String,
+    run_id: u64,
+    call_id: String,
+    context: PolicyContext,
+    expires_at: Instant,
+    consumed: Mutex<bool>,
+}
+
 #[derive(Clone, Debug)]
 pub struct AuditEntry {
     pub seq: u64,
@@ -156,6 +175,7 @@ pub struct PermissionBroker {
     generation: u64,
     policy: Arc<SecurityPolicy>,
     permissions: PermissionSet,
+    context: Arc<PolicyContext>,
     audit: Arc<Mutex<Vec<AuditEntry>>>,
 }
 impl PermissionBroker {
@@ -163,6 +183,10 @@ impl PermissionBroker {
     pub fn new(policy: SecurityPolicy) -> Self {
         Self {
             generation: 1,
+            context: Arc::new(PolicyContext {
+                policy: policy.clone(),
+                permissions: PermissionSet::default(),
+            }),
             policy: Arc::new(policy),
             permissions: PermissionSet::default(),
             audit: Arc::new(Mutex::new(Vec::new())),
@@ -180,6 +204,10 @@ impl PermissionBroker {
     pub fn with_policy(&self, policy: SecurityPolicy) -> Self {
         Self {
             generation: self.generation.saturating_add(1),
+            context: Arc::new(PolicyContext {
+                policy: policy.clone(),
+                permissions: self.permissions.clone(),
+            }),
             policy: Arc::new(policy),
             permissions: self.permissions.clone(),
             audit: Arc::clone(&self.audit),
@@ -189,11 +217,84 @@ impl PermissionBroker {
     pub fn with_permissions(&self, permissions: PermissionSet) -> Self {
         Self {
             generation: self.generation.saturating_add(1),
+            context: Arc::new(PolicyContext {
+                policy: self.policy.as_ref().clone(),
+                permissions: permissions.clone(),
+            }),
             policy: Arc::clone(&self.policy),
             permissions,
             audit: Arc::clone(&self.audit),
         }
     }
+    /// Captures effective policy configuration for grants spanning run brokers.
+    #[must_use]
+    pub fn policy_context(&self) -> PolicyContext {
+        self.context.as_ref().clone()
+    }
+
+    /// Mints authority only from a caller already inside the trusted reply handler.
+    #[must_use]
+    pub fn approve_human(
+        &self,
+        intent: &OperationIntent,
+        session_id: String,
+        run_id: u64,
+        call_id: String,
+    ) -> Option<HumanApproval> {
+        if !matches!(self.authorize(intent), Decision::RequireHuman { .. })
+            || session_id.is_empty()
+            || call_id.is_empty()
+        {
+            return None;
+        }
+        Some(HumanApproval {
+            intent: normalized_intent(intent),
+            session_id,
+            run_id,
+            call_id,
+            context: self.policy_context(),
+            expires_at: Instant::now() + Duration::from_secs(30),
+            consumed: Mutex::new(false),
+        })
+    }
+
+    #[must_use]
+    pub fn authorize_with_human_approval(
+        &self,
+        intent: &OperationIntent,
+        approval: HumanApproval,
+        session_id: &str,
+        run_id: u64,
+        call_id: &str,
+    ) -> Decision {
+        let valid = approval.intent == normalized_intent(intent)
+            && approval.session_id == session_id
+            && approval.run_id == run_id
+            && approval.call_id == call_id
+            && approval.context == self.policy_context()
+            && Instant::now() < approval.expires_at
+            && approval.consumed.lock().is_ok_and(|mut consumed| {
+                if *consumed {
+                    false
+                } else {
+                    *consumed = true;
+                    true
+                }
+            });
+        if !valid {
+            let decision = self.authorize(intent);
+            return if matches!(decision, Decision::Allow | Decision::RequireHuman { .. }) {
+                let decision =
+                    human_required("human approval is stale, mismatched, or already consumed");
+                self.record(intent, &decision);
+                decision
+            } else {
+                decision
+            };
+        }
+        self.authorize_approved_generation(intent, self.generation)
+    }
+
     #[must_use]
     pub fn audit_len(&self) -> usize {
         self.audit.lock().map(|log| log.len()).unwrap_or(0)
@@ -205,26 +306,138 @@ impl PermissionBroker {
     #[must_use]
     pub fn authorize(&self, intent: &OperationIntent) -> Decision {
         let baseline = self.decide(intent);
-        let decision = match baseline {
-            Decision::Allow => match self.permissions.evaluate(intent) {
-                None
-                | Some(PermissionRule {
-                    effect: RuleEffect::Allow,
-                    ..
-                }) => Decision::Allow,
-                Some(rule) if rule.effect == RuleEffect::Deny => Decision::Deny {
-                    reason: format!("denied by permission rule {:?}", rule.pattern),
-                },
-                Some(rule) => human_required(&format!(
-                    "permission rule {:?} requires human approval",
-                    rule.pattern
-                )),
+        if self
+            .permissions
+            .evaluate(intent)
+            .is_some_and(|rule| rule.effect == RuleEffect::Deny)
+        {
+            let decision = Decision::Deny {
+                reason: "denied by permission rule".to_owned(),
+            };
+            self.record(intent, &decision);
+            return decision;
+        }
+        let rule = self.permissions.evaluate(intent);
+        let decision = match (baseline, rule) {
+            (Decision::Deny { reason }, _) => Decision::Deny { reason },
+            (_, Some(rule)) if rule.effect == RuleEffect::Deny => Decision::Deny {
+                reason: format!("denied by permission rule {:?}", rule.pattern),
             },
-            other => other,
+            (
+                Decision::RequireHuman {
+                    approval_id,
+                    reason,
+                },
+                _,
+            ) => Decision::RequireHuman {
+                approval_id,
+                reason,
+            },
+            (Decision::Allow, Some(rule)) if rule.effect == RuleEffect::Ask => human_required(
+                &format!("permission rule {:?} requires human approval", rule.pattern),
+            ),
+            (Decision::Allow, _) => Decision::Allow,
         };
         self.record(intent, &decision);
         decision
     }
+
+    /// Authorize an operation that has already been approved by a human at `approved_generation`.
+    ///
+    /// This rechecks mandatory policy at the effect boundary: `Deny` decisions
+    /// for secrets, system paths, and explicit deny rules remain blocked. An
+    /// `approved_generation` that does not match `self.generation()` returns
+    /// `RequireHuman` (the approval is stale and non-forgeable). When the
+    /// generation alone is never proof of approval. Only `HumanApproval`, minted
+    /// by a trusted live permission-reply path, can lift an effective human gate.
+    #[must_use]
+    pub fn authorize_human_approved(
+        &self,
+        intent: &OperationIntent,
+        approved_generation: u64,
+    ) -> Decision {
+        let baseline = self.decide(intent);
+        // This compatibility API has no proof of which live request a human
+        // answered. A generation number is observable state, never authority.
+        // Keep it fail-closed for human-gated operations; trusted callers use
+        // `authorize_with_human_approval` instead.
+        if self
+            .permissions
+            .evaluate(intent)
+            .is_some_and(|rule| rule.effect == RuleEffect::Deny)
+        {
+            let decision = Decision::Deny {
+                reason: "denied by permission rule".to_owned(),
+            };
+            self.record(intent, &decision);
+            return decision;
+        }
+        if matches!(baseline, Decision::RequireHuman { .. }) {
+            let decision = human_required("human approval proof is required");
+            self.record(intent, &decision);
+            return decision;
+        }
+        if approved_generation != self.generation {
+            let decision = human_required("policy changed since human approval");
+            self.record(intent, &decision);
+            return decision;
+        }
+        // This legacy API has no opaque proof. Even an exact generation match
+        // must not elevate either a mandatory human gate or an explicit Ask.
+        let decision = self.authorize(intent);
+        if matches!(decision, Decision::RequireHuman { .. }) {
+            let decision = human_required("human approval proof is required");
+            self.record(intent, &decision);
+            decision
+        } else {
+            decision
+        }
+    }
+
+    fn authorize_approved_generation(
+        &self,
+        intent: &OperationIntent,
+        approved_generation: u64,
+    ) -> Decision {
+        let baseline = self.decide(intent);
+        // Deny is always terminal whether or not a human approved: mandatory
+        // protections (secrets, system paths, destructive processes/SQL) and
+        // explicit Deny permission rules cannot be lifted by human approval.
+        if matches!(baseline, Decision::Deny { .. }) {
+            self.record(intent, &baseline);
+            return baseline;
+        }
+        // A mismatched generation means the policy changed after the human
+        // grant was issued: fail closed at the original RequireHuman gate.
+        if approved_generation != self.generation {
+            let decision = human_required("policy changed since human approval");
+            self.record(intent, &decision);
+            return decision;
+        }
+        // Generation matches: check permission rules for an explicit Deny
+        // before elevating RequireHuman to Allow. An explicit Deny rule
+        // wins over a matching generation-only approval.
+        let decision = match self.permissions.evaluate(intent) {
+            None
+            | Some(PermissionRule {
+                effect: RuleEffect::Allow,
+                ..
+            }) => match baseline {
+                // RequireHuman baseline + no Deny rule + matching generation => Allow
+                Decision::RequireHuman { .. } | Decision::Allow => Decision::Allow,
+                other => other,
+            },
+            Some(rule) if rule.effect == RuleEffect::Deny => Decision::Deny {
+                reason: format!("denied by permission rule {:?}", rule.pattern),
+            },
+            // Ask rule: still requires human, generation already matched so
+            // the original RequireHuman is the deciding result.
+            Some(_) => baseline,
+        };
+        self.record(intent, &decision);
+        decision
+    }
+
     fn record(&self, intent: &OperationIntent, decision: &Decision) {
         if let Ok(mut log) = self.audit.lock() {
             let seq = log.last().map_or(0, |entry| entry.seq.saturating_add(1));
@@ -337,6 +550,31 @@ impl PermissionBroker {
             .any(|root| path.starts_with(root))
     }
 }
+fn normalized_intent(intent: &OperationIntent) -> OperationIntent {
+    match intent {
+        OperationIntent::File { action, path } => OperationIntent::File {
+            action: *action,
+            path: lexical_normalize(path),
+        },
+        OperationIntent::Process { program, args, cwd } => OperationIntent::Process {
+            program: program.clone(),
+            args: args.clone(),
+            cwd: lexical_normalize(cwd),
+        },
+        OperationIntent::Sql {
+            statement,
+            database,
+        } => OperationIntent::Sql {
+            statement: statement.clone(),
+            database: database.clone(),
+        },
+        OperationIntent::Tool { name, description } => OperationIntent::Tool {
+            name: name.clone(),
+            description: description.clone(),
+        },
+    }
+}
+
 fn rule_scope(intent: &OperationIntent) -> String {
     match intent {
         OperationIntent::File { path, .. } => {
