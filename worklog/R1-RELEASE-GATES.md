@@ -1,7 +1,7 @@
 # R1 release-gates — exact-SHA gate contract (candidate, not acceptance)
 
 Package: R1 (release-readiness orchestrator). Base: `ddff2e6d617f2c70f60ed046f7af7636087f1d61`.
-Status: PREVERIFIED_STATIC only. NO release-readiness claim. R1 integrated at `f5f440d8f4ea7085409a06f10343494945fef6c0` failed acceptance because the tracked template hard-coded `ddff`; R1.1 corrects this with fail-closed `<SOURCE_SHA>` materialization. Heavy platform gates NOT run here.
+Status: PREVERIFIED_STATIC only. NO release-readiness claim. Base candidate `1b8ed868922a3bbb0d9b96dd9daa4606fba6b917` was blocked by archive omission/traversal, artifact-attested gate wiring, multi-platform execution, dispatch SHA checkout, and discarded receipts. This candidate closes those static/security contracts. Heavy platform gates NOT run here.
 
 ## Changed paths (grant: release/**, scripts/**, CI workflows, tests/release-gates/**, this worklog)
 
@@ -41,6 +41,14 @@ Precondition: regenerate manifest per integrated SHA (zero-hash placeholders rep
 2. Mac paste-reset gate: `native_bracketed_paste.py` is design-RED against current native_loop (no bracketed-paste enable/Paste event/Composer::apply_paste caller) → `--run` on mac fails until native paste loop lands.
 3. `macos_loader` cargo test + ubuntu `--tool-gates` cargo clippy/test gates require Cargo execution — out of scope here, owned by active workers.
 4. Ubuntu full runner needs the exact integrated SHA's source archive + `/work` arm64 sandbox (retained receipts cover a79ae96/ac635fa/de7e05f lineage only; none at canonical tip).
+
+## R1.3 static/security candidate evidence
+
+- Base: `1b8ed868922a3bbb0d9b96dd9daa4606fba6b917`; prior private diff snapshot: `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/r1-3-preexisting.diff`, SHA-256 `799f7877d7961b63ab359eafd90be3ab65821ee1a6b7ab24afe4a7629ac489bd`.
+- Exact changed paths: `release/receipts.py`, `release/run_release_gates.py`, `release/materialize_release_manifest.py`, `release/release-gates.manifest.template.json`, `.github/workflows/release-gates.yml`, `tests/release-gates/test_receipt_validation.py`, this worklog.
+- Security/static closure: archive is mandatory and selected-platform layout is closed (Mac dylib/arm64 archive, Web so/x64 archive, Ubuntu so/arm64 archive); artifact platform/target, runner, frozen tests, exact source SHA and concrete manifest wiring are bound; symlinks, traversal, absolute/extra paths, archive overrides and stale/mixed schemas are rejected. `--run` requires exactly one platform, a concrete manifest, and an artifact before any child marker can execute. Workflow checkout uses `${{ inputs.source_sha || github.sha }}` and run inputs are quoted environment variables; receipt uploads are pinned and `if: always()`/error-on-missing.
+- RED/GREEN: at base existing release-gates suite was 27; the candidate's frozen regression file initially produced 3 failures (single-platform synthetic binding, archive fixture runner mismatch, workflow section parser) before correction. Final suite is **46 tests, OK**. No Cargo/build/platform/network gates run.
+- Exact verification: `/usr/bin/python3 -B -m unittest discover -s tests/release-gates -p 'test_*.py'` -> `Ran 46 tests ... OK`; `/usr/bin/python3 -B -m py_compile release/receipts.py release/run_release_gates.py release/materialize_release_manifest.py tests/release-gates/test_receipt_validation.py` -> OK; `python3 tools/validate_repository.py` -> OK; `git diff --check` -> OK.
 
 ## Disposition
 

@@ -47,11 +47,11 @@ class GateError(RuntimeError):
     pass
 
 
-def load_manifest(path: pathlib.Path) -> dict:
+def load_manifest(path: pathlib.Path, source_sha: str) -> dict:
     manifest = receipts.load_json(path)
     if manifest.get("source_sha") == receipts.TEMPLATE_SHA:
         raise GateError("stale/template sentinel passed as --manifest; use --manifest-template")
-    receipts.validate_manifest(manifest["artifact_contract"])
+    receipts.validate_materialized_manifest(manifest, source_sha)
     return manifest
 
 
@@ -89,20 +89,19 @@ def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
             )
     for rel, expected in contract["frozen_tests"].items():
         path = root / rel
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
             raise GateError(f"frozen contract test absent at {path}")
         if receipts.sha256_file(path) != expected:
             raise GateError(
                 f"frozen contract test modified: {rel} (expected {expected})"
             )
     runner = root / contract["runner_path"]
-    if not runner.is_file():
-        raise GateError(f"retained runner absent: {runner}")
-    actual = receipts.sha256_file(runner)
-    if actual != contract["runner_sha256"]:
-        raise GateError(f"retained runner hash mismatch: {actual} != {contract['runner_sha256']}")
+    try:
+        receipts.validate_runner(contract, runner)
+    except receipts.ReceiptError as exc:
+        raise GateError(str(exc)) from exc
     if args.artifact_dir is not None:
-        artifact_dir = pathlib.Path(args.artifact_dir).resolve()
+        artifact_dir = pathlib.Path(args.artifact_dir)
         build = receipts.load_json(artifact_dir / "build.json")
         receipts.validate_manifest(build)
         if build["source_sha"] != args.source_sha:
@@ -110,8 +109,21 @@ def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
                 f"stale artifact: build.json source_sha {build['source_sha']} "
                 f"!= required {args.source_sha}"
             )
-        build["platform"] = "mac" if "mac" in args.platforms else "linux"
-        receipts.validate_artifact_hashes(build, artifact_dir)
+        if len(args.platforms) != 1:
+            raise GateError("--artifact-dir requires exactly one selected platform")
+        selected = args.platforms[0]
+        expected_build_platform = "mac" if selected == "mac" else "linux"
+        if build.get("platform") != expected_build_platform:
+            raise GateError(
+                f"artifact build platform {build.get('platform')!r} does not match selected {selected!r}"
+            )
+        if build.get("runner_sha256") != contract["runner_sha256"]:
+            raise GateError("artifact runner_sha256 differs from concrete manifest")
+        if build.get("frozen_tests") != contract["frozen_tests"]:
+            raise GateError("artifact frozen_tests differs from concrete manifest")
+        if build.get("target") != contract.get("target"):
+            raise GateError("artifact target differs from concrete manifest")
+        receipts.validate_artifact_hashes(build, artifact_dir, platform=selected)
         receipts.validate_frozen_tests(build, root)
         args.artifact_sha = build["source_sha"]
 
@@ -259,6 +271,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.tool_gates and "ubuntu" not in args.platforms:
         parser.error("--tool-gates applies only when --platform ubuntu is selected")
+    if args.run and len(args.platforms) != 1:
+        parser.error("--run accepts exactly one platform")
     root = pathlib.Path(args.repo_root).resolve()
     manifest_path = pathlib.Path(args.manifest or args.manifest_template)
     evidence = pathlib.Path(args.evidence_dir).resolve()
@@ -272,7 +286,11 @@ def main() -> int:
                 raise GateError("--manifest-template is allowed only with --check-contract")
             manifest, manifest_path = load_template(pathlib.Path(args.manifest_template), args.source_sha, evidence)
         else:
-            manifest = load_manifest(manifest_path)
+            manifest = load_manifest(manifest_path, args.source_sha)
+        if args.run:
+            template_path = pathlib.Path(args.repo_root).resolve() / "release" / "release-gates.manifest.template.json"
+            template = receipts.load_json(template_path)
+            receipts.validate_trusted_layout(manifest, template)
         if not manifest.get("source_sha") or manifest["source_sha"] != args.source_sha:
             raise GateError(
                 f"manifest pinned to {manifest.get('source_sha')!r}, not {args.source_sha!r}: "

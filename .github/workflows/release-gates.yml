@@ -27,9 +27,12 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
       - name: Validate receipt/artifact contract schema and frozen test pins
-        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ github.sha }} --manifest-template release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-contract" --platform mac --platform web --platform ubuntu --check-contract
+        run: /usr/bin/python3 release/run_release_gates.py --source-sha "$SOURCE_SHA" --manifest-template release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-contract" --platform mac --platform web --platform ubuntu --check-contract
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       - name: Receipt validation unit tests
         run: /usr/bin/python3 -m unittest discover -s tests/release-gates -p 'test_*.py' -v
 
@@ -41,7 +44,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
       - name: Fetch attested artifact
         run: gh run download "$ARTIFACT_RUN_ID" -n macos-arm64-release -D "$RUNNER_TEMP/artifact"
@@ -51,11 +54,17 @@ jobs:
       - name: Materialize attested concrete manifest
         run: /usr/bin/python3 release/materialize_release_manifest.py --template release/release-gates.manifest.template.json --build "$RUNNER_TEMP/artifact/build.json" --source-sha "$SOURCE_SHA" --output "$RUNNER_TEMP/r1-mac-manifest.json"
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       - name: Run frozen native paste-reset gate (exact SHA)
         run: /usr/bin/python3 release/run_release_gates.py --source-sha "$SOURCE_SHA" --manifest "$RUNNER_TEMP/r1-mac-manifest.json" --evidence-dir "$RUNNER_TEMP/r1-mac" --artifact-dir "$RUNNER_TEMP/artifact" --platform mac --run
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/upload-artifact@5d5d22a31266ced26887403a3e7a1b2a4a8c88a0 # v4.3.4
+        if: always()
+        with:
+          name: mac-arm64-r1-receipts
+          path: ${{ runner.temp }}/r1-mac
+          if-no-files-found: error
 
   web-journey:
     name: r1 web journey (real rust router)
@@ -65,7 +74,7 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.source_sha }}
+          ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
       - name: Fetch attested artifact
         run: gh run download "$ARTIFACT_RUN_ID" -n linux-x64-release -D "$RUNNER_TEMP/artifact"
@@ -75,11 +84,17 @@ jobs:
       - name: Materialize attested concrete manifest
         run: /usr/bin/python3 release/materialize_release_manifest.py --template release/release-gates.manifest.template.json --build "$RUNNER_TEMP/artifact/build.json" --source-sha "$SOURCE_SHA" --output "$RUNNER_TEMP/r1-web-manifest.json"
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
       - name: Run web journey gate (real Rust auth/router daemon)
         run: /usr/bin/python3 release/run_release_gates.py --source-sha "$SOURCE_SHA" --manifest "$RUNNER_TEMP/r1-web-manifest.json" --evidence-dir "$RUNNER_TEMP/r1-web" --artifact-dir "$RUNNER_TEMP/artifact" --platform web --run
         env:
-          SOURCE_SHA: ${{ inputs.source_sha }}
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
+      - uses: actions/upload-artifact@5d5d22a31266ced26887403a3e7a1b2a4a8c88a0 # v4.3.4
+        if: always()
+        with:
+          name: web-x64-r1-receipts
+          path: ${{ runner.temp }}/r1-web
+          if-no-files-found: error
 
   # ubuntu arm64 heavy gates stay on the retained /work sandbox layout via
   # release/verify-native-utf8.py --tool-gates until runner provisioning exists;
@@ -92,6 +107,9 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
+          ref: ${{ inputs.source_sha || github.sha }}
           persist-credentials: false
       - name: Verify retained runner hash and --tool-gates wiring
-        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ inputs.source_sha }} --manifest-template release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-ubuntu" --platform ubuntu --tool-gates --check-contract
+        run: /usr/bin/python3 release/run_release_gates.py --source-sha "$SOURCE_SHA" --manifest-template release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-ubuntu" --platform ubuntu --tool-gates --check-contract
+        env:
+          SOURCE_SHA: ${{ inputs.source_sha || github.sha }}
