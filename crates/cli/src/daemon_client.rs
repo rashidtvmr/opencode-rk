@@ -1412,8 +1412,48 @@ mod d1_real_discovery_auth {
     };
     use opencode_rk_sessions::SessionService;
     use opencode_rk_storage::Storage;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
+
+    /// Monotonic per-process counter: PID alone cannot distinguish repeated
+    /// invocations within one test binary run, and a constant suffix lets
+    /// duplicate or racing runs share one directory. Relaxed ordering is
+    /// enough; the atomic fetch_add alone provides uniqueness.
+    static TEMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+    /// Disposable temp root constructed and owned by exactly one test; on Drop
+    /// (including panic unwind) the whole directory is removed. Errors are
+    /// ignored here: a missing root or a hostile filesystem is this test's own
+    /// hygiene problem, never something to unwind through another Drop.
+    struct OwnedTempRoot(std::path::PathBuf);
+
+    impl OwnedTempRoot {
+        /// PID + process-local counter under `temp_dir()`, created with
+        /// `create_dir` (fails if present, so stale directories are never
+        /// reused). Bounded retries cover a same-PID-same-seq path left by an
+        /// earlier crashed run.
+        fn new() -> Self {
+            let base = std::env::temp_dir();
+            let pid = std::process::id();
+            for _ in 0..64 {
+                let seq = TEMP_SEQ.fetch_add(1, Ordering::Relaxed);
+                let candidate = base.join(format!("d1_real_disc_auth_{pid}_{seq}"));
+                match std::fs::create_dir(&candidate) {
+                    Ok(()) => return Self(candidate),
+                    Err(err) if err.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(err) => panic!("temp root: {err}"),
+                }
+            }
+            panic!("temp root: no unique directory after 64 attempts");
+        }
+    }
+
+    impl Drop for OwnedTempRoot {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
 
     /// Bounded raw HTTP GET over real TCP: `Connection: close`, 64KiB cap,
     /// overall timeout. Returns the response status code.
@@ -1455,13 +1495,10 @@ mod d1_real_discovery_auth {
 
     #[tokio::test]
     async fn real_descriptor_discovery_and_bearer_enforcement() {
-        let root = std::env::temp_dir().join(format!(
-            "d1_real_disc_auth_{}_{}",
-            std::process::id(),
-            "t01"
-        ));
-        let _ = std::fs::remove_dir_all(&root);
-        std::fs::create_dir_all(&root).expect("temp root");
+        // Unique, exclusively-created, panic-safe disposable root owned by
+        // this test only.
+        let tmp = OwnedTempRoot::new();
+        let root = &tmp.0;
 
         let auth = DaemonAuth::mint().expect("mint");
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
@@ -1488,10 +1525,10 @@ mod d1_real_discovery_auth {
                 .expect("serve");
         });
 
-        let descriptor = publish_backend_descriptor_with_auth(&root, addr, auth.token().to_owned())
+        let descriptor = publish_backend_descriptor_with_auth(root, addr, auth.token().to_owned())
             .expect("publish");
 
-        let paths = DaemonPaths::for_data_dir(&root);
+        let paths = DaemonPaths::for_data_dir(root);
         #[cfg(unix)]
         {
             use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -1517,6 +1554,7 @@ mod d1_real_discovery_auth {
             .await
             .expect("serve shutdown")
             .expect("serve join");
-        std::fs::remove_dir_all(&root).expect("cleanup temp root");
+        // Final cleanup relies on OwnedTempRoot::drop (idempotent: removing an
+        // already-absent directory is ignored), also covering assertion panic.
     }
 }

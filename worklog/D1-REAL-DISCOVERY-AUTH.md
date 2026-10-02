@@ -38,3 +38,28 @@
 `cargo test -p opencode-rk-cli d1_real_discovery_auth --offline --locked -- --nocapture`
 
 Result: see commit (recorded below).
+
+## Review fix (successor of e23d9953f153183fc9f456b9f4937e79095ad97b)
+
+- Review blocker: temp root was `temp_dir()/d1_real_disc_auth_{PID}_t01` — PID plus constant
+  suffix. Duplicate invocation, concurrent race, or stale reuse after a crashed run could share
+  or inherit a directory. Test-only fix, no production change.
+- Collision: module-static `TEMP_SEQ: AtomicU64`, `fetch_add(1, Ordering::Relaxed)`; path is
+  `d1_real_disc_auth_{PID}_{seq}`. No random, no network, no new dependency. Created with
+  `std::fs::create_dir` (fails on `AlreadyExists`, never `create_dir_all`), bounded 64-attempt
+  retry skips same-PID-same-seq stale leftovers from crashed processes.
+- Cleanup: `OwnedTempRoot(PathBuf)` guard; Drop runs `remove_dir_all` on the path it exclusively
+  created and owns (panics ignored; no remove on any foreign path, no removal of the bare temp
+  base). Covers assertion panics via unwind. Final explicit `remove_dir_all` removed; cleanup is
+  the idempotent guard. Graceful shutdown unchanged: `tx.send(())` + bounded 5s await on
+  `serve.join()`.
+- Unchanged: real `discover_from_path`, descriptor 0600/current-UID/current-PID asserts, live
+  axum TCP, valid 200 / missing 401 / wrong 403, 5s I/O timeout, 64KiB response cap.
+- Gate rerun (this successor): focused command above, jobs 2, threads 1, executed twice serially
+  to prove reusable fresh allocation per run; results recorded in successor commit.
+  - Run 1: exit 0. `daemon_client::d1_real_discovery_auth::real_descriptor_discovery_and_bearer_enforcement`
+    ok on both bin test targets (`oc2`, `opencode-rk`), `test result: ok. 1 passed` x2. No
+    `d1_real_disc_auth_*` leftovers in `$TMPDIR`.
+  - Run 2 (serial, same instance): exit 0, identical: 2x ok, no leftovers. Proves per-invocation
+    unique allocation (seq 0 each process, fresh create_dir succeeds because prior root was
+    removed by guard) and idempotent guard cleanup.
