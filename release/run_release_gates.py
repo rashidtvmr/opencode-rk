@@ -17,7 +17,7 @@ artifacts/receipts can never be silently reused.
 Modes:
   --check-contract  static validation only (manifest schema, hashes, frozen
                     tests, runner pin). Safe on any host; no heavy gates.
-  --run             execute the platform gate list serially.
+   --run             execute the platform gate list serially (concrete manifests only).
 
 Exit codes: 0 all gates passed, 1 contract violation or any gate failure,
 2 usage error. Never reports release readiness, only per-gate facts.
@@ -47,10 +47,22 @@ class GateError(RuntimeError):
     pass
 
 
-def load_manifest(path: pathlib.Path) -> dict:
+def load_manifest(path: pathlib.Path, source_sha: str) -> dict:
     manifest = receipts.load_json(path)
-    receipts.validate_manifest(manifest["artifact_contract"])
+    if manifest.get("source_sha") == receipts.TEMPLATE_SHA:
+        raise GateError("stale/template sentinel passed as --manifest; use --manifest-template")
+    receipts.validate_materialized_manifest(manifest, source_sha)
     return manifest
+
+
+def load_template(path: pathlib.Path, source_sha: str, evidence: pathlib.Path) -> tuple[dict, pathlib.Path]:
+    concrete_path = evidence / "materialized-manifest.json"
+    try:
+        template = receipts.load_json(path)
+        manifest = receipts.materialize_template(template, source_sha, concrete_path)
+    except (receipts.ReceiptError, KeyError) as exc:
+        raise GateError(f"template materialization failed: {exc}") from exc
+    return manifest, concrete_path
 
 
 def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
@@ -77,20 +89,19 @@ def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
             )
     for rel, expected in contract["frozen_tests"].items():
         path = root / rel
-        if not path.is_file():
+        if path.is_symlink() or not path.is_file():
             raise GateError(f"frozen contract test absent at {path}")
         if receipts.sha256_file(path) != expected:
             raise GateError(
                 f"frozen contract test modified: {rel} (expected {expected})"
             )
     runner = root / contract["runner_path"]
-    if not runner.is_file():
-        raise GateError(f"retained runner absent: {runner}")
-    actual = receipts.sha256_file(runner)
-    if actual != contract["runner_sha256"]:
-        raise GateError(f"retained runner hash mismatch: {actual} != {contract['runner_sha256']}")
+    try:
+        receipts.validate_runner(contract, runner)
+    except receipts.ReceiptError as exc:
+        raise GateError(str(exc)) from exc
     if args.artifact_dir is not None:
-        artifact_dir = pathlib.Path(args.artifact_dir).resolve()
+        artifact_dir = pathlib.Path(args.artifact_dir)
         build = receipts.load_json(artifact_dir / "build.json")
         receipts.validate_manifest(build)
         if build["source_sha"] != args.source_sha:
@@ -98,7 +109,21 @@ def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
                 f"stale artifact: build.json source_sha {build['source_sha']} "
                 f"!= required {args.source_sha}"
             )
-        receipts.validate_artifact_hashes(build, artifact_dir)
+        if len(args.platforms) != 1:
+            raise GateError("--artifact-dir requires exactly one selected platform")
+        selected = args.platforms[0]
+        expected_build_platform = "mac" if selected == "mac" else "linux"
+        if build.get("platform") != expected_build_platform:
+            raise GateError(
+                f"artifact build platform {build.get('platform')!r} does not match selected {selected!r}"
+            )
+        if build.get("runner_sha256") != contract["runner_sha256"]:
+            raise GateError("artifact runner_sha256 differs from concrete manifest")
+        if build.get("frozen_tests") != contract["frozen_tests"]:
+            raise GateError("artifact frozen_tests differs from concrete manifest")
+        if build.get("target") != contract.get("target"):
+            raise GateError("artifact target differs from concrete manifest")
+        receipts.validate_artifact_hashes(build, artifact_dir, platform=selected)
         receipts.validate_frozen_tests(build, root)
         args.artifact_sha = build["source_sha"]
 
@@ -229,12 +254,16 @@ def run_platforms(args, manifest: dict, root: pathlib.Path, evidence: pathlib.Pa
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--manifest", required=True)
+    group_manifest = parser.add_mutually_exclusive_group(required=True)
+    group_manifest.add_argument("--manifest", help="concrete manifest; required for --run")
+    group_manifest.add_argument("--manifest-template", help="unmaterialized template; --check-contract only")
     parser.add_argument("--repo-root", default=str(RELEASE_DIR.parent))
     parser.add_argument("--evidence-dir", required=True)
     parser.add_argument("--platform", action="append", dest="platforms",
                         choices=["mac", "web", "ubuntu"], required=True)
     parser.add_argument("--artifact-dir", help="installed artifact dir with build.json (validated when given)")
+    parser.add_argument("--trusted-provenance", help="controller-supplied provenance receipt (external to artifact)")
+    parser.add_argument("--expected-receipt-digest", help="controller-supplied SHA-256 of trusted provenance")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-contract", action="store_true",
                       help="static validation only; no heavy platform gates")
@@ -244,14 +273,33 @@ def main() -> int:
     args = parser.parse_args()
     if args.tool_gates and "ubuntu" not in args.platforms:
         parser.error("--tool-gates applies only when --platform ubuntu is selected")
-    root = pathlib.Path(args.repo_root).resolve()
-    manifest_path = pathlib.Path(args.manifest)
+    if args.run and len(args.platforms) != 1:
+        parser.error("--run accepts exactly one platform")
+    # Preserve the caller-supplied root identity until validate_git_source has
+    # rejected symlink aliases.  Resolving here would erase that security
+    # boundary and turn an alias into an apparently real repository root.
+    root = pathlib.Path(args.repo_root)
+    manifest_path = pathlib.Path(args.manifest or args.manifest_template)
     evidence = pathlib.Path(args.evidence_dir).resolve()
     try:
         if not SHA_RE.fullmatch(args.source_sha):
             raise GateError("source sha must be 40 hex characters")
         receipts.reject_nonempty_dir(evidence)
-        manifest = load_manifest(manifest_path)
+        evidence.mkdir(parents=True, exist_ok=True)
+        if args.run:
+            if not args.trusted_provenance or not args.expected_receipt_digest:
+                raise GateError("--run requires explicit trusted provenance and expected receipt digest")
+            tree = receipts.validate_git_source(root, args.source_sha)
+        if args.manifest_template:
+            if args.run:
+                raise GateError("--manifest-template is allowed only with --check-contract")
+            manifest, manifest_path = load_template(pathlib.Path(args.manifest_template), args.source_sha, evidence)
+        else:
+            manifest = load_manifest(manifest_path, args.source_sha)
+        if args.run:
+            template_path = pathlib.Path(args.repo_root).resolve() / "release" / "release-gates.manifest.template.json"
+            template = receipts.load_json(template_path)
+            receipts.validate_trusted_layout(manifest, template)
         if not manifest.get("source_sha") or manifest["source_sha"] != args.source_sha:
             raise GateError(
                 f"manifest pinned to {manifest.get('source_sha')!r}, not {args.source_sha!r}: "
@@ -262,12 +310,29 @@ def main() -> int:
             ubuntu = manifest["platforms"].get("ubuntu", {})
             if not ubuntu.get("tool_gates"):
                 raise GateError("--tool-gates requested but manifest ubuntu tool_gates absent")
-        evidence.mkdir(parents=True, exist_ok=True)
+        if args.run and args.artifact_dir is None:
+            raise GateError("--run requires --artifact-dir")
+        if args.run:
+            selected = args.platforms[0]
+            try:
+                trusted = receipts.validate_trusted_provenance(
+                    pathlib.Path(args.trusted_provenance), args.expected_receipt_digest,
+                    args.source_sha, tree, selected, manifest,
+                    pathlib.Path(args.artifact_dir),
+                )
+                receipts.validate_artifact_provenance_binding(
+                    pathlib.Path(args.artifact_dir), selected, trusted
+                )
+            except receipts.ReceiptError as exc:
+                raise GateError(str(exc)) from exc
         if args.check_contract:
+            # materialize_template already emitted this exact evidence once.
+            if not (evidence / "materialized-manifest.json").is_file():
+                receipts.write_json_atomic_exclusive(evidence / "materialized-manifest.json", manifest)
             print(f"contract OK for {args.source_sha} platforms={args.platforms}", flush=True)
             return 0
         return run_platforms(args, manifest, root, evidence)
-    except GateError as exc:
+    except (GateError, receipts.ReceiptError, KeyError) as exc:
         print(f"GATE CONTRACT FAIL: {exc}", file=sys.stderr, flush=True)
         return 1
 
