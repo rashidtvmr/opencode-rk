@@ -27,6 +27,7 @@ bracketed-paste, has no Paste event and no Composer::apply_paste caller, so
 the embedded CR bytes submit early and no 2004h is emitted.
 """
 import argparse
+import errno
 import fcntl
 import hashlib
 import http.server
@@ -315,7 +316,7 @@ def drain_exit_output(master, captures, screen, deadline):
         try:
             output = os.read(master, min(65536, MAX_PTY - len(captures)))
         except OSError as exc:
-            if exc.errno == 5:  # EIO is terminal EOF for a closed macOS PTY slave.
+            if exc.errno == errno.EIO:  # EIO is terminal EOF for a closed macOS PTY slave.
                 return
             raise RuntimeError("PTY read failed while draining CLI exit: %s" % exc)
         if not output:
@@ -349,13 +350,11 @@ def capture_until_child_exit(child, master, captures, screen, deadline):
         except (InterruptedError, BlockingIOError):
             continue
         except OSError as exc:
-            if exc.errno == 5 and child.poll() is not None:
+            if exc.errno == errno.EIO:
                 return
             raise RuntimeError("PTY read failed while waiting for CLI exit: %s" % exc)
         if not output:
-            if child.poll() is not None:
-                return
-            raise RuntimeError("PTY EOF while waiting for CLI exit")
+            return
         captures.extend(output)
         screen.feed(output)
 
