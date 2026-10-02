@@ -28,7 +28,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Validate receipt/artifact contract schema and frozen test pins
-        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ github.sha }} --manifest release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-contract" --platform mac --platform web --platform ubuntu --check-contract
+        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ github.sha }} --manifest-template release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-contract" --platform mac --platform web --platform ubuntu --check-contract
       - name: Receipt validation unit tests
         run: /usr/bin/python3 -m unittest discover -s tests/release-gates -p 'test_*.py' -v
 
@@ -87,4 +87,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Verify retained runner hash and --tool-gates wiring
-        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ inputs.source_sha }} --manifest release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-ubuntu" --platform ubuntu --tool-gates --check-contract
+        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ inputs.source_sha }} --manifest-template release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-ubuntu" --platform ubuntu --tool-gates --check-contract

@@ -21,7 +21,7 @@ sys.path.insert(0, str(ROOT / "release"))
 import receipts  # noqa: E402
 import run_release_gates  # noqa: E402
 
-SHA = "ddff2e6d617f2c70f60ed046f7af7636087f1d61"
+SHA = "f5f440d8f4ea7085409a06f10343494945fef6c0"
 OTHER_SHA = "a79ae96b93f9a0ab94ceafadcd9425db08f28027"
 MANIFEST = ROOT / "release" / "release-gates.manifest.template.json"
 DRIVER = ROOT / "release" / "run_release_gates.py"
@@ -66,8 +66,37 @@ class ManifestSchema(unittest.TestCase):
 
     def test_real_template_contract_validates(self):
         data = json.loads(MANIFEST.read_text(encoding="utf-8"))
-        receipts.validate_manifest(data["artifact_contract"])
-        self.assertEqual(data["source_sha"], SHA)
+        self.assertEqual(data["source_sha"], receipts.TEMPLATE_SHA)
+        self.assertEqual(data["artifact_contract"]["source_sha"], receipts.TEMPLATE_SHA)
+
+    def test_template_materializes_exact_sha(self):
+        data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as td:
+            out = pathlib.Path(td) / "concrete.json"
+            result = receipts.materialize_template(data, SHA, out)
+            self.assertEqual(result["source_sha"], SHA)
+            self.assertEqual(result["artifact_contract"]["source_sha"], SHA)
+            receipts.validate_manifest(result["artifact_contract"])
+            self.assertEqual(json.loads(out.read_text())["source_sha"], SHA)
+
+    def test_template_materialization_rejects_mixed_and_stale(self):
+        data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        data["artifact_contract"]["source_sha"] = SHA
+        with tempfile.TemporaryDirectory() as td:
+            with self.assertRaises(receipts.ReceiptError):
+                receipts.materialize_template(data, SHA, pathlib.Path(td) / "x.json")
+            stale = json.loads(MANIFEST.read_text())
+            stale["source_sha"] = OTHER_SHA
+            with self.assertRaises(receipts.ReceiptError):
+                receipts.materialize_template(stale, OTHER_SHA, pathlib.Path(td) / "y.json")
+
+    def test_template_materialization_refuses_existing_output(self):
+        data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        with tempfile.TemporaryDirectory() as td:
+            out = pathlib.Path(td) / "x.json"
+            out.write_text("{}")
+            with self.assertRaises(receipts.ReceiptError):
+                receipts.materialize_template(data, SHA, out)
 
 
 class ArtifactHashBinding(unittest.TestCase):
@@ -236,7 +265,7 @@ class DriverContract(unittest.TestCase):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         cmd = [sys.executable, str(DRIVER), "--source-sha", SHA,
-               "--manifest", str(MANIFEST), "--evidence-dir", tmp.name + "/evidence"]
+               "--manifest-template", str(MANIFEST), "--evidence-dir", tmp.name + "/evidence"]
         return subprocess.run(cmd + list(extra), capture_output=True, text=True, timeout=60)
 
     def test_check_contract_passes_against_real_repo(self):
@@ -284,7 +313,7 @@ class DriverContract(unittest.TestCase):
             shutil.copy(MANIFEST, repo / "release" / "release-gates.manifest.template.json")
             r = subprocess.run(
                 [sys.executable, str(repo / "release" / "run_release_gates.py"),
-                 "--source-sha", SHA, "--manifest",
+                 "--source-sha", SHA, "--manifest-template",
                  str(repo / "release" / "release-gates.manifest.template.json"),
                  "--evidence-dir", td + "/e", "--repo-root", str(repo),
                  "--platform", "mac", "--check-contract"],

@@ -1,12 +1,13 @@
 # R1 release-gates — exact-SHA gate contract (candidate, not acceptance)
 
 Package: R1 (release-readiness orchestrator). Base: `ddff2e6d617f2c70f60ed046f7af7636087f1d61`.
-Status: PREVERIFIED-static only. NO release-readiness claim. Heavy platform gates NOT run here (mac/web/ubuntu runners require their own hosts/sandboxes; see blockers).
+Status: PREVERIFIED_STATIC only. NO release-readiness claim. R1 integrated at `f5f440d8f4ea7085409a06f10343494945fef6c0` failed acceptance because the tracked template hard-coded `ddff`; R1.1 corrects this with fail-closed `<SOURCE_SHA>` materialization. Heavy platform gates NOT run here.
 
 ## Changed paths (grant: release/**, scripts/**, CI workflows, tests/release-gates/**, this worklog)
 
 - `release/receipts.py` (NEW) — schema + stale-reuse validators: manifest (source_sha/binary/library/archive/runner/frozen_tests), artifact-hash binding, frozen-test rehash, runner pin, receipt validation (exact-SHA, exit 0, limit_failure null, log re-hash), fresh-evidence-dir guard, disposable HOME/XDG/TMP env + credential scrub.
 - `release/run_release_gates.py` (NEW) — bounded serial gate driver. Modes `--check-contract` (static, safe anywhere) / `--run` (executes manifest gates). Real subprocess exit codes via direct Popen + select byte-budget reader + process-group kill (retained verify-native-utf8.py pattern; no shell, no pipe/tail masking). Rejects stale manifest/artifact/receipt cross-SHA reuse; `summary.json` carries `release_readiness_claim: false`.
+- R1.1 — `--manifest-template` is restricted to static checks and materializes both source fields into fresh evidence atomically; `--manifest` remains concrete exact-SHA input, and `--run` requires artifacts.
 - `release/verify-native-utf8.py` (NEW copy) — retained Ubuntu runner verbatim, sha256 `b135a456f9dae899af79f6249c25cf116ba7917f6141123d36b290a80d94d423`, pins `--tool-gates` + platform evidence (loader ABI, `$ORIGIN/../lib`, exports, tools clippy/test/shell_owned_lifetime). Original retained at `/private/var/folders/.../v2-ubuntu-arm64-release-dqhrz_mn/verify-native-utf8.py`.
 - `release/release-gates.manifest.template.json` (NEW) — schema `r1-release-gates/1`. frozen_tests hashes verified at base via `git show ddff2e6:<path> | shasum -a 256` (matches retained a79ae96 build.json for shared 5). binary/library/archive = zero placeholders until a real attested build exists. Platform gates: mac = self-checks + `macos_loader` + frozen `native_bracketed_paste.py` paste-reset on installed binary; web = `web_tool_journey_fixture.py` real Rust router/auth daemon (no Python re-enactment); ubuntu = retained runner `--tool-gates` under `/work` sandbox layout.
 - `.github/workflows/release-gates.yml` (NEW) — SHA-pinned actions, timeout-bounded, disposable evidence dirs uploaded; `contract` job static-only on push; heavy platform jobs `workflow_dispatch`-gated with explicit `source_sha` input.

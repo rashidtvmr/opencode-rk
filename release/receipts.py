@@ -18,6 +18,7 @@ import re
 
 SHA40 = re.compile(r"[0-9a-f]{40}")
 SHA64 = re.compile(r"[0-9a-f]{64}")
+TEMPLATE_SHA = "<SOURCE_SHA>"
 CREDENTIAL_KEY = re.compile(
     r"(API|AUTH|TOKEN|SECRET|KEY|PASSWORD|CREDENTIAL|SIGNING|NOTARY|APPLE_ID|AZURE)", re.I
 )
@@ -73,7 +74,28 @@ def validate_manifest(manifest: dict) -> None:
         if not SHA64.fullmatch(str(expected)):
             raise ReceiptError(f"manifest frozen_tests[{path}] must be 64 hex characters")
     if manifest.get("profile") != "release" or manifest.get("native") is not True:
-        raise ReceiptError("manifest must attest profile=release and native=true")
+            raise ReceiptError("manifest must attest profile=release and native=true")
+
+
+def materialize_template(template: dict, source_sha: str, output: pathlib.Path) -> dict:
+    """Instantiate a deliberately non-runnable template exactly once."""
+    if not SHA40.fullmatch(source_sha):
+        raise ReceiptError("requested source_sha must be 40 lowercase hex characters")
+    if output.exists():
+        raise ReceiptError(f"refusing to overwrite existing materialized manifest: {output}")
+    import copy
+    concrete = copy.deepcopy(template)
+    if concrete.get("source_sha") != TEMPLATE_SHA:
+        raise ReceiptError("template top-level source_sha is not the sentinel")
+    contract = concrete.get("artifact_contract")
+    if not isinstance(contract, dict) or contract.get("source_sha") != TEMPLATE_SHA:
+        raise ReceiptError("template artifact_contract source_sha is not the sentinel")
+    concrete["source_sha"] = source_sha
+    contract["source_sha"] = source_sha
+    validate_manifest(contract)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    write_json_atomic(output, concrete)
+    return concrete
 
 
 def validate_artifact_hashes(manifest: dict, artifact_dir: pathlib.Path) -> None:

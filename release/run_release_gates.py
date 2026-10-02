@@ -17,7 +17,7 @@ artifacts/receipts can never be silently reused.
 Modes:
   --check-contract  static validation only (manifest schema, hashes, frozen
                     tests, runner pin). Safe on any host; no heavy gates.
-  --run             execute the platform gate list serially.
+   --run             execute the platform gate list serially (concrete manifests only).
 
 Exit codes: 0 all gates passed, 1 contract violation or any gate failure,
 2 usage error. Never reports release readiness, only per-gate facts.
@@ -49,8 +49,20 @@ class GateError(RuntimeError):
 
 def load_manifest(path: pathlib.Path) -> dict:
     manifest = receipts.load_json(path)
+    if manifest.get("source_sha") == receipts.TEMPLATE_SHA:
+        raise GateError("stale/template sentinel passed as --manifest; use --manifest-template")
     receipts.validate_manifest(manifest["artifact_contract"])
     return manifest
+
+
+def load_template(path: pathlib.Path, source_sha: str, evidence: pathlib.Path) -> tuple[dict, pathlib.Path]:
+    concrete_path = evidence / "materialized-manifest.json"
+    try:
+        template = receipts.load_json(path)
+        manifest = receipts.materialize_template(template, source_sha, concrete_path)
+    except (receipts.ReceiptError, KeyError) as exc:
+        raise GateError(f"template materialization failed: {exc}") from exc
+    return manifest, concrete_path
 
 
 def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
@@ -229,7 +241,9 @@ def run_platforms(args, manifest: dict, root: pathlib.Path, evidence: pathlib.Pa
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--source-sha", required=True)
-    parser.add_argument("--manifest", required=True)
+    group_manifest = parser.add_mutually_exclusive_group(required=True)
+    group_manifest.add_argument("--manifest", help="concrete manifest; required for --run")
+    group_manifest.add_argument("--manifest-template", help="unmaterialized template; --check-contract only")
     parser.add_argument("--repo-root", default=str(RELEASE_DIR.parent))
     parser.add_argument("--evidence-dir", required=True)
     parser.add_argument("--platform", action="append", dest="platforms",
@@ -245,13 +259,19 @@ def main() -> int:
     if args.tool_gates and "ubuntu" not in args.platforms:
         parser.error("--tool-gates applies only when --platform ubuntu is selected")
     root = pathlib.Path(args.repo_root).resolve()
-    manifest_path = pathlib.Path(args.manifest)
+    manifest_path = pathlib.Path(args.manifest or args.manifest_template)
     evidence = pathlib.Path(args.evidence_dir).resolve()
     try:
         if not SHA_RE.fullmatch(args.source_sha):
             raise GateError("source sha must be 40 hex characters")
         receipts.reject_nonempty_dir(evidence)
-        manifest = load_manifest(manifest_path)
+        evidence.mkdir(parents=True, exist_ok=True)
+        if args.manifest_template:
+            if args.run:
+                raise GateError("--manifest-template is allowed only with --check-contract")
+            manifest, manifest_path = load_template(pathlib.Path(args.manifest_template), args.source_sha, evidence)
+        else:
+            manifest = load_manifest(manifest_path)
         if not manifest.get("source_sha") or manifest["source_sha"] != args.source_sha:
             raise GateError(
                 f"manifest pinned to {manifest.get('source_sha')!r}, not {args.source_sha!r}: "
@@ -262,12 +282,14 @@ def main() -> int:
             ubuntu = manifest["platforms"].get("ubuntu", {})
             if not ubuntu.get("tool_gates"):
                 raise GateError("--tool-gates requested but manifest ubuntu tool_gates absent")
-        evidence.mkdir(parents=True, exist_ok=True)
+        if args.run and args.artifact_dir is None:
+            raise GateError("--run requires --artifact-dir")
         if args.check_contract:
+            receipts.write_json_atomic(evidence / "materialized-manifest.json", manifest)
             print(f"contract OK for {args.source_sha} platforms={args.platforms}", flush=True)
             return 0
         return run_platforms(args, manifest, root, evidence)
-    except GateError as exc:
+    except (GateError, receipts.ReceiptError, KeyError) as exc:
         print(f"GATE CONTRACT FAIL: {exc}", file=sys.stderr, flush=True)
         return 1
 
