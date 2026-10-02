@@ -6,6 +6,7 @@ pub mod auto_compact;
 pub mod auto_lease;
 pub mod auto_sched;
 pub mod branch_v2;
+pub mod compaction;
 pub mod import;
 pub mod index;
 pub mod legacy_view;
