@@ -275,7 +275,10 @@ def main() -> int:
         parser.error("--tool-gates applies only when --platform ubuntu is selected")
     if args.run and len(args.platforms) != 1:
         parser.error("--run accepts exactly one platform")
-    root = pathlib.Path(args.repo_root).resolve()
+    # Preserve the caller-supplied root identity until validate_git_source has
+    # rejected symlink aliases.  Resolving here would erase that security
+    # boundary and turn an alias into an apparently real repository root.
+    root = pathlib.Path(args.repo_root)
     manifest_path = pathlib.Path(args.manifest or args.manifest_template)
     evidence = pathlib.Path(args.evidence_dir).resolve()
     try:
@@ -312,10 +315,13 @@ def main() -> int:
         if args.run:
             selected = args.platforms[0]
             try:
-                receipts.validate_trusted_provenance(
+                trusted = receipts.validate_trusted_provenance(
                     pathlib.Path(args.trusted_provenance), args.expected_receipt_digest,
                     args.source_sha, tree, selected, manifest,
                     pathlib.Path(args.artifact_dir),
+                )
+                receipts.validate_artifact_provenance_binding(
+                    pathlib.Path(args.artifact_dir), selected, trusted
                 )
             except receipts.ReceiptError as exc:
                 raise GateError(str(exc)) from exc

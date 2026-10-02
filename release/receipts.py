@@ -262,6 +262,41 @@ def validate_artifact_hashes(manifest: dict, artifact_dir: pathlib.Path, *,
         raise ReceiptError(f"archive {archive_name} absent under {artifact_dir}")
 
 
+def validate_artifact_provenance_binding(artifact_dir: pathlib.Path, platform: str,
+                                         provenance: dict) -> None:
+    """Bind the bytes gate children will consume to controller provenance.
+
+    build.json is an untrusted assertion.  Its hashes are useful for locating
+    and checking the artifact, but must not be able to authorize a replacement
+    after the controller has issued its trusted receipt.
+    """
+    library = "libopentui.dylib" if platform == "mac" else "libopentui.so"
+    archive_name = {
+        "mac": "oc2-macos-arm64.tar.gz",
+        "web": "oc2-linux-x64.tar.gz",
+        "ubuntu": "oc2-linux-arm64.tar.gz",
+    }.get(platform)
+    if archive_name is None:
+        raise ReceiptError(f"unsupported selected platform: {platform!r}")
+    mapping = {
+        artifact_dir / "install/bin/oc2": "binary_sha256",
+        artifact_dir / f"install/lib/{library}": "native_library_sha256",
+        artifact_dir / archive_name: "archive_sha256",
+    }
+    for path, field in mapping.items():
+        if path.is_symlink() or not path.is_file():
+            raise ReceiptError(f"trusted provenance artifact absent or symlinked: {path}")
+        expected = provenance.get(field)
+        if not SHA64.fullmatch(str(expected or "")):
+            raise ReceiptError(f"trusted provenance missing valid {field}")
+        actual = sha256_file(path)
+        if actual != expected:
+            raise ReceiptError(
+                f"artifact {path.name} is not bound to trusted provenance: "
+                f"{expected} != {actual}"
+            )
+
+
 def validate_frozen_tests(manifest: dict, source_root: pathlib.Path) -> None:
     """Frozen contract tests must be byte-identical to the hashes recorded in
     the artifact manifest (prevents test-weakening against a candidate)."""
