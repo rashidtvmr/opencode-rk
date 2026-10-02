@@ -601,6 +601,231 @@ class ExitCodeCapture(unittest.TestCase):
             self.assertNotEqual(record["exit"], 0)
 
 
+class SyntheticReleaseRun:
+    """Real temporary Git source, source-owned template, pinned contracts, external evidence."""
+
+    def __init__(self, root: pathlib.Path):
+        self.root = root
+        self.repo = root / "repo"
+        self.repo.mkdir()
+        self.marker = root / "marker"
+        self.artifact = root / "artifact"
+        self.provenance = root / "trusted-provenance.json"
+        self.manifest_path = root / "concrete-manifest.json"
+        self.evidence = root / "evidence"
+
+        import shutil
+        template = json.loads(MANIFEST.read_text(encoding="utf-8"))
+        template["platforms"]["mac"]["gates"] = [{
+            "label": "marker",
+            "command": [sys.executable, "-c",
+                        "from pathlib import Path; Path(" + repr(str(self.marker)) + ").open('a').write('x')"],
+            "timeout_seconds": 2,
+        }]
+        for path in ("release", "tests"):
+            (self.repo / path).mkdir(parents=True, exist_ok=True)
+        for rel in ("release/receipts.py", "release/run_release_gates.py", "release/verify-native-utf8.py"):
+            shutil.copy(ROOT / rel, self.repo / rel)
+        for rel in template["artifact_contract"]["frozen_tests"]:
+            dest = self.repo / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy(ROOT / rel, dest)
+        source_template = self.repo / "release/release-gates.manifest.template.json"
+        source_template.write_text(json.dumps(template), encoding="utf-8")
+
+        subprocess.run(["git", "init", "-q", str(self.repo)], check=True, timeout=10)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.email", "r1@test"], check=True, timeout=10)
+        subprocess.run(["git", "-C", str(self.repo), "config", "user.name", "R1 test"], check=True, timeout=10)
+        subprocess.run(["git", "-C", str(self.repo), "add", "."], check=True, timeout=10)
+        subprocess.run(["git", "-C", str(self.repo), "commit", "-qm", "synthetic release source"], check=True, timeout=10)
+        self.source_sha = subprocess.check_output(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD"], text=True, timeout=10).strip()
+        self.tree = subprocess.check_output(
+            ["git", "-C", str(self.repo), "rev-parse", "HEAD^{tree}"], text=True, timeout=10).strip()
+
+        self.artifact.mkdir()
+        (self.artifact / "install/bin").mkdir(parents=True)
+        (self.artifact / "install/lib").mkdir(parents=True)
+        (self.artifact / "install/bin/oc2").write_bytes(b"binary")
+        (self.artifact / "install/lib/libopentui.dylib").write_bytes(b"library")
+        (self.artifact / "oc2-macos-arm64.tar.gz").write_bytes(b"archive")
+        self.manifest = json.loads(json.dumps(template))
+        self.manifest["source_sha"] = self.source_sha
+        contract = self.manifest["artifact_contract"]
+        contract["source_sha"] = self.source_sha
+        contract["binary_sha256"] = digest(self.artifact / "install/bin/oc2")
+        contract["native_library_sha256"] = digest(self.artifact / "install/lib/libopentui.dylib")
+        contract["archive_sha256"] = digest(self.artifact / "oc2-macos-arm64.tar.gz")
+        self.build = {**contract, "platform": "mac"}
+        self.build_json = self.artifact / "build.json"
+        self.build_json.write_text(json.dumps(self.build), encoding="utf-8")
+        self.write_manifest()
+        self.write_provenance()
+
+    def write_manifest(self):
+        self.manifest_path.write_text(json.dumps(self.manifest), encoding="utf-8")
+
+    def write_provenance(self, mutate=None):
+        provenance = {
+            **self.build,
+            "tree": self.tree,
+            "profile": "release",
+            "native": True,
+            "schema": "r1-trusted-provenance/1",
+            "issuer": "release-controller",
+            "build_recipe": "release-build-v1",
+            "build_exit": 0,
+            "build_argv": ["cargo", "build", "--release", "--locked"],
+            "build_log_sha256": "0" * 64,
+            "source_archive_sha256": "1" * 64,
+        }
+        if mutate is not None:
+            mutate(provenance)
+        self.provenance.write_text(json.dumps(provenance), encoding="utf-8")
+        if hasattr(self, "build_json"):
+            self.build_json.write_text(json.dumps(self.build), encoding="utf-8")
+
+    def invoke(self, *, repo=None, source_sha=None, provenance=None, expected_digest=None,
+               evidence=None, extra=(), auto_digest=True, include_provenance=True,
+               include_digest=True):
+        provenance = self.provenance if provenance is None else provenance
+        if auto_digest and expected_digest is None and provenance.is_file() and not provenance.is_symlink():
+            expected_digest = digest(provenance)
+        argv = [sys.executable, str(DRIVER), "--source-sha", source_sha or self.source_sha,
+                "--manifest", str(self.manifest_path), "--repo-root", str(repo or self.repo),
+                "--evidence-dir", str(evidence or self.evidence), "--artifact-dir", str(self.artifact),
+                "--platform", "mac", "--run"]
+        if include_provenance:
+            argv += ["--trusted-provenance", str(provenance)]
+        if include_digest and expected_digest is not None:
+            argv += ["--expected-receipt-digest", expected_digest]
+        argv += list(extra)
+        return subprocess.run(argv, capture_output=True, text=True, timeout=10)
+
+
+class DriverSecurityBoundary(unittest.TestCase):
+    def reject(self, case, result, label):
+        self.assertFalse(case.marker.exists(), label + " started a marker child: " + result.stdout + result.stderr)
+        self.assertEqual(result.returncode, 1, label + ": " + result.stdout + result.stderr)
+        self.assertIn("GATE CONTRACT FAIL:", result.stderr, label)
+
+    def test_real_repository_root_symlink_rejected_before_any_child(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = SyntheticReleaseRun(pathlib.Path(td))
+            alias = pathlib.Path(td) / "repo-alias"
+            alias.symlink_to(case.repo, target_is_directory=True)
+            self.reject(case, case.invoke(repo=alias), "repo-root symlink")
+
+    def test_invalid_git_source_shapes_reject_before_any_child(self):
+        for kind in ("non-git", "stale-head", "tracked-dirty", "git-symlink"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as td:
+                case = SyntheticReleaseRun(pathlib.Path(td))
+                repo = case.repo
+                source_sha = None
+                if kind == "non-git":
+                    import shutil
+                    shutil.rmtree(repo / ".git")
+                elif kind == "stale-head":
+                    source_sha = "f" * 40
+                elif kind == "tracked-dirty":
+                    (repo / "release/receipts.py").write_text("# changed\n", encoding="utf-8")
+                else:
+                    dotgit = repo / ".git"
+                    saved = pathlib.Path(td) / "git-directory"
+                    dotgit.rename(saved)
+                    dotgit.symlink_to(saved, target_is_directory=True)
+                self.reject(case, case.invoke(source_sha=source_sha), kind)
+
+    def test_linked_git_worktree_with_git_pointer_file_remains_valid(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = SyntheticReleaseRun(pathlib.Path(td))
+            linked = pathlib.Path(td) / "linked-worktree"
+            subprocess.run(["git", "-C", str(case.repo), "worktree", "add", "-q", "--detach",
+                            str(linked), case.source_sha], check=True, timeout=10)
+            self.assertTrue((linked / ".git").is_file())
+            result = case.invoke(repo=linked)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(case.marker.read_text(), "x")
+
+    def test_missing_digest_provenance_and_digest_mismatch_reject(self):
+        cases = (
+            ("missing digest", {"include_digest": False}),
+            ("missing provenance", {"include_provenance": False}),
+            ("digest mismatch", {"expected_digest": "0" * 64, "auto_digest": False}),
+        )
+        for label, kwargs in cases:
+            with self.subTest(label=label), tempfile.TemporaryDirectory() as td:
+                case = SyntheticReleaseRun(pathlib.Path(td))
+                self.reject(case, case.invoke(**kwargs), label)
+
+    def test_provenance_location_symlink_and_binding_rejections(self):
+        for kind in ("artifact-contained", "symlink", "stale-source", "stale-tree",
+                     "wrong-platform", "dev-profile", "not-native", "runner", "frozen-tests",
+                     "missing-runner", "unfrozen-runner"):
+            with self.subTest(kind=kind), tempfile.TemporaryDirectory() as td:
+                case = SyntheticReleaseRun(pathlib.Path(td))
+                provenance_path = case.provenance
+                expected_digest = None
+                if kind in ("artifact-contained", "symlink"):
+                    provenance = pathlib.Path(td) / "external-provenance.json"
+                    if kind == "artifact-contained":
+                        provenance = case.build_json
+                        expected_digest = digest(provenance)
+                    else:
+                        provenance.symlink_to(case.provenance)
+                        expected_digest = digest(case.provenance)
+                    provenance_path = provenance
+                else:
+                    changes = {
+                        "stale-source": lambda d: d.update(source_sha="f" * 40),
+                        "stale-tree": lambda d: d.update(tree="f" * 40),
+                        "wrong-platform": lambda d: d.update(platform="web"),
+                        "dev-profile": lambda d: d.update(profile="dev"),
+                        "not-native": lambda d: d.update(native=False),
+                        "runner": lambda d: d.update(runner_sha256="f" * 64),
+                        "frozen-tests": lambda d: d.update(frozen_tests={}),
+                        "missing-runner": lambda d: d.pop("runner_sha256"),
+                        "unfrozen-runner": lambda d: d.update(frozen_tests={"tests/new.py": "f" * 64}),
+                    }
+                    case.write_provenance(changes[kind])
+                self.reject(case, case.invoke(provenance=provenance_path,
+                                              expected_digest=expected_digest), kind)
+
+    def test_artifact_hash_swaps_with_unchanged_controller_digest_reject_before_child(self):
+        paths = {
+            "binary": "install/bin/oc2",
+            "native-library": "install/lib/libopentui.dylib",
+            "archive": "oc2-macos-arm64.tar.gz",
+        }
+        digest_fields = {
+            "binary": "binary_sha256",
+            "native-library": "native_library_sha256",
+            "archive": "archive_sha256",
+        }
+        for name, rel in paths.items():
+            with self.subTest(artifact=name), tempfile.TemporaryDirectory() as td:
+                case = SyntheticReleaseRun(pathlib.Path(td))
+                controller_digest = digest(case.provenance)
+                artifact_file = case.artifact / rel
+                artifact_file.write_bytes(b"controller-unapproved-swap")
+                case.build[digest_fields[name]] = digest(artifact_file)
+                case.build_json.write_text(json.dumps(case.build), encoding="utf-8")
+                self.assertEqual(digest(case.provenance), controller_digest)
+                self.reject(case, case.invoke(expected_digest=controller_digest, auto_digest=False),
+                            name + " swap with unchanged controller digest")
+
+    def test_controller_receipt_digest_binds_complete_provenance_payload(self):
+        with tempfile.TemporaryDirectory() as td:
+            case = SyntheticReleaseRun(pathlib.Path(td))
+            case.write_provenance()
+            valid_digest = digest(case.provenance)
+            data = json.loads(case.provenance.read_text(encoding="utf-8"))
+            data["build_exit"] = 11
+            case.provenance.write_text(json.dumps(data), encoding="utf-8")
+            self.reject(case, case.invoke(expected_digest=valid_digest, auto_digest=False),
+                        "provenance changed after controller digest")
+
+
 class MultiPlatformRejection(unittest.TestCase):
     """Tests for --run mode multi-platform rejection."""
 
@@ -625,72 +850,12 @@ class MultiPlatformRejection(unittest.TestCase):
             self.assertIn("--run accepts exactly one platform", r.stderr)
 
     def test_single_platform_run_allowed(self):
-        """A valid single-platform synthetic artifact binds then runs only its gate."""
+        """Valid exact-SHA source/provenance starts one bounded marker child."""
         with tempfile.TemporaryDirectory() as td:
-            root = pathlib.Path(td) / "repo"
-            (root / "release").mkdir(parents=True)
-            (root / "tests").mkdir()
-            import shutil
-            template = json.loads(MANIFEST.read_text())
-            template["platforms"]["mac"]["gates"] = [{
-                "label": "marker", "command": [sys.executable, "-c", "from pathlib import Path; Path('marker').write_text('ran')"],
-            }]
-            (root / "release" / "release-gates.manifest.template.json").write_text(json.dumps(template))
-            (root / ".gitignore").write_text("release/release-gates.manifest.template.json\n__pycache__/\n")
-            shutil.copy(ROOT / "release" / "receipts.py", root / "release" / "receipts.py")
-            shutil.copy(ROOT / "release" / "run_release_gates.py", root / "release" / "run_release_gates.py")
-            shutil.copy(ROOT / "release" / "verify-native-utf8.py", root / "release" / "verify-native-utf8.py")
-            for rel in template["artifact_contract"]["frozen_tests"]:
-                dest = root / rel
-                dest.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(ROOT / rel, dest)
-            subprocess.run(["git", "init", "-q", str(root)], check=True)
-            subprocess.run(["git", "-C", str(root), "config", "user.email", "r1@test"], check=True)
-            subprocess.run(["git", "-C", str(root), "config", "user.name", "R1"], check=True)
-            subprocess.run(["git", "-C", str(root), "add", "."], check=True)
-            subprocess.run(["git", "-C", str(root), "commit", "-qm", "fixture"], check=True)
-            source_sha = subprocess.check_output(
-                ["git", "-C", str(root), "rev-parse", "HEAD"], text=True).strip()
-            tree = subprocess.check_output(
-                ["git", "-C", str(root), "rev-parse", "HEAD^{tree}"], text=True).strip()
-            manifest = template
-            manifest["source_sha"] = source_sha
-            manifest["artifact_contract"]["source_sha"] = source_sha
-            marker = root / "marker"
-            manifest["platforms"]["mac"]["gates"] = [{
-                "label": "marker", "command": [sys.executable, "-c", f"open({str(marker)!r}, 'w').write('ran')"],
-                "timeout_seconds": 10,
-            }]
-            (root / "release" / "release-gates.manifest.template.json").write_text(json.dumps(manifest))
-            manifest_path = pathlib.Path(td) / "manifest.json"
-            manifest_path.write_text(json.dumps(manifest))
-            art = pathlib.Path(td) / "artifact"
-            (art / "install/bin").mkdir(parents=True)
-            (art / "install/lib").mkdir(parents=True)
-            (art / "install/bin/oc2").write_bytes(b"BIN")
-            (art / "install/lib/libopentui.dylib").write_bytes(b"LIB")
-            (art / "oc2-macos-arm64.tar.gz").write_bytes(b"ARC")
-            build = {**manifest["artifact_contract"], "source_sha": source_sha, "platform": "mac"}
-            build["binary_sha256"] = digest(art / "install/bin/oc2")
-            build["native_library_sha256"] = digest(art / "install/lib/libopentui.dylib")
-            build["archive_sha256"] = digest(art / "oc2-macos-arm64.tar.gz")
-            for key in ("binary_sha256", "native_library_sha256", "archive_sha256"):
-                manifest["artifact_contract"][key] = build[key]
-            manifest_path.write_text(json.dumps(manifest))
-            (art / "build.json").write_text(json.dumps(build))
-            provenance = pathlib.Path(td) / "trusted-provenance.json"
-            provenance.write_text(json.dumps({**build, "tree": tree, "profile": "release", "native": True}))
-            evidence_dir = pathlib.Path(td) / "evidence"
-            r = subprocess.run(
-                [sys.executable, str(DRIVER), "--source-sha", source_sha,
-                 "--manifest", str(manifest_path), "--repo-root", str(root),
-                 "--evidence-dir", str(evidence_dir),
-                 "--artifact-dir", str(art), "--platform", "mac", "--run",
-                 "--trusted-provenance", str(provenance),
-                 "--expected-receipt-digest", digest(provenance)],
-                capture_output=True, text=True, timeout=10)
-            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-            self.assertTrue((root / "marker").is_file(), r.stdout + r.stderr)
+            case = SyntheticReleaseRun(pathlib.Path(td))
+            result = case.invoke()
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(case.marker.read_text(), "x")
 
     def test_rejected_run_modes_start_no_marker_children(self):
         with tempfile.TemporaryDirectory() as td:
