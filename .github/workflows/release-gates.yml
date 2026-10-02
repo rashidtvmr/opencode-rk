@@ -1,0 +1,90 @@
+name: release-gates
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact 40-hex source SHA to gate
+        required: true
+      artifact_run_id:
+        description: Run id of the release-build job that produced build.json
+        required: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  contract:
+    name: r1 contract (static)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Validate receipt/artifact contract schema and frozen test pins
+        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ github.sha }} --manifest release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-contract" --platform mac --platform web --platform ubuntu --check-contract
+      - name: Receipt validation unit tests
+        run: /usr/bin/python3 -m unittest discover -s tests/release-gates -p 'test_*.py' -v
+
+  mac-native:
+    name: r1 mac native gates
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: macos-14
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Fetch attested artifact
+        run: gh run download ${{ inputs.artifact_run_id }} -n macos-arm64-release -D "$RUNNER_TEMP/artifact"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Run frozen native paste-reset gate (exact SHA)
+        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ inputs.source_sha }} --manifest release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-mac" --artifact-dir "$RUNNER_TEMP/artifact" --platform mac --run
+      - uses: actions/upload-artifact@5d5d22a31266ced26887403a3e7a1b2a4a8c88a0 # v4.3.4
+        with:
+          name: r1-mac-receipts
+          path: ${{ runner.temp }}/r1-mac
+          if-no-files-found: error
+
+  web-journey:
+    name: r1 web journey (real rust router)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Fetch attested artifact
+        run: gh run download ${{ inputs.artifact_run_id }} -n linux-x64-release -D "$RUNNER_TEMP/artifact"
+        env:
+          GH_TOKEN: ${{ github.token }}
+      - name: Run web journey gate (real Rust auth/router daemon)
+        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ inputs.source_sha }} --manifest release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-web" --artifact-dir "$RUNNER_TEMP/artifact" --platform web --run
+      - uses: actions/upload-artifact@5d5d22a31266ced26887403a3e7a1b2a4a8c88a0 # v4.3.4
+        with:
+          name: r1-web-receipts
+          path: ${{ runner.temp }}/r1-web
+          if-no-files-found: error
+
+  # ubuntu arm64 heavy gates stay on the retained /work sandbox layout via
+  # release/verify-native-utf8.py --tool-gates until runner provisioning exists;
+  # dispatch here only validates the manifest wiring, not the platform image.
+  ubuntu-tool-gates-contract:
+    name: r1 ubuntu tool-gate contract
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - name: Verify retained runner hash and --tool-gates wiring
+        run: /usr/bin/python3 release/run_release_gates.py --source-sha ${{ inputs.source_sha }} --manifest release/release-gates.manifest.template.json --evidence-dir "$RUNNER_TEMP/r1-ubuntu" --platform ubuntu --tool-gates --check-contract
