@@ -3,7 +3,7 @@
 
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Mutex, mpsc};
+use std::sync::{mpsc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -35,7 +35,13 @@ struct Fixture {
     join: Option<thread::JoinHandle<()>>,
 }
 
-fn fixture() -> Fixture {
+#[derive(Clone, Copy, Debug)]
+enum Framing {
+    LengthDelimited,
+    CloseDelimited,
+}
+
+fn fixture(framing: Framing) -> Fixture {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind loopback fixture");
     listener
         .set_nonblocking(true)
@@ -57,11 +63,16 @@ fn fixture() -> Fixture {
                     Err(_) => return,
                 }
             };
+            let accepted_at = Instant::now();
             let (body, stream) = read_request(stream).expect("bounded fixture request");
             let request: Value = serde_json::from_slice(&body).expect("request JSON");
-            send.send((number, request, Instant::now()))
+            send.send((number, request, accepted_at))
                 .expect("record request");
-            write_response(stream, if number == 1 { FIRST_BODY } else { SECOND_BODY });
+            write_response(
+                stream,
+                if number == 1 { FIRST_BODY } else { SECOND_BODY },
+                framing,
+            );
         }
     });
     Fixture {
@@ -125,11 +136,18 @@ fn read_request(mut stream: TcpStream) -> std::io::Result<(Vec<u8>, TcpStream)> 
     Ok((bytes[header_end..header_end + length].to_vec(), stream))
 }
 
-fn write_response(mut stream: TcpStream, body: &str) {
-    let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-        body.len()
-    );
+fn write_response(mut stream: TcpStream, body: &str, framing: Framing) {
+    let header = match framing {
+        Framing::LengthDelimited => format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        ),
+        // Deliberately matches the S1 fixture wire framing: completion is
+        // signaled only by EOF after the flushed SSE bytes.
+        Framing::CloseDelimited =>
+            "HTTP/1.1 200 OK\r\ncontent-type: text/event-stream\r\nconnection: close\r\n\r\n"
+                .to_owned(),
+    };
     stream
         .write_all(header.as_bytes())
         .expect("fixture headers");
@@ -210,10 +228,8 @@ async fn second_turn(client: &OpenAiResponsesClient) -> String {
     }
 }
 
-#[tokio::test(flavor = "current_thread")]
-async fn reusable_client_two_rounds_after_closed_tool_stream() {
-    let _lock = ENV_LOCK.lock().expect("environment lock");
-    let fixture = fixture();
+async fn run_dropped_first(framing: Framing) {
+    let fixture = fixture(framing);
     let client = configure(&fixture.base_url);
     let first = first_turn(&client).await;
     drop(first);
@@ -234,7 +250,32 @@ async fn reusable_client_two_rounds_after_closed_tool_stream() {
     assert_eq!(second_request.1["input"][1]["type"], "function_call_output");
     assert_eq!(second_request.1["input"][1]["call_id"], CALL_ID);
     eprintln!(
-        "S1 provider diagnostic: ACCEPT/request1 at {:?}, ACCEPT/request2 at {:?}",
+        "S1 provider diagnostic ({framing:?}, dropped first): ACCEPT/request1 at {:?}, ACCEPT/request2 at {:?}",
+        first_request.2, second_request.2
+    );
+    if let Some(join) = fixture.join {
+        join.join().expect("fixture thread");
+    }
+}
+
+async fn run_retained_first(framing: Framing) {
+    let fixture = fixture(framing);
+    let client = configure(&fixture.base_url);
+    let first = first_turn(&client).await;
+    let text = second_turn(&client).await;
+    assert_eq!(text, "done");
+    drop(first);
+    let first_request = fixture
+        .requests
+        .recv_timeout(Duration::from_secs(1))
+        .expect("request 1");
+    let second_request = fixture
+        .requests
+        .recv_timeout(Duration::from_secs(1))
+        .expect("request 2");
+    assert_eq!(second_request.1["input"][1]["type"], "function_call_output");
+    eprintln!(
+        "S1 provider diagnostic ({framing:?}, retained completed first): ACCEPT/request1 at {:?}, ACCEPT/request2 at {:?}",
         first_request.2, second_request.2
     );
     if let Some(join) = fixture.join {
@@ -243,24 +284,25 @@ async fn reusable_client_two_rounds_after_closed_tool_stream() {
 }
 
 #[tokio::test(flavor = "current_thread")]
+async fn reusable_client_two_rounds_after_closed_tool_stream() {
+    let _lock = ENV_LOCK.lock().expect("environment lock");
+    run_dropped_first(Framing::LengthDelimited).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
 async fn completed_first_stream_can_remain_alive_while_second_opens() {
     let _lock = ENV_LOCK.lock().expect("environment lock");
-    let fixture = fixture();
-    let client = configure(&fixture.base_url);
-    let first = first_turn(&client).await;
-    let text = second_turn(&client).await;
-    assert_eq!(text, "done");
-    drop(first);
-    let _ = fixture
-        .requests
-        .recv_timeout(Duration::from_secs(1))
-        .expect("request 1");
-    let second = fixture
-        .requests
-        .recv_timeout(Duration::from_secs(1))
-        .expect("request 2");
-    assert_eq!(second.1["input"][1]["type"], "function_call_output");
-    if let Some(join) = fixture.join {
-        join.join().expect("fixture thread");
-    }
+    run_retained_first(Framing::LengthDelimited).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn close_delimited_dropped_first_stream() {
+    let _lock = ENV_LOCK.lock().expect("environment lock");
+    run_dropped_first(Framing::CloseDelimited).await;
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn close_delimited_retained_completed_first_stream() {
+    let _lock = ENV_LOCK.lock().expect("environment lock");
+    run_retained_first(Framing::CloseDelimited).await;
 }
