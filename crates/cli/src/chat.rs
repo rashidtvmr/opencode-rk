@@ -558,15 +558,13 @@ fn spawn_daemon(addr: &str, data_dir: &Path) -> Option<Child> {
         .ok()?;
     // Keep the frozen startup bound: at most 200 probes, 10ms apart.
     for _ in 0..200 {
-        loop {
-            if probe_daemon(&daemon_origin(addr)) {
-                return Some(child);
-            }
-            if let Ok(Some(_status)) = child.try_wait() {
-                return None;
-            }
-            std::thread::sleep(Duration::from_millis(10));
+        if probe_daemon(&daemon_origin(addr)) {
+            return Some(child);
         }
+        if let Ok(Some(_status)) = child.try_wait() {
+            return None;
+        }
+        std::thread::sleep(Duration::from_millis(10));
     }
     let _ = child.kill();
     let _ = child.wait();
