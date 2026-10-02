@@ -84,12 +84,41 @@ mod macos_pty {
 
     impl Root {
         fn new() -> Self {
-            let n = NEXT.fetch_add(1, Ordering::Relaxed);
-            let path = std::env::temp_dir()
-                .join(format!("oc2-installed-default-{}-{n}", std::process::id()));
-            fs::create_dir_all(path.join("home")).expect("disposable HOME");
-            fs::create_dir_all(path.join("data")).expect("disposable data");
-            Self(path)
+            // Darwin's sockaddr-unix limit includes the terminating NUL.  Keep
+            // the exclusive fixture root deliberately short: data/runtime and
+            // the daemon socket are appended by the production server.
+            let base = std::env::temp_dir();
+            for _ in 0..64 {
+                let n = NEXT.fetch_add(1, Ordering::Relaxed) % 36_u64.pow(6);
+                let mut digits = [b'0'; 6];
+                let mut value = n;
+                for digit in digits.iter_mut().rev() {
+                    let remainder = (value % 36) as u8;
+                    *digit = match remainder {
+                        0..=9 => b'0' + remainder,
+                        _ => b'a' + remainder - 10,
+                    };
+                    value /= 36;
+                }
+                let name = format!("oc2e{}", String::from_utf8_lossy(&digits));
+                let path = base.join(name);
+                let socket = path.join("data/runtime/opencode-rk.sock");
+                assert!(
+                    socket.as_os_str().as_encoded_bytes().len() + 1 <= 104,
+                    "daemon socket path exceeds Darwin limit: {} bytes",
+                    socket.as_os_str().as_encoded_bytes().len() + 1
+                );
+                match fs::create_dir(&path) {
+                    Ok(()) => {
+                        fs::create_dir(path.join("home")).expect("disposable HOME");
+                        fs::create_dir(path.join("data")).expect("disposable data");
+                        return Self(path);
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("create exclusive disposable root: {error}"),
+                }
+            }
+            panic!("could not allocate exclusive disposable root")
         }
 
         fn home(&self) -> PathBuf {
@@ -452,7 +481,7 @@ mod macos_pty {
             "provider dialog missing\n{initial}"
         );
         assert!(
-            initial.contains("ctrl-p"),
+            initial.contains("OpenCode RK (native)"),
             "native route marker missing\n{initial}"
         );
         assert!(
