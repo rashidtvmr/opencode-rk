@@ -119,7 +119,10 @@ impl Sandbox {
     }
 
     fn archive(&self, label: &str, entries: &[TarEntry]) -> PathBuf {
-        assert!(entries.len() <= MAX_TAR_MEMBERS, "fixture member bound exceeded");
+        assert!(
+            entries.len() <= MAX_TAR_MEMBERS,
+            "fixture member bound exceeded"
+        );
         let tar = write_tar(entries);
         let archive = self.root.join(format!("{label}.tar.gz"));
         let compressed = run_child(
@@ -224,21 +227,18 @@ fn run_installer(
     args: &[OsString],
 ) -> Captured {
     let script = script_path(installer);
-    assert!(script.is_file(), "registered installer script missing: {script:?}");
+    assert!(
+        script.is_file(),
+        "registered installer script missing: {script:?}"
+    );
     let mut command_args = vec![script.as_os_str().to_os_string()];
     command_args.extend_from_slice(args);
     command_args.push(OsString::from("--install-dir"));
     command_args.push(install_dir.as_os_str().to_os_string());
     let env = [
         (OsString::from("TERM"), OsString::from("dumb")),
-        (
-            OsString::from(installer.install_env),
-            OsString::from(""),
-        ),
-        (
-            OsString::from(installer.version_env),
-            OsString::from(""),
-        ),
+        (OsString::from(installer.install_env), OsString::from("")),
+        (OsString::from(installer.version_env), OsString::from("")),
     ];
     run_child_with_env(
         "sh",
@@ -261,15 +261,7 @@ fn run_child(
     stdin_bytes: Option<&[u8]>,
 ) -> std::io::Result<Captured> {
     let args: Vec<OsString> = args.iter().map(|arg| (*arg).to_os_string()).collect();
-    run_child_with_env(
-        program,
-        &args,
-        cwd,
-        home,
-        tmpdir,
-        &[],
-        stdin_bytes,
-    )
+    run_child_with_env(program, &args, cwd, home, tmpdir, &[], stdin_bytes)
 }
 
 fn run_child_with_env(
@@ -338,12 +330,8 @@ fn run_child_with_env(
         }
         thread::sleep(Duration::from_millis(10));
     };
-    let (stdout, stdout_truncated) = stdout_reader
-        .join()
-        .expect("join owned stdout reader");
-    let (stderr, stderr_truncated) = stderr_reader
-        .join()
-        .expect("join owned stderr reader");
+    let (stdout, stdout_truncated) = stdout_reader.join().expect("join owned stdout reader");
+    let (stderr, stderr_truncated) = stderr_reader.join().expect("join owned stderr reader");
     Ok(Captured {
         status,
         stdout,
@@ -384,7 +372,11 @@ fn checksum(path: &Path, sandbox: &Sandbox) -> String {
     } else {
         (
             "shasum",
-            vec![OsString::from("-a"), OsString::from("256"), path.as_os_str().to_os_string()],
+            vec![
+                OsString::from("-a"),
+                OsString::from("256"),
+                path.as_os_str().to_os_string(),
+            ],
         )
     };
     let result = run_child_with_env(
@@ -404,8 +396,15 @@ fn checksum(path: &Path, sandbox: &Sandbox) -> String {
         result.stderr_text()
     );
     let text = result.stdout_text();
-    let digest = text.split_whitespace().next().expect("checksum output has digest");
-    assert_eq!(digest.len(), 64, "checksum utility returned malformed digest");
+    let digest = text
+        .split_whitespace()
+        .next()
+        .expect("checksum output has digest");
+    assert_eq!(
+        digest.len(),
+        64,
+        "checksum utility returned malformed digest"
+    );
     digest.to_owned()
 }
 
@@ -456,7 +455,10 @@ fn snapshot_into(root: &Path, path: &Path, entries: &mut Vec<(String, String, Ve
     } else if metadata.is_dir() {
         ("dir".to_owned(), Vec::new())
     } else if metadata.is_file() {
-        ("file".to_owned(), fs::read(path).expect("read fixture file"))
+        (
+            "file".to_owned(),
+            fs::read(path).expect("read fixture file"),
+        )
     } else {
         ("other".to_owned(), Vec::new())
     };
@@ -517,7 +519,10 @@ fn split_tar_name(name: &str) -> (String, String) {
 fn write_tar(entries: &[TarEntry]) -> Vec<u8> {
     let mut tar = Vec::new();
     for entry in entries {
-        assert!(entry.data.len() <= MAX_TAR_MEMBER_BYTES, "tar member byte bound exceeded");
+        assert!(
+            entry.data.len() <= MAX_TAR_MEMBER_BYTES,
+            "tar member byte bound exceeded"
+        );
         let (name, prefix) = split_tar_name(&entry.name);
         let mut header = [0u8; 512];
         put_field(&mut header, 0, 100, name.as_bytes());
@@ -572,7 +577,11 @@ fn checksum_mismatch_preserves_existing_destination_for_both_installers() {
         let sandbox = Sandbox::new("checksum");
         let install_dir = sandbox.path().join("install path 日本語/bin");
         fs::create_dir_all(&install_dir).expect("seed disposable install dir");
-        fs::write(install_dir.join("keep.marker"), b"pre-existing install marker\0").unwrap();
+        fs::write(
+            install_dir.join("keep.marker"),
+            b"pre-existing install marker\0",
+        )
+        .unwrap();
         let before = snapshot_tree(&install_dir);
         let archive = sandbox.archive(
             installer.binary,
@@ -588,14 +597,29 @@ fn checksum_mismatch_preserves_existing_destination_for_both_installers() {
         let args = archive_args(&archive, &wrong);
         let result = run_installer(&sandbox, installer, &install_dir, &args);
         result.assert_bounded("checksum rejection installer");
-        assert_eq!(result.status.code(), Some(65), "checksum rejection status from {}", installer.script);
+        assert_eq!(
+            result.status.code(),
+            Some(65),
+            "checksum rejection status from {}",
+            installer.script
+        );
         assert!(
             result.stderr_text().contains("checksum mismatch"),
             "{} should diagnose the rejected outer archive digest",
             installer.script
         );
-        assert_eq!(snapshot_tree(&install_dir), before, "{} mutated existing destination", installer.script);
-        assert_eq!(fs::read_dir(sandbox.temp()).unwrap().count(), 0, "{} left staging residue", installer.script);
+        assert_eq!(
+            snapshot_tree(&install_dir),
+            before,
+            "{} mutated existing destination",
+            installer.script
+        );
+        assert_eq!(
+            fs::read_dir(sandbox.temp()).unwrap().count(),
+            0,
+            "{} left staging residue",
+            installer.script
+        );
     }
 }
 
@@ -617,7 +641,10 @@ fn positive_packaging_install_preserves_existing_data_and_handles_unicode_paths(
             run_valid_install(&sandbox, installer, &install_dir, "9.9.9");
         assert_child_ok(&result, "positive packaging install");
         let installed = install_dir.join(installer.binary);
-        assert_eq!(fs::read(&installed).expect("installed fixture executable"), expected_binary);
+        assert_eq!(
+            fs::read(&installed).expect("installed fixture executable"),
+            expected_binary
+        );
         assert_eq!(metadata_mode(&fs::metadata(&installed).unwrap()), 0o755);
         assert_eq!(fs::read(&legacy).unwrap(), legacy_before);
         assert_eq!(fs::read(&user_marker).unwrap(), marker_before);
@@ -627,7 +654,12 @@ fn positive_packaging_install_preserves_existing_data_and_handles_unicode_paths(
         } else {
             assert!(result.stdout_text().contains("opencode2 9.9.9 fixture"));
         }
-        assert_eq!(fs::read_dir(sandbox.temp()).unwrap().count(), 0, "{} left staging residue", installer.script);
+        assert_eq!(
+            fs::read_dir(sandbox.temp()).unwrap().count(),
+            0,
+            "{} left staging residue",
+            installer.script
+        );
     }
 }
 
@@ -648,7 +680,8 @@ fn upgrade_replaces_only_packaged_executable_and_preserves_user_markers() {
         let installed = install_dir.join(installer.binary);
         assert_eq!(fs::read(&installed).unwrap(), first_binary);
 
-        let (_, second_binary, second) = run_valid_install(&sandbox, installer, &install_dir, "2.0");
+        let (_, second_binary, second) =
+            run_valid_install(&sandbox, installer, &install_dir, "2.0");
         assert_child_ok(&second, "packaging upgrade");
         assert_eq!(fs::read(&installed).unwrap(), second_binary);
         assert_ne!(first_binary, second_binary);
@@ -675,7 +708,11 @@ fn uninstall_removes_only_installed_binary_and_preserves_other_files() {
 
         let result = run_installer(&sandbox, installer, &install_dir, &args);
         assert_child_ok(&result, "uninstall");
-        assert!(!installed.exists(), "{} binary still exists", installer.binary);
+        assert!(
+            !installed.exists(),
+            "{} binary still exists",
+            installer.binary
+        );
         assert_eq!(fs::read(&sibling).unwrap(), b"unrelated sibling bytes\0");
         assert_eq!(fs::read(&user_marker).unwrap(), b"user marker\0");
         let after = snapshot_tree(&install_dir);
@@ -683,7 +720,11 @@ fn uninstall_removes_only_installed_binary_and_preserves_other_files() {
             .into_iter()
             .filter(|entry| entry.0 != installer.binary)
             .collect();
-        assert_eq!(after, expected, "{} uninstall changed unrelated install files", installer.script);
+        assert_eq!(
+            after, expected,
+            "{} uninstall changed unrelated install files",
+            installer.script
+        );
     }
 }
 
@@ -693,7 +734,11 @@ fn legacy_opencode_refusal_preserves_destination_for_both_installers() {
         let sandbox = Sandbox::new("legacy");
         let install_dir = sandbox.path().join("legacy install/bin");
         fs::create_dir_all(&install_dir).unwrap();
-        fs::write(install_dir.join("opencode"), b"legacy executable sentinel\0").unwrap();
+        fs::write(
+            install_dir.join("opencode"),
+            b"legacy executable sentinel\0",
+        )
+        .unwrap();
         fs::write(install_dir.join("keep.marker"), b"existing marker\0").unwrap();
         let before = snapshot_tree(&install_dir);
         let archive = sandbox.archive(
@@ -714,7 +759,11 @@ fn legacy_opencode_refusal_preserves_destination_for_both_installers() {
         result.assert_bounded("legacy binary refusal");
         assert_eq!(result.status.code(), Some(73));
         assert!(result.stderr_text().contains("refusing"));
-        assert_eq!(snapshot_tree(&install_dir), before, "legacy refusal mutated destination");
+        assert_eq!(
+            snapshot_tree(&install_dir),
+            before,
+            "legacy refusal mutated destination"
+        );
     }
 }
 
@@ -742,7 +791,10 @@ fn invalid_invocation_and_checksum_fail_without_destination_mutation() {
             (
                 vec![
                     OsString::from("--archive"),
-                    sandbox.path().join("does-not-exist.tar.gz").into_os_string(),
+                    sandbox
+                        .path()
+                        .join("does-not-exist.tar.gz")
+                        .into_os_string(),
                     OsString::from("--checksum"),
                     OsString::from("0".repeat(64)),
                 ],
@@ -752,8 +804,17 @@ fn invalid_invocation_and_checksum_fail_without_destination_mutation() {
         ] {
             let result = run_installer(&sandbox, installer, &install_dir, &args);
             result.assert_bounded(label);
-            assert_eq!(result.status.code(), Some(expected_code), "{label}: {}", installer.script);
-            assert_eq!(snapshot_tree(&install_dir), before, "{label} mutated destination");
+            assert_eq!(
+                result.status.code(),
+                Some(expected_code),
+                "{label}: {}",
+                installer.script
+            );
+            assert_eq!(
+                snapshot_tree(&install_dir),
+                before,
+                "{label} mutated destination"
+            );
         }
     }
 }
@@ -787,11 +848,7 @@ fn unsafe_archive_members_are_rejected_without_destination_mutation_or_escape() 
                 _ => unreachable!("case list above is exhaustive"),
             };
             let mut entries = vec![
-                TarEntry::file(
-                    installer.binary,
-                    fixture_binary(installer, "unsafe"),
-                    0o755,
-                ),
+                TarEntry::file(installer.binary, fixture_binary(installer, "unsafe"), 0o755),
                 unsafe_entry,
             ];
             if case == "symlink" {
@@ -820,7 +877,11 @@ fn unsafe_archive_members_are_rejected_without_destination_mutation_or_escape() 
                 result.stdout_text(),
                 result.stderr_text()
             );
-            assert_eq!(snapshot_tree(&install_dir), before, "unsafe {case} mutated destination");
+            assert_eq!(
+                snapshot_tree(&install_dir),
+                before,
+                "unsafe {case} mutated destination"
+            );
             assert_eq!(
                 fs::read_dir(sandbox.temp()).unwrap().count(),
                 0,
@@ -836,7 +897,10 @@ fn unsafe_archive_members_are_rejected_without_destination_mutation_or_escape() 
                 "symlink" => sandbox.path().join("symlink-escape/escape-marker"),
                 _ => continue,
             };
-            assert!(!escaped_path.exists(), "{case} member escaped private staging");
+            assert!(
+                !escaped_path.exists(),
+                "{case} member escaped private staging"
+            );
         }
 
         let sandbox = Sandbox::new("unsafe-duplicate");
@@ -847,16 +911,8 @@ fn unsafe_archive_members_are_rejected_without_destination_mutation_or_escape() 
         let archive = sandbox.archive(
             &format!("{}-duplicate", installer.binary),
             &[
-                TarEntry::file(
-                    installer.binary,
-                    fixture_binary(installer, "first"),
-                    0o755,
-                ),
-                TarEntry::file(
-                    installer.binary,
-                    fixture_binary(installer, "second"),
-                    0o755,
-                ),
+                TarEntry::file(installer.binary, fixture_binary(installer, "first"), 0o755),
+                TarEntry::file(installer.binary, fixture_binary(installer, "second"), 0o755),
             ],
         );
         let digest = checksum(&archive, &sandbox);
@@ -872,6 +928,10 @@ fn unsafe_archive_members_are_rejected_without_destination_mutation_or_escape() 
             "{} accepted duplicate executable archive entries",
             installer.script
         );
-        assert_eq!(snapshot_tree(&install_dir), before, "duplicate member mutated destination");
+        assert_eq!(
+            snapshot_tree(&install_dir),
+            before,
+            "duplicate member mutated destination"
+        );
     }
 }
