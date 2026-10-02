@@ -9,16 +9,19 @@ import os
 import pathlib
 import re
 import shutil
-import signal
-import socket
 import subprocess
+import sys
 import tempfile
 import time
 import urllib.request
 import urllib.error
 
-ROOT = pathlib.Path("/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/pp")
+# A fixture's complete disposable tree (including marker and daemon data) lives
+# here. On macOS /private/tmp is the short canonical temp path needed by sockets;
+# elsewhere honor TMPDIR, falling back to Python's platform temp directory.
+ROOT = pathlib.Path("/private/tmp") if sys.platform == "darwin" else pathlib.Path(tempfile.gettempdir())
 APPROVED_ARTIFACT_ROOT = pathlib.Path("/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode")
+
 MARKER = "G6 browser fixture marker\n"
 CALL_ID = "g6_write_1"
 FIRST_PROMPT = "write the browser marker"
@@ -58,8 +61,11 @@ def check_build(binary, manifest):
 
 
 class ProviderState:
-    def __init__(self, project):
+    def __init__(self, project, marker_path):
         self.project = project
+        self.marker_path = marker_path
+        if marker_path.parent.parent != project.parent or marker_path.parent.name != "outside":
+            raise ValueError("marker must be under the fixture-owned sibling outside/ directory")
         self.requests = []
         self.restart_generation = 0
         self.failed = None
@@ -98,10 +104,11 @@ class ProviderState:
         if number == 1:
             if calls or outputs:
                 raise ValueError("first request contains an unexpected tool pair")
-            arguments = json.dumps({"path": "g6-browser-marker.txt", "content": MARKER, "append": False}, separators=(",", ":"))
+            # The absolute path is unique to this invocation and owned by its root.
+            arguments = json.dumps({"path": str(self.marker_path), "content": MARKER, "append": False}, separators=(",", ":"))
             return sse_function_call(arguments)
-        if not (pathlib.Path(self.project, "g6-browser-marker.txt").is_file() and pathlib.Path(self.project, "g6-browser-marker.txt").read_text() == MARKER):
-            raise ValueError("write success was reported without the exact marker bytes")
+        if not self.marker_path.is_file() or self.marker_path.read_text() != MARKER:
+            raise ValueError("write success was reported without the exact marker bytes in this fixture")
         assistants = [item.get("content") for item in inputs if item.get("role") == "assistant"]
         expected_assistants = {
             2: [],
@@ -113,7 +120,7 @@ class ProviderState:
         if len(calls) != 1 or len(outputs) != 1 or len(inputs) != len(users) + len(assistants) + 2:
             raise ValueError("request does not contain exactly one typed call and output")
         call, output = calls[0], outputs[0]
-        expected_args = json.dumps({"path": "g6-browser-marker.txt", "content": MARKER, "append": False}, separators=(",", ":"))
+        expected_args = json.dumps({"path": str(self.marker_path), "content": MARKER, "append": False}, separators=(",", ":"))
         if call != {"type": "function_call", "call_id": CALL_ID, "name": "write", "arguments": expected_args}:
             raise ValueError("typed call identity or arguments changed")
         if output != {"type": "function_call_output", "call_id": CALL_ID, "output": "write success"}:
@@ -227,11 +234,14 @@ def healthy(value):
 
 
 def self_check():
-    """Exercise the real loopback HTTP framing without launching a daemon."""
+    """Check fixture framing only; this is not a daemon or browser proof."""
     root = pathlib.Path(tempfile.mkdtemp(prefix="g6-self-check-", dir=str(ROOT)))
     project = root / "project"
     project.mkdir(parents=True)
-    state = ProviderState(project)
+    outside = root / "outside"
+    outside.mkdir()
+    marker_path = outside / "g6-browser-marker.txt"
+    state = ProviderState(project, marker_path)
     server = Provider(("127.0.0.1", 0), Handler)
     server.state = state
     server.timeout = 0.05
@@ -242,22 +252,19 @@ def self_check():
         connection = http.client.HTTPConnection("127.0.0.1", server.server_port, timeout=2)
         body = json.dumps({"model": "gpt-5.6", "input": [{"role": "user", "content": FIRST_PROMPT}]}).encode()
         connection.request("POST", "/v1/responses", body, {"Authorization": "Bearer fixture-key", "Content-Length": str(len(body))})
-        assert connection.getresponse().status == 200
+        response = connection.getresponse()
+        assert response.status == 200
+        first_frame = response.read().decode("utf-8")
         connection.close()
         assert len(state.requests) == 1
-        arguments = json.dumps({"path": "g6-browser-marker.txt", "content": MARKER, "append": False}, separators=(",", ":"))
-        call = {"type": "function_call", "call_id": CALL_ID, "name": "write", "arguments": arguments}
-        output = {"type": "function_call_output", "call_id": CALL_ID, "output": "write success"}
-        (project / "g6-browser-marker.txt").write_text(MARKER)
-        inputs = [{"role": "user", "content": FIRST_PROMPT}, call, output]
-        headers = {"Authorization": "Bearer fixture-key"}
-        assert b"G6 first turn settled" in state.response(headers, json.dumps({"model": "gpt-5.6", "input": inputs}).encode())
-        inputs += [{"role": "assistant", "content": "G6 first turn settled"}, {"role": "user", "content": SECOND_PROMPT}]
-        assert b"G6 second turn settled" in state.response(headers, json.dumps({"model": "gpt-5.6", "input": inputs}).encode())
-        inputs += [{"role": "assistant", "content": "G6 second turn settled"}, {"role": "user", "content": RESUMED_PROMPT}]
-        state.set_restart_generation(1)
-        assert b"G6 resumed turn settled" in state.response(headers, json.dumps({"model": "gpt-5.6", "input": inputs}).encode())
-        print("fixture self-check: framing, credential, typed pair and settled history passed")
+        data = next(line[6:] for line in first_frame.splitlines() if line.startswith("data: "))
+        event = json.loads(data)
+        item = event["item"]
+        assert item["call_id"] == CALL_ID and item["name"] == "write"
+        assert json.loads(item["arguments"]) == {"path": str(marker_path), "content": MARKER, "append": False}
+        if marker_path.exists():
+            raise AssertionError("self-check must not simulate approval or create the marker")
+        print("fixture self-check: provider framing and fixture-owned write request only (not browser proof)")
     finally:
         server.shutdown()
         server.server_close()
@@ -289,12 +296,13 @@ def main():
     if (artifacts / "fixture-metadata.json").exists():
         raise ValueError("artifact directory already contains a fixture; preserve it and use a fresh directory")
     root = pathlib.Path(tempfile.mkdtemp(prefix="g6-web-", dir=str(ROOT)))
-    home, data, project = (root / name for name in ("home", "data", "project"))
-    for path in (home, data, project): path.mkdir()
+    home, data, project, outside = (root / name for name in ("home", "data", "project", "outside"))
+    for path in (home, data, project, outside): path.mkdir()
+    marker_path = outside / "g6-browser-marker.txt"
     if len(os.fsencode(data / "runtime" / "opencode-rk.sock")) > 100:
         raise ValueError("fixture data path is too long for the Unix socket")
     auth = data / "opencode" / "auth.json"; auth.parent.mkdir(); auth.write_text(json.dumps({"openai": {"type": "api", "key": "fixture-key"}}) + "\n"); os.chmod(auth, 0o600)
-    state = ProviderState(project)
+    state = ProviderState(project, marker_path)
     server = Provider(("127.0.0.1", 0), Handler); server.state = state; server.timeout = 0.05
     server.evidence_path = artifacts / "provider-requests.json"
     server.persist_evidence()
@@ -303,24 +311,35 @@ def main():
     provider_url = "http://127.0.0.1:%d/v1" % server.server_address[1]
     env = {"HOME": str(home), "XDG_CONFIG_HOME": str(home / ".config"), "XDG_DATA_HOME": str(data), "OPENCODE_RK_HOME": str(data), "PATH": "/usr/bin:/bin", "LANG": "C", "TMPDIR": str(root), "OPENAI_BASE_URL": provider_url, "OPENCODE_RK_TURN_TOOLS": "write", "OPENCODE_RK_TURN_MAX_STEPS": "4"}
     command = [str(binary), "serve", "--listen", "127.0.0.1:0", "--models-file", str(models)]
-    child = None; control = artifacts / "control"; control.mkdir(exist_ok=True); metadata_path = artifacts / "fixture-metadata.json"; descriptor_path = data / "runtime" / "backend.json"
+    child = None
+    control = artifacts / "control"
+    control.mkdir()
+    metadata_path = artifacts / "fixture-metadata.json"
+    descriptor_path = data / "runtime" / "backend.json"
     try:
         child = subprocess.Popen(command, cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         current = descriptor(descriptor_path, time.monotonic() + 15, child)
-        meta = {"origin": current["http_origin"], "launch_fragment": current["http_origin"] + "#oc2-token=" + current["auth_token"], "pid": child.pid, "restart_generation": 0, "project": str(project), "marker": str(project / "g6-browser-marker.txt"), "source_sha": source_sha, "binary_sha256": binary_sha, "provider": provider_url, "control_dir": str(control), "request_evidence": str(artifacts / "provider-requests.json"), "auth_json": str(auth), "auth_json_mode": "0600"}
+        meta = {"origin": current["http_origin"], "launch_fragment": current["http_origin"] + "#oc2-token=" + current["auth_token"], "pid": child.pid, "restart_generation": 0, "project": str(project), "marker": str(marker_path), "fixture_root": str(root), "source_sha": source_sha, "binary_sha256": binary_sha, "provider": provider_url, "control_dir": str(control), "request_evidence": str(artifacts / "provider-requests.json"), "auth_json": str(auth), "auth_json_mode": "0600"}
         atomic_json(metadata_path, meta)
         deadline = time.monotonic() + 600
         while time.monotonic() < deadline:
             server.handle_request()
             if (control / "restart.request").exists():
-                (control / "restart.request").unlink(); old_pid = child.pid; stop(child); child = subprocess.Popen(command, cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                (control / "restart.request").unlink()
+                old_pid = child.pid
+                stop(child)
+                child = subprocess.Popen(command, cwd=project, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
                 fresh = descriptor(descriptor_path, time.monotonic() + 15, child)
-                if fresh["pid"] == old_pid or not healthy(fresh): raise RuntimeError("restart did not publish a fresh healthy descriptor")
-                state.set_restart_generation(1); meta.update(origin=fresh["http_origin"], launch_fragment=fresh["http_origin"] + "#oc2-token=" + fresh["auth_token"], pid=child.pid, restart_generation=1); atomic_json(metadata_path, meta)
+                if fresh["pid"] == old_pid or not healthy(fresh):
+                    raise RuntimeError("restart did not publish a fresh healthy descriptor")
+                state.set_restart_generation(1)
+                meta.update(origin=fresh["http_origin"], launch_fragment=fresh["http_origin"] + "#oc2-token=" + fresh["auth_token"], pid=child.pid, restart_generation=1)
+                atomic_json(metadata_path, meta)
             if state.failed: raise RuntimeError(state.failed)
             if child.poll() is not None:
                 raise RuntimeError("owned daemon exited during browser verification")
-            if (control / "stop.request").exists(): break
+            if (control / "stop.request").exists():
+                break
     finally:
         try:
             server.persist_evidence()
@@ -328,6 +347,7 @@ def main():
         finally:
             stop(child)
             server.server_close()
+            shutil.rmtree(root)
 
 
 if __name__ == "__main__":
