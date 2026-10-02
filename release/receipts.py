@@ -15,6 +15,7 @@ import json
 import os
 import pathlib
 import re
+import tempfile
 
 SHA40 = re.compile(r"[0-9a-f]{40}")
 SHA64 = re.compile(r"[0-9a-f]{64}")
@@ -81,7 +82,7 @@ def materialize_template(template: dict, source_sha: str, output: pathlib.Path) 
     """Instantiate a deliberately non-runnable template exactly once."""
     if not SHA40.fullmatch(source_sha):
         raise ReceiptError("requested source_sha must be 40 lowercase hex characters")
-    if output.exists():
+    if os.path.lexists(output):
         raise ReceiptError(f"refusing to overwrite existing materialized manifest: {output}")
     import copy
     concrete = copy.deepcopy(template)
@@ -94,31 +95,37 @@ def materialize_template(template: dict, source_sha: str, output: pathlib.Path) 
     contract["source_sha"] = source_sha
     validate_manifest(contract)
     output.parent.mkdir(parents=True, exist_ok=True)
-    write_json_atomic(output, concrete)
+    write_json_atomic_exclusive(output, concrete)
     return concrete
 
 
 def validate_artifact_hashes(manifest: dict, artifact_dir: pathlib.Path) -> None:
     """Every binary/library/archive referenced by the manifest must be present
     at artifact_dir and hash exactly. Rejects swapped or stale artifacts."""
+    platform = manifest.get("platform", "linux")
+    if platform not in ("linux", "mac"):
+        raise ReceiptError(f"unsupported artifact platform: {platform!r}")
+    library = "libopentui.dylib" if platform == "mac" else "libopentui.so"
+    archive_name = "oc2-macos-arm64.tar.gz" if platform == "mac" else "oc2-linux-arm64.tar.gz"
+    allowed = {"install/bin/oc2", f"install/lib/{library}", archive_name, "build.json"}
+    # Artifact paths are a closed allow-list.  In particular, never honor a
+    # path supplied by build.json (which could escape through ../ or a link).
+    for entry in artifact_dir.rglob("*"):
+        if entry.is_symlink():
+            raise ReceiptError(f"symlink artifact rejected: {entry}")
+        if entry.is_file() and entry.relative_to(artifact_dir).as_posix() not in allowed:
+            raise ReceiptError(f"unexpected artifact file: {entry}")
     mapping = {
-        "oc2": manifest["binary_sha256"],
-        "libopentui.so": manifest["native_library_sha256"],
+        artifact_dir / "install/bin/oc2": manifest["binary_sha256"],
+        artifact_dir / f"install/lib/{library}": manifest["native_library_sha256"],
     }
-    archive = artifact_dir / "oc2-linux-arm64.tar.gz"
-    for name, expected in mapping.items():
-        candidate = artifact_dir / name
+    for candidate, expected in mapping.items():
         if not candidate.is_file():
-            candidate = artifact_dir / "install" / "bin" / name
-        if not candidate.is_file():
-            candidate = artifact_dir / "install" / "lib" / name
-        if not candidate.is_file():
-            raise ReceiptError(f"artifact {name} absent under {artifact_dir}")
+            raise ReceiptError(f"artifact {candidate.relative_to(artifact_dir)} absent under {artifact_dir}")
         actual = sha256_file(candidate)
         if actual != expected:
-            raise ReceiptError(
-                f"artifact {name} hash mismatch: manifest {expected} != file {actual}"
-            )
+            raise ReceiptError(f"artifact {candidate.name} hash mismatch: manifest {expected} != file {actual}")
+    archive = artifact_dir / archive_name
     if archive.is_file():
         actual = sha256_file(archive)
         if actual != manifest["archive_sha256"]:
@@ -126,7 +133,7 @@ def validate_artifact_hashes(manifest: dict, artifact_dir: pathlib.Path) -> None
                 f"archive hash mismatch: manifest {manifest['archive_sha256']} != file {actual}"
             )
     elif manifest.get("require_archive", True):
-        raise ReceiptError(f"archive absent under {artifact_dir}")
+        raise ReceiptError(f"archive {archive_name} absent under {artifact_dir}")
 
 
 def validate_frozen_tests(manifest: dict, source_root: pathlib.Path) -> None:
@@ -229,6 +236,38 @@ def scrub_inherited_env(env: dict) -> dict:
 
 
 def write_json_atomic(path: pathlib.Path, value: dict) -> None:
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    os.replace(temporary, path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = pathlib.Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        # replace changes the destination directory entry, never the target
+        # of a symlink at path; unlike the old predictable .tmp this is not a
+        # symlink-race primitive.
+        os.replace(temporary, path)
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def write_json_atomic_exclusive(path: pathlib.Path, value: dict) -> None:
+    """Create a fresh output without replacing a race-created entry."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    temporary = pathlib.Path(temporary_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(value, indent=2, sort_keys=True) + "\n")
+            stream.flush(); os.fsync(stream.fileno())
+        if os.path.lexists(path):
+            raise ReceiptError(f"refusing to overwrite existing output: {path}")
+        os.link(temporary, path)
+        temporary.unlink()
+    finally:
+        try: temporary.unlink()
+        except FileNotFoundError: pass

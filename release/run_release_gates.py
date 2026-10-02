@@ -110,6 +110,7 @@ def check_contract(args, manifest: dict, root: pathlib.Path) -> None:
                 f"stale artifact: build.json source_sha {build['source_sha']} "
                 f"!= required {args.source_sha}"
             )
+        build["platform"] = "mac" if "mac" in args.platforms else "linux"
         receipts.validate_artifact_hashes(build, artifact_dir)
         receipts.validate_frozen_tests(build, root)
         args.artifact_sha = build["source_sha"]
@@ -285,7 +286,9 @@ def main() -> int:
         if args.run and args.artifact_dir is None:
             raise GateError("--run requires --artifact-dir")
         if args.check_contract:
-            receipts.write_json_atomic(evidence / "materialized-manifest.json", manifest)
+            # materialize_template already emitted this exact evidence once.
+            if not (evidence / "materialized-manifest.json").is_file():
+                receipts.write_json_atomic_exclusive(evidence / "materialized-manifest.json", manifest)
             print(f"contract OK for {args.source_sha} platforms={args.platforms}", flush=True)
             return 0
         return run_platforms(args, manifest, root, evidence)
