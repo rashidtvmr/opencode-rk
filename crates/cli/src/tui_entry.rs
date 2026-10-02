@@ -1062,7 +1062,7 @@ fn follow_loop(
 /// the daemon's own origin; otherwise requests fail closed (offline banner
 /// interactively, error in `--once`/`--follow`).
 pub fn run(args: TuiArgs) -> Result<(), Box<dyn std::error::Error>> {
-    run_with_dir(args, None)
+    run_with_dir(args, None, None)
 }
 
 /// Same as [`run`] but honors an explicit data-dir from the caller (e.g. the
