@@ -24,8 +24,8 @@ use std::{
     io::{Read, Write},
     net::{SocketAddr, TcpListener, TcpStream},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Condvar, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -33,11 +33,11 @@ use std::{
 
 use axum::body::Body;
 use opencode_rk_catalog::Catalog;
-use opencode_rk_server::{daemon_auth::DaemonAuth, router_with_auth, AppState};
+use opencode_rk_server::{AppState, daemon_auth::DaemonAuth, router_with_auth};
 use opencode_rk_sessions::SessionService;
 use opencode_rk_storage::Storage;
-use serde_json::{json, Value};
-use tempfile::{tempdir, TempDir};
+use serde_json::{Value, json};
+use tempfile::{TempDir, tempdir};
 use tower::ServiceExt;
 
 const PROVIDER_MAX_WIRE: usize = 128 * 1024;
@@ -289,10 +289,12 @@ fn handle_provider(
             Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
             Err(_) => disconnected = true,
         }
+        // Reacquire the predicate guard before either exiting or waiting.  In
+        // particular EOF must still be observed before any fixture cleanup.
+        done = rlock.lock().expect("lock");
         if disconnected {
             break;
         }
-        done = rlock.lock().expect("lock");
         if !*done {
             let (next, _) = rwake
                 .wait_timeout(done, Duration::from_millis(20))

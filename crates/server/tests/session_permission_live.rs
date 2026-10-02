@@ -12,27 +12,27 @@ use std::{
     net::{SocketAddr, TcpListener, TcpStream},
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::{Duration, Instant},
 };
 
 use axum::{
-    body::{to_bytes, Body},
+    body::{Body, to_bytes},
     http::{Request, StatusCode},
 };
 use opencode_rk_catalog::Catalog;
 use opencode_rk_security::{
     Decision, FileAction, OperationIntent, PermissionBroker, PermissionSet, SecurityPolicy,
 };
-use opencode_rk_server::{daemon_auth::DaemonAuth, router_with_auth, AppState};
+use opencode_rk_server::{AppState, daemon_auth::DaemonAuth, router_with_auth};
 use opencode_rk_sessions::SessionService;
 use opencode_rk_storage::Storage;
 use opencode_rk_tools::file_ops::{FileOperation, FileTool};
-use serde_json::{json, Value};
-use tempfile::{tempdir, TempDir};
+use serde_json::{Value, json};
+use tempfile::{TempDir, tempdir};
 use tower::ServiceExt;
 
 const MAX_REQUEST_BYTES: usize = 128 * 1024;
@@ -511,6 +511,7 @@ struct Fixture {
     session: String,
     other_session: String,
     app: axum::Router,
+    last_http: Arc<Mutex<Option<(String, String, u16)>>>,
     server: ServerTask,
     provider: Provider,
     turn: Option<thread::JoinHandle<Result<WireResponse, String>>>,
@@ -623,6 +624,7 @@ impl Fixture {
             session,
             other_session,
             app,
+            last_http: Arc::new(Mutex::new(None)),
             server: ServerTask(Some(server)),
             provider,
             turn: None,
@@ -639,8 +641,9 @@ impl Fixture {
         let address = self.address;
         let token = self.token.clone();
         let session = self.session.clone();
+        let last_http = Arc::clone(&self.last_http);
         self.turn = Some(thread::spawn(move || {
-            http_request(
+            let result = http_request(
                 address,
                 "POST",
                 &format!("/api/sessions/{session}/turns/stream"),
@@ -650,7 +653,17 @@ impl Fixture {
                     "model":MODEL,
                     "reasoning_effort":"low"
                 })),
-            )
+            );
+            if let Ok(response) = &result {
+                *last_http
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((
+                    "POST".to_owned(),
+                    format!("/api/sessions/{session}/turns/stream"),
+                    response.status,
+                ));
+            }
+            result
         }));
     }
 
@@ -660,12 +673,22 @@ impl Fixture {
             .is_some_and(thread::JoinHandle::is_finished)
     }
 
-    fn finish_turn(&mut self) -> Result<WireResponse, String> {
+    async fn finish_turn(&mut self) -> Result<WireResponse, String> {
         let Some(turn) = self.turn.take() else {
             return Err("turn client was not started".to_owned());
         };
-        turn.join()
-            .map_err(|_| "turn client thread panicked".to_owned())?
+        tokio::task::spawn_blocking(move || {
+            turn.join()
+                .map_err(|_| "turn client thread panicked".to_owned())
+        })
+        .await
+        .map_err(|_| "turn client thread panicked".to_owned())??
+        .map_err(|error| {
+            format!(
+                "turn request failed: {error}; {}",
+                self.failure_context("turn client")
+            )
+        })
     }
 
     async fn request(
@@ -677,11 +700,39 @@ impl Fixture {
     ) -> Result<WireResponse, String> {
         let address = self.address;
         let method = method.to_owned();
+        let last_http = Arc::clone(&self.last_http);
+        let diagnostic_method = method.clone();
+        let diagnostic_path = path.clone();
         tokio::task::spawn_blocking(move || {
-            http_request(address, &method, &path, token.as_deref(), body.as_ref())
+            let response = http_request(address, &method, &path, token.as_deref(), body.as_ref())?;
+            *last_http
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) =
+                Some((method, path, response.status));
+            Ok::<_, String>(response)
         })
         .await
         .map_err(|error| error.to_string())?
+        .map_err(|error| {
+            format!(
+                "HTTP {diagnostic_method} {diagnostic_path} failed: {error}; {}",
+                self.failure_context("HTTP request")
+            )
+        })
+    }
+
+    fn failure_context(&self, stage: &str) -> String {
+        let last_http = self
+            .last_http
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .as_ref()
+            .map(|(method, path, status)| format!("{method} {path} last status {status}"))
+            .unwrap_or_else(|| "no completed HTTP response".to_owned());
+        format!(
+            "stage {stage}; {last_http}; provider worker: {:?}",
+            self.provider.captured()
+        )
     }
 
     async fn pending(&self) -> Result<(String, Value), String> {
@@ -694,9 +745,9 @@ impl Fixture {
             if response.status == 200 {
                 let value: Value = serde_json::from_slice(&response.body)
                     .map_err(|error| format!("permission list JSON: {error}"))?;
-                let entries = value
-                    .as_array()
-                    .ok_or_else(|| "session permission list must be a JSON array".to_owned())?;
+                let entries = value["data"].as_array().ok_or_else(|| {
+                    "V2 session permission list data must be a JSON array".to_owned()
+                })?;
                 if let Some(request) = entries.first() {
                     let id = request["id"]
                         .as_str()
@@ -705,14 +756,19 @@ impl Fixture {
                 }
             } else if response.status != 404 {
                 return Err(format!(
-                    "session permission list status {}, expected 200 or initial 404",
+                    "GET {path} status {}, expected 200",
                     response.status
                 ));
             } else {
-                return Err("live session permission list route missing (404)".to_owned());
+                return Err(format!(
+                    "live session permission list route missing: GET {path} returned 404"
+                ));
             }
             if Instant::now() >= deadline {
-                return Err("permission request did not become pending".to_owned());
+                return Err(format!(
+                    "permission request did not become pending; {}; stage permission-list polling",
+                    self.failure_context("pending request deadline")
+                ));
             }
             tokio::time::sleep(Duration::from_millis(25)).await;
         }
@@ -767,7 +823,7 @@ impl Fixture {
         }
     }
 
-    async fn live_once(&mut self) -> Result<(), String> {
+    async fn live_decision(&mut self, decision: &str) -> Result<(), String> {
         self.broker_requires_human_for_target(&self.target)?;
         if self
             .target
@@ -804,15 +860,15 @@ impl Fixture {
             ));
         }
         let approved = self
-            .reply(&self.session, &id, "once", Some(self.token.clone()))
+            .reply(&self.session, &id, decision, Some(self.token.clone()))
             .await?;
         if approved.status != 204 {
             return Err(format!(
-                "approval reply status {}, expected 204",
+                "{decision} approval reply status {}, expected 204",
                 approved.status
             ));
         }
-        let response = self.finish_turn()?;
+        let response = self.finish_turn().await?;
         if response.status != 201 {
             return Err(format!(
                 "turn HTTP status {}, expected 201",
@@ -887,7 +943,7 @@ impl Fixture {
                 rejected.status
             ));
         }
-        let response = self.finish_turn()?;
+        let response = self.finish_turn().await?;
         let events = ndjson_events(&response.body)?;
         let result = events
             .iter()
@@ -942,7 +998,7 @@ impl Fixture {
         if rejected.status != 204 {
             return Err("valid cleanup reply did not consume pending request".to_owned());
         }
-        let _ = self.finish_turn()?;
+        let _ = self.finish_turn().await?;
         if self.target.exists() || self.provider.count() != 1 {
             return Err("unauthenticated reply changed tool/provider state".to_owned());
         }
@@ -986,7 +1042,7 @@ impl Fixture {
         if approved.status != 204 {
             return Err("valid scoped approval failed".to_owned());
         }
-        let _ = self.finish_turn()?;
+        let _ = self.finish_turn().await?;
         let duplicate = self
             .reply(&self.session, &id, "once", Some(self.token.clone()))
             .await?;
@@ -1021,7 +1077,7 @@ impl Fixture {
             return Err("mandatory protected write caused filesystem side effect".to_owned());
         }
         self.start_turn(&secret);
-        let response = self.finish_turn()?;
+        let response = self.finish_turn().await?;
         let events = ndjson_events(&response.body)?;
         if secret.exists() {
             return Err("live protected write created fixture .env".to_owned());
@@ -1118,7 +1174,12 @@ async fn execute_case(case: impl for<'a> AsyncCase<'a>) {
     let mut fixture = Fixture::start().await.expect("fixture setup");
     let result = tokio::time::timeout(MAX_CASE_DURATION, case.run(&mut fixture))
         .await
-        .unwrap_or_else(|_| Err("permission scenario exceeded 20-second bound".to_owned()));
+        .unwrap_or_else(|_| {
+            Err(format!(
+                "permission scenario exceeded 20-second bound; {}",
+                fixture.failure_context("scenario deadline")
+            ))
+        });
     fixture.finish().await;
     result.unwrap_or_else(|error| panic!("{error}"));
 }
@@ -1136,7 +1197,16 @@ impl<'a> AsyncCase<'a> for OnceCase {
         self,
         fixture: &'a mut Fixture,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + 'a>> {
-        Box::pin(fixture.live_once())
+        Box::pin(fixture.live_decision("once"))
+    }
+}
+struct AlwaysCase;
+impl<'a> AsyncCase<'a> for AlwaysCase {
+    fn run(
+        self,
+        fixture: &'a mut Fixture,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + 'a>> {
+        Box::pin(fixture.live_decision("always"))
     }
 }
 struct RejectCase;
@@ -1179,6 +1249,11 @@ impl<'a> AsyncCase<'a> for ProtectedCase {
 #[tokio::test]
 async fn live_permission_pauses_and_once_resumes_exactly_once() {
     execute_case(OnceCase).await;
+}
+
+#[tokio::test]
+async fn live_permission_accepts_always_reply_and_resumes_exactly_once() {
+    execute_case(AlwaysCase).await;
 }
 
 #[tokio::test]
