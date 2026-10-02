@@ -992,6 +992,7 @@ dependencies = [
  "opencode-rk-contracts",
  "serde",
  "serde_json",
+ "tempfile",
  "thiserror",
 ]
 
