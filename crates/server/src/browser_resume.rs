@@ -24,12 +24,25 @@ struct Lease {
     expires_at_unix_ms: u64,
 }
 
-#[derive(Debug)]
 pub(crate) enum IssueError {
     InvalidTtl,
     Capacity,
     Randomness(String),
     Clock,
+}
+
+// Manual Debug equivalent to the former derive. Reads the `Randomness` detail
+// (keeps the OS error text for diagnostics) so the field is not dead code while
+// the variant and error response stay exactly as before.
+impl std::fmt::Debug for IssueError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidTtl => f.write_str("InvalidTtl"),
+            Self::Capacity => f.write_str("Capacity"),
+            Self::Randomness(detail) => f.debug_tuple("Randomness").field(detail).finish(),
+            Self::Clock => f.write_str("Clock"),
+        }
+    }
 }
 
 impl BrowserResumeRegistry {

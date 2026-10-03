@@ -21,7 +21,7 @@
 
 use axum::{
     body::HttpBody,
-    extract::{Extension, Request, State},
+    extract::{Request, State},
     http::{header, StatusCode},
     middleware::Next,
     response::{IntoResponse, Response},
@@ -48,6 +48,17 @@ impl PartialEq for DaemonAuth {
 }
 
 impl Eq for DaemonAuth {}
+
+// Manual Debug: never expose the native bearer token or the in-memory
+// browser-resume lease contents through formatting/assertions.
+impl std::fmt::Debug for DaemonAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DaemonAuth")
+            .field("token", &"<redacted>")
+            .field("browser_resume", &"<redacted>")
+            .finish()
+    }
+}
 
 impl DaemonAuth {
     /// Mint a fresh credential from `/dev/urandom` (plus `BCryptGenRandom`
