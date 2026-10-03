@@ -881,8 +881,8 @@ impl Fixture {
     async fn pending(&self, stage: &str) -> Result<(String, Value), String> {
         let deadline = Instant::now() + Duration::from_secs(3);
         let path = format!("/api/session/{}/permission", self.session);
-        let last_poll;
         loop {
+            let last_poll;
             let response = self
                 .request("GET", path.clone(), Some(self.token.clone()), None)
                 .await?;
