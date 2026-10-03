@@ -575,10 +575,6 @@ impl Provider {
         )
     }
 
-    #[allow(
-        dead_code,
-        reason = "shared S1 adversarial fixture: provider continuation wait used by retained scenario helpers"
-    )]
     async fn wait_for(&self, count: usize) -> bool {
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
@@ -629,7 +625,7 @@ struct Fixture {
     session: String,
     #[allow(
         dead_code,
-        reason = "S1 adversarial support fixture retains session-scoping scenario helper; exercised by the sibling session_permission_live target"
+        reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
     )]
     other_session: String,
     last_http: Arc<Mutex<Option<(String, String, u16)>>>,
@@ -991,7 +987,7 @@ impl Fixture {
 
     #[allow(
         dead_code,
-        reason = "shared S1 adversarial fixture: operation-scoped approval helper retained for the frozen permission contract"
+        reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
     )]
     async fn live_decision(&mut self, decision: &str) -> Result<(), String> {
         self.broker_requires_human_for_target(&self.target)?;
@@ -1313,7 +1309,7 @@ impl Fixture {
 
     #[allow(
         dead_code,
-        reason = "shared S1 adversarial fixture: auth failure scenario helper retained for the frozen permission contract"
+        reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
     )]
     async fn auth_failure(&mut self) -> Result<(), String> {
         self.broker_requires_human_for_target(&self.target)?;
@@ -1359,7 +1355,7 @@ impl Fixture {
 
     #[allow(
         dead_code,
-        reason = "shared S1 adversarial fixture: session-scoping and replay scenario helper retained for the frozen permission contract"
+        reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
     )]
     async fn session_and_replay(&mut self) -> Result<(), String> {
         self.broker_requires_human_for_target(&self.target)?;
@@ -1413,7 +1409,7 @@ impl Fixture {
 
     #[allow(
         dead_code,
-        reason = "shared S1 adversarial fixture: mandatory protected-secret scenario helper retained for the frozen security contract"
+        reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
     )]
     async fn protected_secret(&mut self) -> Result<(), String> {
         let secret = self.workspace.path().join(".env");
@@ -1553,7 +1549,7 @@ trait AsyncCase<'a> {
 
 #[allow(
     dead_code,
-    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+    reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
 )]
 struct OnceCase;
 impl<'a> AsyncCase<'a> for OnceCase {
@@ -1566,7 +1562,7 @@ impl<'a> AsyncCase<'a> for OnceCase {
 }
 #[allow(
     dead_code,
-    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+    reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
 )]
 struct AlwaysCase;
 impl<'a> AsyncCase<'a> for AlwaysCase {
@@ -1588,7 +1584,7 @@ impl<'a> AsyncCase<'a> for RejectCase {
 }
 #[allow(
     dead_code,
-    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+    reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
 )]
 struct AuthCase;
 impl<'a> AsyncCase<'a> for AuthCase {
@@ -1601,7 +1597,7 @@ impl<'a> AsyncCase<'a> for AuthCase {
 }
 #[allow(
     dead_code,
-    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+    reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
 )]
 struct ReplayCase;
 impl<'a> AsyncCase<'a> for ReplayCase {
@@ -1614,7 +1610,7 @@ impl<'a> AsyncCase<'a> for ReplayCase {
 }
 #[allow(
     dead_code,
-    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+    reason = "Retained inactive frozen-contract scenario inventory; not reached by this integration target."
 )]
 struct ProtectedCase;
 impl<'a> AsyncCase<'a> for ProtectedCase {
