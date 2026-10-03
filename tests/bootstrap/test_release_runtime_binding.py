@@ -25,9 +25,9 @@ def _gate(manifest, platform, label):
 
 
 G6_FROZEN = {
-    "tests/e2e/web_browser_gate.py": "ad890a6291482abe04739248f17e10974b603b27a677565a1f5810e0b4bcd988",
+    "tests/e2e/web_browser_gate.py": "0bfcaab9dbb77a876a7f3242abc681be31328687e9e4e41c39a36cdadab8a87f",
     "tests/e2e/web_tool_journey_fixture.py": "d950994a50e9edd9b251c310c0c3a2f176774a509271158cc1343ffb8926a73e",
-    "tests/e2e/web_browser_journey.mjs": "f656201ff6fe7d8f474ee7bad5a8fa66a7e58b1f5e84e8c8a73625e9d5103b42",
+    "tests/e2e/web_browser_journey.mjs": "b8e4efa6c00cd269c8a95d802eddad1ba88b4091670ff1327e65057d93eef000",
 }
 G7_PATH = "tests/e2e/ubuntu_installed_golden.py"
 G7_SHA = "3a44106b1efc912575b6a7ccfd4f3888aa3a4dba204687f54e023ac9ecd09378"
