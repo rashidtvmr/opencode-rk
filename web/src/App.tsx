@@ -50,11 +50,13 @@ import {
   listHistoryPage,
   listMessages,
   listModels,
+  listPermissions,
   listSessions,
   listWorkspaces,
   modelKey,
   prepareRetryBranch,
   renameSession,
+  replyPermission,
   runTurnStream,
   saveArtifactVersion,
   uploadDraftAttachment,
@@ -72,6 +74,7 @@ import {
   type ToolOutput,
   type WebCapabilities,
   type WorkspaceCatalogState,
+  type PermissionRequest,
 } from '@/lib/api'
 
 type LoadState = 'loading' | 'ready' | 'error'
@@ -240,6 +243,12 @@ function App() {
   const [streamingAssistantText, setStreamingAssistantText] = useState('')
   const [streamingReasoningSummary, setStreamingReasoningSummary] = useState('')
   const [streamingToolProgress, setStreamingToolProgress] = useState('')
+  const [pendingPermission, setPendingPermission] = useState<PermissionRequest | null>(null)
+  const [permissionBusy, setPermissionBusy] = useState(false)
+  const permissionControllerRef = useRef<AbortController | null>(null)
+  const replyControllerRef = useRef<AbortController | null>(null)
+  const permissionFlightRef = useRef<string | null>(null)
+  const permissionEpochRef = useRef(0)
   const [activeTurnSessionId, setActiveTurnSessionId] = useState<string | null>(null)
   const activeTurnRef = useRef<{ sessionId: string; controller: AbortController } | null>(null)
   // Set when a turn seeds the transcript for a session whose load effect has
@@ -365,6 +374,93 @@ function App() {
 
     return () => controller.abort()
   }, [selectedSessionId])
+
+  // Permission dock lifecycle, isolated from the history loader above: each
+  // selected-session change bumps an epoch, clears dock state, and aborts the
+  // previous poll/reply controllers. Poll and reply never share a controller
+  // with history loading.
+  useEffect(() => {
+    permissionEpochRef.current += 1
+    setPendingPermission(null)
+    setPermissionBusy(false)
+    permissionFlightRef.current = null
+    return () => {
+      permissionControllerRef.current?.abort()
+      permissionControllerRef.current = null
+      replyControllerRef.current?.abort()
+      replyControllerRef.current = null
+    }
+  }, [selectedSessionId])
+
+  useEffect(() => {
+    if (!selectedSessionId) return
+    const sessionId = selectedSessionId
+    const epoch = permissionEpochRef.current
+    const controller = new AbortController()
+    permissionControllerRef.current = controller
+    let timer: ReturnType<typeof setTimeout> | undefined
+    let stopped = false
+    const refresh = async () => {
+      if (stopped || controller.signal.aborted || permissionEpochRef.current !== epoch) return
+      let requests: PermissionRequest[]
+      try {
+        requests = await listPermissions(sessionId, controller.signal)
+      } catch (cause) {
+        if (stopped || controller.signal.aborted || permissionEpochRef.current !== epoch) return
+        const status = (cause as { status?: number }).status
+        if (status === 403 || status === 404) {
+          setPendingPermission(null)
+          if (status === 403) setNotice('Permission requests are unavailable for this browser session')
+        } else {
+          setNotice(cause instanceof Error ? cause.message : 'Could not refresh permission request')
+        }
+        return
+      }
+      if (stopped || permissionEpochRef.current !== epoch) return
+      setPendingPermission(requests[0] ?? null)
+      timer = setTimeout(() => void refresh(), requests.length > 0 ? 250 : 1000)
+    }
+    void refresh()
+    return () => {
+      stopped = true
+      controller.abort()
+      if (timer) clearTimeout(timer)
+      if (permissionControllerRef.current === controller) permissionControllerRef.current = null
+    }
+  }, [selectedSessionId, activeTurnSessionId])
+
+  const handlePermissionReply = async (reply: 'once' | 'always' | 'reject') => {
+    if (!selectedSessionId || !pendingPermission || permissionBusy) return
+    const request = pendingPermission
+    if (request.sessionID !== selectedSessionId) return
+    const sessionId = selectedSessionId
+    const epoch = permissionEpochRef.current
+    const flight = `${sessionId}:${request.id}`
+    if (permissionFlightRef.current) return
+    permissionFlightRef.current = flight
+    const controller = new AbortController()
+    replyControllerRef.current = controller
+    setPermissionBusy(true)
+    try {
+      await replyPermission(sessionId, request.id, reply, controller.signal)
+      if (permissionEpochRef.current === epoch) {
+        setPendingPermission((current) => (current && current.id === request.id && current.sessionID === sessionId ? null : current))
+      }
+    } catch (cause) {
+      if (controller.signal.aborted || permissionEpochRef.current !== epoch) return
+      if (cause instanceof Error && (cause as { status?: number }).status === 404) {
+        setPendingPermission(null)
+      } else {
+        setNotice(cause instanceof Error ? cause.message : 'Could not reply to permission request')
+      }
+    } finally {
+      if (replyControllerRef.current === controller) {
+        replyControllerRef.current = null
+        if (permissionFlightRef.current === flight) permissionFlightRef.current = null
+        if (permissionEpochRef.current === epoch) setPermissionBusy(false)
+      }
+    }
+  }
 
   useEffect(() => {
     const active = activeTurnRef.current
@@ -1565,6 +1661,22 @@ function App() {
 
         <footer className="codex-composer-dock" id="models">
           <div className="codex-composer-wrap">
+            {pendingPermission && pendingPermission.sessionID === selectedSessionId ? (
+              <section className="codex-permission-dock" aria-label="Permission request">
+                <div>
+                  <strong>Permission required</strong>
+                  <p>{pendingPermission.action}</p>
+                  <ul>
+                    {pendingPermission.resources.map((resource) => <li key={resource}>{resource}</li>)}
+                  </ul>
+                </div>
+                <div className="codex-permission-actions" role="group" aria-label="Permission decision">
+                  <Button size="sm" isDisabled={permissionBusy} onPress={() => void handlePermissionReply('once')}>Allow once</Button>
+                  <Button size="sm" isDisabled={permissionBusy} onPress={() => void handlePermissionReply('always')}>Allow always</Button>
+                  <Button size="sm" variant="outline" isDisabled={permissionBusy} onPress={() => void handlePermissionReply('reject')}>Deny</Button>
+                </div>
+              </section>
+            ) : null}
             <Composer
               disabled={!selectedSession}
               sessionId={selectedSession?.id ?? null}
