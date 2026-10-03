@@ -6,49 +6,87 @@ import test from 'node:test'
 import { deleteDraftAttachment } from './api.ts'
 
 const token = 'a'.repeat(64)
+const capability = 'B'.repeat(43)
 
-test('deleteDraftAttachment sends the fragment bearer credential and keeps it out of the URL', async () => {
+async function readBody(request) {
+  const chunks = []
+  let bytes = 0
+  for await (const chunk of request) {
+    bytes += chunk.length
+    if (bytes > 4096) throw new Error('test request body exceeds fixture limit')
+    chunks.push(chunk)
+  }
+  return Buffer.concat(chunks).toString()
+}
+
+test('deleteDraftAttachment uses the browser capability and keeps launch secrets out of the URL', async () => {
   const observed = []
-  const server = createServer((request, response) => {
-    observed.push({
+  let origin = ''
+  const server = createServer(async (request, response) => {
+    let body
+    try {
+      body = await readBody(request)
+    } catch {
+      response.writeHead(413).end()
+      return
+    }
+    const record = {
       authorization: request.headers.authorization,
+      method: request.method,
+      origin: request.headers.origin,
       url: request.url,
-    })
+      body,
+    }
+    observed.push(record)
+    const send = (status, payload) => response.writeHead(status, { 'content-type': 'application/json' }).end(JSON.stringify(payload))
 
-    if (
-      request.url?.startsWith('/api/sessions/s1/attachments/a1') !== true
-    ) {
-      response.writeHead(404).end()
+    if (record.url === '/auth/browser-resume' && record.method === 'POST') {
+      if (record.origin !== origin) return send(403, { message: 'origin denied' })
+      if (record.authorization !== `Bearer ${token}` || record.body !== '{}') return send(401, { message: 'trusted launch required' })
+      return send(201, { browser_capability: capability, expires_at_unix_ms: Date.now() + 900000 })
+    }
+    if (record.url === '/api/sessions/s1/attachments/a1' && record.method === 'DELETE') {
+      if (record.origin !== origin) return send(403, { message: 'origin denied' })
+      if (record.authorization !== `BrowserResume ${capability}`) {
+        return send(record.authorization ? 403 : 401, { error: 'missing bearer credential' })
+      }
+      response.writeHead(204).end()
       return
     }
-    if (request.headers.authorization !== `Bearer ${token}`) {
-      response.writeHead(401, { 'content-type': 'application/json' })
-        .end(JSON.stringify({ error: 'missing bearer credential' }))
-      return
-    }
-
-    response.writeHead(204).end()
+    return send(404, { message: 'not found' })
   })
 
   server.listen(0, '127.0.0.1')
   await once(server, 'listening')
   const address = server.address()
   assert.ok(address && typeof address === 'object')
+  origin = `http://127.0.0.1:${address.port}`
 
   const originalFetch = globalThis.fetch
   const originalWindow = globalThis.window
   const originalLocation = globalThis.location
   const originalHistory = globalThis.history
-  const location = {
-    href: `http://127.0.0.1:${address.port}/#oc2-token=${token}`,
-    hash: `#oc2-token=${token}`,
-  }
-  const replaced = []
+  const originalLocalStorage = globalThis.localStorage
+  const originalSessionStorage = globalThis.sessionStorage
+  const location = { href: `${origin}/#oc2-token=${token}`, hash: `#oc2-token=${token}` }
+  const historyWrites = []
+  const storageWrites = []
+  const makeStorage = (name) => ({
+    length: 0,
+    getItem: () => null,
+    setItem: (key, value) => storageWrites.push({ name, key, value: String(value) }),
+    removeItem() {},
+    clear() {},
+    key: () => null,
+  })
+  const localStorage = makeStorage('localStorage')
+  const sessionStorage = makeStorage('sessionStorage')
 
   globalThis.location = location
   globalThis.history = {
-    replaceState(_state, _title, url) {
-      replaced.push(url)
+    state: null,
+    replaceState(state, _title, url) {
+      historyWrites.push(String(url))
       if (typeof url === 'string') {
         const parsed = new URL(url, location.href)
         location.href = parsed.href
@@ -56,45 +94,44 @@ test('deleteDraftAttachment sends the fragment bearer credential and keeps it ou
       }
     },
   }
-  globalThis.window = { location, history: globalThis.history }
-  // Global fetch wrapper resolves relative path ONLY; never synthesizes a
-  // response and never injects credentials itself.
-  globalThis.fetch = (input, init) => {
-    const target = new URL(String(input), `http://127.0.0.1:${address.port}/`)
-    return originalFetch(target, init)
+  globalThis.localStorage = localStorage
+  globalThis.sessionStorage = sessionStorage
+  globalThis.window = { location, history: globalThis.history, localStorage, sessionStorage }
+  globalThis.fetch = (input, init = {}) => {
+    const headers = new Headers(init.headers)
+    const method = (init.method ?? 'GET').toUpperCase()
+    if (method !== 'GET' && method !== 'HEAD') headers.set('origin', new URL(location.href).origin)
+    return originalFetch(new URL(String(input), `${origin}/`), { ...init, headers })
   }
 
   try {
     await deleteDraftAttachment('s1', 'a1')
-    assert.equal(observed.length, 1)
-    assert.equal(
-      observed[0].authorization,
-      `Bearer ${token}`,
+    assert.equal(observed.length, 2)
+    assert.deepEqual(
+      { method: observed[0].method, url: observed[0].url, authorization: observed[0].authorization, body: observed[0].body, origin: observed[0].origin },
+      { method: 'POST', url: '/auth/browser-resume', authorization: `Bearer ${token}`, body: '{}', origin },
     )
-    assert.ok(
-      observed[0].url?.startsWith('/api/sessions/s1/attachments/a1'),
-      'request URL should target the attachment endpoint',
-    )
-    assert.equal(
-      new URL(observed[0].url, 'http://127.0.0.1').searchParams.has('token'),
-      false,
-      'token must not appear in query string',
-    )
-    assert.equal(
-      (new URLSearchParams(new URLSearchParams()
-        .toString())
-        .toString()),
-      '',
-    )
+    assert.equal(observed[1].method, 'DELETE')
+    assert.equal(observed[1].url, '/api/sessions/s1/attachments/a1')
+    assert.equal(observed[1].authorization, `BrowserResume ${capability}`)
+    assert.equal(observed[1].origin, origin)
+    assert.equal(new URL(observed[1].url, origin).searchParams.has('token'), false, 'token must not appear in query string')
     assert.equal(location.hash, '')
-    assert.ok(replaced.length > 0, 'fragment token should be cleared with history.replaceState')
+    assert.ok(historyWrites.length > 0, 'fragment token should be cleared with history.replaceState')
+    assert.ok(historyWrites.every((url) => !url.includes(token) && !url.includes(capability)))
+    assert.ok(storageWrites.every(({ value }) => !value.includes(token)))
+    assert.deepEqual(storageWrites.map(({ name }) => name), ['sessionStorage'])
+    assert.ok(observed.every(({ url }) => !url.includes(token) && !url.includes(capability)))
 
-    // Prove the same live endpoint denies a request without credentials.
-    const denied = await originalFetch(`http://127.0.0.1:${address.port}/api/sessions/s1/attachments/a1`, {
-      method: 'DELETE',
-    })
+    const denied = await originalFetch(`${origin}/api/sessions/s1/attachments/a1`, { method: 'DELETE', headers: { origin } })
     assert.equal(denied.status, 401)
-    assert.equal(observed[1].authorization, undefined)
+    assert.equal(observed[2].authorization, undefined)
+    const nativeBearer = await originalFetch(`${origin}/api/sessions/s1/attachments/a1`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${token}`, origin },
+    })
+    assert.equal(nativeBearer.status, 403, 'native launch bearer is never accepted on protected API')
+    assert.equal(observed[3].authorization, `Bearer ${token}`)
   } finally {
     globalThis.fetch = originalFetch
     if (originalWindow === undefined) delete globalThis.window
@@ -103,6 +140,10 @@ test('deleteDraftAttachment sends the fragment bearer credential and keeps it ou
     else globalThis.location = originalLocation
     if (originalHistory === undefined) delete globalThis.history
     else globalThis.history = originalHistory
+    if (originalLocalStorage === undefined) delete globalThis.localStorage
+    else globalThis.localStorage = originalLocalStorage
+    if (originalSessionStorage === undefined) delete globalThis.sessionStorage
+    else globalThis.sessionStorage = originalSessionStorage
     server.close()
     await once(server, 'close')
   }

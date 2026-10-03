@@ -16,6 +16,7 @@ pub mod app_runtime;
 pub mod auto_loop;
 pub mod auto_report;
 pub mod auto_window;
+mod browser_resume;
 pub mod chat_composer;
 pub mod clients;
 pub mod context_accounting;
@@ -77,7 +78,7 @@ pub mod workspace_proxy;
 pub mod workspace_sessions;
 use axum::{
     body::{Body, Bytes},
-    extract::{DefaultBodyLimit, Path, Query, State},
+    extract::{DefaultBodyLimit, Extension, Path, Query, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
@@ -126,6 +127,14 @@ pub fn router(state: AppState) -> Router {
 pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) -> Router {
     let app = Router::new()
         .route("/health", get(health))
+        .route(
+            "/auth/browser-resume",
+            post(issue_browser_resume).delete(revoke_browser_resume),
+        )
+        .route(
+            "/auth/browser-resume/exchange",
+            post(exchange_browser_resume),
+        )
         .route("/api/capabilities", get(web_capabilities))
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
@@ -196,6 +205,126 @@ pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) 
         )),
         None => app,
     }
+}
+
+#[derive(Deserialize)]
+struct BrowserResumeIssueBody {
+    ttl_ms: Option<u64>,
+}
+
+async fn issue_browser_resume(
+    Extension(auth): Extension<daemon_auth::DaemonAuth>,
+    headers: HeaderMap,
+    body: Option<Json<BrowserResumeIssueBody>>,
+) -> Response {
+    let Some(origin) = valid_browser_origin(&headers) else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"message":"browser origin denied"})),
+        )
+            .into_response();
+    };
+    let native = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok());
+    if !auth.verify_bearer(native) {
+        let status = if native.is_some() {
+            StatusCode::FORBIDDEN
+        } else {
+            StatusCode::UNAUTHORIZED
+        };
+        return (
+            status,
+            Json(json!({"message":"trusted native launch required"})),
+        )
+            .into_response();
+    }
+    let ttl_ms = body
+        .and_then(|Json(value)| value.ttl_ms)
+        .unwrap_or(browser_resume::MAX_LEASE_MS);
+    match auth.browser_resume().issue(&origin, ttl_ms) {
+        Ok((browser_capability, expires_at_unix_ms)) => (StatusCode::CREATED, Json(json!({"browser_capability":browser_capability,"expires_at_unix_ms":expires_at_unix_ms}))).into_response(),
+        Err(browser_resume::IssueError::InvalidTtl) => (StatusCode::BAD_REQUEST, Json(json!({"message":"invalid browser resume TTL"}))).into_response(),
+        Err(browser_resume::IssueError::Capacity) => (StatusCode::TOO_MANY_REQUESTS, Json(json!({"message":"browser resume capacity reached"}))).into_response(),
+        Err(browser_resume::IssueError::Clock | browser_resume::IssueError::Randomness(_)) => (StatusCode::INTERNAL_SERVER_ERROR, Json(json!({"message":"browser resume credential unavailable"}))).into_response(),
+    }
+}
+
+async fn exchange_browser_resume(
+    Extension(registry): Extension<Arc<browser_resume::BrowserResumeRegistry>>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(origin) = valid_browser_origin(&headers) else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"message":"browser origin denied"})),
+        )
+            .into_response();
+    };
+    let Some(capability) = resume_authorization(&headers) else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"message":"browser resume denied"})),
+        )
+            .into_response();
+    };
+    match registry.exchange(capability, &origin) {
+        Some((browser_capability, expires_at_unix_ms)) => (StatusCode::OK, Json(json!({"browser_capability":browser_capability,"expires_at_unix_ms":expires_at_unix_ms}))).into_response(),
+        None => (StatusCode::FORBIDDEN, Json(json!({"message":"browser resume denied"}))).into_response(),
+    }
+}
+
+async fn revoke_browser_resume(
+    Extension(registry): Extension<Arc<browser_resume::BrowserResumeRegistry>>,
+    headers: HeaderMap,
+) -> Response {
+    let Some(origin) = valid_browser_origin(&headers) else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"message":"browser origin denied"})),
+        )
+            .into_response();
+    };
+    let Some(capability) = resume_authorization(&headers) else {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(json!({"message":"browser resume denied"})),
+        )
+            .into_response();
+    };
+    if registry.revoke(capability, &origin) {
+        StatusCode::NO_CONTENT.into_response()
+    } else {
+        (
+            StatusCode::FORBIDDEN,
+            Json(json!({"message":"browser resume denied"})),
+        )
+            .into_response()
+    }
+}
+
+fn valid_browser_origin(headers: &HeaderMap) -> Option<String> {
+    let origin = headers.get(header::ORIGIN)?.to_str().ok()?;
+    if origin.len() > 128 || !origin.starts_with("http://127.0.0.1:") {
+        return None;
+    }
+    let port = origin.strip_prefix("http://127.0.0.1:")?;
+    if port.is_empty()
+        || port.len() > 5
+        || !port.bytes().all(|b| b.is_ascii_digit())
+        || (port.len() > 1 && port.starts_with("0"))
+    {
+        return None;
+    }
+    (port.parse::<u16>().ok()? != 0).then(|| origin.to_owned())
+}
+
+fn resume_authorization(headers: &HeaderMap) -> Option<&str> {
+    headers
+        .get(header::AUTHORIZATION)?
+        .to_str()
+        .ok()?
+        .strip_prefix("BrowserResume ")
 }
 
 #[derive(Deserialize)]

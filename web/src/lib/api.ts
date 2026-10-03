@@ -168,43 +168,120 @@ class ApiError extends Error {
   }
 }
 
-// If the launcher supplies a local daemon credential in the page fragment,
-// consume it before the first API request and keep it only in this tab's memory.
-let bearerToken: string | undefined
+const RESUME_STORAGE_KEY = 'opencode.browser-resume'
+const RESUME_TOKEN = /^[A-Za-z0-9_-]{43}$/
+let nativeLaunchToken: string | undefined
+let browserCapability: string | undefined
+let resumeReady: Promise<void> | undefined
 
-function consumeBrowserCredential(): string | undefined {
-  if (bearerToken || typeof window === 'undefined') return bearerToken
+function consumeNativeLaunchToken(): string | undefined {
+  if (nativeLaunchToken || typeof window === 'undefined') return nativeLaunchToken
   const match = /^#oc2-token=([a-fA-F0-9]{64})$/.exec(window.location.hash)
   if (!match) return undefined
-
   const page = new URL(window.location.href)
   window.history.replaceState(window.history.state, '', `${page.pathname}${page.search}`)
-  bearerToken = match[1]
-  return bearerToken
+  nativeLaunchToken = match[1]
+  return nativeLaunchToken
 }
 
-function apiHeaders(path: string, headers?: HeadersInit): Headers {
-  const result = new Headers(headers)
-  if (path.startsWith('/api/')) {
-    const token = consumeBrowserCredential()
-    if (token) result.set('authorization', `Bearer ${token}`)
-    else if (
-      typeof window !== 'undefined' &&
-      !window.location.hash.startsWith('#oc2-token=')
-    ) {
-      throw new ApiError(401, 'Re-authentication required: relaunch the authenticated browser session')
+function storeBrowserCapability(value: unknown): string {
+  const capability = typeof value === 'string' ? value : ''
+  if (!RESUME_TOKEN.test(capability)) throw new ApiError(403, 'Browser resume credential rejected')
+  window.sessionStorage.setItem(RESUME_STORAGE_KEY, capability)
+  browserCapability = capability
+  return capability
+}
+
+async function establishBrowserCapability(): Promise<void> {
+  if (typeof window === 'undefined' || browserCapability) return
+  if (resumeReady) return resumeReady
+  resumeReady = (async () => {
+    try {
+      const native = consumeNativeLaunchToken()
+      if (native) {
+        try {
+          const response = await fetch('/auth/browser-resume', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${native}`, 'content-type': 'application/json' },
+            body: JSON.stringify({}),
+          })
+          if (!response.ok) throw new ApiError(response.status, 'Unable to establish browser resume')
+          const issued = (await response.json()) as { browser_capability?: unknown }
+          storeBrowserCapability(issued.browser_capability)
+          return
+        } finally {
+          nativeLaunchToken = undefined
+        }
+      }
+      const stored = window.sessionStorage.getItem(RESUME_STORAGE_KEY)
+      if (!stored || !RESUME_TOKEN.test(stored)) {
+        window.sessionStorage.removeItem(RESUME_STORAGE_KEY)
+        throw new ApiError(401, 'Re-authentication required: relaunch the authenticated browser session')
+      }
+      const response = await fetch('/auth/browser-resume/exchange', {
+        method: 'POST',
+        headers: { authorization: `BrowserResume ${stored}`, 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (!response.ok) {
+        window.sessionStorage.removeItem(RESUME_STORAGE_KEY)
+        throw new ApiError(403, 'Browser resume credential expired or revoked')
+      }
+      const exchanged = (await response.json()) as { browser_capability?: unknown }
+      storeBrowserCapability(exchanged.browser_capability)
+    } finally {
+      resumeReady = undefined
     }
+  })()
+  return resumeReady
+}
+
+function clearBrowserCapability(): void {
+  if (typeof window !== 'undefined') window.sessionStorage.removeItem(RESUME_STORAGE_KEY)
+  browserCapability = undefined
+}
+
+async function clearRejectedBrowserCapability(headers: Headers, response: Response): Promise<void> {
+  if (!headers.get('authorization')?.startsWith('BrowserResume ') || (response.status !== 401 && response.status !== 403)) return
+  const body = (await response.clone().json().catch(() => null)) as { error?: unknown } | null
+  if (body?.error === 'bad bearer credential' || body?.error === 'missing bearer credential') clearBrowserCapability()
+}
+
+async function apiHeaders(path: string, headers?: HeadersInit): Promise<Headers> {
+  const result = new Headers(headers)
+  if (path.startsWith('/api/') && typeof window !== 'undefined') {
+    await establishBrowserCapability()
+    if (!browserCapability) throw new ApiError(401, 'Re-authentication required: relaunch the authenticated browser session')
+    result.set('authorization', `BrowserResume ${browserCapability}`)
   }
   return result
+}
+
+export async function revokeBrowserResume(): Promise<void> {
+  if (typeof window === 'undefined') return
+  if (resumeReady) await resumeReady.catch(() => undefined)
+  const capability = browserCapability ?? window.sessionStorage.getItem(RESUME_STORAGE_KEY)
+  window.sessionStorage.removeItem(RESUME_STORAGE_KEY)
+  browserCapability = undefined
+  if (capability && RESUME_TOKEN.test(capability)) {
+    await fetch('/auth/browser-resume', {
+      method: 'DELETE',
+      headers: { authorization: `BrowserResume ${capability}` },
+    }).catch(() => undefined)
+  }
+}
+
+async function authenticatedFetch(path: string, init?: RequestInit): Promise<Response> {
+  const headers = await apiHeaders(path, init?.headers)
+  const response = await fetch(path, { ...init, headers })
+  await clearRejectedBrowserCapability(headers, response)
+  return response
 }
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const headers = new Headers(init?.headers)
   if (!headers.has('content-type')) headers.set('content-type', 'application/json')
-  const response = await fetch(path, {
-    ...init,
-    headers: apiHeaders(path, headers),
-  })
+  const response = await authenticatedFetch(path, { ...init, headers })
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as
@@ -213,7 +290,43 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(response.status, body?.message ?? `Request failed with ${response.status}`)
   }
 
+  if (response.status === 204) return undefined as T
   return (await response.json()) as T
+}
+
+export type PermissionReply = 'once' | 'always' | 'reject'
+export interface PermissionRequest {
+  id: string
+  sessionID: string
+  action: string
+  resources: string[]
+  source: { type: string; messageID: string; callID: string }
+}
+
+function normalizePermission(value: unknown): PermissionRequest | null {
+  if (!value || typeof value !== 'object') return null
+  const v = value as Record<string, unknown>
+  const source = v.source
+  const nonemptyBounded = (x: unknown, bytes: number): x is string => typeof x === 'string' && x.length > 0 && x.length <= bytes && new TextEncoder().encode(x).byteLength <= bytes
+  if (!nonemptyBounded(v.id, 256) || !nonemptyBounded(v.sessionID, 256) || !nonemptyBounded(v.action, 64) || !Array.isArray(v.resources) || v.resources.length > 32 || !source || typeof source !== 'object') return null
+  const s = source as Record<string, unknown>
+  const resources = v.resources as unknown[]
+  if (!resources.every((r) => nonemptyBounded(r, 4096)) || !nonemptyBounded(s.type, 32) || !nonemptyBounded(s.messageID, 256) || !nonemptyBounded(s.callID, 256)) return null
+  return { id: v.id, sessionID: v.sessionID, action: v.action, resources: resources as string[], source: { type: s.type, messageID: s.messageID, callID: s.callID } }
+}
+
+export async function listPermissions(sessionId: string, signal?: AbortSignal): Promise<PermissionRequest[]> {
+  const payload = await request<{ data?: unknown }>(`/api/session/${encodeURIComponent(sessionId)}/permission`, { signal })
+  if (!Array.isArray(payload.data)) throw new Error('Server returned invalid pending permissions')
+  const bounded = payload.data.slice(0, 16)
+  if (payload.data.length > 16) throw new Error('Server returned too many pending permission requests')
+  const permissions = bounded.map(normalizePermission)
+  if (permissions.some((p) => p === null)) throw new Error('Server returned invalid pending permission')
+  return permissions as PermissionRequest[]
+}
+
+export async function replyPermission(sessionId: string, requestId: string, reply: PermissionReply, signal?: AbortSignal): Promise<void> {
+  await request<void>(`/api/session/${encodeURIComponent(sessionId)}/permission/${encodeURIComponent(requestId)}/reply`, { method: 'POST', body: JSON.stringify({ reply }), signal })
 }
 
 function normalizeSession(value: unknown): SessionSummary | null {
@@ -607,15 +720,12 @@ export async function uploadDraftAttachment(
 ) {
   const params = new URLSearchParams({ name: file.name || 'attachment' })
   const path = `/api/sessions/${encodeURIComponent(id)}/attachments?${params.toString()}`
-  const response = await fetch(
-    path,
-    {
-      method: 'POST',
-      headers: apiHeaders(path, { 'content-type': file.type || 'application/octet-stream' }),
-      body: file,
-      signal,
-    },
-  )
+  const response = await authenticatedFetch(path, {
+    method: 'POST',
+    headers: { 'content-type': file.type || 'application/octet-stream' },
+    body: file,
+    signal,
+  })
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { message?: string } | null
     throw new ApiError(response.status, body?.message ?? `Request failed with ${response.status}`)
@@ -632,10 +742,7 @@ export async function deleteDraftAttachment(
   signal?: AbortSignal,
 ) {
   const path = `/api/sessions/${encodeURIComponent(sessionId)}/attachments/${encodeURIComponent(attachmentId)}`
-  const response = await fetch(
-    path,
-    { method: 'DELETE', headers: apiHeaders(path), signal },
-  )
+  const response = await authenticatedFetch(path, { method: 'DELETE', signal })
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { message?: string } | null
     throw new ApiError(response.status, body?.message ?? `Request failed with ${response.status}`)
@@ -1078,9 +1185,9 @@ export async function runTurnStream(
   signal?: AbortSignal,
 ): Promise<TurnResult> {
   const path = `/api/sessions/${encodeURIComponent(id)}/turns/stream`
-  const response = await fetch(path, {
+  const response = await authenticatedFetch(path, {
     method: 'POST',
-    headers: apiHeaders(path, { 'content-type': 'application/json' }),
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       text,
       model,
