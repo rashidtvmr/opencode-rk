@@ -96,7 +96,7 @@ impl PidLock {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        let mut file = OpenOptions::new()
+        let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
