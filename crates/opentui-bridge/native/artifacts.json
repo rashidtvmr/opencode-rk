@@ -71,6 +71,72 @@
         "glibc_floor": "2.17"
       },
       "source_output": "linux/libopentui.so"
+    },
+    {
+      "path": "crates/opentui-bridge/native/lib/x86_64-unknown-linux-gnu/libopentui.so",
+      "sha256": "c3e79eba7d7b3628c4a4548e8c139d64485d4e7366ffc7f2ff3e5ca44bdf77b5",
+      "bytes": 26595336,
+      "target": "x86_64-linux-gnu.2.17",
+      "metadata": {
+        "soname": "libopentui.so",
+        "glibc_floor": "2.17"
+      },
+      "source_output": "x86_64-linux/libopentui.so",
+      "provenance": {
+        "producer_source_commit": "c01292fd0837bafd07ce458c74416b2b375a41ab",
+        "producer_source_tree": "261e8ea4b0ac68bb589760c3c871e202ef71ed6b",
+        "producer_receipt_path": "native-x64-verified-inputs-run-evidence/run-evidence-receipt.json",
+        "producer_receipt_sha256": "9ecfe6184f16fbe59e501e9a562a23685b7cb5961977d25733ad485bba795b59",
+        "producer_evidence_manifest_sha256": "88775ed7e71fbaa5e7affb4fe5cd5577ec43f73e9e8590ff53d497eed9ad7c67",
+        "producer_runner_sha256": "f790616b80d8b2df085fe2e25f7669694b145712ee2d843a47b61c2027e4c663",
+        "producer_toolchain": {
+          "name": "Zig",
+          "version": "0.16.0",
+          "sha256": "3567b9094e6ba01ed75b9d80c00b83559b61a3f7408699348c882d3c4f9a7998"
+        },
+        "build_invocation": {
+          "argv": [
+            "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/native-x64-owned-producer-prep-safe-attempt2/toolchain/zig/bin/zig",
+            "build",
+            "-Dlibrary-target=x86_64-linux-gnu.2.17",
+            "-Doptimize=ReleaseSafe",
+            "-j2",
+            "--cache-dir",
+            "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/native-x64-owned-producer-prep-evidence-attempt2/producer-runs/9f5d8422b30d412280b3cf8798b22389/zig-local-cache",
+            "--global-cache-dir",
+            "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/native-x64-owned-producer-prep-evidence-attempt2/producer-runs/9f5d8422b30d412280b3cf8798b22389/zig-global-cache"
+          ],
+          "exit": 0,
+          "network_isolation_verified": true,
+          "dependencies_installed": false,
+          "producer_source_modified": false
+        },
+        "static_abi_evidence": {
+          "path": "native-x64-abi-static-evidence/manifest.json",
+          "sha256": "6caf4e7ef0196895d8cddb7e3c5e083e5a7be01d5d597115b9c7a98ebf4b9fd2",
+          "state": "OBSERVED_ABI_GAPS",
+          "exports_checked": 53,
+          "missing_exports": 0,
+          "full_abi_acceptance": false
+        },
+        "controller_abi_disposition": {
+          "path": "native-x64-controller-opaque-abi-disposition.json",
+          "sha256": "8a66a67361b4f85bfa2a93b55e8a3b84a9fed4cfd7e807d8551a331738689336",
+          "state": "SPECIFIC_STATIC_FINDING_RESOLVED_OPAQUE_POINTER",
+          "full_abi_acceptance": false
+        },
+        "offline_runtime_evidence": {
+          "path": "E/native-x64-offline-runtime-corrected-collector/runtime-receipt.json",
+          "sha256": "b58d02659ebef351e27855a0f4919aa92992e470a5b2ec1626281e8964890146",
+          "state": "PREVERIFIED_LINUX_X64_NATIVE_RUNTIME_ONLY",
+          "named_tests_passed": 20,
+          "native_calls": true,
+          "source_sha": "4e7419b1d4774bc6e65b957142c92222dec0154f",
+          "integrated_candidate": false,
+          "full_abi_acceptance": false
+        },
+        "provenance_scope": "Target-specific x86_64 evidence; does not modify or attest prior macOS/ARM builds"
+      }
     }
   ],
   "sidecars": {
