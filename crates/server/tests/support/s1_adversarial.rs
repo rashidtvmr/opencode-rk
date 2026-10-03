@@ -878,11 +878,10 @@ impl Fixture {
         let deadline = Instant::now() + Duration::from_secs(3);
         let path = format!("/api/session/{}/permission", self.session);
         loop {
-            let last_poll;
             let response = self
                 .request("GET", path.clone(), Some(self.token.clone()), None)
                 .await?;
-            if response.status == 200 {
+            let last_poll = if response.status == 200 {
                 let value: Value = serde_json::from_slice(&response.body)
                     .map_err(|error| format!("permission list JSON: {error}"))?;
                 let entries = value["data"].as_array().ok_or_else(|| {
@@ -894,13 +893,13 @@ impl Fixture {
                         .ok_or_else(|| "pending permission ID missing".to_owned())?;
                     return Ok((id.to_owned(), request.clone()));
                 }
-                last_poll = format!(
+                format!(
                     "HTTP 200 empty permission list body={}",
                     String::from_utf8_lossy(&response.body)
                         .chars()
                         .take(1024)
                         .collect::<String>()
-                );
+                )
             } else if response.status != 404 {
                 return Err(format!(
                     "GET {path} status {}, expected 200",
@@ -910,7 +909,7 @@ impl Fixture {
                 return Err(format!(
                     "live session permission list route missing: GET {path} returned 404"
                 ));
-            }
+            };
             if Instant::now() >= deadline {
                 // Give a just-finished HTTP client thread a short bounded window
                 // to publish its final response/error for diagnostics. This
