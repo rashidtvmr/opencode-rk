@@ -575,6 +575,10 @@ impl Provider {
         )
     }
 
+    #[allow(
+        dead_code,
+        reason = "shared S1 adversarial fixture: provider continuation wait used by retained scenario helpers"
+    )]
     async fn wait_for(&self, count: usize) -> bool {
         let deadline = Instant::now() + Duration::from_secs(3);
         while Instant::now() < deadline {
@@ -623,8 +627,11 @@ struct Fixture {
     address: SocketAddr,
     token: String,
     session: String,
+    #[allow(
+        dead_code,
+        reason = "S1 adversarial support fixture retains session-scoping scenario helper; exercised by the sibling session_permission_live target"
+    )]
     other_session: String,
-    app: axum::Router,
     last_http: Arc<Mutex<Option<(String, String, u16)>>>,
     last_turn_outcome: Arc<Mutex<Option<String>>>,
     server: ServerTask,
@@ -738,7 +745,6 @@ impl Fixture {
             token,
             session,
             other_session,
-            app,
             last_http: Arc::new(Mutex::new(None)),
             last_turn_outcome: Arc::new(Mutex::new(None)),
             server: ServerTask(Some(server)),
@@ -875,7 +881,7 @@ impl Fixture {
     async fn pending(&self, stage: &str) -> Result<(String, Value), String> {
         let deadline = Instant::now() + Duration::from_secs(3);
         let path = format!("/api/session/{}/permission", self.session);
-        let mut last_poll = "not yet polled".to_owned();
+        let last_poll;
         loop {
             let response = self
                 .request("GET", path.clone(), Some(self.token.clone()), None)
@@ -900,20 +906,11 @@ impl Fixture {
                         .collect::<String>()
                 );
             } else if response.status != 404 {
-                last_poll = format!(
-                    "HTTP {} permission list body={}",
-                    response.status,
-                    String::from_utf8_lossy(&response.body)
-                        .chars()
-                        .take(1024)
-                        .collect::<String>()
-                );
                 return Err(format!(
                     "GET {path} status {}, expected 200",
                     response.status
                 ));
             } else {
-                last_poll = "permission list route returned 404".to_owned();
                 return Err(format!(
                     "live session permission list route missing: GET {path} returned 404"
                 ));
@@ -963,10 +960,6 @@ impl Fixture {
         .await
     }
 
-    async fn create_session(&self, title: &str) -> Result<String, String> {
-        create_session(&self.app, &self.token, title).await
-    }
-
     async fn finish(mut self) {
         self.server.stop().await;
         if let Some(turn) = self.turn.take() {
@@ -996,6 +989,10 @@ impl Fixture {
         }
     }
 
+    #[allow(
+        dead_code,
+        reason = "shared S1 adversarial fixture: operation-scoped approval helper retained for the frozen permission contract"
+    )]
     async fn live_decision(&mut self, decision: &str) -> Result<(), String> {
         self.broker_requires_human_for_target(&self.target)?;
         if self
@@ -1139,7 +1136,7 @@ impl Fixture {
                         .is_some_and(|call_id| call_id.starts_with(B_CALL_ID))
             })
             .collect();
-        if b_results.len() != 0 {
+        if !b_results.is_empty() {
             return Err(format!(
                 "B echo tool_output emitted after rejected A (could be execution or denial): {b_results:?}"
             ));
@@ -1314,6 +1311,10 @@ impl Fixture {
         Ok(())
     }
 
+    #[allow(
+        dead_code,
+        reason = "shared S1 adversarial fixture: auth failure scenario helper retained for the frozen permission contract"
+    )]
     async fn auth_failure(&mut self) -> Result<(), String> {
         self.broker_requires_human_for_target(&self.target)?;
         let root = std::env::current_dir().map_err(|error| error.to_string())?;
@@ -1356,6 +1357,10 @@ impl Fixture {
         Ok(())
     }
 
+    #[allow(
+        dead_code,
+        reason = "shared S1 adversarial fixture: session-scoping and replay scenario helper retained for the frozen permission contract"
+    )]
     async fn session_and_replay(&mut self) -> Result<(), String> {
         self.broker_requires_human_for_target(&self.target)?;
         let root = std::env::current_dir().map_err(|error| error.to_string())?;
@@ -1406,6 +1411,10 @@ impl Fixture {
         Ok(())
     }
 
+    #[allow(
+        dead_code,
+        reason = "shared S1 adversarial fixture: mandatory protected-secret scenario helper retained for the frozen security contract"
+    )]
     async fn protected_secret(&mut self) -> Result<(), String> {
         let secret = self.workspace.path().join(".env");
         let broker = PermissionBroker::new(SecurityPolicy::lean_default(self.workspace.path()))
@@ -1542,6 +1551,10 @@ trait AsyncCase<'a> {
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + 'a>>;
 }
 
+#[allow(
+    dead_code,
+    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+)]
 struct OnceCase;
 impl<'a> AsyncCase<'a> for OnceCase {
     fn run(
@@ -1551,6 +1564,10 @@ impl<'a> AsyncCase<'a> for OnceCase {
         Box::pin(fixture.live_decision("once"))
     }
 }
+#[allow(
+    dead_code,
+    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+)]
 struct AlwaysCase;
 impl<'a> AsyncCase<'a> for AlwaysCase {
     fn run(
@@ -1569,6 +1586,10 @@ impl<'a> AsyncCase<'a> for RejectCase {
         Box::pin(fixture.rejection())
     }
 }
+#[allow(
+    dead_code,
+    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+)]
 struct AuthCase;
 impl<'a> AsyncCase<'a> for AuthCase {
     fn run(
@@ -1578,6 +1599,10 @@ impl<'a> AsyncCase<'a> for AuthCase {
         Box::pin(fixture.auth_failure())
     }
 }
+#[allow(
+    dead_code,
+    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+)]
 struct ReplayCase;
 impl<'a> AsyncCase<'a> for ReplayCase {
     fn run(
@@ -1587,6 +1612,10 @@ impl<'a> AsyncCase<'a> for ReplayCase {
         Box::pin(fixture.session_and_replay())
     }
 }
+#[allow(
+    dead_code,
+    reason = "shared S1 adversarial fixture: retained case wrapper exercised by the sibling session_permission_live target"
+)]
 struct ProtectedCase;
 impl<'a> AsyncCase<'a> for ProtectedCase {
     fn run(

@@ -510,7 +510,6 @@ struct Fixture {
     token: String,
     session: String,
     other_session: String,
-    app: axum::Router,
     last_http: Arc<Mutex<Option<(String, String, u16)>>>,
     server: ServerTask,
     provider: Provider,
@@ -623,7 +622,6 @@ impl Fixture {
             token,
             session,
             other_session,
-            app,
             last_http: Arc::new(Mutex::new(None)),
             server: ServerTask(Some(server)),
             provider,
@@ -788,10 +786,6 @@ impl Fixture {
             Some(json!({"reply":reply})),
         )
         .await
-    }
-
-    async fn create_session(&self, title: &str) -> Result<String, String> {
-        create_session(&self.app, &self.token, title).await
     }
 
     async fn finish(mut self) {

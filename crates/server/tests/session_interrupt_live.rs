@@ -254,7 +254,7 @@ fn handle_provider(
         .expect("write timeout");
     let req = read_bounded_request(&mut stream).expect("request");
     let text = String::from_utf8(req).expect("utf8");
-    let (headers, body) = text.split_once("\r\n\r\n").expect("body split");
+    let (_headers, body) = text.split_once("\r\n\r\n").expect("body split");
     let parsed: Value = serde_json::from_str(body).expect("json");
     let streaming = parsed["stream"] == true;
     {
@@ -634,7 +634,7 @@ async fn interrupt_streaming_authorized_returns_204_and_reclaims_slot() {
         int_body.len()
     );
 
-    let (turn_status, _turn_body) = turn_handle.await.expect("turn join");
+    let (_turn_status, _turn_body) = turn_handle.await.expect("turn join");
     assert!(
         provider.wait_disconnected().await,
         "interrupted provider request must observe client EOF before cleanup"
