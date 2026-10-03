@@ -285,7 +285,6 @@ def main() -> int:
     parser.add_argument("--mac-rustc", help="absolute existing rustc executable for the Mac loader gate")
     parser.add_argument("--mac-rustdoc", help="absolute existing rustdoc executable for the Mac loader gate")
     parser.add_argument("--mac-cargo-home", help="absolute owned Cargo cache directory for the Mac loader gate")
-    parser.add_argument("--mac-rustup-home", help="absolute owned rustup home when explicit tools are rustup shims")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-contract", action="store_true",
                       help="static validation only; no heavy platform gates")
