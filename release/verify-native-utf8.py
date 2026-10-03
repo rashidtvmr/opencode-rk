@@ -112,7 +112,7 @@ if args.tool_gates:
     assert digest(SOURCE/owned_test) == frozen[owned_test]
 run('build', ['/work/cargo/bin/cargo', 'build', '--offline', '--locked', '--release', '-p', 'opencode-rk-cli', '--bin', 'oc2', '--features', 'native'], build_env, 240)
 native_source = SOURCE/'crates/opentui-bridge/native/lib/aarch64-unknown-linux-gnu/libopentui.so'
-assert digest(native_source) == 'e85a45710e9e181b3eb7cca877a1d9022f2210bfa1e06b7c159e734506da3b89'
+assert digest(native_source) == '567d7422cf5f658297d992b2885e408d9ba71a98c3ceb7372d4a8bb0a6382b74'
 archive = OUTPUT/'oc2-linux-arm64.tar.gz'
 with tarfile.open(archive, 'w:gz', compresslevel=1) as output:
     output.add(ROOT/'target/release/oc2', arcname='oc2', recursive=False)

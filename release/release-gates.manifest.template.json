@@ -17,7 +17,7 @@
     "native_library_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "archive_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
     "runner_path": "release/verify-native-utf8.py",
-    "runner_sha256": "b135a456f9dae899af79f6249c25cf116ba7917f6141123d36b290a80d94d423",
+    "runner_sha256": "dbde8a78b50ca9d5b7af3fcf51c484b0aa60858e100e3acc12148680f6ba85bd",
     "frozen_tests": {
       "tests/e2e/native_utf8_input.py": "f5a4058cc51d6d84e02523633a2601e1bfa741fe8834848353606939a7f80619",
       "tests/e2e/native_stream_tool.py": "c6d8d561a96136061c4d6e87e183bad144e762df17847fcfca4a347d0d30633e",
@@ -76,16 +76,10 @@
       ]
     },
     "ubuntu": {
-      "runner_sha256": "b135a456f9dae899af79f6249c25cf116ba7917f6141123d36b290a80d94d423",
+      "runner_sha256": "dbde8a78b50ca9d5b7af3fcf51c484b0aa60858e100e3acc12148680f6ba85bd",
       "path": "/usr/bin:/bin",
       "strip_env": ["OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GITHUB_TOKEN"],
       "gates": [
-        {
-          "label": "tool-contract-self-check",
-          "command": ["{python}", "{root}/tests/e2e/ubuntu_installed_golden.py", "--archive", "{artifact}/oc2-linux-arm64.tar.gz", "--checksum", "{archive_sha256}", "--build-json", "{artifact}/build.json", "--artifact-dir", "{evidence}/ubuntu-installed-golden", "--expected-source-sha", "{sha}"],
-          "timeout_seconds": 30,
-          "notes": "retained runner invocation surface preserved (--sha/--source-name/--output-name/--tool-gates)"
-        },
         {
           "label": "ubuntu-installed-golden",
           "command": ["{python}", "{root}/tests/e2e/ubuntu_installed_golden.py", "--archive", "{artifact}/oc2-linux-arm64.tar.gz", "--checksum", "{archive_sha256}", "--build-json", "{artifact}/build.json", "--artifact-dir", "{evidence}/ubuntu-installed-golden", "--expected-source-sha", "{sha}"],
