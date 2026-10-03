@@ -22,7 +22,7 @@
 
 use opencode_rk_server::rules_globs::LoadDecision;
 use opencode_rk_server::rules_loader::{RuleEntry, RulesSnapshot};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// Maximum bytes of rule content injected into the system prompt.
 pub const INJECT_BYTE_CAP: usize = 128 * 1024;
@@ -58,7 +58,7 @@ pub struct InjectRecord {
 }
 
 /// Extract the file name from a path as a display name.
-fn rule_name(path: &PathBuf) -> String {
+fn rule_name(path: &Path) -> String {
     path.file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("unknown")
@@ -126,14 +126,14 @@ pub fn assemble_prompt(
         let body = String::from_utf8_lossy(&entry.bytes);
         prompt.push_str(MARKER_PREFIX);
         prompt.push_str(&name);
-        prompt.push_str(" ");
+        prompt.push(' ');
         prompt.push_str(MARKER_SUFFIX);
         prompt.push('\n');
         prompt.push_str(&body);
         prompt.push('\n');
         prompt.push_str(MARKER_END_PREFIX);
         prompt.push_str(&name);
-        prompt.push_str(" ");
+        prompt.push(' ');
         prompt.push_str(MARKER_SUFFIX);
         prompt.push('\n');
 

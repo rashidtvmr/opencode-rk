@@ -10,7 +10,7 @@ mod rules_inject;
 
 use opencode_rk_server::rules_globs::LoadDecision;
 use opencode_rk_server::rules_loader::{RuleEntry, RulesSnapshot};
-use rules_inject::{assemble_prompt, InjectRecord, LoadedRule, SkippedRule};
+use rules_inject::assemble_prompt;
 use std::path::PathBuf;
 
 /// T01: Empty rules + empty decision -> base prompt returned with empty record.
