@@ -22,7 +22,7 @@
 
 use opencode_rk_server::rules_globs::LoadDecision;
 use opencode_rk_server::rules_loader::{RuleEntry, RulesSnapshot};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// Maximum bytes of rule content injected into the system prompt.
 pub const INJECT_BYTE_CAP: usize = 128 * 1024;
