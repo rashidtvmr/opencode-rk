@@ -45,7 +45,7 @@
         {
           "label": "macos-loader",
           "command": ["{mac_cargo}", "test", "--offline", "--locked", "-p", "opencode-rk-cli", "--test", "macos_loader", "--", "--test-threads=1"],
-          "env": {"OC2_NATIVE_BINARY": "{artifact}/install/bin/oc2", "MAC_OPENTUI_FIXTURE": "{artifact}/install/lib/libopentui.dylib", "HOME": "{mac_home}", "CARGO_HOME": "{mac_cargo_home}", "CARGO_TARGET_DIR": "{mac_target_dir}", "CARGO_BUILD_JOBS": "2", "RUST_TEST_THREADS": "1"},
+          "env": {"OC2_NATIVE_BINARY": "{artifact}/install/bin/oc2", "MAC_OPENTUI_FIXTURE": "{artifact}/install/lib/libopentui.dylib", "RUSTC": "{mac_rustc}", "RUSTDOC": "{mac_rustdoc}", "HOME": "{mac_home}", "TMPDIR": "{owned_short_tmp}", "CARGO_HOME": "{mac_cargo_home}", "CARGO_TARGET_DIR": "{mac_target_dir}", "CARGO_BUILD_JOBS": "2", "RUST_TEST_THREADS": "1"},
           "timeout_seconds": 900,
           "requires": "installed Mach-O release binary attested by --artifact-dir build.json"
         },

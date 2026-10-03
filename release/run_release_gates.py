@@ -218,9 +218,11 @@ def run_platforms(args, manifest: dict, root: pathlib.Path, evidence: pathlib.Pa
             "{sha}": args.source_sha, "{archive_sha256}": contract["archive_sha256"],
             "{node}": args.node or "", "{playwright_preload}": args.playwright_preload or "",
             "{browser_cache}": args.browser_cache or "", "{mac_cargo}": args.mac_cargo or "",
+            "{mac_rustc}": args.mac_rustc or "", "{mac_rustdoc}": args.mac_rustdoc or "",
+            "{mac_cargo_home}": args.mac_cargo_home or "",
             "{mac_home}": str(evidence / "mac" / "cargo-home"),
-            "{mac_cargo_home}": str(evidence / "mac" / "cargo-home"),
             "{mac_target_dir}": str(evidence / "mac" / "cargo-target"),
+            "{owned_short_tmp}": str(evidence / "mac" / "tmp"),
         }
         def expand(token: str) -> str:
             result = token
@@ -232,8 +234,9 @@ def run_platforms(args, manifest: dict, root: pathlib.Path, evidence: pathlib.Pa
 
         for gate in platform_gates:
             command = [expand(part) for part in gate["command"]]
-            gate_env = {key: expand(str(value)) for key, value in (gate.get("env") or {}).items()}
-            gate_env.update(env)
+            gate_env = dict(env)
+            gate_env.update({key: expand(str(value)) for key, value in (gate.get("env") or {}).items()})
+            gate_env = receipts.scrub_inherited_env(gate_env)
             record = run_gate(
                 f"{name}:{gate['label']}", command, root, gate_env,
                 int(gate.get("timeout_seconds", 90)),
@@ -279,6 +282,10 @@ def main() -> int:
     parser.add_argument("--playwright-preload", help="absolute owned Playwright preload file")
     parser.add_argument("--browser-cache", help="absolute owned Playwright browser cache directory")
     parser.add_argument("--mac-cargo", help="absolute existing Cargo executable for the Mac loader gate")
+    parser.add_argument("--mac-rustc", help="absolute existing rustc executable for the Mac loader gate")
+    parser.add_argument("--mac-rustdoc", help="absolute existing rustdoc executable for the Mac loader gate")
+    parser.add_argument("--mac-cargo-home", help="absolute owned Cargo cache directory for the Mac loader gate")
+    parser.add_argument("--mac-rustup-home", help="absolute owned rustup home when explicit tools are rustup shims")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check-contract", action="store_true",
                       help="static validation only; no heavy platform gates")
@@ -290,22 +297,6 @@ def main() -> int:
         parser.error("--tool-gates applies only when --platform ubuntu is selected")
     if args.run and len(args.platforms) != 1:
         parser.error("--run accepts exactly one platform")
-    if args.run and "web" in args.platforms:
-        for option, value in (("--node", args.node), ("--playwright-preload", args.playwright_preload),
-                              ("--browser-cache", args.browser_cache)):
-            if not value or not pathlib.Path(value).is_absolute():
-                parser.error(f"{option} must be an absolute existing capability")
-        if not pathlib.Path(args.node).is_file() or not os.access(args.node, os.X_OK):
-            parser.error("--node must be an existing executable")
-        if not pathlib.Path(args.playwright_preload).is_file():
-            parser.error("--playwright-preload must be an existing file")
-        if not pathlib.Path(args.browser_cache).is_dir():
-            parser.error("--browser-cache must be an existing directory")
-    if args.run and "mac" in args.platforms:
-        if not args.mac_cargo or not pathlib.Path(args.mac_cargo).is_absolute():
-            parser.error("--mac-cargo must be an absolute existing executable")
-        if not pathlib.Path(args.mac_cargo).is_file() or not os.access(args.mac_cargo, os.X_OK):
-            parser.error("--mac-cargo must be an existing executable")
     # Preserve the caller-supplied root identity until validate_git_source has
     # rejected symlink aliases.  Resolving here would erase that security
     # boundary and turn an alias into an apparently real repository root.
@@ -356,6 +347,31 @@ def main() -> int:
                 )
             except receipts.ReceiptError as exc:
                 raise GateError(str(exc)) from exc
+            required = " ".join(json.dumps(g) for g in manifest["platforms"][selected].get("gates", []))
+            if selected == "web" and "{node}" in required:
+                for option, value in (("--node", args.node), ("--playwright-preload", args.playwright_preload),
+                                      ("--browser-cache", args.browser_cache)):
+                    if not value or not pathlib.Path(value).is_absolute():
+                        raise GateError(f"{option} must be an absolute existing capability")
+                if not pathlib.Path(args.node).is_file() or not os.access(args.node, os.X_OK):
+                    raise GateError("--node must be an existing executable")
+                if not pathlib.Path(args.playwright_preload).is_file():
+                    raise GateError("--playwright-preload must be an existing file")
+                if not pathlib.Path(args.browser_cache).is_dir():
+                    raise GateError("--browser-cache must be an existing directory")
+            if selected == "mac" and "{mac_cargo}" in required:
+                for option, value in (("--mac-cargo", args.mac_cargo), ("--mac-rustc", args.mac_rustc),
+                                      ("--mac-rustdoc", args.mac_rustdoc), ("--mac-cargo-home", args.mac_cargo_home)):
+                    if not value or not pathlib.Path(value).is_absolute():
+                        raise GateError(f"{option} must be an absolute existing capability")
+                for option, value in (("--mac-cargo", args.mac_cargo), ("--mac-rustc", args.mac_rustc),
+                                      ("--mac-rustdoc", args.mac_rustdoc)):
+                    path = pathlib.Path(value)
+                    if path.is_symlink() or not path.is_file() or not os.access(path, os.X_OK):
+                        raise GateError(f"{option} must be an existing non-symlink executable")
+                cache = pathlib.Path(args.mac_cargo_home)
+                if cache.is_symlink() or not cache.is_dir():
+                    raise GateError("--mac-cargo-home must be an existing non-symlink directory")
         if args.check_contract:
             # materialize_template already emitted this exact evidence once.
             if not (evidence / "materialized-manifest.json").is_file():
