@@ -1486,9 +1486,11 @@ function App() {
                               ) : null}
                               <div className="codex-message-content">
                                 <span className="sr-only">{message.role}: </span>
-                                {activeArtifact?.source_message_id === message.id
-                                  ? '(open in artifact editor)'
-                                  : messageText(message)}
+                                <span>
+                                  {activeArtifact?.source_message_id === message.id
+                                    ? '(open in artifact editor)'
+                                    : messageText(message)}
+                                </span>
                               </div>
                             </>
                           )}
@@ -1527,7 +1529,7 @@ function App() {
                           {streamingAssistantText ? (
                             <div className="codex-message-content">
                               <span className="sr-only">assistant: </span>
-                              {streamingAssistantText}
+                              <span>{streamingAssistantText}</span>
                             </div>
                           ) : null}
                         </div>
