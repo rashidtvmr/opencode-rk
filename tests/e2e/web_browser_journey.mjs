@@ -149,8 +149,13 @@ async function main() {
     // This is the only approval action, and it is a human-facing browser click.
     await onceButton.click()
     await waitFor(async () => {
-      await assertMarkerPresent(initial)
-      return true
+      try {
+        await assertMarkerPresent(initial)
+        return true
+      } catch (error) {
+        if (error?.code === 'ENOENT') return false
+        throw error
+      }
     }, 'tool-result')
     await waitFor(async () => (await textCount(page, 'G6 first turn settled')) === 1, 'first-turn-after-approval')
     await assertOneEach(page, FIRST_PROMPT, 'G6 first turn settled', 'first-history')
