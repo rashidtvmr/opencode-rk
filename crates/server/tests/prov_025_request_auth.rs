@@ -97,10 +97,10 @@ fn read_http_message(stream: &mut TcpStream) -> io::Result<Vec<u8>> {
                     .parse::<usize>()
                     .map_err(|_| invalid("bad Content-Length"))?,
             );
-        } else if name.eq_ignore_ascii_case("transfer-encoding") {
-            if transfer_encoding.replace(value.trim().to_owned()).is_some() {
-                return Err(invalid("duplicate Transfer-Encoding"));
-            }
+        } else if name.eq_ignore_ascii_case("transfer-encoding")
+            && transfer_encoding.replace(value.trim().to_owned()).is_some()
+        {
+            return Err(invalid("duplicate Transfer-Encoding"));
         }
     }
     let chunked = match transfer_encoding.as_deref() {
@@ -504,10 +504,6 @@ fn assert_auth(request: &[u8], expected: &str) {
         actual.as_deref() == Some(expected),
         "provider Authorization credential mismatch"
     );
-}
-fn assert_no_auth(request: &[u8]) {
-    let actual = authorization(request).expect("authorization parse");
-    assert!(actual.is_none(), "unexpected provider Authorization field");
 }
 fn session(server: &Server, title: &str) -> String {
     let (status, body) = request(server, "POST", "/api/sessions", json!({"title":title}));
