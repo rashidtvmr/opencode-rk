@@ -2,7 +2,7 @@ use std::{
     env,
     io::{Read, Write},
     net::TcpListener,
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, OnceLock},
     thread,
 };
 
@@ -18,9 +18,9 @@ use serde_json::{json, Value};
 use tempfile::tempdir;
 use tower::ServiceExt;
 
-fn env_lock() -> &'static Mutex<()> {
-    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-    LOCK.get_or_init(|| Mutex::new(()))
+fn env_lock() -> &'static tokio::sync::Mutex<()> {
+    static LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
 }
 
 fn app() -> (axum::Router, tempfile::TempDir) {
@@ -176,9 +176,7 @@ async fn stream_turn(app: &axum::Router, session_id: &str) -> Vec<Value> {
 
 #[tokio::test]
 async fn web_009_t01_provider_reasoning_summary_streams_and_survives_reload() {
-    let _env_guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _env_guard = env_lock().lock().await;
     const EVENTS: &[u8] = concat!(
         "event: response.reasoning_summary_part.added\n",
         "data: {\"type\":\"response.reasoning_summary_part.added\",\"item_id\":\"rs_1\",\"output_index\":0,\"summary_index\":0,\"part\":{\"type\":\"summary_text\",\"text\":\"\"}}\n\n",
@@ -250,9 +248,7 @@ async fn web_009_t01_provider_reasoning_summary_streams_and_survives_reload() {
 
 #[tokio::test]
 async fn web_009_t02_unsupported_structured_provider_activity_fails_closed() {
-    let _env_guard = env_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let _env_guard = env_lock().lock().await;
     const EVENTS: &[u8] = concat!(
         "event: response.output_text.annotation.added\n",
         "data: {\"type\":\"response.output_text.annotation.added\",\"annotation_index\":0,\"annotation\":{\"type\":\"url_citation\",\"url\":\"https://example.test\",\"title\":\"Example\"}}\n\n",
