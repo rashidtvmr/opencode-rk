@@ -65,6 +65,9 @@ async fn long_data_directory_uses_short_real_socket_and_rebinds() {
     ] {
         data_dir.push(component);
     }
+    while data_dir.as_os_str().as_bytes().len() <= 200 {
+        data_dir.push("epsilon-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+    }
     fs::create_dir_all(&data_dir).expect("create nested disposable data directory");
     assert!(data_dir.as_os_str().as_bytes().len() > 200);
     let paths = DaemonPaths::for_data_dir(&data_dir);
