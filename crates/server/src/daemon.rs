@@ -80,6 +80,16 @@ pub struct PidLock {
 }
 impl PidLock {
     pub fn acquire(path: impl AsRef<Path>) -> Result<Self> {
+        let mut lock = Self::acquire_locked(path)?;
+        lock.write_identity()?;
+        Ok(lock)
+    }
+
+    /// Acquire the PID-file lock without changing its contents. Binding uses
+    /// this while it performs its post-lock endpoint check, so a raced unsafe
+    /// endpoint cannot cause a rejected bind to overwrite an existing PID
+    /// identity.
+    fn acquire_locked(path: impl AsRef<Path>) -> Result<Self> {
         let path = path.as_ref().to_path_buf();
         if let Some(parent) = path.parent() {
             if !parent.as_os_str().is_empty() {
@@ -99,11 +109,16 @@ impl PidLock {
             }
             Err(error) => return Err(DaemonError::Io(error.to_string())),
         }
-        file.set_len(0)?;
-        file.seek(SeekFrom::Start(0))?;
-        file.write_all(std::process::id().to_string().as_bytes())?;
-        file.sync_data()?;
         Ok(Self { path, file })
+    }
+
+    fn write_identity(&mut self) -> Result<()> {
+        self.file.set_len(0)?;
+        self.file.seek(SeekFrom::Start(0))?;
+        self.file
+            .write_all(std::process::id().to_string().as_bytes())?;
+        self.file.sync_data()?;
+        Ok(())
     }
     #[must_use]
     pub fn is_held(path: impl AsRef<Path>) -> bool {
@@ -183,6 +198,37 @@ fn socket_path_is_usable(path: &Path) -> bool {
     {
         let _ = path;
         true
+    }
+}
+
+/// Inspect an existing endpoint without changing either it or the PID file.
+/// Only an owned Unix socket is eligible for stale cleanup.
+fn endpoint_is_removable(path: &Path) -> Result<bool> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(error.into()),
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::{FileTypeExt, MetadataExt};
+        if meta.file_type().is_symlink()
+            || !meta.file_type().is_socket()
+            || meta.uid() != rustix::process::geteuid().as_raw()
+        {
+            return Err(DaemonError::Io(format!(
+                "refusing to remove foreign or non-socket endpoint {}",
+                path.display()
+            )));
+        }
+        Ok(true)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = meta;
+        Err(DaemonError::Io(
+            "existing daemon endpoint is unsupported on this platform".to_owned(),
+        ))
     }
 }
 
@@ -475,7 +521,10 @@ pub struct SingletonDaemon {
 impl SingletonDaemon {
     pub fn bind(socket_path: impl AsRef<Path>, pid_path: impl AsRef<Path>) -> Result<Self> {
         let socket_path = socket_path.as_ref().to_path_buf();
-        let lock = PidLock::acquire(pid_path)?;
+        // Reject an unsafe existing endpoint before opening/truncating the PID
+        // file. This is deliberately only a side-effect-free preflight; the
+        // same check is repeated after ownership serialization below.
+        let _endpoint_present = endpoint_is_removable(&socket_path)?;
         #[cfg(unix)]
         if socket_path.is_absolute()
             && socket_path.parent().is_some_and(|parent| {
@@ -489,6 +538,7 @@ impl SingletonDaemon {
                 "short Unix socket path exceeds sockaddr_un limit".to_owned(),
             ));
         }
+        let mut lock = PidLock::acquire_locked(pid_path)?;
         #[cfg(unix)]
         let managed_parent = socket_path.parent().is_some_and(|parent| {
             parent
@@ -502,26 +552,14 @@ impl SingletonDaemon {
                 std::fs::create_dir_all(parent)?;
             }
         }
-        let socket_meta = match std::fs::symlink_metadata(&socket_path) {
-            Ok(meta) => Some(meta),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
-            Err(error) => return Err(error.into()),
-        };
-        if let Some(meta) = socket_meta {
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::{FileTypeExt, MetadataExt};
-                if meta.file_type().is_symlink()
-                    || !meta.file_type().is_socket()
-                    || meta.uid() != rustix::process::geteuid().as_raw()
-                {
-                    return Err(DaemonError::Io(format!(
-                        "refusing to remove foreign or non-socket endpoint {}",
-                        socket_path.display()
-                    )));
-                }
-            }
+        // Revalidate after taking the PID lock: a safe stale socket may be
+        // removed, but a raced replacement by a regular file or symlink must
+        // never be unlinked.
+        if endpoint_is_removable(&socket_path)? {
+            lock.write_identity()?;
             std::fs::remove_file(&socket_path)?;
+        } else {
+            lock.write_identity()?;
         }
         let listener = UnixListener::bind(&socket_path)?;
         Ok(Self {
