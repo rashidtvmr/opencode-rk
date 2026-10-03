@@ -488,7 +488,9 @@ mod tests {
 
     #[test]
     fn propagation_bound_documented() {
-        assert!(MAX_REVOCATION_PROPAGATION_SECS > 0 && MAX_REVOCATION_PROPAGATION_SECS <= 300);
+        const {
+            assert!(MAX_REVOCATION_PROPAGATION_SECS > 0 && MAX_REVOCATION_PROPAGATION_SECS <= 300);
+        }
         assert_eq!(
             RevocationRegistry::propagation_deadline(1000),
             1000 + MAX_REVOCATION_PROPAGATION_SECS

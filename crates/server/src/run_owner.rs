@@ -140,11 +140,11 @@ impl RunOwner {
         request: PermissionRequest,
         intent: OperationIntent,
         broker: &PermissionBroker,
-    ) -> Result<oneshot::Receiver<ApprovedPermission>, PermissionRequest> {
+    ) -> Result<oneshot::Receiver<ApprovedPermission>, Box<PermissionRequest>> {
         let (reply, receiver) = oneshot::channel();
-        let mut pending = self.pending.lock().map_err(|_| request.clone())?;
+        let mut pending = self.pending.lock().map_err(|_| Box::new(request.clone()))?;
         if pending.is_some() || self.is_cancelled() {
-            return Err(request);
+            return Err(Box::new(request));
         }
         *pending = Some(PendingPermission {
             request,

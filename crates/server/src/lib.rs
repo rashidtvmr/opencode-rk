@@ -1329,14 +1329,12 @@ async fn create_turn_stream(
                     }
                     TurnStreamStage::Provider => {
                         if state.owner.is_cancelled() {
-                            state.stage = TurnStreamStage::Done;
                             return None;
                         }
                         let mut cancelled = state.owner.cancellation_receiver();
                         let event = tokio::select! {
                             biased;
                             _ = cancelled.changed() => {
-                                state.stage = TurnStreamStage::Done;
                                 return None;
                             }
                             event = state.provider.next_event() => event,
@@ -1655,7 +1653,6 @@ async fn create_turn_stream(
                             }
                         }
                         if state.owner.is_cancelled() {
-                            state.stage = TurnStreamStage::Done;
                             return None;
                         }
                         state.executed_outputs = round_outputs;
@@ -1759,7 +1756,6 @@ async fn create_turn_stream(
                         {
                             Ok(next_stream) => {
                                 if state.owner.is_cancelled() {
-                                    state.stage = TurnStreamStage::Done;
                                     return None;
                                 }
                                 state.provider = next_stream;

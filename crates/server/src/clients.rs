@@ -100,8 +100,8 @@ mod tests {
         let (tx2, mut rx2) = mpsc::channel::<ClientMessage>(16);
         let (tx3, mut rx3) = mpsc::channel::<ClientMessage>(16);
         let id1 = registry.register(tx1).unwrap();
-        let id2 = registry.register(tx2).unwrap();
-        let id3 = registry.register(tx3).unwrap();
+        registry.register(tx2).unwrap();
+        registry.register(tx3).unwrap();
         assert_eq!(registry.connected_count(), 3);
         registry.broadcast(ClientMessage {
             client: id1,

@@ -825,10 +825,12 @@ mod tests {
         assert_eq!(MAX_CONCURRENT_TURNS, 2); // lib.rs:73 TURN_PERMITS
         assert_eq!(MAX_TURN_HISTORY, MAX_RESPONSES_INPUT_MESSAGES);
         assert_eq!(MAX_POLICY_RULES, MAX_TOOL_ALLOW);
-        assert!(MAX_PENDING_TURNS > MAX_CONCURRENT_TURNS);
-        assert!(MAX_ENGINE_CLIENTS > 0);
-        assert!(MAX_EVENT_BUFFER > 0);
-        assert!(MAX_MODEL_REF_BYTES > 0);
+        const {
+            assert!(MAX_PENDING_TURNS > MAX_CONCURRENT_TURNS);
+            assert!(MAX_ENGINE_CLIENTS > 0);
+            assert!(MAX_EVENT_BUFFER > 0);
+            assert!(MAX_MODEL_REF_BYTES > 0);
+        }
     }
 
     #[test]

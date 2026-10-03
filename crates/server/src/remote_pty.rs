@@ -784,7 +784,9 @@ mod tests {
         let inh = g.inheritance(&id).unwrap();
         // Env/fs/network/human-only inheritance marker.
         assert!(!inh.inherits_ambient_process());
-        assert!(!SubprocessInheritance::INHERITS_AMBIENT_ENV);
+        const {
+            assert!(!SubprocessInheritance::INHERITS_AMBIENT_ENV);
+        }
         assert!(!inh.passes_secrets());
         assert!(inh.fs_root_confined);
         assert!(inh.network_isolated);
@@ -794,7 +796,9 @@ mod tests {
 
     #[test]
     fn disconnect_reconnect_follows_lease_without_orphans() {
-        assert!(NO_ORPHAN_PROCESSES);
+        const {
+            assert!(NO_ORPHAN_PROCESSES);
+        }
         let mut g = gw();
         let grace = g.lease_policy().grace_ticks;
         let id = open_granted(&mut g, 0);
