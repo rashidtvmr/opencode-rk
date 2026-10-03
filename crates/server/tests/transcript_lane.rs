@@ -1,8 +1,8 @@
 //! WEB-007 FROZEN RED: transcript geometry + per-message action bars.
 //! Server-side geometry/capability model only; `web/` DOM owned elsewhere.
-//! Includes the lane module via path so shared `lib.rs` is never touched.
-#[path = "../src/transcript_lane.rs"]
-mod transcript_lane;
+//! Uses the lane module via the public `opencode_rk_server::transcript_lane`;
+//! shared `lib.rs` is never touched.
+use opencode_rk_server::transcript_lane;
 
 use transcript_lane::{
     animation_ms, geometry_for, is_branch_boundary, normalize_persisted_role, popover_items,
@@ -14,11 +14,11 @@ use transcript_lane::{
 fn web007_t01_row_action_happy_path() {
     let user = geometry_for(MessageRole::User, 0);
     assert!(user.full_width);
-    assert_eq!(user.align_right, true);
+    assert!(user.align_right);
     assert!(user.actions_below);
     let asst = geometry_for(MessageRole::Assistant, 1);
     assert!(asst.full_width);
-    assert_eq!(asst.align_right, false);
+    assert!(!asst.align_right);
     assert!(asst.actions_below);
     for role in [MessageRole::User, MessageRole::Assistant] {
         let acts = row_actions(role, true);

@@ -3,8 +3,7 @@
 //! Frozen behavioral suite. T01 structured edit/send, T02 paste/format failure,
 //! T03 editor accessibility, T04 bounds/cancel/queue, T05 draft/reload compat.
 //! Pure, deterministic, no I/O, no network, no wall clock.
-#[path = "../src/chat_composer.rs"]
-mod chat_composer;
+use opencode_rk_server::chat_composer;
 
 use chat_composer::{
     accessible_label, decode_draft, doc_from_legacy_text, editor_help, encode_draft, key_command,

@@ -1,11 +1,9 @@
 //! WEB-016 frozen tests T01..T05 (server voice-capture contract, no web/ touch).
 //!
-//! The lane owns exactly two files and never edits shared `lib.rs`, so the
-//! transport module is included via path (the integrator wires
-//! `mod voice_capture;` into `lib.rs` later).
+//! The lane owns exactly two files and never edits shared `lib.rs`; the
+//! transport module is used via the public `opencode_rk_server::voice_capture`.
 
-#[path = "../src/voice_capture.rs"]
-mod voice_capture;
+use opencode_rk_server::voice_capture;
 
 use voice_capture::{MicGrant, MicState, VoiceConfig, VoiceError, VoiceSession};
 

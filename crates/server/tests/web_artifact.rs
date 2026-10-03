@@ -1,9 +1,9 @@
 //! WEB-017 FROZEN RED: editable writing/code artifacts (pure, side-effect-free).
 //! T01 happy path, T02 execution/apply safety, T03 accessibility/focus,
 //! T04 bounds/cancellation, T05 version/reload fidelity.
-//! `#[path]` include: lib.rs untouched, no fs/net/process in impl.
-#[path = "../src/web_artifact.rs"]
-mod web_artifact;
+//! Uses the public `opencode_rk_server::web_artifact` module: no fs/net/process
+//! in impl.
+use opencode_rk_server::web_artifact;
 
 use web_artifact::{
     artifact_controls, authorize_run, copy_text, edit_artifact, open_artifact, open_code,
@@ -41,7 +41,7 @@ fn artifact_t01_happy_path_edit_copy_preview_preserves_original() {
 
 #[test]
 fn artifact_t02_run_apply_disabled_without_executor_and_gated_when_enabled() {
-    let mut a = code();
+    let a = code();
     // No safe native executor: run/apply disabled explicitly.
     let err = authorize_run(false, true).expect_err("no executor must disable run");
     assert!(matches!(err, RunError::NoExecutor));

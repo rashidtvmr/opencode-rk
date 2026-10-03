@@ -163,7 +163,7 @@ fn scenario_a_pipeline_discover_and_evaluate() {
     }
 
     // Round 5: hysteresis expires, rust unloads
-    let d5 = rs.evaluate(&vec!["final.py".to_string()]);
+    let d5 = rs.evaluate(&["final.py".to_string()]);
     assert!(
         d5.unload.iter().any(|n| n.contains("rust")),
         "rust rule should unload after hysteresis expires, got unload: {:?}",

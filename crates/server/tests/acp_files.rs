@@ -1,11 +1,10 @@
 //! ACP-002 frozen tests T01..T05 (file capabilities + typed unsupported).
 //!
 //! Lane owns exactly `crates/server/src/acp_files.rs` + this test file.
-//! Never edits shared `lib.rs`, `Cargo.toml`. Module included via path;
-//! integrator wires `mod acp_files;` into `lib.rs` later.
+//! Never edits shared `lib.rs` or `Cargo.toml`; the module is used via the
+//! public `opencode_rk_server::acp_files`.
 
-#[path = "../src/acp_files.rs"]
-mod acp_files;
+use opencode_rk_server::acp_files;
 
 use acp_files::{
     is_supported, read_text, require, write_text, AcpFileError, Capability, FileReader, FileWriter,
@@ -133,7 +132,7 @@ fn acp002_t03_unsupported_named_no_side_effect() {
     }
 
     // No file touched by capability negotiation.
-    let mut fs = FixtureFs::with_text("notes/a.txt", "stable");
+    let fs = FixtureFs::with_text("notes/a.txt", "stable");
     let before = fs.files.clone();
     for cap in [
         Capability::Terminal,

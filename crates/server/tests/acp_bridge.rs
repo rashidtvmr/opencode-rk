@@ -1,8 +1,7 @@
 //! ACP-001 RED: ACP v1 JSON-lines bridge over stdio (codec + session map).
 //! Pure route-layer boundary: decode one frame per line, encode one line per
 //! response, in-memory caller-owned session map. Fails until acp_bridge exists.
-#[path = "../src/acp_bridge.rs"]
-mod acp_bridge;
+use opencode_rk_server::acp_bridge;
 
 use acp_bridge::{
     decode_frame, encode_frame, encode_frame_into, models_body, modes_body, session_load,

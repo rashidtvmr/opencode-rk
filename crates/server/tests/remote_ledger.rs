@@ -14,7 +14,7 @@ fn good_hash(seed: u8) -> String {
     // 40 lowercase hex chars, deterministic
     let mut s = String::with_capacity(40);
     for i in 0..40 {
-        let v = (seed.wrapping_add(i as u8) % 16) as u8;
+        let v = seed.wrapping_add(i as u8) % 16;
         s.push(char::from_digit(v as u32, 16).unwrap());
     }
     s

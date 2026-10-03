@@ -1,8 +1,7 @@
 //! WEB-001 RED: canonical typed control-plane input decoding (MoveSession shape).
 //! Route-layer decode-once contract: well-formed bytes forward byte-identical to
 //! the domain service; malformed bytes reject with the service uncalled.
-#[path = "../src/control_decode.rs"]
-mod control_decode;
+use opencode_rk_server::control_decode;
 
 use control_decode::{
     decode_move_session_input, InputDecodeError, MoveSessionInput, MAX_CONTROL_INPUT_BYTES,

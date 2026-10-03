@@ -2,9 +2,9 @@
 //! T01 real capability selection, T02 unavailable/denied never substituted,
 //! T03 accessible chooser/approval with focus restore, T04 bounded execution,
 //! T05 persistence/audit rehydrate without secrets.
-//! `#[path]` include: lib.rs untouched, std-only, no I/O, no clock, no network.
-#[path = "../src/web_tool_chooser.rs"]
-mod web_tool_chooser;
+//! Uses the public `opencode_rk_server::web_tool_chooser` module: std-only,
+//! no I/O, no clock, no network.
+use opencode_rk_server::web_tool_chooser;
 
 use web_tool_chooser::{
     rehydrate, snapshot, turn_contract, ApprovalQueue, Capability, CapabilityKind, CapabilityState,

@@ -1,9 +1,8 @@
 //! SDK-001 frozen tests T01..T05 plus negatives.
 //!
 //! Fixture `HttpPort`/`AbortFlag` only; no sockets, no spawn, no fs.
-//! Module included via path; integrator wires `mod sdk_client` later.
-#[path = "../src/sdk_client.rs"]
-mod sdk_client;
+//! Uses the public `opencode_rk_server::sdk_client` module.
+use opencode_rk_server::sdk_client;
 
 use sdk_client::{
     AbortFlag, HttpMethod, HttpPort, HttpRequest, HttpResponse, SdkClient, SdkError,
@@ -82,7 +81,7 @@ impl HttpPort for FixturePort {
                     return Err(SdkError::Abort);
                 }
             }
-            if let Some(e) = self.fail.borrow().clone() {
+            if let Some(e) = *self.fail.borrow() {
                 return Err(e);
             }
             Ok(HttpResponse {

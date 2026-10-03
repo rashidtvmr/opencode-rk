@@ -1,10 +1,9 @@
 //! WEB-004 FROZEN: server control-plane remote-exposure boundary.
 //! T01 local allowed, T02 remote default-deny, T03 grant + header spoof,
 //! T04 health exempt + socket peer, T05 no side effect + safety.
-//! Includes the boundary module directly so the integrator never needs to
-//! touch shared `lib.rs` for this lane.
-#[path = "../src/control_plane_exposure.rs"]
-mod control_plane_exposure;
+//! Uses the public `opencode_rk_server::control_plane_exposure` module; shared
+//! `lib.rs` is untouched.
+use opencode_rk_server::control_plane_exposure;
 
 use control_plane_exposure::{
     check_exposure, check_socket_peer, check_with_headers, deny_body, deny_code, deny_log_line,
