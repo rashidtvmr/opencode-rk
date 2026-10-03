@@ -1,0 +1,106 @@
+{
+  "schema": "opentui-native-artifacts/v1",
+  "status": "CANDIDATE_ARTIFACT_ACTIVATION_ONLY",
+  "source": {
+    "repository": "OpenTUI native source",
+    "commit": "c01292fd0837bafd07ce458c74416b2b375a41ab",
+    "tree": "261e8ea4b0ac68bb589760c3c871e202ef71ed6b",
+    "producer_receipt_sha256": "a470cac50ce39276fd49d2834df2619ca76ecd06ba979d09cd39d4b3ac90e7bf",
+    "readiness_receipt_sha256": "3e3f3a4ae0cc0f34393618fc4a76b14ce6206b3ceb1b492a7914b8a3ac1c34c3",
+    "dependency_extraction_manifest_sha256": "ef21d924e9dd4b7cfe98fd8a1cdd3198cf29c0f11fd6e88f00523f21e48c615f"
+  },
+  "production": {
+    "configuration": "ReleaseFast",
+    "zig_version": "0.16.0 (as recorded in producer evidence)",
+    "zig_executable": "/opt/homebrew/bin/zig",
+    "invocations": [
+      {
+        "target": "aarch64-macos.13.0",
+        "argv": [
+          "/opt/homebrew/bin/zig",
+          "build",
+          "-Doptimize=ReleaseFast",
+          "-Dlibrary-target=aarch64-macos.13.0",
+          "-j2",
+          "--maxrss",
+          "8589934592",
+          "--cache-dir",
+          "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/native-source/packages/native/.zig-cache",
+          "--global-cache-dir",
+          "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/native-producer-evidence/zig-global-cache"
+        ]
+      },
+      {
+        "target": "aarch64-linux-gnu.2.17",
+        "argv": [
+          "/opt/homebrew/bin/zig",
+          "build",
+          "-Doptimize=ReleaseFast",
+          "-Dlibrary-target=aarch64-linux-gnu.2.17",
+          "-j2",
+          "--maxrss",
+          "8589934592",
+          "--cache-dir",
+          "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/native-source/packages/native/.zig-cache",
+          "--global-cache-dir",
+          "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/native-producer-evidence/zig-global-cache"
+        ]
+      }
+    ],
+    "zig_executable_sha256": "not recorded at build time; current executable identity cannot attest producer build"
+  },
+  "artifacts": [
+    {
+      "path": "crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.dylib",
+      "sha256": "9e3325596b6217e6e00c9326ce1cb99a2cd613ed6771ef0c37093500243ee5be",
+      "bytes": 6397376,
+      "target": "aarch64-macos.13.0",
+      "metadata": {
+        "install_name": "@rpath/libopentui.dylib",
+        "minimum_os": "13.0"
+      },
+      "source_output": "mac/libopentui.dylib"
+    },
+    {
+      "path": "crates/opentui-bridge/native/lib/aarch64-unknown-linux-gnu/libopentui.so",
+      "sha256": "567d7422cf5f658297d992b2885e408d9ba71a98c3ceb7372d4a8bb0a6382b74",
+      "bytes": 26466240,
+      "target": "aarch64-linux-gnu.2.17",
+      "metadata": {
+        "soname": "libopentui.so",
+        "glibc_floor": "2.17"
+      },
+      "source_output": "linux/libopentui.so"
+    }
+  ],
+  "sidecars": {
+    "NOTICES": {
+      "sha256": "adde6b16f328427dfc1596616a419fb2b0ffd3e3341d21ebc628e3d715cfc2c7",
+      "bytes": 59568
+    },
+    "sbom.json": {
+      "sha256": "6675d8f52782c38b31703af6e15704ff6fd6f1425d9db56597862f3c2a77ec22",
+      "bytes": 346989
+    }
+  },
+  "static_archive_shadow": {
+    "paths": [
+      "crates/opentui-bridge/native/lib/aarch64-apple-darwin/libopentui.a",
+      "crates/opentui-bridge/native/lib/aarch64-unknown-linux-gnu/libopentui.a"
+    ],
+    "present": false
+  },
+  "producer_checks": {
+    "required_symbol_names_checked": 53,
+    "missing_required_symbols": [],
+    "scope": "Symbol-name presence only; not full ABI semantic verification."
+  },
+  "acceptance": {
+    "runtime_load_test": false,
+    "Rust_link_test": false,
+    "ABI_semantic_verification": false,
+    "PTY_gate": false,
+    "claim": "No release acceptance; S1 owns subsequent independent heavy verification.",
+    "notices_gap": "The two license texts referenced by the pinned uucode LICENSE.md are present in NOTICES, with hashes and both exact dependency pins recorded in sbom.json. These referenced-text omissions are resolved; broader license inventory completeness and legal review remain unresolved."
+  }
+}

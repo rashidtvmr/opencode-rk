@@ -13,9 +13,10 @@ const ACK: u8 = b'K';
 const BEFORE_CREATE: &[u8] = b"TUI015_BEFORE_CREATE_7f31\n";
 const BEFORE_SETUP: &[u8] = b"TUI015_BEFORE_SETUP_7f31\n";
 const PYTHON_DRIVER: &str = r#"
-import fcntl, json, os, pathlib, pty, signal, subprocess, tempfile, termios, time
+import fcntl, json, os, pathlib, pty, signal, subprocess, sys, tempfile, termios, time
 exe, case, native_dir = os.environ["TUI015_EXE"], os.environ["TUI015_CASE"], os.environ["TUI015_NATIVE_LIB_DIR"]
-native_path = pathlib.Path(native_dir) / "libopentui.dylib"
+native_name = os.environ["TUI015_NATIVE_LIB_NAME"]
+native_path = pathlib.Path(native_dir) / native_name
 if not native_path.is_file(): raise RuntimeError("native fixture missing: %s" % native_path)
 master, slave = pty.openpty()
 flags = fcntl.fcntl(master, fcntl.F_GETFL)
@@ -26,7 +27,10 @@ env["TUI015_CHILD"] = "1"; env["HOME"] = tempfile.mkdtemp(prefix="tui015-home-")
 trace_file = pathlib.Path(env["HOME"]) / "trace.log"
 trace_file.touch()
 env["TUI015_TRACE_FILE"] = str(trace_file)
-env["DYLD_LIBRARY_PATH"] = native_dir; env["DYLD_FALLBACK_LIBRARY_PATH"] = native_dir
+if sys.platform == "linux":
+    env["LD_LIBRARY_PATH"] = native_dir
+else:
+    env["DYLD_LIBRARY_PATH"] = native_dir; env["DYLD_FALLBACK_LIBRARY_PATH"] = native_dir
 def controlling_tty():
     # Popen(start_new_session=True) performs setsid exactly once; this hook
     # performs the required POSIX TIOCSCTTY in that new session.
@@ -53,6 +57,22 @@ def read_until(needle, trace_needle=None):
             time.sleep(.001)
         if len(data) > 1024 * 1024: raise RuntimeError("PTY output exceeded 1 MiB")
         if proc.poll() is not None:
+            # The child can publish its trace marker and exit between the
+            # marker check above and poll(). Drain the nonblocking PTY once,
+            # then apply the same marker predicate before declaring failure.
+            while True:
+                try:
+                    chunk = os.read(master, 65536)
+                except (BlockingIOError, OSError):
+                    break
+                if not chunk: break
+                data.extend(chunk)
+                if len(data) > 1024 * 1024: raise RuntimeError("PTY output exceeded 1 MiB")
+            if trace_needle is not None:
+                done = trace_needle in trace_file.read_bytes()
+            else:
+                done = needle not in (b"", None) and needle in data
+            if proc.returncode == 0 and done: return
             raise RuntimeError("child exited %d during %s before %r: %r" %
                 (proc.returncode, phase, needle, bytes(data[-4096:])))
 def raw_flags(attrs):
@@ -139,11 +159,13 @@ finally:
 fn run_case(case: &str) {
     let native_dir = std::env::var("TUI015_NATIVE_LIB_DIR")
         .expect("TUI015_NATIVE_LIB_DIR must name the staged native fixture directory");
+    let native_name =
+        std::env::consts::DLL_PREFIX.to_owned() + "opentui" + std::env::consts::DLL_SUFFIX;
     assert!(
         std::path::Path::new(&native_dir)
-            .join("libopentui.dylib")
+            .join(&native_name)
             .is_file(),
-        "native fixture missing at {native_dir}/libopentui.dylib"
+        "native fixture missing at {native_dir}/{native_name}"
     );
     let output = Command::new("python3")
         .arg("-c")
@@ -154,6 +176,7 @@ fn run_case(case: &str) {
         )
         .env("TUI015_CASE", case)
         .env("TUI015_NATIVE_LIB_DIR", native_dir)
+        .env("TUI015_NATIVE_LIB_NAME", &native_name)
         .output()
         .expect("python3 PTY supervisor");
     assert!(
