@@ -155,13 +155,122 @@ pub struct DaemonPaths {
 impl DaemonPaths {
     #[must_use]
     pub fn for_data_dir(data_dir: impl AsRef<Path>) -> Self {
-        let runtime = data_dir.as_ref().join("runtime");
+        let data_dir = data_dir.as_ref();
+        let runtime = data_dir.join("runtime");
+        let legacy_socket = runtime.join("opencode-rk.sock");
         Self {
             pid: runtime.join("opencode-rk.pid"),
-            socket: runtime.join("opencode-rk.sock"),
+            socket: if socket_path_is_usable(&legacy_socket) {
+                legacy_socket
+            } else {
+                short_socket_path(data_dir)
+            },
             descriptor: runtime.join("backend.json"),
         }
     }
+}
+
+/// Darwin `sockaddr_un.sun_path` includes its NUL byte; keep every Unix
+/// pathname below 104 encoded bytes. Short existing layouts stay compatible.
+const MAX_SOCKET_PATH_BYTES: usize = 104;
+
+fn socket_path_is_usable(path: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        path.as_os_str().as_encoded_bytes().len() < MAX_SOCKET_PATH_BYTES
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = path;
+        true
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn short_socket_root() -> PathBuf {
+    PathBuf::from("/private/tmp")
+}
+#[cfg(all(unix, not(target_os = "macos")))]
+fn short_socket_root() -> PathBuf {
+    PathBuf::from("/tmp")
+}
+
+/// Deterministic per-user path identity avoids collisions between data dirs
+/// while keeping the endpoint within `sockaddr_un.sun_path` bounds.
+#[cfg(unix)]
+fn short_socket_path(data_dir: &Path) -> PathBuf {
+    let absolute = if data_dir.is_absolute() {
+        data_dir.to_path_buf()
+    } else {
+        std::env::current_dir().map_or_else(|_| data_dir.to_path_buf(), |cwd| cwd.join(data_dir))
+    };
+    let path_bytes = absolute.as_os_str().as_encoded_bytes();
+    let mut identity = Vec::with_capacity(32 + path_bytes.len());
+    identity.extend_from_slice(b"opencode-rk-daemon-socket-v1\0");
+    identity.extend_from_slice(&rustix::process::geteuid().as_raw().to_ne_bytes());
+    identity.push(0);
+    identity.extend_from_slice(path_bytes);
+    let name = format!("rk-{}.sock", blake3::hash(&identity).to_hex());
+    short_socket_root()
+        .join(format!("rk-{}", rustix::process::geteuid().as_raw()))
+        .join(name)
+}
+
+#[cfg(not(unix))]
+fn short_socket_path(data_dir: &Path) -> PathBuf {
+    data_dir.join("runtime/opencode-rk.sock")
+}
+
+/// Prepare only our deterministic fallback directory. The system temp root
+/// must be root-owned, sticky, and not a symlink; the per-user leaf must be
+/// owned by this euid and inaccessible to group/other users.
+#[cfg(unix)]
+fn ensure_short_socket_parent(socket_path: &Path) -> Result<()> {
+    use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+
+    let root = short_socket_root();
+    let parent = socket_path
+        .parent()
+        .ok_or_else(|| DaemonError::Io("short socket path has no parent directory".to_owned()))?;
+    if parent.parent() != Some(root.as_path()) {
+        return Err(DaemonError::Io(
+            "short socket parent is outside the managed runtime root".to_owned(),
+        ));
+    }
+    let root_meta = std::fs::symlink_metadata(&root)?;
+    if root_meta.file_type().is_symlink()
+        || !root_meta.file_type().is_dir()
+        || root_meta.uid() != 0
+        || root_meta.permissions().mode() & 0o1000 == 0
+    {
+        return Err(DaemonError::Io(format!(
+            "short socket root {} is not a root-owned sticky directory; refusing",
+            root.display()
+        )));
+    }
+
+    let created = match std::fs::DirBuilder::new().mode(0o700).create(parent) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => false,
+        Err(error) => return Err(error.into()),
+    };
+    let meta = std::fs::symlink_metadata(parent)?;
+    let caller = rustix::process::geteuid().as_raw();
+    if meta.file_type().is_symlink() || !meta.file_type().is_dir() || meta.uid() != caller {
+        return Err(DaemonError::Io(format!(
+            "short socket parent {} is not an owned directory; refusing",
+            parent.display()
+        )));
+    }
+    if created {
+        std::fs::set_permissions(parent, std::fs::Permissions::from_mode(0o700))?;
+    } else if meta.permissions().mode() & 0o077 != 0 {
+        return Err(DaemonError::Io(format!(
+            "short socket parent {} is not private; refusing",
+            parent.display()
+        )));
+    }
+    Ok(())
 }
 
 pub fn read_backend_descriptor(data_dir: impl AsRef<Path>) -> Result<Option<BackendDescriptor>> {
@@ -367,13 +476,52 @@ impl SingletonDaemon {
     pub fn bind(socket_path: impl AsRef<Path>, pid_path: impl AsRef<Path>) -> Result<Self> {
         let socket_path = socket_path.as_ref().to_path_buf();
         let lock = PidLock::acquire(pid_path)?;
-        if socket_path.exists() {
-            let _ = std::fs::remove_file(&socket_path);
+        #[cfg(unix)]
+        if socket_path.is_absolute()
+            && socket_path.parent().is_some_and(|parent| {
+                parent
+                    == short_socket_root()
+                        .join(format!("rk-{}", rustix::process::geteuid().as_raw()))
+            })
+            && !socket_path_is_usable(&socket_path)
+        {
+            return Err(DaemonError::Io(
+                "short Unix socket path exceeds sockaddr_un limit".to_owned(),
+            ));
         }
-        if let Some(parent) = socket_path.parent() {
+        #[cfg(unix)]
+        let managed_parent = socket_path.parent().is_some_and(|parent| {
+            parent
+                == short_socket_root().join(format!("rk-{}", rustix::process::geteuid().as_raw()))
+        });
+        #[cfg(unix)]
+        if managed_parent {
+            ensure_short_socket_parent(&socket_path)?;
+        } else if let Some(parent) = socket_path.parent() {
             if !parent.as_os_str().is_empty() {
                 std::fs::create_dir_all(parent)?;
             }
+        }
+        let socket_meta = match std::fs::symlink_metadata(&socket_path) {
+            Ok(meta) => Some(meta),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+            Err(error) => return Err(error.into()),
+        };
+        if let Some(meta) = socket_meta {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::{FileTypeExt, MetadataExt};
+                if meta.file_type().is_symlink()
+                    || !meta.file_type().is_socket()
+                    || meta.uid() != rustix::process::geteuid().as_raw()
+                {
+                    return Err(DaemonError::Io(format!(
+                        "refusing to remove foreign or non-socket endpoint {}",
+                        socket_path.display()
+                    )));
+                }
+            }
+            std::fs::remove_file(&socket_path)?;
         }
         let listener = UnixListener::bind(&socket_path)?;
         Ok(Self {

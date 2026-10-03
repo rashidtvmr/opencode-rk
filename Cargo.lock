@@ -1001,6 +1001,7 @@ name = "opencode-rk-server"
 version = "0.1.0-alpha.1"
 dependencies = [
  "axum",
+ "blake3",
  "fs2",
  "futures-util",
  "include_dir",
