@@ -619,7 +619,7 @@ def request_count_from_result(artifacts):
     if not result_path.is_file():
         return 0
     value = json.loads(result_path.read_text())
-    requests = value.get("provider_requests")
+    requests = value.get("requests")
     return len(requests) if isinstance(requests, list) else 0
 
 

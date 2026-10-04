@@ -30,7 +30,7 @@ G6_FROZEN = {
     "tests/e2e/web_browser_journey.mjs": "b8e4efa6c00cd269c8a95d802eddad1ba88b4091670ff1327e65057d93eef000",
 }
 G7_PATH = "tests/e2e/ubuntu_installed_golden.py"
-G7_SHA = "47bf187c881863e3adb5f209875a9485afc9e30f3f50c793ec003c12742ae254"
+G7_SHA = "4af26fa70516a7d059783ece2def36cb6aff3ea010e0f1147cf2d98f046b33bc"
 
 
 class ReleaseRuntimeBindingTest(unittest.TestCase):
