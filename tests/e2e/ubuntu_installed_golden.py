@@ -508,7 +508,7 @@ def run_golden(binary, library, manifest, artifacts):
             )
             argv = [sys.executable, "-c", terminal_exec, *argv]
         child = original_popen(argv, *args, **kwargs)
-        if argv and argv[0] == sys.executable and len(argv) > 1 and "TIOCSCTTY" in argv[1]:
+        if argv and argv[0] == sys.executable and len(argv) > 2 and "TIOCSCTTY" in argv[2]:
             master = next(reversed(pty_records))
             deadline = time.monotonic() + 3
             controlling_terminal = False
