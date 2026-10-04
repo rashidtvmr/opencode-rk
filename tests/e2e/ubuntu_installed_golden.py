@@ -532,6 +532,8 @@ def run_golden(binary, library, manifest, artifacts):
             if not controlling_terminal or not raw_terminal:
                 raise RuntimeError("primary client did not acquire controlling terminal and enter raw mode")
             primary_clients.append(child)
+            if active_state is not None and active_state.primary_process is None:
+                active_state.primary_process = child
         return child
 
     golden.ProviderState = SecondClientState
