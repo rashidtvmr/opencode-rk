@@ -499,6 +499,7 @@ def run_golden(binary, library, manifest, artifacts):
 
     def controlling_terminal_popen(argv, *args, **kwargs):
         argv = [str(part) for part in argv]
+        wrapped_primary = False
         if (
             argv
             and pathlib.Path(argv[0]).is_file()
@@ -510,8 +511,9 @@ def run_golden(binary, library, manifest, artifacts):
                 "os.execve(sys.argv[1], sys.argv[1:], dict(os.environ))"
             )
             argv = [sys.executable, "-c", terminal_exec, *argv]
+            wrapped_primary = True
         child = original_popen(argv, *args, **kwargs)
-        if argv and argv[0] == sys.executable and len(argv) > 2 and "TIOCSCTTY" in argv[2]:
+        if wrapped_primary:
             master = latest_master
             if master is None:
                 raise RuntimeError("primary client spawned without an owned PTY")
