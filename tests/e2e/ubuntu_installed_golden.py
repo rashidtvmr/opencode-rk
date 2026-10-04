@@ -453,6 +453,7 @@ def run_golden(binary, library, manifest, artifacts):
     original_reaper = golden.reap_cli_then_daemon
     observations = []
     pty_records = {}
+    latest_master = None
     primary_clients = []
     primary_terminal_checks = []
     lifecycle_checks = []
@@ -470,8 +471,10 @@ def run_golden(binary, library, manifest, artifacts):
             )
 
     def tracked_openpty(*args, **kwargs):
+        nonlocal latest_master
         master, slave = original_openpty(*args, **kwargs)
         pty_records[master] = termios.tcgetattr(master)
+        latest_master = master
         return master, slave
 
     def tracked_reaper(child, descriptor_value, master):
@@ -509,7 +512,9 @@ def run_golden(binary, library, manifest, artifacts):
             argv = [sys.executable, "-c", terminal_exec, *argv]
         child = original_popen(argv, *args, **kwargs)
         if argv and argv[0] == sys.executable and len(argv) > 2 and "TIOCSCTTY" in argv[2]:
-            master = next(reversed(pty_records))
+            master = latest_master
+            if master is None:
+                raise RuntimeError("primary client spawned without an owned PTY")
             deadline = time.monotonic() + 3
             controlling_terminal = False
             raw_terminal = False
