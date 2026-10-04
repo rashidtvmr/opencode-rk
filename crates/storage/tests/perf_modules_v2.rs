@@ -123,13 +123,15 @@ fn perf_100_execution_start_transition() {
     let mut ops = 0_usize;
     for i in 0..BATCH {
         // start queue(0) -> running(1) -> complete(2, terminal) so the
-        // single-owner index is released before the next start.
+        // single-owner index is released before the next start. The fixture's
+        // workspace_state generation is 0; i is only the execution timestamp
+        // discriminator and must not be treated as an issued generation.
         let start = Instant::now();
         let exec_pk = ExecV2::start_execution(
             &conn,
             session_pk,
             0,
-            i as i64,
+            0,
             config_pk,
             "prov",
             "model",
