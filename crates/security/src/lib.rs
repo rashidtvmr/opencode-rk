@@ -468,6 +468,9 @@ impl PermissionBroker {
     }
     fn authorize_file(&self, action: FileAction, path: &Path) -> Decision {
         let normalized = lexical_normalize(path);
+        if let Some(reason) = protected_hardlink_alias(&normalized) {
+            return Decision::Deny { reason };
+        }
         if is_secret_path(&normalized) && !self.policy.allow_secret_reads {
             return Decision::Deny {
                 reason: "secret-bearing paths are not accessible to agents".to_owned(),
@@ -790,6 +793,24 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     }
     result
 }
+/// Mandatory protected-path denial for hardlink aliases. A workspace path that
+/// is a regular file with more than one hard link may alias a mandatory
+/// protected file (for example an outside `.env`); a wildcard permission must
+/// not authorize it. Uses one bounded `symlink_metadata` call on the exact
+/// target; any metadata error or absent path falls through to normal path
+/// policy, and ordinary single-link files stay readable. Directories are
+/// exempt (`is_file`), and legitimate hardlink creation is a separate policy.
+fn protected_hardlink_alias(path: &Path) -> Option<String> {
+    use std::os::unix::fs::MetadataExt;
+    let meta = std::fs::symlink_metadata(path).ok()?;
+    if meta.is_file() && meta.nlink() > 1 {
+        return Some(
+            "multi-link file may alias a mandatory protected path and is denied".to_owned(),
+        );
+    }
+    None
+}
+
 fn is_secret_path(path: &Path) -> bool {
     let lower = path
         .to_string_lossy()
