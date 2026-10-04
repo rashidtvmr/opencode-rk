@@ -15,8 +15,10 @@ use crate::StorageError;
 pub struct ExecV2;
 
 impl ExecV2 {
-    /// Start a queued execution. The partial UNIQUE index on sessions with an
-    /// active execution rejects a second owner while one is live.
+    /// Start a queued execution only for the current workspace owner generation.
+    /// The generation predicate and insertion share one statement, so stale or
+    /// unissued callers cannot race the check and create an execution row. The
+    /// partial UNIQUE index on sessions rejects a second live owner.
     #[expect(
         clippy::too_many_arguments,
         reason = "Existing explicit execution-start operation keeps ownership and provider configuration atomic."
@@ -37,11 +39,15 @@ impl ExecV2 {
         if !(1..=128).contains(&provider.len()) || !(1..=512).contains(&model.len()) {
             return Err(invalid_input());
         }
-        connection.execute(
+        let changed = connection.execute(
             "INSERT INTO executions
              (id, session_pk, mode, state, owner_generation, config_payload_pk,
               provider_id, model_id, created_at_us)
-             VALUES (randomblob(16), ?1, ?2, 0, ?3, ?4, ?5, ?6, ?7)",
+             SELECT randomblob(16), ?1, ?2, 0, ?3, ?4, ?5, ?6, ?7
+             WHERE EXISTS (
+                 SELECT 1 FROM workspace_state
+                 WHERE id = 1 AND owner_generation = ?3
+             )",
             params![
                 session_pk,
                 i64::from(mode),
@@ -52,6 +58,9 @@ impl ExecV2 {
                 now_us,
             ],
         )?;
+        if changed == 0 {
+            return Err(invalid_input());
+        }
         Ok(connection.last_insert_rowid())
     }
 
