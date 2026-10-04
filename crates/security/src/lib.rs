@@ -793,16 +793,20 @@ fn lexical_normalize(path: &Path) -> PathBuf {
     }
     result
 }
-/// Mandatory protected-path denial for hardlink aliases. A workspace path that
-/// is a regular file with more than one hard link may alias a mandatory
+/// Mandatory protected-path denial for hardlink aliases. A path that resolves
+/// to a regular file with more than one hard link may alias a mandatory
 /// protected file (for example an outside `.env`); a wildcard permission must
-/// not authorize it. Uses one bounded `symlink_metadata` call on the exact
-/// target; any metadata error or absent path falls through to normal path
-/// policy, and ordinary single-link files stay readable. Directories are
-/// exempt (`is_file`), and legitimate hardlink creation is a separate policy.
+/// not authorize it. Metadata is taken from the actual accessed target reached
+/// through any symlink (`std::fs::metadata`), falling back to the link itself
+/// only when the target cannot be resolved. Any metadata error falls through to
+/// normal path policy, and ordinary single-link files, ordinary symlinks,
+/// directories and intended file creation stay unaffected. Directories are
+/// exempt (`is_file`).
 fn protected_hardlink_alias(path: &Path) -> Option<String> {
     use std::os::unix::fs::MetadataExt;
-    let meta = std::fs::symlink_metadata(path).ok()?;
+    let meta = std::fs::metadata(path)
+        .or_else(|_| std::fs::symlink_metadata(path))
+        .ok()?;
     if meta.is_file() && meta.nlink() > 1 {
         return Some(
             "multi-link file may alias a mandatory protected path and is denied".to_owned(),
