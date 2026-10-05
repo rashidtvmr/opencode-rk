@@ -10,7 +10,7 @@ use opencode_rk_tools::shell_tool::{ShellConfig, ShellError, ShellTool};
 use tempfile::TempDir;
 use tokio::process::Command;
 
-const TIMEOUT_FIXTURE: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\n\"$3\" \"$4\" &\nhelper=$!\nwait \"$helper\"\nprintf '%s\\n' sentinel > \"$2\"\n";
+const TIMEOUT_FIXTURE: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\n\"$4\" \"$3\" \"$2\" &\nhelper=$!\nwait \"$helper\"\nprintf '%s\\n' sentinel > \"$2\"\n";
 const TIMEOUT_HELPER: &str =
     "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\nsleep 3\nprintf '%s\\n' complete > \"$2\"\n";
 const OUTPUT_FIXTURE: &str = "#!/bin/sh\ndd if=/dev/zero bs=1048576 count=2 2>/dev/null\ndd if=/dev/zero bs=1048576 count=2 1>&2 2>/dev/null\n";
