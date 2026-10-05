@@ -1050,6 +1050,7 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "blake3",
  "chrono",
+ "fs2",
  "opencode-rk-contracts",
  "rusqlite",
  "serde",

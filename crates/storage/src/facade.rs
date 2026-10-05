@@ -223,10 +223,13 @@ fn acquire_owner_lock(database_path: &Path) -> Result<File, StorageError> {
         .open(lock_path)?;
     match FileExt::try_lock_exclusive(&lock) {
         Ok(()) => Ok(lock),
-        Err(std::fs::TryLockError::WouldBlock) => {
+        Err(error)
+            if error.kind() == io::ErrorKind::WouldBlock
+                || error.raw_os_error() == fs2::lock_contended_error().raw_os_error() =>
+        {
             Err(io::Error::from(io::ErrorKind::WouldBlock).into())
         }
-        Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
+        Err(error) => Err(error.into()),
     }
 }
 fn now_us() -> i64 {
