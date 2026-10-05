@@ -459,6 +459,9 @@ fn hard_link_alias_is_rejected_before_second_writable_database_open() {
         seeded.close().unwrap();
     }
 
+    let facade = StorageFacade::open(&path).unwrap();
+    let generation = state(&facade).0;
+
     fs::hard_link(&path, &alias).unwrap();
     let original = fs::metadata(&path).unwrap();
     let linked = fs::metadata(&alias).unwrap();
@@ -469,8 +472,6 @@ fn hard_link_alias_is_rejected_before_second_writable_database_open() {
     );
     assert!(original.nlink() >= 2);
 
-    let facade = StorageFacade::open(&path).unwrap();
-    let generation = state(&facade).0;
     assert_alias_rejected_without_mutation(&facade, &path, &alias);
     assert_eq!(state(&facade).0, generation);
     facade.close().unwrap();
