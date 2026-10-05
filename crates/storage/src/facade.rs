@@ -2,6 +2,7 @@
 //! ponytail: BlobStore file layout not unified with v2 `blobs` table yet (payloads inline only). Upgrade: content-addressed blob spillover.
 use crate::writer_v2::{NewMessage, NewSession};
 use crate::{BlobStore, CatalogV2, SchemaV2, StorageError, V2Writer};
+use fs2::FileExt;
 use opencode_rk_contracts::SessionId;
 use rusqlite::{params, Connection, TransactionBehavior};
 use std::{
@@ -220,7 +221,7 @@ fn acquire_owner_lock(database_path: &Path) -> Result<File, StorageError> {
         .read(true)
         .write(true)
         .open(lock_path)?;
-    match lock.try_lock() {
+    match FileExt::try_lock_exclusive(&lock) {
         Ok(()) => Ok(lock),
         Err(std::fs::TryLockError::WouldBlock) => {
             Err(io::Error::from(io::ErrorKind::WouldBlock).into())
