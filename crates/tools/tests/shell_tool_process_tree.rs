@@ -10,22 +10,19 @@ use opencode_rk_tools::shell_tool::{ShellConfig, ShellTool};
 use tempfile::TempDir;
 use tokio::process::Command;
 
-const FIXTURE: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\n\"$5\" \"$2\" \"$4\" &\ndescendant=$!\nwait \"$descendant\"\nif [ ! -e \"$4\" ]; then printf '%s\\n' sentinel > \"$3\"; fi\n";
-const DESCENDANT_FIXTURE: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\nwhile [ ! -e \"$2\" ]; do sleep 0.05; done\n";
+const FIXTURE: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\nsleep 5 &\ndescendant=$!\nprintf '%s\\n' \"$descendant\" > \"$2\"\nwait \"$descendant\"\nprintf '%s\\n' sentinel > \"$3\"\n";
 
 struct FixtureGuard {
     dir: TempDir,
     parent_pid_path: PathBuf,
     descendant_pid_path: PathBuf,
-    release_path: PathBuf,
 }
 
 impl Drop for FixtureGuard {
     fn drop(&mut self) {
-        let _ = fs::write(&self.release_path, "release");
-        let deadline = Instant::now() + Duration::from_secs(2);
+        let deadline = Instant::now() + Duration::from_secs(6);
         while fixture_process_alive(&self.parent_pid_path, self.dir.path())
-            || fixture_process_alive(&self.descendant_pid_path, self.dir.path())
+            || process_is_live(&self.descendant_pid_path)
         {
             if Instant::now() >= deadline {
                 eprintln!("process-tree fixture cleanup did not finish");
@@ -38,27 +35,34 @@ impl Drop for FixtureGuard {
 
 fn fixture_process_alive(pid_path: &Path, dir: &Path) -> bool {
     read_pid(pid_path).is_some_and(|pid| {
-        let Ok(output) = StdCommand::new("/bin/ps")
-            .env_clear()
-            .args(["-p", &pid.to_string(), "-o", "state=", "-o", "command="])
-            .output()
-        else {
-            return true;
-        };
-        if output.stdout.len() > 4096 {
-            return true;
-        }
-        if !output.status.success() && output.stdout.is_empty() {
-            return false;
-        }
-        let text = String::from_utf8_lossy(&output.stdout);
-        let mut fields = text.split_whitespace();
-        let Some(state) = fields.next() else {
-            return true;
-        };
-        !state.to_ascii_lowercase().starts_with('z')
-            && fields.collect::<Vec<_>>().join(" ").contains(&dir.to_string_lossy().to_string())
+        process_is_live_pid(pid).is_some_and(|(state, command)| {
+            !state.to_ascii_lowercase().starts_with('z')
+                && command.contains(&dir.to_string_lossy().to_string())
+        })
     })
+}
+
+fn process_is_live(path: &Path) -> bool {
+    read_pid(path).is_some_and(|pid| {
+        process_is_live_pid(pid).is_some_and(|(state, _)| !state.to_ascii_lowercase().starts_with('z'))
+    })
+}
+
+fn process_is_live_pid(pid: u32) -> Option<(String, String)> {
+    let output = StdCommand::new("/bin/ps")
+        .env_clear()
+        .args(["-p", &pid.to_string(), "-o", "state=", "-o", "command="])
+        .output()
+        .ok()?;
+    if output.stdout.len() > 4096 {
+        return Some(("unknown".to_owned(), String::new()));
+    }
+    if !output.status.success() && output.stdout.is_empty() {
+        return None;
+    }
+    let text = String::from_utf8(output.stdout).ok()?;
+    let mut fields = text.split_whitespace();
+    Some((fields.next()?.to_owned(), fields.collect::<Vec<_>>().join(" ")))
 }
 
 fn executable(dir: &TempDir, name: &str, contents: &str) -> PathBuf {
@@ -93,16 +97,13 @@ async fn is_alive(pid: u32) -> bool {
 async fn aborting_execute_kills_process_tree_and_prevents_delayed_side_effect() {
     let dir = tempfile::tempdir().expect("tempdir");
     let script = executable(&dir, "process-tree.sh", FIXTURE);
-    let descendant_script = executable(&dir, "descendant.sh", DESCENDANT_FIXTURE);
     let parent_pid_path = dir.path().join("parent.pid");
     let descendant_pid_path = dir.path().join("descendant.pid");
     let sentinel_path = dir.path().join("sentinel");
-    let release_path = dir.path().join("release");
     let guard = FixtureGuard {
         dir,
         parent_pid_path: parent_pid_path.clone(),
         descendant_pid_path: descendant_pid_path.clone(),
-        release_path: release_path.clone(),
     };
     let config = ShellConfig {
         timeout_secs: 10,
@@ -115,8 +116,6 @@ async fn aborting_execute_kills_process_tree_and_prevents_delayed_side_effect() 
             parent_pid_path.to_string_lossy().into_owned(),
             descendant_pid_path.to_string_lossy().into_owned(),
             sentinel_path.to_string_lossy().into_owned(),
-            release_path.to_string_lossy().into_owned(),
-            descendant_script.to_string_lossy().into_owned(),
         ],
     );
     let handle = tokio::spawn(tool.execute(config));

@@ -10,8 +10,8 @@ use opencode_rk_tools::shell_tool::{ShellConfig, ShellError, ShellTool};
 use tempfile::TempDir;
 use tokio::process::Command;
 
-const TIMEOUT_FIXTURE: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\n\"$4\" \"$5\" \"$3\" \"$2\" &\nhelper=$!\nwait \"$helper\"\nif [ ! -e \"$3\" ]; then printf '%s\\n' sentinel > \"$2\"; fi\n";
-const TIMEOUT_HELPER: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\ni=0\nwhile [ ! -e \"$2\" ]; do\n  sleep 0.05\n  i=$((i + 1))\n  if [ \"$i\" -ge 60 ]; then\n    printf '%s\\n' sentinel > \"$3\"\n    exit 0\n  fi\ndone\n";
+const TIMEOUT_FIXTURE: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\n\"$3\" \"$4\" &\nhelper=$!\nwait \"$helper\"\nprintf '%s\\n' sentinel > \"$2\"\n";
+const TIMEOUT_HELPER: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\nsleep 3\nprintf '%s\\n' complete > \"$2\"\n";
 const OUTPUT_FIXTURE: &str = "#!/bin/sh\ndd if=/dev/zero bs=1048576 count=2 2>/dev/null\ndd if=/dev/zero bs=1048576 count=2 1>&2 2>/dev/null\n";
 const LIMIT: usize = 1024 * 1024;
 const MARKER: &str = "\n[truncated]";
@@ -20,23 +20,16 @@ struct FixtureGuard {
     dir: TempDir,
     pid_path: PathBuf,
     helper_pid_path: PathBuf,
-    release_path: PathBuf,
 }
 
 impl Drop for FixtureGuard {
     fn drop(&mut self) {
-        let _ = fs::write(&self.release_path, "release");
-        let deadline = Instant::now() + Duration::from_secs(2);
-        loop {
-            let pid = read_pid_sync(&self.pid_path);
-            let helper_pid = read_pid_sync(&self.helper_pid_path);
-            if !pid.is_some_and(|pid| process_is_ours(pid, self.dir.path()))
-                && !helper_pid.is_some_and(|pid| process_is_ours(pid, self.dir.path()))
-            {
-                break;
-            }
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while fixture_process_alive(&self.pid_path, self.dir.path())
+            || fixture_process_alive(&self.helper_pid_path, self.dir.path())
+        {
             if Instant::now() >= deadline {
-                eprintln!("timeout fixture cleanup did not finish");
+                eprintln!("timeout fixture cleanup did not finish; bounded fixture process may remain");
                 break;
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -53,27 +46,29 @@ fn read_pid_sync(path: &Path) -> Option<u32> {
     text.parse().ok()
 }
 
-fn process_is_ours(pid: u32, dir: &Path) -> bool {
-    let Ok(output) = StdCommand::new("/bin/ps")
-        .env_clear()
-        .args(["-p", &pid.to_string(), "-o", "state=", "-o", "command="])
-        .output()
-    else {
-        return true;
-    };
-    if output.stdout.len() > 4096 {
-        return true;
-    }
-    if !output.status.success() && output.stdout.is_empty() {
-        return false;
-    }
-    let text = String::from_utf8_lossy(&output.stdout);
-    let mut fields = text.split_whitespace();
-    let Some(state) = fields.next() else {
-        return true;
-    };
-    !state.to_ascii_lowercase().starts_with('z')
-        && fields.collect::<Vec<_>>().join(" ").contains(&dir.to_string_lossy().to_string())
+fn fixture_process_alive(pid_path: &Path, dir: &Path) -> bool {
+    read_pid_sync(pid_path).is_some_and(|pid| {
+        let Ok(output) = StdCommand::new("/bin/ps")
+            .env_clear()
+            .args(["-p", &pid.to_string(), "-o", "state=", "-o", "command="])
+            .output()
+        else {
+            return true;
+        };
+        if output.stdout.len() > 4096 {
+            return true;
+        }
+        if !output.status.success() && output.stdout.is_empty() {
+            return false;
+        }
+        let text = String::from_utf8_lossy(&output.stdout);
+        let mut fields = text.split_whitespace();
+        let Some(state) = fields.next() else {
+            return true;
+        };
+        !state.to_ascii_lowercase().starts_with('z')
+            && fields.collect::<Vec<_>>().join(" ").contains(&dir.to_string_lossy().to_string())
+    })
 }
 
 fn executable(dir: &TempDir, name: &str, contents: &str) -> PathBuf {
@@ -112,18 +107,15 @@ async fn public_execute_enforces_timeout_and_cleans_up_child() {
     let pid_path = dir.path().join("child.pid");
     let helper_pid_path = dir.path().join("helper.pid");
     let sentinel_path = dir.path().join("sentinel");
-    let release_path = dir.path().join("release");
     let guard = FixtureGuard {
         dir,
         pid_path: pid_path.clone(),
         helper_pid_path: helper_pid_path.clone(),
-        release_path: release_path.clone(),
     };
     let pid_arg = pid_path.to_string_lossy().into_owned();
     let sentinel_arg = sentinel_path.to_string_lossy().into_owned();
-    let release_arg = release_path.to_string_lossy().into_owned();
+    let helper_path_arg = helper_pid_path.to_string_lossy().into_owned();
     let helper_arg = helper.to_string_lossy().into_owned();
-    let helper_pid_arg = helper_pid_path.to_string_lossy().into_owned();
     let config = ShellConfig {
         timeout_secs: 1,
         max_output_mb: 1,
@@ -131,7 +123,7 @@ async fn public_execute_enforces_timeout_and_cleans_up_child() {
     };
     let tool = ShellTool::new(
         script.to_string_lossy().into_owned(),
-        vec![pid_arg, sentinel_arg, release_arg, helper_arg, helper_pid_arg],
+        vec![pid_arg, sentinel_arg, helper_path_arg, helper_arg],
     )
     .timeout(1);
 
