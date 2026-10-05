@@ -84,6 +84,22 @@ impl BrowserResumeRegistry {
         let now = now_ms()?;
         let mut leases = self.leases.lock().ok()?;
         leases.retain(|lease| lease.expires_at_unix_ms > now);
+        self.exchange_locked(presented, origin, &mut leases, || {
+            let bytes = random_bytes().ok()?;
+            Some(base64url_encode(&bytes))
+        })
+    }
+
+    fn exchange_locked<F>(
+        &self,
+        presented: &str,
+        origin: &str,
+        leases: &mut Vec<Lease>,
+        mut candidate: F,
+    ) -> Option<(String, u64)>
+    where
+        F: FnMut() -> Option<String>,
+    {
         let index = leases.iter().position(|lease| {
             constant_time_eq(lease.capability.as_bytes(), presented.as_bytes())
                 && lease.origin == origin
@@ -91,8 +107,7 @@ impl BrowserResumeRegistry {
         let expires_at_unix_ms = leases[index].expires_at_unix_ms;
         let mut replacement = None;
         for _ in 0..4 {
-            let bytes = random_bytes().ok()?;
-            let candidate = base64url_encode(&bytes);
+            let candidate = candidate()?;
             if !leases.iter().enumerate().any(|(i, lease)| {
                 i != index && constant_time_eq(lease.capability.as_bytes(), candidate.as_bytes())
             }) {
@@ -140,6 +155,46 @@ impl BrowserResumeRegistry {
         };
         leases.remove(index);
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn exchange_rotation_is_deterministically_distinct_and_expires_unchanged() {
+        let registry = BrowserResumeRegistry::default();
+        let (old, expires) = registry.issue("https://example.test", 60_000).unwrap();
+        let new = "distinct-capability".to_owned();
+        let mut leases = registry.leases.lock().unwrap();
+        let mut candidates = vec![old.clone(), new.clone()].into_iter();
+        let result = registry.exchange_locked(&old, "https://example.test", &mut leases, || {
+            candidates.next()
+        });
+        assert!(result.is_some(), "distinct candidate should rotate");
+        let (replacement, replacement_expiry) = result.unwrap();
+        assert_eq!(replacement, old, "RED: existing predicate accepts self-collision");
+        assert_eq!(replacement_expiry, expires);
+        drop(leases);
+        assert!(registry.verify(&old, "https://example.test"));
+    }
+
+    #[test]
+    fn exchange_retry_exhaustion_preserves_original_lease() {
+        let registry = BrowserResumeRegistry::default();
+        let (old, expires) = registry.issue("https://example.test", 60_000).unwrap();
+        let mut leases = registry.leases.lock().unwrap();
+        let mut attempts = 0;
+        let result = registry.exchange_locked(&old, "https://example.test", &mut leases, || {
+            attempts += 1;
+            Some(old.clone())
+        });
+        assert_eq!(result, None);
+        assert_eq!(attempts, 4);
+        assert_eq!(leases.len(), 1);
+        assert_eq!(leases[0].capability, old);
+        assert_eq!(leases[0].expires_at_unix_ms, expires);
     }
 }
 
