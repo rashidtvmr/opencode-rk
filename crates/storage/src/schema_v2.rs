@@ -68,17 +68,19 @@ impl SchemaV2 {
         let actual_user_version: i64 =
             conn.pragma_query_value(None, "user_version", |row| row.get(0))?;
         if actual_user_version != USER_VERSION {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
-                "user_version mismatch after commit: expected {USER_VERSION}, got {actual_user_version}"
-            ))));
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
+                    "user_version mismatch after commit: expected {USER_VERSION}, got {actual_user_version}"
+                )),
+            ));
         }
         let actual_app_id: i64 =
             conn.pragma_query_value(None, "application_id", |row| row.get(0))?;
         if actual_app_id != APP_ID {
             return Err(crate::StorageError::Sqlite(
                 rusqlite::Error::InvalidParameterName(format!(
-                "application_id mismatch after commit: expected {APP_ID:#x}, got {actual_app_id:#x}"
-            )),
+                    "application_id mismatch after commit: expected {APP_ID:#x}, got {actual_app_id:#x}"
+                )),
             ));
         }
         // apply full connection policy (foreign_keys, synchronous=FULL, etc.)
@@ -93,6 +95,80 @@ impl SchemaV2 {
             ));
         }
         Ok(conn)
+    }
+
+    pub(crate) fn begin_facade_owner(
+        connection: &mut Connection,
+    ) -> Result<(i64, i64), crate::StorageError> {
+        let synchronous: i64 =
+            connection.pragma_query_value(None, "synchronous", |row| row.get(0))?;
+        if synchronous != 2 {
+            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (generation, clean_shutdown): (i64, i64) = tx.query_row(
+            "SELECT owner_generation, clean_shutdown FROM workspace_state WHERE id=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if generation < 0 || !matches!(clean_shutdown, 0 | 1) {
+            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        let next_generation = generation
+            .checked_add(1)
+            .ok_or(crate::StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
+        let changed = tx.execute(
+            "UPDATE workspace_state SET owner_generation=?1, clean_shutdown=0
+             WHERE id=1 AND owner_generation=?2 AND clean_shutdown=?3",
+            params![next_generation, generation, clean_shutdown],
+        )?;
+        if changed != 1 {
+            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        tx.commit()?;
+        Ok((next_generation, clean_shutdown))
+    }
+
+    pub(crate) fn finish_facade_owner(
+        connection: &mut Connection,
+        owner_generation: i64,
+    ) -> Result<(), crate::StorageError> {
+        let synchronous: i64 =
+            connection.pragma_query_value(None, "synchronous", |row| row.get(0))?;
+        if synchronous != 2 {
+            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        let tx = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let (generation, clean_shutdown): (i64, i64) = tx.query_row(
+            "SELECT owner_generation, clean_shutdown FROM workspace_state WHERE id=1",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        if generation != owner_generation || clean_shutdown != 0 {
+            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        let unresolved: bool = tx.query_row(
+            "SELECT EXISTS (
+                 SELECT 1 FROM executions WHERE state IN (0, 1, 4)
+                 UNION ALL SELECT 1 FROM provider_attempts WHERE state IN (0, 1, 4)
+                 UNION ALL SELECT 1 FROM tool_calls WHERE state IN (0, 1, 5)
+             )",
+            [],
+            |row| row.get(0),
+        )?;
+        if unresolved {
+            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        let changed = tx.execute(
+            "UPDATE workspace_state SET clean_shutdown=1
+             WHERE id=1 AND owner_generation=?1 AND clean_shutdown=0",
+            [owner_generation],
+        )?;
+        if changed != 1 {
+            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        tx.commit()?;
+        Ok(())
     }
 
     pub fn open_existing(path: &Path) -> Result<Connection, crate::StorageError> {
@@ -122,9 +198,11 @@ impl SchemaV2 {
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Vec<u8>>(1)?)),
         )?;
         if stored_version != MIGRATION_VERSION {
-            return Err(crate::StorageError::Sqlite(rusqlite::Error::InvalidParameterName(format!(
-                "schema_migrations version mismatch: expected {MIGRATION_VERSION}, got {stored_version}"
-            ))));
+            return Err(crate::StorageError::Sqlite(
+                rusqlite::Error::InvalidParameterName(format!(
+                    "schema_migrations version mismatch: expected {MIGRATION_VERSION}, got {stored_version}"
+                )),
+            ));
         }
         let computed = Self::workspace_checksum();
         if stored_checksum != computed.to_vec() {

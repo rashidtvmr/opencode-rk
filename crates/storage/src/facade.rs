@@ -5,7 +5,9 @@ use crate::{BlobStore, CatalogV2, SchemaV2, StorageError, V2Writer};
 use opencode_rk_contracts::SessionId;
 use rusqlite::{params, Connection, TransactionBehavior};
 use std::{
-    fs,
+    ffi::OsString,
+    fs::{self, File, OpenOptions},
+    io,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -20,6 +22,9 @@ pub struct StorageFacade {
     connection: Mutex<Connection>,
     blobs: BlobStore,
     path: Option<PathBuf>,
+    _owner_lock: Option<File>,
+    owner_generation: Option<i64>,
+    clean_shutdown_eligible: bool,
     writer: V2Writer,
     catalog: CatalogV2,
 }
@@ -30,17 +35,20 @@ impl StorageFacade {
                 fs::create_dir_all(parent)?;
             }
         }
-        let nonempty = path.exists() && fs::metadata(path)?.len() > 0;
-        let connection = if nonempty {
-            SchemaV2::open_existing(path)?
+        let canonical_path = canonical_database_path(path)?;
+        let owner_lock = acquire_owner_lock(&canonical_path)?;
+        let nonempty = canonical_path.exists() && fs::metadata(&canonical_path)?.len() > 0;
+        let mut connection = if nonempty {
+            SchemaV2::open_existing(&canonical_path)?
         } else {
             SchemaV2::initialize_workspace(
-                path,
+                &canonical_path,
                 fresh_id_16(b"workspace"),
                 fresh_id_16(b"epoch"),
                 now_us(),
             )?
         };
+        let (owner_generation, clean_shutdown) = SchemaV2::begin_facade_owner(&mut connection)?;
         let blob_root = path
             .parent()
             .map(|p| {
@@ -56,6 +64,9 @@ impl StorageFacade {
             connection: Mutex::new(connection),
             blobs: BlobStore::new(blob_root),
             path: Some(path.to_path_buf()),
+            _owner_lock: Some(owner_lock),
+            owner_generation: Some(owner_generation),
+            clean_shutdown_eligible: !nonempty || clean_shutdown == 1,
             writer: V2Writer,
             catalog: CatalogV2,
         })
@@ -79,6 +90,9 @@ impl StorageFacade {
             connection: Mutex::new(connection),
             blobs: BlobStore::new(dir),
             path: None,
+            _owner_lock: None,
+            owner_generation: None,
+            clean_shutdown_eligible: true,
             writer: V2Writer,
             catalog: CatalogV2,
         })
@@ -133,13 +147,67 @@ impl StorageFacade {
         V2Writer::list_recent_sessions(&connection, state, before, limit)
     }
     pub fn close(self) -> Result<(), StorageError> {
-        {
-            let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
-            let _ =
-                connection.execute("UPDATE workspace_state SET clean_shutdown=1 WHERE id=1", []);
-            let _ = connection.execute_batch("PRAGMA wal_checkpoint(TRUNCATE);");
+        if let Some(owner_generation) = self.owner_generation {
+            let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+            if self.clean_shutdown_eligible {
+                SchemaV2::finish_facade_owner(&mut connection, owner_generation)?;
+            }
         }
         Ok(())
+    }
+}
+
+fn canonical_database_path(path: &Path) -> Result<PathBuf, StorageError> {
+    if fs::symlink_metadata(path).is_ok_and(|metadata| metadata.file_type().is_symlink()) {
+        return Ok(fs::canonicalize(path)?);
+    }
+    let parent = path
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let parent = fs::canonicalize(parent)?;
+    let file_name = path.file_name().ok_or_else(|| {
+        StorageError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "database path requires a file name",
+        ))
+    })?;
+    let mut canonical = parent.join(file_name);
+    if fs::metadata(path).is_ok_and(|metadata| metadata.is_file()) {
+        canonical = fs::canonicalize(path)?;
+    }
+    Ok(canonical)
+}
+
+fn acquire_owner_lock(database_path: &Path) -> Result<File, StorageError> {
+    let parent = database_path.parent().ok_or_else(|| {
+        StorageError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "database path requires a parent",
+        ))
+    })?;
+    let file_name = database_path.file_name().ok_or_else(|| {
+        StorageError::Io(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "database path requires a file name",
+        ))
+    })?;
+    let mut lock_name = OsString::from(".");
+    lock_name.push(file_name);
+    lock_name.push(".owner.lock");
+    let lock_path = parent.join(lock_name);
+    let lock = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(lock_path)?;
+    match lock.try_lock() {
+        Ok(()) => Ok(lock),
+        Err(std::fs::TryLockError::WouldBlock) => {
+            Err(io::Error::from(io::ErrorKind::WouldBlock).into())
+        }
+        Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
     }
 }
 fn now_us() -> i64 {
