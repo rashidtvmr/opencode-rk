@@ -562,6 +562,27 @@ fn installed_http_tool_writer_preserves_typed_round_and_rolls_back_failed_pair()
         failed_status, 201,
         "streaming late persistence faults retain committed HTTP status"
     );
+    // Original tip predicate: the real installed daemon's failed stream response
+    // must use chunked transfer-encoding. Assert on the actual HTTP headers before
+    // decoding, independent of the permissive helper fallback for synthetic fixtures.
+    let failed_head_end = failed_response
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .expect("faulted stream HTTP headers");
+    let failed_headers = String::from_utf8_lossy(&failed_response[..failed_head_end]);
+    let failed_is_chunked = failed_headers.lines().any(|line| {
+        line.split_once(':')
+            .is_some_and(|(name, value)| {
+                name.eq_ignore_ascii_case("transfer-encoding")
+                    && value
+                        .split(',')
+                        .any(|coding| coding.trim().eq_ignore_ascii_case("chunked"))
+            })
+    });
+    assert!(
+        failed_is_chunked,
+        "real installed failed stream must use chunked transfer-encoding: {failed_headers:?}"
+    );
     let failed_body = decoded_chunked_body(&failed_response);
     assert!(
         !failed_body.is_empty() && failed_body.ends_with(b"\n"),
