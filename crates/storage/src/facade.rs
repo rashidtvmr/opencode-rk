@@ -15,6 +15,8 @@ use std::{
     },
     time::{SystemTime, UNIX_EPOCH},
 };
+#[cfg(unix)]
+use std::os::unix::fs::MetadataExt;
 const MEMORY_SCHEMA_SQL: &str = include_str!("../schema/v2/workspace.sql");
 const CONNECT_POLICY: &str = "PRAGMA foreign_keys=ON; PRAGMA synchronous=FULL; PRAGMA busy_timeout=5000; PRAGMA trusted_schema=OFF; PRAGMA cache_size=-8192; PRAGMA temp_store=FILE; PRAGMA mmap_size=0;";
 static FACADE_ID_COUNTER: AtomicU64 = AtomicU64::new(1);
@@ -35,6 +37,7 @@ impl StorageFacade {
                 fs::create_dir_all(parent)?;
             }
         }
+        reject_unfenced_hardlink_alias(path)?;
         let canonical_path = canonical_database_path(path)?;
         let owner_lock = acquire_owner_lock(&canonical_path)?;
         let nonempty = canonical_path.exists() && fs::metadata(&canonical_path)?.len() > 0;
@@ -155,6 +158,21 @@ impl StorageFacade {
         }
         Ok(())
     }
+}
+
+fn reject_unfenced_hardlink_alias(path: &Path) -> Result<(), StorageError> {
+    #[cfg(unix)]
+    {
+        if let Ok(metadata) = fs::metadata(path) {
+            if metadata.is_file() && metadata.nlink() > 1 {
+                return Err(StorageError::Io(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "database has multiple hard links and cannot be safely owned by the facade",
+                )));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn canonical_database_path(path: &Path) -> Result<PathBuf, StorageError> {
