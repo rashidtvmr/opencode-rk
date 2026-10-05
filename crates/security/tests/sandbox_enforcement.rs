@@ -67,7 +67,15 @@ fn scenario_b_deny_write_outside_allowed_roots() {
         .is_allowed(&outside_file, FileAction::Write)
         .expect_err("write outside allowed roots must be denied");
 
-    assert_eq!(err.path, outside_file);
+    // Expected denial path: canonicalize the existing parent dir only
+    // (independent oracle: std canonicalize, not the production resolver).
+    // secret.txt itself must not exist, so do not canonicalize the file.
+    let expected_path = outside
+        .canonicalize()
+        .expect("outside dir must exist for canonical expected path")
+        .join("secret.txt");
+
+    assert_eq!(err.path, expected_path);
     assert_eq!(err.action, FileAction::Write);
     assert!(
         err.reason.contains("outside the sandbox"),
