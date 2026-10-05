@@ -370,3 +370,131 @@ fn startup_issues_generation_and_dirty_marker_together_under_full() {
     drop(reopened);
     assert_eq!(on_disk_state(&path), (2, 0));
 }
+
+#[cfg(unix)]
+fn session_titles(facade: &StorageFacade) -> Vec<String> {
+    facade
+        .with_connection(|connection| {
+            let mut statement = connection.prepare("SELECT title FROM sessions ORDER BY pk")?;
+            let mut titles = Vec::new();
+            for title in statement.query_map([], |row| row.get::<_, String>(0))? {
+                titles.push(title?);
+            }
+            Ok(titles)
+        })
+        .unwrap()
+}
+
+#[cfg(unix)]
+fn assert_alias_rejected_without_mutation(
+    facade: &StorageFacade,
+    path: &Path,
+    alias: &Path,
+) {
+    let before_state = state(facade);
+    let before_titles = session_titles(facade);
+    let before_artifacts = (database_artifacts(path), database_artifacts(alias));
+    let denial = match StorageFacade::open(alias) {
+        Ok(second_owner) => {
+            drop(second_owner);
+            None
+        }
+        Err(error) => Some(error),
+    };
+    let after_artifacts = (database_artifacts(path), database_artifacts(alias));
+    let after_state = state(facade);
+    let after_titles = session_titles(facade);
+    let rejected_before_sqlite = matches!(
+        &denial,
+        Some(StorageError::Io(error))
+            if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::InvalidInput)
+    );
+
+    assert_eq!(after_state, before_state, "alias denial changed owner markers");
+    assert_eq!(after_titles, before_titles, "alias denial changed database rows");
+    assert_eq!(
+        after_artifacts, before_artifacts,
+        "alias denial changed database, WAL, or shared-memory artifacts"
+    );
+    assert!(
+        rejected_before_sqlite,
+        "alias must be denied before writable SQLite open, not by missing-WAL/SQLite failure: {denial:?}"
+    );
+
+    facade
+        .create_session(&NewSession {
+            id: opencode_rk_contracts::SessionId::new(),
+            title: "original owner remains writable".to_owned(),
+            created_at_us: 2,
+            updated_at_us: 2,
+        })
+        .unwrap();
+    let mut expected_titles = before_titles;
+    expected_titles.push("original owner remains writable".to_owned());
+    assert_eq!(
+        session_titles(facade),
+        expected_titles,
+        "original owner stopped working after alias denial"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn hard_link_alias_is_rejected_before_second_writable_database_open() {
+    use std::os::unix::fs::MetadataExt;
+
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("workspace.db");
+    let alias = directory.path().join("workspace-hardlink.db");
+    {
+        let seeded = StorageFacade::open(&path).unwrap();
+        seeded
+            .create_session(&NewSession {
+                id: opencode_rk_contracts::SessionId::new(),
+                title: "original owner data".to_owned(),
+                created_at_us: 1,
+                updated_at_us: 1,
+            })
+            .unwrap();
+        seeded.close().unwrap();
+    }
+
+    fs::hard_link(&path, &alias).unwrap();
+    let original = fs::metadata(&path).unwrap();
+    let linked = fs::metadata(&alias).unwrap();
+    assert_eq!(
+        (original.dev(), original.ino()),
+        (linked.dev(), linked.ino()),
+        "fixture alias must name the same database inode"
+    );
+    assert!(original.nlink() >= 2);
+
+    let facade = StorageFacade::open(&path).unwrap();
+    let generation = state(&facade).0;
+    assert_alias_rejected_without_mutation(&facade, &path, &alias);
+    assert_eq!(state(&facade).0, generation);
+    facade.close().unwrap();
+}
+
+#[cfg(unix)]
+#[test]
+fn symlink_alias_is_rejected_while_original_facade_owns_database() {
+    use std::os::unix::fs::symlink;
+
+    let directory = tempdir().unwrap();
+    let path = directory.path().join("workspace.db");
+    let alias = directory.path().join("workspace-symlink.db");
+    let facade = StorageFacade::open(&path).unwrap();
+    facade
+        .create_session(&NewSession {
+            id: opencode_rk_contracts::SessionId::new(),
+            title: "original owner data".to_owned(),
+            created_at_us: 1,
+            updated_at_us: 1,
+        })
+        .unwrap();
+    symlink(&path, &alias).unwrap();
+
+    assert_alias_rejected_without_mutation(&facade, &path, &alias);
+    facade.close().unwrap();
+}
