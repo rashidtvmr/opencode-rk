@@ -57,7 +57,7 @@ recovery/core           startup + provider
 recovery/runtime        tools + sessions/durability
 recovery/ui             native TUI
 recovery/platform       release/platform-only repairs
-controller/recovery-mode-v1  controller/docs bootstrap only
+controller/recovery-mode-v1  frozen bootstrap/history ref only; never an execution lane
 ```
 
 The hundreds of pre-existing branches/worktrees remain frozen. They are not deleted and are not individually merged.
@@ -69,7 +69,7 @@ Recovery Mode is not considered active for product work merely because this docu
 1. the Recovery Mode controller/contracts must be committed on canonical `main-v2`;
 2. the four fixed lane refs must point at that exact `main-v2` SHA;
 3. only the predeclared fixed lane worktrees may be added;
-4. `tools/recovery_state.py init` must initialize shared operational state;
+4. `tools/recovery_state.py init` must initialize shared operational state **once** after the Recovery controller commit and fixed lanes are all at the same canonical SHA; initialization freezes evaluator blob IDs and installs the Git reference-transaction guard;
 5. `python3 tools/recovery_guard.py` must be GREEN from `main-v2`;
 6. any old merge-wave/controller process that can still create branches/worktrees must be stopped or treated as a blocking hostile writer.
 
@@ -177,7 +177,7 @@ For each useful legacy candidate:
 6. verify against current `main-v2` behavior;
 7. record the disposition in the salvage index.
 
-Never whole-tip merge a historical branch simply to preserve ancestry.
+Never whole-tip merge a historical branch simply to preserve ancestry. Use `tools/recovery_state.py salvage-query --failure ...` for discovery. The query scans all frozen refs, collapses aliases by frozen tip SHA, and materializes at most eight candidates for that current failure. Dispose every materialized candidate with `salvage-dispose` before the failure can enter integration. Do not copy the old `docs/convergence-v2-salvage.json` rows into runtime state.
 
 Allowed dispositions:
 
@@ -208,11 +208,13 @@ For every candidate:
 
 Do not hold a large integration train. The candidate high-water mark is deliberately small.
 
-The single integration writer must acquire the runtime integration lock with `tools/recovery_state.py begin-integration`. Before that transition the tool rechecks that `main-v2` has not moved and that the reviewed candidate is still the fixed lane HEAD. A crash/stale integration must be reopened explicitly; never guess from worklog text or retry blindly. After a candidate is accepted/rejected, the fixed lane is reset/fast-forwarded back to current `main-v2` before another claim.
+The normal integration command is `tools/recovery_state.py integrate --id ... --owner ...`. It acquires the runtime lock, rechecks the exact reviewed lane HEAD/base and performs a **fast-forward-only** update of canonical `main-v2`; it never cherry-picks a semantically different tree. After canonical advances, use `sync-lane --lane recovery/...` on idle lanes before their next claim. On interruption use `recover-integration`: it completes an already-landed reviewed candidate, returns an untouched canonical to READY, or fails closed if state is ambiguous.
 
 ## 9. Centralized heavy validation
 
 At most one heavy workspace/build/E2E validation runs at once unless measured headroom proves otherwise. Agents should consume the resulting diagnostics rather than each independently launching full builds.
+
+`tools/phase1_judge.py` enforces this with a shared file lock. Quick mode can only return `PRECHECK_PASS`; it can never be release acceptance. Artifact mode requires a native release receipt bound to the exact current canonical SHA.
 
 Preferred loop:
 
@@ -251,14 +253,14 @@ Branch counts are irrelevant to completion.
 On startup:
 
 1. read `AGENTS.md`, this file, `docs/PHASE1_ACCEPTANCE.md`, `config/recovery-mode.json` and `recovery/failures.json`;
-2. run `python3 tools/recovery_state.py status` and `python3 tools/recovery_guard.py`;
+2. run `python3 tools/recovery_state.py status` and `python3 tools/recovery_guard.py`; if runtime revisions are inconsistent use `recover-state`, and if integration is interrupted use `recover-integration`;
 3. inspect the highest-priority non-accepted failure;
 4. spawn read-only/review/research subagents as useful;
 5. claim at most the failures that fit the fixed lanes and path grants;
 6. search legacy refs selectively for those failures;
 7. implement/preverify candidates without creating new persistent branch families;
 8. feed candidates through the integration writer;
-9. refresh the judge and repeat until Phase-1 failure count reaches zero;
-10. run the installed-artifact `tools/phase1_judge.py ... --sync-state` only on clean canonical `main-v2` to certify all Phase-1 gates on one SHA.
+9. refresh the judge with `--observe-state` so its failed/missing checks deterministically update the runtime failure queue; repeat until Phase-1 failure count reaches zero;
+10. run the installed-artifact judge once more on clean canonical `main-v2`; only when there are no unresolved failures may `--sync-state` certify all Phase-1 gates on that same SHA.
 
 If no failure exists but a Phase-1 gate is `UNPROVEN`, the next task is to create/run the executable probe for that gate, not to inspect random legacy branches.

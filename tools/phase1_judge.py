@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-import argparse, json, os, pathlib, subprocess, sys, tempfile, time
+import argparse, fcntl, json, os, pathlib, subprocess, sys, tempfile, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 
@@ -32,11 +32,20 @@ def main():
     parser.add_argument("--build-json")
     parser.add_argument("--artifact-evidence-dir")
     parser.add_argument("--output")
+    parser.add_argument("--observe-state", action="store_true")
     parser.add_argument("--sync-state", action="store_true")
     args = parser.parse_args()
     artifact_values = [args.binary, args.native_library, args.build_json, args.artifact_evidence_dir]
     if any(artifact_values) and not all(artifact_values):
         parser.error("artifact mode requires --binary --native-library --build-json --artifact-evidence-dir together")
+
+    heavy_lock = common_git_dir() / "recovery-state" / "heavy-validation.lock"
+    heavy_lock.parent.mkdir(parents=True, exist_ok=True)
+    heavy_handle = heavy_lock.open("a+")
+    try:
+        fcntl.flock(heavy_handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        parser.error("another centralized heavy validation is already running")
 
     py = sys.executable
     canonical_sha = git("rev-parse", "main-v2")
@@ -64,6 +73,12 @@ def main():
             parser.error(
                 f"artifact source SHA {artifact_sha!r} does not equal current main-v2 {current_sha}"
             )
+        if build_data.get("profile") != "release" or build_data.get("native") is not True:
+            parser.error("artifact acceptance requires a native release build receipt")
+        if build_data.get("target") not in (None, "installed-binary"):
+            parser.error("artifact target must be installed-binary when target is declared")
+        if build_data.get("platform") not in (None, "mac"):
+            parser.error("Phase-1 macOS acceptance cannot use a non-mac artifact receipt")
         evidence = pathlib.Path(args.artifact_evidence_dir).resolve()
         if evidence.exists() and any(evidence.iterdir()):
             parser.error("--artifact-evidence-dir must be new or empty")
@@ -147,7 +162,10 @@ def main():
     result["runtimeUnresolvedFailures"] = runtime_unresolved
     checks_pass = all(c["exit"] == 0 for c in checks)
     gates_pass = all(g["status"] == "PASS" for g in gate_results.values())
-    result["status"] = "PASS" if checks_pass and (not artifact_mode or gates_pass) else "FAIL"
+    if artifact_mode:
+        result["status"] = "PASS" if checks_pass and gates_pass else "FAIL"
+    else:
+        result["status"] = "PRECHECK_PASS" if checks_pass else "FAIL"
     result["acceptanceEligible"] = bool(
         artifact_mode
         and result["status"] == "PASS"
@@ -166,6 +184,17 @@ def main():
     canonical_evidence.write_text(rendered, encoding="utf-8")
     if args.output:
         out = pathlib.Path(args.output); out = out if out.is_absolute() else ROOT/out; out.parent.mkdir(parents=True, exist_ok=True); out.write_text(rendered, encoding="utf-8")
+    if args.observe_state:
+        observed = subprocess.run(
+            [py, "tools/recovery_state.py", "observe-judge", "--evidence", str(canonical_evidence)],
+            cwd=ROOT,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+        )
+        if observed.returncode != 0:
+            print(observed.stdout, file=sys.stderr)
+            return observed.returncode
     if args.sync_state:
         if not result["acceptanceEligible"]:
             parser.error("--sync-state requires an acceptance-eligible installed-artifact PASS")
@@ -180,7 +209,7 @@ def main():
             print(sync.stdout, file=sys.stderr)
             return sync.returncode
     print(rendered, end="")
-    return 0 if result["status"] == "PASS" else 1
+    return 0 if result["status"] in {"PASS", "PRECHECK_PASS"} else 1
 
 
 if __name__ == "__main__":

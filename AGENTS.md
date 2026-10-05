@@ -23,6 +23,7 @@ Recovery Mode overrides older merge-wave, Ralph-queue, branch-inventory and heri
 - Only the fixed mutable branches listed in `config/recovery-mode.json` may be created or advanced during Recovery Mode.
 - A worker or subagent normally returns evidence, a patch/commit candidate and verification results to its lane owner. It does not create a persistent worktree.
 - `main-v2` is the canonical product line. Exactly one integration writer lands there.
+- Recovery activation installs a Git `reference-transaction` guard. New local branches, stashes/tags/custom refs, movement/deletion of frozen legacy refs, and post-activation changes to frozen evaluator files are rejected rather than merely detected later.
 - A candidate that fails after rebasing/preparing against current `main-v2` is ejected from the integration queue; reopen the failure instead of creating a descendant repair branch.
 - Legacy refs are frozen by `recovery/legacy-snapshot.json`. Never reset, force-push, delete or advance them.
 - `ralph.json`, completion claims and legacy task inventories are requirement/evidence databases, not schedulers.
@@ -40,9 +41,14 @@ Recovery Mode overrides older merge-wave, Ralph-queue, branch-inventory and heri
 5. Rejection/needs-fix returns to the same failure and same lane; no repair/review branch is created.
 6. After optimizer changes, reviewers evaluate the new candidate SHA again; old approvals do not carry forward.
 7. Disagreement goes to a third independent evaluator or reopens the failure.
+8. The evaluator is frozen at Recovery activation: ordinary product candidates may not change Recovery controller files or the semantic Phase-1 judge/tests listed in `config/recovery-mode.json`. If the referee itself is genuinely wrong, stop Recovery Mode and perform an explicit human-authorized controller reactivation; never let the optimizer rewrite its judge.
 8. The optimizer/author may never mark its own candidate accepted.
 
-Use `tools/recovery_state.py claim/candidate/review/preverify/ready/begin-integration/accept` for lifecycle transitions. The tool owns state locks, path leases, independent-review counts and the single integration lock.
+Use `tools/recovery_state.py` for lifecycle transitions. The normal product path is `claim -> candidate -> review -> preverify -> ready -> integrate`, followed by an installed judge and `observe-judge`/acceptance. `integrate` is fast-forward-only and owns the single integration lock. Use `sync-lane` after canonical advances; use `recover-integration` after a crash instead of inventing a current-base/repair branch. `recover-state` restores the last consistent runtime revision after an interrupted multi-file state write.
+
+Legacy search is also state-machine controlled: `salvage-query`, `salvage-status`, and `salvage-dispose`. A query is tied to one current failure, scans the entire frozen snapshot read-only, materializes at most eight distinct tip candidates, and blocks integration until every materialized candidate has a terminal disposition. The old convergence salvage inventory is evidence only and cannot be imported as a new queue.
+
+Every judge result that is meant to drive work must be ingested with `recovery_state.py observe-judge` (or `phase1_judge.py --observe-state`). Never translate judge output into ad-hoc tasks by hand.
 
 ### Activation / restart safety
 
@@ -50,6 +56,7 @@ Use `tools/recovery_state.py claim/candidate/review/preverify/ready/begin-integr
 - Unexpected local branches or persistent worktrees are a hard guard failure.
 - Recovery Mode contracts must already be present on canonical `main-v2` before product work starts.
 - On agent restart/crash, do not infer state from prose/worklogs. Run `tools/recovery_state.py status` and `tools/recovery_guard.py`; inspect any integration lock before doing Git work.
+- If runtime JSON revisions disagree, run `tools/recovery_state.py recover-state`. If an integration lock is present, run `recover-integration`; it completes an already-landed candidate, returns an untouched canonical to READY, or fails closed on ambiguity.
 - Phase-1 judge evidence is written under the shared Git common directory (`recovery-evidence/<sha>/`), not committed. This prevents acceptance bookkeeping from changing the SHA it certifies.
 
 ### Subagents are allowed and encouraged

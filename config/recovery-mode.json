@@ -30,25 +30,33 @@
       "crates/cli",
       "crates/server",
       "crates/providers",
-      "crates/catalog"
+      "crates/catalog",
+      "Cargo.toml",
+      "Cargo.lock"
     ],
     "recovery/runtime": [
       "crates/server",
       "crates/sessions",
       "crates/tools",
       "crates/security",
-      "crates/storage"
+      "crates/storage",
+      "Cargo.toml",
+      "Cargo.lock"
     ],
     "recovery/ui": [
       "crates/cli",
       "crates/opentui-bridge",
-      "tests/e2e"
+      "tests/e2e",
+      "Cargo.toml",
+      "Cargo.lock"
     ],
     "recovery/platform": [
       "release",
       "scripts",
       "tests",
-      "tools"
+      "tools",
+      "Cargo.toml",
+      "Cargo.lock"
     ]
   },
   "maxFixedRecoveryLanes": 4,
@@ -82,7 +90,9 @@
     "createRepairDescendantBranch": false,
     "stateMutationsMustUseTool": true,
     "trackedSeedsAreImmutable": true,
-    "runtimeStateOutsideTrackedHistory": true
+    "runtimeStateOutsideTrackedHistory": true,
+    "judgeResultsMustBeIngested": true,
+    "manualQueueInsertionAllowed": false
   },
   "acceptancePolicy": {
     "exactIntegratedShaRequired": true,
@@ -100,7 +110,8 @@
     "cargoBuildJobs": 2,
     "rustTestThreads": 2,
     "preferFocusedBeforeWorkspace": true,
-    "centralizeHeavyValidation": true
+    "centralizeHeavyValidation": true,
+    "heavyValidationLock": "git-common-dir/recovery-state/heavy-validation.lock"
   },
   "bootstrapMutable": false,
   "requireCanonicalRecoveryConfig": true,
@@ -125,7 +136,10 @@
     "maxAheadCommits": 6,
     "resetOrFastForwardLaneAfterDisposition": true,
     "rebaseOrReapplyBeforeIntegration": true,
-    "overlappingPathGrantsForbidden": true
+    "overlappingPathGrantsForbidden": true,
+    "candidateDiffMustFitPathGrant": true,
+    "pathGrantMustFitLaneIntent": true,
+    "integrationMode": "fast-forward-only"
   },
   "integrationLock": ".git/recovery-integration.lock",
   "stateLock": ".git/recovery-state.lock",
@@ -142,12 +156,66 @@
     },
     "reviewDisagreement": "third_independent_evaluator_or_reopen_failure",
     "securityOrPermissionChangeRequiresSecurityEvaluator": true,
-    "optimizerMayNotMarkOwnCandidateAccepted": true
+    "optimizerMayNotMarkOwnCandidateAccepted": true,
+    "protectedEvaluatorPaths": [
+      "config/recovery-mode.json",
+      "docs/PHASE1_ACCEPTANCE.md",
+      "recovery/failures.json",
+      "recovery/phase1-gates.json",
+      "tools/convergence_gate.py",
+      "tools/phase1_judge.py",
+      "tools/recovery_guard.py",
+      "tools/recovery_state.py",
+      "tools/recovery_ref_hook.py",
+      "tests/e2e/native_provider_setup.py",
+      "tests/e2e/native_stream_tool.py",
+      "tests/e2e/native_utf8_input.py",
+      "tests/e2e/native_escape_input.py",
+      "tests/e2e/native_resize.py",
+      "tests/e2e/native_bracketed_paste.py",
+      "tests/e2e/native_interactive_pty.py",
+      "tests/bootstrap/test_native_provider_auth_control.py"
+    ],
+    "securitySensitivePaths": [
+      "crates/security",
+      "crates/tools",
+      "crates/server/src/lib.rs",
+      "crates/server/src/daemon.rs",
+      "crates/providers",
+      "crates/cli/src/daemon_client.rs",
+      "crates/cli/src/app_start.rs"
+    ]
   },
   "activationPolicy": {
     "oldControllersAndMergeWavesMustBeStopped": true,
     "canonicalMustContainRecoveryModeBeforeProductClaims": true,
     "fixedLaneBranchesMustStartAtCanonical": true,
-    "unexpectedBranchOrWorktreeCreationBlocks": true
+    "unexpectedBranchOrWorktreeCreationBlocks": true,
+    "installReferenceTransactionHook": true,
+    "freezeEvaluatorAtActivation": true,
+    "runtimeStateRevisionMustBeAtomic": true
+  },
+  "salvagePolicy": {
+    "legacyInventoryImportAllowed": false,
+    "historicalEvidenceOnly": [
+      "docs/convergence-v2-salvage.json",
+      "docs/CONVERGENCE_V2_SALVAGE.md"
+    ],
+    "requiresActiveFailure": true,
+    "scanEntireFrozenSnapshot": true,
+    "collapseAliasesByTipSha": true,
+    "maxMaterializedCandidatesPerFailure": 8,
+    "oneActiveQueryPerFailure": true,
+    "unresolvedCandidatesBlockIntegration": true,
+    "terminalDispositions": [
+      "ALREADY_PRESENT",
+      "SALVAGED_PRODUCT",
+      "SALVAGED_TEST",
+      "SUPERSEDED_BY",
+      "DUPLICATE",
+      "PROCESS_ONLY",
+      "EVIDENCE_ONLY",
+      "CONFLICTING_IMPL_PRESERVED"
+    ]
   }
 }

@@ -12,10 +12,12 @@ import argparse
 import copy
 import datetime as dt
 import fcntl
+import hashlib
 import json
 import os
 import pathlib
 import re
+import shlex
 import subprocess
 import sys
 from contextlib import contextmanager
@@ -61,8 +63,12 @@ def state_paths(cfg: dict) -> dict[str, pathlib.Path]:
         "failures": base / "failures.json",
         "gates": base / "gates.json",
         "salvage": base / "salvage-index.json",
+        "policy": base / "policy.json",
+        "ref_policy": base / "ref-policy.json",
+        "backup": base / "last-good.json",
         "lock": base / "state.lock",
         "integration_lock": base / "integration.lock",
+        "heavy_lock": base / "heavy-validation.lock",
         "evidence": common_git_dir() / "recovery-evidence",
     }
 
@@ -92,16 +98,100 @@ def paths_overlap(a: str, b: str) -> bool:
     return aa == bb or aa.startswith(bb + "/") or bb.startswith(aa + "/")
 
 
+def path_within(path: str, prefix: str) -> bool:
+    value = path.rstrip("/")
+    root = prefix.rstrip("/")
+    return value == root or value.startswith(root + "/")
+
+
+def normalize_repo_path(raw: str) -> str:
+    value = raw.replace("\\", "/").strip().rstrip("/")
+    pure = pathlib.PurePosixPath(value)
+    if (
+        not value
+        or pure.is_absolute()
+        or ".." in pure.parts
+        or value == ".git"
+        or value.startswith(".git/")
+    ):
+        raise RuntimeError(f"unsafe repository path grant: {raw!r}")
+    return pure.as_posix()
+
+
+def changed_paths(base: str, tip: str) -> list[str]:
+    out = git("diff", "--name-only", f"{base}..{tip}")
+    return [line for line in out.splitlines() if line]
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
 def bump(meta: dict) -> None:
     meta["stateRevision"] = int(meta.get("stateRevision", 0)) + 1
     meta["updatedAt"] = now()
 
 
-def init_state(cfg: dict, force: bool = False) -> None:
+def install_reference_hook(cfg: dict, paths: dict[str, pathlib.Path]) -> str:
+    canonical = str(cfg["canonicalBranch"])
+    canonical_root = pathlib.Path(cfg["approvedRecoveryWorktrees"][canonical]).resolve()
+    hook_driver = canonical_root / "tools" / "recovery_ref_hook.py"
+    if not hook_driver.is_file():
+        raise RuntimeError(f"reference hook driver missing: {hook_driver}")
+    hook = common_git_dir() / "hooks" / "reference-transaction"
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    wrapper = (
+        "#!/bin/sh\n"
+        f"exec /usr/bin/env python3 {shlex.quote(str(hook_driver))} \"$@\"\n"
+    )
+    if hook.exists():
+        existing = hook.read_text(encoding="utf-8", errors="replace")
+        if "recovery_ref_hook.py" not in existing:
+            raise RuntimeError(
+                f"existing reference-transaction hook is not Recovery Mode owned: {hook}"
+            )
+    hook.write_text(wrapper, encoding="utf-8")
+    hook.chmod(0o755)
+    return sha256_bytes(wrapper.encode())
+
+
+def build_runtime_policy(cfg: dict, sha: str, paths: dict[str, pathlib.Path]) -> dict:
+    snapshot = load_json(ROOT / cfg["legacySnapshot"])
+    frozen = snapshot.get("refs", {})
+    if not isinstance(frozen, dict) or not frozen:
+        raise RuntimeError("legacy snapshot has no frozen refs")
+    mutable = list(cfg.get("fixedMutableBranches", []))
+    ref_policy = {
+        "schemaVersion": 1,
+        "activationSha": sha,
+        "mutableHeads": mutable,
+        "frozenHeads": frozen,
+        "protectedPaths": cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", []),
+    }
+    atomic_write(paths["ref_policy"], ref_policy)
+
+    protected: dict[str, str] = {}
+    for rel in cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", []):
+        path = ROOT / rel
+        if not path.is_file():
+            raise RuntimeError(f"protected evaluator path missing at activation: {rel}")
+        protected[rel] = git("rev-parse", f"{cfg['canonicalBranch']}:{rel}")
+
+    hook_sha = install_reference_hook(cfg, paths)
+    return {
+        "schemaVersion": 1,
+        "activationSha": sha,
+        "createdAt": now(),
+        "protectedEvaluatorBlobs": protected,
+        "referenceHookSha256": hook_sha,
+    }
+
+
+def init_state(cfg: dict) -> None:
     paths = state_paths(cfg)
     paths["meta"].parent.mkdir(parents=True, exist_ok=True)
     with locked(paths["lock"]):
-        if paths["meta"].exists() and not force:
+        if paths["meta"].exists():
             print("RECOVERY STATE ALREADY INITIALIZED")
             return
         seed_failures = load_json(ROOT / "recovery" / "failures.json")
@@ -122,6 +212,8 @@ def init_state(cfg: dict, force: bool = False) -> None:
         salvage = copy.deepcopy(salvage_seed)
         salvage["runtime"] = True
         salvage["stateRevision"] = 1
+        salvage.setdefault("queries", {})
+        salvage.setdefault("dispositions", {})
         meta = {
             "schemaVersion": 1,
             "initializedAt": now(),
@@ -131,10 +223,16 @@ def init_state(cfg: dict, force: bool = False) -> None:
             "canonicalShaAtInit": sha,
             "note": "Operational state is intentionally outside tracked Git history.",
         }
+        policy = build_runtime_policy(cfg, sha, paths)
         atomic_write(paths["failures"], failures)
         atomic_write(paths["gates"], gates)
         atomic_write(paths["salvage"], salvage)
+        atomic_write(paths["policy"], policy)
         atomic_write(paths["meta"], meta)
+        atomic_write(
+            paths["backup"],
+            {"meta": meta, "failures": failures, "gates": gates, "salvage": salvage},
+        )
     print(f"RECOVERY STATE INITIALIZED {paths['meta'].parent}")
 
 
@@ -143,13 +241,20 @@ def require_state(cfg: dict) -> tuple[dict, dict, dict, dict, dict[str, pathlib.
     for key in ("meta", "failures", "gates", "salvage"):
         if not paths[key].is_file():
             raise RuntimeError("runtime state missing; run tools/recovery_state.py init")
-    return (
-        load_json(paths["meta"]),
-        load_json(paths["failures"]),
-        load_json(paths["gates"]),
-        load_json(paths["salvage"]),
-        paths,
-    )
+    meta = load_json(paths["meta"])
+    failures = load_json(paths["failures"])
+    gates = load_json(paths["gates"])
+    salvage = load_json(paths["salvage"])
+    revision = meta.get("stateRevision")
+    if not isinstance(revision, int) or revision < 1:
+        raise RuntimeError("runtime state has invalid meta revision; run recovery_state.py recover-state")
+    if failures.get("queueRevision") != revision:
+        raise RuntimeError("runtime failures revision mismatch; run recovery_state.py recover-state")
+    if gates.get("stateRevision") != revision:
+        raise RuntimeError("runtime gates revision mismatch; run recovery_state.py recover-state")
+    if salvage.get("stateRevision") != revision:
+        raise RuntimeError("runtime salvage revision mismatch; run recovery_state.py recover-state")
+    return meta, failures, gates, salvage, paths
 
 
 def active_failures(failures: dict) -> list[dict]:
@@ -164,6 +269,16 @@ def failure_by_id(failures: dict, fid: str) -> dict:
 
 
 def save_all(meta: dict, failures: dict, gates: dict, salvage: dict, paths: dict[str, pathlib.Path]) -> None:
+    if all(paths[key].is_file() for key in ("meta", "failures", "gates", "salvage")):
+        atomic_write(
+            paths["backup"],
+            {
+                "meta": load_json(paths["meta"]),
+                "failures": load_json(paths["failures"]),
+                "gates": load_json(paths["gates"]),
+                "salvage": load_json(paths["salvage"]),
+            },
+        )
     bump(meta)
     failures["queueRevision"] = meta["stateRevision"]
     gates["stateRevision"] = meta["stateRevision"]
@@ -172,6 +287,24 @@ def save_all(meta: dict, failures: dict, gates: dict, salvage: dict, paths: dict
     atomic_write(paths["gates"], gates)
     atomic_write(paths["salvage"], salvage)
     atomic_write(paths["meta"], meta)
+
+
+def cmd_recover_state(cfg: dict) -> int:
+    paths = state_paths(cfg)
+    with locked(paths["lock"]):
+        if not paths["backup"].is_file():
+            raise RuntimeError("last-good runtime state backup is missing")
+        backup = load_json(paths["backup"])
+        for key in ("meta", "failures", "gates", "salvage"):
+            value = backup.get(key)
+            if not isinstance(value, dict):
+                raise RuntimeError(f"last-good backup is missing {key}")
+        atomic_write(paths["failures"], backup["failures"])
+        atomic_write(paths["gates"], backup["gates"])
+        atomic_write(paths["salvage"], backup["salvage"])
+        atomic_write(paths["meta"], backup["meta"])
+    print(f"RECOVERY STATE RESTORED revision={backup['meta'].get('stateRevision')}")
+    return 0
 
 
 def cmd_status(cfg: dict) -> int:
@@ -196,6 +329,166 @@ def cmd_status(cfg: dict) -> int:
     return 0
 
 
+def salvage_query_open(salvage: dict, fid: str) -> bool:
+    query = salvage.get("queries", {}).get(fid)
+    if not isinstance(query, dict):
+        return False
+    return any(not candidate.get("disposition") for candidate in query.get("candidates", []))
+
+
+def cmd_salvage_status(cfg: dict, args: argparse.Namespace) -> int:
+    _, _, _, salvage, _ = require_state(cfg)
+    queries = salvage.get("queries", {})
+    if args.failure:
+        queries = {args.failure: queries.get(args.failure)}
+    for fid, query in sorted(queries.items()):
+        if not isinstance(query, dict):
+            continue
+        unresolved = [c for c in query.get("candidates", []) if not c.get("disposition")]
+        print(
+            f"{fid} query={query.get('queryHash','-')} scanned={query.get('refsScanned',0)} "
+            f"matches={query.get('matchCount',0)} selected={query.get('selectedCount',0)} unresolved={len(unresolved)}"
+        )
+        for row in unresolved[:8]:
+            print(f"  {row.get('sourceRef')} {row.get('sourceSha','')[:12]} score={row.get('score')}")
+    return 0
+
+
+def cmd_salvage_query(cfg: dict, args: argparse.Namespace) -> int:
+    meta, failures, gates, salvage, paths = require_state(cfg)
+    with locked(paths["lock"]):
+        meta, failures, gates, salvage, paths = require_state(cfg)
+        row = failure_by_id(failures, args.failure)
+        if row.get("status") not in ACTIVE_STATES | {"OPEN", "UNPROVEN"}:
+            raise RuntimeError("salvage query requires an unresolved current failure")
+        if salvage_query_open(salvage, args.failure):
+            raise RuntimeError("prior salvage query still has unresolved candidates")
+        base = main_sha(cfg)
+        grants = row.get("pathGrant", []) or [normalize_repo_path(path) for path in args.path]
+        if not grants:
+            raise RuntimeError("salvage query needs failure pathGrant or explicit --path")
+        terms = sorted({term.casefold() for term in args.term if term.strip()})
+        snapshot = load_json(ROOT / cfg["legacySnapshot"])
+        refs = snapshot.get("refs", {})
+        if not isinstance(refs, dict) or not refs:
+            raise RuntimeError("legacy snapshot has no refs")
+        groups: dict[str, list[str]] = {}
+        for ref, sha in refs.items():
+            groups.setdefault(str(sha), []).append(str(ref))
+        scored: list[dict] = []
+        for sha, aliases in groups.items():
+            try:
+                files = changed_paths(base, sha)
+            except subprocess.CalledProcessError:
+                continue
+            path_hits = [
+                changed for changed in files
+                if any(paths_overlap(changed, grant) for grant in grants)
+            ]
+            alias_text = " ".join(aliases).casefold()
+            term_hits = [term for term in terms if term in alias_text]
+            score = len(path_hits) * 100 + len(term_hits) * 10
+            if score <= 0:
+                continue
+            scored.append(
+                {
+                    "sourceSha": sha,
+                    "sourceRef": sorted(aliases)[0],
+                    "aliases": sorted(aliases),
+                    "score": score,
+                    "pathHits": path_hits[:40],
+                    "termHits": term_hits,
+                    "disposition": None,
+                }
+            )
+        scored.sort(key=lambda item: (-int(item["score"]), item["sourceSha"]))
+        limit = int(cfg.get("salvagePolicy", {}).get("maxMaterializedCandidatesPerFailure", 8))
+        if len(scored) > limit and scored[limit - 1]["score"] == scored[limit]["score"]:
+            raise RuntimeError(
+                "salvage candidate tie crosses materialization cutoff; narrow --path/--term before continuing"
+            )
+        selected = scored[:limit]
+        query_value = {
+            "failureId": args.failure,
+            "baseSha": base,
+            "pathGrant": grants,
+            "terms": terms,
+            "refsScanned": len(refs),
+            "uniqueTipsScanned": len(groups),
+            "matchCount": len(scored),
+            "selectedCount": len(selected),
+            "truncatedCount": max(0, len(scored) - len(selected)),
+            "candidates": selected,
+            "createdAt": now(),
+        }
+        material = json.dumps(
+            {key: query_value[key] for key in ("failureId", "baseSha", "pathGrant", "terms")},
+            sort_keys=True,
+        ).encode()
+        query_value["queryHash"] = sha256_bytes(material)
+        salvage.setdefault("queries", {})[args.failure] = query_value
+        save_all(meta, failures, gates, salvage, paths)
+    print(
+        f"SALVAGE QUERY {args.failure} scanned={len(refs)} matches={len(scored)} selected={len(selected)}"
+    )
+    for candidate in selected:
+        print(f"{candidate['sourceRef']} {candidate['sourceSha']} score={candidate['score']}")
+    return 0
+
+
+def cmd_salvage_dispose(cfg: dict, args: argparse.Namespace) -> int:
+    meta, failures, gates, salvage, paths = require_state(cfg)
+    terminal = set(cfg.get("salvagePolicy", {}).get("terminalDispositions", []))
+    if args.disposition not in terminal:
+        raise RuntimeError(f"invalid terminal salvage disposition {args.disposition!r}")
+    with locked(paths["lock"]):
+        meta, failures, gates, salvage, paths = require_state(cfg)
+        query = salvage.get("queries", {}).get(args.failure)
+        if not isinstance(query, dict):
+            raise RuntimeError("no salvage query exists for this failure")
+        candidates = [
+            item for item in query.get("candidates", [])
+            if item.get("sourceRef") == args.source_ref or args.source_ref in item.get("aliases", [])
+        ]
+        if len(candidates) != 1:
+            raise RuntimeError("source ref is not exactly one materialized candidate")
+        candidate = candidates[0]
+        if candidate.get("disposition"):
+            raise RuntimeError("salvage candidate is already disposed")
+        snapshot = load_json(ROOT / cfg["legacySnapshot"])
+        expected = snapshot.get("refs", {}).get(args.source_ref)
+        if expected != candidate.get("sourceSha"):
+            raise RuntimeError("salvage source ref/SHA does not match frozen snapshot")
+        if args.disposition in {"SUPERSEDED_BY", "DUPLICATE"} and not args.target:
+            raise RuntimeError(f"{args.disposition} requires --target")
+        if args.disposition in {"SALVAGED_PRODUCT", "SALVAGED_TEST"} and not args.candidate_sha:
+            raise RuntimeError(f"{args.disposition} requires --candidate-sha")
+        candidate.update(
+            {
+                "disposition": args.disposition,
+                "evidence": args.evidence,
+                "target": args.target,
+                "candidateSha": args.candidate_sha,
+                "disposedAt": now(),
+            }
+        )
+        salvage.setdefault("dispositions", {})[candidate["sourceSha"]] = {
+            "failureId": args.failure,
+            "sourceRef": candidate["sourceRef"],
+            "sourceSha": candidate["sourceSha"],
+            "disposition": args.disposition,
+            "evidence": args.evidence,
+            "target": args.target,
+            "candidateSha": args.candidate_sha,
+            "queryHash": query.get("queryHash"),
+            "baseSha": query.get("baseSha"),
+            "at": now(),
+        }
+        save_all(meta, failures, gates, salvage, paths)
+    print(f"SALVAGE DISPOSED {args.source_ref} {args.disposition}")
+    return 0
+
+
 def cmd_claim(cfg: dict, args: argparse.Namespace) -> int:
     meta, failures, gates, salvage, paths = require_state(cfg)
     with locked(paths["lock"]):
@@ -206,6 +499,19 @@ def cmd_claim(cfg: dict, args: argparse.Namespace) -> int:
         lanes = set(cfg.get("executionLanes", []))
         if args.lane not in lanes:
             raise RuntimeError(f"lane {args.lane!r} is not an execution lane")
+        grants = sorted({normalize_repo_path(path) for path in args.path})
+        intents = cfg.get("lanePathIntent", {}).get(args.lane, [])
+        if not intents:
+            raise RuntimeError(f"lane {args.lane} has no configured path intent")
+        for grant in grants:
+            if not any(path_within(grant, prefix) for prefix in intents):
+                raise RuntimeError(
+                    f"path grant {grant!r} is outside configured intent for {args.lane}: {intents}"
+                )
+        protected = cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", [])
+        for grant in grants:
+            if any(paths_overlap(grant, rel) for rel in protected):
+                raise RuntimeError(f"path grant {grant!r} overlaps protected evaluator state")
         canonical = main_sha(cfg)
         lane_sha = git("rev-parse", args.lane)
         if lane_sha != canonical:
@@ -215,7 +521,7 @@ def cmd_claim(cfg: dict, args: argparse.Namespace) -> int:
         for other in active_failures(failures):
             if other.get("lane") == args.lane:
                 raise RuntimeError(f"lane {args.lane} already owns {other.get('id')}")
-            for wanted in args.path:
+            for wanted in grants:
                 for held in other.get("pathGrant", []):
                     if paths_overlap(wanted, held):
                         raise RuntimeError(
@@ -227,7 +533,7 @@ def cmd_claim(cfg: dict, args: argparse.Namespace) -> int:
                 "owner": args.owner,
                 "lane": args.lane,
                 "baseSha": canonical,
-                "pathGrant": sorted(set(args.path)),
+                "pathGrant": grants,
                 "claimedAt": now(),
                 "reviews": [],
             }
@@ -252,8 +558,24 @@ def cmd_candidate(cfg: dict, args: argparse.Namespace) -> int:
             raise RuntimeError(
                 f"candidate SHA {args.sha} is not current lane head {row['lane']} {lane_head}"
             )
+        diff = changed_paths(row["baseSha"], args.sha)
+        if not diff:
+            raise RuntimeError("candidate has no changed paths")
+        grants = row.get("pathGrant", [])
+        outside = [path for path in diff if not any(path_within(path, grant) for grant in grants)]
+        if outside:
+            raise RuntimeError(
+                f"candidate changed paths outside its lease: {outside[:8]}"
+            )
+        protected = cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", [])
+        evaluator_changes = [path for path in diff if any(paths_overlap(path, rel) for rel in protected)]
+        if evaluator_changes:
+            raise RuntimeError(
+                f"ordinary candidates may not modify frozen evaluator paths: {evaluator_changes[:8]}"
+            )
         row["status"] = "CANDIDATE"
         row["candidateSha"] = args.sha
+        row["changedPaths"] = diff
         row["candidateAt"] = now()
         row["reviews"] = []
         save_all(meta, failures, gates, salvage, paths)
@@ -309,8 +631,10 @@ def cmd_preverify(cfg: dict, args: argparse.Namespace) -> int:
         need = required_approvals(cfg, row)
         if len(approvals) < need:
             raise RuntimeError(f"{args.id} needs {need} independent approvals; has {len(approvals)}")
+        sensitive = cfg.get("evaluationPolicy", {}).get("securitySensitivePaths", [])
         security_change = any(
-            str(p).startswith("crates/security") for p in row.get("pathGrant", [])
+            any(path_within(str(changed), prefix) for prefix in sensitive)
+            for changed in row.get("changedPaths", [])
         )
         if security_change:
             security_ok = any(
@@ -341,6 +665,11 @@ def cmd_ready(cfg: dict, args: argparse.Namespace) -> int:
             raise RuntimeError(
                 f"{args.id} candidate is stale: base {row.get('baseSha')} != current main-v2 {canonical}; reopen, fast-forward lane, and reapply"
             )
+        if cfg.get("salvagePolicy", {}).get("unresolvedCandidatesBlockIntegration", True):
+            if salvage_query_open(salvage, args.id):
+                raise RuntimeError(
+                    f"{args.id} still has unresolved legacy salvage candidates; dispose them before integration"
+                )
         high_water = int(cfg.get("maxVerifiedUnintegratedCandidates", 4))
         waiting = [
             x
@@ -372,12 +701,15 @@ def cmd_reopen(cfg: dict, args: argparse.Namespace) -> int:
             "baseSha",
             "pathGrant",
             "candidateSha",
+            "changedPaths",
             "claimedAt",
             "candidateAt",
             "reviews",
             "preverifiedAt",
             "preverifyEvidence",
             "integrationReadyAt",
+            "integrationOwner",
+            "integrationStartedAt",
         ):
             row.pop(key, None)
         row["status"] = "OPEN"
@@ -396,6 +728,10 @@ def cmd_accept(cfg: dict, args: argparse.Namespace) -> int:
         row = failure_by_id(failures, args.id)
         if row.get("status") not in {"INTEGRATED", "OPEN", "UNPROVEN"}:
             raise RuntimeError(f"{args.id} must be INTEGRATED, or an OPEN/UNPROVEN probe failure")
+        if row.get("status") in {"OPEN", "UNPROVEN"} and row.get("requiresImplementation", True):
+            raise RuntimeError(
+                f"{args.id} requires implementation and must pass the full candidate/review/integration lifecycle before acceptance"
+            )
         canonical = main_sha(cfg)
         if args.sha != canonical:
             raise RuntimeError(f"accept SHA {args.sha} != current main-v2 {canonical}")
@@ -453,6 +789,22 @@ def cmd_complete_integration(cfg: dict, args: argparse.Namespace) -> int:
         row["status"] = "INTEGRATED"
         row["integratedSha"] = canonical
         row["integratedAt"] = now()
+        for other in failures.get("failures", []):
+            if other is row:
+                continue
+            if other.get("status") == "ACCEPTED" and other.get("acceptedSha") != canonical:
+                other["lastAcceptedSha"] = other.get("acceptedSha")
+                other["lastAcceptEvidence"] = other.get("acceptEvidence")
+                other["status"] = "UNPROVEN"
+                other.pop("acceptedSha", None)
+                other.pop("acceptEvidence", None)
+        for gate in gates.get("gates", []):
+            if gate.get("status") == "ACCEPTED" and gate.get("acceptedSha") != canonical:
+                gate["lastAcceptedSha"] = gate.get("acceptedSha")
+                gate["lastAcceptedEvidence"] = gate.get("evidence", [])
+                gate["status"] = "UNPROVEN"
+                gate["acceptedSha"] = None
+                gate["evidence"] = []
         save_all(meta, failures, gates, salvage, paths)
         paths["integration_lock"].unlink()
     print(f"INTEGRATED {args.id} sha={canonical}")
@@ -495,6 +847,103 @@ def cmd_sync_gates(cfg: dict, args: argparse.Namespace) -> int:
         gates = staged
         save_all(meta, failures, gates, salvage, paths)
     print(f"PHASE1 GATES ACCEPTED sha={canonical}")
+    return 0
+
+
+def observed_failure_id(check: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9]+", "-", check).strip("-").upper()
+    return f"OBS-{safe}"[:120]
+
+
+def cmd_observe_judge(cfg: dict, args: argparse.Namespace) -> int:
+    meta, failures, gates, salvage, paths = require_state(cfg)
+    evidence = pathlib.Path(args.evidence).resolve()
+    allowed = paths["evidence"].resolve()
+    if allowed not in evidence.parents or not evidence.is_file():
+        raise RuntimeError(f"judge evidence must be an existing file under {allowed}")
+    result = load_json(evidence)
+    canonical = main_sha(cfg)
+    if result.get("sourceSha") != canonical or result.get("canonicalSha") != canonical:
+        raise RuntimeError("judge evidence is not bound to current main-v2")
+    checks = {str(row.get("name")): row for row in result.get("checks", [])}
+    gate_results = result.get("gateResults", {})
+    failed_checks: dict[str, set[str]] = {}
+    for gate_id, gate in gate_results.items():
+        for check in gate.get("missingChecks", []):
+            failed_checks.setdefault(str(check), set()).add(str(gate_id))
+        for check in gate.get("failedChecks", []):
+            failed_checks.setdefault(str(check), set()).add(str(gate_id))
+    artifact_mode = result.get("artifactMode") is True
+    all_installed_pass = artifact_mode and all(
+        gate.get("status") == "PASS" for gate in gate_results.values()
+    )
+
+    with locked(paths["lock"]):
+        meta, failures, gates, salvage, paths = require_state(cfg)
+        if main_sha(cfg) != canonical:
+            raise RuntimeError("main-v2 moved while ingesting judge evidence; rerun judge")
+        rows = failures.setdefault("failures", [])
+        by_check = {
+            str(row.get("check")): row
+            for row in rows
+            if isinstance(row.get("check"), str)
+        }
+
+        for check, gate_ids in sorted(failed_checks.items()):
+            existing = by_check.get(check)
+            if existing is None:
+                gate = sorted(gate_ids)[0] if gate_ids else "P1-RELEASE"
+                existing = {
+                    "id": observed_failure_id(check),
+                    "priority": "P1",
+                    "gate": gate,
+                    "status": "OPEN",
+                    "kind": "judge-observed",
+                    "check": check,
+                    "requiresImplementation": True,
+                    "title": f"Installed judge check fails: {check}",
+                    "evidence": str(evidence),
+                    "nextAction": "Diagnose the exact observed failure, claim a fixed recovery lane, and use the evaluator-optimizer lifecycle.",
+                }
+                rows.append(existing)
+                by_check[check] = existing
+            if existing.get("status") in {"ACCEPTED", "SUPERSEDED", "REJECTED"}:
+                existing["status"] = "OPEN"
+                existing.pop("acceptedSha", None)
+                existing.pop("acceptEvidence", None)
+            existing["lastObservedAt"] = now()
+            existing["lastObservedSha"] = canonical
+            existing["lastJudgeEvidence"] = str(evidence)
+
+        passing = {
+            name for name, check in checks.items() if check.get("exit") == 0
+        }
+        if all_installed_pass:
+            passing.add("phase1_all_installed")
+        for check, row in list(by_check.items()):
+            if check not in passing or check in failed_checks:
+                continue
+            status = row.get("status")
+            if status == "INTEGRATED":
+                row["status"] = "ACCEPTED"
+                row["acceptedSha"] = canonical
+                row["acceptedAt"] = now()
+                row["acceptEvidence"] = str(evidence)
+            elif row.get("requiresImplementation") is False and status in {"OPEN", "UNPROVEN"}:
+                row["status"] = "ACCEPTED"
+                row["acceptedSha"] = canonical
+                row["acceptedAt"] = now()
+                row["acceptEvidence"] = str(evidence)
+            elif status in {"OPEN", "UNPROVEN"}:
+                row["status"] = "SUPERSEDED"
+                row["supersededReason"] = (
+                    "Exact current installed judge passes this check; another integrated/reviewed change resolved the observed failure."
+                )
+                row["supersededEvidence"] = str(evidence)
+        save_all(meta, failures, gates, salvage, paths)
+    print(
+        f"JUDGE OBSERVED sha={canonical} failed_checks={len(failed_checks)} artifact={artifact_mode}"
+    )
     return 0
 
 
@@ -546,11 +995,135 @@ def cmd_end_integration(cfg: dict, args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_integrate(cfg: dict, args: argparse.Namespace) -> int:
+    canonical_root = pathlib.Path(
+        cfg.get("approvedRecoveryWorktrees", {}).get(cfg["canonicalBranch"], ROOT)
+    ).resolve()
+    if subprocess.check_output(
+        ["git", "-C", str(canonical_root), "status", "--porcelain"], text=True
+    ).strip():
+        raise RuntimeError("canonical main-v2 worktree is dirty; refuse integration")
+    before = main_sha(cfg)
+    cmd_begin_integration(cfg, args)
+    _, failures, _, _, paths = require_state(cfg)
+    row = failure_by_id(failures, args.id)
+    candidate = str(row.get("candidateSha"))
+    try:
+        subprocess.check_call(
+            ["git", "-C", str(canonical_root), "merge", "--ff-only", candidate]
+        )
+        after = main_sha(cfg)
+        if after != candidate:
+            raise RuntimeError(
+                f"fast-forward integration ended at {after}, expected reviewed candidate {candidate}"
+            )
+        return cmd_complete_integration(
+            cfg, argparse.Namespace(id=args.id, sha=after)
+        )
+    except Exception:
+        after = main_sha(cfg)
+        if after == before:
+            with locked(paths["lock"]):
+                meta, failures, gates, salvage, paths = require_state(cfg)
+                row = failure_by_id(failures, args.id)
+                if row.get("status") == "INTEGRATING":
+                    row["status"] = "INTEGRATION_READY"
+                    row.pop("integrationOwner", None)
+                    row.pop("integrationStartedAt", None)
+                    save_all(meta, failures, gates, salvage, paths)
+            paths["integration_lock"].unlink(missing_ok=True)
+        else:
+            print(
+                "INTEGRATION INTERRUPTED AFTER MAIN MOVED; keep lock/state and run complete-integration after inspection",
+                file=sys.stderr,
+            )
+        raise
+
+
+def cmd_sync_lane(cfg: dict, args: argparse.Namespace) -> int:
+    lanes = set(cfg.get("executionLanes", []))
+    if args.lane not in lanes:
+        raise RuntimeError(f"{args.lane!r} is not an execution lane")
+    _, failures, _, _, _ = require_state(cfg)
+    if any(
+        row.get("lane") == args.lane and row.get("status") in ACTIVE_STATES
+        for row in failures.get("failures", [])
+    ):
+        raise RuntimeError(f"{args.lane} has active work and cannot be synchronized")
+    lane_root = pathlib.Path(cfg["approvedRecoveryWorktrees"][args.lane]).resolve()
+    if subprocess.check_output(
+        ["git", "-C", str(lane_root), "status", "--porcelain"], text=True
+    ).strip():
+        raise RuntimeError(f"{args.lane} worktree is dirty")
+    subprocess.check_call(
+        ["git", "-C", str(lane_root), "merge", "--ff-only", cfg["canonicalBranch"]]
+    )
+    lane_sha = git("rev-parse", args.lane)
+    canonical = main_sha(cfg)
+    if lane_sha != canonical:
+        raise RuntimeError(f"{args.lane} did not synchronize to canonical {canonical}")
+    print(f"LANE SYNCED {args.lane} {canonical}")
+    return 0
+
+
+def cmd_recover_integration(cfg: dict) -> int:
+    meta, failures, gates, salvage, paths = require_state(cfg)
+    integrating = [
+        row for row in failures.get("failures", [])
+        if row.get("status") == "INTEGRATING"
+    ]
+    if len(integrating) != 1:
+        raise RuntimeError(
+            f"recover-integration requires exactly one INTEGRATING failure; found {len(integrating)}"
+        )
+    row = integrating[0]
+    current = main_sha(cfg)
+    candidate = str(row.get("candidateSha", ""))
+    base = str(row.get("baseSha", ""))
+    if candidate and subprocess.run(
+        ["git", "merge-base", "--is-ancestor", candidate, current], cwd=ROOT
+    ).returncode == 0:
+        return cmd_complete_integration(
+            cfg, argparse.Namespace(id=row["id"], sha=current)
+        )
+    if current == base:
+        with locked(paths["lock"]):
+            meta, failures, gates, salvage, paths = require_state(cfg)
+            row = failure_by_id(failures, row["id"])
+            row["status"] = "INTEGRATION_READY"
+            row.pop("integrationOwner", None)
+            row.pop("integrationStartedAt", None)
+            save_all(meta, failures, gates, salvage, paths)
+        paths["integration_lock"].unlink(missing_ok=True)
+        print(f"INTEGRATION RECOVERED TO READY {row['id']}")
+        return 0
+    raise RuntimeError(
+        f"integration recovery is ambiguous: current main {current}, base {base}, candidate {candidate}; inspect before mutation"
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("init").add_argument("--force", action="store_true")
+    sub.add_parser("init")
+    sub.add_parser("recover-state")
     sub.add_parser("status")
+
+    p = sub.add_parser("salvage-status")
+    p.add_argument("--failure")
+
+    p = sub.add_parser("salvage-query")
+    p.add_argument("--failure", required=True)
+    p.add_argument("--path", action="append", default=[])
+    p.add_argument("--term", action="append", default=[])
+
+    p = sub.add_parser("salvage-dispose")
+    p.add_argument("--failure", required=True)
+    p.add_argument("--source-ref", required=True)
+    p.add_argument("--disposition", required=True)
+    p.add_argument("--evidence", required=True)
+    p.add_argument("--target")
+    p.add_argument("--candidate-sha")
 
     p = sub.add_parser("claim")
     p.add_argument("--id", required=True)
@@ -584,6 +1157,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", required=True)
     p.add_argument("--owner", required=True)
 
+    p = sub.add_parser("integrate")
+    p.add_argument("--id", required=True)
+    p.add_argument("--owner", required=True)
+
+    p = sub.add_parser("sync-lane")
+    p.add_argument("--lane", required=True)
+
+    sub.add_parser("recover-integration")
+
     p = sub.add_parser("end-integration")
     p.add_argument("--owner", required=True)
 
@@ -598,6 +1180,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("sync-gates")
     p.add_argument("--evidence", required=True)
+
+    p = sub.add_parser("observe-judge")
+    p.add_argument("--evidence", required=True)
     return parser
 
 
@@ -606,10 +1191,18 @@ def main() -> int:
     args = build_parser().parse_args()
     try:
         if args.cmd == "init":
-            init_state(cfg, args.force)
+            init_state(cfg)
             return 0
+        if args.cmd == "recover-state":
+            return cmd_recover_state(cfg)
         if args.cmd == "status":
             return cmd_status(cfg)
+        if args.cmd == "salvage-status":
+            return cmd_salvage_status(cfg, args)
+        if args.cmd == "salvage-query":
+            return cmd_salvage_query(cfg, args)
+        if args.cmd == "salvage-dispose":
+            return cmd_salvage_dispose(cfg, args)
         if args.cmd == "claim":
             return cmd_claim(cfg, args)
         if args.cmd == "candidate":
@@ -624,6 +1217,12 @@ def main() -> int:
             return cmd_reopen(cfg, args)
         if args.cmd == "begin-integration":
             return cmd_begin_integration(cfg, args)
+        if args.cmd == "integrate":
+            return cmd_integrate(cfg, args)
+        if args.cmd == "sync-lane":
+            return cmd_sync_lane(cfg, args)
+        if args.cmd == "recover-integration":
+            return cmd_recover_integration(cfg)
         if args.cmd == "end-integration":
             return cmd_end_integration(cfg, args)
         if args.cmd == "complete-integration":
@@ -632,6 +1231,8 @@ def main() -> int:
             return cmd_accept(cfg, args)
         if args.cmd == "sync-gates":
             return cmd_sync_gates(cfg, args)
+        if args.cmd == "observe-judge":
+            return cmd_observe_judge(cfg, args)
     except (RuntimeError, subprocess.CalledProcessError) as exc:
         print(f"RECOVERY STATE BLOCKED: {exc}", file=sys.stderr)
         return 1

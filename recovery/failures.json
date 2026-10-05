@@ -20,6 +20,8 @@
       "gate": "P1-RELEASE",
       "status": "OPEN",
       "kind": "unproven-gate",
+      "check": "phase1_all_installed",
+      "requiresImplementation": false,
       "title": "Establish executable Phase-1 golden judge",
       "evidence": "tools/convergence_gate.py is intentionally structural and states that behavioral E2E remains mandatory; all Phase-1 gates are currently UNPROVEN.",
       "nextAction": "Run python3 tools/phase1_judge.py for source checks, then run it in artifact mode with --binary --native-library --build-json --artifact-evidence-dir. Any observed installed-product failure becomes a separate queue item."
@@ -30,6 +32,8 @@
       "gate": "P1-STARTUP",
       "status": "OPEN",
       "kind": "structural-gate",
+      "check": "convergence_structure",
+      "requiresImplementation": true,
       "title": "Default-entrypoint provider/persistence E2E spine is missing",
       "evidence": "python3 tools/convergence_gate.py: E2E: default-entrypoint provider/persistence test spine is missing",
       "nextAction": "Inspect current default_tui/startup/provider fixtures and pinned upstream; salvage only if a legacy test/implementation is stronger, otherwise write the missing integrated E2E spine."
@@ -40,6 +44,8 @@
       "gate": "P1-DURABILITY",
       "status": "OPEN",
       "kind": "unproven-gate",
+      "check": "native_second_client_installed",
+      "requiresImplementation": true,
       "title": "Installed native second-client overlap/no-duplicate-work probe is missing",
       "evidence": "Phase-1 requires a second local client to attach during in-flight work without starting a second daemon or duplicating provider/tool execution. Existing source tests and tests/e2e/ubuntu_installed_golden.py contain useful logic, but the macOS installed-artifact judge has no native_second_client_installed check yet.",
       "nextAction": "Create a platform-neutral installed-artifact second-client probe, preferably by extracting/adapting the proven overlap logic from tests/e2e/ubuntu_installed_golden.py. Add it to tools/phase1_judge.py as native_second_client_installed; do not weaken P1-DURABILITY to make the gate pass."
@@ -50,6 +56,7 @@
       "gate": "P1-RELEASE",
       "status": "SUPERSEDED",
       "kind": "harness-ledger",
+      "requiresImplementation": false,
       "title": "AUD-017 is marked completed while its own note admits no acceptance",
       "evidence": "python3 tools/convergence_gate.py: LEDGER: AUD-017 is completed but its own note admits 'no acceptance'",
       "nextAction": "No product action. Historical claims are evidence only under Recovery Mode.",
@@ -61,6 +68,7 @@
       "gate": "P1-RELEASE",
       "status": "SUPERSEDED",
       "kind": "harness-ledger",
+      "requiresImplementation": false,
       "title": "AUD-020 is marked completed while its own note admits no acceptance",
       "evidence": "python3 tools/convergence_gate.py: LEDGER: AUD-020 is completed but its own note admits 'no acceptance'",
       "nextAction": "No product action. Historical claims are evidence only under Recovery Mode.",

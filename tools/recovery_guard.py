@@ -7,7 +7,9 @@ judge; product correctness is decided by tools/phase1_judge.py on exact main-v2.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import pathlib
 import re
 import subprocess
@@ -24,8 +26,12 @@ def load(path: pathlib.Path) -> dict:
     try:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception as exc:
+        try:
+            label = str(path.relative_to(ROOT))
+        except ValueError:
+            label = str(path)
         raise RuntimeError(
-            f"cannot load {path.relative_to(ROOT)}: {type(exc).__name__}: {exc}"
+            f"cannot load {label}: {type(exc).__name__}: {exc}"
         ) from exc
 
 
@@ -70,8 +76,11 @@ def main() -> int:
     try:
         cfg = load(CONFIG)
         runtime = common_git_dir() / "recovery-state"
+        meta = load(runtime / "meta.json")
         failures = load(runtime / "failures.json")
         gates = load(runtime / "gates.json")
+        salvage = load(runtime / "salvage-index.json")
+        policy = load(runtime / "policy.json")
         snapshot = load(SNAPSHOT)
     except RuntimeError as exc:
         print(f"RECOVERY GUARD BLOCKED\n- {exc}")
@@ -85,6 +94,22 @@ def main() -> int:
         errors.append("bulk legacy merge must remain disabled")
     if cfg.get("legacyRefsMutable") is not False:
         errors.append("legacy refs must remain immutable")
+
+    revision = meta.get("stateRevision")
+    if not isinstance(revision, int) or revision < 1:
+        errors.append("runtime meta has invalid stateRevision")
+    if failures.get("queueRevision") != revision:
+        errors.append(
+            f"runtime failures revision {failures.get('queueRevision')!r} != meta {revision!r}; run recovery_state.py recover-state"
+        )
+    if gates.get("stateRevision") != revision:
+        errors.append(
+            f"runtime gates revision {gates.get('stateRevision')!r} != meta {revision!r}; run recovery_state.py recover-state"
+        )
+    if salvage.get("stateRevision") != revision:
+        errors.append(
+            f"runtime salvage revision {salvage.get('stateRevision')!r} != meta {revision!r}; run recovery_state.py recover-state"
+        )
 
     canonical = str(cfg.get("canonicalBranch", ""))
     bootstrap = str(cfg.get("bootstrapBranch", ""))
@@ -159,7 +184,9 @@ def main() -> int:
         )
     for branch, path in approved_map.items():
         p = str(path)
-        if p in actual_worktrees and actual_worktrees[p] != branch:
+        if p not in actual_worktrees:
+            errors.append(f"approved recovery worktree is missing: {branch} -> {p}")
+        elif actual_worktrees[p] != branch:
             errors.append(
                 f"approved recovery worktree {p} has branch {actual_worktrees[p]!r}, expected {branch!r}"
             )
@@ -172,6 +199,31 @@ def main() -> int:
                 errors.append("canonical main-v2 does not contain the active Recovery Mode config")
         except subprocess.CalledProcessError:
             errors.append("canonical main-v2 does not contain config/recovery-mode.json")
+
+    protected = policy.get("protectedEvaluatorBlobs", {})
+    if not isinstance(protected, dict) or not protected:
+        errors.append("runtime policy has no protectedEvaluatorBlobs")
+    else:
+        for rel, expected_blob in protected.items():
+            try:
+                actual_blob = git("rev-parse", f"{canonical}:{rel}")
+            except subprocess.CalledProcessError:
+                errors.append(f"protected evaluator path disappeared from {canonical}: {rel}")
+                continue
+            if actual_blob != expected_blob:
+                errors.append(
+                    f"protected evaluator drift: {rel} {str(expected_blob)[:12]} -> {actual_blob[:12]}"
+                )
+
+    hook = common_git_dir() / "hooks" / "reference-transaction"
+    expected_hook = policy.get("referenceHookSha256")
+    if cfg.get("activationPolicy", {}).get("installReferenceTransactionHook", False):
+        if not hook.is_file() or not os.access(hook, os.X_OK):
+            errors.append("Recovery Mode reference-transaction hook is missing or not executable")
+        elif expected_hook:
+            actual_hook = hashlib.sha256(hook.read_bytes()).hexdigest()
+            if actual_hook != expected_hook:
+                errors.append("Recovery Mode reference-transaction hook hash changed")
 
     unresolved_states = {
         "UNPROVEN",
@@ -203,6 +255,7 @@ def main() -> int:
     }
     active = [item for item in queue if item.get("status") in active_states]
     grants: list[tuple[str, str]] = []
+    protected_paths = cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", [])
     for item in active:
         fid = str(item.get("id", ""))
         lane = item.get("lane")
@@ -215,14 +268,91 @@ def main() -> int:
         if not isinstance(paths, list) or not paths:
             errors.append(f"{fid} active claim has no explicit pathGrant")
             continue
+        intents = cfg.get("lanePathIntent", {}).get(lane, []) if lane else []
         for path in paths:
             p = str(path)
+            if not any(
+                p == str(prefix).rstrip("/") or p.startswith(str(prefix).rstrip("/") + "/")
+                for prefix in intents
+            ):
+                errors.append(f"{fid} path grant {p!r} is outside lane intent for {lane!r}")
+            if any(paths_overlap(p, str(rel)) for rel in protected_paths):
+                errors.append(f"{fid} path grant {p!r} overlaps protected evaluator state")
             for other_path, other_id in grants:
                 if other_id != fid and paths_overlap(p, other_path):
                     errors.append(
                         f"path grant collision: {p} ({fid}) overlaps {other_path} ({other_id})"
                     )
             grants.append((p, fid))
+        candidate = item.get("candidateSha")
+        if candidate and isinstance(base_sha, str) and SHA40.fullmatch(base_sha):
+            try:
+                changed = git_lines("diff", "--name-only", f"{base_sha}..{candidate}")
+                outside = [
+                    path for path in changed
+                    if not any(
+                        path == str(grant).rstrip("/")
+                        or path.startswith(str(grant).rstrip("/") + "/")
+                        for grant in paths
+                    )
+                ]
+                if outside:
+                    errors.append(f"{fid} candidate diff escapes path grant: {outside[:8]}")
+                evaluator_changes = [
+                    path for path in changed
+                    if any(paths_overlap(path, str(rel)) for rel in protected_paths)
+                ]
+                if evaluator_changes:
+                    errors.append(
+                        f"{fid} candidate modifies protected evaluator paths: {evaluator_changes[:8]}"
+                    )
+            except subprocess.CalledProcessError:
+                errors.append(f"cannot inspect candidate diff for {fid}")
+
+    salvage_queries = salvage.get("queries", {})
+    terminal_dispositions = set(
+        cfg.get("salvagePolicy", {}).get("terminalDispositions", [])
+    )
+    max_salvage = int(
+        cfg.get("salvagePolicy", {}).get("maxMaterializedCandidatesPerFailure", 8)
+    )
+    queue_ids = set(ids)
+    for fid, query in salvage_queries.items():
+        if fid not in queue_ids:
+            errors.append(f"salvage query references unknown failure {fid!r}")
+            continue
+        if not isinstance(query, dict):
+            errors.append(f"salvage query {fid!r} is not an object")
+            continue
+        if query.get("refsScanned") != len(snapshot_refs):
+            errors.append(
+                f"salvage query {fid} did not scan full frozen snapshot: {query.get('refsScanned')} != {len(snapshot_refs)}"
+            )
+        candidates = query.get("candidates", [])
+        if not isinstance(candidates, list) or len(candidates) > max_salvage:
+            errors.append(f"salvage query {fid} exceeds bounded candidate limit {max_salvage}")
+            continue
+        unresolved_salvage = 0
+        for candidate in candidates:
+            ref = candidate.get("sourceRef")
+            sha = candidate.get("sourceSha")
+            aliases = candidate.get("aliases", [])
+            if not isinstance(aliases, list) or ref not in aliases:
+                errors.append(f"salvage candidate {fid}/{ref} has invalid aliases")
+            if snapshot_refs.get(ref) != sha:
+                errors.append(f"salvage candidate {fid}/{ref} does not match frozen ref/SHA")
+            disposition = candidate.get("disposition")
+            if disposition is None:
+                unresolved_salvage += 1
+            elif disposition not in terminal_dispositions:
+                errors.append(
+                    f"salvage candidate {fid}/{ref} has non-terminal/invalid disposition {disposition!r}"
+                )
+        row = next((item for item in queue if item.get("id") == fid), None)
+        if unresolved_salvage and row and row.get("status") in {"INTEGRATION_READY", "INTEGRATING"}:
+            errors.append(
+                f"{fid} entered integration with {unresolved_salvage} unresolved salvage candidates"
+            )
 
     integrating = [item for item in queue if item.get("status") == "INTEGRATING"]
     integration_lock = common_git_dir() / "recovery-state" / "integration.lock"
@@ -282,13 +412,9 @@ def main() -> int:
     for item in queue:
         if item.get("status") == "ACCEPTED":
             accepted_sha = item.get("acceptedSha")
-            try:
-                if not isinstance(accepted_sha, str) or not SHA40.fullmatch(accepted_sha):
-                    raise subprocess.CalledProcessError(1, "acceptedSha")
-                git("merge-base", "--is-ancestor", accepted_sha, current_main)
-            except subprocess.CalledProcessError:
+            if accepted_sha != current_main:
                 errors.append(
-                    f"{item.get('id')} ACCEPTED SHA {accepted_sha!r} is not an ancestor of current {canonical} {current_main}"
+                    f"{item.get('id')} ACCEPTED SHA {accepted_sha!r} is stale; current {canonical} is {current_main}"
                 )
 
     unresolved = [item for item in queue if item.get("status") in unresolved_states]
