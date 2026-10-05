@@ -9,7 +9,9 @@ tracking refs remain fetchable.
 
 from __future__ import annotations
 
+import hashlib
 import json
+import os
 import pathlib
 import subprocess
 import sys
@@ -49,6 +51,8 @@ def main() -> int:
         return 1
     policy = json.loads(policy_path.read_text(encoding="utf-8"))
     mutable = set(policy.get("mutableHeads", []))
+    canonical = str(policy.get("canonicalHead", ""))
+    canonical_token_hash = str(policy.get("canonicalWriteTokenSha256", ""))
     frozen = policy.get("frozenHeads", {})
     protected = [str(path) for path in policy.get("protectedPaths", [])]
 
@@ -75,22 +79,30 @@ def main() -> int:
             if name in mutable:
                 if new == ZERO:
                     errors.append(f"fixed Recovery Mode head may not be deleted: {name}")
-                elif old != ZERO and protected:
-                    try:
-                        changed = subprocess.check_output(
-                            ["git", "diff", "--name-only", old, new], text=True
-                        ).splitlines()
-                    except subprocess.CalledProcessError as exc:
-                        errors.append(f"cannot verify protected evaluator diff for {name}: {exc}")
-                        continue
-                    blocked = [
-                        path for path in changed
-                        if any(overlaps(path, frozen_path) for frozen_path in protected)
-                    ]
-                    if blocked:
-                        errors.append(
-                            f"fixed evaluator paths may not change after activation on {name}: {blocked[:8]}"
-                        )
+                else:
+                    if name == canonical:
+                        supplied = os.environ.get("OC2_RECOVERY_CANONICAL_TOKEN", "")
+                        supplied_hash = hashlib.sha256(supplied.encode()).hexdigest()
+                        if not canonical_token_hash or supplied_hash != canonical_token_hash:
+                            errors.append(
+                                "canonical main-v2 may advance only through tools/recovery_state.py integrate"
+                            )
+                    if old != ZERO and protected:
+                        try:
+                            changed = subprocess.check_output(
+                                ["git", "diff", "--name-only", old, new], text=True
+                            ).splitlines()
+                        except subprocess.CalledProcessError as exc:
+                            errors.append(f"cannot verify protected evaluator diff for {name}: {exc}")
+                            continue
+                        blocked = [
+                            path for path in changed
+                            if any(overlaps(path, frozen_path) for frozen_path in protected)
+                        ]
+                        if blocked:
+                            errors.append(
+                                f"fixed evaluator paths may not change after activation on {name}: {blocked[:8]}"
+                            )
                 continue
             if name in frozen:
                 errors.append(f"frozen legacy head may not move or be deleted: {name}")

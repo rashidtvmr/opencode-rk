@@ -81,6 +81,7 @@ def main() -> int:
         gates = load(runtime / "gates.json")
         salvage = load(runtime / "salvage-index.json")
         policy = load(runtime / "policy.json")
+        ref_policy = load(runtime / "ref-policy.json")
         snapshot = load(SNAPSHOT)
     except RuntimeError as exc:
         print(f"RECOVERY GUARD BLOCKED\n- {exc}")
@@ -225,6 +226,29 @@ def main() -> int:
             if actual_hook != expected_hook:
                 errors.append("Recovery Mode reference-transaction hook hash changed")
 
+    if ref_policy.get("canonicalHead") != canonical:
+        errors.append(
+            f"reference policy canonical head {ref_policy.get('canonicalHead')!r} != {canonical!r}"
+        )
+    token_path = runtime / "canonical-write.token"
+    expected_token_hash = ref_policy.get("canonicalWriteTokenSha256")
+    if not token_path.is_file():
+        errors.append("canonical integration token is missing")
+    else:
+        try:
+            token_mode = token_path.stat().st_mode & 0o777
+            if token_mode != 0o600:
+                errors.append(
+                    f"canonical integration token permissions are {oct(token_mode)}, expected 0o600"
+                )
+            actual_token_hash = hashlib.sha256(
+                token_path.read_text(encoding="utf-8").strip().encode()
+            ).hexdigest()
+            if not expected_token_hash or actual_token_hash != expected_token_hash:
+                errors.append("canonical integration token does not match ref-policy.json")
+        except OSError as exc:
+            errors.append(f"cannot validate canonical integration token: {exc}")
+
     unresolved_states = {
         "UNPROVEN",
         "OPEN",
@@ -258,6 +282,10 @@ def main() -> int:
     protected_paths = cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", [])
     for item in active:
         fid = str(item.get("id", ""))
+        if item.get("strategyReviewRequired"):
+            errors.append(
+                f"{fid} is active while strategyReviewRequired is set; reopen and run strategy-review"
+            )
         lane = item.get("lane")
         base_sha = item.get("baseSha")
         paths = item.get("pathGrant")

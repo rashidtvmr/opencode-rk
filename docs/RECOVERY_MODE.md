@@ -159,7 +159,9 @@ security/semantic concerns
 
 ### Evaluator-optimizer protocol
 
-Candidate generation and candidate judgment must remain independent. For P0/P1 work, two independent evaluators must approve the exact candidate SHA; P2/P3 require one. A security/permission change additionally requires a security-role evaluator. The first review is diff/evidence-first rather than author-rationale-first. A reviewer disagreement invokes a third evaluator or reopens the failure. Any optimizer change produces a new candidate SHA and invalidates prior approvals.
+Candidate generation and candidate judgment must remain independent. For P0/P1 work, two independent evaluators must approve the exact candidate SHA; P2/P3 require one. A security/permission change additionally requires a security-role evaluator. The first review is diff/evidence-first rather than author-rationale-first. Any `REJECT`/`NEEDS_FIX` blocks that candidate: a third evaluator may diagnose the disagreement but cannot outvote the negative verdict. Reopen the same failure, produce a new candidate SHA and review again. Any optimizer change invalidates prior approvals.
+
+The semantic contract and controller are frozen at activation. Evaluator-sensitive extension points listed in `config/recovery-mode.json` may evolve only through a normal candidate with at least two independent approvals including an approving `test` evaluator. This lets the missing `tests/e2e/native_second_client.py` probe be implemented without allowing an optimizer to weaken the frozen Phase-1 contract or existing semantic tests.
 
 Lifecycle changes must go through `tools/recovery_state.py`; do not hand-edit runtime JSON. The state tool serializes writers, checks path ownership, records candidate-SHA-specific reviews and enforces the candidate high-water mark.
 
@@ -189,7 +191,6 @@ Allowed dispositions:
 - `PROCESS_ONLY`
 - `EVIDENCE_ONLY`
 - `CONFLICTING_IMPL_PRESERVED`
-- `PENDING_REVIEW`
 
 ## 8. Integration queue
 
@@ -208,7 +209,7 @@ For every candidate:
 
 Do not hold a large integration train. The candidate high-water mark is deliberately small.
 
-The normal integration command is `tools/recovery_state.py integrate --id ... --owner ...`. It acquires the runtime lock, rechecks the exact reviewed lane HEAD/base and performs a **fast-forward-only** update of canonical `main-v2`; it never cherry-picks a semantically different tree. After canonical advances, use `sync-lane --lane recovery/...` on idle lanes before their next claim. On interruption use `recover-integration`: it completes an already-landed reviewed candidate, returns an untouched canonical to READY, or fails closed if state is ambiguous.
+The normal integration command is `tools/recovery_state.py integrate --id ... --owner ...`. It acquires the runtime lock, rechecks the exact reviewed lane HEAD/base and performs a **fast-forward-only** update of canonical `main-v2`; it never cherry-picks a semantically different tree. A Git reference-transaction hook also denies direct `main-v2` movement unless the integration command presents the runtime capability. After canonical advances, use `sync-lane --lane recovery/...` on idle lanes before their next claim. On interruption use `recover-integration`: it completes an already-landed reviewed candidate, returns an untouched canonical to READY, or fails closed if state is ambiguous.
 
 ## 9. Centralized heavy validation
 
@@ -230,6 +231,8 @@ run judge once
 ## 10. Repeated failure means process/rule repair
 
 If the same defect pattern appears more than twice, stop fixing instances independently. Update the appropriate architectural rule/test/helper and repair the class of error. The system must get smarter as it runs; it must not create a new branch family for a repeated mistake.
+
+The optimizer loop has a machine-enforced circuit breaker: after three failed candidate cycles on one failure, further `claim` attempts are rejected until `tools/recovery_state.py strategy-review` records an independent root-cause diagnosis and a materially new approach.
 
 ## 11. Today-mode / Phase-1 completion
 

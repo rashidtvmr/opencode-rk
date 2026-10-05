@@ -154,7 +154,7 @@
       "P2": 1,
       "P3": 1
     },
-    "reviewDisagreement": "third_independent_evaluator_or_reopen_failure",
+    "reviewDisagreement": "any_negative_verdict_requires_new_candidate; third evaluator may diagnose but cannot override a rejection",
     "securityOrPermissionChangeRequiresSecurityEvaluator": true,
     "optimizerMayNotMarkOwnCandidateAccepted": true,
     "protectedEvaluatorPaths": [
@@ -162,7 +162,6 @@
       "docs/PHASE1_ACCEPTANCE.md",
       "recovery/failures.json",
       "recovery/phase1-gates.json",
-      "tools/convergence_gate.py",
       "tools/phase1_judge.py",
       "tools/recovery_guard.py",
       "tools/recovery_state.py",
@@ -184,7 +183,13 @@
       "crates/providers",
       "crates/cli/src/daemon_client.rs",
       "crates/cli/src/app_start.rs"
-    ]
+    ],
+    "evaluatorSensitivePaths": [
+      "tools/convergence_gate.py",
+      "tests/e2e/native_second_client.py"
+    ],
+    "evaluatorChangeRequiresTestEvaluator": true,
+    "evaluatorChangeMinimumApprovals": 2
   },
   "activationPolicy": {
     "oldControllersAndMergeWavesMustBeStopped": true,
@@ -217,5 +222,10 @@
       "EVIDENCE_ONLY",
       "CONFLICTING_IMPL_PRESERVED"
     ]
+  },
+  "optimizerPolicy": {
+    "maxFailedCandidateCyclesBeforeStrategyReview": 3,
+    "strategyReviewRequiresIndependentEvaluator": true,
+    "strategyReviewMustRecordDiagnosisAndNewApproach": true
   }
 }

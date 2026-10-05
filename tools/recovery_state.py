@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import secrets
 import shlex
 import subprocess
 import sys
@@ -65,6 +66,7 @@ def state_paths(cfg: dict) -> dict[str, pathlib.Path]:
         "salvage": base / "salvage-index.json",
         "policy": base / "policy.json",
         "ref_policy": base / "ref-policy.json",
+        "canonical_token": base / "canonical-write.token",
         "backup": base / "last-good.json",
         "lock": base / "state.lock",
         "integration_lock": base / "integration.lock",
@@ -161,10 +163,15 @@ def build_runtime_policy(cfg: dict, sha: str, paths: dict[str, pathlib.Path]) ->
     if not isinstance(frozen, dict) or not frozen:
         raise RuntimeError("legacy snapshot has no frozen refs")
     mutable = list(cfg.get("fixedMutableBranches", []))
+    canonical_token = secrets.token_hex(32)
+    paths["canonical_token"].write_text(canonical_token + "\n", encoding="utf-8")
+    paths["canonical_token"].chmod(0o600)
     ref_policy = {
         "schemaVersion": 1,
         "activationSha": sha,
         "mutableHeads": mutable,
+        "canonicalHead": cfg["canonicalBranch"],
+        "canonicalWriteTokenSha256": sha256_bytes(canonical_token.encode()),
         "frozenHeads": frozen,
         "protectedPaths": cfg.get("evaluationPolicy", {}).get("protectedEvaluatorPaths", []),
     }
@@ -496,6 +503,11 @@ def cmd_claim(cfg: dict, args: argparse.Namespace) -> int:
         row = failure_by_id(failures, args.id)
         if row.get("status") not in {"OPEN", "UNPROVEN"}:
             raise RuntimeError(f"{args.id} is {row.get('status')}, not OPEN/UNPROVEN")
+        if row.get("strategyReviewRequired"):
+            raise RuntimeError(
+                f"{args.id} reached the failed-candidate circuit breaker; "
+                "run strategy-review with an independent evaluator before claiming it again"
+            )
         lanes = set(cfg.get("executionLanes", []))
         if args.lane not in lanes:
             raise RuntimeError(f"lane {args.lane!r} is not an execution lane")
@@ -623,14 +635,59 @@ def cmd_preverify(cfg: dict, args: argparse.Namespace) -> int:
         if row.get("status") != "CANDIDATE":
             raise RuntimeError(f"{args.id} must be CANDIDATE")
         candidate = row.get("candidateSha")
+        current_reviews = [
+            r
+            for r in row.get("reviews", [])
+            if r.get("candidateSha") == candidate
+        ]
+        negative = [
+            r
+            for r in current_reviews
+            if r.get("verdict") in {"REJECT", "NEEDS_FIX"}
+        ]
+        if negative:
+            reviewers = sorted(str(r.get("reviewer")) for r in negative)
+            raise RuntimeError(
+                f"{args.id} has unresolved negative evaluator verdicts from {reviewers}; "
+                "reopen the failure, produce a new candidate SHA, and review again"
+            )
         approvals = {
             r.get("reviewer")
-            for r in row.get("reviews", [])
+            for r in current_reviews
             if r.get("verdict") == "APPROVE" and r.get("candidateSha") == candidate
         }
         need = required_approvals(cfg, row)
+        evaluator_sensitive = cfg.get("evaluationPolicy", {}).get(
+            "evaluatorSensitivePaths", []
+        )
+        evaluator_change = any(
+            any(path_within(str(changed), prefix) for prefix in evaluator_sensitive)
+            for changed in row.get("changedPaths", [])
+        )
+        if evaluator_change:
+            need = max(
+                need,
+                int(
+                    cfg.get("evaluationPolicy", {}).get(
+                        "evaluatorChangeMinimumApprovals", 2
+                    )
+                ),
+            )
         if len(approvals) < need:
             raise RuntimeError(f"{args.id} needs {need} independent approvals; has {len(approvals)}")
+        if evaluator_change and cfg.get("evaluationPolicy", {}).get(
+            "evaluatorChangeRequiresTestEvaluator", True
+        ):
+            test_ok = any(
+                r.get("verdict") == "APPROVE"
+                and r.get("role") == "test"
+                and r.get("candidateSha") == candidate
+                for r in row.get("reviews", [])
+            )
+            if not test_ok:
+                raise RuntimeError(
+                    "evaluator/judge change requires an approving independent test evaluator"
+                )
         sensitive = cfg.get("evaluationPolicy", {}).get("securitySensitivePaths", [])
         security_change = any(
             any(path_within(str(changed), prefix) for prefix in sensitive)
@@ -691,6 +748,26 @@ def cmd_reopen(cfg: dict, args: argparse.Namespace) -> int:
         meta, failures, gates, salvage, paths = require_state(cfg)
         row = failure_by_id(failures, args.id)
         previous = row.get("status")
+        last_owner = row.get("owner")
+        counted_states = {
+            "CANDIDATE",
+            "PREVERIFIED",
+            "INTEGRATION_READY",
+            "INTEGRATING",
+            "INTEGRATED",
+        }
+        if previous in counted_states:
+            cycles = int(row.get("failedCandidateCyclesSinceReview", 0)) + 1
+            row["failedCandidateCyclesSinceReview"] = cycles
+            limit = int(
+                cfg.get("optimizerPolicy", {}).get(
+                    "maxFailedCandidateCyclesBeforeStrategyReview", 3
+                )
+            )
+            if cycles >= limit:
+                row["strategyReviewRequired"] = True
+        if last_owner:
+            row["lastOwner"] = last_owner
         if previous == "INTEGRATING" and paths["integration_lock"].is_file():
             lock_data = load_json(paths["integration_lock"])
             if lock_data.get("failure") == args.id:
@@ -718,6 +795,42 @@ def cmd_reopen(cfg: dict, args: argparse.Namespace) -> int:
         row["lastState"] = previous
         save_all(meta, failures, gates, salvage, paths)
     print(f"REOPENED {args.id} from={previous}")
+    return 0
+
+
+def cmd_strategy_review(cfg: dict, args: argparse.Namespace) -> int:
+    meta, failures, gates, salvage, paths = require_state(cfg)
+    with locked(paths["lock"]):
+        meta, failures, gates, salvage, paths = require_state(cfg)
+        row = failure_by_id(failures, args.id)
+        if row.get("status") not in {"OPEN", "UNPROVEN"}:
+            raise RuntimeError("strategy-review requires an OPEN/UNPROVEN failure")
+        if not row.get("strategyReviewRequired"):
+            raise RuntimeError("strategy-review is not required for this failure")
+        if (
+            cfg.get("optimizerPolicy", {}).get(
+                "strategyReviewRequiresIndependentEvaluator", True
+            )
+            and args.reviewer == row.get("lastOwner")
+        ):
+            raise RuntimeError(
+                "strategy reviewer must be independent from the last candidate owner"
+            )
+        if not args.diagnosis.strip() or not args.new_approach.strip():
+            raise RuntimeError("strategy review requires diagnosis and a new approach")
+        row.setdefault("strategyReviews", []).append(
+            {
+                "reviewer": args.reviewer,
+                "diagnosis": args.diagnosis,
+                "newApproach": args.new_approach,
+                "at": now(),
+            }
+        )
+        row["strategyReviewRequired"] = False
+        row["failedCandidateCyclesSinceReview"] = 0
+        row["lastStrategyReviewAt"] = now()
+        save_all(meta, failures, gates, salvage, paths)
+    print(f"STRATEGY REVIEWED {args.id} reviewer={args.reviewer}")
     return 0
 
 
@@ -868,12 +981,13 @@ def cmd_observe_judge(cfg: dict, args: argparse.Namespace) -> int:
     checks = {str(row.get("name")): row for row in result.get("checks", [])}
     gate_results = result.get("gateResults", {})
     failed_checks: dict[str, set[str]] = {}
+    artifact_mode = result.get("artifactMode") is True
     for gate_id, gate in gate_results.items():
-        for check in gate.get("missingChecks", []):
-            failed_checks.setdefault(str(check), set()).add(str(gate_id))
+        if artifact_mode:
+            for check in gate.get("missingChecks", []):
+                failed_checks.setdefault(str(check), set()).add(str(gate_id))
         for check in gate.get("failedChecks", []):
             failed_checks.setdefault(str(check), set()).add(str(gate_id))
-    artifact_mode = result.get("artifactMode") is True
     all_installed_pass = artifact_mode and all(
         gate.get("status") == "PASS" for gate in gate_results.values()
     )
@@ -1009,8 +1123,13 @@ def cmd_integrate(cfg: dict, args: argparse.Namespace) -> int:
     row = failure_by_id(failures, args.id)
     candidate = str(row.get("candidateSha"))
     try:
+        ref_env = dict(os.environ)
+        ref_env["OC2_RECOVERY_CANONICAL_TOKEN"] = paths["canonical_token"].read_text(
+            encoding="utf-8"
+        ).strip()
         subprocess.check_call(
-            ["git", "-C", str(canonical_root), "merge", "--ff-only", candidate]
+            ["git", "-C", str(canonical_root), "merge", "--ff-only", candidate],
+            env=ref_env,
         )
         after = main_sha(cfg)
         if after != candidate:
@@ -1153,6 +1272,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--id", required=True)
     p.add_argument("--reason", required=True)
 
+    p = sub.add_parser("strategy-review")
+    p.add_argument("--id", required=True)
+    p.add_argument("--reviewer", required=True)
+    p.add_argument("--diagnosis", required=True)
+    p.add_argument("--new-approach", required=True)
+
     p = sub.add_parser("begin-integration")
     p.add_argument("--id", required=True)
     p.add_argument("--owner", required=True)
@@ -1215,6 +1340,8 @@ def main() -> int:
             return cmd_ready(cfg, args)
         if args.cmd == "reopen":
             return cmd_reopen(cfg, args)
+        if args.cmd == "strategy-review":
+            return cmd_strategy_review(cfg, args)
         if args.cmd == "begin-integration":
             return cmd_begin_integration(cfg, args)
         if args.cmd == "integrate":

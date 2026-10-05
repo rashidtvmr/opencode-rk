@@ -38,17 +38,20 @@ Recovery Mode overrides older merge-wave, Ralph-queue, branch-inventory and heri
 2. Independent evaluator(s) review the diff **without inheriting the author's justification first**.
 3. P0/P1 require two independent approvals; P2/P3 require one.
 4. A security/permission-path change additionally requires an approving security evaluator.
-5. Rejection/needs-fix returns to the same failure and same lane; no repair/review branch is created.
+5. **Any** `REJECT`/`NEEDS_FIX` blocks preverification. Reopen the same failure, keep the same fixed lane, produce a new candidate SHA, and review that SHA again; no repair/review branch is created.
 6. After optimizer changes, reviewers evaluate the new candidate SHA again; old approvals do not carry forward.
-7. Disagreement goes to a third independent evaluator or reopens the failure.
-8. The evaluator is frozen at Recovery activation: ordinary product candidates may not change Recovery controller files or the semantic Phase-1 judge/tests listed in `config/recovery-mode.json`. If the referee itself is genuinely wrong, stop Recovery Mode and perform an explicit human-authorized controller reactivation; never let the optimizer rewrite its judge.
-8. The optimizer/author may never mark its own candidate accepted.
+7. A third evaluator may diagnose a disagreement, but a negative verdict can never be outvoted on the same candidate SHA.
+8. Recovery controller files, the Phase-1 contract/gate definitions, the judge engine and existing semantic installed-product tests are frozen at activation. The explicitly listed evaluator-sensitive extension points may change only with at least two independent approvals including a `test` evaluator.
+9. The optimizer/author may never mark its own candidate accepted.
+10. After three failed candidate cycles for the same failure, claiming is blocked until an independent evaluator records a `strategy-review` diagnosis and a materially different approach.
 
 Use `tools/recovery_state.py` for lifecycle transitions. The normal product path is `claim -> candidate -> review -> preverify -> ready -> integrate`, followed by an installed judge and `observe-judge`/acceptance. `integrate` is fast-forward-only and owns the single integration lock. Use `sync-lane` after canonical advances; use `recover-integration` after a crash instead of inventing a current-base/repair branch. `recover-state` restores the last consistent runtime revision after an interrupted multi-file state write.
 
 Legacy search is also state-machine controlled: `salvage-query`, `salvage-status`, and `salvage-dispose`. A query is tied to one current failure, scans the entire frozen snapshot read-only, materializes at most eight distinct tip candidates, and blocks integration until every materialized candidate has a terminal disposition. The old convergence salvage inventory is evidence only and cannot be imported as a new queue.
 
 Every judge result that is meant to drive work must be ingested with `recovery_state.py observe-judge` (or `phase1_judge.py --observe-state`). Never translate judge output into ad-hoc tasks by hand.
+
+Direct canonical writes are forbidden after activation. The Git reference hook requires a runtime capability held by `recovery_state.py integrate`; do not use raw Git to advance `main-v2`.
 
 ### Activation / restart safety
 
@@ -146,7 +149,7 @@ The pinned OpenCode commit is recorded in `sources/upstream.lock.json`. Use the 
 
 Pre-V2 branches/worktrees are valuable evidence. Never delete, force-push, reset or prune them during convergence.
 
-Legacy branches receive dispositions only when a current product failure requires inspecting that lineage. Do not create hundreds of disposition tasks merely to complete an inventory. Allowed dispositions include `ALREADY_PRESENT`, `SALVAGED_PRODUCT`, `SALVAGED_TEST`, `SUPERSEDED_BY <ref>`, `DUPLICATE`, `PROCESS_ONLY`, `EVIDENCE_ONLY`, `CONFLICTING_IMPL_PRESERVED`, and `PENDING_REVIEW`.
+Legacy branches receive dispositions only when a current product failure requires inspecting that lineage. Do not create hundreds of disposition tasks merely to complete an inventory. Terminal dispositions are `ALREADY_PRESENT`, `SALVAGED_PRODUCT`, `SALVAGED_TEST`, `SUPERSEDED_BY <ref>`, `DUPLICATE`, `PROCESS_ONLY`, `EVIDENCE_ONLY`, and `CONFLICTING_IMPL_PRESERVED`. There is no durable `PENDING_REVIEW` salvage queue.
 
 Useful code/tests are integrated selectively. Superseded/process-only branches stay preserved in Git ancestry/archive refs without reintroducing obsolete file contents.
 

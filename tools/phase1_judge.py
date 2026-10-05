@@ -6,6 +6,16 @@ from __future__ import annotations
 import argparse, fcntl, json, os, pathlib, subprocess, sys, tempfile, time
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
+UNRESOLVED_STATES = {
+    "UNPROVEN",
+    "OPEN",
+    "CLAIMED",
+    "CANDIDATE",
+    "PREVERIFIED",
+    "INTEGRATION_READY",
+    "INTEGRATING",
+    "INTEGRATED",
+}
 
 
 def git(*args):
@@ -23,6 +33,18 @@ def run(name, argv, env=None):
     started = time.monotonic()
     proc = subprocess.run(argv, cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env)
     return {"name": name, "argv": argv, "exit": proc.returncode, "durationSeconds": round(time.monotonic()-started, 3), "output": proc.stdout[-20000:]}
+
+
+def runtime_unresolved_ids():
+    path = common_git_dir() / "recovery-state" / "failures.json"
+    if not path.is_file():
+        return ["<runtime-state-not-initialized>"]
+    state = json.loads(path.read_text(encoding="utf-8"))
+    return [
+        row.get("id")
+        for row in state.get("failures", [])
+        if row.get("status") in UNRESOLVED_STATES
+    ]
 
 
 def main():
@@ -90,6 +112,34 @@ def main():
         checks.append(run("native_escape_installed", [py, "tests/e2e/native_escape_input.py", *common, "--artifact-dir", str(evidence/"escape")]))
         checks.append(run("native_resize_installed", [py, "tests/e2e/native_resize.py", *common, "--artifact-dir", str(evidence/"resize")]))
         checks.append(run("native_paste_reset_installed", [py, "tests/e2e/native_bracketed_paste.py", *common, "--artifact-dir", str(evidence/"paste-reset")]))
+        second_client_probe = ROOT / "tests" / "e2e" / "native_second_client.py"
+        if second_client_probe.is_file():
+            checks.append(
+                run(
+                    "native_second_client_installed",
+                    [
+                        py,
+                        str(second_client_probe),
+                        *common,
+                        "--artifact-dir",
+                        str(evidence / "second-client"),
+                    ],
+                )
+            )
+        else:
+            checks.append(
+                {
+                    "name": "native_second_client_installed",
+                    "argv": [py, str(second_client_probe)],
+                    "exit": 127,
+                    "durationSeconds": 0.0,
+                    "output": (
+                        "required Phase-1 installed second-client probe is missing; "
+                        "implement tests/e2e/native_second_client.py without weakening "
+                        "recovery/phase1-gates.json"
+                    ),
+                }
+            )
 
         installed_env = dict(os.environ)
         installed_env.update(
@@ -145,20 +195,7 @@ def main():
         "checks": checks,
         "gateResults": gate_results,
     }
-    runtime_failures_path = common_git_dir() / "recovery-state" / "failures.json"
-    if runtime_failures_path.is_file():
-        runtime_failures = json.loads(runtime_failures_path.read_text(encoding="utf-8"))
-        unresolved_states = {
-            "UNPROVEN", "OPEN", "CLAIMED", "CANDIDATE", "PREVERIFIED",
-            "INTEGRATION_READY", "INTEGRATING", "INTEGRATED",
-        }
-        runtime_unresolved = [
-            row.get("id")
-            for row in runtime_failures.get("failures", [])
-            if row.get("status") in unresolved_states
-        ]
-    else:
-        runtime_unresolved = ["<runtime-state-not-initialized>"]
+    runtime_unresolved = runtime_unresolved_ids()
     result["runtimeUnresolvedFailures"] = runtime_unresolved
     checks_pass = all(c["exit"] == 0 for c in checks)
     gates_pass = all(g["status"] == "PASS" for g in gate_results.values())
@@ -182,9 +219,7 @@ def main():
     result["canonicalEvidence"] = str(canonical_evidence)
     rendered = json.dumps(result, indent=2) + "\n"
     canonical_evidence.write_text(rendered, encoding="utf-8")
-    if args.output:
-        out = pathlib.Path(args.output); out = out if out.is_absolute() else ROOT/out; out.parent.mkdir(parents=True, exist_ok=True); out.write_text(rendered, encoding="utf-8")
-    if args.observe_state:
+    if args.observe_state or args.sync_state:
         observed = subprocess.run(
             [py, "tools/recovery_state.py", "observe-judge", "--evidence", str(canonical_evidence)],
             cwd=ROOT,
@@ -195,6 +230,19 @@ def main():
         if observed.returncode != 0:
             print(observed.stdout, file=sys.stderr)
             return observed.returncode
+        runtime_unresolved = runtime_unresolved_ids()
+        result["runtimeUnresolvedFailures"] = runtime_unresolved
+        result["acceptanceEligible"] = bool(
+            artifact_mode
+            and result["status"] == "PASS"
+            and branch == "main-v2"
+            and head_sha == canonical_sha
+            and clean
+            and gates_pass
+            and not runtime_unresolved
+        )
+        rendered = json.dumps(result, indent=2) + "\n"
+        canonical_evidence.write_text(rendered, encoding="utf-8")
     if args.sync_state:
         if not result["acceptanceEligible"]:
             parser.error("--sync-state requires an acceptance-eligible installed-artifact PASS")
@@ -208,6 +256,8 @@ def main():
         if sync.returncode != 0:
             print(sync.stdout, file=sys.stderr)
             return sync.returncode
+    if args.output:
+        out = pathlib.Path(args.output); out = out if out.is_absolute() else ROOT/out; out.parent.mkdir(parents=True, exist_ok=True); out.write_text(rendered, encoding="utf-8")
     print(rendered, end="")
     return 0 if result["status"] in {"PASS", "PRECHECK_PASS"} else 1
 
