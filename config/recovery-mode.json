@@ -113,7 +113,7 @@
     "recovery/platform"
   ],
   "approvedRecoveryWorktrees": {
-    "main-v2": "/Users/mymac/Projects/opencode-rk-main-v2",
+    "main-v2": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
     "recovery/core": "/Users/mymac/Projects/opencode-rk-recovery-lanes/core",
     "recovery/runtime": "/Users/mymac/Projects/opencode-rk-recovery-lanes/runtime",
     "recovery/ui": "/Users/mymac/Projects/opencode-rk-recovery-lanes/ui",
