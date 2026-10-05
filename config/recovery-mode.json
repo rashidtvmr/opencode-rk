@@ -1,31 +1,55 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
   "status": "ACTIVE",
   "mode": "phase1-product-failure-burndown",
   "canonicalBranch": "main-v2",
   "bootstrapBranch": "controller/recovery-mode-v1",
   "phase1Contract": "docs/PHASE1_ACCEPTANCE.md",
-  "failureQueue": "recovery/failures.json",
-  "phase1GateState": "recovery/phase1-gates.json",
+  "trackedFailureSeed": "recovery/failures.json",
+  "trackedGateDefinitions": "recovery/phase1-gates.json",
+  "trackedSalvageTemplate": "recovery/salvage-index.json",
+  "runtimeStateLocation": "git-common-dir/recovery-state",
+  "runtimeEvidenceLocation": "git-common-dir/recovery-evidence",
+  "failureQueue": "git-common-dir/recovery-state/failures.json",
+  "phase1GateState": "git-common-dir/recovery-state/gates.json",
   "legacySnapshot": "recovery/legacy-snapshot.json",
-  "salvageIndex": "recovery/salvage-index.json",
+  "salvageIndex": "git-common-dir/recovery-state/salvage-index.json",
   "branchInventoryIsExecutionQueue": false,
   "bulkLegacyMergeAllowed": false,
   "heritageMergeRequiredForPhase1": false,
   "legacyRefsMutable": false,
   "fixedMutableBranches": [
     "main-v2",
-    "controller/recovery-mode-v1",
     "recovery/core",
     "recovery/runtime",
     "recovery/ui",
     "recovery/platform"
   ],
   "lanePathIntent": {
-    "recovery/core": ["crates/cli", "crates/server", "crates/providers", "crates/catalog"],
-    "recovery/runtime": ["crates/server", "crates/sessions", "crates/tools", "crates/security", "crates/storage"],
-    "recovery/ui": ["crates/cli", "crates/opentui-bridge", "tests/e2e"],
-    "recovery/platform": ["release", "scripts", "tests", "tools"]
+    "recovery/core": [
+      "crates/cli",
+      "crates/server",
+      "crates/providers",
+      "crates/catalog"
+    ],
+    "recovery/runtime": [
+      "crates/server",
+      "crates/sessions",
+      "crates/tools",
+      "crates/security",
+      "crates/storage"
+    ],
+    "recovery/ui": [
+      "crates/cli",
+      "crates/opentui-bridge",
+      "tests/e2e"
+    ],
+    "recovery/platform": [
+      "release",
+      "scripts",
+      "tests",
+      "tools"
+    ]
   },
   "maxFixedRecoveryLanes": 4,
   "maxVerifiedUnintegratedCandidates": 4,
@@ -55,7 +79,10 @@
     ],
     "candidateHighWaterBehavior": "stop_new_implementation_and_shift_to_review_integration_salvage",
     "failedPreparedCandidate": "eject_and_reopen_failure",
-    "createRepairDescendantBranch": false
+    "createRepairDescendantBranch": false,
+    "stateMutationsMustUseTool": true,
+    "trackedSeedsAreImmutable": true,
+    "runtimeStateOutsideTrackedHistory": true
   },
   "acceptancePolicy": {
     "exactIntegratedShaRequired": true,
@@ -63,12 +90,64 @@
     "candidateGreenIsAcceptance": false,
     "claimsCompletedIsAcceptance": false,
     "branchMergedIsAcceptance": false,
-    "phase1FailureCountMustBeZero": true
+    "phase1FailureCountMustBeZero": true,
+    "artifactSourceShaMustEqualCurrentMainV2": true,
+    "allPhase1GatesMustPassOnSameSha": true,
+    "quickJudgeCannotAcceptRelease": true,
+    "trackedStateCommitMayNotCreateAcceptance": true
   },
   "resourcePolicy": {
     "cargoBuildJobs": 2,
     "rustTestThreads": 2,
     "preferFocusedBeforeWorkspace": true,
     "centralizeHeavyValidation": true
+  },
+  "bootstrapMutable": false,
+  "requireCanonicalRecoveryConfig": true,
+  "rejectUnexpectedLocalBranches": true,
+  "rejectUnexpectedWorktrees": true,
+  "executionLanes": [
+    "recovery/core",
+    "recovery/runtime",
+    "recovery/ui",
+    "recovery/platform"
+  ],
+  "approvedRecoveryWorktrees": {
+    "main-v2": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+    "recovery/core": "/Users/mymac/Projects/opencode-rk-recovery-lanes/core",
+    "recovery/runtime": "/Users/mymac/Projects/opencode-rk-recovery-lanes/runtime",
+    "recovery/ui": "/Users/mymac/Projects/opencode-rk-recovery-lanes/ui",
+    "recovery/platform": "/Users/mymac/Projects/opencode-rk-recovery-lanes/platform"
+  },
+  "lanePolicy": {
+    "oneActiveFailurePerLane": true,
+    "claimRequiresLaneAtCurrentMainV2": true,
+    "maxAheadCommits": 6,
+    "resetOrFastForwardLaneAfterDisposition": true,
+    "rebaseOrReapplyBeforeIntegration": true,
+    "overlappingPathGrantsForbidden": true
+  },
+  "integrationLock": ".git/recovery-integration.lock",
+  "stateLock": ".git/recovery-state.lock",
+  "stateMutationTool": "tools/recovery_state.py",
+  "evaluationPolicy": {
+    "method": "evaluator-optimizer",
+    "authorAndReviewerMustBeIndependent": true,
+    "blindDiffFirstReview": true,
+    "requiredApprovalsByPriority": {
+      "P0": 2,
+      "P1": 2,
+      "P2": 1,
+      "P3": 1
+    },
+    "reviewDisagreement": "third_independent_evaluator_or_reopen_failure",
+    "securityOrPermissionChangeRequiresSecurityEvaluator": true,
+    "optimizerMayNotMarkOwnCandidateAccepted": true
+  },
+  "activationPolicy": {
+    "oldControllersAndMergeWavesMustBeStopped": true,
+    "canonicalMustContainRecoveryModeBeforeProductClaims": true,
+    "fixedLaneBranchesMustStartAtCanonical": true,
+    "unexpectedBranchOrWorktreeCreationBlocks": true
   }
 }

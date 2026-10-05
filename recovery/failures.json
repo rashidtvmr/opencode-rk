@@ -1,5 +1,8 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "kind": "tracked-failure-seed",
+  "runtimeState": "git-common-dir/recovery-state/failures.json",
+  "note": "Immutable seed only. Operational claims/reviews/transitions are written atomically by tools/recovery_state.py outside tracked Git history.",
   "baseSha": "7256f93d1ccacdb0d9d878b0824239d2c1a48001",
   "generatedFrom": [
     "python3 tools/convergence_gate.py",
@@ -32,24 +35,36 @@
       "nextAction": "Inspect current default_tui/startup/provider fixtures and pinned upstream; salvage only if a legacy test/implementation is stronger, otherwise write the missing integrated E2E spine."
     },
     {
+      "id": "RECOVERY-DURABILITY-001",
+      "priority": "P0",
+      "gate": "P1-DURABILITY",
+      "status": "OPEN",
+      "kind": "unproven-gate",
+      "title": "Installed native second-client overlap/no-duplicate-work probe is missing",
+      "evidence": "Phase-1 requires a second local client to attach during in-flight work without starting a second daemon or duplicating provider/tool execution. Existing source tests and tests/e2e/ubuntu_installed_golden.py contain useful logic, but the macOS installed-artifact judge has no native_second_client_installed check yet.",
+      "nextAction": "Create a platform-neutral installed-artifact second-client probe, preferably by extracting/adapting the proven overlap logic from tests/e2e/ubuntu_installed_golden.py. Add it to tools/phase1_judge.py as native_second_client_installed; do not weaken P1-DURABILITY to make the gate pass."
+    },
+    {
       "id": "RECOVERY-LEDGER-001",
       "priority": "P2",
       "gate": "P1-RELEASE",
-      "status": "OPEN",
+      "status": "SUPERSEDED",
       "kind": "harness-ledger",
       "title": "AUD-017 is marked completed while its own note admits no acceptance",
       "evidence": "python3 tools/convergence_gate.py: LEDGER: AUD-017 is completed but its own note admits 'no acceptance'",
-      "nextAction": "Correct the historical claim/state without using it as product acceptance; preserve the evidence and let executable Phase-1 gates decide completion."
+      "nextAction": "No product action. Historical claims are evidence only under Recovery Mode.",
+      "supersededReason": "Legacy completion-ledger consistency is no longer a Phase-1 product acceptance signal. tools/convergence_gate.py --structure-only excludes this historical bookkeeping."
     },
     {
       "id": "RECOVERY-LEDGER-002",
       "priority": "P2",
       "gate": "P1-RELEASE",
-      "status": "OPEN",
+      "status": "SUPERSEDED",
       "kind": "harness-ledger",
       "title": "AUD-020 is marked completed while its own note admits no acceptance",
       "evidence": "python3 tools/convergence_gate.py: LEDGER: AUD-020 is completed but its own note admits 'no acceptance'",
-      "nextAction": "Correct the historical claim/state without using it as product acceptance; preserve the evidence and let executable Phase-1 gates decide completion."
+      "nextAction": "No product action. Historical claims are evidence only under Recovery Mode.",
+      "supersededReason": "Legacy completion-ledger consistency is no longer a Phase-1 product acceptance signal. tools/convergence_gate.py --structure-only excludes this historical bookkeeping."
     }
   ]
 }

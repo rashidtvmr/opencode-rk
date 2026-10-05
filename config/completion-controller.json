@@ -30,7 +30,8 @@
   "claimsCompletedIsAcceptance": false,
   "requireIntegratedParentJourney": true,
   "recoveryModeConfig": "config/recovery-mode.json",
-  "recoveryFailureQueue": "recovery/failures.json",
+  "recoveryFailureQueue": "git-common-dir/recovery-state/failures.json",
+  "recoveryStateMutationTool": "tools/recovery_state.py",
   "legacyBranchInventorySchedulingAllowed": false,
   "persistentSubagentBranchCreationAllowed": false,
   "persistentSubagentWorktreeCreationAllowed": false

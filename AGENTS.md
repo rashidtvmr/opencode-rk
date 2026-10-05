@@ -9,7 +9,7 @@ Read these first, in this order, before changing product code:
 1. `docs/RECOVERY_MODE.md`;
 2. `docs/PHASE1_ACCEPTANCE.md`;
 3. `config/recovery-mode.json`;
-4. `recovery/failures.json`;
+4. `tools/recovery_state.py` and `recovery/failures.json` (the tracked file is only the immutable seed);
 5. `docs/CONVERGENCE.md` and `docs/AGENT_STRATEGY_V2.md`;
 6. `docs/TDD.md` and `docs/SECURITY.md`.
 
@@ -27,6 +27,30 @@ Recovery Mode overrides older merge-wave, Ralph-queue, branch-inventory and heri
 - Legacy refs are frozen by `recovery/legacy-snapshot.json`. Never reset, force-push, delete or advance them.
 - `ralph.json`, completion claims and legacy task inventories are requirement/evidence databases, not schedulers.
 - Product progress means the count of failing/unproven Phase-1 behaviors decreases on the exact integrated SHA.
+- Mutable queue/gate/salvage state lives under the shared Git common directory (`recovery-state/`), **outside tracked history**. Never hand-edit operational state or commit acceptance bookkeeping; use `tools/recovery_state.py`.
+- Before any product claim or implementation delegation, `python3 tools/recovery_guard.py` must be GREEN from the activated canonical Recovery Mode. A bootstrap/controller branch is never a production execution lane.
+- A fixed recovery lane owns at most one active failure, starts from the current `main-v2`, has an explicit non-overlapping path grant, and is reset/fast-forwarded after disposition. If `main-v2` moves, stale candidates are reopened/reapplied rather than turned into a branch family.
+
+### Evaluator-optimizer loop (mandatory)
+
+1. The implementer/optimizer produces a candidate on the assigned fixed lane.
+2. Independent evaluator(s) review the diff **without inheriting the author's justification first**.
+3. P0/P1 require two independent approvals; P2/P3 require one.
+4. A security/permission-path change additionally requires an approving security evaluator.
+5. Rejection/needs-fix returns to the same failure and same lane; no repair/review branch is created.
+6. After optimizer changes, reviewers evaluate the new candidate SHA again; old approvals do not carry forward.
+7. Disagreement goes to a third independent evaluator or reopens the failure.
+8. The optimizer/author may never mark its own candidate accepted.
+
+Use `tools/recovery_state.py claim/candidate/review/preverify/ready/begin-integration/accept` for lifecycle transitions. The tool owns state locks, path leases, independent-review counts and the single integration lock.
+
+### Activation / restart safety
+
+- Old merge-wave/controller sessions must be stopped or treated as hostile writers before Recovery Mode starts.
+- Unexpected local branches or persistent worktrees are a hard guard failure.
+- Recovery Mode contracts must already be present on canonical `main-v2` before product work starts.
+- On agent restart/crash, do not infer state from prose/worklogs. Run `tools/recovery_state.py status` and `tools/recovery_guard.py`; inspect any integration lock before doing Git work.
+- Phase-1 judge evidence is written under the shared Git common directory (`recovery-evidence/<sha>/`), not committed. This prevents acceptance bookkeeping from changing the SHA it certifies.
 
 ### Subagents are allowed and encouraged
 
@@ -91,7 +115,7 @@ Forty agents may reason in parallel; forty Cargo builds or forty independent wri
 
 ## Acceptance lifecycle
 
-Use: `READY -> LEASED -> CANDIDATE -> PREVERIFIED -> INTEGRATION_READY -> INTEGRATING -> INTEGRATED -> ACCEPTED`.
+Use runtime lifecycle: `OPEN/UNPROVEN -> CLAIMED -> CANDIDATE -> PREVERIFIED -> INTEGRATION_READY -> INTEGRATING -> ACCEPTED`.
 
 Only `ACCEPTED` unlocks dependencies. `ACCEPTED` means the required gate passed on the **exact integrated revision**. Worker self-report, isolated GREEN, `claims.json completed`, worklog text, source presence or candidate GREEN is not acceptance.
 
@@ -115,7 +139,7 @@ The pinned OpenCode commit is recorded in `sources/upstream.lock.json`. Use the 
 
 Pre-V2 branches/worktrees are valuable evidence. Never delete, force-push, reset or prune them during convergence.
 
-Every legacy branch gets one disposition: `INTEGRATED_ANCESTOR`, `SALVAGE_PRODUCT`, `SALVAGE_TEST`, `SUPERSEDED_BY <ref>`, `PROCESS_ONLY`, `EVIDENCE_ONLY`, `CONFLICTING_IMPL_PRESERVED`, or `PENDING_REVIEW`.
+Legacy branches receive dispositions only when a current product failure requires inspecting that lineage. Do not create hundreds of disposition tasks merely to complete an inventory. Allowed dispositions include `ALREADY_PRESENT`, `SALVAGED_PRODUCT`, `SALVAGED_TEST`, `SUPERSEDED_BY <ref>`, `DUPLICATE`, `PROCESS_ONLY`, `EVIDENCE_ONLY`, `CONFLICTING_IMPL_PRESERVED`, and `PENDING_REVIEW`.
 
 Useful code/tests are integrated selectively. Superseded/process-only branches stay preserved in Git ancestry/archive refs without reintroducing obsolete file contents.
 

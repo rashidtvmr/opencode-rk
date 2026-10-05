@@ -62,6 +62,19 @@ controller/recovery-mode-v1  controller/docs bootstrap only
 
 The hundreds of pre-existing branches/worktrees remain frozen. They are not deleted and are not individually merged.
 
+### Activation barrier
+
+Recovery Mode is not considered active for product work merely because this document exists on a controller branch. Before the first claim:
+
+1. the Recovery Mode controller/contracts must be committed on canonical `main-v2`;
+2. the four fixed lane refs must point at that exact `main-v2` SHA;
+3. only the predeclared fixed lane worktrees may be added;
+4. `tools/recovery_state.py init` must initialize shared operational state;
+5. `python3 tools/recovery_guard.py` must be GREEN from `main-v2`;
+6. any old merge-wave/controller process that can still create branches/worktrees must be stopped or treated as a blocking hostile writer.
+
+Unexpected branch or persistent-worktree creation after activation is a fail-closed error, not merely a warning.
+
 ### Forbidden branch patterns during Recovery Mode
 
 Do not create new branches for states such as:
@@ -84,7 +97,9 @@ If a candidate needs repair after integration preparation, update/recreate the c
 
 ## 5. Failure queue is the scheduler
 
-`recovery/failures.json` is the active queue.
+`recovery/failures.json` is an **immutable tracked seed**, not the mutable queue. Mutable queue, gate and salvage state lives under Git's shared common directory in `recovery-state/` and is changed only through `tools/recovery_state.py`. Evidence lives beside it under `recovery-evidence/<sha>/`.
+
+This separation is mandatory: committing an `ACCEPTED` bookkeeping change would create a new Git SHA and invalidate the exact SHA that had just passed. Operational state therefore never participates in product history.
 
 Queue items must originate from one of these sources:
 
@@ -110,6 +125,8 @@ UNPROVEN/OPEN
 ```
 
 `ACCEPTED` means the required judge passed on the exact integrated `main-v2` SHA. Anything else is not done.
+
+Claims are atomic leases. `claim` requires one fixed lane at the current canonical SHA plus explicit path grants; overlapping path prefixes are rejected. The same lane cannot own two active failures. If canonical moves before integration, the candidate is stale and must be reopened/reapplied from the new canonical base.
 
 ## 6. Agent/subagent operating model
 
@@ -139,6 +156,12 @@ evidence
 commands/results
 security/semantic concerns
 ```
+
+### Evaluator-optimizer protocol
+
+Candidate generation and candidate judgment must remain independent. For P0/P1 work, two independent evaluators must approve the exact candidate SHA; P2/P3 require one. A security/permission change additionally requires a security-role evaluator. The first review is diff/evidence-first rather than author-rationale-first. A reviewer disagreement invokes a third evaluator or reopens the failure. Any optimizer change produces a new candidate SHA and invalidates prior approvals.
+
+Lifecycle changes must go through `tools/recovery_state.py`; do not hand-edit runtime JSON. The state tool serializes writers, checks path ownership, records candidate-SHA-specific reviews and enforces the candidate high-water mark.
 
 ## 7. Selective legacy salvage
 
@@ -185,6 +208,8 @@ For every candidate:
 
 Do not hold a large integration train. The candidate high-water mark is deliberately small.
 
+The single integration writer must acquire the runtime integration lock with `tools/recovery_state.py begin-integration`. Before that transition the tool rechecks that `main-v2` has not moved and that the reviewed candidate is still the fixed lane HEAD. A crash/stale integration must be reopened explicitly; never guess from worklog text or retry blindly. After a candidate is accepted/rejected, the fixed lane is reset/fast-forwarded back to current `main-v2` before another claim.
+
 ## 9. Centralized heavy validation
 
 At most one heavy workspace/build/E2E validation runs at once unless measured headroom proves otherwise. Agents should consume the resulting diagnostics rather than each independently launching full builds.
@@ -216,6 +241,8 @@ The project is Phase-1 ready only when:
 - terminal state is restored after normal exit, interruption and failure;
 - no acceptance depends on a legacy branch that is not represented in the integrated tree;
 - the failure queue has no Phase-1 `OPEN`, `CLAIMED`, `CANDIDATE`, `PREVERIFIED`, `INTEGRATION_READY`, `INTEGRATING` or `UNPROVEN` item.
+- the final installed-artifact judge was run from a clean `main-v2` worktree, its `build.json` source SHA equals current `main-v2`, and **all Phase-1 gates PASS in that one judge result on the same SHA**;
+- final judge evidence is stored outside tracked history under Git common-dir `recovery-evidence/<sha>/`; syncing runtime gate state must not create a new commit.
 
 Branch counts are irrelevant to completion.
 
@@ -224,13 +251,14 @@ Branch counts are irrelevant to completion.
 On startup:
 
 1. read `AGENTS.md`, this file, `docs/PHASE1_ACCEPTANCE.md`, `config/recovery-mode.json` and `recovery/failures.json`;
-2. run `python3 tools/recovery_guard.py`;
+2. run `python3 tools/recovery_state.py status` and `python3 tools/recovery_guard.py`;
 3. inspect the highest-priority non-accepted failure;
 4. spawn read-only/review/research subagents as useful;
 5. claim at most the failures that fit the fixed lanes and path grants;
 6. search legacy refs selectively for those failures;
 7. implement/preverify candidates without creating new persistent branch families;
 8. feed candidates through the integration writer;
-9. refresh the judge and repeat until Phase-1 failure count reaches zero.
+9. refresh the judge and repeat until Phase-1 failure count reaches zero;
+10. run the installed-artifact `tools/phase1_judge.py ... --sync-state` only on clean canonical `main-v2` to certify all Phase-1 gates on one SHA.
 
 If no failure exists but a Phase-1 gate is `UNPROVEN`, the next task is to create/run the executable probe for that gate, not to inspect random legacy branches.

@@ -1,42 +1,52 @@
 {
-  "schemaVersion": 1,
+  "schemaVersion": 2,
+  "kind": "tracked-gate-definitions",
+  "runtimeState": "git-common-dir/recovery-state/gates.json",
+  "note": "Tracked definitions are immutable during execution. ACCEPTED/acceptedSha/evidence live only in runtime state so bookkeeping cannot change the source SHA being judged.",
   "baseSha": "7256f93d1ccacdb0d9d878b0824239d2c1a48001",
   "scope": "local-native-macos-phase1",
   "gates": [
     {
       "id": "P1-STARTUP",
       "status": "UNPROVEN",
-      "requirement": "Bare launch starts/reuses exactly one authenticated daemon and enters the native path from a fresh HOME."
+      "requirement": "Bare launch starts/reuses exactly one authenticated daemon and enters the native path from a fresh HOME.",
+      "requiredChecks": ["recovery_guard", "convergence_structure", "native_provider_installed", "native_auth_control", "native_interactive_pty"]
     },
     {
       "id": "P1-PROVIDER",
       "status": "UNPROVEN",
-      "requirement": "Persisted/in-app provider configuration drives the actual outbound request and first streamed response."
+      "requirement": "Persisted/in-app provider configuration drives the actual outbound request and first streamed response.",
+      "requiredChecks": ["native_provider_installed"]
     },
     {
       "id": "P1-TOOL",
       "status": "UNPROVEN",
-      "requirement": "Provider tool call uses the real permission broker, executes the tool, persists typed metadata and continues the provider turn; denial is side-effect free."
+      "requirement": "Provider tool call uses the real permission broker, executes the tool, persists typed metadata and continues the provider turn; denial is side-effect free.",
+      "requiredChecks": ["native_stream_tool_installed", "security_all_targets"]
     },
     {
       "id": "P1-DURABILITY",
       "status": "UNPROVEN",
-      "requirement": "Second turn, restart/resume and second-client attachment preserve identical typed history without duplicate execution."
+      "requirement": "Second turn, restart/resume and second-client attachment preserve identical typed history without duplicate execution.",
+      "requiredChecks": ["native_stream_tool_installed", "native_second_client_installed"]
     },
     {
       "id": "P1-TUI",
       "status": "UNPROVEN",
-      "requirement": "Real native OpenTUI accepts raw input, streams redraws and restores the terminal after resize/suspend/interrupt/failure."
+      "requirement": "Real native OpenTUI accepts raw input, streams redraws and restores the terminal after resize/suspend/interrupt/failure.",
+      "requiredChecks": ["native_interactive_pty", "native_utf8_installed", "native_escape_installed", "native_resize_installed", "native_paste_reset_installed"]
     },
     {
       "id": "P1-SECURITY",
       "status": "UNPROVEN",
-      "requirement": "Protected paths, alias/symlink/hardlink escape, foreign/stale daemon identity and secret-output checks pass on the integrated product."
+      "requirement": "Protected paths, alias/symlink/hardlink escape, foreign/stale daemon identity and secret-output checks pass on the integrated product.",
+      "requiredChecks": ["native_auth_control", "native_stream_tool_installed", "security_all_targets"]
     },
     {
       "id": "P1-RELEASE",
       "status": "UNPROVEN",
-      "requirement": "A release-built local artifact passes the complete Phase-1 journey on one exact SHA from a fresh disposable HOME."
+      "requirement": "A release-built local artifact passes the complete Phase-1 journey on one exact SHA from a fresh disposable HOME.",
+      "requiredChecks": ["recovery_guard", "convergence_structure", "cargo_check_workspace_locked", "native_provider_installed", "native_stream_tool_installed", "native_second_client_installed", "native_utf8_installed", "native_escape_installed", "native_resize_installed", "native_paste_reset_installed", "native_interactive_pty", "native_auth_control", "security_all_targets"]
     }
   ]
 }
