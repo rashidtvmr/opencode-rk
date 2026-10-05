@@ -288,25 +288,118 @@ fn decoded_chunked_body(response: &[u8]) -> Vec<u8> {
             .and_then(|rest| rest.windows(2).position(|w| w == b"\r\n"))
             .map(|end| cursor + end)
             .expect("chunk size CRLF");
-        let size = usize::from_str_radix(
-            std::str::from_utf8(&wire[cursor..line_end])
-                .expect("chunk size UTF-8")
-                .trim(),
-            16,
-        )
-        .expect("chunk size");
-        cursor = line_end + 2;
+        let size_line = std::str::from_utf8(&wire[cursor..line_end])
+            .expect("chunk size UTF-8");
+        // Strip optional chunk extensions (e.g. ";ext=val") per RFC 7230 §4.1.
+        let size_text = size_line.split(';').next().unwrap_or("").trim();
+        let size = usize::from_str_radix(size_text, 16)
+            .unwrap_or_else(|_| panic!("invalid chunk size {size_text:?}"));
+        cursor = cursor
+            .checked_add(line_end - cursor + 2)
+            .expect("chunk cursor overflow");
         if size == 0 {
-            break;
+            // Zero-length chunk terminates the body. Consume optional trailers:
+            // either a bare CRLF (no trailers) or trailer fields terminated by
+            // a final CRLFCRLF sequence.
+            if wire.get(cursor..).is_some_and(|rest| rest.starts_with(b"\r\n")) {
+                cursor += 2;
+            } else {
+                let trailer_end = wire
+                    .get(cursor..)
+                    .and_then(|rest| rest.windows(4).position(|w| w == b"\r\n\r\n"))
+                    .expect("missing end of chunk trailers after terminal zero-chunk");
+                cursor = cursor
+                    .checked_add(trailer_end + 4)
+                    .expect("trailer cursor overflow");
+            }
+            // After terminal chunk + optional trailers, no bytes may follow.
+            assert_eq!(
+                cursor,
+                wire.len(),
+                "trailing bytes after terminal HTTP chunk framing"
+            );
+            return decoded;
         }
         let end = cursor.checked_add(size).expect("chunk length overflow");
-        assert!(end + 2 <= wire.len(), "truncated HTTP chunk");
+        let framed_end = end.checked_add(2).expect("chunk framing overflow");
+        assert!(
+            framed_end <= wire.len(),
+            "truncated chunk data or missing chunk CRLF"
+        );
+        assert_eq!(&wire[end..framed_end], b"\r\n", "chunk terminator");
         decoded.extend_from_slice(&wire[cursor..end]);
-        assert_eq!(&wire[end..end + 2], b"\r\n", "chunk terminator");
-        cursor = end + 2;
+        cursor = framed_end;
         assert!(decoded.len() <= LIMIT, "decoded HTTP body exceeded bound");
     }
-    decoded
+}
+
+/// Focused helper-level unit cases for chunked decoder framing contracts.
+/// These exercise the `decoded_chunked_body` parser directly with synthetic
+/// HTTP responses; they do not start a server or daemon.
+#[cfg(test)]
+mod chunked_decoder_framing {
+    use super::*;
+
+    fn fake_chunked_http_response(body_wire: &[u8]) -> Vec<u8> {
+        let mut resp = b"HTTP/1.1 200 OK\r\ntransfer-encoding: chunked\r\n\r\n".to_vec();
+        resp.extend_from_slice(body_wire);
+        resp
+    }
+
+    #[test]
+    fn valid_terminal_chunk_with_no_trailers() {
+        let wire = fake_chunked_http_response(b"5\r\nhello\r\n0\r\n\r\n");
+        let decoded = decoded_chunked_body(&wire);
+        assert_eq!(decoded, b"hello");
+    }
+
+    #[test]
+    fn valid_terminal_chunk_with_optional_trailers() {
+        let wire =
+            fake_chunked_http_response(b"5\r\nhello\r\n0\r\nX-Trailer: val\r\n\r\n");
+        let decoded = decoded_chunked_body(&wire);
+        assert_eq!(decoded, b"hello");
+    }
+
+    #[test]
+    #[should_panic(expected = "trailing bytes after terminal HTTP chunk framing")]
+    fn reject_trailing_bytes_after_terminal_chunk() {
+        let wire = fake_chunked_http_response(b"5\r\nhello\r\n0\r\n\r\ngarbage");
+        let _ = decoded_chunked_body(&wire);
+    }
+
+    #[test]
+    #[should_panic(expected = "truncated chunk data or missing chunk CRLF")]
+    fn reject_truncated_terminal_chunk_data() {
+        // Claims 5 bytes but only provides 3 before EOF.
+        let wire = fake_chunked_http_response(b"5\r\nhel");
+        let _ = decoded_chunked_body(&wire);
+    }
+
+    #[test]
+    #[should_panic(expected = "trailing bytes after terminal HTTP chunk framing")]
+    fn reject_trailing_garbage_after_trailers() {
+        let wire = fake_chunked_http_response(
+            b"5\r\nhello\r\n0\r\nX-Trailer: v\r\n\r\nextra",
+        );
+        let _ = decoded_chunked_body(&wire);
+    }
+
+    #[test]
+    fn valid_chunk_extensions_are_stripped_before_size_parse() {
+        // RFC 7230 §4.1: chunk-size may be followed by optional chunk-ext.
+        let wire = fake_chunked_http_response(b"5;ext=val\r\nhello\r\n0\r\n\r\n");
+        let decoded = decoded_chunked_body(&wire);
+        assert_eq!(decoded, b"hello");
+    }
+
+    #[test]
+    #[should_panic(expected = "missing end of chunk trailers after terminal zero-chunk")]
+    fn reject_truncated_zero_terminal_missing_trailer_termination() {
+        // Zero-chunk present but no trailer-terminating CRLFCRLF and no bare CRLF.
+        let wire = fake_chunked_http_response(b"5\r\nhello\r\n0\r\nX-Trailer: incomplete");
+        let _ = decoded_chunked_body(&wire);
+    }
 }
 
 fn find_state_db(root: &Path) -> PathBuf {
@@ -478,7 +571,17 @@ fn installed_http_tool_writer_preserves_typed_round_and_rolls_back_failed_pair()
         .split(|byte| *byte == b'\n')
         .map(|line| serde_json::from_slice(line).expect("faulted stream contains valid NDJSON"))
         .collect();
-    let error_event = events.last().expect("faulted stream terminal error event");
+    assert!(
+        !events.is_empty(),
+        "faulted stream must contain at least one NDJSON event"
+    );
+    assert!(
+        events
+            .iter()
+            .all(|event| event.get("type").and_then(Value::as_str).is_some()),
+        "every parsed NDJSON event must carry a string type field: {events:?}"
+    );
+    let error_event = events.last().expect("nonempty event list checked above");
     assert_eq!(
         error_event.get("type").and_then(Value::as_str),
         Some("error")
