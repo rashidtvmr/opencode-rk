@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "baseSha": "7256f93d1ccacdb0d9d878b0824239d2c1a48001",
+  "generatedFrom": [
+    "python3 tools/convergence_gate.py",
+    "CARGO_BUILD_JOBS=2 cargo check --workspace --locked"
+  ],
+  "baseline": {
+    "cargoCheckWorkspaceLocked": "PASS",
+    "convergenceStructuralGate": "BLOCKED",
+    "structuralBlockerCount": 3
+  },
+  "failures": [
+    {
+      "id": "RECOVERY-JUDGE-001",
+      "priority": "P0",
+      "gate": "P1-RELEASE",
+      "status": "OPEN",
+      "kind": "unproven-gate",
+      "title": "Establish executable Phase-1 golden judge",
+      "evidence": "tools/convergence_gate.py is intentionally structural and states that behavioral E2E remains mandatory; all Phase-1 gates are currently UNPROVEN.",
+      "nextAction": "Run python3 tools/phase1_judge.py for source checks, then run it in artifact mode with --binary --native-library --build-json --artifact-evidence-dir. Any observed installed-product failure becomes a separate queue item."
+    },
+    {
+      "id": "RECOVERY-STRUCTURE-001",
+      "priority": "P0",
+      "gate": "P1-STARTUP",
+      "status": "OPEN",
+      "kind": "structural-gate",
+      "title": "Default-entrypoint provider/persistence E2E spine is missing",
+      "evidence": "python3 tools/convergence_gate.py: E2E: default-entrypoint provider/persistence test spine is missing",
+      "nextAction": "Inspect current default_tui/startup/provider fixtures and pinned upstream; salvage only if a legacy test/implementation is stronger, otherwise write the missing integrated E2E spine."
+    },
+    {
+      "id": "RECOVERY-LEDGER-001",
+      "priority": "P2",
+      "gate": "P1-RELEASE",
+      "status": "OPEN",
+      "kind": "harness-ledger",
+      "title": "AUD-017 is marked completed while its own note admits no acceptance",
+      "evidence": "python3 tools/convergence_gate.py: LEDGER: AUD-017 is completed but its own note admits 'no acceptance'",
+      "nextAction": "Correct the historical claim/state without using it as product acceptance; preserve the evidence and let executable Phase-1 gates decide completion."
+    },
+    {
+      "id": "RECOVERY-LEDGER-002",
+      "priority": "P2",
+      "gate": "P1-RELEASE",
+      "status": "OPEN",
+      "kind": "harness-ledger",
+      "title": "AUD-020 is marked completed while its own note admits no acceptance",
+      "evidence": "python3 tools/convergence_gate.py: LEDGER: AUD-020 is completed but its own note admits 'no acceptance'",
+      "nextAction": "Correct the historical claim/state without using it as product acceptance; preserve the evidence and let executable Phase-1 gates decide completion."
+    }
+  ]
+}

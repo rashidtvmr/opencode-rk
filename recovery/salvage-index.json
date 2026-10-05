@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "status": "BOOTSTRAP",
+  "policy": "selective-by-current-failure",
+  "wholeBranchMergeAllowed": false,
+  "branchInventoryIsQueue": false,
+  "legacySnapshot": "recovery/legacy-snapshot.json",
+  "dispositions": {},
+  "note": "Populate dispositions only when a current Phase-1 failure causes a legacy lineage to be inspected. Do not pre-create hundreds of merge tasks."
+}

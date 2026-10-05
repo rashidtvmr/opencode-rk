@@ -1,0 +1,2205 @@
+{
+  "schemaVersion": 1,
+  "createdAt": "2026-10-05",
+  "baseMainV2": "7256f93d1ccacdb0d9d878b0824239d2c1a48001",
+  "policy": "immutable-evidence-during-recovery-mode",
+  "excludedMutableBranches": [
+    "controller/recovery-mode-v1",
+    "main-v2",
+    "recovery/core",
+    "recovery/platform",
+    "recovery/runtime",
+    "recovery/ui"
+  ],
+  "counts": {
+    "frozenLocalRefs": 524,
+    "registeredWorktrees": 316,
+    "prunableWorktrees": 78
+  },
+  "refs": {
+    "APP012-facade-hardlink-test-owner-safe": "d410e136e140ebc8d74b2a3a5228a831027b5183",
+    "APP012-generation-perf-fixture-test-owner-safe": "7256f93d1ccacdb0d9d878b0824239d2c1a48001",
+    "APP012-protected-hardlink-salvage-safe": "31dd9330d991452cbb1dc8a0030f692d3babdc79",
+    "D1-real-discovery-auth": "e23d9953f153183fc9f456b9f4937e79095ad97b",
+    "G0-agent-role-runtime-contract-safe": "7424198e5a14650ba6facdd91852388ab2379e39",
+    "G0-agent-role-runtime-red-current-base-safe": "1fe1f99f9c3bbd62f98c5713c006b03a55d43313",
+    "G1-G6-complete-maintenance-train-safe": "a41b363452fca6c6592df53dd03056c1e2d4193c",
+    "G1-G6-native-web-maintenance-train-safe": "7d494e9ac7ff731351263f8e54a828e8bc0ce94a",
+    "G1-G6-x64-browser-assets-train-safe": "c9d2fa3187ae035d08102f782a7a3ec61529df16",
+    "G1-G6-x64-native-import-train-safe": "8bb91e449f60fbffc28052b60d09b86f8d4855b5",
+    "G1-activity-fixture-lock-repair-safe": "368a23c50cf74042b6668f17b77c538f0689e0c1",
+    "G1-daemon-runtime-current-base-train-safe": "5a32a7d1d0c46b6c503206c3b3351f6e19e6cd87",
+    "G1-daemon-runtime-integrated-base-train-safe": "4dbcbf8ed41b8157767c446a28c17c41070c54a5",
+    "G1-endpoint-and-fixture-current-train-safe": "066b8658af2295283187f4a4308863eae63dbe2d",
+    "G1-endpoint-rejection-repair-safe": "b2a08bb4b06314d9e6cd6ec73e84c24e64ae1671",
+    "G1-final-lint-repair-safe": "5bcea2cecb491c9de449b97fd45135482154ec85",
+    "G1-linux-fixture-maintenance-safe": "1ca48c6641e49fc1c00e7c6185c7d62ce370416c",
+    "G1-runtime-clippy-verification-train-safe": "d318d40273b7a521593028367d7dd7fe3bb20e00",
+    "G1-runtime-red-current-base-safe": "a0bdd37c06c520e1712cf38a0b6e98a2cb860314",
+    "G6-async-fixture-final-train-safe": "a4cf64a598bbe1461e9fcfb15a6af1f468695659",
+    "G6-auth-clippy-repair-safe": "871e328db4395503b77659cc15a02e1e6a766a44",
+    "G6-auth-compatibility-tests-safe": "40ff2f5b12834b5f4b46c027ec7e967e453f6a0b",
+    "G6-browser-resume-implementation-safe": "a7798e9c70e3a965f7fe19488a13afe9026c5056",
+    "G6-current-train-safe": "2fdff4fa649a146d70c77da8a3debdf04c35d5ea",
+    "G6-final-verification-train-safe": "ac42eba635620543999105beb851f2dea790bb36",
+    "G6-marker-readiness-fingerprint-safe": "0d1398fd235465225735e904279887203c886fb8",
+    "G6-marker-readiness-test-maintenance-safe": "f713e92b21406c0269862c09aadcf37c39b1d161",
+    "G6-permission-ui-assets-train-safe": "ac725f5f60f4b61e048ac81b70ad96f12f8cfe1e",
+    "G6-provider-auth-fixture-lint-safe": "d3bda4672a41e4fa0603b59dcd223b9f758a6a35",
+    "G6-release-fingerprint-closure-safe": "0802445294fe3c03ce417399c55fa1a6132256ea",
+    "G6-transcript-leaf-assets-train-safe": "23cddb99ec50686091d264894b597529f1a30b53",
+    "G7-owner-binding-maintenance-safe": "f94978a2de1b68afda9dd52773964acdcdfcb27b",
+    "G7-primary-role-tracking-maintenance-safe": "34665e4eae4bef4c4938230509d2de417642f872",
+    "G7-request-evidence-reader-maintenance-safe": "cefc8c50f405139ee26c64e3183a636ddef5c860",
+    "G7-restart-pty-tracking-maintenance-safe": "6999d31d14528f8cf63609a06314d9952ad59927",
+    "G7-tracking-guard-maintenance-safe": "00159e2e61bd0a0448218ed62ada970a4e43c1ec",
+    "N1-R1-current-base-train-safe": "4e7419b1d4774bc6e65b957142c92222dec0154f",
+    "R1-runtime-binding-repair-20261002-40743": "28d3a0b9b4128f631c8a6cbd5a8201ab2351e42b",
+    "R1-runtime-binding-repair-safe-fresh-v2": "7424198e5a14650ba6facdd91852388ab2379e39",
+    "S1-candidate-9dc74a25": "9dc74a25a272bd79bd80684bd75a87dbdf9667c5",
+    "T1-correction": "029cce2ebfb0ae329a0723c78d668cc2cf1790bf",
+    "WouterE/server-clippy-maintenance-safe": "a1b01e940bda6727533fd2cba9a855d303f7bfe1",
+    "WouterE/server-public-module-test-maintenance-safe": "e315331b1fe1bb61fa220d7e8d0dcf7da8aa48a5",
+    "agent/fix-20260926": "aa532962e039a706976824455b4f6d3f2869ad5a",
+    "app012-facade-msrv-lock-repair-1791175823": "0f38dedb3029adfae3a339edfcebac5d5737d677",
+    "archive/v2-canonical-ci-fixture-18cb219b96e9": "18cb219b96e91c69281805c6028324d93bfc1b3f",
+    "branchcustody/R1-platform-provenance-test-20261002-40743": "64492a0d53016e773f1779937b35a196eaea6a2a",
+    "browser-resume-rotation-frozen-red-1791173728": "5efc8712f2d07ac65eacc368d9c2f5cb1475b8cb",
+    "candidate/N1-native-terminal-reset-last": "ee8dc3a7a029f3f1b17d838579bbdefecd18b4ed",
+    "candidate/N2-native-output-drain": "925c240574f1f741158563541edb18b3cd460a81",
+    "candidate/history-only-after-landing-20261002": "ddff2e6d617f2c70f60ed046f7af7636087f1d61",
+    "controller/LEDGER-CONVERGENCE-TOOL": "49ab00c4932793fd02562e1e848b6ffd3904e355",
+    "controller/TOOL-RED-SHELL-REFREEZE": "2c5e9cfbdc4989a54e88b0ebb095a078cc4805de",
+    "custody/G6-permission-ui-20261002-40743": "482d480012718d51407465e63b69b8ede4a0ac3e",
+    "custody/G6-runner-20261002-40743": "3d4efe8cb6e4fde55022a456400e3ec91bc252a8",
+    "custody/G6-test-safe-20261002-40743": "f18ad2fe90e4ea44c031549fb3494551733f68eb",
+    "custody/G7-test-safe-20261002-40743": "06df5045b9803552ba9fdb328547235260125166",
+    "custody/N1-canonical-train-20261002-40743": "ee93c81065a566d5a19023ea772cb62768aa9bec",
+    "custody/N1-native-activation-20261002-40743": "51b5fe3de64d280130d0becd4468ba680307ad1c",
+    "custody/N1-native-portability-test-20261002-40743": "02d7ec5aeca00584bfb157cd4b4cbf0e6add45d8",
+    "custody/N1-pty-observation-final-format-20261002": "52180251584764da98718fbcbb351fb52e94db20",
+    "custody/N1-pty-observation-repair-20261002": "3e155b0ab4bbe7d37e59decd3cc7236e8a2719fc",
+    "custody/R1-integrated-prep-20261002-40743": "789badd0526313966c28b6b80a19769a8608d00d",
+    "custody/R1-platform-provenance-repair-20261002-40743": "68d2b76f6b655c0f1c601ae37b86149a19680def",
+    "custody/R1-repair-safe-20261002-40743": "d9fa8aca293e3711b57a11ef01fd3e6e73b0a96a",
+    "custody/R1-runtime-binding-base-20261002-40743": "28d3a0b9b4128f631c8a6cbd5a8201ab2351e42b",
+    "custody/R1-runtime-binding-test-20261002-40743": "cc7ad69d198cc6711bdee36d97f592f6b2ddea82",
+    "custody/R1-test-safe-20261002-40743": "6b898e0d89de10ec95a3c9856e7b43c38305c0ee",
+    "custody/R1-workflow-repair-20261002-40743": "d35f3d30bc6f717610a261cd902501cc1b56ed55",
+    "custody/R1-workflow-test-safe-20261002-40743": "96552faec4ffd876889a2c07b201475dcb8c34cc",
+    "custody/S1-ask-contract-20261002-40743": "79cff62028d3ec88110c56e90165ef13d307721d",
+    "custody/S1-canonical-train-20261002-40743": "5c36ceac5c8509e5f4a2ecc22400fcb74537e9f6",
+    "custody/S1-contract-restoration-20261002-40743": "34b983caecb77b14e69b79af913df6fa23146214",
+    "custody/S1-final-repair-20261002-40743": "d92a2a7d5bb32e9d32569cb40ede3899e1ab4b91",
+    "custody/S1-repair-safe-20261002-40743": "a13f6e2acc3c581936b9b49dace9331023261dbb",
+    "custody/S1-test-safe-20261002-40743": "2498e8ea2f67de40b9ed472eafd6fbc5234cf104",
+    "custody/controller-safe-20261002-40743": "e298c4c6c893cd36f2941525d8d447193da1584b",
+    "custody/daemon-socket-path-repair-safe": "bdb507e9f81a3fc63124fe72b2bafc9c8cf9f267",
+    "custody/daemon-socket-regression-20261002-40743": "bdb507e9f81a3fc63124fe72b2bafc9c8cf9f267",
+    "custody/format-safe-20261002-40743": "f87d7058c92d3977778f7fa3713aabe2eef9e1bf",
+    "custody/session-fixture-salvage-20261002-40743": "40aade7cd7c5945eae2deedede528f2f6ab376e5",
+    "custody/session-fixture-train-verify-20261002-40743": "26eeaa51d979bed1d43f7eb675e20ff0a6776bdc",
+    "daemon-socket-current-train-safe": "d2735a53fc707241805851bed26178d0093082ee",
+    "daemon-socket-path-repair-safe-v2": "8152ffa60b642c36491499217e7e1c317d467985",
+    "daemon-socket-runtime-contract-evidence": "7424198e5a14650ba6facdd91852388ab2379e39",
+    "diag/N4-native-reset-channel": "1b97404dc401849148918d5abb5bba776428b01c",
+    "diag/S1-provider-sequential-streams": "0ebb7509e7ba58bca727211a99e27061eb9ae75c",
+    "docs/decision-authority-policy": "78930a81a1244925d4ecfe0d22b8ba291c333a61",
+    "docs/receipt-durability-20261001": "225b6f9def7df7c19e9ae94f38f6488e3654387b",
+    "docs/structured-subagent-prompts": "716b546077204c4db9c3514a91018546ac9af61a",
+    "facade-ownership-prerequisite-safe": "57c35eac7ed09d0925d7e19b91a7df6112fa1845",
+    "fix/storage-same-batch-fixture": "03ef20dd8c13bad383d20e4c8ea1018472be3459",
+    "g6-permission-ui-repair": "4d9e0e595998e3a02440b8021cae0beb35c8883a",
+    "g6-transcript-text-leaf-repair": "50148acd6fd89970f19bb0d76e5524bb7f3ae50e",
+    "generation-enforcement-salvage-safe": "398b44148237a8391911f42faae3d2aaed99fcf9",
+    "h2-history-preserve": "b34d16ecebfee31036ce17bb0e3ab5a937dc5ea9",
+    "h3/process-only-history-81256": "e298c4c6c893cd36f2941525d8d447193da1584b",
+    "integration/APP-001-FILE0600-SETUP-BASE-W1": "106524114decd58854fad737b5f322638739bb1c",
+    "integration/APP-012-LIVE-FILE-TOOL-W2": "299bbbfc53b63e205fd314faf4a936ffd1da2ea9",
+    "integration/APP-012-SECURE-W1": "f386fae6a98f25dc1e5fb3adb87b9d2e15ecc155",
+    "integration/AUTH-RED-prerequisite": "691709c46785a78a563f173a3d90a9d570c4bbfb",
+    "integration/AUTH-registration": "d542fc0c021d27bf6985576f79972b8240c4fa92",
+    "integration/AUTHWEB-CLEAN-W3": "06c6ffd6ee537ff70b1fa3ebfcf3c15057649e12",
+    "integration/CUSTOM-PROVIDER-SERVER-W1": "cab7c4cf3fc839cb306673fd7893a4028b38f6ad",
+    "integration/DB019-VERIFIED-CANDIDATE": "80c06210695e13f43eff5375b105a1aaa3ea7dd8",
+    "integration/DB022-correction": "61d473ab6e2967069fd1f23acbd7219518d7b7c6",
+    "integration/FEATURE-CANDIDATE-DB019-DB023": "c58850daefb39e3793121ce8dff3fb5cc5c6babe",
+    "integration/FEATURE-STORAGE-GREEN-v1": "51caadd7e25ee0c3d13152ecdceea1fb69ee0c1e",
+    "integration/GAP-MANIFESTS-34-W1": "2185d332f46f8800cb8ebc86f98de87c42ac728b",
+    "integration/GAP-MANIFESTS-34-W2": "eebf2359466f862ec98a54a7b8799734a77ad59a",
+    "integration/H5-original-exact-delta-history-20261003": "f2347c3fd6a44611c6f7b1f9329759642a2f2f73",
+    "integration/STORAGE-boundary-dag-correction": "4accfca9b158ccf227dff3fe99f21edbcb566654",
+    "integration/STORAGE-boundary-green-candidate": "3ced89a87ba1f7a8416d6830b79bd7187406d392",
+    "integration/STORAGE-boundary-registration": "cdd3ccbc7b867d991eb473ca718e01415b42a218",
+    "integration/T1-D1-20261002": "be659402cbc99a4ffdedbfdc461ea754036a9f46",
+    "integration/TUI003-REPAIR-REGISTRATION": "ff7f44b84a4e89a850780d12605bd559a0598405",
+    "integration/WAVE20-registration-chain-corrected": "600cbfc88af2cbf14149d2ff9e8fe0f0deeb50f8",
+    "integration/WAVE20-registry-id-repair": "07a57c9f670a7c4a632c377b48db1fafa099e14b",
+    "integration/WAVE20-ubuntu-wording-corrected": "2798d151dd20f05408cb600384f0a944c6576600",
+    "integration/phase1-completion-20260929": "d382fdfd8966052c81ef7ad10a56d87314ab8a73",
+    "integration/r1-static-20261002154915": "f5f440d8f4ea7085409a06f10343494945fef6c0",
+    "integration/t1-storage-contract": "f99792c034808d141480097e5f175c828ea866b6",
+    "lane/APP-001-CREDENTIAL-RESTART-RED-W1": "106524114decd58854fad737b5f322638739bb1c",
+    "lane/APP-001-CREDENTIAL-SEMANTICS-W1": "86537198c26b39f75e64dc76cc278b2e7f6e9857",
+    "lane/APP-001-FILE0600-BACKEND-W1": "d137a091dbc5d1c2e9245c7df31c83a5fdfc30fd",
+    "lane/APP-001-FILE0600-SETUP-W1": "f22e0e8b027c947ebeefd9dbc39fc0a5580a182b",
+    "lane/APP-001-FILE0600-SETUP-W2": "ff61a62e6513addd53fe7d1f5f98165baea5dc2d",
+    "lane/APP-001-FILE0600-SETUP-W3": "ff61a62e6513addd53fe7d1f5f98165baea5dc2d",
+    "lane/APP-001-FILE0600-SETUP-W4": "aa0e52b94b2936f70b3607832eafcdb693b7ed0a",
+    "lane/APP-001-INSTALLED-SETUP-REPAIR-W1": "798cbff99f4e2a2ad21cc937df428eb6bd871cca",
+    "lane/APP-001-REPAIR-RED": "4c953e4e2a2907e5f7b693cb667d53824a9a873e",
+    "lane/APP-005-SECURE-RED": "141c2028fa06ef326b4dd2e5e775a2b8d5d56bfa",
+    "lane/APP-012-LIVE-FILE-TOOL-IMPL-W2": "2f4f7056517d6013bafa8ef2e2ddd5eca84dcda1",
+    "lane/APP-012-LIVE-WRITE-CONTRACT-REVIEW": "299b969bf62da33ddd5a1e4e636df4e59de663e3",
+    "lane/APP-012-PARENT-TOCTOU-FIX-W1": "78b744ddeaa1b79d3cebddc4bbe80c8217bec8dd",
+    "lane/APP-012-ROOT-ANCHOR-FIX-W1": "0289aefc059e9d33580ce5e78b9c960dc23238a4",
+    "lane/APP-012-ROOT-ANCHOR-SEAM-W1": "68bd3510ace6c419df6f5ebcb58250d1c8e5df44",
+    "lane/APP-012-SERVER-ROOT-W1": "a91bd89fe48cd379965462eead519b6d1c4f129e",
+    "lane/APP-012-SERVER-ROOT-W2": "0289aefc059e9d33580ce5e78b9c960dc23238a4",
+    "lane/APP-012-SERVER-ROOT-W2-LAND": "d51711ecb35d27ce2496fec000bec420f8dc015d",
+    "lane/APP-012-SERVER-ROOT-W2-LUNA-LAND": "3227b28e6dbaf604d8557768a8732407c5750181",
+    "lane/APP-012-SERVER-ROOT-W2-clean": "0289aefc059e9d33580ce5e78b9c960dc23238a4",
+    "lane/APP-012-SYMLINK-FIX-W1": "34ff1c76e1ca754c048c639c630d35e0b46b6f6c",
+    "lane/APP-012-TOCTOU-SEAM-W1": "5d07e20c43c1e332f93b1c305772f645df80e4b2",
+    "lane/APP-012-TOOL-RED": "7358e3e98acab6bb7740c0813f952e9ad0dae725",
+    "lane/APP-012-phase1-v2": "8422a9efcf25a5fc857f200abc5ce2c4e622220f",
+    "lane/APP-016-SAME-BATCH-STOP-REGRESSION": "dd5143ad37a2502f47d36d9e58789df0c28273f7",
+    "lane/APP012-APPROVAL-EXPIRY-GREEN": "ea295455444aa879eca6126f6afc92fc9ba4ec53",
+    "lane/APP012-APPROVAL-RETENTION-GREEN": "6b65207494bc1b089f7a236760cacdc1b42ea8e4",
+    "lane/APP012-PROTECTED-PATH-FILEOPS": "c2697156e3078b4dff50cb8093bd502840c12a4c",
+    "lane/APP012-PROTECTED-PATH-GREEN": "7463dbe74980b9a0098d245a275d2d03728925e5",
+    "lane/APP012-RECOVERY-CHILD-BOUND-GREEN": "3ad58b0554aecb79080064a7fa70b0071b1ba2a1",
+    "lane/APP012-RESTART-RECOVERY": "f83637df72c0410cfde84bdee225d0b060248c2c",
+    "lane/AUTHWEB-BROWSER-CLIENT-IMPL": "ecec045471641eb50b8e59bed00003f1af943d4d",
+    "lane/AUTHWEB-CLI-HANDOFF-IMPL-W1": "8638c3ac71fd99180bc26114de462fe61805ec8a",
+    "lane/AUTHWEB-REFRESH-IMPL-W2": "8bff81a1f8219aec993af5abadad97d6fde7709f",
+    "lane/COORD-001-NATIVE-ADAPTER": "2118939e30b75e6af92bd608f28be74cc7dd1fe9",
+    "lane/COORD008-STARTUP-REGISTRATION": "62f6fed44c410c9b6d53f1ef619fe483522070d0",
+    "lane/CROSS-PLATFORM-RUNNER-CLOSURE-VERIFY": "2d04c1c925595b566f617b073129ecee24593eb9",
+    "lane/CUSTOM-PROVIDER-CATALOG-RESOLVER-W1": "f701110b94ca8ee8be6a6f9d2bab5be37c0acf05",
+    "lane/CUSTOM-PROVIDER-CATALOG-SECURITY-RED-W1": "f701110b94ca8ee8be6a6f9d2bab5be37c0acf05",
+    "lane/CUSTOM-PROVIDER-CLIENT-W1": "238ed7a17cea33ac8fb183d6d53d2748376bc102",
+    "lane/CUSTOM-PROVIDER-CONFIG-INGEST-W1": "96b4a33ddee7d39fa5de508c8bea701326b23324",
+    "lane/D1-discovery-integration-y52o0gi3": "259570ba7eb59a2b39b4cce75cd55eda8fc24336",
+    "lane/D1-review-fix-e23": "c64a5d2b9ec7b3770c6e6ffac100a460e42d9c2e",
+    "lane/DB-019-BOUNDARY-REPAIR": "7ee1b807de2817301b7d4e75d93a3bafec9104a9",
+    "lane/DB-019-metadata-repair": "3fbbc6646db5c35e1dc5171b57840e27f86f10cd",
+    "lane/DB-019-review-candidate": "f7dea8f7708519fe27aa5d3a419dae591ae15968",
+    "lane/DB-021": "de77c37ae477234c4ee324f3e3fba25ce6bdfce8",
+    "lane/DB-022": "d3b442ec99813c2878bcb41d2632ba669c00807f",
+    "lane/DB-022-corrected": "2e73e42b5f368dac185a10318ae65447990e1596",
+    "lane/DB-023": "f92124e27ab59c4ec3841777653d52466b7d1b27",
+    "lane/GUARD-EXT-001-20260923": "ec8df6c178087752bf64ed64e93074dde7f7799d",
+    "lane/GUARD-EXT-002-20260923": "2499012f2734480d36daeeefc352038e689e2000",
+    "lane/GUARD-EXT-004-20260923": "29d2b8fee34378a388bf2cbc0226dde67ce86b53",
+    "lane/GUARD-EXT-006-20260923": "2c291e017f55f473ce8fb99137c3d1c35bd668f5",
+    "lane/GUARD-EXT-009-20260923": "26e54d7577c471b85a8e1c07faf083f2c788e0c5",
+    "lane/GUARD-EXT-010-20260923": "bdab3fede306e4505967cc10041e29b657b3b216",
+    "lane/GUARD-EXT-011-20260923": "614c22064c7280987bed298f38b442054fd73755",
+    "lane/GUARD-EXT-012-20260923": "8c0bcd53ff7a909a529bc361bc5986670b690a0f",
+    "lane/GUARD-INT-001-20260923": "2040fcbcc920618d77e87d21fecd0900b64820ed",
+    "lane/GUARD-INT-003-20260923": "233a99c2b55256d39a511422c3e8f575235d72a0",
+    "lane/GUARD-INT-005-20260923": "b3e0d012822da9fe48e43126c9085e9782c2b082",
+    "lane/GUARD-INT-006-20260923": "3a3751dd7fbe57b524d81599450940dfda7d01c9",
+    "lane/GUARD-INT-007-20260923": "836c987c0d4b14f977e711a6e526bbac9e23becb",
+    "lane/GUARD-INT-009-20260923": "eb8bff9e7144f69f0f0d89146dda7ad91661c799",
+    "lane/GUARD-OPS-001-20260923": "9f41701fd1e4a10b2ce22e0f1a63f1cfd6c9f317",
+    "lane/GUARD-OPS-002-20260923": "92fbdcf24e520e827df74431ed75fc71921938d1",
+    "lane/GUARD-OPS-003-20260923": "4f7863ac5fc0f443e5e23f8921e71c88862cba0d",
+    "lane/GUARD-OPS-004-20260923": "4167f35b6246386bdfdedf3d1cb6e1046c404960",
+    "lane/GUARD-OPS-005-20260923": "7a459f9a224e3daec69fb2e848bdb66831b4550a",
+    "lane/GUARD-OPS-006-20260923": "36776159d0dc361646fec0eba17625c6798db1e9",
+    "lane/GUARD-OPS-008-20260923": "da07031d9c0260eeea7201a31a740c09e9d12453",
+    "lane/GUARD-REL-001-20260923": "9c5192fe547a797516052a47263161220882198a",
+    "lane/GUARD-ROUTE-009-20260923": "c8f6dcb39d98302f27f04a25897d3880e09e2c1b",
+    "lane/GUARD-ROUTE-010-20260923": "86d67f47b0e55f3b6c219a887d668368526221d7",
+    "lane/GUARD-SHARE-001-20260923": "61bec38a15b1bf24a81a0020f454d6f5daacf639",
+    "lane/GUARD-SHARE-002-20260923": "574924c1e2957b5923d4347fa5ca8b4f3970d1de",
+    "lane/GUARD-SHARE-003-20260923": "76be775ecfb1c49868c5d90e92f7564e1ce67e8d",
+    "lane/GUARD-SHARE-004-20260923": "3e89fbe86a99c1994f02b7087c4a1ef67d767029",
+    "lane/GUARD-SHARE-005-20260923": "fbea8c407fa61cfc8bb7a8b9e312cfd1fd94a345",
+    "lane/GUARD-wave1-integrate-20260923": "924301e43d2ee32b2605ef311bd9e1b4af7b5ad1",
+    "lane/GUARD-wave23-integrate-20260923": "2987c2e58d32604628c2c183af365ee577880382",
+    "lane/INSTALLED-DEFAULT-CONTRACT": "26da87430cb38f34779d92211eecb3e73e3cbf8d",
+    "lane/PACKAGE-POSIX-INSTALLER-GREEN": "2f87242d6371cc5059facb75ff6756b0ece6ed68",
+    "lane/PHASE1-convergence": "e57d1d37b6050f217609c2c994bb9f9948841388",
+    "lane/PHASE1-convergence-review": "00e2c26d2c4e1a95480afbc051ba08e7b2a231e6",
+    "lane/PHASE1-integration-20260923": "7938791ba76645115e418928a728869b48beb73b",
+    "lane/PHASE1-product-spine-20260923": "5d666830bc9e5b716b2ea1d239d9d0ccbe6e067b",
+    "lane/POLICY-STRUCTURED-DELEGATION-WORKER-CORRECTION": "096169461f5c356fa0b969bd5f8199f3ad1b1d4a",
+    "lane/PROV-023-catalog": "3a271c473741d906f6cb9b123fed223936a672a7",
+    "lane/PROV-023-loader-red-20260923": "c745eab3e71d681b3df661c08a2d08abaa9c4ff1",
+    "lane/PROV-023-loader-verify-20260923": "c97fbdded34d98006e8449019a929985305c32ce",
+    "lane/PROV-023-runtime-red-20260923": "befb2b8b40609da6380b88cc9068225f2784c46a",
+    "lane/PROV-024-fixtures": "1dcc0c884dfe6ed3d73bd0412036d79b2b77943e",
+    "lane/PROV-030-author-v4": "4c307043091232939d8df6ac43ba45c66147d381",
+    "lane/R1.2-security-workflow-repair": "0c1dda250fd952a02068364d1caa21f88bc074ef",
+    "lane/REL-002-phase1": "aad73f0032dbfb997f665cc7f509fa354ce0af7f",
+    "lane/SEC-RED-OS": "62f43ce21b09f997d7df5c860dafb5c44a7bb3d8",
+    "lane/SEC-RED-OS-RETRY": "bd8ddc9557e9422e2bc1ff46aba86e8794bdd2cd",
+    "lane/SESS-008-contract": "38569366021bd00cdcc79c284fcb7e7f270c149f",
+    "lane/SHIP-001-workflow-v2": "ddbc99f612614862884b1c40385dc1be122c8a8e",
+    "lane/SHIP-004-RELEASE-PROOF": "38c54121be33f354e9606f14565991fb18e1c1d4",
+    "lane/SHIP-004-phase1": "e477cc420c96015bee990a991a38a45a1dd209d0",
+    "lane/TOOL-AUTHORIZED-PROCESS-SEAM": "c15c09f957aa81adf409d84f2d92a93b93fce9be",
+    "lane/TOOL-PROCESS-CWD-BYTES-GREEN": "1fcd3838e2a849eadfa4220c3d298750e99c52b3",
+    "lane/TOOL-RED-SHELL": "2cd9ca9987bed99adcff0d1bee0038f7f1b2c3c5",
+    "lane/TOOL-SHELL-BATCH-IMMEDIATE-GREEN": "55acf2942d950fea0b4c90c336ec10713f0fa81d",
+    "lane/TOOL-SHELL-BROKER-GREEN": "b66ee38899dfb5daf22d0ab76533dc41d359fe13",
+    "lane/TUI-011-FROZEN-REVIEW": "ed835d5bd31612b88014276288849a1927d0c039",
+    "lane/TUI-011-GNU-OBJDUMP-GREEN": "f577550b370d63ff7ab5c596ec6a7a439d803427",
+    "lane/TUI-011-INSTALLER-REAL-ASSET": "4bbeb99ac4357a5fb2101b50e8b218df8c4b23b1",
+    "lane/TUI-011-MAC-RPATH": "0ec028a8d820eee0ecbb7582c193573849f0167c",
+    "lane/TUI-011-NATIVE-COMPILE-FIX": "55a4292132958af6fc6d6c5b15e89c8d75b35e84",
+    "lane/TUI-011-artifact-matrix": "83b38276d59a239b88067e7da3427b51c9f43182",
+    "lane/TUI-011-native-artifacts": "79840f880ab36bf5ba645a0a5f36291c92388dba",
+    "lane/TUI-011-prod": "606a820ec094022066008437f297b3e63bcdda7a",
+    "lane/TUI-011-static-macos": "2263e912644ebc666bf94d3b811af86e1e3e84a7",
+    "lane/TUI-012-pty-red": "5a9db78c2111e0cae80493618e09fc147bbd8d3f",
+    "lane/TUI-013-corrected": "b3f2c30438b8fce288bcce9db23e4a3374198306",
+    "lane/TUI-013-repair": "100875f7ac51b1633e329aa7900992aafb5d0c46",
+    "lane/TUI-015": "ffa52ddf4664833bca1fa30fb93ab520fb1d1747",
+    "lane/UI-014-behavioral-red-20260923": "61de339868d7202a4ca017d903645dd282951f68",
+    "lane/UI-014-e2e": "f0dbf6a4c68ce696bba59bfcc35dcc7cde0f476e",
+    "lane/UI-014-prewire-20260923": "7eae08b30ce84597f64640ee6cb3ccb627c08cdd",
+    "lane/UI-014-turn-worker": "4535bef9fb8f1cf4f9434800b4d04964ce852c04",
+    "lane/WEB-006-integration": "de560e83680a9a02c85e32841c0978f09e27da47",
+    "lane/WEB-006-readiness": "e579d3818b6fda6fc36bd89ad546b031e3fdb0f0",
+    "lane/WEB-009-branch-activity": "6c975145ef6e1c564b55609ec13ca0f8ae45400e",
+    "lane/WEB-009-branch-activity-red-20260923": "4cfd87c412f6b64a3eee8e52ddc07d9e42d99c2d",
+    "lane/WEB-009-browser-red-20260923": "78ba73a42bbb32beab596a5f0b9d6ec2077620dd",
+    "lane/WEB-009-browser-verify-20260923": "220de90f705ed1ea346e5d932da2e5fbddd1b50c",
+    "lane/WEB-009-durable-impl-20260923": "4ff12a2aa994a35ba398cc93fbc9d28df48afe00",
+    "lane/WEB-009-durable-red-20260923": "a9a73711ed12382f915ccb1a47e40f38ba1a1c29",
+    "lane/WEB-009-embedded-red-20260923": "f7c0a81e04325cd2867efc4963b04f7dac15ce28",
+    "lane/WEB-009-embedded-verify-20260923": "9d74784888e2704433578fdfbb75e899c8223ac8",
+    "lane/WEB-009-test-replacement": "8ecf29524adf721857030fbdd698596a06ebf4ce",
+    "lane/bridge-parity": "4c6f2d89f8c5f0bbc3031ec167688a3f104d1968",
+    "lane/native-tui-parity-review-20260923": "72621123a52e134b7caaebdc0173e1536e2eaf07",
+    "main": "62f7eb1ba1b744604762cd022118390784be8d41",
+    "persistent-daemon-terminal-lifetime-safe": "85ae7432bbb745d9c42879e0fae01b7f8bb0c975",
+    "plan/APP012-APPROVAL-RESUME": "1f53b01176248c1b9dc364c8add06039d4d800a1",
+    "plan/APP012-APPROVAL-RESUME-CORRECTION": "6d2f97f90478abf1dd484e3865d8aa0fd72630bc",
+    "plan/APP012-APPROVAL-RESUME-PREWIRE-CORRECTION": "61b095902849f2e08ab2093c27c1d3e96003b93d",
+    "plan/APP012-KEYRING": "135d26e9403c77a7909fba6084273fa74891fc8c",
+    "plan/APP012-KEYRING-API-SEAM": "6dcfe198e096721169efb2d96f0d763b35c8daff",
+    "plan/APP012-KEYRING-API-SEAM-CORRECTION": "55174dc83edf9df197d102522d2889c9af3d6408",
+    "plan/APP012-KEYRING-BLACKBOX-RED-SEAM": "48143574365b841d2bf6659d574070b32575c461",
+    "plan/APP012-KEYRING-CONTRACT-CORRECTION": "1cb703996b6b1180bce7cb511acf439187755bd8",
+    "plan/APP012-PROTECTED-PATH": "edf32a339d0a9f4bc3d25f77466dbe89302ed9c4",
+    "plan/APP012-RESTART-RESUME": "c54b68e6b2bd99825689c476ccfef0be653f5208",
+    "plan/APP012-RESTART-RESUME-CORRECTION": "c7ac440bb7d738992b5c4eafd54f3afc39758a00",
+    "plan/CROSS-PLATFORM-RUNNER-CLOSURE": "39a08732930cf89d3d225a0a6c07db6328620057",
+    "plan/PACKAGE-RECEIPT-BINDING": "9de9ee7e8bffc7b3cce16d1d2951adeb43735a7b",
+    "plan/PACKAGE-RECEIPT-SCHEMA-CORRECTION": "a6e1d8200611343d440cdf199b77228aaa8c3be7",
+    "plan/PHASE1-CONVERGENCE-RECONCILE": "f93f936f4951d1dc8bf3058e645ec1c319fcc43e",
+    "plan/PHASE1-GUARD-RECONCILE": "8b1785e99109cd040a01ac844e387b8318d65251",
+    "plan/PHASE1-INTEGRATION-GUARD-UNBLOCK": "576cda69c01ac9375d95dc37936ee564e53dbd59",
+    "plan/PHASE1-KEYRING-SEAM": "7993f9f37d5664f3cd6646c906a7af44cc5f1f88",
+    "plan/PHASE1-LINUX-RUNNER-CLOSURE": "7b16a69411d11322dbeefebdb07fd4e9387878fe",
+    "plan/PHASE1-SIGNING-READINESS": "e4c65f7a94fb15d4323fc00d556add394dde020f",
+    "plan/PHASE1-VERTICAL-LINUX": "b924d9aed587f89ffbc2ee41ee316bc78c45e777",
+    "plan/PHASE1-VERTICAL-PACKAGING": "e8da0668da99eb01f47ae25cb419b5463f24c7fa",
+    "plan/PHASE1-VERTICAL-PRODUCT-MACOS": "68ff545e6727321b52e83ad21f308ca3531a0e65",
+    "plan/PHASE1-VERTICAL-SECURITY-DURABILITY": "baf1e855e727f5b8d304a73f0756d0dee7b3a0dd",
+    "plan/PHASE1-VERTICAL-SYNTHESIS": "7262682e31c1f473912c9483804c9430eb4ee4c5",
+    "plan/PHASE1-VERTICAL-WAVE-DAG": "9a7d79214b2cb69677559e77071293e611f61389",
+    "plan/PHASE1-VERTICAL-WINDOWS-GNU": "a039296a7fc55bddaf3708d5616623722ff96d98",
+    "plan/PHASE1-WGNU-RUNNER-CLOSURE": "6fe73b898bc55bb8b53286d54214c1fb82e50b46",
+    "plan/TOOL-RED-SHELL-SPLIT": "bae37145a06d6811debb8f4d42b41d0e70660dc4",
+    "plan/TOOL-SHELL-CANCEL-CONTRACT": "c630f3fb0107c5f3a7c5104e8e6b3b018c6e04e6",
+    "plan/TOOL-SHELL-LEGACY-CONTRACT": "9613f53cdee83875e1ccef2229bb6e98c6c15599",
+    "plan/TOOL-SHELL-REMAINING-TEST-CONFLICTS": "45095aecf32c0ecacd3e84c45556f0923f14652d",
+    "plan/e2e-journey": "f4d943d34890dd968b498678857e4cac343375b8",
+    "plan/ledger-convergence": "5d3f639a5fd129c6e93314c07bca37c2b881adce",
+    "plan/packaging-matrix": "4771e3b8f53f6a26a754268896e4fe6e16a496e2",
+    "plan/phase1-roadmap": "eae002f0e62361221788066a3e46cb4391428080",
+    "plan/phase1-wave1-dispatch": "17a212246ea9408386f39de43b16d1ea49e0a9ae",
+    "plan/release-evidence": "c0c5d9b48020413e57fdcabee708c83459b39268",
+    "plan/security-acceptance": "89fa28bcfa718cc3505da448cdb4686fd261c5c5",
+    "planning/phase1-six-waves": "8a91a7b49a5a1c948218ad8f176d44e015530dcb",
+    "policy/MANDATORY-SUBAGENT-DELEGATION-W1": "cb64da11ea8afe675890bd799c6062daee989d8f",
+    "policy/MANDATORY-SUBAGENT-DELEGATION-W2": "8e8679d0e4222cb56f7915894431669683af0871",
+    "policy/MANDATORY-SUBAGENT-DELEGATION-W3": "dd1fa14c474c0065b2accb25cea80e3cdd7f3d76",
+    "policy/MANDATORY-SUBAGENT-DELEGATION-W4": "99c9d057e9f07cb74254e92d1335f79e3e27b9be",
+    "prewire/APP-001-CLI-PROVIDERS-CLEAN-W1": "5117d76ef0cf105881da7d140732ea083f7721a6",
+    "prewire/APP-001-CLI-PROVIDERS-LOCK-W1": "ff61a62e6513addd53fe7d1f5f98165baea5dc2d",
+    "prewire/APP-001-CLI-PROVIDERS-W1": "e068f0b751d804980dbe22fb7ee7f9922d8fda05",
+    "prewire/APP-012-RUSTIX-LOCK-W1": "6aee5973bd1ae700d4827cc9c0b8ff8e716ab5d5",
+    "prewire/APP-012-RUSTIX-W1": "e5eb9b94a7e10bd8afe4522ae4b1789f5bbf375a",
+    "prewire/APP-012-RUSTIX-WORKSPACE-W1": "ce97e8d8562660fd61f18e8cee5df1d88d3f2be1",
+    "prod/native-tui-parity": "6c2b725db473666677e393c88dbd26266d359d4b",
+    "proposal/APP012-EXPIRY-RETENTION-INTEGRATION": "dc3331ee257dbb21197f5310b8455d32a38b34ed",
+    "proposal/DB019-component-test-registration": "94b6ec80c979c655725a8be2d7953185c219fa26",
+    "proposal/DISC-120-installer-rollback": "9bae192704343a26398174b794280064645edde4",
+    "proposal/DISC-121-native-artifacts": "6cb5b88d340c24390d0f38232a4b6d432c7c90bc",
+    "proposal/PHASE1-GUARD-STATUS-ROLLBACK": "405599ab0a994682e9db517f353c5314f491671d",
+    "proposal/ledger-reconciliation": "eff9dbd9b2c1a5a8b2a2c78724ca07d6b87644b7",
+    "r1-1-template-materialization": "480a2df9ed0df3ce485343fe81bbc584b423eb1f",
+    "reconcile/BACKLOG-CLASSIFIER-34-W1": "cf9f4bc5c764c1485ac6554510cbf1a9374bd9aa",
+    "reconcile/BACKLOG-LEDGER-34-W1": "f21a01e21a4a82b57dae641c032472585f84b2c4",
+    "reconcile/BACKLOG-REOPEN-32-W1": "a2dcb8531ff7dcf77e3588b4e285dbb60d66d222",
+    "reconcile/FEATURES-REOPEN-32-W1": "3b716c7f405df7b7621a26f83fdd4aadd0541606",
+    "reconcile/FEATURES-REOPEN-34-W1": "7888b47ab6ce04f7df96791e32bce4eaba2f30db",
+    "reconcile/GAP-ENTERPRISE-34-W1": "bfa974ffa17302cd91af7403a2850608cb06e996",
+    "reconcile/GAP-EXTENSIBILITY-34-W1": "98de33bdeec7fe38a88f1c727f195c73ca00ba68",
+    "reconcile/GAP-INTEGRATIONS-34-W1": "9425be10a5a71c15055536f3a0309668db430d37",
+    "reconcile/GAP-OPERATIONS-34-W1": "a84a054c3c86fa336abf93a7890294fa4b7c7c28",
+    "reconcile/GAP-RELEASE-34-W1": "78b744ddeaa1b79d3cebddc4bbe80c8217bec8dd",
+    "reconcile/GAP-RELEASE-34-W1-LAND": "99688f2b34ab3ffd820013e7755b1ff21b5546d4",
+    "reconcile/GAP-RELEASE-34-W1-candidate": "f21a01e21a4a82b57dae641c032472585f84b2c4",
+    "reconcile/GAP-REQ017-34-W1": "7368e7d84e6c4c5b4603a2281da4995c46c3f258",
+    "reconcile/GAP-ROUTING-34-W1": "471d46bbe1fca0dcf0357fea71f2e78513d6287c",
+    "reconcile/GAP-SHARING-34-W1": "5bb32ee32edb9a94fdc5e3e9916ffbfcd60badd5",
+    "reconcile/RALPH-REOPEN-32-W1": "3eefe5e808ff4c37391f422e1db79a0c1faef954",
+    "reconcile/RALPH-REOPEN-34-W1": "693ab9a2aa11802f855acfab9abf2bb9ea00900b",
+    "recovery-child-bound-red-safe": "4ecb0375d60e04b2ba856a1676b9ef1d45add462",
+    "red/APP-001-CREDENTIAL-PERSISTENCE-W2": "90d45f3aceed32dc7486701a3a1e4c24fd712140",
+    "red/APP-001-CREDENTIAL-PERSISTENCE-W3": "b943d1cc349d2b4e2cda8929e298a01676748474",
+    "red/APP-001-CREDENTIAL-SEMANTICS-W1": "09a590e94b0ff65b349d189adfcb0c508f9d1382",
+    "red/APP-001-FILE0600-W1": "60f0a6c0d4ed80b23a44a55fee50138e6f708c8d",
+    "red/APP-001-INSTALLED-SETUP": "9cf998a5512f86e5f88c2f57280fc79d1f22c19a",
+    "red/APP-001-SETUP-REPAIR": "18e7c304ea29258ec9a9339fce036cb858f106e8",
+    "red/APP-012-APPROVAL-RESUME": "7938791ba76645115e418928a728869b48beb73b",
+    "red/APP-012-INSTALLED-JOURNEY": "8f180c714f67479ea9c1af38ab2c5bb28d4343fb",
+    "red/APP-012-LIVE-FILE-TOOL-ALLOW-W2": "8b5b5a0cea5d1c66b9aa7edb7de551ed1c400d16",
+    "red/APP-012-LIVE-FILE-TOOL-INROOT-W3": "4f66a10f087e98d77db31ac7a968f74e33aae725",
+    "red/APP-012-LIVE-FILE-TOOL-W2": "52807f87c4d9ff9937adb2e1a655acdeb51badbc",
+    "red/APP-012-PARENT-TOCTOU-W1": "3ecee1009890087f71b3548260604fa9eed7af1c",
+    "red/APP-012-ROOT-ANCHOR-W1": "8b72e84823ebb133854557e2f8b3e62de46af5f0",
+    "red/APP-012-SYMLINK-ESCAPE-W1": "c6091e166e06ee949921b0b60630c7b7b99d46b2",
+    "red/APP-012-TOOL-INTENT": "925bb52f7685e2900244fe4755892dee7c831bf9",
+    "red/APP012-APPROVAL-EXPIRY": "7d90cdd6decf8c72f7036c01928e2b81e7bd4861",
+    "red/APP012-APPROVAL-RETENTION": "8d9dc23c7a23a292f19a30ff3001dbab5632128f",
+    "red/APP012-AUTHORIZE-OPEN": "671beb3a2e87b22af86b29799f96a56ca2d66340",
+    "red/APP012-CONCRETE-DISPATCH": "5b42e8be739fa23660ebb53cea2bf0d202b30169",
+    "red/APP012-GENERATION-ENFORCEMENT": "758618d643a72c826f80147d6333e97525181a3f",
+    "red/APP012-KEYRING-PERSISTENCE": "f92facb1f16acb4715b78451933c0dd66b9c9adf",
+    "red/APP012-PROTECTED-HARDLINK": "a340af69617f11ebe3ad4ceaf527daa8761d52f9",
+    "red/APP012-PROTECTED-PATH": "dc1a84d17b05daa001225e2e94dd9a17c47b86fe",
+    "red/APP012-RECOVERY-CHILD-BOUND": "2d0a6fead69210ed985cc46e969fbdcb64282aba",
+    "red/APP012-RESTART-RESUME": "ece05d12c29e2c66461eac7e86e4ad3bdc83328f",
+    "red/APP012-WORKSPACE-OWNER-LOCK": "077d2359ea2da295e24c384f4cfb0120ff8710e0",
+    "red/AUTHWEB-BROWSER": "6de682f7d70b22c0ae95e86a41fe6a1bb0a866c4",
+    "red/AUTHWEB-CLI-HANDOFF": "5977b5877b61e7beff22ab299694c88fab1da2a1",
+    "red/AUTHWEB-DIRECT-FETCH": "0da7bcb316e241f4ae3ed53a3e94ea9d4ab0362b",
+    "red/AUTHWEB-REFRESH-W2": "255958ccbfbb545296d86dee46d9853e3add761b",
+    "red/CUSTOM-PROVIDER-CONFIG-E2E-W1": "84f834a9f4bdb1112ad65110b8da456363e2ba86",
+    "red/CUSTOM-PROVIDER-CONFIG-INVENTORY-W1": "cab7c4cf3fc839cb306673fd7893a4028b38f6ad",
+    "red/CUSTOM-PROVIDER-LIVE-W1": "434cddebed7a1d5c21965b395fb0d8c687a395ba",
+    "red/PACKAGE-RECEIPT-BINDING": "ca7a2df711ac5ce506e88c821d37ce94f3b1a940",
+    "red/PHASE1-ACCOUNT-SETUP": "a033941ae831d4e8aee2694b43d4be0f92694d4e",
+    "red/PHASE1-AUTHENTICATED-WEB": "a7ec0d2b42383a226bc18ab6b1344b3f5aa91382",
+    "red/PHASE1-LANDLOCK": "7262682e31c1f473912c9483804c9430eb4ee4c5",
+    "red/PHASE1-LIVE-TURN": "9f4e9a59e1b4786e5e374c290060deee297cbe1f",
+    "red/PHASE1-MACOS-INSTALLED": "12da0a88e847c4e508a8a43c621589aae61bf26d",
+    "red/PHASE1-NATIVE-ARTIFACT-MATRIX": "15f6406b85cce98269d1746ca479c82e6bd94742",
+    "red/PHASE1-PKG-RUNTIME": "7262682e31c1f473912c9483804c9430eb4ee4c5",
+    "red/PHASE1-POSIX-UPGRADE": "7262682e31c1f473912c9483804c9430eb4ee4c5",
+    "red/PHASE1-WGNU-NATIVE": "7262682e31c1f473912c9483804c9430eb4ee4c5",
+    "red/TOOL-PROCESS-CWD-BYTES": "e66ad1ee81d4befadb40adbc29aea7daae5d49c6",
+    "red/TOOL-SHELL-BATCH-IMMEDIATE": "6e1695dbd01981d22c95291b7fe576aeb56e5d20",
+    "red/TOOL-SHELL-CANCELLATION": "56f8e2b3d9bd1f50481d7c8b0ee9fc0a13b662d7",
+    "red/TUI-011-GNU-OBJDUMP": "d1b7f136753f84504d35edeca0a40738b1848997",
+    "red/TUI-011-INSTALLER-REAL-ASSET": "cc3ebaa3c2f14c2070565cafc0f970f7cd887191",
+    "red/TUI-011-LINUX-REAL-ASSET": "3190556a78d7fe3766f65e55f9ac58ece97ba7b3",
+    "red/TUI-011-MAC-LOADER": "f0b5a27ffa8cc6d843e4e84d64c9489506efb492",
+    "red/TUI-011-NATIVE-COMPILE": "5c5f03e13a659a947505d470a9e7fbee540f328d",
+    "red/TUI-011-NATIVE-COMPILE-SAFE": "7938791ba76645115e418928a728869b48beb73b",
+    "release-native-current-binding-safe": "80998a7bc1012729c4a40294a7911300a3e4afec",
+    "repair/GAP-ENTERPRISE-RECONCILE-W2": "15231636d09168d514b0637e2872789de0157350",
+    "repair/GAP-EXTENSIBILITY-RECONCILE-W2": "eebf2359466f862ec98a54a7b8799734a77ad59a",
+    "repair/GAP-INTEGRATIONS-RECONCILE-W2": "2185d332f46f8800cb8ebc86f98de87c42ac728b",
+    "repair/GAP-OPERATIONS-RECONCILE-W2": "22762c28e49a9b2b983884c7a7e154cb5aa61d32",
+    "review/APP-001-CREDENTIAL-DESIGN-W3": "61eabd432fa0eeb98017d2d3c92e63ba59a52920",
+    "review/APP-012-LIVE-WRITE-CONTRACT": "925bb52f7685e2900244fe4755892dee7c831bf9",
+    "review/CUSTOM-PROVIDER-IMPL-W1": "434cddebed7a1d5c21965b395fb0d8c687a395ba",
+    "review/GUARD-1128738-W2": "8a91a7b49a5a1c948218ad8f176d44e015530dcb",
+    "review/TUI013-DEPENDENCY-CLEAN": "d0886596c6ac034816775781fcb0531c47c81145",
+    "review/TUI013-RUSTIX-TERMIOS-PROPOSAL": "36953b19ae810f95d27b6e2d851bdf86b3c21e1d",
+    "review/WEB-CANVAS-IMPORT-EXCEPTION": "ff7f44b84a4e89a850780d12605bd559a0598405",
+    "review/WEB-CANVAS-IMPORT-EXCEPTION-v2": "cd020cb121109cf4a85790a8d97cc74d509fe45b",
+    "salvage/db022-decoder-framing-test-only-20261005": "29c557bb3d6e630c5adfb65247dab4ab0afe5fc0",
+    "salvage/shell-owned-group-timeout-product-20261005": "0b77eb9033fd4ca60307318116e26d9dc3be7885",
+    "server-rules-injector-final-maintenance-safe": "1fb480a7126153105ac6d010200d8a3c4dd3de58",
+    "server-rules-injector-maintenance-safe": "d3bda4672a41e4fa0603b59dcd223b9f758a6a35",
+    "server-s1-fixture-final-safe": "3ade003ebeaad0e4ca583abd4f5a76438e564596",
+    "server-s1-fixture-maintenance-safe": "3eb915e293ac21bcf7aa16d3f798d0216e3f503e",
+    "server-s1-fixture-poll-scope-safe": "032a03fa85a4be57e380ead02b84a80aa4fa1aa1",
+    "server-s1-fixture-qualified-safe": "d10df81d8acb48b55dd13a448d12a904daf39bfc",
+    "storage/typed-tool-history-same-batch-stop": "ddff2e6d617f2c70f60ed046f7af7636087f1d61",
+    "tui015-testbase-projection": "f92aa529cec55c068d27466c37af20cda51f62b9",
+    "v2/C1-specification-ready": "db975b186f4fe20d180fe2bbf530903187f6b71c",
+    "v2/C1N7-clean-20261002": "b6284a8440d801da1bb8cad152b4b51ce70cc7fe",
+    "v2/C1N7-prepared-20261002": "bce6d9f7697fa2c58aa1085d84d166a4d3a4fa45",
+    "v2/P1-provider-session-y52o0gi3": "259570ba7eb59a2b39b4cce75cd55eda8fc24336",
+    "v2/S1-live-permission-interrupt": "9dc74a25a272bd79bd80684bd75a87dbdf9667c5",
+    "v2/agent-loop-contract-current": "17d780ff5aa06ed4710e6927d3e799683fdc6966",
+    "v2/agents-library-current": "72e5aa499b124937ed8e193ca0f0d2d9689b5122",
+    "v2/approval-expiry-contract": "8178d0b24b4691e467baad2fd6ca098c1a74c6a5",
+    "v2/approval-expiry-live": "6ab4dfb7fe3d02426ef3778435b4e3c31cd27011",
+    "v2/catalog-library-current": "97774583c6b008581fb26cc85a11b74b9d0692a1",
+    "v2/ci-ext-fixture-current": "640d1110fe8cef19192a38d3275967babffa57ff",
+    "v2/ci-ext-integration-ready": "8563c4d6442e496573b35dbef6e117ebce938ba5",
+    "v2/ci-mode-fixture-current": "6227f1aefc88f6704f1e190d1ba74bd90044c06d",
+    "v2/ci-mode-integration-ready": "3abcc879dd68f5cf7df413d3118d03785f86fca2",
+    "v2/cli-mechanical-y52o0gi3": "35fa43bdc48203e818a3bb5b2411a77f17842695",
+    "v2/default-tui-contract-current": "9f6428c1763381d57ab83cf82a42bda284c8fd0f",
+    "v2/delegation-identity": "2f06dc6fb3f5162e6aa9cde6a6267a4f11ec00d2",
+    "v2/discovery-contract-fixed-y52o0gi3": "c1ee03c869a987556d58867d851b0011bd3886a1",
+    "v2/discovery-contract-today-y52o0gi3": "87b01e4e1bb500abf06ed6d3637329aa4c310563",
+    "v2/discovery-dead-pid-test-salvage-safe": "5e79fea3d9053f992b209767c499345e92d625c9",
+    "v2/foundation-library-current": "7b8b5f6e5218802806e608b712ab0855fcd1102e",
+    "v2/foundation-library-integration-ready": "6a71db3898abde832ff4ccce023a80f3bff252f9",
+    "v2/live-interrupt-contract-y52o0gi3": "257c01e5dc2838d057fb115a2d7e25ae9ff73c81",
+    "v2/live-permission-contract-y52o0gi3": "5f35e070c85c36445e4532fc71d7c0372f33606f",
+    "v2/live-permission-interrupt-correction-y52o0gi3": "4fa46232fdb0840b052d24194a85765a23a53b09",
+    "v2/mcp-config-test-compile": "2db02c0dcc7b37af4a989f8c3bc8dfa427b6543e",
+    "v2/mcp-spawn-baseline-89aeaa8": "89aeaa81be72e4af95dc6fb39c28f54c07c92ae1",
+    "v2/merge-ledger-y52o0gi3": "3097644f846fc6f187925791aedd6d4924a32219",
+    "v2/merge-ready-20261001-y52o0gi3": "180c55eedc3aeeb52fac29cceea8b70715cba6e0",
+    "v2/native-bridge-library-current": "4a88077f80657f44ed439f948fcc3560cca61ad5",
+    "v2/native-entrypoint-recovery": "3ece0394b414f87aab34700f1bb6c631566f5b3b",
+    "v2/native-fixture-maintenance": "8b5b6ef9595713db34d1a2719f84caa6c543c443",
+    "v2/native-lifecycle-salvage": "6959f88d1e94dc489a545e51390d00de56c7257b",
+    "v2/native-paste-contract-y52o0gi3": "d0376c80c944c8a802f8ad99dc02845276e2ea97",
+    "v2/native-paste-prepared-y52o0gi3": "681ba084f1d1deb9ad7ec8fb6aa84598a7a85c40",
+    "v2/native-paste-repair-y52o0gi3": "6e796088dc1f522e87797960cb6fab7239adafde",
+    "v2/native-portable-pty": "ff4ec3cc234147e15adca0737248c11e7b514b29",
+    "v2/native-provider-contract": "c377a96ae98fab4730b52594eb4db48088a8441f",
+    "v2/native-provider-live": "bdee47eac2e31f25a4787944a230a2ec8554e70b",
+    "v2/native-reset-diag-current-20261001": "bf9d2ac00deb1a39c02f166cebd42cf3b232f1fe",
+    "v2/native-reset-diag-rootcause-y52o0gi3": "493956d598bcfbd59612fe216ce095e467a77175",
+    "v2/native-reset-diag-y52o0gi3": "0efe86bb2e6c6587f4c8b8d7163ae08f521aabf4",
+    "v2/native-resize-luna-y52o0gi3": "2e7c9a35cb78a9ba12b4d2387b3ba99cfb77a5d9",
+    "v2/native-resize-today-y52o0gi3": "f8bde4923cb0f6fdf9c86cbb9341d82d50a89209",
+    "v2/native-stream-cleanup-test": "86c4d232f6468b055975adc823d5ee1bf8f2689f",
+    "v2/native-stream-tool-contract": "8f0058b0f7747589cf0f215067d01634ea06ad7b",
+    "v2/native-stream-tool-live": "ed727a6577527fc560a6dfc736fbdb0479654f06",
+    "v2/native-utf8-contract": "cc532734033d7d9f26c7a50536b83d1d73138058",
+    "v2/native-utf8-integration-ready": "a79ae96b93f9a0ab94ceafadcd9425db08f28027",
+    "v2/native-utf8-live": "cfe6cbfdc96dbe6d3cf76b284da7e614e40c5a9a",
+    "v2/owner-fixture-maintenance-y52o0gi3": "0ec955ba412ba60a9ae0299d3fd9cdb6b9330ddd",
+    "v2/packaged-identity": "ab159b240d81a8c4b9ae75130d0f1583742ac652",
+    "v2/prepared-combined-20261001": "dbb6412ace66f4cd32620be700cb6dc9b399d450",
+    "v2/prod-native-priority": "fe9830b2e61c07f2aee91c9d5a29c2111b495579",
+    "v2/prod-native-resize": "f8bde4923cb0f6fdf9c86cbb9341d82d50a89209",
+    "v2/provider-auth-bound-contract": "e29a9e9e0adaf49b14295e4e2511ae81f38b0575",
+    "v2/provider-auth-contract": "c7947f42c807b129cf54f76b7d7aea174c3740e6",
+    "v2/provider-auth-security-contract": "538f848a3c73c86387497d08b4e1b3c037695263",
+    "v2/provider-auth-wiring": "f9eb056a2edccc12f4fb0898f905b829ce26b4ab",
+    "v2/provider-lint": "bbdfff2a0033621c771bcb5f89c09df5a55df5a7",
+    "v2/r1-release-gates": "703b6d6fd4c9eac8d3f7812fffe65672c9c5e8bc",
+    "v2/salvage-preservation": "3fd4b81443787deafb1dbb02890b241b4bb70772",
+    "v2/security-lint": "3634145d6661b31421529d27e45dba24395d73d7",
+    "v2/server-library-current": "353821578700cf9b22ef1b429042f41989f756cc",
+    "v2/server-quality-y52o0gi3": "ce400481a036d7aa684b94352658797df19420b7",
+    "v2/session-owner-contract": "787cd8d383f25369309e31f8868ea60169eea7f4",
+    "v2/session-owner-contract-ready": "2a9903ebcdbb2406238a1110b1cbb48ebdf53438",
+    "v2/session-owner-today-y52o0gi3": "1f1969123a0f30257449b0d37226ab26b0513fc3",
+    "v2/sessions-lint-current": "a75b761dab23e58f49f93ec0ebb3a2f1fc0fc9c3",
+    "v2/sessions-lint-integration-ready": "0f01432793a599b312226b522c479a757ab34f5e",
+    "v2/shell-cancel-contract": "efa0b13667f1ec6ec3fd3c47bce4c141ec0db6c6",
+    "v2/shell-owned-lifetime-live": "5c6fd500d46cec9c7248f2f91ddc0336c33ad08b",
+    "v2/storage-lint": "d099194edc1afb87adb1f1e10eab80e969aab2aa",
+    "v2/today-integration-y52o0gi3": "73966a40118df538c5dc5ce4577ded6fb48f964d",
+    "v2/tools-lint": "2e596577d02f9d65e43bef6e16561e0ef789b84b",
+    "v2/tools-owned-current-ready": "e1acd5258fed50b1f79f54b412921266f07dc8ed",
+    "v2/tools-owned-integration-ready": "88437098be650f27eeffe6db2c177134b238bf34",
+    "v2/transcript-paging": "5c6f9cb05f6997423da62c8edca8df07a4754103",
+    "v2/typed-contract-maintenance": "88923f185975482c24ad2ef8d589200954eaea74",
+    "v2/typed-history-wiring": "6291cafbfbb16824c577f4d530e4371c96be7455",
+    "v2/ubuntu-installer-closure": "7a06cc89feb8a694063356dcfdfe34798deee353",
+    "v2/web-auth-fixture": "0076bfb32103c778786ba4e567807912c1e20bf9",
+    "v2/web-mechanical-build": "78f585c8b428b24b06793a91c6e7c303657f0bfd",
+    "v2/web-tool-stream": "81fddef90bb29ec4e217b40153ec720557e5188b",
+    "v2/workspace-format": "b046ca453a5e3edbe5b30bf53ccc42be9d04c074",
+    "verify/APP-001-FILE0600-D137-W1": "f22e0e8b027c947ebeefd9dbc39fc0a5580a182b",
+    "verify/APP012-APPROVAL-PREWIRE": "bbdf1f1c3d1b8f07097fcd484bf567c130412b30",
+    "verify/APP012-APPROVAL-RESUME-CORRECTION": "d8599168b05fdf40a3841b398d9256afaf5b090a",
+    "verify/APP012-KEYRING-API-SEAM": "beffcb555323cf0dde5e75ee83ca1de9335b996f",
+    "verify/APP012-KEYRING-API-SEAM-CORRECTION": "4dc8811b65e6b340afe3b25efc3f55d2bb9d9147",
+    "verify/APP012-PROTECTED-PATH": "8916868dc31ba98f98bf26d33dbe9d43b1758d10",
+    "verify/APP012-RECOVERY-CHILD-BOUND": "a0291547d4706d982e4e999f140e0fe4e1a0e9ce",
+    "verify/APP012-RESTART-RECOVERY": "48d0351040efb83ffd8fd2cc65bcdb89ee217620",
+    "verify/AUTHWEB-BROWSER-CLIENT-IMPL": "ecec045471641eb50b8e59bed00003f1af943d4d",
+    "verify/AUTHWEB-BROWSER-CLIENT-VERIFY": "026a0aea2ee1c2d06710135410d18a061547a327",
+    "verify/LEDGER-CONVERGENCE-TOOL-GREEN": "174b955ff26a6037634f0808b0636b00e22b9a18",
+    "verify/LEDGER-CONVERGENCE-TOOL-RED": "d62fac636864101718da2a7e73a37add42c208e5",
+    "verify/PACKAGE-POSIX-INSTALLER": "b3708060917b54dc9055b8b6432c88d6deb40763",
+    "verify/PHASE1-VERTICAL-SYNTHESIS": "5a5a51c48b2c0519e674a92ce9ee9051b59b7f46",
+    "verify/TOOL-AUTHORIZED-PROCESS-SEAM": "2699dc7e666e78ddedcecf960d4d5ef425e0f172",
+    "verify/TOOL-PROCESS-CWD-BYTES-GREEN": "1c81b4cd1cca3a3d5450898b5d22309817a9e7ce",
+    "verify/TOOL-RED-SHELL": "8c514e05f63ad4de5942e43d56e3f180126fee2a",
+    "verify/TOOL-RED-SHELL-BROKER-REFREEZE": "d33d142ba1f4525a0f8714a97f8c81694f26265c",
+    "verify/TOOL-SHELL-BATCH-IMMEDIATE": "30de11af23a4db7ef701d5a753933a18897954d1",
+    "verify/TOOL-SHELL-BROKER-EXECUTOR-GREEN": "6a55ac573a25b4e55901a128458a014e677a00d2",
+    "verify/TOOL-SHELL-BROKER-FULL-GREEN": "2b7a6faf2916169e5b776d951859c31ff622b39b",
+    "verify/TOOL-SHELL-CANCELLATION": "0fb07076d4608f3c7b08eeeb2342cf11b85177d0",
+    "verify/TUI-011-INSTALLER-REAL-ASSET": "6962e8f21ff3c6d474169e660af223eeea895215",
+    "wave/1-integration-candidate-luna": "b3164496414ff09de6e76add710c1c09a18dba02",
+    "wave/1-staging": "cacad26a2af5c88ef9708108ac4163cbb68a5222",
+    "wave1-fixture-correction-luna": "744f963f2fe08164ed8703fd6ce862916d81016a",
+    "wip/local-agent-loop-20260926": "96087d1d22727893273ba58ed28a3c6ede9e0bf0"
+  },
+  "worktrees": [
+    {
+      "path": "/Users/mymac/Projects/opencode-rk",
+      "head": "6c2b725db473666677e393c88dbd26266d359d4b",
+      "branch": "prod/native-tui-parity"
+    },
+    {
+      "path": "/private/tmp/r1-4-test-worktree",
+      "head": "0c1dda250fd952a02068364d1caa21f88bc074ef",
+      "detached": true
+    },
+    {
+      "path": "/private/tmp/wmainv2",
+      "head": "180c55eedc3aeeb52fac29cceea8b70715cba6e0",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/oc2-repair-base",
+      "head": "d542fc0c021d27bf6985576f79972b8240c4fa92",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/oc2-verify-stg",
+      "head": "2798d151dd20f05408cb600384f0a944c6576600",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode-db-022",
+      "head": "d3b442ec99813c2878bcb41d2632ba669c00807f",
+      "branch": "lane/DB-022",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode-db-022-corrected",
+      "head": "2e73e42b5f368dac185a10318ae65447990e1596",
+      "branch": "lane/DB-022-corrected",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/AGENTS-decision-policy",
+      "head": "78930a81a1244925d4ecfe0d22b8ba291c333a61",
+      "branch": "docs/decision-authority-policy",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-merge-68eda8ad",
+      "head": "806c247afc5fb633b8dd72616841a6e82aeb783a",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/app012-reg-review",
+      "head": "d7bc401e08c2c7883527951e5adbb9ecbc715406",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-registration-review",
+      "head": "260356596ce810f3d32ec762d22370bdaab85702",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-registration-review-a79",
+      "head": "a79b61c66c298d0eb4c2dc9c12e9196aed00d512",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-registration-review-v2",
+      "head": "a79b61c66c298d0eb4c2dc9c12e9196aed00d512",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/app012-rk-eval-3227b28",
+      "head": "3227b28e6dbaf604d8557768a8732407c5750181",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-v3-review-full",
+      "head": "28e894f4bdfe9c56fa1604cc115259f64f62d733",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP012-v5-indrev/tree",
+      "head": "d7bc401e08c2c7883527951e5adbb9ecbc715406",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/app012-v5-reg-prep",
+      "head": "d7bc401e08c2c7883527951e5adbb9ecbc715406",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/app015v2",
+      "head": "5b9172c7a35a264623a4b0baf2412bd1075e0abd",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP016-same-batch-author",
+      "head": "dd5143ad37a2502f47d36d9e58789df0c28273f7",
+      "branch": "lane/APP-016-SAME-BATCH-STOP-REGRESSION",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/APP017-INDEPENDENT-RUNTIME/worktree",
+      "head": "ebf36d37922f5a30dd44ca9819bec5229a5e01ef",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/approvedtemp/TUI013-dependency-clean",
+      "head": "d0886596c6ac034816775781fcb0531c47c81145",
+      "branch": "review/TUI013-DEPENDENCY-CLEAN",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/AUTH-RED-prerequisite-integration",
+      "head": "691709c46785a78a563f173a3d90a9d570c4bbfb",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/AUTH-registration-integration",
+      "head": "d542fc0c021d27bf6985576f79972b8240c4fa92",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/AUTH-request-red-author-v4",
+      "head": "4c307043091232939d8df6ac43ba45c66147d381",
+      "branch": "lane/PROV-030-author-v4",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/authweb-prep",
+      "head": "806c247afc5fb633b8dd72616841a6e82aeb783a",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/authweb-prep-a79",
+      "head": "f3bda35276bc3856c794f8101bf194130289697f",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/authweb-web-build",
+      "head": "b52b5651d1f5c10bd2ac13ead7da7e26fd9b7d41",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/C1-installed-default-entrypoint",
+      "head": "db975b186f4fe20d180fe2bbf530903187f6b71c",
+      "branch": "v2/C1-specification-ready"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/c1-native-startup-1790948952",
+      "head": "656fbf814e07ded64196727f35be55239b38d831",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/C1-test-owner-1790942952",
+      "head": "15db75ec0fe88790398f2ff19e9cd8760a5d9a5c",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/C1-test-owner-1790942952-d92",
+      "head": "d92a2a7d5bb32e9d32569cb40ede3899e1ab4b91",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/C1N7-clean-20261002",
+      "head": "b6284a8440d801da1bb8cad152b4b51ce70cc7fe",
+      "branch": "v2/C1N7-clean-20261002"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/C1N7-prepared-20261002",
+      "head": "bce6d9f7697fa2c58aa1085d84d166a4d3a4fa45",
+      "branch": "v2/C1N7-prepared-20261002"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/cli-storage-contract-wave",
+      "head": "6dcabf83dbfb0e254b91ba4656562d91b3210d09",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/controller-safe-20261002-2025-40743",
+      "head": "7424198e5a14650ba6facdd91852388ab2379e39",
+      "branch": "G0-agent-role-runtime-contract-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/APP012-facade-alias-fixture-test-owner-safe",
+      "head": "064b0c6ac5ac0aa6ca2cb86417b38045bb698428",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/APP012-facade-alias-repair-safe",
+      "head": "472481c05c48f637424a2c50e1291e86f24df3d9",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/APP012-facade-hardlink-test-owner-safe",
+      "head": "d410e136e140ebc8d74b2a3a5228a831027b5183",
+      "branch": "APP012-facade-hardlink-test-owner-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/APP012-facade-msrv-lock-repair-safe",
+      "head": "0f38dedb3029adfae3a339edfcebac5d5737d677",
+      "branch": "app012-facade-msrv-lock-repair-1791175823"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/APP012-generation-enforcement-salvage-safe",
+      "head": "398b44148237a8391911f42faae3d2aaed99fcf9",
+      "branch": "generation-enforcement-salvage-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/APP012-generation-perf-fixture-test-owner-safe",
+      "head": "57c35eac7ed09d0925d7e19b91a7df6112fa1845",
+      "branch": "facade-ownership-prerequisite-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/APP012-protected-hardlink-salvage-safe",
+      "head": "31dd9330d991452cbb1dc8a0030f692d3babdc79",
+      "branch": "APP012-protected-hardlink-salvage-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/APP012-recovery-child-bound-red-safe",
+      "head": "4ecb0375d60e04b2ba856a1676b9ef1d45add462",
+      "branch": "recovery-child-bound-red-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/Browser-resume-rotation-frozen-red-safe",
+      "head": "5efc8712f2d07ac65eacc368d9c2f5cb1475b8cb",
+      "branch": "browser-resume-rotation-frozen-red-1791173728"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/C1-verify",
+      "head": "b6284a8440d801da1bb8cad152b4b51ce70cc7fe",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/daemon-socket-current-train-safe",
+      "head": "d2735a53fc707241805851bed26178d0093082ee",
+      "branch": "daemon-socket-current-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/daemon-socket-path-repair-safe",
+      "head": "bdb507e9f81a3fc63124fe72b2bafc9c8cf9f267",
+      "branch": "custody/daemon-socket-path-repair-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/daemon-socket-path-repair-safe-v2",
+      "head": "8152ffa60b642c36491499217e7e1c317d467985",
+      "branch": "daemon-socket-path-repair-safe-v2"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/daemon-socket-regression-train-safe",
+      "head": "bdb507e9f81a3fc63124fe72b2bafc9c8cf9f267",
+      "branch": "custody/daemon-socket-regression-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/Discovery-dead-pid-test-salvage-safe",
+      "head": "5e79fea3d9053f992b209767c499345e92d625c9",
+      "branch": "v2/discovery-dead-pid-test-salvage-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G1-endpoint-and-fixture-current-train-safe",
+      "head": "066b8658af2295283187f4a4308863eae63dbe2d",
+      "branch": "G1-endpoint-and-fixture-current-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G1-endpoint-rejection-repair-safe",
+      "head": "b2a08bb4b06314d9e6cd6ec73e84c24e64ae1671",
+      "branch": "G1-endpoint-rejection-repair-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G1-final-lint-repair-safe",
+      "head": "5bcea2cecb491c9de449b97fd45135482154ec85",
+      "branch": "G1-final-lint-repair-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G1-linux-fixture-maintenance-safe",
+      "head": "1ca48c6641e49fc1c00e7c6185c7d62ce370416c",
+      "branch": "G1-linux-fixture-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G1-runtime-red-current-base-safe",
+      "head": "a0bdd37c06c520e1712cf38a0b6e98a2cb860314",
+      "branch": "G1-runtime-red-current-base-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G6-async-fixture-final-train-safe",
+      "head": "a4cf64a598bbe1461e9fcfb15a6af1f468695659",
+      "branch": "G6-async-fixture-final-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G6-auth-compatibility-tests-safe",
+      "head": "40ff2f5b12834b5f4b46c027ec7e967e453f6a0b",
+      "branch": "G6-auth-compatibility-tests-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G6-browser-resume-implementation-safe",
+      "head": "a7798e9c70e3a965f7fe19488a13afe9026c5056",
+      "branch": "G6-browser-resume-implementation-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G6-current-train-safe",
+      "head": "2fdff4fa649a146d70c77da8a3debdf04c35d5ea",
+      "branch": "G6-current-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/G6-final-verification-train-safe",
+      "head": "ac42eba635620543999105beb851f2dea790bb36",
+      "branch": "G6-final-verification-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/N1-R1-current-base-train-safe",
+      "head": "4e7419b1d4774bc6e65b957142c92222dec0154f",
+      "branch": "N1-R1-current-base-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/Shell-owned-group-timeout-product-repair-safe",
+      "head": "0b77eb9033fd4ca60307318116e26d9dc3be7885",
+      "branch": "salvage/shell-owned-group-timeout-product-20261005"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/E/Typed-tool-stream-framing-salvage-test-safe",
+      "head": "29c557bb3d6e630c5adfb65247dab4ab0afe5fc0",
+      "branch": "salvage/db022-decoder-framing-test-only-20261005"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/format-safe",
+      "head": "f87d7058c92d3977778f7fa3713aabe2eef9e1bf",
+      "branch": "custody/format-safe-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G0-agent-role-runtime-red-current-base-safe",
+      "head": "1fe1f99f9c3bbd62f98c5713c006b03a55d43313",
+      "branch": "G0-agent-role-runtime-red-current-base-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G1-activity-fixture-lock-repair-safe",
+      "head": "368a23c50cf74042b6668f17b77c538f0689e0c1",
+      "branch": "G1-activity-fixture-lock-repair-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G1-daemon-runtime-current-base-train-safe",
+      "head": "5a32a7d1d0c46b6c503206c3b3351f6e19e6cd87",
+      "branch": "G1-daemon-runtime-current-base-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G1-daemon-runtime-integrated-base-train-safe",
+      "head": "4dbcbf8ed41b8157767c446a28c17c41070c54a5",
+      "branch": "G1-daemon-runtime-integrated-base-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G1-G6-complete-maintenance-train-safe",
+      "head": "a41b363452fca6c6592df53dd03056c1e2d4193c",
+      "branch": "G1-G6-complete-maintenance-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G1-G6-native-web-maintenance-train-safe",
+      "head": "7d494e9ac7ff731351263f8e54a828e8bc0ce94a",
+      "branch": "G1-G6-native-web-maintenance-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G1-G6-x64-browser-assets-train-safe",
+      "head": "c9d2fa3187ae035d08102f782a7a3ec61529df16",
+      "branch": "G1-G6-x64-browser-assets-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G1-G6-x64-native-import-train-safe",
+      "head": "8bb91e449f60fbffc28052b60d09b86f8d4855b5",
+      "branch": "G1-G6-x64-native-import-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G1-runtime-clippy-verification-train-safe",
+      "head": "d318d40273b7a521593028367d7dd7fe3bb20e00",
+      "branch": "G1-runtime-clippy-verification-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-auth-clippy-repair-safe",
+      "head": "871e328db4395503b77659cc15a02e1e6a766a44",
+      "branch": "G6-auth-clippy-repair-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-browser-resume-contract-safe",
+      "head": "356d65c7d8dabf02b43402f3cbd72a7676eef05b",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-marker-readiness-fingerprint-safe",
+      "head": "0d1398fd235465225735e904279887203c886fb8",
+      "branch": "G6-marker-readiness-fingerprint-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-marker-readiness-test-maintenance-safe",
+      "head": "f713e92b21406c0269862c09aadcf37c39b1d161",
+      "branch": "G6-marker-readiness-test-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-permission-ui-assets-train-safe",
+      "head": "ac725f5f60f4b61e048ac81b70ad96f12f8cfe1e",
+      "branch": "G6-permission-ui-assets-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-permission-ui-repair-safe",
+      "head": "4d9e0e595998e3a02440b8021cae0beb35c8883a",
+      "branch": "g6-permission-ui-repair"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-permission-ui-safe",
+      "head": "482d480012718d51407465e63b69b8ede4a0ac3e",
+      "branch": "custody/G6-permission-ui-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-provider-auth-fixture-lint-safe",
+      "head": "d3bda4672a41e4fa0603b59dcd223b9f758a6a35",
+      "branch": "G6-provider-auth-fixture-lint-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-release-fingerprint-closure-safe",
+      "head": "0802445294fe3c03ce417399c55fa1a6132256ea",
+      "branch": "G6-release-fingerprint-closure-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-runner-contract-safe",
+      "head": "3d4efe8cb6e4fde55022a456400e3ec91bc252a8",
+      "branch": "custody/G6-runner-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-test-safe",
+      "head": "f18ad2fe90e4ea44c031549fb3494551733f68eb",
+      "branch": "custody/G6-test-safe-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-transcript-leaf-assets-train-safe",
+      "head": "23cddb99ec50686091d264894b597529f1a30b53",
+      "branch": "G6-transcript-leaf-assets-train-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G6-transcript-text-leaf-repair-safe",
+      "head": "50148acd6fd89970f19bb0d76e5524bb7f3ae50e",
+      "branch": "g6-transcript-text-leaf-repair"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G7-owner-binding-maintenance-safe",
+      "head": "f94978a2de1b68afda9dd52773964acdcdfcb27b",
+      "branch": "G7-owner-binding-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G7-primary-role-tracking-maintenance-safe",
+      "head": "34665e4eae4bef4c4938230509d2de417642f872",
+      "branch": "G7-primary-role-tracking-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G7-request-evidence-reader-maintenance-safe",
+      "head": "cefc8c50f405139ee26c64e3183a636ddef5c860",
+      "branch": "G7-request-evidence-reader-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G7-restart-pty-tracking-maintenance-safe",
+      "head": "6999d31d14528f8cf63609a06314d9952ad59927",
+      "branch": "G7-restart-pty-tracking-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G7-test-safe",
+      "head": "06df5045b9803552ba9fdb328547235260125166",
+      "branch": "custody/G7-test-safe-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/G7-tracking-guard-maintenance-safe",
+      "head": "00159e2e61bd0a0448218ed62ada970a4e43c1ec",
+      "branch": "G7-tracking-guard-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/N1-canonical-train-safe",
+      "head": "ee93c81065a566d5a19023ea772cb62768aa9bec",
+      "branch": "custody/N1-canonical-train-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/N1-native-activation-safe",
+      "head": "51b5fe3de64d280130d0becd4468ba680307ad1c",
+      "branch": "custody/N1-native-activation-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/N1-native-portability-test-safe",
+      "head": "02d7ec5aeca00584bfb157cd4b4cbf0e6add45d8",
+      "branch": "custody/N1-native-portability-test-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/N1-pty-observation-final-format-safe",
+      "head": "52180251584764da98718fbcbb351fb52e94db20",
+      "branch": "custody/N1-pty-observation-final-format-20261002"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/N1-pty-observation-repair-safe",
+      "head": "3e155b0ab4bbe7d37e59decd3cc7236e8a2719fc",
+      "branch": "custody/N1-pty-observation-repair-20261002"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/PERSISTENT-DAEMON-terminal-lifetime-safe",
+      "head": "85ae7432bbb745d9c42879e0fae01b7f8bb0c975",
+      "branch": "persistent-daemon-terminal-lifetime-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-integrated-prep",
+      "head": "789badd0526313966c28b6b80a19769a8608d00d",
+      "branch": "custody/R1-integrated-prep-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-platform-provenance-repair-safe",
+      "head": "68d2b76f6b655c0f1c601ae37b86149a19680def",
+      "branch": "custody/R1-platform-provenance-repair-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-platform-provenance-test-safe",
+      "head": "64492a0d53016e773f1779937b35a196eaea6a2a",
+      "branch": "branchcustody/R1-platform-provenance-test-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-product-verify",
+      "head": "d9fa8aca293e3711b57a11ef01fd3e6e73b0a96a",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-repair-safe",
+      "head": "d9fa8aca293e3711b57a11ef01fd3e6e73b0a96a",
+      "branch": "custody/R1-repair-safe-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-runtime-binding-base-safe",
+      "head": "28d3a0b9b4128f631c8a6cbd5a8201ab2351e42b",
+      "branch": "R1-runtime-binding-repair-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-runtime-binding-integrated-gate-checkout",
+      "head": "7424198e5a14650ba6facdd91852388ab2379e39",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-runtime-binding-repair-safe-fresh-v2",
+      "head": "7424198e5a14650ba6facdd91852388ab2379e39",
+      "branch": "R1-runtime-binding-repair-safe-fresh-v2"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-runtime-binding-test-safe",
+      "head": "cc7ad69d198cc6711bdee36d97f592f6b2ddea82",
+      "branch": "custody/R1-runtime-binding-test-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-verify",
+      "head": "6b898e0d89de10ec95a3c9856e7b43c38305c0ee",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-workflow-repair-safe",
+      "head": "d35f3d30bc6f717610a261cd902501cc1b56ed55",
+      "branch": "custody/R1-workflow-repair-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/R1-workflow-test-safe",
+      "head": "96552faec4ffd876889a2c07b201475dcb8c34cc",
+      "branch": "custody/R1-workflow-test-safe-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/r1-worktree-b628",
+      "head": "b6284a8440d801da1bb8cad152b4b51ce70cc7fe",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/release-native-current-binding-safe",
+      "head": "80998a7bc1012729c4a40294a7911300a3e4afec",
+      "branch": "release-native-current-binding-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/S1-ask-contract-safe",
+      "head": "79cff62028d3ec88110c56e90165ef13d307721d",
+      "branch": "custody/S1-ask-contract-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/S1-canonical-train-safe",
+      "head": "5c36ceac5c8509e5f4a2ecc22400fcb74537e9f6",
+      "branch": "custody/S1-canonical-train-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/S1-contract-restoration-safe",
+      "head": "34b983caecb77b14e69b79af913df6fa23146214",
+      "branch": "custody/S1-contract-restoration-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/S1-final-repair-safe",
+      "head": "d92a2a7d5bb32e9d32569cb40ede3899e1ab4b91",
+      "branch": "custody/S1-final-repair-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/S1-repair-safe",
+      "head": "a13f6e2acc3c581936b9b49dace9331023261dbb",
+      "branch": "custody/S1-repair-safe-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/S1-verify",
+      "head": "2498e8ea2f67de40b9ed472eafd6fbc5234cf104",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/server-clippy-maintenance-safe",
+      "head": "a1b01e940bda6727533fd2cba9a855d303f7bfe1",
+      "branch": "WouterE/server-clippy-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/server-public-module-test-maintenance-safe",
+      "head": "e315331b1fe1bb61fa220d7e8d0dcf7da8aa48a5",
+      "branch": "WouterE/server-public-module-test-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/server-rules-injector-final-maintenance-safe",
+      "head": "1fb480a7126153105ac6d010200d8a3c4dd3de58",
+      "branch": "server-rules-injector-final-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/server-rules-injector-maintenance-safe",
+      "head": "d3bda4672a41e4fa0603b59dcd223b9f758a6a35",
+      "branch": "server-rules-injector-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/server-s1-fixture-final-safe",
+      "head": "3ade003ebeaad0e4ca583abd4f5a76438e564596",
+      "branch": "server-s1-fixture-final-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/server-s1-fixture-maintenance-safe",
+      "head": "3eb915e293ac21bcf7aa16d3f798d0216e3f503e",
+      "branch": "server-s1-fixture-maintenance-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/server-s1-fixture-poll-scope-safe",
+      "head": "032a03fa85a4be57e380ead02b84a80aa4fa1aa1",
+      "branch": "server-s1-fixture-poll-scope-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/server-s1-fixture-qualified-safe",
+      "head": "d10df81d8acb48b55dd13a448d12a904daf39bfc",
+      "branch": "server-s1-fixture-qualified-safe"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/session-fixture-salvage-safe",
+      "head": "40aade7cd7c5945eae2deedede528f2f6ab376e5",
+      "branch": "custody/session-fixture-salvage-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/session-fixture-train-verify-safe",
+      "head": "26eeaa51d979bed1d43f7eb675e20ff0a6776bdc",
+      "branch": "custody/session-fixture-train-verify-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/Shell-lifetime-test-owner-safe",
+      "head": "496ef128ca59c72643a1f9154c67c266d49ad8fb",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/convergence-fast-20261002-40743/Shell-timeout-fixture-argument-repair-safe",
+      "head": "29706d595b1f9f219cfc25cc050db1b5d8f5334c",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/D1-discovery-integr-y52o0gi3",
+      "head": "259570ba7eb59a2b39b4cce75cd55eda8fc24336",
+      "branch": "lane/D1-discovery-integration-y52o0gi3"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/d1-real-disc-auth",
+      "head": "e23d9953f153183fc9f456b9f4937e79095ad97b",
+      "branch": "D1-real-discovery-auth"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/D1-review-fix-e23",
+      "head": "c64a5d2b9ec7b3770c6e6ffac100a460e42d9c2e",
+      "branch": "lane/D1-review-fix-e23"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB-019",
+      "head": "f7dea8f7708519fe27aa5d3a419dae591ae15968",
+      "branch": "lane/DB-019-review-candidate",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB-021",
+      "head": "de77c37ae477234c4ee324f3e3fba25ce6bdfce8",
+      "branch": "lane/DB-021",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/db-red-integration",
+      "head": "46029ece25aa0bf409033881f9eb6f415f438858",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB019-clean-repair",
+      "head": "3fbbc6646db5c35e1dc5171b57840e27f86f10cd",
+      "branch": "lane/DB-019-metadata-repair",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB019-component-test-registration",
+      "head": "94b6ec80c979c655725a8be2d7953185c219fa26",
+      "branch": "proposal/DB019-component-test-registration",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB019-integration",
+      "head": "80c06210695e13f43eff5375b105a1aaa3ea7dd8",
+      "branch": "integration/DB019-VERIFIED-CANDIDATE",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB022-correction-integration",
+      "head": "61d473ab6e2967069fd1f23acbd7219518d7b7c6",
+      "branch": "integration/DB022-correction",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/DB023-author",
+      "head": "f92124e27ab59c4ec3841777653d52466b7d1b27",
+      "branch": "lane/DB-023",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/FEATURE-INTEGRATION-SPINE",
+      "head": "c58850daefb39e3793121ce8dff3fb5cc5c6babe",
+      "branch": "integration/FEATURE-CANDIDATE-DB019-DB023",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/FEATURE-STORAGE-GREEN-v1",
+      "head": "51caadd7e25ee0c3d13152ecdceea1fb69ee0c1e",
+      "branch": "integration/FEATURE-STORAGE-GREEN-v1",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/h2-worktree",
+      "head": "b34d16ecebfee31036ce17bb0e3ab5a937dc5ea9",
+      "branch": "h2-history-preserve"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/lane-APP-012-phase1-v2",
+      "head": "8422a9efcf25a5fc857f200abc5ce2c4e622220f",
+      "branch": "lane/APP-012-phase1-v2",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/lane-SHIP-001-workflow-v2",
+      "head": "ddbc99f612614862884b1c40385dc1be122c8a8e",
+      "branch": "lane/SHIP-001-workflow-v2",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/lane-SHIP-004-phase1",
+      "head": "e477cc420c96015bee990a991a38a45a1dd209d0",
+      "branch": "lane/SHIP-004-phase1",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/LINUX-installer-registration",
+      "head": "115facc2f3366c8bdbe45774dd9b03af69ebc0f6",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/LINUX-registration-additive-resume",
+      "head": "62f6fed44c410c9b6d53f1ef619fe483522070d0",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/live-permission-interrupt-correction-y52o0gi3",
+      "head": "4fa46232fdb0840b052d24194a85765a23a53b09",
+      "branch": "v2/live-permission-interrupt-correction-y52o0gi3"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/merge-policy-unblock-180-y52o0gi3/preclear-luna-round2/candidate",
+      "head": "096169461f5c356fa0b969bd5f8199f3ad1b1d4a",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/merge-policy-unblock-180-y52o0gi3/worktree",
+      "head": "3a3b4b9fa0e8a211996704b2c5f1a6df65ad7330",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/merge-run-20261001-20261001T213133-25441/worktrees/final-combined-308fcdd-verify",
+      "head": "308fcdd1f31ef52256273710c2787b28cf3eafdc",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/merge-run-20261001-20261001T213133-25441/worktrees/L1-174685f-verify",
+      "head": "174685f5f7796a799d5a88342dd1264d6a2b1d09",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/merge-run-20261001-20261001T213133-25441/worktrees/merge-ready-20261001",
+      "head": "180c55eedc3aeeb52fac29cceea8b70715cba6e0",
+      "branch": "v2/merge-ready-20261001-y52o0gi3"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/merge-run-20261001-20261001T213133-25441/worktrees/post-retry-d8489d63baf569ab749aaa48cbe7e23bdde6db39-verify",
+      "head": "d8489d63baf569ab749aaa48cbe7e23bdde6db39",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/N1-native-terminal-reset-last",
+      "head": "ee8dc3a7a029f3f1b17d838579bbdefecd18b4ed",
+      "branch": "candidate/N1-native-terminal-reset-last"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/N2-native-output-drain",
+      "head": "925c240574f1f741158563541edb18b3cd460a81",
+      "branch": "candidate/N2-native-output-drain"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/N4-native-reset-channel",
+      "head": "1b97404dc401849148918d5abb5bba776428b01c",
+      "branch": "diag/N4-native-reset-channel"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/n7-native-observer",
+      "head": "ea86ca51ffeea2f9355de88e83c8d3373ac1332e",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/native-accept-180",
+      "head": "180c55eedc3aeeb52fac29cceea8b70715cba6e0",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/native-reset-diag-current",
+      "head": "bf9d2ac00deb1a39c02f166cebd42cf3b232f1fe",
+      "branch": "v2/native-reset-diag-current-20261001"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/P1-provider-session-y52o0gi3",
+      "head": "259570ba7eb59a2b39b4cce75cd55eda8fc24336",
+      "branch": "v2/P1-provider-session-y52o0gi3"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/phase1-integration",
+      "head": "d382fdfd8966052c81ef7ad10a56d87314ab8a73",
+      "branch": "integration/phase1-completion-20260929",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/prepared-v2-1790910767",
+      "head": "dbb6412ace66f4cd32620be700cb6dc9b399d450",
+      "branch": "v2/prepared-combined-20261001"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/proposal-DISC-120-installer-rollback",
+      "head": "9bae192704343a26398174b794280064645edde4",
+      "branch": "proposal/DISC-120-installer-rollback",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/proposal-DISC-121-native-artifacts",
+      "head": "6cb5b88d340c24390d0f38232a4b6d432c7c90bc",
+      "branch": "proposal/DISC-121-native-artifacts",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/proposal-ledger-reconciliation",
+      "head": "eff9dbd9b2c1a5a8b2a2c78724ca07d6b87644b7",
+      "branch": "proposal/ledger-reconciliation",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/PROV025-registration",
+      "head": "115facc2f3366c8bdbe45774dd9b03af69ebc0f6",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/prov030-red-verify-001",
+      "head": "2798d151dd20f05408cb600384f0a944c6576600",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/r1-1-template-materialization",
+      "head": "480a2df9ed0df3ce485343fe81bbc584b423eb1f",
+      "branch": "r1-1-template-materialization"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/r1-2-security-workflow",
+      "head": "1b8ed868922a3bbb0d9b96dd9daa4606fba6b917",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/r1-3-successor",
+      "head": "1b8ed868922a3bbb0d9b96dd9daa4606fba6b917",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/r1-4-release-gates",
+      "head": "2817d210e3afdaeee6c4cf110d637b693dbe1bf5",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/r1-4-test-owner",
+      "head": "2817d210e3afdaeee6c4cf110d637b693dbe1bf5",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/r1-integration-20261002154915",
+      "head": "f5f440d8f4ea7085409a06f10343494945fef6c0",
+      "branch": "integration/r1-static-20261002154915"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/r1-post-f5f440d8f4ea7085409a06f10343494945fef6c0",
+      "head": "f5f440d8f4ea7085409a06f10343494945fef6c0",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/R1-test-safe-20261002-2025-40743",
+      "head": "6b898e0d89de10ec95a3c9856e7b43c38305c0ee",
+      "branch": "custody/R1-test-safe-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/S1-candidate-9dc74a25-independent-audit",
+      "head": "37a812a2e314b795fbb33d8616daf61f0bc743a1",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/S1-live-permission-interrupt",
+      "head": "9dc74a25a272bd79bd80684bd75a87dbdf9667c5",
+      "branch": "v2/S1-live-permission-interrupt"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/S1-test-safe-20261002-2025-40743",
+      "head": "2498e8ea2f67de40b9ed472eafd6fbc5234cf104",
+      "branch": "custody/S1-test-safe-20261002-40743"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/STARTUP-readiness-registration",
+      "head": "62f6fed44c410c9b6d53f1ef619fe483522070d0",
+      "branch": "lane/COORD008-STARTUP-REGISTRATION",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/STORAGE-boundary-dag-correction",
+      "head": "4accfca9b158ccf227dff3fe99f21edbcb566654",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/STORAGE-boundary-registration",
+      "head": "cdd3ccbc7b867d991eb473ca718e01415b42a218",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/STORAGE-boundary-repair-candidate",
+      "head": "7ee1b807de2817301b7d4e75d93a3bafec9104a9",
+      "branch": "lane/DB-019-BOUNDARY-REPAIR",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/STORAGE-verification-candidate",
+      "head": "3ced89a87ba1f7a8416d6830b79bd7187406d392",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/STORAGE51-boundary-independent",
+      "head": "51caadd7e25ee0c3d13152ecdceea1fb69ee0c1e",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/STORAGE51-boundary-red",
+      "head": "51caadd7e25ee0c3d13152ecdceea1fb69ee0c1e",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/T1-D1-integrated-verify-20261002",
+      "head": "be659402cbc99a4ffdedbfdc461ea754036a9f46",
+      "detached": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/T1-D1-integration-20261002",
+      "head": "be659402cbc99a4ffdedbfdc461ea754036a9f46",
+      "branch": "integration/T1-D1-20261002"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TH-51ca",
+      "head": "51caadd7e25ee0c3d13152ecdceea1fb69ee0c1e",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TH-c588",
+      "head": "c58850daefb39e3793121ce8dff3fb5cc5c6babe",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TH-staging-62f6fed",
+      "head": "62f6fed44c410c9b6d53f1ef619fe483522070d0",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TUI-012-wt",
+      "head": "5a9db78c2111e0cae80493618e09fc147bbd8d3f",
+      "branch": "lane/TUI-012-pty-red",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui003-reg-prep",
+      "head": "ff7f44b84a4e89a850780d12605bd559a0598405",
+      "branch": "integration/TUI003-REPAIR-REGISTRATION",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui011-rpath-prep",
+      "head": "7153bb34dcb95666463d436eaf5d2a17fec85e80",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui012-combined",
+      "head": "f1d7bb53de6a49b2468b16de9f1e8b938998d8f4",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TUI013-dependency-prep",
+      "head": "36953b19ae810f95d27b6e2d851bdf86b3c21e1d",
+      "branch": "review/TUI013-RUSTIX-TERMIOS-PROPOSAL",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/tui013-integration-prep",
+      "head": "2cd6cdbe437d155f677b0a836aeb0144be0385b4",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TUI013-repair",
+      "head": "100875f7ac51b1633e329aa7900992aafb5d0c46",
+      "branch": "lane/TUI-013-repair",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TUI015-author",
+      "head": "ffa52ddf4664833bca1fa30fb93ab520fb1d1747",
+      "branch": "lane/TUI-015",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TUI015-reg-prep",
+      "head": "5312b60be2b4a5bb635dfb67946aee4630076712",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/TUI015-testbase",
+      "head": "f92aa529cec55c068d27466c37af20cda51f62b9",
+      "branch": "tui015-testbase-projection",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-docs-receipt-durability",
+      "head": "225b6f9def7df7c19e9ae94f38f6488e3654387b",
+      "branch": "docs/receipt-durability-20261001"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-native-baseline-3692743",
+      "head": "3692743b0c2fd717efcabd7b491a4e48b7d46c1e",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-r1-release-gates-r1",
+      "head": "703b6d6fd4c9eac8d3f7812fffe65672c9c5e8bc",
+      "branch": "v2/r1-release-gates"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/v2-today-convergence-y52o0gi3",
+      "head": "9f6428c1763381d57ab83cf82a42bda284c8fd0f",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/verify-candidate",
+      "head": "07a57c9f670a7c4a632c377b48db1fafa099e14b",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/verify-staging",
+      "head": "2798d151dd20f05408cb600384f0a944c6576600",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave-1-staging",
+      "head": "cacad26a2af5c88ef9708108ac4163cbb68a5222",
+      "branch": "wave/1-staging",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave1-candidate-luna",
+      "head": "744f963f2fe08164ed8703fd6ce862916d81016a",
+      "branch": "wave1-fixture-correction-luna"
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/WAVE20-chain-corrected",
+      "head": "600cbfc88af2cbf14149d2ff9e8fe0f0deeb50f8",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/WAVE20-landing-check",
+      "head": "2798d151dd20f05408cb600384f0a944c6576600",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/WAVE20-registry-id-repair",
+      "head": "07a57c9f670a7c4a632c377b48db1fafa099e14b",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/WAVE20-same-batch-integration",
+      "head": "08dd5c145e7fb5e6986526ba9418a740dd2f1aa5",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/wave20-staging",
+      "head": "cacad26a2af5c88ef9708108ac4163cbb68a5222",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/WAVE20-ubuntu-wording-integration",
+      "head": "2798d151dd20f05408cb600384f0a944c6576600",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/web-policy-v2",
+      "head": "cd020cb121109cf4a85790a8d97cc74d509fe45b",
+      "branch": "review/WEB-CANVAS-IMPORT-EXCEPTION-v2",
+      "prunable": true
+    },
+    {
+      "path": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/stack-verify-retry",
+      "head": "2798d151dd20f05408cb600384f0a944c6576600",
+      "detached": true,
+      "prunable": true
+    },
+    {
+      "path": "/Users/mymac/Projects/integration-APP-001-FILE0600-SETUP-BASE-W1",
+      "head": "106524114decd58854fad737b5f322638739bb1c",
+      "branch": "integration/APP-001-FILE0600-SETUP-BASE-W1"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-bridge",
+      "head": "4c6f2d89f8c5f0bbc3031ec167688a3f104d1968",
+      "branch": "lane/bridge-parity"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-convergence",
+      "head": "e57d1d37b6050f217609c2c994bb9f9948841388",
+      "branch": "lane/PHASE1-convergence"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-convergence-review",
+      "head": "00e2c26d2c4e1a95480afbc051ba08e7b2a231e6",
+      "branch": "lane/PHASE1-convergence-review"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-main-v2",
+      "head": "7256f93d1ccacdb0d9d878b0824239d2c1a48001",
+      "branch": "main-v2"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-phase1-plan",
+      "head": "8a91a7b49a5a1c948218ad8f176d44e015530dcb",
+      "branch": "planning/phase1-six-waves"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-phase1-restored",
+      "head": "62f7eb1ba1b744604762cd022118390784be8d41",
+      "branch": "main"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-phase1-review",
+      "head": "767a86a84376a69b2814ea959bb2c94831783768",
+      "detached": true
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-prov023",
+      "head": "3a271c473741d906f6cb9b123fed223936a672a7",
+      "branch": "lane/PROV-023-catalog"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-prov024",
+      "head": "1dcc0c884dfe6ed3d73bd0412036d79b2b77943e",
+      "branch": "lane/PROV-024-fixtures"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-recovery-20261005",
+      "head": "7256f93d1ccacdb0d9d878b0824239d2c1a48001",
+      "branch": "controller/recovery-mode-v1"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-rel002",
+      "head": "aad73f0032dbfb997f665cc7f509fa354ce0af7f",
+      "branch": "lane/REL-002-phase1"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-sess008",
+      "head": "38569366021bd00cdcc79c284fcb7e7f270c149f",
+      "branch": "lane/SESS-008-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-tool-shell-conflicts-v3",
+      "head": "45095aecf32c0ecacd3e84c45556f0923f14652d",
+      "branch": "plan/TOOL-SHELL-REMAINING-TEST-CONFLICTS"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-TUI-013-corrected",
+      "head": "b3f2c30438b8fce288bcce9db23e4a3374198306",
+      "branch": "lane/TUI-013-corrected"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-tui011",
+      "head": "606a820ec094022066008437f297b3e63bcdda7a",
+      "branch": "lane/TUI-011-prod"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-ui014",
+      "head": "f0dbf6a4c68ce696bba59bfcc35dcc7cde0f476e",
+      "branch": "lane/UI-014-e2e"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-agent-loop-contract-current",
+      "head": "17d780ff5aa06ed4710e6927d3e799683fdc6966",
+      "branch": "v2/agent-loop-contract-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-agents-library-current",
+      "head": "72e5aa499b124937ed8e193ca0f0d2d9689b5122",
+      "branch": "v2/agents-library-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-approval-expiry-contract",
+      "head": "8178d0b24b4691e467baad2fd6ca098c1a74c6a5",
+      "branch": "v2/approval-expiry-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-approval-expiry-live",
+      "head": "6ab4dfb7fe3d02426ef3778435b4e3c31cd27011",
+      "branch": "v2/approval-expiry-live"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-catalog-library-current",
+      "head": "97774583c6b008581fb26cc85a11b74b9d0692a1",
+      "branch": "v2/catalog-library-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-ci-ext-fixture-current",
+      "head": "640d1110fe8cef19192a38d3275967babffa57ff",
+      "branch": "v2/ci-ext-fixture-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-ci-ext-integration-ready",
+      "head": "8563c4d6442e496573b35dbef6e117ebce938ba5",
+      "branch": "v2/ci-ext-integration-ready"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-ci-mode-fixture-current",
+      "head": "6227f1aefc88f6704f1e190d1ba74bd90044c06d",
+      "branch": "v2/ci-mode-fixture-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-ci-mode-integration-ready",
+      "head": "3abcc879dd68f5cf7df413d3118d03785f86fca2",
+      "branch": "v2/ci-mode-integration-ready"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-cli-mechanical-y52o0gi3",
+      "head": "35fa43bdc48203e818a3bb5b2411a77f17842695",
+      "branch": "v2/cli-mechanical-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-default-tui-contract-current",
+      "head": "9f6428c1763381d57ab83cf82a42bda284c8fd0f",
+      "branch": "v2/default-tui-contract-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-delegation-identity",
+      "head": "2f06dc6fb3f5162e6aa9cde6a6267a4f11ec00d2",
+      "branch": "v2/delegation-identity"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-discovery-fixed-y52o0gi3",
+      "head": "c1ee03c869a987556d58867d851b0011bd3886a1",
+      "branch": "v2/discovery-contract-fixed-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-discovery-today-y52o0gi3",
+      "head": "87b01e4e1bb500abf06ed6d3637329aa4c310563",
+      "branch": "v2/discovery-contract-today-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-foundation-library-current",
+      "head": "7b8b5f6e5218802806e608b712ab0855fcd1102e",
+      "branch": "v2/foundation-library-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-foundation-library-integration-ready",
+      "head": "6a71db3898abde832ff4ccce023a80f3bff252f9",
+      "branch": "v2/foundation-library-integration-ready"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-integration-y52o0gi3",
+      "head": "0c1dda250fd952a02068364d1caa21f88bc074ef",
+      "branch": "lane/R1.2-security-workflow-repair"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-integration-y52o0gi3/r1-3-clean",
+      "head": "41797d8e77f84d6aa5c0b33a11bdcb11e8620dbf",
+      "detached": true
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-interrupt-contract-y52o0gi3",
+      "head": "257c01e5dc2838d057fb115a2d7e25ae9ff73c81",
+      "branch": "v2/live-interrupt-contract-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-l0-c81bf19-verify-y52o0gi3",
+      "head": "c81bf19f3709ba6a02cd99e5619a03b0d47a801a",
+      "detached": true
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-ledger-y52o0gi3",
+      "head": "3097644f846fc6f187925791aedd6d4924a32219",
+      "branch": "v2/merge-ledger-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-mcp-config-test-compile",
+      "head": "2db02c0dcc7b37af4a989f8c3bc8dfa427b6543e",
+      "branch": "v2/mcp-config-test-compile"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-mcp-spawn-baseline-89aeaa8",
+      "head": "89aeaa81be72e4af95dc6fb39c28f54c07c92ae1",
+      "branch": "v2/mcp-spawn-baseline-89aeaa8"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-bridge-library-current",
+      "head": "4a88077f80657f44ed439f948fcc3560cca61ad5",
+      "branch": "v2/native-bridge-library-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-entrypoint-recovery",
+      "head": "3ece0394b414f87aab34700f1bb6c631566f5b3b",
+      "branch": "v2/native-entrypoint-recovery"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-fixture-maintenance",
+      "head": "8b5b6ef9595713db34d1a2719f84caa6c543c443",
+      "branch": "v2/native-fixture-maintenance"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-lifecycle",
+      "head": "6959f88d1e94dc489a545e51390d00de56c7257b",
+      "branch": "v2/native-lifecycle-salvage"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-paste-prepared-y52o0gi3",
+      "head": "681ba084f1d1deb9ad7ec8fb6aa84598a7a85c40",
+      "branch": "v2/native-paste-prepared-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-portable-pty",
+      "head": "ff4ec3cc234147e15adca0737248c11e7b514b29",
+      "branch": "v2/native-portable-pty"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-provider-contract",
+      "head": "c377a96ae98fab4730b52594eb4db48088a8441f",
+      "branch": "v2/native-provider-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-provider-live",
+      "head": "bdee47eac2e31f25a4787944a230a2ec8554e70b",
+      "branch": "v2/native-provider-live"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-reset-diag-rootcause-y52o0gi3",
+      "head": "493956d598bcfbd59612fe216ce095e467a77175",
+      "branch": "v2/native-reset-diag-rootcause-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-reset-diag-y52o0gi3",
+      "head": "0efe86bb2e6c6587f4c8b8d7163ae08f521aabf4",
+      "branch": "v2/native-reset-diag-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-stream-cleanup-test",
+      "head": "86c4d232f6468b055975adc823d5ee1bf8f2689f",
+      "branch": "v2/native-stream-cleanup-test"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-stream-tool-contract",
+      "head": "8f0058b0f7747589cf0f215067d01634ea06ad7b",
+      "branch": "v2/native-stream-tool-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-stream-tool-live",
+      "head": "ed727a6577527fc560a6dfc736fbdb0479654f06",
+      "branch": "v2/native-stream-tool-live"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-utf8-contract",
+      "head": "cc532734033d7d9f26c7a50536b83d1d73138058",
+      "branch": "v2/native-utf8-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-utf8-integration-ready",
+      "head": "a79ae96b93f9a0ab94ceafadcd9425db08f28027",
+      "branch": "v2/native-utf8-integration-ready"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-native-utf8-live",
+      "head": "cfe6cbfdc96dbe6d3cf76b284da7e614e40c5a9a",
+      "branch": "v2/native-utf8-live"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-owner-fixture-y52o0gi3",
+      "head": "0ec955ba412ba60a9ae0299d3fd9cdb6b9330ddd",
+      "branch": "v2/owner-fixture-maintenance-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-owner-today-y52o0gi3",
+      "head": "1f1969123a0f30257449b0d37226ab26b0513fc3",
+      "branch": "v2/session-owner-today-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-packaged-identity",
+      "head": "ab159b240d81a8c4b9ae75130d0f1583742ac652",
+      "branch": "v2/packaged-identity"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-paste-contract-y52o0gi3",
+      "head": "d0376c80c944c8a802f8ad99dc02845276e2ea97",
+      "branch": "v2/native-paste-contract-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-paste-repair-y52o0gi3",
+      "head": "6e796088dc1f522e87797960cb6fab7239adafde",
+      "branch": "v2/native-paste-repair-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-permission-contract-y52o0gi3",
+      "head": "5f35e070c85c36445e4532fc71d7c0372f33606f",
+      "branch": "v2/live-permission-contract-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-prod-native-priority",
+      "head": "fe9830b2e61c07f2aee91c9d5a29c2111b495579",
+      "branch": "v2/prod-native-priority"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-prod-native-resize",
+      "head": "f8bde4923cb0f6fdf9c86cbb9341d82d50a89209",
+      "branch": "v2/prod-native-resize"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-provider-auth-bound-contract",
+      "head": "e29a9e9e0adaf49b14295e4e2511ae81f38b0575",
+      "branch": "v2/provider-auth-bound-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-provider-auth-contract",
+      "head": "c7947f42c807b129cf54f76b7d7aea174c3740e6",
+      "branch": "v2/provider-auth-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-provider-auth-security-contract",
+      "head": "538f848a3c73c86387497d08b4e1b3c037695263",
+      "branch": "v2/provider-auth-security-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-provider-auth-wiring",
+      "head": "f9eb056a2edccc12f4fb0898f905b829ce26b4ab",
+      "branch": "v2/provider-auth-wiring"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-provider-lint",
+      "head": "bbdfff2a0033621c771bcb5f89c09df5a55df5a7",
+      "branch": "v2/provider-lint"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-provider-sequential-streams",
+      "head": "0ebb7509e7ba58bca727211a99e27061eb9ae75c",
+      "branch": "diag/S1-provider-sequential-streams"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-resize-luna-y52o0gi3",
+      "head": "2e7c9a35cb78a9ba12b4d2387b3ba99cfb77a5d9",
+      "branch": "v2/native-resize-luna-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-resize-today-y52o0gi3",
+      "head": "f8bde4923cb0f6fdf9c86cbb9341d82d50a89209",
+      "branch": "v2/native-resize-today-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-salvage-preservation",
+      "head": "3fd4b81443787deafb1dbb02890b241b4bb70772",
+      "branch": "v2/salvage-preservation"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-security-lint",
+      "head": "3634145d6661b31421529d27e45dba24395d73d7",
+      "branch": "v2/security-lint"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-server-library-current",
+      "head": "353821578700cf9b22ef1b429042f41989f756cc",
+      "branch": "v2/server-library-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-server-quality-y52o0gi3",
+      "head": "ce400481a036d7aa684b94352658797df19420b7",
+      "branch": "v2/server-quality-y52o0gi3"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-session-owner-contract",
+      "head": "787cd8d383f25369309e31f8868ea60169eea7f4",
+      "branch": "v2/session-owner-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-session-owner-contract-ready",
+      "head": "2a9903ebcdbb2406238a1110b1cbb48ebdf53438",
+      "branch": "v2/session-owner-contract-ready"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-sessions-lint-current",
+      "head": "a75b761dab23e58f49f93ec0ebb3a2f1fc0fc9c3",
+      "branch": "v2/sessions-lint-current"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-sessions-lint-integration-ready",
+      "head": "0f01432793a599b312226b522c479a757ab34f5e",
+      "branch": "v2/sessions-lint-integration-ready"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-shell-cancel-contract",
+      "head": "efa0b13667f1ec6ec3fd3c47bce4c141ec0db6c6",
+      "branch": "v2/shell-cancel-contract"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-shell-owned-lifetime-live",
+      "head": "5c6fd500d46cec9c7248f2f91ddc0336c33ad08b",
+      "branch": "v2/shell-owned-lifetime-live"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-storage-lint",
+      "head": "d099194edc1afb87adb1f1e10eab80e969aab2aa",
+      "branch": "v2/storage-lint"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-tools-lint",
+      "head": "2e596577d02f9d65e43bef6e16561e0ef789b84b",
+      "branch": "v2/tools-lint"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-tools-owned-current-ready",
+      "head": "e1acd5258fed50b1f79f54b412921266f07dc8ed",
+      "branch": "v2/tools-owned-current-ready"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-tools-owned-integration-ready",
+      "head": "88437098be650f27eeffe6db2c177134b238bf34",
+      "branch": "v2/tools-owned-integration-ready"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-transcript-paging",
+      "head": "5c6f9cb05f6997423da62c8edca8df07a4754103",
+      "branch": "v2/transcript-paging"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-typed-contract-maintenance",
+      "head": "88923f185975482c24ad2ef8d589200954eaea74",
+      "branch": "v2/typed-contract-maintenance"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-typed-history",
+      "head": "6291cafbfbb16824c577f4d530e4371c96be7455",
+      "branch": "v2/typed-history-wiring"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-ubuntu-installer",
+      "head": "7a06cc89feb8a694063356dcfdfe34798deee353",
+      "branch": "v2/ubuntu-installer-closure"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-web-auth-fixture",
+      "head": "0076bfb32103c778786ba4e567807912c1e20bf9",
+      "branch": "v2/web-auth-fixture"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-web-mechanical",
+      "head": "78f585c8b428b24b06793a91c6e7c303657f0bfd",
+      "branch": "v2/web-mechanical-build"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-web-tool-stream",
+      "head": "81fddef90bb29ec4e217b40153ec720557e5188b",
+      "branch": "v2/web-tool-stream"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-v2-workspace-format",
+      "head": "b046ca453a5e3edbe5b30bf53ccc42be9d04c074",
+      "branch": "v2/workspace-format"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-web006-integrate",
+      "head": "de560e83680a9a02c85e32841c0978f09e27da47",
+      "branch": "lane/WEB-006-integration"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-web006-readiness",
+      "head": "e579d3818b6fda6fc36bd89ad546b031e3fdb0f0",
+      "branch": "lane/WEB-006-readiness"
+    },
+    {
+      "path": "/Users/mymac/Projects/opencode-rk-web009-test",
+      "head": "8ecf29524adf721857030fbdd698596a06ebf4ce",
+      "branch": "lane/WEB-009-test-replacement"
+    }
+  ]
+}

@@ -1,8 +1,44 @@
-# Agent contract — Convergence V2
+# Agent contract — Recovery Mode / Convergence V2
 
 This repository is in **product-convergence mode**. The goal is a working OpenCode-compatible Rust application, not a larger task graph.
 
-Read `PLAN.md`, `docs/CONVERGENCE.md`, `docs/AGENT_STRATEGY_V2.md`, `docs/TDD.md`, and `docs/SECURITY.md` before changing product code.
+## Recovery Mode is active
+
+Read these first, in this order, before changing product code:
+
+1. `docs/RECOVERY_MODE.md`;
+2. `docs/PHASE1_ACCEPTANCE.md`;
+3. `config/recovery-mode.json`;
+4. `recovery/failures.json`;
+5. `docs/CONVERGENCE.md` and `docs/AGENT_STRATEGY_V2.md`;
+6. `docs/TDD.md` and `docs/SECURITY.md`.
+
+Recovery Mode overrides older merge-wave, Ralph-queue, branch-inventory and heritage-merge execution plans when they conflict. Historical plans, worklogs, claims, branches and worktrees are evidence only.
+
+### Hard recovery invariants
+
+- The unit of work is an **observed failing product behavior**, never a branch, worktree, file count, task-card count or legacy claim.
+- Do **not** bulk-merge legacy branches. Read them only to salvage exact useful code/tests into an active failure repair.
+- Do **not** create review, verification, custody, repair, candidate or test-owner branches. Those are queue states, not Git topology.
+- Only the fixed mutable branches listed in `config/recovery-mode.json` may be created or advanced during Recovery Mode.
+- A worker or subagent normally returns evidence, a patch/commit candidate and verification results to its lane owner. It does not create a persistent worktree.
+- `main-v2` is the canonical product line. Exactly one integration writer lands there.
+- A candidate that fails after rebasing/preparing against current `main-v2` is ejected from the integration queue; reopen the failure instead of creating a descendant repair branch.
+- Legacy refs are frozen by `recovery/legacy-snapshot.json`. Never reset, force-push, delete or advance them.
+- `ralph.json`, completion claims and legacy task inventories are requirement/evidence databases, not schedulers.
+- Product progress means the count of failing/unproven Phase-1 behaviors decreases on the exact integrated SHA.
+
+### Subagents are allowed and encouraged
+
+Use subagents aggressively for independent investigation, upstream comparison, legacy-salvage search, test diagnosis, adversarial review and competing implementation ideas. Subagents may run in parallel up to the configured logical ceiling, but mutable repository state stays bounded:
+
+- read-only/research/review subagents: parallelize freely within resource limits;
+- implementation subagents: only for currently OPEN/CLAIMED failures with non-overlapping path grants;
+- reviewers/verifiers: return verdicts/evidence; do not create branches;
+- only a lane owner may mutate one of the fixed recovery lanes;
+- only the integration writer may advance `main-v2`.
+
+When the verified-candidate high-water mark is reached, stop spawning implementers and move subagents to review, salvage lookup, integration prep and failure diagnosis.
 
 ## Authority order
 

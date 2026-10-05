@@ -1,0 +1,74 @@
+{
+  "schemaVersion": 1,
+  "status": "ACTIVE",
+  "mode": "phase1-product-failure-burndown",
+  "canonicalBranch": "main-v2",
+  "bootstrapBranch": "controller/recovery-mode-v1",
+  "phase1Contract": "docs/PHASE1_ACCEPTANCE.md",
+  "failureQueue": "recovery/failures.json",
+  "phase1GateState": "recovery/phase1-gates.json",
+  "legacySnapshot": "recovery/legacy-snapshot.json",
+  "salvageIndex": "recovery/salvage-index.json",
+  "branchInventoryIsExecutionQueue": false,
+  "bulkLegacyMergeAllowed": false,
+  "heritageMergeRequiredForPhase1": false,
+  "legacyRefsMutable": false,
+  "fixedMutableBranches": [
+    "main-v2",
+    "controller/recovery-mode-v1",
+    "recovery/core",
+    "recovery/runtime",
+    "recovery/ui",
+    "recovery/platform"
+  ],
+  "lanePathIntent": {
+    "recovery/core": ["crates/cli", "crates/server", "crates/providers", "crates/catalog"],
+    "recovery/runtime": ["crates/server", "crates/sessions", "crates/tools", "crates/security", "crates/storage"],
+    "recovery/ui": ["crates/cli", "crates/opentui-bridge", "tests/e2e"],
+    "recovery/platform": ["release", "scripts", "tests", "tools"]
+  },
+  "maxFixedRecoveryLanes": 4,
+  "maxVerifiedUnintegratedCandidates": 4,
+  "integrationWriters": 1,
+  "maxHeavyValidations": 1,
+  "logicalSubagentCeiling": 48,
+  "parallelReadOnlySubagents": 32,
+  "parallelImplementationCandidates": 8,
+  "parallelIndependentReviewers": 8,
+  "subagentPolicy": {
+    "allowed": true,
+    "readOnlyResearchAndReview": "encouraged",
+    "persistentBranchCreation": "forbidden",
+    "persistentWorktreeCreation": "forbidden",
+    "implementationOutput": "patch_or_candidate_commit_to_lane_owner",
+    "reviewOutput": "verdict_and_evidence_only"
+  },
+  "queuePolicy": {
+    "authority": "observed_product_failure_or_unproven_phase1_gate",
+    "allowedSources": [
+      "compiler",
+      "focused-test",
+      "phase1-golden-journey",
+      "upstream-parity",
+      "security-adversarial",
+      "unproven-gate"
+    ],
+    "candidateHighWaterBehavior": "stop_new_implementation_and_shift_to_review_integration_salvage",
+    "failedPreparedCandidate": "eject_and_reopen_failure",
+    "createRepairDescendantBranch": false
+  },
+  "acceptancePolicy": {
+    "exactIntegratedShaRequired": true,
+    "workerSelfReportIsAcceptance": false,
+    "candidateGreenIsAcceptance": false,
+    "claimsCompletedIsAcceptance": false,
+    "branchMergedIsAcceptance": false,
+    "phase1FailureCountMustBeZero": true
+  },
+  "resourcePolicy": {
+    "cargoBuildJobs": 2,
+    "rustTestThreads": 2,
+    "preferFocusedBeforeWorkspace": true,
+    "centralizeHeavyValidation": true
+  }
+}

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "note": "Compatibility settings for legacy Ralph. V2 treats concurrency as a ceiling and schedules only observed independent failures; it does not eagerly refill.",
+  "note": "Compatibility settings only. Recovery Mode schedules from recovery/failures.json, never from Ralph or the legacy branch inventory. Concurrency is a ceiling; research/review subagents may fan out, persistent Git topology may not.",
   "maxConcurrentLanes": 6,
   "perTaskTimeoutSeconds": 3600,
   "maxAttemptsPerTask": 2,
@@ -13,5 +13,10 @@
   "requeueBlockedAfterSeconds": 0,
   "stopWhenNoReadyWork": true,
   "v2CandidateHighWater": 4,
-  "v2RefillPolicy": "only-after-integration-or-new-observed-failure"
+  "v2RefillPolicy": "only-after-integration-or-new-observed-failure",
+  "recoveryMode": true,
+  "recoveryConfig": "config/recovery-mode.json",
+  "recoveryFailureQueue": "recovery/failures.json",
+  "allowPersistentWorkerBranches": false,
+  "allowPersistentWorkerWorktrees": false
 }

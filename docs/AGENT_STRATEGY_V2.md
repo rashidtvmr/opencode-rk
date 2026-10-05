@@ -1,5 +1,12 @@
 # Convergence V2 agent strategy
 
+> **Recovery Mode override (2026-10-05):** `docs/RECOVERY_MODE.md` and
+> `config/recovery-mode.json` are now the active execution contract. This file
+> remains useful background for exact-SHA acceptance, backpressure and product
+> gates, but its older integration-train wording must not be interpreted as
+> permission to create new candidate/review/repair worktrees or to treat the
+> legacy branch inventory as a merge queue.
+
 ## Objective
 
 Continuously converge the Rust port toward a production-ready OpenCode-compatible application while preserving all pre-V2 work. Work is driven by observable failures on the integrated product rather than an expanding file-level backlog.
@@ -28,7 +35,7 @@ Continuously converge the Rust port toward a production-ready OpenCode-compatibl
 
 ## Parallel topology
 
-Use many agents for independent reasoning, evidence and verification, but keep writing/integration bounded.
+Use many agents for independent reasoning, evidence and verification, but keep writing/integration bounded. Under Recovery Mode, the persistent writable topology is the fixed lane set in `config/recovery-mode.json`; subagents return patches, candidate commits, diagnoses or review verdicts instead of creating persistent branches/worktrees.
 
 Typical high-capacity allocation when the harness supports it:
 
@@ -49,6 +56,8 @@ A package has one product gate/failure, base SHA, explicit allowed path set, sem
 Packages may span files. Two active packages may not own overlapping paths.
 
 ## Integration train
+
+Recovery Mode uses a **short candidate queue, not a merge train of legacy refs**. A prepared candidate that fails against current `main-v2` is ejected and its product failure is reopened. Do not create a repair-descendant branch.
 
 For each candidate:
 
@@ -85,7 +94,7 @@ Never equate preservation with blindly merging stale file contents. Preserve his
 3. inventory every branch relative to `main-v2`;
 4. integrate unique useful product/test changes by behavior slice;
 5. mark duplicates/superseded/process-only branches explicitly;
-6. after content salvage, create ancestry-only heritage merges for remaining branches so their history remains reachable without reintroducing obsolete files.
+6. Recovery Mode does **not** require ancestry-only heritage merges for Phase 1. Legacy refs are already frozen/preserved by `recovery/legacy-snapshot.json`. Heritage/history cleanup, if ever desired, is a later repository-maintenance task and never blocks product acceptance.
 
 ## What does not count as progress
 
