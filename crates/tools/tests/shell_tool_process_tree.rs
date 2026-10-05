@@ -44,7 +44,8 @@ fn fixture_process_alive(pid_path: &Path, dir: &Path) -> bool {
 
 fn process_is_live(path: &Path) -> bool {
     read_pid(path).is_some_and(|pid| {
-        process_is_live_pid(pid).is_some_and(|(state, _)| !state.to_ascii_lowercase().starts_with('z'))
+        process_is_live_pid(pid)
+            .is_some_and(|(state, _)| !state.to_ascii_lowercase().starts_with('z'))
     })
 }
 
@@ -62,7 +63,10 @@ fn process_is_live_pid(pid: u32) -> Option<(String, String)> {
     }
     let text = String::from_utf8(output.stdout).ok()?;
     let mut fields = text.split_whitespace();
-    Some((fields.next()?.to_owned(), fields.collect::<Vec<_>>().join(" ")))
+    Some((
+        fields.next()?.to_owned(),
+        fields.collect::<Vec<_>>().join(" "),
+    ))
 }
 
 fn executable(dir: &TempDir, name: &str, contents: &str) -> PathBuf {

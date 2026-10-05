@@ -11,7 +11,8 @@ use tempfile::TempDir;
 use tokio::process::Command;
 
 const TIMEOUT_FIXTURE: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\n\"$3\" \"$4\" &\nhelper=$!\nwait \"$helper\"\nprintf '%s\\n' sentinel > \"$2\"\n";
-const TIMEOUT_HELPER: &str = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\nsleep 3\nprintf '%s\\n' complete > \"$2\"\n";
+const TIMEOUT_HELPER: &str =
+    "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$1\"\nsleep 3\nprintf '%s\\n' complete > \"$2\"\n";
 const OUTPUT_FIXTURE: &str = "#!/bin/sh\ndd if=/dev/zero bs=1048576 count=2 2>/dev/null\ndd if=/dev/zero bs=1048576 count=2 1>&2 2>/dev/null\n";
 const LIMIT: usize = 1024 * 1024;
 const MARKER: &str = "\n[truncated]";
@@ -29,7 +30,9 @@ impl Drop for FixtureGuard {
             || fixture_process_alive(&self.helper_pid_path, self.dir.path())
         {
             if Instant::now() >= deadline {
-                eprintln!("timeout fixture cleanup did not finish; bounded fixture process may remain");
+                eprintln!(
+                    "timeout fixture cleanup did not finish; bounded fixture process may remain"
+                );
                 break;
             }
             std::thread::sleep(Duration::from_millis(20));
@@ -67,7 +70,10 @@ fn fixture_process_alive(pid_path: &Path, dir: &Path) -> bool {
             return true;
         };
         !state.to_ascii_lowercase().starts_with('z')
-            && fields.collect::<Vec<_>>().join(" ").contains(&dir.to_string_lossy().to_string())
+            && fields
+                .collect::<Vec<_>>()
+                .join(" ")
+                .contains(&dir.to_string_lossy().to_string())
     })
 }
 
@@ -132,7 +138,10 @@ async fn public_execute_enforces_timeout_and_cleans_up_child() {
         .await
         .expect("public execute watchdog elapsed");
     assert!(started.elapsed() < Duration::from_millis(1500));
-    assert!(matches!(result, Err(ShellError::Timeout(1))), "result: {result:?}");
+    assert!(
+        matches!(result, Err(ShellError::Timeout(1))),
+        "result: {result:?}"
+    );
 
     let pid_deadline = Instant::now() + Duration::from_millis(500);
     let pid = loop {
@@ -145,7 +154,10 @@ async fn public_execute_enforces_timeout_and_cleans_up_child() {
         tokio::time::sleep(Duration::from_millis(20)).await;
     };
     tokio::time::sleep(Duration::from_millis(2200)).await;
-    assert!(!sentinel_path.exists(), "child PID {pid} created delayed sentinel");
+    assert!(
+        !sentinel_path.exists(),
+        "child PID {pid} created delayed sentinel"
+    );
     drop(guard);
 }
 
