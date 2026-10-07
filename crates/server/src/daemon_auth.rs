@@ -111,6 +111,15 @@ impl DaemonAuth {
     }
 }
 
+/// Marker inserted **server-side by [`require_bearer`]** after a
+/// `BrowserResume` capability passed origin-bound registry verification
+/// (`registry.verify(capability, bound_origin)`). Handlers may treat this
+/// as an authenticated request without re-running a native-only check;
+/// it is never derived from client-supplied headers, so possessing a
+/// capability string alone cannot produce it.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct BrowserResumeAdmitted;
+
 /// Failures minting or restoring the daemon credential.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum AuthError {
@@ -186,15 +195,42 @@ pub async fn require_bearer(
     next: Next,
 ) -> Response {
     let path = request.uri().path().to_owned();
-    if !path.starts_with("/api/") && !path.starts_with("/auth/") {
+    // Both event aliases (`/api/event` and `/events`) go through this same
+    // middleware before any SSE subscription attaches; `/events` must not
+    // bypass path matching.
+    if !path.starts_with("/api/") && !path.starts_with("/auth/") && path != "/events" {
         return next.run(request).await;
     }
     let method = request.method().clone();
-    let authorization = request
-        .headers()
-        .get(header::AUTHORIZATION)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_owned);
+    // Fail closed on Authorization cardinality BEFORE verifying any native
+    // or BrowserResume credential and before any subscription can attach:
+    // exactly one field value. Multi-valued Authorization (duplicate fields,
+    // identical or mixed schemes, either order) is a malformed request and
+    // is rejected with 400 without echoing any credential. This is shared
+    // strictness for every route admitted by this middleware (documented;
+    // frozen fixtures send a single field, so non-event semantics are
+    // unchanged for them). A single comma-combined value is still ONE field
+    // and stays with the existing strict native/BrowserResume parsers — no
+    // permissive splitting is introduced here.
+    let (auth_count, authorization) = {
+        let auth_values: Vec<_> = request
+            .headers()
+            .get_all(header::AUTHORIZATION)
+            .iter()
+            .collect();
+        let authorization = auth_values
+            .first()
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+        (auth_values.len(), authorization)
+    };
+    if auth_count > 1 {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(json!({"message":"multiple authorization fields"})),
+        )
+            .into_response();
+    }
     let origin_header = request
         .headers()
         .get(header::ORIGIN)
@@ -210,13 +246,18 @@ pub async fn require_bearer(
             return forbidden("browser origin denied");
         }
     }
+    // Event routes are explicitly origin-bound-BrowserResume compatible
+    // (same admission contract as the other approved API reads); no blanket
+    // whitelist beyond these exact paths.
     let resume_api_path = path == "/api/capabilities"
         || path == "/api/workspaces"
         || path == "/api/models"
         || path.starts_with("/api/models/")
         || path == "/api/sessions"
         || path.starts_with("/api/sessions/")
-        || path.starts_with("/api/session/");
+        || path.starts_with("/api/session/")
+        || path == "/api/event"
+        || path == "/events";
     let is_issue = path == "/auth/browser-resume" && method == axum::http::Method::POST;
     let is_revoke = path == "/auth/browser-resume" && method == axum::http::Method::DELETE;
     let is_exchange = path == "/auth/browser-resume/exchange" && method == axum::http::Method::POST;
@@ -274,7 +315,10 @@ pub async fn require_bearer(
             Some(_) => forbidden("bad bearer credential"),
         };
     }
-    if !path.starts_with("/api/") {
+    // `/events` falls through to the combined native/BrowserResume logic
+    // above the native-only branch (it is a first-class alias, never a
+    // bypass of path matching).
+    if !path.starts_with("/api/") && path != "/events" {
         return match authorization.as_deref() {
             None => missing_credential(),
             Some(value) if auth.verify_bearer(Some(value)) => next.run(request).await,
@@ -297,6 +341,10 @@ pub async fn require_bearer(
                     && bound_origin
                         .is_some_and(|origin| auth.browser_resume().verify(capability, origin))
                 {
+                    // Origin-bound BrowserResume admission completed: mark the
+                    // request server-side so the event handler does not re-run
+                    // a native-only verify that would reject it.
+                    request.extensions_mut().insert(BrowserResumeAdmitted);
                     request.extensions_mut().insert(auth.browser_resume());
                     return next.run(request).await;
                 }

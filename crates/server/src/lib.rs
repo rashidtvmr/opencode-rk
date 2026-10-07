@@ -32,6 +32,7 @@ pub mod enterprise_link;
 pub mod error_translate;
 pub mod event_bus;
 pub mod event_cursor;
+pub mod event_http;
 pub mod event_stream;
 pub mod loop_driver;
 pub mod origin_check;
@@ -125,6 +126,29 @@ pub fn router(state: AppState) -> Router {
 /// bearer middleware; `None` is the legacy unauthenticated router used by
 /// frozen tests. The serve path always passes `Some`.
 pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) -> Router {
+    let events = app_runtime::event_bus();
+    // HTTP admission cap is enforced authoritatively inside
+    // `router_with_events` (delegation); this constructor no longer owns an
+    // out-of-band cap setter that an injected-bus composition could skip.
+    router_with_events(state, auth, events)
+}
+
+/// Authenticated router with an explicitly owned event bus (`events` is
+/// injected into the SSE handler and the durable turn handlers via
+/// `Extension`, so two routers build two independent buses and never share
+/// streams). `router_with_auth` delegates here with a fresh bus.
+pub fn router_with_events(
+    state: AppState,
+    auth: Option<daemon_auth::DaemonAuth>,
+    events: event_bus::EventBus,
+) -> Router {
+    // Authoritative HTTP admission cap for EVERY router composition,
+    // including injected-bus production builds: lower-only (a preconfigured
+    // smaller cap is preserved, never widened). Raw `EventBus::subscribe`
+    // (SDK/internal callers) stays outside this HTTP-bound cap by design.
+    if events.max_subscribers() > event_http::MAX_HTTP_SUBSCRIBERS {
+        events.set_max_subscribers(event_http::MAX_HTTP_SUBSCRIBERS);
+    }
     let app = Router::new()
         .route("/health", get(health))
         .route(
@@ -188,6 +212,8 @@ pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) 
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
         .route("/api/session/{id}/interrupt", post(interrupt_session))
+        .route("/api/event", get(event_http::handle_events_sse))
+        .route("/events", get(event_http::handle_events_sse))
         .route(
             "/api/session/{id}/permission",
             get(list_session_permissions),
@@ -197,12 +223,15 @@ pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) 
             post(reply_session_permission),
         )
         .fallback(web_assets::serve)
+        .layer(axum::extract::Extension(events))
         .with_state(state);
     match auth {
-        Some(credential) => app.layer(axum::middleware::from_fn_with_state(
-            credential,
-            daemon_auth::require_bearer,
-        )),
+        Some(credential) => app
+            .layer(axum::extract::Extension(credential.clone()))
+            .layer(axum::middleware::from_fn_with_state(
+                credential,
+                daemon_auth::require_bearer,
+            )),
         None => app,
     }
 }
@@ -619,6 +648,7 @@ struct CreateSessionBody {
 }
 async fn create_session(
     State(state): State<AppState>,
+    Extension(events): Extension<event_bus::EventBus>,
     Json(body): Json<CreateSessionBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
     let session = state
@@ -626,6 +656,9 @@ async fn create_session(
         .create(body.title)
         .await
         .map_err(ApiFailure::internal)?;
+    // Publish only after the durable create succeeded; the bus allocates the
+    // shared publication identity (all SSE subscribers observe the same id).
+    let _ = events.publish(event_bus::ServerEvent::SessionCreated(session.id));
     Ok((StatusCode::CREATED, Json(json!({"session":session}))))
 }
 async fn get_session(
@@ -745,6 +778,7 @@ struct AppendMessageBody {
 async fn append_message(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Extension(events): Extension<event_bus::EventBus>,
     Json(body): Json<AppendMessageBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
     let id = parse_session_id(&id)?;
@@ -753,6 +787,13 @@ async fn append_message(
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
+    // Publish ONLY after the durable append succeeded: the payload carries the
+    // actual persisted `MessageRecord.id` (UUID), so consumers can fetch
+    // history by identity. A failed append publishes nothing.
+    let _ = events.publish(event_bus::ServerEvent::MessageStored {
+        session: id,
+        message_id: message.id,
+    });
     Ok((StatusCode::CREATED, Json(json!({"message":message}))))
 }
 
@@ -1022,6 +1063,7 @@ fn turn_admission_failure(error: run_owner::AdmissionError) -> ApiFailure {
 async fn create_turn(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Extension(events): Extension<event_bus::EventBus>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
     let id = parse_session_id(&id)?;
@@ -1059,6 +1101,12 @@ async fn create_turn(
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
+    // Durable user append -> publish persisted identity (shared id allocated
+    // once by the bus, actual MessageRecord.id in the payload).
+    let _ = events.publish(event_bus::ServerEvent::MessageStored {
+        session: id,
+        message_id: user_message.id,
+    });
     let input = bounded_typed_history(
         &state.sessions,
         id,
@@ -1083,6 +1131,10 @@ async fn create_turn(
         .append_text(id, MessageRole::Assistant, assistant_text)
         .await
         .map_err(ApiFailure::internal)?;
+    let _ = events.publish(event_bus::ServerEvent::MessageStored {
+        session: id,
+        message_id: assistant_message.id,
+    });
 
     Ok((
         StatusCode::CREATED,
@@ -1106,6 +1158,8 @@ struct TurnStreamState {
     stage: TurnStreamStage,
     _permit: TurnExecutionPermit,
     owner: Arc<RunOwner>,
+    /// Router-owned event bus for durable append publication.
+    events: event_bus::EventBus,
     /// Agentic loop state: provider tool schema + step budget + typed history.
     tools: Vec<ResponsesTool>,
     enabled_tools: Vec<String>,
@@ -1323,6 +1377,7 @@ enum TurnStreamStage {
 async fn create_turn_stream(
     State(state): State<AppState>,
     Path(id): Path<String>,
+    Extension(events): Extension<event_bus::EventBus>,
     Json(body): Json<CreateTurnBody>,
 ) -> Result<Response, ApiFailure> {
     let id = parse_session_id(&id)?;
@@ -1364,6 +1419,10 @@ async fn create_turn_stream(
         .append_text(id, MessageRole::User, body.text)
         .await
         .map_err(ApiFailure::internal)?;
+    let _ = events.publish(event_bus::ServerEvent::MessageStored {
+        session: id,
+        message_id: user_message.id,
+    });
     let user_message_id = user_message.id;
     let input = bounded_typed_history(
         &state.sessions,
@@ -1417,6 +1476,7 @@ async fn create_turn_stream(
             stage: TurnStreamStage::User,
             _permit: permit,
             owner,
+            events,
             tools,
             enabled_tools: turn_tools,
             broker,
@@ -1557,6 +1617,12 @@ async fn create_turn_stream(
                                     .await
                                 {
                                     Ok(message) => {
+                                        let _ = state.events.publish(
+                                            event_bus::ServerEvent::MessageStored {
+                                                session: state.session_id,
+                                                message_id: message.id,
+                                            },
+                                        );
                                         state.stage = TurnStreamStage::Done;
                                         return Some((
                                             Ok::<Bytes, Infallible>(ndjson(json!({

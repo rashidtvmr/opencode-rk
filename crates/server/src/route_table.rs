@@ -49,6 +49,11 @@ pub const MAX_ROUTES: usize = 256;
 pub static PROTOCOL_ROUTES: &[ProtocolRoute] = &[
     ProtocolRoute {
         method: Method::Get,
+        path: "/api/event",
+        handler: "handle_events_sse",
+    },
+    ProtocolRoute {
+        method: Method::Get,
         path: "/events",
         handler: "handle_events_sse",
     },
@@ -75,11 +80,12 @@ pub fn served_routes() -> Vec<(Method, &'static str)> {
     routes
 }
 
-/// Wire kind for a served path. `GET /events` is the SSE stream route;
-/// every other known route is a JSON route.
+/// Wire kind for a served path. `GET /api/event` (canonical) and its
+/// advertised `GET /events` alias are SSE stream routes; every other known
+/// route is a JSON route.
 #[must_use]
 pub fn route_kind(path: &str) -> RouteKind {
-    if path == "/events" {
+    if path == "/events" || path == "/api/event" {
         RouteKind::Sse
     } else {
         RouteKind::Json

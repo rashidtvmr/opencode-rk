@@ -1,9 +1,9 @@
 //! Bounded fan-out event bus for the server daemon.
-use opencode_rk_contracts::SessionId;
+use opencode_rk_contracts::{MessageId, SessionId};
 use std::{
     fmt,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicU64, AtomicUsize, Ordering},
         Arc, Mutex,
     },
 };
@@ -11,8 +11,25 @@ use tokio::sync::mpsc;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ServerEvent {
     SessionCreated(SessionId),
-    MessageAppended { session: SessionId, seq: u64 },
-    ToolExecuted { name: String, duration_ms: u64 },
+    MessageAppended {
+        session: SessionId,
+        seq: u64,
+    },
+    /// Durable message publication: emitted **after** a successful persisted
+    /// append, carrying the actual `MessageRecord.id` (UUID) plus the
+    /// session. Explicit local extension of the upstream-derived
+    /// `message.appended` wire type (properties gain `message_id`), not a
+    /// claim of full upstream parity. The legacy [`Self::MessageAppended`]
+    /// helper carries only `{session, seq}` and must never be described as a
+    /// durable message event.
+    MessageStored {
+        session: SessionId,
+        message_id: MessageId,
+    },
+    ToolExecuted {
+        name: String,
+        duration_ms: u64,
+    },
     PermissionRequested(String),
     Shutdown,
 }
@@ -29,7 +46,7 @@ impl ServerEvent {
     pub fn kind(&self) -> EventKind {
         match self {
             Self::SessionCreated(_) => EventKind::SessionCreated,
-            Self::MessageAppended { .. } => EventKind::MessageAppended,
+            Self::MessageAppended { .. } | Self::MessageStored { .. } => EventKind::MessageAppended,
             Self::ToolExecuted { .. } => EventKind::ToolExecuted,
             Self::PermissionRequested(_) => EventKind::PermissionRequested,
             Self::Shutdown => EventKind::Shutdown,
@@ -50,15 +67,45 @@ impl fmt::Display for BusError {
     }
 }
 impl std::error::Error for BusError {}
+/// One bus publication: the stable identity is allocated **once by the bus,
+/// before fanout**, so every subscriber of this publication observes the
+/// same `id` and an equal payload (never a per-client wire-layer counter).
+/// `id` comes from the per-bus monotonic publication counter and is a fresh
+/// publication identity only — it is **not** a durable replay cursor; a
+/// reconnecting client must resnapshot durable history (no seq-based
+/// side-effect replay is ever performed).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Published {
+    /// Stable per-publication identity, identical for every subscriber.
+    pub id: u64,
+    /// The domain event carried by this publication.
+    pub event: ServerEvent,
+}
 struct SubEntry {
     id: u64,
     filter: Option<EventKind>,
-    tx: mpsc::Sender<ServerEvent>,
+    tx: mpsc::Sender<Published>,
+    /// Overflow counter for one subscriber: `publish` increments it when the
+    /// per-subscriber bounded channel is full (the event is dropped for that
+    /// subscriber, the publish still reports `BusError::Full`, and the entry
+    /// is otherwise untouched — preserving pre-existing semantics for every
+    /// existing caller/test). A consumer detects its own stall via
+    /// [`Subscription::overflow_count`] and disconnects (EOF), so an
+    /// unreadable subscriber never receives silently dropped frames forever.
+    overflow: std::sync::atomic::AtomicU64,
 }
 struct BusInner {
     capacity: usize,
     next: AtomicU64,
+    /// Per-bus monotonic event-ordering / publication-identity counter.
+    /// Explicitly *not* a durable per-session replay cursor: reconnect
+    /// requires a snapshot, never a seq-based replay of side effects.
+    seq: AtomicU64,
     subs: Mutex<Vec<SubEntry>>,
+    /// Finite subscriber admission ceiling for this bus instance (per router
+    /// bus, so routers are independent). `usize::MAX` (the default) is
+    /// unlimited; the production router lowers it at construction.
+    max_subscribers: AtomicUsize,
 }
 #[derive(Clone)]
 pub struct EventBus {
@@ -71,21 +118,49 @@ impl EventBus {
             inner: Arc::new(BusInner {
                 capacity: capacity.max(1),
                 next: AtomicU64::new(1),
+                seq: AtomicU64::new(0),
                 subs: Mutex::new(Vec::new()),
+                max_subscribers: AtomicUsize::new(usize::MAX),
             }),
         }
     }
+    /// Caps concurrent subscribers on this bus instance. Call once at router
+    /// construction, before serving. Applies to [`Self::try_subscribe`];
+    /// plain [`Self::subscribe`] (SDK/internal callers) is unchanged.
+    pub fn set_max_subscribers(&self, max: usize) {
+        self.inner.max_subscribers.store(max, Ordering::Release);
+    }
+    /// Current subscriber admission ceiling of this bus instance.
+    #[must_use]
+    pub fn max_subscribers(&self) -> usize {
+        self.inner.max_subscribers.load(Ordering::Acquire)
+    }
+    /// Next per-bus ordering counter (starts at 1; `seq0` never issued).
+    #[must_use]
+    pub fn next_seq(&self) -> u64 {
+        self.inner.seq.fetch_add(1, Ordering::Relaxed) + 1
+    }
     pub fn publish(&self, event: ServerEvent) -> Result<(), BusError> {
         let mut guard = self.inner.subs.lock().unwrap();
+        // Allocate the stable publication identity ONCE, before fanout: every
+        // subscriber receives this same `id`/payload (the HTTP wire layer
+        // must never allocate per-client ids).
+        let published = Published {
+            id: self.inner.seq.fetch_add(1, Ordering::Relaxed) + 1,
+            event,
+        };
         let mut full = false;
         let mut closed_ids = Vec::new();
         for entry in guard.iter() {
-            if entry.filter.is_some_and(|f| f != event.kind()) {
+            if entry.filter.is_some_and(|f| f != published.event.kind()) {
                 continue;
             }
-            match entry.tx.try_send(event.clone()) {
+            match entry.tx.try_send(published.clone()) {
                 Ok(()) => {}
-                Err(mpsc::error::TrySendError::Full(_)) => full = true,
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    full = true;
+                    entry.overflow.fetch_add(1, Ordering::Relaxed);
+                }
                 Err(mpsc::error::TrySendError::Closed(_)) => closed_ids.push(entry.id),
             }
         }
@@ -98,15 +173,37 @@ impl EventBus {
             Ok(())
         }
     }
+    /// Unbounded subscribe: unchanged signature/semantics for SDK and
+    /// internal callers. HTTP admission uses [`Self::try_subscribe`].
     #[must_use]
     pub fn subscribe(&self, filter: Option<EventKind>) -> Subscription {
+        let mut guard = self.inner.subs.lock().unwrap();
+        self.push_subscription(&mut guard, filter)
+    }
+    /// Admission-checked subscribe. Returns `None` (attaching nothing) when
+    /// this bus instance already holds [`Self::max_subscribers`] entries;
+    /// the length check and the push happen under the same `subs` mutex, so
+    /// concurrent admissions can never exceed the ceiling.
+    pub fn try_subscribe(&self, filter: Option<EventKind>) -> Option<Subscription> {
+        let mut guard = self.inner.subs.lock().unwrap();
+        if guard.len() >= self.inner.max_subscribers.load(Ordering::Acquire) {
+            return None;
+        }
+        Some(self.push_subscription(&mut guard, filter))
+    }
+    fn push_subscription(
+        &self,
+        guard: &mut Vec<SubEntry>,
+        filter: Option<EventKind>,
+    ) -> Subscription {
         let id = self.inner.next.fetch_add(1, Ordering::Relaxed);
         let (tx, rx) = mpsc::channel(self.inner.capacity);
-        self.inner
-            .subs
-            .lock()
-            .unwrap()
-            .push(SubEntry { id, filter, tx });
+        guard.push(SubEntry {
+            id,
+            filter,
+            tx,
+            overflow: std::sync::atomic::AtomicU64::new(0),
+        });
         Subscription {
             id,
             filter,
@@ -122,19 +219,49 @@ impl EventBus {
 pub struct Subscription {
     id: u64,
     filter: Option<EventKind>,
-    rx: mpsc::Receiver<ServerEvent>,
+    rx: mpsc::Receiver<Published>,
     bus: Arc<BusInner>,
 }
 impl Subscription {
+    /// Legacy receive: returns only the event, discarding the shared
+    /// publication envelope (kept for existing callers/tests).
     pub async fn recv(&mut self) -> Option<ServerEvent> {
-        self.rx.recv().await
+        self.rx.recv().await.map(|published| published.event)
     }
     pub fn try_recv(&mut self) -> Result<ServerEvent, mpsc::error::TryRecvError> {
+        self.rx.try_recv().map(|published| published.event)
+    }
+    /// Additive envelope receive: the shared publication identity plus its
+    /// event. Every subscriber observes the same `id` for one publication.
+    pub async fn recv_published(&mut self) -> Option<Published> {
+        self.rx.recv().await
+    }
+    pub fn try_recv_published(&mut self) -> Result<Published, mpsc::error::TryRecvError> {
         self.rx.try_recv()
     }
     #[must_use]
     pub fn filter(&self) -> Option<EventKind> {
         self.filter
+    }
+    /// Times this subscriber's bounded channel was full (dropped frames).
+    #[must_use]
+    pub fn overflow_count(&self) -> u64 {
+        self.bus
+            .subs
+            .lock()
+            .map(|guard| {
+                guard
+                    .iter()
+                    .find(|e| e.id == self.id)
+                    .map(|e| e.overflow.load(Ordering::Relaxed))
+                    .unwrap_or(0)
+            })
+            .unwrap_or(0)
+    }
+    /// True once any frame was dropped for this subscriber (slow consumer).
+    #[must_use]
+    pub fn has_overflowed(&self) -> bool {
+        self.overflow_count() > 0
     }
 }
 impl Drop for Subscription {
