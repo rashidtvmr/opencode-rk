@@ -42,6 +42,22 @@ mod native_status;
 mod native_theme;
 mod native_timeline;
 mod native_transcript;
+// Three-pane native shell (OBS-NATIVE-THREE-PANE-SHELL-INSTALLED): the
+// integration-owned facade plus its six part modules, native feature only.
+#[cfg(feature = "native")]
+mod native_view;
+#[cfg(feature = "native")]
+mod native_view_chat;
+#[cfg(feature = "native")]
+mod native_view_dialogs;
+#[cfg(feature = "native")]
+mod native_view_layout;
+#[cfg(feature = "native")]
+mod native_view_pages;
+#[cfg(feature = "native")]
+mod native_view_sessions;
+#[cfg(feature = "native")]
+mod native_view_status;
 mod onboarding;
 mod pair;
 mod service_commands;

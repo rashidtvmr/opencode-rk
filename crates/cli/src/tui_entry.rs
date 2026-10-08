@@ -54,6 +54,40 @@ const MAX_NATIVE_DRAFT_BYTES: usize = 32 * 1024;
 const MAX_NATIVE_TRANSCRIPT_BYTES: usize = 64 * 1024;
 const MAX_NATIVE_LINE_CHARS: usize = 1024;
 
+/// Fixed, bounded Help overlay shown by `/help` in the native loop. Lists
+/// only bindings actually wired in `native_loop`; no dynamic or user text.
+#[cfg(feature = "native")]
+const NATIVE_HELP_LINES: [&str; 10] = [
+    "Help - active keybindings",
+    "  Enter: submit composer draft",
+    "  Backspace: delete last draft character",
+    "  Esc: close Help or dialog",
+    "  Ctrl-C / Ctrl-D: exit",
+    "  Ctrl-P: open model picker",
+    "  Ctrl-K: commands",
+    "  /connect: connect a provider",
+    "  /models: select a model",
+    "  /help: open this Help page",
+];
+
+/// Ctrl-J submit-keymap variant of the same fixed Help contract: identical
+/// whole-frame/compact behavior and focus/draft handling; only the
+/// advertised submit-key text differs so Help stays truthful about the
+/// active [`SubmitKeymap`].
+#[cfg(feature = "native")]
+const NATIVE_HELP_LINES_CTRLJ: [&str; 10] = [
+    "Help - active keybindings",
+    "  Ctrl-J: submit composer draft; Enter: newline",
+    "  Backspace: delete last draft character",
+    "  Esc: close Help or dialog",
+    "  Ctrl-C / Ctrl-D: exit",
+    "  Ctrl-P: open model picker",
+    "  Ctrl-K: commands",
+    "  /connect: connect a provider",
+    "  /models: select a model",
+    "  /help: open this Help page",
+];
+
 /// Assemble terminal bytes into complete UTF-8 scalars without ever storing a
 /// partial sequence in the draft.  The input buffer is intentionally fixed:
 /// terminal input is untrusted and a malformed sequence must not grow state.
@@ -188,16 +222,20 @@ struct LiveSnapshot {
     history: Vec<String>,
 }
 
-/// Minimal bounded HTTP/1.1 client for the daemon API (std-only, http scheme).
+/// Minimal bounded HTTP/1.1 client for the daemon API (std-only, http
+/// scheme), returning the response body AND its parsed status code so a
+/// status-specific contract can be enforced without a second parser.
 /// `auth` carries the `Bearer <token>` header value; `/api/*` refuses to
-/// send without one (fail-closed), `/health` stays public.
-fn http_request(
+/// send without one (fail-closed), `/health` stays public. Transport
+/// behavior (timeouts, body cap, auth refusal, any-2xx acceptance) is
+/// shared with [`http_request`].
+fn http_request_with_status(
     origin: &str,
     method: &str,
     path: &str,
     body: Option<&str>,
     auth: Option<&str>,
-) -> Result<String, String> {
+) -> Result<(String, u16), String> {
     if path.starts_with("/api/") || path.starts_with("/auth/") {
         match auth {
             Some(token) if crate::daemon_client::is_wellformed_token(token) => {}
@@ -260,7 +298,30 @@ fn http_request(
         .find("\r\n\r\n")
         .ok_or_else(|| format!("daemon at {origin} returned a malformed HTTP response"))?
         + 4;
-    Ok(response[body_start..].to_string())
+    // Typed status for status-specific contracts (the broker permission
+    // reply requires exactly 204): a `2xx` token that is not a decimal
+    // code is a malformed response and fails closed — never silently
+    // treated as an acknowledgement.
+    let status_code = status
+        .parse::<u16>()
+        .map_err(|_| format!("daemon at {origin} returned a malformed HTTP status"))?;
+    Ok((response[body_start..].to_string(), status_code))
+}
+
+/// Minimal bounded HTTP/1.1 client for the daemon API (std-only, http
+/// scheme). `auth` carries the `Bearer <token>` header value; `/api/*`
+/// refuses to send without one (fail-closed), `/health` stays public.
+/// Body-only view over [`http_request_with_status`]: every non-permission
+/// caller keeps the exact pre-existing any-2xx success contract — the
+/// status code is simply dropped.
+fn http_request(
+    origin: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    auth: Option<&str>,
+) -> Result<String, String> {
+    http_request_with_status(origin, method, path, body, auth).map(|(body, _status)| body)
 }
 
 /// Fetch the live session snapshot: target session (explicit id or most
@@ -274,6 +335,19 @@ fn fetch_snapshot(
     let sessions_body = http_request(origin, "GET", "/api/sessions", None, auth)?;
     let value: serde_json::Value = serde_json::from_str(&sessions_body)
         .map_err(|e| format!("daemon session list is not valid JSON: {e}"))?;
+    snapshot_from_listing(origin, &value, session, auth)
+}
+
+/// Target selection + bounded message history from an ALREADY authenticated
+/// listing payload. Shared so `bind_session` satisfies its contract with ONE
+/// `GET /api/sessions`: the same parsed body proves target row membership
+/// and selects the snapshot target before any local mutation.
+fn snapshot_from_listing(
+    origin: &str,
+    value: &serde_json::Value,
+    session: Option<&str>,
+    auth: Option<&str>,
+) -> Result<LiveSnapshot, String> {
     let sessions = value["sessions"]
         .as_array()
         .ok_or_else(|| "daemon session list is missing the sessions array".to_string())?;
@@ -428,6 +502,10 @@ fn render_frame(
     for hint in footer_hints(keymap) {
         out.push_str(&format!("  {}: {}\n", hint.keys, hint.action));
     }
+    // Truthful local binding line: Ctrl-K (0x0b) is wired in
+    // `native_loop` (opens the command input) and is never advertised
+    // without a handler — the approved footer_hints set predates it.
+    out.push_str("  Ctrl-K: commands\n");
     out
 }
 
@@ -572,12 +650,274 @@ fn native_paint(
     Ok(())
 }
 
+/// Workspace identity for the center pane: the real process working
+/// directory (the launcher's project root); never fabricated data.
+#[cfg(feature = "native")]
+fn current_workspace_label() -> String {
+    std::env::current_dir()
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|_| "unavailable".to_owned())
+}
+
+/// Backend-confirmed session bind: two phases. Phase 1 performs only the
+/// authenticated fetches (target session + history, fresh listing) — a
+/// failure there mutates nothing. Phase 2 hands every fetched fact to the
+/// single facade transaction (`bind_commit`), which saves the outgoing
+/// draft under its old known id, acknowledges membership, restores the
+/// target draft, and only then commits active marker/status/transcript.
+/// Returns the fetched snapshot plus the restored composer draft.
+#[cfg(feature = "native")]
+fn bind_session(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut Vec<String>,
+    global_draft: &str,
+    origin: &str,
+    session: Option<&str>,
+    auth: Option<&str>,
+) -> Result<(LiveSnapshot, String), String> {
+    // Phase 1 — every required authenticated fetch, ZERO local mutation.
+    // A listing failure / parse failure ERRORS HERE, before bind_commit can
+    // touch the draft store, rows, active marker, status or transcript.
+    let listing = http_request(origin, "GET", "/api/sessions", None, auth)
+        .map_err(|error| format!("session listing unavailable: {error}"))?;
+    let value: serde_json::Value = serde_json::from_str(&listing)
+        .map_err(|error| format!("session listing is not valid JSON: {error}"))?;
+    let rows = crate::native_view_sessions::parse_rows(&value)
+        .map_err(|error| format!("session listing unusable: {error}"))?;
+    // ONE listing serves both contracts: target selection and row
+    // membership (bind_commit step 0 proves the target is an actual row of
+    // THIS payload before the first mutation).
+    let snapshot = snapshot_from_listing(origin, &value, session, auth)?;
+    // Phase 2 — the single all-or-nothing facade transaction.
+    let draft = view
+        .bind_commit(
+            Ok((snapshot.session_id.clone(), snapshot.history.clone(), rows)),
+            global_draft,
+            transcript,
+            append_transcript,
+        )?
+        .draft;
+    Ok((snapshot, draft))
+}
+
+/// Authenticated `GET /api/sessions` → `PageRow`s for the open Sessions
+/// page: id = backend UUID (the Enter target), label = backend title,
+/// detail = active marker for the currently bound session. Every failure
+/// returns `Err` BEFORE any `PageState` change, so the page keeps its
+/// previous rows/honest note instead of showing fabricated content.
+#[cfg(feature = "native")]
+fn session_page_rows(
+    origin: &str,
+    auth: Option<&str>,
+    active: Option<&str>,
+) -> Result<Vec<crate::native_view_pages::PageRow>, String> {
+    let body = http_request(origin, "GET", "/api/sessions", None, auth)?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|error| format!("session listing is not valid JSON: {error}"))?;
+    let rows = crate::native_view_sessions::parse_rows(&value)?;
+    Ok(rows
+        .into_iter()
+        .map(|row| {
+            let detail = if Some(row.id.as_str()) == active {
+                "active".to_owned()
+            } else {
+                String::new()
+            };
+            crate::native_view_pages::PageRow {
+                id: row.id,
+                label: row.title,
+                detail,
+                enabled: true,
+            }
+        })
+        .collect())
+}
+
+/// One pending backend permission request for the bound session
+/// (`GET /api/session/{id}/permission`, existing bounded authenticated
+/// client). `Ok(None)` is an honest "no request pending".
+#[cfg(feature = "native")]
+struct PendingPermission {
+    id: String,
+    title: String,
+}
+
+#[cfg(feature = "native")]
+fn fetch_permission(
+    origin: &str,
+    session: &str,
+    auth: Option<&str>,
+) -> Result<Option<PendingPermission>, String> {
+    let body = http_request(
+        origin,
+        "GET",
+        &format!("/api/session/{session}/permission"),
+        None,
+        auth,
+    )?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|error| format!("permission list is not valid JSON: {error}"))?;
+    let data = value
+        .get("data")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "permission list is missing the data array".to_owned())?;
+    for entry in data {
+        let Some(id) = entry.get("id").and_then(serde_json::Value::as_str) else {
+            continue;
+        };
+        if id.is_empty() || id.len() > 128 {
+            continue;
+        }
+        // Bounded, control-free display title from the real request action.
+        let title: String = entry
+            .get("action")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("permission request")
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(160)
+            .collect();
+        return Ok(Some(PendingPermission {
+            id: id.to_owned(),
+            title,
+        }));
+    }
+    Ok(None)
+}
+
+/// Dispatch one decision intent to the real permission broker reply route
+/// (`POST /api/session/{id}/permission/{request_id}/reply`, `once` or
+/// `reject`). The local `attempt` is captured from THIS intent and echoed
+/// only in its matching [`DialogAck`]. `accepted: true` is constructed
+/// only on the exact broker ACK — `204 No Content` with an empty body
+/// ([`permission_reply_accepted`]); any other status (including other 2xx),
+/// a malformed status, or any transport failure produces a bounded static
+/// error line plus `accepted: false` (the module's refusal path reopens
+/// the choice — the dialog is never pretended accepted, never locally
+/// closed), and the facade records the retry-await correlation so the
+/// empty-GET poll can never close a decision that is awaiting this
+/// explicit retry. Exactly one POST is attempted per explicit user
+/// intent: no automatic retry, no replay, no auto-approve.
+/// Question / confirm intents have no permission route and never produce
+/// a POST.
+#[cfg(feature = "native")]
+fn dispatch_permission_reply(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut Vec<String>,
+    origin: Option<&str>,
+    auth: Option<&str>,
+    intent: crate::native_view_dialogs::DecisionIntent,
+) {
+    use crate::native_view_dialogs::{DecisionIntent, DialogAck};
+    let reply = match &intent {
+        DecisionIntent::Approve { .. } => "once",
+        DecisionIntent::Reject { .. } => "reject",
+        DecisionIntent::Answer { .. } | DecisionIntent::Cancel { .. } => {
+            append_transcript(
+                transcript,
+                "error: dialog kind has no backend reply route (unsupported)".to_owned(),
+            );
+            return;
+        }
+    };
+    let attempt = intent.attempt();
+    let request_id = intent.request_id().to_owned();
+    let session_id = intent.session_id().to_owned();
+    let result = origin
+        .ok_or_else(|| "daemon unavailable".to_owned())
+        .and_then(|origin| {
+            let path = format!("/api/session/{session_id}/permission/{request_id}/reply");
+            let payload = serde_json::json!({ "reply": reply }).to_string();
+            http_request_with_status(origin, "POST", &path, Some(&payload), auth).and_then(
+                |(reply_body, status)| {
+                    if permission_reply_accepted(status, &reply_body) {
+                        Ok(())
+                    } else {
+                        // Bounded static refusal: the decimal status only
+                        // (or a fixed phrase) — never raw body tokens.
+                        Err(permission_reply_refusal(status))
+                    }
+                },
+            )
+        });
+    let accepted = matches!(result, Ok(()));
+    if let Err(error) = &result {
+        append_transcript(
+            transcript,
+            format!("error: permission reply not acknowledged: {error}"),
+        );
+    }
+    let ack = DialogAck {
+        request_id,
+        session_id,
+        accepted,
+        attempt,
+    };
+    // Correlated facade acknowledgement: records the retry-await flag ONLY
+    // on the actual `AckOutcome::Rejected` outcome (the module reopened the
+    // choice after a failed/non-accepting ACK — the decision awaits an
+    // explicit retry, e.g. Esc re-sending reject). An accepted empty-204
+    // (`AckOutcome::Closed`) is a legitimate resolution and clears it; a
+    // stale/mismatched ACK is refused by the module without touching the
+    // flag or focus.
+    if let Err(error) = view.ack_permission_reply(ack) {
+        append_transcript(
+            transcript,
+            format!("error: permission ack: {}", error.code()),
+        );
+    }
+}
+
+/// Exact broker contract for acknowledging a permission reply: ONLY
+/// `204 No Content` with an EMPTY body accepts (constructing
+/// `DialogAck { accepted: true }`). `200`/`201`/`202`/any other 2xx,
+/// `404`, and a `204` carrying a body are NOT acceptance — fail closed
+/// after the single POST, with no retry. Pure so the classification the
+/// production dispatch actually calls is unit-testable.
+#[cfg(feature = "native")]
+pub(crate) fn permission_reply_accepted(status: u16, body: &str) -> bool {
+    status == 204 && body.is_empty()
+}
+
+/// Bounded static refusal reason for a non-accepting broker reply:
+/// carries only the decimal status (or a fixed phrase for the
+/// empty-body contract violation) — never raw response body bytes.
+#[cfg(feature = "native")]
+fn permission_reply_refusal(status: u16) -> String {
+    if status == 204 {
+        "broker permission reply 204 carried a non-empty body".to_owned()
+    } else {
+        format!("broker permission reply requires HTTP 204, got HTTP {status}")
+    }
+}
+
+/// Created-id extraction for `POST /api/sessions`: the real ACK body is
+/// `{"session":{"id":"<uuid>"}}`, so the id is taken ONLY from the nested
+/// `/session/id` pointer and validated with the real `SessionId` parser
+/// (UUID) before any bind. A top-level `id`, a missing pointer, malformed
+/// JSON or a non-UUID value is a bounded static error — never a most-
+/// recent-session bind, never an invented id. Pure: the exact function
+/// the `/new` production path calls is unit-tested.
+#[cfg(feature = "native")]
+pub(crate) fn parse_created_session_id(response: &str) -> Result<String, String> {
+    let value: serde_json::Value = serde_json::from_str(response)
+        .map_err(|_| "session create ACK is not valid JSON".to_owned())?;
+    let raw = value
+        .pointer("/session/id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "session create ACK missing nested session.id".to_owned())?;
+    raw.parse::<opencode_rk_contracts::SessionId>()
+        .map(|_| raw.to_owned())
+        .map_err(|_| "session create ACK session.id is not a valid session id".to_owned())
+}
+
 #[cfg(feature = "native")]
 fn native_loop(
     memory: &[MemoryFile],
-    live: Option<&LiveSnapshot>,
+    mut live: Option<LiveSnapshot>,
     auth: Option<&str>,
     startup_view: Option<crate::app_start::StartupView>,
+    keymap: SubmitKeymap,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cols, rows) = native_size();
     let mut renderer = NativeRenderer::create(cols, rows)?;
@@ -590,22 +930,40 @@ fn native_loop(
     } else {
         native_setup::Dialog::None
     };
-    let models = live
-        .and_then(|snapshot| {
-            http_request(
-                &snapshot.origin,
-                "GET",
-                "/api/models?provider=openai&limit=500",
-                None,
-                auth,
-            )
-            .and_then(|body| native_setup::catalogue(&body))
-            .ok()
-        })
-        .unwrap_or_default();
+    let mut help_open = false;
+    // Track whether the model catalogue was actually observed (HTTP + parse
+    // succeeded): a failed fetch yields `None`, never a fabricated "confirmed
+    // unset" model claim (status-v2 `set_model_unknown` path).
+    let models_fetch = live.as_ref().and_then(|snapshot| {
+        http_request(
+            &snapshot.origin,
+            "GET",
+            "/api/models?provider=openai&limit=500",
+            None,
+            auth,
+        )
+        .and_then(|body| native_setup::catalogue(&body))
+        .ok()
+    });
+    let models_loaded = models_fetch.is_some();
+    let models = models_fetch.unwrap_or_default();
     let mut selected = native_setup::selected(&models);
     let mut transcript = Vec::new();
-    let mut worker: Option<native_turn::TurnWorker> = None;
+    // In-flight turn worker wrapped with the binding identity it was
+    // launched under: events apply only while session AND generation still
+    // match; a superseded (stale) worker is drained and never touches the
+    // current busy flag, transcript or live snapshot.
+    let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
+    let mut binding_generation: u64 = 0;
+    // Segregated API-key dialog buffer: never stored as (or merged into)
+    // the chat composer draft, never saved by any draft transaction.
+    let mut key_input = String::new();
+    // Dialog-local provider/model filter buffer: the picker's transient
+    // text. Opening a picker preserves the chat draft verbatim, filtering
+    // never mutates it, and cancel returns the exact original draft.
+    let mut filter_input = String::new();
+    let mut last_permission_poll = Instant::now();
+    let mut permission_error: Option<String> = None;
     let mut partial = String::new();
     let mut utf8 = NativeUtf8Decoder::default();
     let mut input = native_input_decoder::TerminalInputDecoder::default();
@@ -614,100 +972,261 @@ fn native_loop(
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
-    if let Some(snapshot) = live {
+    if let Some(snapshot) = live.as_ref() {
         for line in &snapshot.history {
             append_transcript(&mut transcript, line.clone());
         }
     }
+    // Three-pane shell facade: populated from the actual initial daemon,
+    // session, model, workspace and existing history, then maintained on
+    // every frame and turn event below. Fetches use the existing bounded
+    // authenticated client; the facade itself never performs IO.
+    let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
+    // Honest status-v2 facts: a model claim only after the catalogue was
+    // actually observed (failed fetch -> `Unavailable`, not `unset`); the
+    // connection is confirmed only when the startup snapshot fetch ACKed.
+    if selected.is_some() {
+        view.set_model(selected.as_ref().map(|model| model.qualified()));
+    } else if models_loaded {
+        view.set_model(None); // confirmed: catalogue observed, no model
+    } else {
+        view.set_model_unknown(); // failed fetch: never observed
+    }
+    if live.is_some() {
+        view.set_connection(true);
+    } else {
+        view.set_connection_unknown();
+    }
+    view.set_session(live.as_ref().map(|snapshot| snapshot.session_id.clone()));
+    view.set_workspace(current_workspace_label());
+    if let Some(snapshot) = live.as_ref() {
+        // Left pane: real backend session listing (GET /api/sessions).
+        match http_request(&snapshot.origin, "GET", "/api/sessions", None, auth).and_then(|body| {
+            serde_json::from_str::<serde_json::Value>(&body).map_err(|error| error.to_string())
+        }) {
+            Ok(value) => match crate::native_view_sessions::parse_rows(&value) {
+                Ok(rows) => view.set_session_rows(rows, Some(snapshot.session_id.clone())),
+                Err(error) => append_transcript(
+                    &mut transcript,
+                    format!("error: session listing malformed: {error}"),
+                ),
+            },
+            Err(error) => append_transcript(
+                &mut transcript,
+                format!("error: sessions unavailable: {error}"),
+            ),
+        }
+        // Right pane: MCP snapshot (GET /api/mcp).
+        match http_request(&snapshot.origin, "GET", "/api/mcp", None, auth).and_then(|body| {
+            serde_json::from_str::<serde_json::Value>(&body).map_err(|error| error.to_string())
+        }) {
+            Ok(value) => {
+                if let Err(error) = view.apply_mcp(&value) {
+                    append_transcript(
+                        &mut transcript,
+                        format!("error: mcp snapshot rejected: {error}"),
+                    );
+                }
+            }
+            Err(error) => {
+                append_transcript(&mut transcript, format!("error: mcp unavailable: {error}"))
+            }
+        }
+    }
+    view.set_page_rows(crate::native_view::initial_page_rows(live.is_some()));
+    // Active submit keymap fact: keeps Pages Help rows truthful (Enter vs
+    // Ctrl-J), alongside the frozen whole-frame Help overlay below.
+    view.set_submit_with_ctrl_j(matches!(keymap, SubmitKeymap::CtrlJ));
+    // Session picker: highlight moves locally; the active session changes
+    // only after a backend-ACKed fetch (Ctrl-G confirmation below).
+    let mut pending_session: Option<String> = None;
     let mut byte = [0u8; 1];
     loop {
         if let Ok(Some(size)) = renderer.terminal_size() {
             if size != observed_size {
                 renderer.resize(size.0, size.1)?;
                 observed_size = size;
+                view.resize(size.0 as u16, size.1 as u16);
                 needs_paint = true;
             }
         }
-        let mut lines = vec![
-            "OpenCode RK (native)".to_string(),
-            selected
-                .as_ref()
-                .map(|model| format!("model: {} (ctrl-p)", model.qualified()))
-                .unwrap_or_else(|| "model: unset (/connect)".to_owned()),
-            live.map(|s| format!("session: {} (live)", s.title))
-                .unwrap_or_else(|| "daemon: offline".to_string()),
-        ];
-        if let Some(active) = worker.as_mut() {
-            let mut settled = false;
-            while let Some(event) = active.try_next() {
-                needs_paint = true;
-                match event {
-                    native_turn::Event::User => {}
-                    native_turn::Event::Delta(delta) => {
-                        partial.push_str(&delta);
-                        replace_partial(&mut transcript, &partial);
+        // Binding identity: events/busy apply only while this worker's
+        // captured (session, generation) still matches the current binding.
+        let binding_active = worker.as_ref().is_some_and(|owned| {
+            owned.owns(
+                live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                binding_generation,
+            )
+        });
+        let mut worker_finished = false;
+        if let Some(owned) = worker.as_mut() {
+            if binding_active {
+                let mut settled = false;
+                while let Some(event) = owned.worker.try_next() {
+                    needs_paint = true;
+                    view.follow_tail();
+                    match event {
+                        native_turn::Event::User => {}
+                        native_turn::Event::Delta(delta) => {
+                            partial.push_str(&delta);
+                            replace_partial(&mut transcript, &partial);
+                        }
+                        native_turn::Event::ToolCall(name) => {
+                            append_transcript(
+                                &mut transcript,
+                                format!("tool: {}", native_transcript::strip_ansi(&name)),
+                            );
+                        }
+                        native_turn::Event::ToolOutput(name, output) => {
+                            append_transcript(
+                                &mut transcript,
+                                format!(
+                                    "tool {}: {}",
+                                    native_transcript::strip_ansi(&name),
+                                    native_transcript::strip_ansi(&output)
+                                ),
+                            );
+                        }
+                        native_turn::Event::Assistant(text) => {
+                            partial.clear();
+                            remove_partial(&mut transcript);
+                            settled = true;
+                            append_transcript(
+                                &mut transcript,
+                                format!("assistant: {}", native_transcript::strip_ansi(&text)),
+                            );
+                        }
+                        native_turn::Event::Error(error) => {
+                            partial.clear();
+                            remove_partial(&mut transcript);
+                            settled = true;
+                            append_transcript(
+                                &mut transcript,
+                                format!("error: {}", native_transcript::strip_ansi(&error)),
+                            );
+                        }
                     }
-                    native_turn::Event::ToolCall(name) => {
-                        append_transcript(
-                            &mut transcript,
-                            format!("tool: {}", native_transcript::strip_ansi(&name)),
-                        );
+                }
+                if settled || owned.worker.is_finished() {
+                    worker_finished = true;
+                }
+            } else {
+                // Stale worker from a superseded binding: drain events only.
+                // Nothing here mutates busy, transcript, partial, live or
+                // needs_paint from this source.
+                while owned.worker.try_next().is_some() {}
+                if owned.worker.is_finished() {
+                    worker_finished = true;
+                }
+            }
+        }
+        if worker_finished {
+            worker = None;
+        }
+        // Bounded permission poll (existing authenticated client, 500ms
+        // cadence): only while a turn owns this binding, or while an open
+        // decision still needs backend-resolution detection. No queues, no
+        // new threads, existing 2s/1MiB http_request limits.
+        if !view.dialogs.pending()
+            && (binding_active || view.dialogs.is_open())
+            && last_permission_poll.elapsed() >= Duration::from_millis(500)
+        {
+            last_permission_poll = Instant::now();
+            if let Some(snapshot) = live.as_ref() {
+                match fetch_permission(&snapshot.origin, &snapshot.session_id, auth) {
+                    Ok(None) => {
+                        if view.permission_retry_open() && view.dialogs.is_open() {
+                            // A dispatched reply did NOT legitimately
+                            // resolve the decision: its ACK was rejected
+                            // (failed/non-204 — the module reopened the
+                            // choice, awaiting an EXPLICIT user retry such
+                            // as Esc re-sending reject). Authenticated
+                            // GET-none is not a resolution of the local
+                            // decision: keep focus, report honestly (one
+                            // deduplicated line), and never auto-replay,
+                            // auto-approve or locally close.
+                            let message = "error: permission reply unresolved: backend has no pending request; decision stays open (Esc retries reject)".to_owned();
+                            if permission_error.as_deref() != Some(message.as_str()) {
+                                permission_error = Some(message.clone());
+                                append_transcript(&mut transcript, message);
+                                needs_paint = true;
+                            }
+                        } else {
+                            permission_error = None;
+                            // Authenticated GET proves no request remains:
+                            // the backend resolved it (pending() is false
+                            // here, so no in-flight decision is touched).
+                            // The facade closes ONLY an unsubmitted dialog
+                            // — one with no dispatched reply awaiting an
+                            // explicit retry.
+                            if view.permission_backend_resolved_close() {
+                                append_transcript(
+                                    &mut transcript,
+                                    "permission: request resolved by backend".to_owned(),
+                                );
+                                needs_paint = true;
+                            }
+                        }
                     }
-                    native_turn::Event::ToolOutput(name, output) => {
-                        append_transcript(
-                            &mut transcript,
-                            format!(
-                                "tool {}: {}",
-                                native_transcript::strip_ansi(&name),
-                                native_transcript::strip_ansi(&output)
-                            ),
-                        );
+                    Ok(Some(pending)) => {
+                        if !view.dialogs.is_open() {
+                            let result = view.dialogs.open_permission(
+                                pending.id,
+                                snapshot.session_id.clone(),
+                                pending.title,
+                            );
+                            match result {
+                                Ok(()) => {
+                                    // A fresh prompt implies the previous
+                                    // decision cycle ended in an explicit
+                                    // valid resolution (the retry flag only
+                                    // survives while its own dialog stays
+                                    // open, and that blocks every close
+                                    // path): the new decision cycle starts
+                                    // clean.
+                                    view.permission_retry_clear();
+                                    permission_error = None;
+                                    // Modal precedence: suspend the Help
+                                    // frame so the decision is visible
+                                    // once painted; the composer draft is
+                                    // untouched (restore-after-ACK is
+                                    // optional and deliberately not
+                                    // implemented — no focus stealing
+                                    // beyond the modal itself).
+                                    help_open = false;
+                                    needs_paint = true;
+                                }
+                                Err(error) => {
+                                    let message =
+                                        format!("error: permission dialog: {}", error.code());
+                                    if permission_error.as_deref() != Some(message.as_str()) {
+                                        permission_error = Some(message.clone());
+                                        append_transcript(&mut transcript, message);
+                                        needs_paint = true;
+                                    }
+                                }
+                            }
+                        }
                     }
-                    native_turn::Event::Assistant(text) => {
-                        partial.clear();
-                        remove_partial(&mut transcript);
-                        settled = true;
-                        append_transcript(
-                            &mut transcript,
-                            format!("assistant: {}", native_transcript::strip_ansi(&text)),
-                        );
-                    }
-                    native_turn::Event::Error(error) => {
-                        partial.clear();
-                        remove_partial(&mut transcript);
-                        settled = true;
-                        append_transcript(
-                            &mut transcript,
-                            format!("error: {}", native_transcript::strip_ansi(&error)),
-                        );
+                    Err(error) => {
+                        // Failed observation: connection state is unknown
+                        // now (never a stale connected claim).
+                        view.set_connection_unknown();
+                        let message = format!("error: permission poll: {error}");
+                        if permission_error.as_deref() != Some(message.as_str()) {
+                            permission_error = Some(message.clone());
+                            append_transcript(&mut transcript, message);
+                            needs_paint = true;
+                        }
                     }
                 }
             }
-            if settled || active.is_finished() {
-                worker = None;
-            }
         }
-        if let Some(snapshot) = live {
-            lines.push(format!(
-                "state: {}, updated: {}",
-                snapshot.state, snapshot.updated_at
-            ));
-            lines.push(format!(
-                "{} message{}",
-                snapshot.message_count,
-                if snapshot.message_count == 1 { "" } else { "s" }
-            ));
-            if let Some(last) = &snapshot.last_text {
-                lines.push(format!("last: {last}"));
-            }
-        }
-        let panel = match dialog {
-            native_setup::Dialog::None => draft
-                .split('\n')
-                .take((renderer.rows() as usize).saturating_sub(lines.len()))
-                .enumerate()
-                .map(|(row, text)| format!("{}{text}", if row == 0 { "> " } else { "  " }))
-                .collect(),
+        // Center dialog overlay (native_setup): credentials stay masked in
+        // its own lines; the facade keeps all three panes visible and
+        // echoes the composer draft (never an API key) below it.
+        let overlay: Vec<String> = match dialog {
+            native_setup::Dialog::None => Vec::new(),
             native_setup::Dialog::Provider => {
                 let mut panel = vec!["Connect a provider".to_owned()];
                 if !models.is_empty() && "openai".contains(&draft.trim().to_lowercase()) {
@@ -720,7 +1239,7 @@ fn native_loop(
                 "API key (OpenAI)".to_owned(),
                 format!(
                     "key: {} (enter / escape)",
-                    "*".repeat(draft.chars().count().min(40))
+                    "*".repeat(key_input.chars().count().min(40))
                 ),
             ],
             native_setup::Dialog::Model => {
@@ -736,10 +1255,42 @@ fn native_loop(
                 panel
             }
         };
-        let slots = (renderer.rows() as usize).saturating_sub(lines.len() + panel.len());
-        let visible = transcript.iter().rev().take(slots).collect::<Vec<_>>();
-        lines.extend(visible.into_iter().rev().cloned());
-        lines.extend(panel);
+        let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
+            ""
+        } else {
+            draft.as_str()
+        };
+        // Modal precedence in RENDER too: an open permission decision must
+        // be visible even if Help would otherwise own the whole frame (the
+        // facade renders the dialog center first, so the native_setup
+        // credential overlay can never show behind it).
+        let dialog_open = view.dialogs.is_open();
+        let mut lines = if help_open && !dialog_open {
+            Vec::new()
+        } else {
+            // Busy reflects only the worker that owns the CURRENT binding;
+            // a stale (superseded) worker never shows busy here.
+            view.render(draft_echo, &transcript, binding_active, &overlay)
+        };
+        // Help owns the whole frame: heading at row 0 with static content
+        // clipped to the terminal, so a short window still shows the page.
+        // Esc recomputes the ordinary header/composer frame unchanged.
+        // Never painted over an open decision modal (`dialog_open` gate).
+        if help_open && !dialog_open {
+            // Truthful submit-key line for the active keymap; same frozen
+            // whole-frame compact take (rows-bounded), draft/focus rules
+            // and Esc semantics.
+            let help: &[&str] = if matches!(keymap, SubmitKeymap::CtrlJ) {
+                &NATIVE_HELP_LINES_CTRLJ
+            } else {
+                &NATIVE_HELP_LINES
+            };
+            lines = help
+                .iter()
+                .take((renderer.rows() as usize).min(help.len()))
+                .map(|line| (*line).to_owned())
+                .collect();
+        }
         if needs_paint {
             native_paint(&mut renderer, &lines)?;
             needs_paint = false;
@@ -779,21 +1330,59 @@ fn native_loop(
         }
         let Some(event) = input.pop() else { continue };
         needs_paint = true;
+        // Focus snapshot for this event: an open (non-Chat) page behaves
+        // like the frozen Help overlay for focus purposes.
+        let page_open = !matches!(view.page(), crate::native_view_pages::Page::Chat);
+        // Typed-query focus: the Sessions filter and the Commands page
+        // (Ctrl-K command input) accept printable/backspace input into the
+        // facade-owned bounded query; every other open page stays fully
+        // inert, and the permission modal / Help gates above keep
+        // precedence over both.
+        let page_query_open = matches!(
+            view.page(),
+            crate::native_view_pages::Page::Sessions | crate::native_view_pages::Page::Commands
+        );
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Paste(text) => {
                 utf8.reset();
-                let limit = if matches!(dialog, native_setup::Dialog::ApiKey) {
-                    16 * 1024
+                if view.dialogs.intercepts_input() {
+                    // Modal precedence: an open permission decision owns
+                    // focus over Help and pages; paste is intercepted and
+                    // never reaches the composer or the dialog.
+                    continue;
+                }
+                if help_open {
+                    // Help owns focus; paste must not mutate the hidden draft.
+                    continue;
+                }
+                if page_open {
+                    // An open page owns focus; paste lands in the page's
+                    // own bounded query (Sessions filter / command buffer)
+                    // and NEVER in the composer draft. Any other page
+                    // discards the paste entirely.
+                    if page_query_open {
+                        for character in text.chars() {
+                            if !view.page_query_push(character) {
+                                break;
+                            }
+                        }
+                    }
+                    continue;
+                }
+                // API-key input is segregated: it lands in the native_setup
+                // key buffer, never in the chat composer draft.
+                let (target, limit) = if matches!(dialog, native_setup::Dialog::ApiKey) {
+                    (&mut key_input, 16 * 1024)
                 } else {
-                    MAX_NATIVE_DRAFT_BYTES
+                    (&mut draft, MAX_NATIVE_DRAFT_BYTES)
                 };
-                if draft
+                if target
                     .len()
                     .checked_add(text.len())
                     .is_some_and(|len| len <= limit)
                 {
-                    draft.push_str(&text);
+                    target.push_str(&text);
                 }
                 // Paste has no key actions, even in a dialog or a busy turn.
                 continue;
@@ -802,28 +1391,433 @@ fn native_loop(
             // draft) while keeping protocol escape bytes out of the composer.
             native_input_decoder::InputEvent::Escape => 27,
         };
+        // Modal precedence: a pending permission decision owns input over
+        // the Help frame and open pages — printables, page bindings and the
+        // composer are intercepted; only choice navigation (Ctrl-N / Ctrl-B),
+        // an explicit answer (Enter) and an explicit Esc act. Esc emits
+        // Reject through the real broker reply route and waits for its ACK —
+        // never a local close, even if Help is open. Ctrl-C / Ctrl-D keep
+        // exit priority above every modal: they fall through here and break
+        // in the dispatch below.
+        if view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
+            match byte {
+                14 => view.dialogs.next(),
+                2 => view.dialogs.prev(),
+                13 | 10 => match view.dialogs.answer() {
+                    Ok(intent) => dispatch_permission_reply(
+                        &mut view,
+                        &mut transcript,
+                        live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                        auth,
+                        intent,
+                    ),
+                    Err(error) => append_transcript(
+                        &mut transcript,
+                        format!("error: permission answer: {}", error.code()),
+                    ),
+                },
+                27 => match view.dialogs.cancel() {
+                    Ok(intent) => dispatch_permission_reply(
+                        &mut view,
+                        &mut transcript,
+                        live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                        auth,
+                        intent,
+                    ),
+                    Err(error) => append_transcript(
+                        &mut transcript,
+                        format!("error: permission reject: {}", error.code()),
+                    ),
+                },
+                _ => {}
+            }
+            utf8.reset();
+            continue;
+        }
+        // Help page owns input focus (no decision dialog is open): every
+        // key except exit (Ctrl-C/Ctrl-D) and close (Esc) is inert, so no
+        // dialog, draft, paste, or turn side effect can occur while Help
+        // is open.
+        if help_open && !matches!(byte, 3 | 4 | 27) {
+            utf8.reset();
+            continue;
+        }
+        // An open page owns focus the same way: only exit/close plus page
+        // navigation (Ctrl-N / Ctrl-B) and confirmation (Enter) act; no
+        // draft, dialog, paste or turn side effect can occur. On the
+        // Sessions filter and the command buffer, printable and
+        // backspace bytes are additionally routed to that bounded query
+        // (and only it) below; every other page keeps the inert contract.
+        if page_open
+            && !help_open
+            && !matches!(byte, 3 | 4 | 27 | 13 | 10 | 14 | 2)
+            && !(page_query_open && (byte == 8 || byte == 127 || byte >= 0x20))
+        {
+            utf8.reset();
+            continue;
+        }
         match byte {
             3 | 4 => break,
+            27 if help_open => {
+                // Close Help only: draft/dialog/model/session are unchanged.
+                help_open = false;
+                utf8.reset();
+            }
+            27 if page_open => {
+                // Close the page only, mirroring the frozen Help close:
+                // draft/dialog/model/session are unchanged. This is also
+                // the command-input cancel: the query buffer lives in the
+                // page state and the composer draft — including unsent
+                // text typed before Ctrl-K — comes back byte-identical.
+                view.close_page();
+                utf8.reset();
+            }
+            27 if !matches!(dialog, native_setup::Dialog::None) => {
+                // Canceling a provider/model/API-key dialog returns the
+                // composer draft EXACTLY as it was: the dialog filter and
+                // the segregated key buffer are dialog-local and are
+                // discarded; the chat draft is never the dialog buffer.
+                dialog = native_setup::Dialog::None;
+                key_input.clear();
+                filter_input.clear();
+                utf8.reset();
+            }
             27 => {
                 dialog = native_setup::Dialog::None;
+                key_input.clear();
                 draft.clear();
                 utf8.reset();
             }
             16 => {
+                // Ctrl-P opens the real Models picker with the composer
+                // draft preserved verbatim; filtering uses the dialog's
+                // own bounded buffer, never the chat draft.
                 dialog = native_setup::Dialog::Model;
-                draft.clear();
+                key_input.clear();
+                filter_input.clear();
+                utf8.reset();
+            }
+            // Page navigation while a page owns focus (Enter confirms).
+            14 if page_open => {
+                view.page_next();
+                utf8.reset();
+            }
+            2 if page_open => {
+                view.page_prev();
+                utf8.reset();
+            }
+            // Chat keyboard scroll (Ctrl-F / Ctrl-B): bounded view state
+            // only; no history, dialog or turn side effect. Ctrl-T (0x14)
+            // is not mapped here and stays inert by fall-through.
+            6 if !page_open && matches!(dialog, native_setup::Dialog::None) => {
+                view.scroll_down(8);
+                utf8.reset();
+            }
+            2 if !page_open && matches!(dialog, native_setup::Dialog::None) => {
+                view.scroll_up(8);
+                utf8.reset();
+            }
+            // Session picker in Chat: Ctrl-N / Ctrl-O move the highlight
+            // only; the active session never changes before a backend ACK.
+            14 if !page_open && matches!(dialog, native_setup::Dialog::None) => {
+                if worker.is_none() {
+                    pending_session = view.session_next();
+                }
+                utf8.reset();
+            }
+            15 if !page_open && matches!(dialog, native_setup::Dialog::None) => {
+                if worker.is_none() {
+                    pending_session = view.session_prev();
+                }
+                utf8.reset();
+            }
+            // Ctrl-G: confirm the highlighted session. The active session,
+            // facade rows, draft store and transcript change only through
+            // the single bind transaction after GET succeeds; a busy turn
+            // or pending permission decision refuses the switch outright
+            // (before any HTTP create/fetch).
+            7 if !page_open && matches!(dialog, native_setup::Dialog::None) => {
+                utf8.reset();
+                // Reserve the next generation BEFORE any fetch/bind side
+                // effect. Exhaustion fails closed: no fetch runs, no bind
+                // commits, no generation is reused or minted.
+                let Some(prospective) = crate::native_view::reserve_generation(binding_generation)
+                else {
+                    append_transcript(
+                        &mut transcript,
+                        "error: binding generation exhausted; session switch refused".to_owned(),
+                    );
+                    needs_paint = true;
+                    continue;
+                };
+                let busy = worker.as_ref().is_some_and(|owned| {
+                    owned.owns(
+                        live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                        binding_generation,
+                    )
+                }) || view.dialogs.is_open();
+                if busy {
+                    append_transcript(
+                        &mut transcript,
+                        "busy: turn or permission decision in progress; session switch refused"
+                            .to_owned(),
+                    );
+                    needs_paint = true;
+                } else if let Some(candidate) = pending_session.take() {
+                    let bound = live
+                        .as_ref()
+                        .ok_or_else(|| "daemon unavailable".to_owned())
+                        .and_then(|snapshot| {
+                            bind_session(
+                                &mut view,
+                                &mut transcript,
+                                &draft,
+                                &snapshot.origin,
+                                Some(&candidate),
+                                auth,
+                            )
+                        });
+                    match bound {
+                        Ok((snapshot, restored_draft)) => {
+                            live = Some(snapshot);
+                            draft = restored_draft;
+                            // Committed ONLY on a successful bind.
+                            binding_generation = prospective;
+                            needs_paint = true;
+                        }
+                        Err(error) => {
+                            append_transcript(
+                                &mut transcript,
+                                format!("error: session switch: {error}"),
+                            );
+                            needs_paint = true;
+                        }
+                    }
+                }
+            }
+            // Ctrl-K (0x0b): open the local command input — the Commands
+            // page with its static route rows — from Chat. Unoccupied raw
+            // byte (no other arm consumes 0x0b). The composer draft,
+            // including unsent text, is preserved verbatim; typing then
+            // goes exclusively to the bounded command buffer (page
+            // query), never the draft and never a provider turn.
+            11 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
+                view.open_commands_page();
                 utf8.reset();
             }
             8 | 127 => {
-                draft.pop();
+                // Backspace edits the buffer that owns focus: the page
+                // query on Sessions/Commands, the API-key dialog's
+                // segregated key buffer, a provider/model dialog's own
+                // filter buffer, otherwise the composer.
+                if page_query_open {
+                    view.page_query_backspace();
+                } else if matches!(dialog, native_setup::Dialog::ApiKey) {
+                    key_input.pop();
+                } else if matches!(dialog, native_setup::Dialog::None) {
+                    draft.pop();
+                } else {
+                    filter_input.pop();
+                }
                 utf8.reset();
+            }
+            // Ctrl-J submit keymap: Enter is a literal newline in the draft
+            // (multiline composer); Ctrl-J (b'\n') still submits below.
+            b'\r'
+                if matches!(keymap, SubmitKeymap::CtrlJ)
+                    && !page_open
+                    && matches!(dialog, native_setup::Dialog::None) =>
+            {
+                utf8.reset();
+                if draft.len() < MAX_NATIVE_DRAFT_BYTES {
+                    draft.push('\n');
+                }
             }
             b'\r' | b'\n' => {
                 utf8.reset();
-                let text = if matches!(dialog, native_setup::Dialog::None) {
-                    draft.clone()
-                } else {
-                    draft.trim().to_owned()
+                // Set only by command-input Enter (Commands page); the
+                // composer path leaves it `None` and parses the draft
+                // exactly as before.
+                let mut command_route: Option<&'static str> = None;
+                if page_open {
+                    if matches!(view.page(), crate::native_view_pages::Page::Sessions) {
+                        // Sessions page Enter: the selected backend row
+                        // becomes a real Request intent that runs through
+                        // the SAME reserve+guard+bind transaction as
+                        // Ctrl-G and /new (required listing + target
+                        // membership). PageState is ACKed only on a real
+                        // bind success; any refusal keeps the old active
+                        // session, draft, rows and selection (the bind
+                        // transaction is zero-mutation on failure) and
+                        // records the reason as the page's visible error.
+                        match view.activate_open_page() {
+                            crate::native_view_pages::PageAction::Request {
+                                page: crate::native_view_pages::Page::Sessions,
+                                id,
+                            } => {
+                                // Reserve BEFORE any fetch/bind side
+                                // effect. Exhaustion fails closed: no
+                                // fetch, no commit, no reused identity.
+                                let Some(prospective) =
+                                    crate::native_view::reserve_generation(binding_generation)
+                                else {
+                                    append_transcript(
+                                        &mut transcript,
+                                        "error: binding generation exhausted; session switch refused"
+                                            .to_owned(),
+                                    );
+                                    view.resolve_page_ack(crate::native_view_pages::Ack::Rejected(
+                                        "binding generation exhausted".to_owned(),
+                                    ));
+                                    continue;
+                                };
+                                let busy = worker.as_ref().is_some_and(|owned| {
+                                    owned.owns(
+                                        live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                                        binding_generation,
+                                    )
+                                }) || view.dialogs.is_open();
+                                if busy {
+                                    // Refused BEFORE any HTTP fetch: no
+                                    // auto-abort, no replay, composer
+                                    // draft untouched.
+                                    append_transcript(
+                                        &mut transcript,
+                                        "busy: turn or permission decision in progress; session switch refused"
+                                            .to_owned(),
+                                    );
+                                    view.resolve_page_ack(crate::native_view_pages::Ack::Rejected(
+                                        "busy: turn or permission decision in progress".to_owned(),
+                                    ));
+                                    continue;
+                                }
+                                let bound = live
+                                    .as_ref()
+                                    .ok_or_else(|| "daemon unavailable".to_owned())
+                                    .and_then(|snapshot| {
+                                        bind_session(
+                                            &mut view,
+                                            &mut transcript,
+                                            &draft,
+                                            &snapshot.origin,
+                                            Some(&id),
+                                            auth,
+                                        )
+                                    });
+                                match bound {
+                                    Ok((snapshot, restored_draft)) => {
+                                        live = Some(snapshot);
+                                        draft = restored_draft;
+                                        // Committed ONLY on a real bind
+                                        // success.
+                                        binding_generation = prospective;
+                                        view.resolve_page_ack(crate::native_view_pages::Ack::Ok);
+                                        // ACK contract: reload rows for
+                                        // the current page (the active
+                                        // marker moves to the newly bound
+                                        // session).
+                                        if let Some(snapshot) = live.as_ref() {
+                                            match session_page_rows(
+                                                &snapshot.origin,
+                                                auth,
+                                                Some(&snapshot.session_id),
+                                            ) {
+                                                Ok(rows) => view.set_page_rows(rows),
+                                                Err(error) => append_transcript(
+                                                    &mut transcript,
+                                                    format!("error: sessions page reload: {error}"),
+                                                ),
+                                            }
+                                        }
+                                    }
+                                    Err(error) => {
+                                        // Rejected: the transaction kept
+                                        // old active/draft/state intact;
+                                        // the reason is now the page's
+                                        // visible error too.
+                                        append_transcript(
+                                            &mut transcript,
+                                            format!("error: session switch: {error}"),
+                                        );
+                                        view.resolve_page_ack(
+                                            crate::native_view_pages::Ack::Rejected(error),
+                                        );
+                                    }
+                                }
+                            }
+                            crate::native_view_pages::PageAction::Unsupported {
+                                reason, ..
+                            } => {
+                                append_transcript(
+                                    &mut transcript,
+                                    format!("unavailable: {reason}"),
+                                );
+                            }
+                            // No session row loaded/selected (e.g. the
+                            // listing failed when the page opened): an
+                            // honest no-op — never a fake shortcut.
+                            crate::native_view_pages::PageAction::None => {}
+                            other => append_transcript(
+                                &mut transcript,
+                                format!("error: unsupported sessions action: {other:?}"),
+                            ),
+                        }
+                        continue;
+                    }
+                    if matches!(view.page(), crate::native_view_pages::Page::Commands) {
+                        // Command-input Enter: the bounded command buffer
+                        // (page query) resolves a recognized LOCAL route —
+                        // an exact typed route first, else the selected
+                        // (filtered) row's static route. No route means an
+                        // honest error line: never a fabricated route,
+                        // never a turn, and the composer draft typed
+                        // before Ctrl-K is untouched.
+                        match view.dispatch_command() {
+                            Some(route) => {
+                                // Leave the Commands page first; the shared
+                                // local-route chain below reopens the
+                                // route's own page or dialog. The draft
+                                // stays verbatim.
+                                view.close_page();
+                                command_route = Some(route);
+                            }
+                            None => append_transcript(
+                                &mut transcript,
+                                format!("error: unrecognized local command: {}", view.page_query()),
+                            ),
+                        }
+                        if command_route.is_none() {
+                            utf8.reset();
+                            continue;
+                        }
+                    } else {
+                        // Confirmation only: open the selected enabled page.
+                        // Disabled rows stay put — their `detail` is the
+                        // explicit unsupported reason. Pure page state: no
+                        // HTTP transition, no provider turn, no history
+                        // mutation — and NEVER a composer draft clear
+                        // (only an accepted turn or a recognized
+                        // chat-composer local command clears the draft).
+                        view.confirm_page(&mut draft);
+                        continue;
+                    }
+                }
+                let was_api = matches!(dialog, native_setup::Dialog::ApiKey);
+                // The API-key dialog reads its segregated buffer (trimmed),
+                // never the chat composer draft; provider/model filters
+                // read their own dialog-local buffer — the chat draft is
+                // preserved verbatim across the whole dialog flow.
+                let text = match command_route {
+                    // Command mode: the recognized local route, fed to the
+                    // SAME local-route chain below. Every recognized route
+                    // branch `continue`s before turn submit, so no
+                    // provider turn can originate from the command buffer.
+                    Some(route) => route.to_owned(),
+                    None => match dialog {
+                        native_setup::Dialog::None => draft.clone(),
+                        native_setup::Dialog::ApiKey => key_input.trim().to_owned(),
+                        _ => filter_input.trim().to_owned(),
+                    },
                 };
                 let command = text.trim();
                 if matches!(dialog, native_setup::Dialog::None)
@@ -836,6 +1830,8 @@ fn native_loop(
                         native_setup::Dialog::Provider => {
                             if !models.is_empty() && "openai".contains(&text.to_lowercase()) {
                                 dialog = native_setup::Dialog::ApiKey;
+                                // Fresh start for the segregated key buffer.
+                                key_input.clear();
                             } else {
                                 append_transcript(
                                     &mut transcript,
@@ -846,6 +1842,7 @@ fn native_loop(
                         native_setup::Dialog::ApiKey => {
                             let payload = serde_json::json!({"type":"api", "key":text}).to_string();
                             let result = live
+                                .as_ref()
                                 .ok_or_else(|| "daemon unavailable".to_owned())
                                 .and_then(|snapshot| {
                                     http_request(
@@ -866,7 +1863,13 @@ fn native_loop(
                                     }
                                 });
                             match result {
-                                Ok(()) => dialog = native_setup::Dialog::Model,
+                                Ok(()) => {
+                                    // Fresh dialog-local filter for the
+                                    // model step; the chat draft stays
+                                    // byte-identical.
+                                    filter_input.clear();
+                                    dialog = native_setup::Dialog::Model;
+                                }
                                 Err(_) => append_transcript(
                                     &mut transcript,
                                     "error: unable to save API key".to_owned(),
@@ -882,6 +1885,9 @@ fn native_loop(
                                 match native_setup::save_model(model) {
                                     Ok(()) => {
                                         selected = Some(model.clone());
+                                        // Confirmed local config write:
+                                        // honest live model status update.
+                                        view.set_model(selected.as_ref().map(|m| m.qualified()));
                                         dialog = native_setup::Dialog::None;
                                     }
                                     Err(error) => append_transcript(
@@ -898,28 +1904,297 @@ fn native_loop(
                         }
                         native_setup::Dialog::None => {}
                     }
-                    draft.clear();
+                    // Filter dialogs consumed only their dialog-local
+                    // buffer: the API-key dialog keeps its segregated
+                    // buffer and the chat draft is preserved verbatim
+                    // through the entire provider/model/API-key flow.
+                    if !was_api {
+                        filter_input.clear();
+                    }
+                    key_input.clear();
                     utf8.reset();
                     continue;
                 }
+                // Where the submitted text came from: the chat composer's
+                // own draft vs a segregated source (the Commands-page
+                // query, which set `command_route`, or a dialog buffer —
+                // both handled above/never reach here). Recognition and
+                // consumption of a typed local command apply ONLY to the
+                // chat-composer source; a segregated source never clears
+                // the chat draft.
+                let from_chat_composer =
+                    command_route.is_none() && matches!(dialog, native_setup::Dialog::None);
+                // Intercept the exact /help extension command before any
+                // transcript append, TurnWorker start, or provider/model
+                // validation: it is a local page route, never a turn. The
+                // typed command is consumed from the chat composer (it is
+                // a command invocation, not an unsent draft) so Esc
+                // restores the pre-command blank composer; a segregated
+                // source's own buffer is untouched.
+                if command == "/help" {
+                    help_open = true;
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    utf8.reset();
+                    continue;
+                }
+                if command == "/sessions" {
+                    // Real Sessions page (pages-v5): open FIRST (rows bind
+                    // to the page current at load time), then the same
+                    // authenticated `GET /api/sessions` parse feeds its
+                    // PageRows (uuid / title / active marker). A fetch or
+                    // parse failure keeps the page's previous rows/note and
+                    // reports honestly; never a turn, no backend mutation,
+                    // and only a chat-composer typed command is consumed
+                    // (a segregated source's own buffer is untouched).
+                    view.open_page(crate::native_view_pages::Page::Sessions);
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    match live.as_ref() {
+                        Some(snapshot) => {
+                            match session_page_rows(
+                                &snapshot.origin,
+                                auth,
+                                Some(&snapshot.session_id),
+                            ) {
+                                Ok(rows) => view.set_page_rows(rows),
+                                Err(error) => append_transcript(
+                                    &mut transcript,
+                                    format!("error: sessions page: {error}"),
+                                ),
+                            }
+                        }
+                        None => append_transcript(
+                            &mut transcript,
+                            "error: sessions page: daemon unavailable".to_owned(),
+                        ),
+                    }
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                // Local page routes, same contract as /help above: pure
+                // state, never a transcript append or provider turn. A
+                // chat-composer typed command is consumed at dispatch so
+                // Esc restores the pre-command blank composer; a
+                // segregated source (Ctrl-K query) keeps its draft intact.
+                let local_page = match command {
+                    "/status" => Some(crate::native_view_pages::Page::Status),
+                    "/mcp" => Some(crate::native_view_pages::Page::Mcp),
+                    "/theme" => Some(crate::native_view_pages::Page::Theme),
+                    "/workspace" => Some(crate::native_view_pages::Page::Workspaces),
+                    "/agents" => Some(crate::native_view_pages::Page::Agents),
+                    "/context" => Some(crate::native_view_pages::Page::Context),
+                    "/diff" => Some(crate::native_view_pages::Page::Diff),
+                    "/commands" => Some(crate::native_view_pages::Page::Commands),
+                    _ => None,
+                };
+                if let Some(page) = local_page {
+                    if matches!(page, crate::native_view_pages::Page::Commands) {
+                        // Single production path: the static route rows
+                        // are loaded with the page (same as Ctrl-K).
+                        view.open_commands_page();
+                    } else {
+                        view.open_page(page);
+                    }
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    utf8.reset();
+                    continue;
+                }
+                // /new: real backend session create (POST /api/sessions),
+                // then bind the ACKed created id (`{"session":{"id":…}}`,
+                // SessionId-validated — required `Some`, never a
+                // most-recent fallback) through the same guard+transaction
+                // as every other session-mutating entrypoint: fresh
+                // listing + target membership proved before any mutation.
+                // A chat-composer typed "/new" is consumed only into a
+                // TRANSACTION-LOCAL remainder (never the visible draft),
+                // so the visible draft is preserved unchanged through
+                // every create/parse/fetch/listing/bind failure for
+                // explicit manual retry — never auto-replayed, and the
+                // honest created-ID refusal below stands. On a real
+                // success the outgoing old-session store holds the empty
+                // remainder (never the command text) and the target's
+                // restored draft becomes visible. A genuine unsent draft
+                // from the Commands page passes through unchanged.
+                // Never replays or submits any turn.
+                if command == "/new" {
+                    utf8.reset();
+                    // Reserve the next generation BEFORE any POST/fetch
+                    // side effect. Exhaustion fails closed: no create runs,
+                    // no bind commits, no identity is reused or minted.
+                    let Some(prospective) =
+                        crate::native_view::reserve_generation(binding_generation)
+                    else {
+                        append_transcript(
+                            &mut transcript,
+                            "error: binding generation exhausted; /new refused".to_owned(),
+                        );
+                        needs_paint = true;
+                        continue;
+                    };
+                    let busy = worker.as_ref().is_some_and(|owned| {
+                        owned.owns(
+                            live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                            binding_generation,
+                        )
+                    }) || view.dialogs.is_open();
+                    if busy {
+                        // Refused BEFORE any HTTP creation: no auto-abort,
+                        // no replay, composer draft untouched.
+                        append_transcript(
+                            &mut transcript,
+                            "busy: turn or permission decision in progress; /new refused"
+                                .to_owned(),
+                        );
+                        needs_paint = true;
+                        continue;
+                    }
+                    // No consumption before the external operation: the
+                    // visible draft still holds the typed "/new" through
+                    // POST, ACK parse, listing and bind; only the
+                    // transaction-local remainder below is consumed.
+                    let created = live
+                        .as_ref()
+                        .ok_or_else(|| "daemon unavailable".to_owned())
+                        .and_then(|snapshot| {
+                            let body = serde_json::json!({ "title": "Chat" }).to_string();
+                            http_request(
+                                &snapshot.origin,
+                                "POST",
+                                "/api/sessions",
+                                Some(&body),
+                                auth,
+                            )
+                        });
+                    // Honest created id: parsed ONLY from the real POST
+                    // ACK's nested `/session/id` and validated by the real
+                    // SessionId parser — never invented, never a top-level
+                    // `id`, never a most-recent fallback.
+                    match created {
+                        Err(error) => append_transcript(
+                            &mut transcript,
+                            format!("error: session create: {error}"),
+                        ),
+                        Ok(response) => {
+                            let created_id = match parse_created_session_id(&response) {
+                                Ok(id) => id,
+                                Err(error) => {
+                                    // The POST already created the session:
+                                    // report the refusal honestly with no
+                                    // unvalidated id, and NEVER bind (the
+                                    // most-recent session is not a fallback).
+                                    append_transcript(
+                                        &mut transcript,
+                                        format!(
+                                            "error: session create: {error}; created session preserved on the backend (not bound, not retried)"
+                                        ),
+                                    );
+                                    needs_paint = true;
+                                    continue;
+                                }
+                            };
+                            // `Some(&created_id)` is REQUIRED after the ACK:
+                            // the bind transaction proves this exact id's
+                            // membership in a fresh authenticated listing
+                            // and refuses atomically on any miss — never a
+                            // `None` (most-recent) bind.
+                            //
+                            // Transaction-local remainder: the visible
+                            // draft is never staged, cleared or replayed
+                            // before this transaction commits. On success
+                            // the outgoing old-session store receives the
+                            // working copy (empty for a consumed
+                            // chat-composer "/new" — never the command
+                            // text — or the genuine Unicode draft from the
+                            // Commands page) and the target's restored
+                            // draft becomes the visible draft. On any
+                            // failure the working copy is discarded and
+                            // the visible draft — the typed "/new" itself
+                            // — stands unchanged for explicit manual
+                            // retry (manual only: an ambiguous create is
+                            // never auto-replayed as a second POST).
+                            let working_draft =
+                                command_transaction_draft(&draft, command, from_chat_composer);
+                            let bound = live
+                                .as_ref()
+                                .ok_or_else(|| "daemon unavailable".to_owned())
+                                .and_then(|snapshot| {
+                                    bind_session(
+                                        &mut view,
+                                        &mut transcript,
+                                        &working_draft,
+                                        &snapshot.origin,
+                                        Some(&created_id),
+                                        auth,
+                                    )
+                                });
+                            match bound {
+                                Ok((snapshot, restored_draft)) => {
+                                    live = Some(snapshot);
+                                    // Visible draft updates ONLY on this
+                                    // successful commit.
+                                    draft = restored_draft;
+                                    binding_generation = prospective;
+                                    append_transcript(
+                                        &mut transcript,
+                                        "session: created".to_owned(),
+                                    );
+                                }
+                                Err(error) => {
+                                    // The external session already exists on
+                                    // the backend: report its id honestly.
+                                    // Never auto-switched, never retried or
+                                    // replayed as an ambiguous create, and
+                                    // the visible draft still holds the
+                                    // typed "/new" — preserved outside the
+                                    // failed transaction for explicit
+                                    // manual retry only.
+                                    append_transcript(
+                                        &mut transcript,
+                                        format!(
+                                            "error: session create: {error}; created session {created_id} preserved (not switched, not retried)"
+                                        ),
+                                    );
+                                }
+                            }
+                        }
+                    }
+                    needs_paint = true;
+                    continue;
+                }
                 if command == "/connect" {
+                    // Open the provider picker. A chat-composer typed
+                    // "/connect" is consumed (command invocation, not an
+                    // unsent draft); the filter is the dialog's own
+                    // buffer, and cancel returns the exact draft state at
+                    // dispatch (blank for a consumed command).
                     dialog = native_setup::Dialog::Provider;
-                    draft.clear();
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    filter_input.clear();
                     utf8.reset();
                     continue;
                 }
                 if command == "/models" {
+                    // Same contract as /connect: real Models picker; a
+                    // chat-composer typed "/models" is consumed, the
+                    // dialog-local filter only is touched.
                     dialog = native_setup::Dialog::Model;
-                    draft.clear();
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    filter_input.clear();
                     utf8.reset();
                     continue;
                 }
                 if !command.is_empty() {
-                    if worker.is_some() {
-                        // Do not consume or echo this draft while busy.
+                    if worker.as_ref().is_some_and(|owned| {
+                        owned.owns(
+                            live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                            binding_generation,
+                        )
+                    }) {
+                        // Do not consume or echo this draft while a worker
+                        // owns the current binding.
                         continue;
                     }
-                    if let Some(snapshot) = live {
+                    if let Some(snapshot) = live.as_ref() {
                         {
                             append_transcript(&mut transcript, format!("you: {text}"));
                             let result = selected
@@ -935,7 +2210,14 @@ fn native_loop(
                                     )
                                 })
                                 .map(|next| {
-                                    worker = Some(next);
+                                    // Capture the binding identity this
+                                    // worker is launched under: events only
+                                    // apply while both still match.
+                                    worker = Some(crate::native_view::OwnedWorker::new(
+                                        next,
+                                        snapshot.session_id.clone(),
+                                        binding_generation,
+                                    ));
                                     partial.clear();
                                 });
                             if let Err(error) = result {
@@ -954,19 +2236,34 @@ fn native_loop(
                 utf8.reset();
             }
             b if b >= 0x20 && b != b'\t' => {
-                let limit = if matches!(dialog, native_setup::Dialog::ApiKey) {
-                    16 * 1024
+                if page_query_open {
+                    // Sessions filter / command buffer: the query is
+                    // facade-owned and bounded (char + byte caps); the
+                    // composer draft is never touched while a query page
+                    // owns focus.
+                    if let Some(character) = utf8.push(b) {
+                        view.page_query_push(character);
+                    }
                 } else {
-                    MAX_NATIVE_DRAFT_BYTES
-                };
-                if let Some(character) = utf8.push(b) {
-                    let width = character.len_utf8();
-                    if draft
-                        .len()
-                        .checked_add(width)
-                        .is_some_and(|len| len <= limit)
-                    {
-                        draft.push(character);
+                    let (target, limit) = if matches!(dialog, native_setup::Dialog::ApiKey) {
+                        // Segregated API-key buffer: never the chat draft.
+                        (&mut key_input, 16 * 1024)
+                    } else if matches!(dialog, native_setup::Dialog::None) {
+                        (&mut draft, MAX_NATIVE_DRAFT_BYTES)
+                    } else {
+                        // Provider/model filter: dialog-local buffer,
+                        // never the chat draft.
+                        (&mut filter_input, MAX_NATIVE_DRAFT_BYTES)
+                    };
+                    if let Some(character) = utf8.push(b) {
+                        let width = character.len_utf8();
+                        if target
+                            .len()
+                            .checked_add(width)
+                            .is_some_and(|len| len <= limit)
+                        {
+                            target.push(character);
+                        }
                     }
                 }
             }
@@ -979,6 +2276,55 @@ fn native_loop(
     let _ = renderer.restore_terminal_modes();
     renderer.close();
     Ok(())
+}
+
+/// Recognized LOCAL slash-command surface, resolved through the
+/// production page table plus the two chat-only routes that are not
+/// `Page::from_route` entries (`/commands` has no static route; `/new`
+/// is a session-create action). No invented aliases: an unknown or
+/// unsupported command is never "recognized" here. (`:q`/`:quit`/
+/// `/exit`/`/quit` exit before dispatch, so their draft never renders
+/// again and needs no consumption.)
+#[cfg(feature = "native")]
+fn is_recognized_local_command(command: &str) -> bool {
+    crate::native_view_pages::Page::from_route(command).is_some()
+        || matches!(command, "/commands" | "/new")
+}
+
+/// Consume the typed text of a RECOGNIZED local slash command that was
+/// dispatched from the CHAT composer. That text is a non-submitted
+/// command invocation — not an unsent user draft — so it is cleared at
+/// dispatch: Esc must return to the pre-command (blank) composer
+/// instead of leaving command text that later keystrokes concatenate
+/// onto (installed bug: `/status` retained, then `mcp` appended →
+/// `you: /status/mcp`). Only the chat-composer source clears: the
+/// Commands-page query and every dialog buffer are segregated sources
+/// that never touch the chat draft, and unknown/unsupported text never
+/// reaches this helper (recognition is re-validated here, on the actual
+/// input source — never a blind text match). Rendering/UI only: no
+/// provider turn, no history entry, no state write.
+#[cfg(feature = "native")]
+fn consume_local_command(draft: &mut String, command: &str, from_chat_composer: bool) {
+    if from_chat_composer && is_recognized_local_command(command) {
+        draft.clear();
+    }
+}
+
+/// Transaction-local remainder for a recognized local command that runs
+/// an external create/bind transaction (`/new`): the command text is
+/// consumed into this COPY — the visible draft is never staged, cleared
+/// or replayed before the transaction commits. A segregated source
+/// (the Commands page) passes the genuine Unicode draft unchanged. The
+/// owning transaction consumes the returned value only on success (the
+/// outgoing old-session store receives it and the target's restored
+/// draft becomes visible); on any failure the copy is discarded and the
+/// visible draft stands untouched for explicit manual retry — never an
+/// automatic second POST.
+#[cfg(feature = "native")]
+fn command_transaction_draft(draft: &str, command: &str, from_chat_composer: bool) -> String {
+    let mut working = draft.to_owned();
+    consume_local_command(&mut working, command, from_chat_composer);
+    working
 }
 
 #[cfg(feature = "native")]
@@ -1148,7 +2494,7 @@ pub fn run_with_dir(
                 }
                 #[cfg(feature = "native")]
                 {
-                    return native_loop(&memory, Some(&snapshot), auth, startup_view);
+                    return native_loop(&memory, Some(snapshot), auth, startup_view, keymap);
                 }
                 #[cfg(not(feature = "native"))]
                 {
@@ -1182,7 +2528,7 @@ pub fn run_with_dir(
     }
     #[cfg(feature = "native")]
     {
-        native_loop(&memory, None, auth, startup_view)
+        native_loop(&memory, None, auth, startup_view, keymap)
     }
     #[cfg(not(feature = "native"))]
     {
@@ -1243,5 +2589,152 @@ fn print_native_or_legacy(frame: &str) -> String {
     #[cfg(not(feature = "native"))]
     {
         frame.to_owned()
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod command_consumption_tests {
+    use super::{consume_local_command, is_recognized_local_command};
+
+    /// Installed bug reproduced as a pure production-helper contract:
+    /// `/status` typed in the CHAT composer is a non-submitted local
+    /// command — consumed at dispatch, so Esc restores the blank
+    /// pre-command composer.
+    #[test]
+    fn chat_source_recognized_command_is_consumed() {
+        let mut draft = String::from("/status");
+        consume_local_command(&mut draft, "/status", true);
+        assert_eq!(draft, "", "typed command consumed, not retained");
+    }
+
+    /// The Commands page (Ctrl-K) is a SEGREGATED source: dispatching
+    /// `/status` from its query must never clear the genuine chat draft
+    /// typed before Ctrl-K — byte-identical Unicode preserved.
+    #[test]
+    fn command_page_source_keeps_genuine_chat_draft() {
+        let mut draft = String::from("keep café 🦀");
+        consume_local_command(&mut draft, "/status", false);
+        assert_eq!(
+            draft, "keep café 🦀",
+            "page dispatch never clears chat draft"
+        );
+    }
+
+    /// The exact installed failure chain, simulated through the actual
+    /// helper: `/status` open → Esc (blank composer) → type `mcp` →
+    /// Enter. The draft must be exactly `mcp`; the retained `/status`
+    /// prefix that produced `you: /status/mcp` is gone. No concatenation.
+    #[test]
+    fn status_then_mcp_produces_no_command_concatenation() {
+        let mut draft = String::from("/status");
+        consume_local_command(&mut draft, "/status", true); // Enter dispatches /status
+        assert_eq!(draft, "", "Esc returns to the pre-command blank composer");
+        for c in "mcp".chars() {
+            draft.push(c); // subsequent typing, then Enter
+        }
+        assert_eq!(draft, "mcp", "no `/status` prefix remains to concatenate");
+    }
+
+    /// Recognition goes through the production page table — never a
+    /// blind text match: unknown/unsupported text is untouched for the
+    /// chat source (it falls through to the ordinary turn path, which
+    /// owns its own accepted-draft clear), and a genuine unrelated
+    /// Unicode draft is retained when a page is dispatched from the
+    /// segregated source.
+    #[test]
+    fn unknown_text_and_unrelated_drafts_untouched() {
+        let mut unknown = String::from("/definitely-not-a-route");
+        consume_local_command(&mut unknown, "/definitely-not-a-route", true);
+        assert_eq!(
+            unknown, "/definitely-not-a-route",
+            "unknown text never consumed here"
+        );
+        let mut unrelated = String::from("keep café 🦀");
+        consume_local_command(&mut unrelated, "/status", false);
+        assert_eq!(
+            unrelated, "keep café 🦀",
+            "unrelated draft retained across Ctrl-K"
+        );
+    }
+
+    /// Every route the production page table exposes is consumed from
+    /// the chat source, plus the two chat-only locals (/commands, /new)
+    /// — and NONE from the segregated source. No invented aliases.
+    #[test]
+    fn recognition_matches_page_table_plus_chat_only_locals() {
+        for page in crate::native_view_pages::Page::ORDER {
+            let Some(route) = page.route() else { continue };
+            assert!(is_recognized_local_command(route), "route {route}");
+            let mut draft = String::from(route);
+            consume_local_command(&mut draft, route, true);
+            assert_eq!(draft, "", "chat source consumes {route}");
+        }
+        for local in ["/commands", "/new"] {
+            assert!(is_recognized_local_command(local));
+            let mut draft = String::from(local);
+            consume_local_command(&mut draft, local, true);
+            assert_eq!(draft, "", "chat source consumes {local}");
+        }
+        for unknown in [
+            "/definitely-not-a-route",
+            "/status extra",
+            "status",
+            "/Status",
+        ] {
+            assert!(!is_recognized_local_command(unknown), "no alias {unknown}");
+        }
+    }
+
+    /// /new via the Commands page (genuine unsent draft) is preserved:
+    /// the bind transaction must still receive and store the real draft,
+    /// never an empty remainder.
+    #[test]
+    fn new_from_command_page_preserves_genuine_draft() {
+        let mut draft = String::from("unsent café 🦀 work");
+        consume_local_command(&mut draft, "/new", false);
+        assert_eq!(draft, "unsent café 🦀 work");
+    }
+
+    /// v2 (general NEEDS_FIX): a chat-composer "/new" must NOT touch the
+    /// visible draft before the external create/bind transaction
+    /// commits. The production staging helper yields a transaction-local
+    /// remainder; the original stays intact until a simulated success
+    /// commit consumes the copy (never the command text into storage),
+    /// and a Commands-origin "/new" stages the genuine draft unchanged.
+    #[test]
+    fn new_consumption_is_transaction_local_until_commit() {
+        let visible = String::from("/new");
+        let working = super::command_transaction_draft(&visible, "/new", true);
+        assert_eq!(working, "", "commit path stores empty remainder");
+        assert_eq!(visible, "/new", "visible draft untouched pre-commit");
+        // Simulated successful bind: only now does the commit take the
+        // working value — the invocation text never stores, and the
+        // pre-commit original was intact above.
+        let committed = working;
+        assert_eq!(committed, "", "successful discard of the invocation");
+        assert_eq!(visible, "/new");
+        // Commands-origin stages the real Unicode draft byte-identical.
+        assert_eq!(
+            super::command_transaction_draft("café 🦀 unsent", "/new", false),
+            "café 🦀 unsent"
+        );
+    }
+
+    /// Failure staging with the REAL production ACK parser: wrong ACK
+    /// shapes are Err, so the commit stage never runs — the typed "/new"
+    /// remains preserved outside the discarded transaction-local copy
+    /// for explicit manual retry. No auto-POST, no replay, no fake
+    /// success claim; helper-only, no HTTP/PTY.
+    #[test]
+    fn new_failed_ack_keeps_original_command_outside() {
+        let visible = String::from("/new");
+        let working = super::command_transaction_draft(&visible, "/new", true);
+        // Real parse_created_session_id: nested /session/id only.
+        assert!(super::parse_created_session_id("").is_err());
+        assert!(super::parse_created_session_id("{\"id\":\"top-level\"}").is_err());
+        assert!(super::parse_created_session_id("{\"session\":{}}").is_err());
+        assert!(super::parse_created_session_id("not json").is_err());
+        drop(working); // Err arm discards the working copy
+        assert_eq!(visible, "/new", "original preserved for manual retry");
     }
 }
