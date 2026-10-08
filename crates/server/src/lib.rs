@@ -35,6 +35,7 @@ pub mod event_cursor;
 pub mod event_http;
 pub mod event_stream;
 pub mod loop_driver;
+pub mod mcp_http;
 pub mod origin_check;
 pub mod protocol_api;
 pub mod rel_stamp;
@@ -149,6 +150,10 @@ pub fn router_with_events(
     if events.max_subscribers() > event_http::MAX_HTTP_SUBSCRIBERS {
         events.set_max_subscribers(event_http::MAX_HTTP_SUBSCRIBERS);
     }
+    // One MCP status registry per router/daemon: constructed here and
+    // injected as an `Extension`, so two routers never share entries and
+    // there is no static global. Fresh router ⇒ empty registry ⇒ `{}`.
+    let mcp_registry = mcp_http::McpStatusRegistry::new();
     let app = Router::new()
         .route("/health", get(health))
         .route(
@@ -163,6 +168,18 @@ pub fn router_with_events(
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
         .route("/api/models/{provider}/{model}", get(get_model))
+        // Authenticated MCP status/lifecycle projection. Registered ahead of
+        // the SPA asset fallback, so it can never be served by the public
+        // fallback, and its `/api/*` prefix puts it under `require_bearer`
+        // exactly like `/api/models`.
+        .route(
+            "/api/mcp",
+            get(mcp_http::status)
+                .post(mcp_http::add)
+                .layer(DefaultBodyLimit::max(mcp_http::MAX_ADD_BODY_BYTES)),
+        )
+        .route("/api/mcp/{name}/connect", post(mcp_http::connect))
+        .route("/api/mcp/{name}/disconnect", post(mcp_http::disconnect))
         .route(
             "/auth/{provider}",
             axum::routing::put(save_provider_auth)
@@ -224,6 +241,7 @@ pub fn router_with_events(
         )
         .fallback(web_assets::serve)
         .layer(axum::extract::Extension(events))
+        .layer(axum::extract::Extension(mcp_registry))
         .with_state(state);
     match auth {
         Some(credential) => app
