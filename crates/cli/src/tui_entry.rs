@@ -691,12 +691,27 @@ fn bind_session(
     // Phase 2 — the single all-or-nothing facade transaction.
     let draft = view
         .bind_commit(
-            Ok((snapshot.session_id.clone(), snapshot.history.clone(), rows)),
+            Ok((
+                snapshot.session_id.clone(),
+                snapshot.history.clone(),
+                rows,
+                snapshot.message_count,
+            )),
             global_draft,
             transcript,
             append_transcript,
         )?
         .draft;
+    // Successful bind: re-assert the accepted binding from the SAME
+    // accepted snapshot (`LiveSnapshot` id, title and confirmed persisted
+    // message count are one authenticated payload), so the rendered
+    // triple is always the freshly bound session — never a stale title,
+    // stale count or a mismatched id.
+    view.set_session_binding(
+        Some(snapshot.session_id.clone()),
+        Some(snapshot.title.clone()),
+        Some(snapshot.message_count),
+    );
     Ok((snapshot, draft))
 }
 
@@ -997,7 +1012,20 @@ fn native_loop(
     } else {
         view.set_connection_unknown();
     }
-    view.set_session(live.as_ref().map(|snapshot| snapshot.session_id.clone()));
+    // Accepted startup binding: the auto-resumed snapshot IS the
+    // authenticated product snapshot, so id, title and the confirmed
+    // persisted message count commit together from that same source —
+    // without a snapshot the bare setter retracts everything (no title,
+    // no confirmed count, no `(live)` claim, never a fabricated `Chat`
+    // default).
+    match live.as_ref() {
+        Some(snapshot) => view.set_session_binding(
+            Some(snapshot.session_id.clone()),
+            Some(snapshot.title.clone()),
+            Some(snapshot.message_count),
+        ),
+        None => view.set_session(None),
+    }
     view.set_workspace(current_workspace_label());
     if let Some(snapshot) = live.as_ref() {
         // Left pane: real backend session listing (GET /api/sessions).

@@ -34,6 +34,9 @@
 //! (`mcp_http.rs`), so it is rendered as unsupported — never a success
 //! button.
 
+use crate::native_transcript::strip_ansi;
+use crate::native_view_chat::MAX_INPUT_ROW_BYTES;
+use opencode_rk_contracts::SessionId;
 use serde_json::Value;
 
 /// Maximum MCP entries accepted from one snapshot (daemon registry cap).
@@ -146,6 +149,23 @@ pub struct StatusView {
     provider: Option<String>,
     agent: Option<String>,
     session: Option<String>,
+    /// Accepted-binding display title: sanitized bounded text from the
+    /// SAME accepted snapshot as `session` (initial auto-resume snapshot
+    /// or a successful bind transaction). A bare id observation never
+    /// sets it, so it can never be faked from a display row label.
+    session_title: Option<String>,
+    /// Accepted authenticated binding fact: set ONLY by
+    /// [`Self::set_session_binding`]. `(live)` renders from this flag and
+    /// means "client bound to the authenticated daemon" — never provider
+    /// busy, never SSE connected, never a guess.
+    session_live: bool,
+    /// Confirmed persisted message count of the SAME accepted
+    /// authenticated snapshot tuple as `session`/`session_title`:
+    /// `messages.len()` from the authenticated
+    /// `GET /api/sessions/{id}/messages?limit=200` snapshot. `None` =
+    /// never confirmed / retracted — never transcript rows, provider
+    /// deltas, or a fabricated zero.
+    session_message_count: Option<usize>,
     /// `(used, window)` from the caller's context snapshot.
     context: Option<(u64, u64)>,
     /// Last good MCP map (retained across a rejected snapshot).
@@ -199,8 +219,54 @@ impl StatusView {
         self.model = ModelSlot::NotObserved;
     }
 
+    /// Record a bare session identity (UUID) observation. This is NOT an
+    /// accepted authenticated binding: any previously bound title,
+    /// confirmed message count and `(live)` fact are retracted so a bare
+    /// id can never fake auth metadata — the render falls back to
+    /// `session: Unavailable` plus the separate `session id:` identity
+    /// row and `messages: Unavailable`.
     pub fn set_session(&mut self, id: Option<String>) {
         self.session = non_empty(id);
+        self.session_title = None;
+        self.session_message_count = None;
+        self.session_live = false;
+    }
+
+    /// Record an ACCEPTED authenticated binding tuple: id, title and the
+    /// confirmed persisted `message_count` come from the SAME accepted
+    /// snapshot (the startup auto-resume snapshot, or the fresh
+    /// listing/snapshot pair of a successful bind transaction).
+    /// `(live)` renders only when a CANONICAL session id and a
+    /// display-usable title are present — an unusable title keeps the
+    /// identity (and the confirmed count: its provenance is the accepted
+    /// snapshot, not the display title) but never claims `(live)`, and a
+    /// `None`/invalid id clears the whole tuple. A malformed/noncanonical
+    /// id fails closed here: this setter is the only path that can set
+    /// `(live)` or a confirmed count, and it never projects an
+    /// unvalidated string as an authenticated binding (the startup
+    /// snapshot's listing id reaches this setter before the row
+    /// projection's own parse guard).
+    pub fn set_session_binding(
+        &mut self,
+        id: Option<String>,
+        title: Option<String>,
+        message_count: Option<usize>,
+    ) {
+        self.session = canonical_session_id(id);
+        self.session_title = self
+            .session
+            .as_deref()
+            .and(title.as_deref())
+            .and_then(sanitize_session_title);
+        // Confirmed count travels with the accepted canonical id (any
+        // confirmed value, including a valid empty-history 0); an
+        // invalid/bare binding clears it — never a fabricated count.
+        self.session_message_count = if self.session.is_some() {
+            message_count
+        } else {
+            None
+        };
+        self.session_live = self.session.is_some() && self.session_title.is_some();
     }
 
     /// Optional context setters (confirmed values only, `None` => Unavailable).
@@ -365,7 +431,26 @@ impl StatusView {
             format!("model: {}", self.model.label()),
             format!("provider: {}", display(self.provider.as_deref())),
             format!("agent: {}", display(self.agent.as_deref())),
-            format!("session: {}", display(self.session.as_deref())),
+            // Title row: the accepted authenticated bound title with the
+            // `(live)` marker ONLY while the binding fact holds; otherwise
+            // honest Unavailable (never a fabricated default like `Chat`).
+            if self.session_live {
+                format!("session: {} (live)", display(self.session_title.as_deref()))
+            } else {
+                format!("session: {UNAVAILABLE}")
+            },
+            // Identity row: the actual execution UUID, kept separate from
+            // the human-visible title (bounded, control-free).
+            format!("session id: {}", display(self.session.as_deref())),
+            // Message-count row: the confirmed persisted count of the
+            // accepted authenticated snapshot only (bounded usize decimal,
+            // width-masked by the pane; never transcript rows, provider
+            // deltas, or a fabricated zero). Honest `Unavailable` without
+            // an accepted binding fact.
+            match self.session_message_count {
+                Some(count) => format!("messages: {count}"),
+                None => format!("messages: {UNAVAILABLE}"),
+            },
             match self.context {
                 Some((used, window)) => format!("context: used={used} window={window}"),
                 None => format!("context: {UNAVAILABLE}"),
@@ -553,6 +638,71 @@ fn display(raw: Option<&str>) -> String {
 
 fn non_empty(value: Option<String>) -> Option<String> {
     value.filter(|v| !v.trim().is_empty())
+}
+
+/// Canonical identity gate for the ACCEPTED-binding setter: the value must
+/// be non-empty, parse with the production contracts [`SessionId`] parser
+/// (the same one `bind_commit` step 0b and the listing/sessions commit
+/// paths use) and round-trip exactly — `parse::<SessionId>()?.to_string()
+/// == raw`, i.e. the full lowercase hyphenated UUID spelling. A value that
+/// merely parses (uppercase, hyphenless, braced/URN) is still not
+/// canonical, so it is rejected too. Anything else is `None`: the
+/// projection fails closed instead of claiming an authenticated binding
+/// from an unvalidated string.
+fn canonical_session_id(id: Option<String>) -> Option<String> {
+    let raw = non_empty(id)?;
+    let parsed: SessionId = raw.parse().ok()?;
+    (parsed.to_string() == raw).then_some(raw)
+}
+
+/// Bounded UTF-8 prefix for raw title input: O(bound) work regardless of
+/// caller string size and never splits a scalar (a cut through an escape
+/// is finished safely by [`strip_ansi`]'s unterminated-sequence handling).
+/// The chat module's identical helper is private, so this minimal copy
+/// lives here rather than widening any visibility.
+fn clip_title_prefix(text: &str, max: usize) -> &str {
+    if text.len() <= max {
+        return text;
+    }
+    let mut end = max;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    &text[..end]
+}
+
+/// Bounded display title for the `session:` status row: raw input is
+/// clipped to [`MAX_INPUT_ROW_BYTES`] FIRST (a hostile public-setter title
+/// cannot make sanitization allocate its input size), then real ANSI
+/// sequences are removed by the shared transcript [`strip_ansi`] — CSI/OSC/
+/// DCS and unterminated sequences drop whole, leaving NO printable residue
+/// — then control characters are stripped, the text is trimmed and it is
+/// truncated at [`MAX_FIELD_CHARS`] with a `…` cut marker when anything was
+/// dropped (the row is additionally width-masked by [`fit`]). Returns `None`
+/// when nothing displayable remains — a control-sequence-only title (e.g.
+/// `ESC[2J`) is unusable, never a guess and never a fabricated default, so
+/// it can never claim `(live)`. Source bound verified: the backend rejects
+/// session titles over 512 bytes
+/// (`crates/server/src/workspace_sessions.rs::MAX_TITLE_BYTES`) and the
+/// listing layer re-checks the same bound, so this projection bound is
+/// a defensive subset of an already-bounded pipeline.
+fn sanitize_session_title(raw: &str) -> Option<String> {
+    let bounded = clip_title_prefix(raw, MAX_INPUT_ROW_BYTES);
+    let stripped = strip_ansi(bounded);
+    let cleaned: String = stripped.chars().filter(|c| !c.is_control()).collect();
+    let cleaned = cleaned.trim();
+    if cleaned.is_empty() {
+        return None;
+    }
+    if cleaned.chars().count() <= MAX_FIELD_CHARS {
+        return Some(cleaned.to_owned());
+    }
+    let mut out: String = cleaned
+        .chars()
+        .take(MAX_FIELD_CHARS.saturating_sub(1))
+        .collect();
+    out.push('…');
+    Some(out)
 }
 
 fn fit(line: &str, width: usize) -> String {
@@ -777,5 +927,319 @@ mod tests {
         let rows = fresh.render(120, 30);
         assert!(rows.contains(&"model: unset".to_owned()));
         assert!(!rows.iter().any(|r| r == "model: Unavailable"));
+    }
+
+    const BOUND_ID: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+
+    /// RECOVERY-DURABILITY-001 regression: an accepted authenticated
+    /// snapshot maps to the visible `session: Chat (live)` title row with
+    /// the execution UUID preserved as a SEPARATE identity row, and the
+    /// Status pane heading stays row 0 (primary right-pane contract).
+    #[test]
+    fn accepted_binding_renders_title_live_and_uuid_separate() {
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("Chat".to_owned()), None);
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Chat (live)".to_owned()));
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+        assert_eq!(rows[0], "Status");
+        // The title row and the identity row are distinct rows.
+        let titles = rows.iter().filter(|r| r.starts_with("session:")).count();
+        assert_eq!(titles, 1);
+        assert_eq!(
+            rows.iter().filter(|r| r.starts_with("session id:")).count(),
+            1
+        );
+    }
+
+    /// Initial/unbound state and any bare-id observation can never claim
+    /// `(live)`: no accepted binding fact, no title, no marker — and a
+    /// bare id retracts a previous bound pair instead of leaving a
+    /// mismatched stale title.
+    #[test]
+    fn unbound_bare_id_never_claims_live() {
+        let mut view = StatusView::default();
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Unavailable".to_owned()));
+        assert!(rows.contains(&"session id: Unavailable".to_owned()));
+        assert!(!rows.iter().any(|r| r.contains("(live)")));
+        view.set_session(Some(BOUND_ID.to_owned()));
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Unavailable".to_owned()));
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+        assert!(!rows.iter().any(|r| r.contains("(live)")));
+        // A later bare observation retracts an earlier bound pair.
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("Chat".to_owned()), None);
+        assert!(view
+            .render(120, 30)
+            .contains(&"session: Chat (live)".to_owned()));
+        view.set_session(Some(BOUND_ID.to_owned()));
+        let rows = view.render(120, 30);
+        assert!(!rows.iter().any(|r| r.contains("(live)")));
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+    }
+
+    /// A successful switch changes id and title TOGETHER (never a stale
+    /// title paired with a new id), and a binding with an unusable title
+    /// keeps the identity without any live claim or fabricated name.
+    #[test]
+    fn switch_changes_id_and_title_together_never_mismatched() {
+        const B: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("Alpha".to_owned()), None);
+        view.set_session_binding(Some(B.to_owned()), Some("Beta".to_owned()), None);
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Beta (live)".to_owned()));
+        assert!(rows.contains(&format!("session id: {B}")));
+        assert!(!rows.iter().any(|r| r.contains("Alpha")));
+        assert!(!rows.iter().any(|r| r.contains(BOUND_ID)));
+        // Unusable (blank-after-sanitize) title: id kept, no live, no name.
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("   ".to_owned()), None);
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Unavailable".to_owned()));
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+        assert!(!rows.iter().any(|r| r.contains("(live)")));
+    }
+
+    /// Hostile titles (escape sequences, control bytes, oversized input)
+    /// are sanitized and bounded: no control character reaches the row,
+    /// the cut is marked with `…`, the identity row is untouched, and a
+    /// control-only title can never fabricate a name or a live claim.
+    #[test]
+    fn hostile_title_sanitized_bounded_no_escape_no_fake_identity() {
+        let hostile = format!(
+            "\u{1b}[31mevil\u{1b}[0m\u{7}\nlinebreak {}",
+            "t".repeat(4096)
+        );
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some(hostile), None);
+        // Width 200 keeps the full bounded row visible for exact checks.
+        let rows = view.render(200, 30);
+        let title_row = rows
+            .iter()
+            .find(|r| r.starts_with("session:"))
+            .expect("title row");
+        assert!(!title_row.chars().any(char::is_control), "no control leak");
+        assert!(
+            title_row.chars().count()
+                <= "session: ".chars().count() + MAX_FIELD_CHARS + " (live)".chars().count(),
+            "bounded with cut marker"
+        );
+        assert!(title_row.contains('…'), "dot-ellipsis on truncation");
+        assert!(title_row.ends_with(" (live)"), "still the bound title");
+        // Raw escape bytes never survive into the rendered row.
+        assert!(!title_row.contains('\u{1b}'));
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+        // Control-only title: nothing displayable -> no name, no live.
+        let mut view2 = StatusView::default();
+        view2.set_session_binding(
+            Some(BOUND_ID.to_owned()),
+            Some("\u{1b}[2J\u{7}".to_owned()),
+            None,
+        );
+        let rows2 = view2.render(120, 30);
+        assert!(rows2.contains(&"session: Unavailable".to_owned()));
+        assert!(!rows2.iter().any(|r| r.contains("(live)")));
+        // Width masking: every rendered row fits the requested width.
+        let narrow = view.render(20, 30);
+        assert!(narrow.iter().all(|r| r.chars().count() <= 20));
+    }
+
+    /// RECOVERY-DURABILITY-001 (v2 fail-closed guard): the accepted-binding
+    /// setter itself validates the canonical session id, so a malformed or
+    /// noncanonical id can never render `(live)`, a title, or a forged
+    /// identity row — while the canonical lowercase UUID + bound title
+    /// control still renders `session: Chat (live)` with the id row.
+    /// Table-driven against the REAL setter (no mirrored predicate).
+    #[test]
+    fn accepted_binding_requires_canonical_id_rejects_five_shapes() {
+        let rejected = [
+            Some("not-a-session-id".to_owned()),
+            // Parses as a UUID, but not the canonical lowercase spelling.
+            Some("AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA".to_owned()),
+            // Parses as a UUID, but not the canonical hyphenated spelling.
+            Some("aaaaaaaaaaaa4aaa8aaaaaaaaaaaaaaa".to_owned()),
+            Some(String::new()),
+            None,
+        ];
+        for id in rejected {
+            let mut view = StatusView::default();
+            view.set_session_binding(id, Some("Chat".to_owned()), None);
+            let rows = view.render(120, 30);
+            assert!(
+                !rows.iter().any(|r| r.contains("(live)")),
+                "no live claim without a canonical id: {rows:?}"
+            );
+            assert!(
+                rows.contains(&"session: Unavailable".to_owned()),
+                "no title claim without a canonical id: {rows:?}"
+            );
+            assert!(
+                rows.contains(&"session id: Unavailable".to_owned()),
+                "rejected id never forges an identity row: {rows:?}"
+            );
+        }
+        // Valid control: canonical id + accepted bound title still renders.
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("Chat".to_owned()), None);
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Chat (live)".to_owned()));
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+    }
+
+    /// RECOVERY-DURABILITY-001 (v3 sanitizer regression): ANSI sequences
+    /// are stripped BEFORE the live decision — a control-sequence-only or
+    /// control-only title sanitizes to nothing (`Unavailable`, no `(live)`,
+    /// canonical id row retained truthfully), while ANSI-wrapped real text
+    /// still renders its title live. Unterminated sequences drop with no
+    /// printable residue, and an oversized ESC-prefixed title stays a
+    /// bounded, control-free `…` prefix. Table-driven against the REAL
+    /// setter/renderer (no mirrored predicate).
+    #[test]
+    fn ansi_titles_fail_closed_or_render_sanitized() {
+        // ANSI-only (CSI / OSC) and control-only payloads: nothing
+        // displayable remains -> title Unavailable, never live; the
+        // canonical id row stays truthful.
+        for raw in [
+            "\u{1b}[2J",
+            "\u{1b}]0;evil window title\u{7}",
+            "\u{7}\u{1b}[0m",
+        ] {
+            let mut view = StatusView::default();
+            view.set_session_binding(Some(BOUND_ID.to_owned()), Some(raw.to_owned()), None);
+            let rows = view.render(120, 30);
+            assert!(
+                rows.contains(&"session: Unavailable".to_owned()),
+                "no printable ANSI residue: {raw:?} -> {rows:?}"
+            );
+            assert!(!rows.iter().any(|r| r.contains("(live)")), "{raw:?}");
+            assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+        }
+        // ANSI-wrapped real text: sequence stripped, title still live.
+        let mut view = StatusView::default();
+        view.set_session_binding(
+            Some(BOUND_ID.to_owned()),
+            Some("\u{1b}[31mChat\u{1b}[0m".to_owned()),
+            None,
+        );
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Chat (live)".to_owned()));
+        // Unterminated trailing CSI: dropped to end of input, the leading
+        // legit text is honored and no parameter residue survives.
+        let mut view = StatusView::default();
+        view.set_session_binding(
+            Some(BOUND_ID.to_owned()),
+            Some("Ready\u{1b}[38;5;".to_owned()),
+            None,
+        );
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Ready (live)".to_owned()));
+        assert!(!rows.iter().any(|r| r.contains("38;5")));
+        // Oversized ESC-prefixed title: bounded sanitized `…` prefix, no
+        // control byte and no raw escape reach the rendered row.
+        let mut view = StatusView::default();
+        view.set_session_binding(
+            Some(BOUND_ID.to_owned()),
+            Some(format!("\u{1b}[2Jevil{}", "t".repeat(4096))),
+            None,
+        );
+        // Width 200 keeps the full bounded row visible for exact checks.
+        let rows = view.render(200, 30);
+        let title_row = rows
+            .iter()
+            .find(|r| r.starts_with("session:"))
+            .expect("title row");
+        assert!(!title_row.chars().any(char::is_control), "no control leak");
+        assert!(!title_row.contains('\u{1b}'), "no raw escape");
+        assert!(title_row.contains('…'), "dot-ellipsis on truncation");
+        assert!(
+            title_row.chars().count()
+                <= "session: ".chars().count() + MAX_FIELD_CHARS + " (live)".chars().count(),
+            "bounded with cut marker"
+        );
+        assert!(title_row.ends_with(" (live)"), "still the bound title");
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+    }
+
+    /// RECOVERY-DURABILITY-001 (v4): the accepted tuple is (canonical id,
+    /// display title, confirmed persisted snapshot count). The confirmed
+    /// count travels ONLY with an accepted canonical binding (including a
+    /// valid empty-history 0), survives an unusable display title (its
+    /// provenance is the accepted snapshot, not the title), and is
+    /// cleared — never fabricated — for invalid, bare or unavailable
+    /// bindings. Driven through the REAL setter/renderer.
+    #[test]
+    fn accepted_tuple_carries_confirmed_count_and_retracts_without_binding() {
+        // Accepted tuple: title live, UUID separate, confirmed count shown.
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("Chat".to_owned()), Some(7));
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Chat (live)".to_owned()));
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+        assert!(rows.contains(&"messages: 7".to_owned()));
+        // A confirmed empty-history count of 0 is a valid accepted fact,
+        // distinct from `Unavailable` (never fabricated, never conflated).
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("Chat".to_owned()), Some(0));
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"messages: 0".to_owned()));
+        assert!(rows.contains(&"session: Chat (live)".to_owned()));
+        // Unusable title + accepted canonical id: no live claim, but the
+        // confirmed snapshot count remains a truthful accepted fact.
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("   ".to_owned()), Some(7));
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&"session: Unavailable".to_owned()));
+        assert!(!rows.iter().any(|r| r.contains("(live)")));
+        assert!(rows.contains(&"messages: 7".to_owned()));
+        // Invalid/bare ids fail closed for the WHOLE tuple: no count.
+        for raw in ["aaaa", "", "AAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA"] {
+            let mut view = StatusView::default();
+            view.set_session_binding(Some(raw.to_owned()), Some("Chat".to_owned()), Some(7));
+            let rows = view.render(120, 30);
+            assert!(rows.contains(&"session: Unavailable".to_owned()), "{raw:?}");
+            assert!(
+                rows.contains(&"messages: Unavailable".to_owned()),
+                "{raw:?}"
+            );
+            assert!(!rows.iter().any(|r| r.contains("messages: 7")), "{raw:?}");
+        }
+        // A bare id observation retracts the whole previous tuple.
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(BOUND_ID.to_owned()), Some("Chat".to_owned()), Some(7));
+        view.set_session(Some(BOUND_ID.to_owned()));
+        let rows = view.render(120, 30);
+        assert!(rows.contains(&format!("session id: {BOUND_ID}")));
+        assert!(rows.contains(&"session: Unavailable".to_owned()));
+        assert!(!rows.iter().any(|r| r.contains("(live)")));
+        assert!(rows.contains(&"messages: Unavailable".to_owned()));
+        assert!(!rows.iter().any(|r| r.contains("messages: 7")));
+    }
+
+    /// RECOVERY-DURABILITY-001 (v4): the count row is bounded and width-
+    /// safe — the full confirmed usize decimal fits the real 39-column
+    /// right pane (label 9 + up to 20 digits = 29 < 39) with no clipping
+    /// artifact and no unbounded content.
+    #[test]
+    fn count_row_is_width_bounded_at_39_columns() {
+        let mut view = StatusView::default();
+        view.set_session_binding(
+            Some(BOUND_ID.to_owned()),
+            Some("Chat".to_owned()),
+            Some(usize::MAX),
+        );
+        // Width 39 = the actual production right pane at 120 columns.
+        let rows = view.render(39, 30);
+        let count_row = rows
+            .iter()
+            .find(|r| r.starts_with("messages:"))
+            .expect("count row");
+        assert_eq!(
+            count_row,
+            &format!("messages: {}", usize::MAX),
+            "the full confirmed decimal fits the real right pane unclipped"
+        );
+        assert!(count_row.chars().count() <= 39, "bounded by the pane width");
+        assert!(rows.contains(&"session: Chat (live)".to_owned()));
     }
 }

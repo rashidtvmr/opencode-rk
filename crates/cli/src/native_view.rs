@@ -175,6 +175,20 @@ impl NativeView {
         self.status.set_session(session);
     }
 
+    /// Forward an ACCEPTED authenticated binding (id + title + confirmed
+    /// persisted message count from the SAME accepted snapshot) into the
+    /// status projection. See
+    /// [`crate::native_view_status::StatusView::set_session_binding`].
+    pub fn set_session_binding(
+        &mut self,
+        session: Option<String>,
+        title: Option<String>,
+        message_count: Option<usize>,
+    ) {
+        self.status
+            .set_session_binding(session, title, message_count);
+    }
+
     pub fn set_workspace(&mut self, workspace: String) {
         self.workspace = workspace;
     }
@@ -495,12 +509,16 @@ impl NativeView {
     ///    invariant instead of manufacturing an error after the commit.
     pub fn bind_commit(
         &mut self,
-        fetched: Result<(String, Vec<String>, Vec<SessionRow>), String>,
+        // (target id, history, fresh listing rows, confirmed persisted
+        // message_count of the SAME authenticated snapshot). The count is
+        // only ever projected from this accepted tuple — never derived
+        // from transcript rows or provider deltas.
+        fetched: Result<(String, Vec<String>, Vec<SessionRow>, usize), String>,
         global_draft: &str,
         transcript: &mut Vec<String>,
         append: fn(&mut Vec<String>, String),
     ) -> Result<BindCommit, String> {
-        let (target, history, fresh_rows) =
+        let (target, history, fresh_rows, confirmed_count) =
             fetched.map_err(|error| format!("bind refused, state unchanged: {error}"))?;
         // ---------- preflight: every acknowledgement condition is proved
         // BEFORE the first mutation (the outgoing draft save). Afterwards
@@ -557,6 +575,15 @@ impl NativeView {
         // refresh never silently deletes; only an explicit user discard
         // removes a draft.
         let active = self.sessions.active_id().map(str::to_owned);
+        // The SAME accepted authenticated listing that proved membership
+        // (preflight 0) carries the bound title: `bind_session` builds the
+        // `LiveSnapshot` from this exact payload, so row title and
+        // snapshot title are the identical authenticated value. Extract it
+        // before the rows are consumed by `set_rows`.
+        let bound_title = fresh_rows
+            .iter()
+            .find(|row| row.id == target)
+            .map(|row| row.title.clone());
         self.sessions.set_rows(fresh_rows, active);
         // Phase C/D: restore the target draft (store copy retained), then
         // commit the active marker, status and transcript. All infallible:
@@ -571,7 +598,14 @@ impl NativeView {
             Some(target.as_str()),
             "preflight proved canonical id + bounded membership; ack cannot no-op"
         );
-        self.status.set_session(Some(target.clone()));
+        // Identity + accepted title + confirmed persisted count commit
+        // together: all three come from this one successful bind
+        // transaction's authenticated snapshot, so the rendered tuple can
+        // never be a stale title or count on a new id (a bind whose
+        // listing title is unusable keeps the id and confirmed count with
+        // no live claim).
+        self.status
+            .set_session_binding(Some(target.clone()), bound_title, Some(confirmed_count));
         transcript.clear();
         for line in history {
             append(transcript, line);
@@ -844,6 +878,7 @@ mod tests {
                     B.to_owned(),
                     vec!["b-hist".to_owned()],
                     vec![row(A), row(B)],
+                    2,
                 )),
                 "draft-a",
                 &mut transcript,
@@ -864,6 +899,7 @@ mod tests {
                     A.to_owned(),
                     vec!["a-hist".to_owned()],
                     vec![row(A), row(B)],
+                    1,
                 )),
                 "draft-b",
                 &mut transcript,
@@ -899,7 +935,7 @@ mod tests {
         let fresh_rows: Vec<SessionRow> = ids.iter().map(|id| row(id)).collect();
         let mut transcript = vec!["keep".to_owned()];
         let result = view.bind_commit(
-            Ok((ids[33].clone(), vec!["hist".to_owned()], fresh_rows)),
+            Ok((ids[33].clone(), vec!["hist".to_owned()], fresh_rows, 1)),
             "unsent-in-s0",
             &mut transcript,
             test_append,
@@ -932,6 +968,7 @@ mod tests {
                     B.to_owned(),
                     vec!["b-hist".to_owned()],
                     vec![row(B)], // A is absent from the fresh listing
+                    1,
                 )),
                 "draft-a",
                 &mut transcript,
@@ -973,6 +1010,7 @@ mod tests {
                 "not-a-canonical-id".to_owned(),
                 vec!["h".to_owned()],
                 vec![row(A), row("not-a-canonical-id"), row(B)],
+                1,
             )),
             "unsent",
             &mut transcript,
@@ -997,7 +1035,7 @@ mod tests {
             .collect();
         rows.push(row(B));
         let result = view.bind_commit(
-            Ok((B.to_owned(), vec!["h".to_owned()], rows)),
+            Ok((B.to_owned(), vec!["h".to_owned()], rows, 1)),
             "unsent",
             &mut transcript,
             test_append,
@@ -1050,6 +1088,7 @@ mod tests {
                 "c".to_owned(),
                 vec!["c-hist".to_owned()],
                 vec![row("a"), row("b")],
+                1,
             )),
             "unsent",
             &mut transcript,
@@ -1557,6 +1596,204 @@ mod tests {
         assert!(
             !view.permission_backend_resolved_close(),
             "a closed dialog is a no-op for the poll helper"
+        );
+    }
+
+    /// RECOVERY-DURABILITY-001: a REFUSED bind (failed fetch) keeps the
+    /// previously accepted title/id pair, the drafts and the transcript
+    /// atomically — status projection assertions added additively; the
+    /// existing draft/state assertions are unchanged.
+    #[test]
+    fn refused_bind_keeps_bound_title_id_and_draft() {
+        const A: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const B: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let mut view = view_with_sessions(A, &[A, B]);
+        view.sessions.set_draft(B, "b-unsent").unwrap();
+        view.set_session_binding(Some(A.to_owned()), Some("Alpha".to_owned()), Some(4));
+        let mut transcript = vec!["old".to_owned()];
+        let result = view.bind_commit(
+            Err("daemon unreachable".to_owned()),
+            "a-draft",
+            &mut transcript,
+            test_append,
+        );
+        assert!(result.is_err());
+        let frame = view.render("a-draft", &transcript, false, &[]);
+        assert!(
+            frame.iter().any(|r| r.contains("session: Alpha (live)")),
+            "bound title survives a refused bind"
+        );
+        assert!(
+            frame.iter().any(|r| r.contains("messages: 4")),
+            "confirmed snapshot count survives a refused bind"
+        );
+        // Right pane is 39 cols at 120: `session id: ` (12 cols) + the
+        // first 27 chars of the canonical UUID are the exact visible
+        // prefix — clipping can only truncate, never regroup. Full
+        // identity stays asserted at state level below (active_id).
+        assert!(
+            frame
+                .iter()
+                .any(|r| r.contains("session id: aaaaaaaa-aaaa-4aaa-8aaa-aaa")),
+            "bound id survives a refused bind"
+        );
+        assert_eq!(view.sessions.active_id(), Some(A));
+        assert_eq!(view.sessions.draft(B), Some("b-unsent"));
+        assert_eq!(transcript, vec!["old".to_owned()]);
+        // Draft-capacity refusal (32 KiB + 1) likewise mutates nothing.
+        let mut view2 = view_with_sessions(A, &[A, B]);
+        view2.sessions.set_draft(B, "b-unsent").unwrap();
+        view2.set_session_binding(Some(A.to_owned()), Some("Alpha".to_owned()), Some(4));
+        let mut transcript2 = vec!["old".to_owned()];
+        let oversized = "x".repeat(32 * 1024 + 1);
+        let result2 = view2.bind_commit(
+            Ok((B.to_owned(), vec![], vec![row(A), row(B)], 7)),
+            &oversized,
+            &mut transcript2,
+            test_append,
+        );
+        assert!(result2.is_err());
+        let frame2 = view2.render("a-draft", &transcript2, false, &[]);
+        assert!(
+            frame2.iter().any(|r| r.contains("session: Alpha (live)")),
+            "capacity refusal keeps the bound pair"
+        );
+        assert!(
+            frame2.iter().any(|r| r.contains("messages: 4")),
+            "capacity refusal keeps the confirmed count (the refused 7 is never applied)"
+        );
+        assert!(
+            !frame2.iter().any(|r| r.contains("messages: 7")),
+            "the refused snapshot count never reaches the projection"
+        );
+        assert_eq!(view2.sessions.active_id(), Some(A));
+        assert_eq!(view2.sessions.draft(B), Some("b-unsent"));
+        assert_eq!(transcript2, vec!["old".to_owned()]);
+    }
+
+    /// RECOVERY-DURABILITY-001: a successful bind commits id, title and
+    /// the confirmed persisted message count TOGETHER from the one
+    /// accepted snapshot tuple (the same payload the `LiveSnapshot`
+    /// title/count come from) — never a stale title or count on the new
+    /// id, never a bare id left bound from before the switch.
+    #[test]
+    fn successful_bind_commits_id_and_title_together() {
+        const A: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const B: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let mut view = view_with_sessions(A, &[A, B]);
+        view.set_session_binding(Some(A.to_owned()), Some("Alpha".to_owned()), Some(4));
+        let mut transcript = vec!["old".to_owned()];
+        let fresh = vec![
+            SessionRow {
+                id: A.to_owned(),
+                title: "Alpha".to_owned(),
+            },
+            SessionRow {
+                id: B.to_owned(),
+                title: "Beta".to_owned(),
+            },
+        ];
+        let commit = view
+            .bind_commit(
+                Ok((B.to_owned(), vec!["h".to_owned()], fresh, 3)),
+                "draft-a",
+                &mut transcript,
+                test_append,
+            )
+            .expect("bind commits");
+        assert_eq!(commit.session_id, B);
+        let frame = view.render("draft-a", &transcript, false, &[]);
+        // `fresh` is the accepted authenticated listing — the exact payload
+        // the `LiveSnapshot` title comes from — so id and title commit
+        // together in this one transaction.
+        assert!(
+            frame.iter().any(|r| r.contains("session: Beta (live)")),
+            "new bound title rendered: {frame:?}"
+        );
+        assert!(
+            frame.iter().any(|r| r.contains("messages: 3")),
+            "confirmed snapshot count rendered with the new tuple"
+        );
+        // Exact visible prefix of the new canonical id: 39-col right pane
+        // keeps `session id: ` + the first 27 UUID chars (state-level full
+        // identity is `commit.session_id` above).
+        assert!(
+            frame
+                .iter()
+                .any(|r| r.contains("session id: bbbbbbbb-bbbb-4bbb-8bbb-bbb")),
+            "new identity rendered"
+        );
+        // No stale pair: the old bound status row is gone (the left pane's
+        // row list legitimately shows the fresh titles, but the status
+        // projection can never keep the old title next to the new id).
+        assert!(
+            !frame.contains(&"session: Alpha (live)".to_owned()),
+            "no stale title on the new id"
+        );
+        // Full-shell rows begin with the left pane, so the single identity
+        // row is counted by membership: exactly one frame row carries the
+        // `session id:` segment (no duplicate identity row).
+        assert_eq!(
+            frame.iter().filter(|r| r.contains("session id: ")).count(),
+            1
+        );
+        assert_eq!(transcript, vec!["h".to_owned()]);
+    }
+
+    /// RECOVERY-DURABILITY-001 (v4): a successful bind replaces the FULL
+    /// accepted tuple — id, title and confirmed persisted count — in one
+    /// atomic commit. A confirmed count of 0 (valid empty history) is a
+    /// real accepted fact and renders truthfully; the previous count and
+    /// title never survive the switch.
+    #[test]
+    fn successful_switch_replaces_id_title_and_count_together() {
+        const A: &str = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+        const B: &str = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+        let mut view = view_with_sessions(A, &[A, B]);
+        view.set_session_binding(Some(A.to_owned()), Some("Alpha".to_owned()), Some(4));
+        let mut transcript = vec!["old".to_owned()];
+        let commit = view
+            .bind_commit(
+                Ok((
+                    B.to_owned(),
+                    vec![],
+                    vec![
+                        SessionRow {
+                            id: A.to_owned(),
+                            title: "Alpha".to_owned(),
+                        },
+                        SessionRow {
+                            id: B.to_owned(),
+                            title: "Beta".to_owned(),
+                        },
+                    ],
+                    0,
+                )),
+                "draft-a",
+                &mut transcript,
+                test_append,
+            )
+            .expect("bind commits");
+        assert_eq!(commit.session_id, B);
+        let frame = view.render("draft-a", &transcript, false, &[]);
+        assert!(frame.iter().any(|r| r.contains("session: Beta (live)")));
+        assert!(
+            frame
+                .iter()
+                .any(|r| r.contains("session id: bbbbbbbb-bbbb-4bbb-8bbb-bbb")),
+            "new identity rendered"
+        );
+        assert!(
+            frame.iter().any(|r| r.contains("messages: 0")),
+            "confirmed empty-history count 0 is a valid accepted fact"
+        );
+        assert!(
+            !frame.iter().any(|r| r.contains("messages: 4")),
+            "no stale count on the new id"
+        );
+        assert!(
+            !frame.iter().any(|r| r.contains("session: Alpha (live)")),
+            "no stale title on the new id"
         );
     }
 }
