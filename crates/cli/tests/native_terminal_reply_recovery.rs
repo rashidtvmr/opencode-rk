@@ -33,6 +33,8 @@ fn bytes(events: Vec<InputEvent>) -> Vec<u8> {
             InputEvent::Byte(byte) => byte,
             InputEvent::Escape => panic!("unexpected Escape event"),
             InputEvent::Paste(text) => panic!("unexpected Paste event: {text:?}"),
+            InputEvent::ArrowUp => panic!("unexpected ArrowUp event"),
+            InputEvent::ArrowDown => panic!("unexpected ArrowDown event"),
         })
         .collect()
 }

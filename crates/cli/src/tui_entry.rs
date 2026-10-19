@@ -1880,6 +1880,25 @@ fn native_loop(
         );
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
+            direction @ (native_input_decoder::InputEvent::ArrowUp
+            | native_input_decoder::InputEvent::ArrowDown) => {
+                utf8.reset();
+                // Page selection owns arrows only when no higher-priority
+                // overlay owns focus. Never turn them into composer text or
+                // permission/credential actions.
+                if !page_open
+                    || help_open
+                    || view.dialogs.intercepts_input()
+                    || !matches!(dialog, native_setup::Dialog::None)
+                {
+                    continue;
+                }
+                if direction == native_input_decoder::InputEvent::ArrowUp {
+                    2 // existing previous-row dispatch
+                } else {
+                    14 // existing next-row dispatch
+                }
+            }
             native_input_decoder::InputEvent::Paste(text) => {
                 utf8.reset();
                 if view.dialogs.intercepts_input() {

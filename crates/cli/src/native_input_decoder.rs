@@ -22,6 +22,8 @@ const MAX_EVENTS: usize = 8;
 pub(crate) enum InputEvent {
     Byte(u8),
     Escape,
+    ArrowUp,
+    ArrowDown,
     Paste(String),
 }
 
@@ -247,7 +249,18 @@ impl TerminalInputDecoder {
                 self.begin_paste(now);
                 return;
             }
-            if self.state == State::Csi && byte == b'u' {
+            // Decode only unmodified keyboard arrows. Other CSI reports and
+            // modifier/intermediate forms remain protocol, never typed text.
+            if matches!(byte, b'A' | b'B')
+                && (self.len == 0
+                    || (self.state == State::Csi && &self.sequence[..self.len] == b"1"))
+            {
+                self.emit(if byte == b'A' {
+                    InputEvent::ArrowUp
+                } else {
+                    InputEvent::ArrowDown
+                });
+            } else if self.state == State::Csi && byte == b'u' {
                 self.decode_kitty();
             }
             self.reset();
