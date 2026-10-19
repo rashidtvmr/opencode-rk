@@ -1384,8 +1384,10 @@ fn native_loop(
     // Honest status-v2 facts: a model claim only after the catalogue was
     // actually observed (failed fetch -> `Unavailable`, not `unset`); the
     // connection is confirmed only when the startup snapshot fetch ACKed.
-    if selected.is_some() {
-        view.set_model(selected.as_ref().map(|model| model.qualified()));
+    if let Some(model) = &selected {
+        view.set_model(Some(model.qualified()));
+        // The native setup catalogue currently admits only the OpenAI adapter.
+        view.set_composer_model(&model.name, "OpenAI");
     } else if models_loaded {
         view.set_model(None); // confirmed: catalogue observed, no model
     } else {
@@ -2463,6 +2465,7 @@ fn native_loop(
                                         // Confirmed local config write:
                                         // honest live model status update.
                                         view.set_model(selected.as_ref().map(|m| m.qualified()));
+                                        view.set_composer_model(&model.name, "OpenAI");
                                         dialog = native_setup::Dialog::None;
                                     }
                                     Err(error) => append_transcript(

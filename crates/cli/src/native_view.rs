@@ -104,6 +104,7 @@ pub struct NativeView {
     dialog_size: DialogSize,
     composer_agent: Option<String>,
     composer_variant: Option<String>,
+    composer_model: Option<(String, String)>,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
 }
 
@@ -222,6 +223,7 @@ impl NativeView {
             dialog_size: DialogSize::Medium,
             composer_agent: None,
             composer_variant: None,
+            composer_model: None,
             chat_row_classes: Vec::new(),
         }
     }
@@ -234,12 +236,26 @@ impl NativeView {
     // ---------- startup facts (set from tui_entry, no IO here) ----------
 
     pub fn set_model(&mut self, model: Option<String>) {
+        self.composer_model = None;
         self.status.set_model(model);
+    }
+
+    /// Catalogue display names are presentation only. The status retains the
+    /// qualified identity used by the daemon and persisted configuration.
+    pub fn set_composer_model(&mut self, model: &str, provider: &str) {
+        self.composer_model = if [model, provider].iter().all(|name| {
+            !name.trim().is_empty() && name.len() <= 256 && !name.chars().any(char::is_control)
+        }) {
+            Some((model.to_owned(), provider.to_owned()))
+        } else {
+            None
+        };
     }
 
     /// Model state was never observed (failed catalogue fetch): honest
     /// `Unavailable`, never `None` (which would claim "confirmed unset").
     pub fn set_model_unknown(&mut self) {
+        self.composer_model = None;
         self.status.set_model_unknown();
     }
 
@@ -349,7 +365,10 @@ impl NativeView {
         }
         // The qualified label retains provider identity even before richer
         // catalogue display metadata has been observed.
-        parts.push(self.status.model_label().to_owned());
+        parts.push(match &self.composer_model {
+            Some((model, provider)) => format!("{model}  {provider}"),
+            None => self.status.model_label().to_owned(),
+        });
         if let Some(variant) = &self.composer_variant {
             parts.push(variant.clone());
         }
