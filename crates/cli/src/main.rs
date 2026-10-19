@@ -33,6 +33,9 @@ mod medown;
 mod modals;
 mod native_app;
 mod native_approvals;
+mod native_chat_history;
+#[cfg(feature = "native")]
+mod native_chat_projection;
 mod native_composer;
 mod native_layout;
 mod native_navigation;
@@ -40,8 +43,22 @@ mod native_palette;
 mod native_shell;
 mod native_status;
 mod native_theme;
+#[cfg(feature = "native")]
+mod native_theme_assets;
+#[cfg(feature = "native")]
+mod native_theme_runtime;
 mod native_timeline;
 mod native_transcript;
+#[cfg(feature = "native")]
+mod native_ui_budget;
+#[cfg(feature = "native")]
+mod native_ui_preferences;
+#[cfg(all(test, feature = "native"))]
+#[path = "../tests/support/security_preferences.rs"]
+mod security_preferences;
+#[cfg(all(test, feature = "native"))]
+#[path = "../tests/support/upstream_view_parity.rs"]
+mod upstream_view_parity;
 // Three-pane native shell (OBS-NATIVE-THREE-PANE-SHELL-INSTALLED): the
 // integration-owned facade plus its six part modules, native feature only.
 #[cfg(feature = "native")]

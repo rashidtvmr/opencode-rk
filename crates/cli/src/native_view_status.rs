@@ -177,6 +177,52 @@ pub struct StatusView {
 }
 
 impl StatusView {
+    /// Sanitized, authenticated presentation facts shared by the composer
+    /// and session sidebar. Reading these never establishes a new observation.
+    pub fn model_label(&self) -> &str {
+        self.model.label()
+    }
+
+    pub fn session_title(&self) -> Option<&str> {
+        self.session_title.as_deref()
+    }
+
+    pub fn session_id(&self) -> Option<&str> {
+        self.session.as_deref()
+    }
+
+    /// Upstream session sidebar content, separate from the diagnostic Status
+    /// page. Session identity comes only from the accepted binding; the MCP
+    /// section is omitted for an empty registry (sidebar/mcp.tsx:30).
+    pub fn render_sidebar(&self, width: usize, height: usize) -> Vec<String> {
+        let mut rows = vec![String::new()];
+        if let Some(title) = self.session_title() {
+            rows.push(title.to_owned());
+        }
+        if let Some(id) = self.session_id() {
+            rows.push(id.to_owned());
+        }
+        if let Some((used, window)) = self.context {
+            rows.push(String::new());
+            rows.push("Context".to_owned());
+            rows.push(format!("{used} tokens"));
+            if window > 0 {
+                rows.push(format!("{}% used", used.saturating_mul(100) / window));
+            }
+        }
+        if !self.mcp.is_empty() {
+            rows.push(String::new());
+            rows.push("MCP".to_owned());
+            for entry in &self.mcp {
+                rows.push(format!("• {} {}", entry.name, entry.status.as_str()));
+            }
+        }
+        rows.into_iter()
+            .take(height.min(MAX_ROWS))
+            .map(|row| fit(&row, width))
+            .collect()
+    }
+
     /// Caller-confirmed daemon connection observation. Call only after an
     /// ACK; connection/reconnect snapshots are reconciled by the caller.
     pub fn set_connection(&mut self, connected: bool) {

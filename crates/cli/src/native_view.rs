@@ -1,5 +1,5 @@
 #![forbid(unsafe_code)]
-//! `NativeView` facade: the visible three-pane native shell.
+//! Route-aware native Home, conversation, sidebar and modal presentation.
 //!
 //! This file is integration-owned glue over the six `native_view_*` part
 //! modules (layout/sessions/chat/pages/status/dialogs). It exposes only
@@ -13,17 +13,54 @@
 
 use crate::native_view_chat::ChatView;
 use crate::native_view_dialogs::DialogView;
-use crate::native_view_layout::{compose_frame, Layout};
+use crate::native_view_layout::{compose_frame, fit, Layout};
 use crate::native_view_pages::{Page, PageRow, PageState};
 use crate::native_view_sessions::{SessionRow, SessionView};
 use crate::native_view_status::StatusView;
 use serde_json::Value;
 
-/// Product banner (frozen PTY foundation control: `control.banner`).
-const BANNER: &str = "OpenCode RK (native)";
 /// Draft bytes carried into one render (paint sanitizes control chars and
 /// clips to pane width; this bound just keeps allocation fixed-size).
 const MAX_RENDER_DRAFT_CHARS: usize = 4096;
+const MAX_FRAME_CELLS: usize = 1 << 20;
+
+/// Pinned Home prompt max-width configuration (home.tsx:33-36).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum PromptWidth {
+    #[default]
+    Default,
+    Auto,
+    Fixed(u16),
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DialogSize {
+    #[default]
+    Medium,
+    Large,
+    XLarge,
+}
+
+impl DialogSize {
+    fn width(self) -> u16 {
+        match self {
+            Self::Medium => 60,
+            Self::Large => 88,
+            Self::XLarge => 116,
+        }
+    }
+}
+
+/// Shared modal geometry; panel position and inner padding are distinct.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ModalPresentation {
+    pub x: u16,
+    pub y: u16,
+    pub width: u16,
+    pub content_y: u16,
+    pub content_width: u16,
+    pub backdrop_alpha: u8,
+}
 
 pub struct NativeView {
     layout: Layout,
@@ -49,6 +86,45 @@ pub struct NativeView {
     /// Active submit keymap fact (set once by `tui_entry`): keeps the
     /// Pages Help rows truthful about which key submits vs inserts newline.
     submit_with_ctrl_j: bool,
+    /// Session route fact: true when the main column shows the active
+    /// session (transcript + composer); false = home (no active
+    /// conversation). Set explicitly by the input loop from the real
+    /// transcript/backend state; the view never guesses it from
+    /// startup memory/error text.
+    session_route: bool,
+    /// Sidebar hidden by explicit user toggle (`session.sidebar.toggle`).
+    sidebar_hidden: bool,
+    sidebar_open: bool,
+    /// Active session is a child (`parentID` present): upstream suppresses
+    /// the sidebar entirely.
+    parent_session: bool,
+    prompt_width: PromptWidth,
+    shell_mode: bool,
+    placeholder_index: usize,
+    dialog_size: DialogSize,
+    composer_agent: Option<String>,
+    composer_variant: Option<String>,
+    chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
+}
+
+/// Region geometry for the current frame, without ANSI. Downstream style
+/// writers derive cell positions from this instead of parsing the frame.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ViewPresentation {
+    /// Viewport width in cells.
+    pub cols: u16,
+    /// Viewport height in rows.
+    pub rows: u16,
+    /// Main-column start cell (always 0: no permanent left pane).
+    pub main_offset: u16,
+    /// Main-column outer width in cells.
+    pub main_width: u16,
+    /// Upstream view horizontal padding applied inside the main column.
+    pub main_padding: u16,
+    /// Sidebar start cell, or `None` when the sidebar is not shown.
+    pub sidebar_offset: Option<u16>,
+    /// Sidebar width in cells (`0` when not shown).
+    pub sidebar_width: u16,
 }
 
 /// Captured binding identity of one in-flight turn worker. A worker is
@@ -136,6 +212,17 @@ impl NativeView {
             permission_retry_attempt: None,
             workspace: String::new(),
             submit_with_ctrl_j: false,
+            session_route: true,
+            sidebar_hidden: false,
+            sidebar_open: false,
+            parent_session: false,
+            prompt_width: PromptWidth::Default,
+            shell_mode: false,
+            placeholder_index: 0,
+            dialog_size: DialogSize::Medium,
+            composer_agent: None,
+            composer_variant: None,
+            chat_row_classes: Vec::new(),
         }
     }
 
@@ -169,6 +256,239 @@ impl NativeView {
     /// Active submit keymap fact for truthful Help rows.
     pub fn set_submit_with_ctrl_j(&mut self, submit_with_ctrl_j: bool) {
         self.submit_with_ctrl_j = submit_with_ctrl_j;
+    }
+
+    pub fn set_prompt_width(&mut self, value: PromptWidth) {
+        self.prompt_width = value;
+    }
+    pub fn chat_row_classes(&self) -> &[crate::native_view_chat::ChatRowClass] {
+        &self.chat_row_classes
+    }
+
+    pub fn set_prompt_mode(&mut self, shell: bool) {
+        self.shell_mode = shell;
+    }
+
+    pub fn set_placeholder_index(&mut self, index: usize) {
+        self.placeholder_index = index % 3;
+    }
+
+    pub fn set_dialog_size(&mut self, size: DialogSize) {
+        self.dialog_size = size;
+    }
+
+    pub fn set_composer_agent(&mut self, agent: Option<String>, variant: Option<String>) {
+        fn clean(value: Option<String>) -> Option<String> {
+            value
+                .map(|text| {
+                    crate::native_transcript::strip_ansi(&text)
+                        .chars()
+                        .filter(|c| !c.is_control())
+                        .take(128)
+                        .collect::<String>()
+                })
+                .filter(|text| !text.trim().is_empty())
+        }
+        self.composer_agent = clean(agent);
+        self.composer_variant = clean(variant);
+    }
+
+    fn render_height(&self) -> usize {
+        let cols = usize::from(self.layout.cols);
+        if cols == 0 {
+            return 0;
+        }
+        usize::from(self.layout.rows)
+            .min(256)
+            .min(MAX_FRAME_CELLS / cols)
+    }
+
+    pub fn home_prompt_width(&self) -> u16 {
+        let width = self.presentation().main_width;
+        let requested = match self.prompt_width {
+            PromptWidth::Default => 75,
+            PromptWidth::Auto => 75usize
+                .max(usize::from(width) * 7 / 10)
+                .min(u16::MAX as usize) as u16,
+            PromptWidth::Fixed(value) => value.max(1),
+        };
+        width.saturating_sub(4).min(requested)
+    }
+
+    pub fn modal_presentation(&self) -> ModalPresentation {
+        let width = self
+            .layout
+            .cols
+            .saturating_sub(2)
+            .min(self.dialog_size.width());
+        let y = self.render_height() as u16 / 4;
+        ModalPresentation {
+            x: (self.layout.cols - width) / 2,
+            y,
+            width,
+            content_y: y.saturating_add(1),
+            content_width: width.saturating_sub(4),
+            backdrop_alpha: 150,
+        }
+    }
+
+    pub fn sidebar_backdrop_alpha(&self) -> u8 {
+        if self.sidebar_visible() && self.layout.cols <= 120 {
+            70
+        } else {
+            0
+        }
+    }
+
+    fn composer_metadata(&self) -> String {
+        let mut parts = Vec::new();
+        if self.shell_mode {
+            parts.push("Shell".to_owned());
+        } else if let Some(agent) = &self.composer_agent {
+            parts.push(agent.clone());
+        }
+        // The qualified label retains provider identity even before richer
+        // catalogue display metadata has been observed.
+        parts.push(self.status.model_label().to_owned());
+        if let Some(variant) = &self.composer_variant {
+            parts.push(variant.clone());
+        }
+        parts.join("  ")
+    }
+
+    // ---------- route / sidebar facts (set from the input loop) ----------
+
+    /// Main-column route: `true` shows the active session (transcript +
+    /// composer), `false` shows Home. Set explicitly from the real
+    /// transcript/backend state; startup memory/error text must never force
+    /// this on its own.
+    pub fn set_session_route(&mut self, session_route: bool) {
+        self.session_route = session_route;
+    }
+
+    /// Toggle the optional wide sidebar (`session.sidebar.toggle`).
+    pub fn toggle_sidebar(&mut self) {
+        let visible = self.sidebar_visible();
+        self.sidebar_hidden = visible;
+        self.sidebar_open = !visible;
+    }
+
+    /// Force the sidebar hidden/shown. Hidden wins over the wide auto rule.
+    pub fn set_sidebar_hidden(&mut self, hidden: bool) {
+        self.sidebar_hidden = hidden;
+        self.sidebar_open = false;
+    }
+
+    pub fn sidebar_hidden(&self) -> bool {
+        self.sidebar_hidden
+    }
+
+    /// Mark the active session as a child (`parentID` present): upstream
+    /// suppresses the sidebar regardless of width or toggle.
+    pub fn set_parent_session(&mut self, parent_session: bool) {
+        self.parent_session = parent_session;
+    }
+
+    /// Current region geometry (no ANSI): positions for the style writer.
+    #[must_use]
+    pub fn presentation(&self) -> ViewPresentation {
+        let sidebar = self.sidebar_visible();
+        let inline = sidebar && self.layout.cols > 120;
+        let sidebar_width = if sidebar { self.layout.cols.min(42) } else { 0 };
+        let main_width = self
+            .layout
+            .cols
+            .saturating_sub(if inline { sidebar_width } else { 0 });
+        ViewPresentation {
+            cols: self.layout.cols,
+            rows: self.layout.rows,
+            main_offset: 0,
+            main_width,
+            main_padding: 2,
+            sidebar_offset: if sidebar {
+                Some(self.layout.cols.saturating_sub(sidebar_width))
+            } else {
+                None
+            },
+            sidebar_width,
+        }
+    }
+
+    fn sidebar_visible(&self) -> bool {
+        self.session_route
+            && !self.parent_session
+            && self.layout.rows >= 2
+            && (self.sidebar_open || (!self.sidebar_hidden && self.layout.cols > 120))
+    }
+
+    /// Composer box coordinates shared with the painter. The box is derived
+    /// from route and bounded draft rows, never from visible text matching.
+    pub fn composer_region(&self, draft: &str) -> Option<(u16, u16, u16, u16)> {
+        let height = self.render_height();
+        let width = self.presentation().main_width;
+        if height == 0 || width <= 4 || !matches!(self.pages.page(), Page::Chat | Page::Theme) {
+            return None;
+        }
+        if self.session_route {
+            let body_height = if height >= 4 { height - 2 } else { height };
+            let composer_height = draft
+                .split('\n')
+                .take(129)
+                .count()
+                .clamp(1, (body_height / 2).max(1));
+            Some((
+                2,
+                body_height.saturating_sub(composer_height) as u16,
+                width - 4,
+                (composer_height + usize::from(height >= 4)) as u16,
+            ))
+        } else {
+            let count = draft
+                .chars()
+                .take(MAX_RENDER_DRAFT_CHARS)
+                .collect::<String>()
+                .split('\n')
+                .take((height / 2).clamp(1, 12))
+                .count();
+            let block_height = 8 + count;
+            let top = height.saturating_sub(block_height + 1) / 2;
+            let input_top = if height >= block_height + 1 {
+                top + 6
+            } else {
+                height.saturating_sub(count + 2)
+            };
+            let prompt_width = self.home_prompt_width();
+            Some((
+                (width - prompt_width) / 2,
+                input_top.saturating_sub(1) as u16,
+                prompt_width,
+                (count + 3).min(height - input_top.saturating_sub(1)) as u16,
+            ))
+        }
+    }
+
+    pub fn home_logo_region(&self, draft: &str) -> Option<(u16, u16)> {
+        let height = self.render_height();
+        let width = self.presentation().main_width;
+        let count = draft
+            .chars()
+            .take(MAX_RENDER_DRAFT_CHARS)
+            .collect::<String>()
+            .split('\n')
+            .take((height / 2).clamp(1, 12))
+            .count();
+        let block_height = 8 + count;
+        if self.session_route
+            || !matches!(self.pages.page(), Page::Chat | Page::Theme)
+            || width < 43
+            || height < block_height + 1
+        {
+            return None;
+        }
+        Some((
+            (width - 39) / 2,
+            (height.saturating_sub(block_height + 1) / 2) as u16,
+        ))
     }
 
     pub fn set_session(&mut self, session: Option<String>) {
@@ -230,6 +550,28 @@ impl NativeView {
 
     pub fn page_selected(&self) -> Option<&PageRow> {
         self.pages.selected()
+    }
+
+    pub fn theme_dialog(&self) -> Vec<String> {
+        if self.pages.page() != Page::Theme {
+            return Vec::new();
+        }
+        let geometry = self.modal_presentation();
+        let height = self
+            .render_height()
+            .saturating_sub(usize::from(geometry.content_y))
+            .saturating_sub(1)
+            .min(16);
+        let mut rows = self
+            .pages
+            .render(usize::from(geometry.content_width), height);
+        if let Some(title) = rows.first_mut() {
+            *title = "Themes".into();
+        }
+        if let Some(search) = rows.get_mut(1) {
+            *search = format!("Search: {}", self.pages.query());
+        }
+        rows
     }
 
     /// Confirmation handler: open the selected (enabled) page row, close on
@@ -618,10 +960,11 @@ impl NativeView {
 
     // ---------- render ----------
 
-    /// Compose one bounded frame: left Sessions, center workspace/composer
-    /// (or the open page, or the active center dialog overlay), right
-    /// Status + MCP. Returns at most `layout.rows` lines, ready for the
-    /// preserved `native_paint` bridge path.
+    /// Compose one bounded frame: the main column (chat/page/dialog), plus
+    /// the optional fixed 42-column sidebar only when `cols > 120`. There is
+    /// no permanent left all-sessions pane and no permanent right status
+    /// pane (upstream `session/index.tsx:255-278`). Returns at most
+    /// `layout.rows` lines, ready for the preserved `native_paint` path.
     pub fn render(
         &mut self,
         draft: &str,
@@ -629,94 +972,284 @@ impl NativeView {
         busy: bool,
         overlay: &[String],
     ) -> Vec<String> {
-        let rows = self.layout.rows as usize;
-        let height = rows;
-        let w_left = self.layout.left_width as usize;
-        let w_center = self.layout.center_width as usize;
-        let w_right = self.layout.right_width as usize;
+        self.render_content(draft, transcript, None, busy, overlay)
+    }
 
-        // Left: backend session listing (rows come from GET /api/sessions).
-        // Module output is rendered as-is: no synthesized headings or
-        // fallback rows that could conceal a part-module defect.
-        let mut left = self.sessions.render(w_left, height);
-        // Shell chrome (always-true product banner), not module data.
-        left.insert(0, BANNER.to_owned());
+    pub fn render_typed(
+        &mut self,
+        draft: &str,
+        messages: &[crate::native_view_chat::ChatMessage],
+        busy: bool,
+        overlay: &[String],
+    ) -> Vec<String> {
+        self.render_content(draft, &[], Some(messages), busy, overlay)
+    }
 
-        // Right: Status + MCP snapshot, exactly as the status module
-        // renders it from the applied real state.
-        let right = self.status.render(w_right, height);
-
-        // Center: an open permission decision dialog owns focus (rendered
-        // from the approved DialogView), else the active native_setup
-        // center dialog overlay, else the open page, else the chat
-        // workspace.
-        let is_chat = matches!(self.pages.page(), Page::Chat);
-        let dialog_lines = if self.dialogs.is_open() {
-            Some(self.dialogs.render(w_center, height))
-        } else {
-            None
-        };
-        let mut center = if let Some(mut dialog_lines) = dialog_lines {
-            let mut center: Vec<String> = dialog_lines
-                .drain(..)
-                .take(height.saturating_sub(1))
-                .collect();
-            center.push(format!("> {}", first_line(draft)));
-            center
-        } else if !overlay.is_empty() {
-            let mut center: Vec<String> = overlay
-                .iter()
-                .take(height.saturating_sub(1))
-                .cloned()
-                .collect();
-            center.push(format!("> {}", first_line(draft)));
-            center
-        } else if is_chat {
-            // Global chrome: the product banner owns frame row 0 (painted
-            // by the left pane), so the chat center column starts with ONE
-            // blank continuation row — the workspace header lands on frame
-            // row 1, the transcript viewport on rows 2..=rows-2 and the
-            // composer on the last row, all derived from the real layout
-            // height (no hardcoded geometry). Only a non-compact shell
-            // with at least 3 usable body rows reserves that chrome row;
-            // compact or tiny viewports keep whole-frame chat priority
-            // (workspace + draft first), per the available-later contract.
-            let chat_height = height.saturating_sub(1);
-            if !self.layout.compact && chat_height >= 3 {
-                let mut center: Vec<String> = vec![String::new()];
-                center.extend(self.chat.render(
-                    w_center,
-                    chat_height,
+    fn render_content(
+        &mut self,
+        draft: &str,
+        transcript: &[String],
+        messages: Option<&[crate::native_view_chat::ChatMessage]>,
+        busy: bool,
+        overlay: &[String],
+    ) -> Vec<String> {
+        self.chat_row_classes.clear();
+        let height = self.render_height();
+        if self.layout.cols == 0 || height == 0 {
+            return Vec::new();
+        }
+        let presentation = self.presentation();
+        let width = presentation.main_width;
+        let inner_width = width.saturating_sub(4);
+        let is_chat = matches!(self.pages.page(), Page::Chat | Page::Theme);
+        let center = if self.pages.page() == Page::Status {
+            self.status
+                .render(inner_width as usize, height)
+                .into_iter()
+                .map(|line| padded(&line, width))
+                .collect()
+        } else if !is_chat {
+            self.pages
+                .render(inner_width as usize, height)
+                .into_iter()
+                .map(|line| padded(&line, width))
+                .collect()
+        } else if self.session_route {
+            let body_height = if height >= 4 { height - 2 } else { height };
+            let mut body = if let Some(messages) = messages {
+                let rows = self.chat.render_typed_classified(
+                    inner_width as usize,
+                    body_height,
+                    &self.workspace,
+                    messages,
+                    draft,
+                    busy,
+                );
+                self.chat_row_classes
+                    .extend(rows.iter().map(|(_, class)| *class));
+                rows.into_iter().map(|(text, _)| text).collect::<Vec<_>>()
+            } else {
+                self.chat.render(
+                    inner_width as usize,
+                    body_height,
                     &self.workspace,
                     transcript,
                     draft,
                     busy,
-                ));
-                center
-            } else {
-                self.chat
-                    .render(w_center, height, &self.workspace, transcript, draft, busy)
+                )
+            };
+            // The upstream scrollbox starts with a spacer, rather than a
+            // permanent workspace/header row. The composer stays at its foot.
+            if body.len() > 1 {
+                body[0].clear();
             }
+            let mut body: Vec<_> = body.into_iter().map(|line| padded(&line, width)).collect();
+            if height >= 4 {
+                body.push(padded(&self.composer_metadata(), width));
+                body.push(String::new());
+            }
+            body
         } else {
-            self.pages.render(w_center, height)
+            self.home_column(width, height, draft)
         };
-        center.truncate(height);
-
-        let mut frame = compose_frame(&self.layout, &left, &center, &right);
-        frame.truncate(rows);
+        let sidebar: Vec<String> = if presentation.sidebar_width > 0 {
+            // Backend facts remain available in the optional session sidebar;
+            // the all-sessions picker is a separate page, never sidebar chrome.
+            self.status
+                .render_sidebar(38, height.saturating_sub(1))
+                .into_iter()
+                .map(|line| padded(&line, presentation.sidebar_width))
+                .collect()
+        } else {
+            Vec::new()
+        };
+        let inline = presentation.sidebar_width > 0 && self.layout.cols > 120;
+        let effective = Layout {
+            center_width: width,
+            right_width: if inline {
+                presentation.sidebar_width
+            } else {
+                0
+            },
+            rows: height as u16,
+            ..self.layout
+        };
+        let mut frame = compose_frame(&effective, &[], &center, &sidebar);
+        if !inline {
+            if let Some(offset) = presentation.sidebar_offset {
+                for (row, line) in sidebar.iter().enumerate().take(frame.len()) {
+                    frame[row] = fit(
+                        &format!(
+                            "{}{}",
+                            fit(&frame[row], offset),
+                            fit(line, presentation.sidebar_width)
+                        ),
+                        self.layout.cols,
+                    );
+                }
+            }
+        }
+        // Modal geometry is viewport-owned, rather than restricted to the
+        // conversation column: dialog.tsx medium=60, maxWidth=cols-2, top=h/4.
+        let modal_geometry = self.modal_presentation();
+        let dialog_width = modal_geometry.width;
+        let modal = if self.dialogs.is_open() {
+            self.dialogs
+                .render(dialog_width.saturating_sub(4) as usize, height)
+        } else if self.pages.page() == Page::Theme {
+            self.theme_dialog()
+        } else {
+            overlay.iter().take(height).cloned().collect()
+        };
+        let content_rows = modal
+            .iter()
+            .rposition(|line| !line.trim().is_empty())
+            .map_or(0, |i| i + 1);
+        if content_rows > 0 {
+            let left = self.layout.cols.saturating_sub(dialog_width) / 2;
+            let top = usize::from(modal_geometry.content_y);
+            // The panel's inner top padding is an empty panel row, not
+            // transcript text behind the dialog.
+            for row in usize::from(modal_geometry.y)
+                ..height.min(top.saturating_add(content_rows).saturating_add(1))
+            {
+                let line = row
+                    .checked_sub(top)
+                    .and_then(|index| modal.get(index))
+                    .filter(|_| row < top + content_rows);
+                let right = crate::native_view_layout::slice_cells(
+                    &frame[row],
+                    left + dialog_width,
+                    self.layout.cols.saturating_sub(left + dialog_width),
+                );
+                frame[row] = format!(
+                    "{}{}{}",
+                    fit(&frame[row], left),
+                    padded(line.map_or("", String::as_str), dialog_width),
+                    right
+                );
+            }
+        }
         frame
+    }
+
+    /// Pinned Home composition: centered four-row logo and a 75-cell maximum
+    /// prompt, constrained by the parent's two-cell horizontal padding.
+    fn home_column(&self, width: u16, height: usize, draft: &str) -> Vec<String> {
+        let mut rows = vec![String::new(); height];
+        if height == 0 || width == 0 {
+            return rows;
+        }
+        let prompt_width = self.home_prompt_width();
+        let left = width.saturating_sub(prompt_width) / 2;
+        let draft: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
+        let draft = crate::native_transcript::strip_ansi(&draft);
+        let input: Vec<_> = draft.split('\n').take((height / 2).clamp(1, 12)).collect();
+        let block_height = 4 + 2 + input.len() + 2;
+        let top = height.saturating_sub(block_height + 1) / 2;
+        // logo.ts marker substitutions match component/logo.tsx's glyphs;
+        // marker-specific shading is applied by the native paint layer.
+        let logo = [
+            ("                   ", "             ▄     "),
+            ("█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█"),
+            ("█__█ █__█ █^^^ █__█", "█___ █__█ █__█ █^^^"),
+            ("▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"),
+        ];
+        if height >= block_height + 1 {
+            let logo_width = width.saturating_sub(4).min(39);
+            let logo_left = width.saturating_sub(logo_width) / 2;
+            for (index, (left_line, right_line)) in logo.iter().enumerate() {
+                let line: String = format!("{left_line} {right_line}")
+                    .chars()
+                    .map(|c| match c {
+                        '_' => ' ',
+                        '^' | '~' => '▀',
+                        ',' => '▄',
+                        other => other,
+                    })
+                    .collect();
+                rows[top + index] = format!(
+                    "{}{}",
+                    " ".repeat(logo_left as usize),
+                    fit(&line, logo_width)
+                );
+            }
+        }
+        let input_top = if height >= block_height + 1 {
+            top + 6
+        } else {
+            height.saturating_sub(input.len() + 2)
+        };
+        for (index, line) in input.iter().enumerate() {
+            if input_top + index < height {
+                let normal = [
+                    "Fix a TODO in the codebase",
+                    "What is the tech stack of this project?",
+                    "Fix broken tests",
+                ];
+                let shell = ["ls -la", "git status", "pwd"];
+                let placeholder = if self.shell_mode {
+                    format!("Run a command… \"{}\"", shell[self.placeholder_index])
+                } else {
+                    format!("Ask anything… \"{}\"", normal[self.placeholder_index])
+                };
+                let label = if draft.is_empty() {
+                    placeholder.as_str()
+                } else {
+                    line
+                };
+                rows[input_top + index] = format!(
+                    "{}{}",
+                    " ".repeat(left as usize),
+                    padded(label, prompt_width)
+                );
+            }
+        }
+        let model_row = input_top + input.len();
+        if model_row < height {
+            rows[model_row] = format!(
+                "{}{}",
+                " ".repeat(left as usize),
+                padded(&self.composer_metadata(), prompt_width)
+            );
+        }
+        let mut right = env!("CARGO_PKG_VERSION").to_owned();
+        if self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
+            let connected = self
+                .status
+                .entries()
+                .iter()
+                .filter(|entry| {
+                    matches!(
+                        entry.status,
+                        crate::native_view_status::McpStatus::Connected
+                    )
+                })
+                .count();
+            right = format!("⊙ {connected} MCP /status  {right}");
+        }
+        let inner = width.saturating_sub(4);
+        let right_width = (right.chars().count().min(usize::from(inner))) as u16;
+        let left_width = inner.saturating_sub(right_width).saturating_sub(2);
+        let footer = format!(
+            "{}{}{}",
+            fit(&self.workspace, left_width),
+            " ".repeat(usize::from(inner.saturating_sub(left_width + right_width))),
+            fit(&right, right_width)
+        );
+        rows[height - 1] = padded(&footer, width);
+        rows
     }
 }
 
-/// First line only, bounded; the pane width clip happens in `native_paint`.
-fn first_line(draft: &str) -> String {
-    draft
-        .lines()
-        .next()
-        .unwrap_or_default()
-        .chars()
-        .take(MAX_RENDER_DRAFT_CHARS)
-        .collect()
+fn padded(line: &str, width: u16) -> String {
+    let padding = (width / 2).min(2);
+    format!(
+        "{}{}{}",
+        " ".repeat(padding as usize),
+        fit(line, width.saturating_sub(padding.saturating_mul(2))),
+        " ".repeat(padding as usize)
+    )
 }
 
 /// Honest startup page rows: `enabled` mirrors an actual reachable backend
@@ -837,7 +1370,10 @@ mod tests {
     }
 
     fn view_with_sessions(active: &str, ids: &[&str]) -> NativeView {
-        let mut view = NativeView::new(120, 30);
+        // Wide viewport: the status projection and session listing render in
+        // the optional 42-column sidebar (`cols > 120`), which is the only
+        // place they are painted after the main-column parity change.
+        let mut view = NativeView::new(160, 30);
         let rows: Vec<SessionRow> = ids.iter().map(|id| row(id)).collect();
         view.sessions.set_rows(rows, Some(active.to_owned()));
         view.set_session(Some(active.to_owned()));
@@ -1181,6 +1717,9 @@ mod tests {
     /// Compact/tiny frames keep whole-frame chat priority (workspace +
     /// draft visible) with no reserved chrome row.
     #[test]
+    // Contract supersession: the current explicit upstream-parity requirement
+    // replaces banner/workspace/thirds placement, preserving bounded transcript
+    // and composer priority. See upstream-ui-contract-adjudication-v1.
     fn full_frame_chat_keeps_chrome_header_transcript_and_composer_rows() {
         let mut view = NativeView::new(120, 30);
         view.set_workspace("/private/tmp/real-project".to_owned());
@@ -1193,8 +1732,8 @@ mod tests {
         let center = |i: usize| -> String { frame[i].chars().skip(lw + 1).take(cw).collect() };
         // Row 0: global chrome — banner in the left pane, center blank.
         assert!(
-            frame[0].starts_with(BANNER),
-            "banner owns frame row 0: {frame0:?}",
+            frame[0].trim().is_empty(),
+            "upstream scrollbox starts with a spacer: {frame0:?}",
             frame0 = frame[0]
         );
         assert!(
@@ -1204,13 +1743,13 @@ mod tests {
         );
         // Row 1: workspace header shows the real caller path.
         assert!(
-            center(1).contains("/private/tmp/real-project"),
-            "workspace header on frame row 1: {:?}",
+            center(1).trim().is_empty(),
+            "no permanent workspace header in the upstream scrollbox: {:?}",
             center(1)
         );
         // Rows 2..=28: empty transcript viewport — blank center cells,
         // no fabricated filler, no prompt creeping up under the header.
-        for i in 2..29 {
+        for i in 2..27 {
             assert_eq!(
                 center(i).trim(),
                 "",
@@ -1220,9 +1759,9 @@ mod tests {
         }
         // Row 29: composer prompt on the last frame row.
         assert!(
-            center(29).starts_with("> "),
-            "composer on the last frame row: {:?}",
-            center(29)
+            center(27).trim_start().starts_with("> "),
+            "composer above model metadata and upstream bottom padding: {:?}",
+            center(27)
         );
 
         // Tiny frame (2 rows): whole-frame chat priority — workspace
@@ -1233,8 +1772,8 @@ mod tests {
         let frame = tiny.render("draft here", &[], false, &[]);
         assert_eq!(frame.len(), 2);
         assert!(
-            frame[0].contains("/ws"),
-            "tiny frame keeps the workspace header: {frame0:?}",
+            frame[0].trim().is_empty(),
+            "tiny transcript spacer remains blank: {frame0:?}",
             frame0 = frame[0]
         );
         assert!(
@@ -1249,10 +1788,67 @@ mod tests {
         let frame = one.render("draft", &[], false, &[]);
         assert_eq!(frame.len(), 1);
         assert!(
-            frame[0].starts_with("> "),
+            frame[0].trim_start().starts_with("> "),
             "height-1 keeps composer priority: {frame0:?}",
             frame0 = frame[0]
         );
+    }
+
+    #[test]
+    fn home_preserves_multiline_draft_and_does_not_reserve_sidebar() {
+        let mut view = NativeView::new(160, 30);
+        view.set_session_route(false);
+        let frame = view.render("first line\n第二行", &[], false, &[]);
+        assert!(frame.iter().any(|row| row.contains("first line")));
+        assert!(frame.iter().any(|row| row.contains("第二行")));
+        assert_eq!(view.presentation().main_width, 160);
+        assert_eq!(view.presentation().sidebar_width, 0);
+        assert!(!frame.iter().any(|row| row.contains("Sessions")));
+    }
+
+    #[test]
+    fn narrow_sidebar_overlays_and_hide_reclaims_wide_main_width() {
+        let mut view = NativeView::new(120, 30);
+        assert_eq!(view.presentation().sidebar_width, 0);
+        view.toggle_sidebar();
+        assert_eq!(view.presentation().sidebar_offset, Some(78));
+        assert_eq!(view.presentation().main_width, 120);
+        view.resize(160, 30);
+        assert_eq!(view.presentation().main_width, 118);
+        view.toggle_sidebar();
+        assert_eq!(view.presentation().main_width, 160);
+        view.set_parent_session(true);
+        view.toggle_sidebar();
+        assert_eq!(view.presentation().sidebar_width, 0);
+        assert_eq!(view.presentation().main_width, 160);
+    }
+
+    #[test]
+    fn modal_and_manual_sidebar_rows_stay_within_tiny_ascii_viewports() {
+        for cols in [0, 1, 2, 3, 4, 5, 40, 60, 120] {
+            let mut view = NativeView::new(cols, 8);
+            view.toggle_sidebar();
+            let sidebar = view.render("draft", &[], false, &[]);
+            assert!(
+                sidebar
+                    .iter()
+                    .all(|line| line.chars().count() == cols as usize),
+                "sidebar {cols}: {sidebar:?}"
+            );
+            let modal = view.render(
+                "draft",
+                &[],
+                false,
+                &["API key (OpenAI)".to_owned(), "masked".to_owned()],
+            );
+            assert!(
+                modal
+                    .iter()
+                    .all(|line| line.chars().count() == cols as usize),
+                "modal {cols}: {modal:?}"
+            );
+            assert_eq!(modal.len(), if cols == 0 { 0 } else { 8 });
+        }
     }
 
     #[test]
@@ -1618,6 +2214,9 @@ mod tests {
             test_append,
         );
         assert!(result.is_err());
+        // The binding tuple is exposed through the reachable Status page,
+        // rather than the superseded permanently visible status column.
+        view.open_page(Page::Status);
         let frame = view.render("a-draft", &transcript, false, &[]);
         assert!(
             frame.iter().any(|r| r.contains("session: Alpha (live)")),
@@ -1653,6 +2252,7 @@ mod tests {
             test_append,
         );
         assert!(result2.is_err());
+        view2.open_page(Page::Status);
         let frame2 = view2.render("a-draft", &transcript2, false, &[]);
         assert!(
             frame2.iter().any(|r| r.contains("session: Alpha (live)")),
@@ -1702,6 +2302,7 @@ mod tests {
             )
             .expect("bind commits");
         assert_eq!(commit.session_id, B);
+        view.open_page(Page::Status);
         let frame = view.render("draft-a", &transcript, false, &[]);
         // `fresh` is the accepted authenticated listing — the exact payload
         // the `LiveSnapshot` title comes from — so id and title commit
@@ -1775,6 +2376,7 @@ mod tests {
             )
             .expect("bind commits");
         assert_eq!(commit.session_id, B);
+        view.open_page(Page::Status);
         let frame = view.render("draft-a", &transcript, false, &[]);
         assert!(frame.iter().any(|r| r.contains("session: Beta (live)")));
         assert!(

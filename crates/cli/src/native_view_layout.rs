@@ -1,40 +1,24 @@
 #![forbid(unsafe_code)]
-//! Visible three-pane / compact shell geometry and frame composition.
+//! Main-column shell geometry and frame composition.
 //!
-//! Pure and synchronous: geometry ([`Layout`]) plus a frame composer that
-//! paints caller-owned left/center/right content lines into exact terminal
-//! cell positions. No IO, no clock, no backend/state access, no ANSI output.
-//! Every returned row is plain text whose display width is exactly the
-//! viewport width, so painting the full frame clears the previous region
-//! cell-exactly (no stale interior header/content/footer cells).
+//! Pure and synchronous: geometry ([`Layout`]) plus a frame composer. No IO,
+//! no clock, no backend/state access, no ANSI output. Every returned row is
+//! plain text whose display width is exactly the viewport width, so painting
+//! the full frame clears the previous region cell-exactly.
 //!
-//! Spatial contract at the installed gate geometry (120x30, thirds of 120):
-//! * vertical pane borders at columns 40 and 80 (harness window +/-2),
-//! * left interior columns 0..40 carries the caller's `Sessions` heading,
-//! * center interior 41..80 carries workspace rows and the composer row,
-//! * right interior 81..120 carries the caller's `Status` and `MCP` headings.
+//! Contract: upstream `packages/tui/src/routes/session/index.tsx:255-278`
+//! (SPEC `upstream-tui-layout-parity-v1`, pin
+//! `95daf90670b7c039c436c85537da5fbfe2205b41`) has no permanent left
+//! all-sessions pane and no permanent right status/MCP pane. The main area is
+//! one growing column. An inline sidebar is a FIXED 42-column box, present
+//! only when `cols > 120` (strict) and the height can host it; the left width
+//! is always zero and no separator cell is drawn:
+//! `left_width + center_width + right_width == cols`.
 //!
-//! A center line whose first non-space is `>` marks the composer row. That
-//! row is *reserved* in the left flow: left items shift to the next free row
-//! so none is silently discarded, and the left border cell renders as a blank
-//! there so the prompt owns the row up to the center third. When more left
-//! items exist than free rows, the last free row carries an explicit
-//! `+N more` overflow marker instead of a silent drop. Borders stay present
-//! on every other row.
-//!
-//! No-silent-loss holds whenever at least one non-reserved row exists (full
-//! shell at [`MIN_FULL_HEIGHT`] rows or more, compact with two or more
-//! rows). Below that height the viewport is compact and center-priority:
-//! row 0 carries center content (e.g. the Help line), side panes are hidden
-//! by that documented policy and the frame makes no all-items-visible claim
-//! there; the compact overflow marker needs two rows so it never displaces
-//! content.
-//!
-//! Panes never overlap: `left_width + 1 + center_width + 1 + right_width ==
-//! cols`. Below [`MIN_FULL_COLS`] columns the shell is `compact`: one column,
-//! center content first (center is prioritized), then left, then right, with
-//! no borders and no overlaid/invisible panes. Zero or tiny viewports are
-//! safe: no out-of-range cells, no UTF-8 slicing, bounded output.
+//! The upstream view padding (`contentWidth = cols - 42 - 4`) is applied by
+//! the view, NOT folded into the layout: [`Layout::center_width`] is the outer
+//! `cols - right_width`. Zero or tiny viewports are safe: no out-of-range
+//! cells, no UTF-8 slicing, bounded output.
 //!
 //! Rendering is a bounded streaming scan: each line is inspected for at most
 //! `width * MAX_CLUSTER_BYTES + SCAN_OVERHEAD_BYTES` bytes (so an
@@ -46,11 +30,14 @@
 //! cluster boundaries only: no dangling ZWJ, orphan variation selector, half
 //! flag or combining-only atom is ever emitted.
 
-use std::borrow::Cow;
 use std::cmp::{max, min};
 
-/// Below this many columns the full three-pane shell cannot exist.
-const MIN_FULL_COLS: u16 = 80;
+/// Fixed inline sidebar width when the wide layout is active (upstream
+/// `session/index.tsx`: an inline box of exactly 42 columns).
+const SIDEBAR_WIDTH: u16 = 42;
+/// Strict width threshold: the sidebar appears only when `cols > 120`
+/// (upstream `wide = terminal_width > 120`).
+const WIDE_MIN_COLS: u16 = 120;
 /// Hard cap on composed frame cells (`cols * rows`), so a hostile or absurd
 /// viewport cannot allocate unbounded memory.
 const MAX_FRAME_CELLS: usize = 1 << 20;
@@ -69,103 +56,75 @@ const MAX_CLUSTER_BASES: usize = 4;
 const SCAN_OVERHEAD_BYTES: usize = 256;
 /// ZWJ (U+200D): joins the next base into one cluster.
 const ZWJ: char = '\u{200D}';
-/// Below this viewport height the full shell cannot reserve a composer row
-/// without silently dropping left content: short viewports use the compact
-/// center-priority row (`Layout::new` reports `compact`), side panes are
-/// hidden by that documented policy, and the frame makes no all-visible
-/// claim there.
+/// Below this viewport height the shell cannot reserve a composer row, so the
+/// sidebar is suppressed (height-safe guard).
 const MIN_FULL_HEIGHT: u16 = 2;
 /// A completed regional-indicator (flag) pair renders as one 2-cell glyph;
 /// never the naive scalar sum of its two RI halves.
 const FLAG_PAIR_CELLS: usize = 2;
-/// Vertical pane border glyph (member of the frozen harness
-/// `VERTICAL_BORDER = "│|┃"` set).
-const BORDER: char = '│';
 
 /// Viewport geometry for the native shell frame.
 ///
-/// Widths are *interior* content widths in cells; each full-shell pane pair
-/// is divided by exactly one border cell, so the three widths plus two border
-/// cells sum to `cols`. In compact mode the side widths are zero and
-/// `center_width == cols`.
+/// Widths are outer column counts. `left_width` is always zero (upstream has
+/// no permanent left all-sessions pane). `right_width` is the fixed 42-column
+/// sidebar when active, else zero. `center_width == cols - right_width`; no
+/// separator cells exist between columns.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct Layout {
     /// Viewport width in cells.
     pub cols: u16,
     /// Viewport height in rows.
     pub rows: u16,
-    /// Left (Sessions) pane interior width in cells.
+    /// Left pane width in cells: always zero.
     pub left_width: u16,
-    /// Center (workspace + composer) pane interior width in cells.
+    /// Main-column outer width in cells (`cols - right_width`).
     pub center_width: u16,
-    /// Right (Status + MCP) pane interior width in cells.
+    /// Right sidebar outer width in cells: `SIDEBAR_WIDTH` or zero.
     pub right_width: u16,
-    /// True below 80 columns: single column, center prioritized, no borders.
+    /// True for a zero-area viewport (nothing to paint).
     pub compact: bool,
 }
 
 impl Layout {
     /// Geometry for a `cols x rows` viewport.
     ///
-    /// Full shell (`cols >= 80` and `rows >= 2`): `left_width = cols / 3`,
-    /// `right_width = cols / 3 - 1`, `center_width` takes the rest minus two
-    /// border cells, putting the borders at columns `cols / 3` and `cols -
-    /// cols / 3` (40 and 80 at 120 columns). Compact (`cols < 80`, or a
-    /// height below [`MIN_FULL_HEIGHT`] where reserving a composer row would
-    /// silently drop left content): side panes collapse to zero and the
-    /// center takes the full width — a documented center-priority row that
-    /// hides side content instead of claiming every item is visible. `rows`
-    /// only bounds how many rows [`compose_frame`] emits; any value
-    /// (including zero) is safe.
+    /// `right_width = SIDEBAR_WIDTH` only when `cols > WIDE_MIN_COLS` and
+    /// `rows >= MIN_FULL_HEIGHT`; otherwise zero. `center_width` takes the
+    /// remaining columns and `left_width` is always zero, so
+    /// `left_width + center_width + right_width == cols`. `compact` flags a
+    /// zero-area viewport; any `cols`/`rows` (including zero) is safe.
     #[must_use]
     pub fn new(cols: u16, rows: u16) -> Layout {
-        if cols < MIN_FULL_COLS || rows < MIN_FULL_HEIGHT {
-            return Layout {
-                cols,
-                rows,
-                left_width: 0,
-                center_width: cols,
-                right_width: 0,
-                compact: true,
-            };
-        }
-        // cols >= 80 implies cols / 3 >= 26, so this subtraction cannot
-        // underflow and every pane keeps at least one interior cell.
-        let left_width = cols / 3;
-        let right_width = cols / 3 - 1;
-        let center_width = cols - left_width - right_width - 2;
+        let right_width = if cols > WIDE_MIN_COLS && rows >= MIN_FULL_HEIGHT {
+            SIDEBAR_WIDTH
+        } else {
+            0
+        };
         Layout {
             cols,
             rows,
-            left_width,
-            center_width,
+            left_width: 0,
+            center_width: cols.saturating_sub(right_width),
             right_width,
-            compact: false,
+            compact: cols == 0 || rows == 0,
         }
     }
 }
 
-/// Compose one full frame from caller-owned pane content.
+/// Compose one frame from caller-owned main-column content.
 ///
-/// `left`, `center` and `right` are the caller's actual pane lines (headings,
-/// content, footer); this module renders them at the positions [`Layout`]
-/// declares and never fabricates pane metrics or backend data. The result has
-/// exactly `min(layout.rows, cell_budget / layout.cols)` rows (empty when
-/// `cols` or `rows` is zero) and every row has a display width of exactly
-/// `layout.cols` cells, so painting the whole frame clears the old region
-/// exactly. Missing rows render as blanks; extra content is truncated at the
-/// pane boundary on a cell boundary (wide glyphs are never split, combining
-/// marks stay with their base, control bytes and ANSI sequences never reach
-/// the frame).
-///
-/// Compact layout stacks center first (center is prioritized), then left,
-/// then right; full layout paints `left | center | right` on every row, with
-/// the composer row (center line starting with `>`) reserved out of the left
-/// flow so no left item is discarded and the prompt sits inside the center
-/// third. Overflow in any flow becomes an explicit `+N more` row.
+/// `center` is the main column (chat/page/dialog body) and `right` is the
+/// optional sidebar; `left` is accepted for API compatibility and ignored —
+/// upstream has no permanent left all-sessions pane at any width, so its
+/// content must never be painted. Every row is exactly `layout.cols` cells
+/// wide (missing rows are blank; extra content is clipped on a cell boundary:
+/// wide glyphs are never split, combining marks stay with their base, control
+/// bytes and ANSI sequences never reach the frame). At most
+/// `min(rows, cell_budget / cols)` rows are emitted; zero-area viewports emit
+/// nothing.
 pub fn compose_frame(
     layout: &Layout,
-    left: &[String],
+    _left: &[String],
     center: &[String],
     right: &[String],
 ) -> Vec<String> {
@@ -176,157 +135,20 @@ pub fn compose_frame(
     }
     let row_budget = max(1, MAX_FRAME_CELLS / cols);
     let used = min(rows, row_budget);
-    // Short viewports normalize to the compact center-priority policy even
-    // when a hand-built `Layout` claims full mode: height 1 cannot reserve a
-    // composer row without silent loss, so side panes are hidden by the same
-    // documented rule `Layout::new` applies.
-    let compact = layout.compact || rows < usize::from(MIN_FULL_HEIGHT);
-    // One composer row in the center flow; the left flow reserves it.
-    let composer_row = if compact {
-        None
-    } else {
-        center.iter().take(used).position(|line| is_composer(line))
-    };
     let mut frame = Vec::with_capacity(used);
     for row in 0..used {
-        let line: Cow<'_, str> = if compact {
-            stacked_row(center, left, right, row, used)
-        } else {
-            Cow::Owned(three_pane_row(
-                layout,
-                left,
-                center,
-                right,
-                row,
-                used,
-                composer_row,
-            ))
-        };
+        // Main column first, then the optional fixed sidebar, concatenated
+        // with no separator cell. The sidebar is the exception, not a
+        // permanent status pane.
+        let mut line = fit(line_at(center, row), layout.center_width);
+        if layout.right_width > 0 {
+            line.push_str(&fit(line_at(right, row), layout.right_width));
+        }
         // Trust-boundary normalization: even a hand-built `Layout` with
         // inconsistent widths yields an in-range, exactly-wide row.
         frame.push(fit(&line, layout.cols));
     }
     frame
-}
-
-/// One full-shell row: `left | center | right`, each segment padded to its
-/// pane width so cell positions are exact (never byte-length based). The
-/// composer row is reserved out of the left flow (see [`flow_line`]), so a
-/// non-blank left item is shifted, never overwritten, and the left border
-/// cell is blank only on the composer row itself.
-fn three_pane_row(
-    layout: &Layout,
-    left: &[String],
-    center: &[String],
-    right: &[String],
-    row: usize,
-    rows: usize,
-    composer_row: Option<usize>,
-) -> String {
-    let composer = composer_row == Some(row);
-    let left_line = if composer {
-        Cow::Borrowed("")
-    } else {
-        flow_line(left, rows, composer_row, row)
-    };
-    let mut line = fit(&left_line, layout.left_width);
-    line.push(if composer { ' ' } else { BORDER });
-    line.push_str(&fit(line_at(center, row), layout.center_width));
-    line.push(BORDER);
-    line.push_str(&fit(&flow_line(right, rows, None, row), layout.right_width));
-    line
-}
-
-/// Map pane content onto rows without silently discarding items.
-///
-/// `reserved` rows (the composer row in the left flow) are never written, so
-/// items shift to the next free row instead of being overwritten. When more
-/// items exist than free rows, the last free row carries an explicit
-/// `+N more` marker: the overflow count is honest and incoming state is never
-/// mutated. Items beyond the marker row are counted, not rendered.
-///
-/// The `available == 0` guard is unreachable through [`compose_frame`]:
-/// viewports shorter than [`MIN_FULL_HEIGHT`] rows normalize to the compact
-/// center-priority path (`stacked_row`), so every full-shell flow here has
-/// at least one non-reserved row. It remains only as a defensive fallback
-/// for direct calls.
-fn flow_line<'a>(
-    lines: &'a [String],
-    rows: usize,
-    reserved: Option<usize>,
-    row: usize,
-) -> Cow<'a, str> {
-    let reserved = reserved.filter(|&r| r < rows);
-    if reserved == Some(row) {
-        return Cow::Borrowed("");
-    }
-    let available = rows.saturating_sub(reserved.is_some() as usize);
-    if available == 0 {
-        return Cow::Borrowed("");
-    }
-    let index = match reserved {
-        Some(r) if row > r => row - 1,
-        _ => row,
-    };
-    if lines.len() <= available {
-        return match lines.get(index) {
-            Some(line) => Cow::Borrowed(line.as_str()),
-            None => Cow::Borrowed(""),
-        };
-    }
-    // Overflow: keep the first `available - 1` items, mark the last free row.
-    let keep = available.saturating_sub(1);
-    if row == last_free_row(rows, reserved) {
-        return Cow::Owned(format!("+{} more", lines.len() - keep));
-    }
-    match lines.get(index) {
-        Some(line) if index < keep => Cow::Borrowed(line.as_str()),
-        _ => Cow::Borrowed(""),
-    }
-}
-
-/// Last row index usable by [`flow_line`] (rows are 1-based-free of the
-/// reserved row; `available == 0` is filtered by the caller).
-fn last_free_row(rows: usize, reserved: Option<usize>) -> usize {
-    match reserved {
-        Some(r) if r == rows - 1 && rows >= 2 => rows - 2,
-        _ => rows - 1,
-    }
-}
-
-/// True when this center line is the composer prompt: its first non-space
-/// scalar is `>`. Only center lines are classified, so a `>` in pane content
-/// elsewhere never steals a row.
-fn is_composer(center_line: &str) -> bool {
-    center_line.trim_start().starts_with('>')
-}
-
-/// One compact row: center content first, then left, then right, all at full
-/// width and with no borders, so nothing is overlaid while the center pane
-/// keeps priority. When the stack does not fit the viewport, the last row is
-/// an explicit `+N more` marker instead of a silent tail drop.
-fn stacked_row<'a>(
-    center: &'a [String],
-    left: &'a [String],
-    right: &'a [String],
-    row: usize,
-    rows: usize,
-) -> Cow<'a, str> {
-    let total = center.len() + left.len() + right.len();
-    // Height 1 keeps center content on row 0 (center priority wins the sole
-    // row; the tail is hidden by the documented short-viewport policy). The
-    // overflow marker needs at least two rows so it never displaces content.
-    if rows >= 2 && total > rows && row + 1 == rows {
-        return Cow::Owned(format!("+{} more", total.saturating_sub(rows - 1)));
-    }
-    let mut index = row;
-    for slice in [center, left, right] {
-        if index < slice.len() {
-            return Cow::Borrowed(slice[index].as_str());
-        }
-        index -= slice.len();
-    }
-    Cow::Borrowed("")
 }
 
 /// Row `row` of a pane slice, or an empty line when the caller passed fewer
@@ -353,7 +175,7 @@ fn scan_budget(width: usize) -> usize {
 /// whole and the tail is padded visibly. Retained bytes stay bounded by
 /// `width * MAX_CLUSTER_BYTES + width` (clusters plus padding); the scan
 /// itself stops at [`scan_budget`].
-fn fit(line: &str, width: u16) -> String {
+pub(crate) fn fit(line: &str, width: u16) -> String {
     let budget = usize::from(width);
     if budget == 0 {
         return String::new();
@@ -470,6 +292,72 @@ fn fit(line: &str, width: u16) -> String {
         used += 1;
     }
     out
+}
+
+/// Visit sanitized display clusters, preserving the same bounded segmentation
+/// used by `fit`. Native styling can change at cell coordinates without
+/// splitting combining sequences, flags or joined emoji.
+pub(crate) fn visit_cells(line: &str, width: u16, mut visit: impl FnMut(u16, &str, u16)) {
+    let text = fit(line, width);
+    let mut cluster = Cluster::default();
+    let mut x = 0u16;
+    for c in text.chars() {
+        if is_continuation(c) {
+            if !cluster.is_empty() {
+                cluster.push_cont(c);
+            }
+            continue;
+        }
+        if !cluster.is_empty()
+            && ((cluster.last_was_zwj && cluster.can_join(c))
+                || (is_regional(c)
+                    && cluster.regional == 1
+                    && cluster.bases == 1
+                    && cluster.conts == 0))
+        {
+            let flag = is_regional(c) && cluster.regional == 1;
+            cluster.join(c, usize::from(char_width(c)));
+            if flag {
+                cluster.regional = 2;
+            }
+            continue;
+        }
+        if let Some((glyph, cells)) = cluster.finish() {
+            visit(x, &glyph, cells as u16);
+            x = x.saturating_add(cells as u16);
+        }
+        cluster.push_base(c, usize::from(char_width(c)));
+        if is_regional(c) {
+            cluster.regional = 1;
+        }
+    }
+    if let Some((glyph, cells)) = cluster.finish() {
+        visit(x, &glyph, cells as u16);
+    }
+}
+
+/// Extract a display-cell interval; glyphs crossing either boundary become
+/// spaces rather than partial Unicode clusters.
+pub(crate) fn slice_cells(line: &str, start: u16, width: u16) -> String {
+    let end = start.saturating_add(width);
+    let mut result = String::new();
+    let mut used = 0u16;
+    visit_cells(line, end, |x, glyph, cells| {
+        if x >= start && x.saturating_add(cells) <= end {
+            let offset = x - start;
+            while used < offset {
+                result.push(' ');
+                used += 1;
+            }
+            result.push_str(glyph);
+            used += cells;
+        }
+    });
+    while used < width {
+        result.push(' ');
+        used += 1;
+    }
+    result
 }
 
 /// True for zero-width cluster continuations: combining marks, variation
@@ -734,233 +622,151 @@ const WIDE_RANGES: &[(u32, u32)] = &[
 mod tests {
     use super::*;
 
+    /// Vertical pane border from the frozen harness set: a main-only column
+    /// must never draw one.
+    const BORDER: char = '│';
+
     fn line(s: &str) -> String {
         s.to_owned()
     }
 
-    /// Display cells of a composed row (must equal `cols` for every row).
+    /// Display cells of a composed row.
     fn cells(row: &str) -> usize {
         row.chars()
             .map(|c| usize::from(char_width(c)))
             .sum::<usize>()
     }
 
-    /// Scalar at cell/column `col` when the row is ASCII (cells == scalars).
-    fn char_at(row: &str, col: usize) -> Option<char> {
-        row.chars().nth(col)
+    fn compose(cols: u16, rows: u16, center: &[String], right: &[String]) -> Vec<String> {
+        compose_frame(&Layout::new(cols, rows), &[], center, right)
     }
 
-    /// Start column (scalar index) of `needle`, or `None`.
-    fn find(row: &str, needle: &str) -> Option<usize> {
-        let hay: Vec<char> = row.chars().collect();
-        let pin: Vec<char> = needle.chars().collect();
-        if pin.is_empty() || pin.len() > hay.len() {
-            return None;
+    // Contract note: the former permanent three-pane shell (left `Sessions`
+    // + center + right `Status`/`MCP`, thirds with `│` borders) is superseded
+    // by upstream `session/index.tsx:255-278` (no permanent left all-sessions
+    // pane; a fixed 42-column sidebar only when `cols > 120`) and by the
+    // user's explicit layout-parity requirement. Expectations below are
+    // re-pinned to that contract; unicode, control-stripping and resource
+    // bound assertions are preserved.
+
+    #[test]
+    fn main_only_at_120_and_below_has_no_left_or_right_pane() {
+        for cols in [0u16, 1, 10, 40, 60, 79, 80, 120] {
+            let layout = Layout::new(cols, 24);
+            assert_eq!(layout.left_width, 0, "{cols}: no left pane");
+            assert_eq!(layout.right_width, 0, "{cols}: no sidebar at <= 120");
+            assert_eq!(layout.center_width, cols, "{cols}: main spans viewport");
         }
-        (0..=hay.len() - pin.len()).find(|&i| hay[i..i + pin.len()] == pin[..])
-    }
-
-    /// Scalar index of the first non-space cell (leading indent).
-    fn indent(row: &str) -> usize {
-        row.chars().take_while(|c| *c == ' ').count()
-    }
-
-    fn installed_frame() -> Vec<String> {
         let layout = Layout::new(120, 30);
-        let left = vec![
-            line("OpenCode RK (native)"),
-            line("model: unset"),
-            line("Sessions"),
-            line("chat one"),
-        ];
+        assert!(!layout.compact, "120x30 is the normal main shell");
+        assert_eq!(
+            usize::from(layout.center_width) - 4,
+            116,
+            "logical content width after the view's 2+2 padding (SPEC matrix)"
+        );
+    }
+
+    #[test]
+    fn fixed_42_sidebar_above_120_never_thirds() {
+        for (cols, center) in [
+            (121u16, 79u16),
+            (122, 80),
+            (132, 90),
+            (160, 118),
+            (200, 158),
+        ] {
+            let layout = Layout::new(cols, 30);
+            assert!(!layout.compact, "{cols} is the normal main shell");
+            assert_eq!(layout.left_width, 0, "{cols}: no permanent left pane");
+            assert_eq!(
+                layout.right_width, SIDEBAR_WIDTH,
+                "{cols}: sidebar is the fixed 42-column box"
+            );
+            assert_eq!(layout.center_width, center, "{cols}: center = cols - 42");
+            assert_eq!(
+                layout.left_width + layout.center_width + layout.right_width,
+                layout.cols,
+                "{cols}: fills the viewport with no separator cells"
+            );
+        }
+        assert_eq!(usize::from(Layout::new(121, 30).center_width) - 4, 75);
+        assert_eq!(usize::from(Layout::new(160, 30).center_width) - 4, 114);
+    }
+
+    #[test]
+    fn short_viewport_suppresses_sidebar() {
+        let layout = Layout::new(160, 1);
+        assert_eq!(layout.right_width, 0, "sidebar needs enough height");
+        assert_eq!(layout.center_width, 160, "main keeps the full width");
+    }
+
+    #[test]
+    fn main_column_never_draws_left_or_right_or_borders() {
         let center = vec![
             line("workspace line alpha"),
             line("workspace line beta"),
-            line("> "),
+            line("> prompt"),
         ];
         let right = vec![line("Status"), line("MCP"), line("idle")];
-        compose_frame(&layout, &left, &center, &right)
-    }
-
-    #[test]
-    fn full_shell_geometry_splits_120x30_into_thirds() {
-        let layout = Layout::new(120, 30);
-        assert!(!layout.compact, "120x30 must not be compact");
-        assert_eq!(layout.left_width, 40);
-        assert_eq!(layout.center_width, 39);
-        assert_eq!(layout.right_width, 39);
-        assert_eq!(
-            layout.left_width + layout.center_width + layout.right_width + 2,
-            layout.cols,
-            "interior widths plus two borders must fill the viewport"
-        );
-        let frame = installed_frame();
+        let frame = compose(120, 30, &center, &right);
         assert_eq!(frame.len(), 30, "every viewport row is emitted");
         for (index, row) in frame.iter().enumerate() {
             assert_eq!(cells(row), 120, "row {index} must span 120 cells");
+            assert!(!row.contains(BORDER), "row {index}: no pane separators");
+            assert!(!row.contains("Status"), "row {index}: right pane hidden");
+            assert!(!row.contains("MCP"), "row {index}: right pane hidden");
         }
-    }
-
-    #[test]
-    fn pane_borders_sit_on_third_boundaries_on_enough_rows() {
-        let frame = installed_frame();
-        let mut left_rows = 0usize;
-        let mut right_rows = 0usize;
-        for row in &frame {
-            if char_at(row, 40) == Some(BORDER) {
-                left_rows += 1;
-            }
-            if char_at(row, 80) == Some(BORDER) {
-                right_rows += 1;
-            }
-        }
-        let need = 30 / 3;
-        assert!(
-            left_rows >= need,
-            "left border on {left_rows} rows, need >= {need}"
-        );
-        assert!(
-            right_rows >= need,
-            "right border on {right_rows} rows, need >= {need}"
-        );
-        // Borders live at the expected third columns, never elsewhere.
-        for row in &frame {
-            for col in 38..=42 {
-                if col != 40 {
-                    assert_ne!(char_at(row, col), Some(BORDER));
-                }
-            }
-            for col in 78..=82 {
-                if col != 80 {
-                    assert_ne!(char_at(row, col), Some(BORDER));
-                }
-            }
-        }
-    }
-
-    #[test]
-    fn left_heading_and_right_status_mcp_land_in_their_thirds() {
-        let frame = installed_frame();
-        // Frozen harness semantics (`screen_grid.left_heading`): the label
-        // counts wherever it occurs so long as it sits fully inside the left
-        // third — the probe scans every row. The composer row (center index
-        // 2) reserves left row 2 under the non-loss flow, so the heading
-        // shifts to the next free row instead of being discarded; the old
-        // `frame[2]` pin encoded the blanked composer row and could not hold
-        // under any non-loss policy.
-        let heading_row = frame
-            .iter()
-            .position(|row| row.contains("Sessions"))
-            .expect("Sessions heading visible in the left pane");
-        let sessions = find(&frame[heading_row], "Sessions").expect("Sessions heading");
-        assert!(
-            sessions + "Sessions".len() <= 40,
-            "Sessions at {sessions} must sit fully in the left third"
-        );
-        let status = find(&frame[0], "Status").expect("Status heading");
-        assert!(
-            status >= 80 && status + "Status".len() <= 120,
-            "Status at {status} must sit in the right third"
-        );
-        let mcp = find(&frame[1], "MCP").expect("MCP heading");
-        assert!(mcp >= 80 && mcp + "MCP".len() <= 120, "MCP at {mcp}");
-        let sessions_end = sessions + "Sessions".len();
-        assert!(
-            sessions_end <= 40 && 80 <= status,
-            "panes must not share columns: left ends {sessions_end}, right starts {status}"
-        );
-    }
-
-    #[test]
-    fn center_carries_workspace_above_a_composer_row() {
-        let frame = installed_frame();
-        let banner = frame
-            .iter()
-            .position(|row| row.contains("OpenCode RK (native)"))
-            .expect("banner row");
-        let composer = frame
-            .iter()
-            .position(|row| {
-                let indent = indent(row);
-                (40..80).contains(&indent) && row.chars().nth(indent) == Some('>')
-            })
-            .expect("composer row inside the center third");
-        assert!(
-            banner < composer,
-            "composer must render below the banner/workspace"
-        );
-        let workspace = (banner + 1..composer).find(|&row| {
-            let band: String = frame[row].chars().skip(40).take(40).collect();
-            !band.trim().is_empty()
-        });
-        assert!(
-            workspace.is_some(),
-            "a workspace row with content must sit between banner and composer"
-        );
-    }
-
-    #[test]
-    fn zero_and_tiny_viewports_stay_safe() {
-        for (cols, rows) in [(0, 0), (0, 30), (120, 0), (1, 1), (79, 1), (80, 2)] {
-            let layout = Layout::new(cols, rows);
-            let frame = compose_frame(&layout, &[line("Sessions")], &[line("> x")], &[line("MCP")]);
+        for (index, body) in center.iter().enumerate() {
             assert!(
-                frame.len() <= usize::from(rows),
-                "{cols}x{rows} must not emit more rows than it has"
+                frame[index].contains(body.as_str()),
+                "main row {index} retained"
             );
-            for row in &frame {
-                assert_eq!(
-                    cells(row),
-                    usize::from(cols),
-                    "{cols}x{rows} row width mismatch"
-                );
-            }
         }
-        assert!(Layout::new(0, 0).compact, "zero width is compact");
-        assert!(!Layout::new(80, 24).compact, "80x24 fits the full shell");
     }
 
     #[test]
-    fn compact_center_is_prioritized_without_overlays() {
-        let layout = Layout::new(79, 30);
-        assert!(layout.compact, "below 80 columns must be compact");
-        assert_eq!(layout.left_width, 0);
-        assert_eq!(layout.center_width, 79);
-        assert_eq!(layout.right_width, 0);
-        let frame = compose_frame(
-            &layout,
-            &[line("Sessions")],
-            &[line("center one"), line("> x")],
-            &[line("Status"), line("MCP")],
-        );
-        assert_eq!(frame.len(), 30);
+    fn left_content_is_never_painted() {
+        let left = vec![line("OpenCode RK (native)"), line("Sessions")];
+        let frame = compose_frame(&Layout::new(120, 30), &left, &[line("main")], &[]);
         for (index, row) in frame.iter().enumerate() {
-            assert_eq!(cells(row), 79, "row {index} spans the full width");
-            assert!(!row.contains(BORDER), "compact mode draws no pane borders");
+            assert!(!row.contains("Sessions"), "row {index}: left leaked");
+            assert!(
+                !row.contains("OpenCode RK (native)"),
+                "row {index}: left banner leaked"
+            );
         }
-        assert_eq!(
-            frame[0].trim_end(),
-            "center one",
-            "center content owns the first row"
+    }
+
+    #[test]
+    fn wide_sidebar_is_concatenated_without_a_separator() {
+        let frame = compose(
+            160,
+            3,
+            &[line("main0"), line("main1"), line("main2")],
+            &[line("side0"), line("side1"), line("side2")],
         );
-        assert!(
-            frame.iter().any(|row| row.contains("Sessions")),
-            "left content stays visible after center"
-        );
-        assert!(
-            frame.iter().any(|row| row.contains("MCP")),
-            "right content stays visible after center"
-        );
+        assert_eq!(frame.len(), 3);
+        for (index, row) in frame.iter().enumerate() {
+            assert_eq!(cells(row), 160, "row {index} spans 160 cells");
+            assert!(!row.contains(BORDER), "row {index}: no separator");
+        }
+        assert!(frame[0].starts_with("main0"));
+        let sidebar: String = frame[0].chars().skip(160 - 42).collect();
+        assert!(sidebar.starts_with("side0"), "sidebar paints at cols - 42");
     }
 
     #[test]
     fn wide_and_combining_glyphs_keep_exact_cell_width() {
-        let layout = Layout::new(120, 30);
-        let frame = compose_frame(
-            &layout,
-            &[line("日本語テスト")],
-            &[line("e\u{0301} combining"), line("\u{1F600} emoji")],
-            &[line(&"漢".repeat(50))],
+        let frame = compose(
+            120,
+            30,
+            &[
+                line("日本語テスト"),
+                line("e\u{0301} combining"),
+                line("\u{1F600} emoji"),
+                line(&"漢".repeat(50)),
+            ],
+            &[],
         );
         for (index, row) in frame.iter().enumerate() {
             assert_eq!(
@@ -969,32 +775,28 @@ mod tests {
                 "row {index} must stay 120 cells with wide glyphs"
             );
         }
+        assert!(frame[0].contains("日本語"), "wide glyphs are never sliced");
         assert!(
-            find(&frame[0], "日本語").is_some(),
-            "wide glyphs are never sliced or split"
-        );
-        assert!(
-            frame[0].contains('漢'),
-            "right pane wide text is truncated on a cell boundary"
-        );
-        assert!(
-            frame[0].contains("e\u{0301}"),
+            frame[1].contains("e\u{0301}"),
             "combining marks stay attached to their kept base"
         );
         assert!(
-            frame[0].contains("combining"),
+            frame[1].contains("combining"),
             "zero-width marks behind a base keep alignment"
+        );
+        assert!(
+            frame[3].contains('漢'),
+            "wide text truncates on a cell boundary"
         );
     }
 
     #[test]
     fn control_and_ansi_bytes_never_reach_the_frame() {
-        let layout = Layout::new(120, 30);
-        let frame = compose_frame(
-            &layout,
-            &[line("\x1b[31mSessions\x1b[0m\x07")],
+        let frame = compose(
+            160,
+            30,
             &[line("line1\nline2\ttab\x1b]0;title\x07")],
-            &[line("MCP\x7f\x00")],
+            &[line("\x1b[31mSessions\x1b[0m\x07")],
         );
         for (index, row) in frame.iter().enumerate() {
             for c in row.chars() {
@@ -1002,31 +804,21 @@ mod tests {
             }
             assert!(!row.contains('\x1b'), "row {index} leaked ESC");
         }
-        assert!(frame[0].contains("Sessions"), "CSI payload is stripped");
-        assert!(!frame[0].contains("31m"), "no CSI residue");
-        // Single-line panes compose on row 0; intent unchanged: sanitized
-        // text and right-pane content reach the frame, controls do not.
         assert!(
             frame[0].contains("line1 line2 tab"),
             "controls became spaces"
         );
-        assert!(frame[0].contains("MCP"));
+        assert!(!frame[0].contains("31m"), "no CSI residue in the sidebar");
     }
 
     #[test]
     fn long_lines_are_bounded_to_the_pane() {
-        let layout = Layout::new(120, 30);
         let long = "x".repeat(10_000);
-        let frame = compose_frame(
-            &layout,
-            &[line(long.as_str())],
-            &[line("workspace"), line("> hi")],
-            &[line("MCP")],
-        );
+        let frame = compose(160, 30, &[line(&long)], &[line(&long)]);
         assert_eq!(frame.len(), 30);
         for (index, row) in frame.iter().enumerate() {
-            assert_eq!(cells(row), 120, "row {index} width");
-            assert!(row.chars().count() <= 120, "row {index} scalar bound");
+            assert_eq!(cells(row), 160, "row {index} width");
+            assert!(row.chars().count() <= 160, "row {index} scalar bound");
         }
     }
 
@@ -1034,7 +826,7 @@ mod tests {
     fn absurd_viewports_are_bounded() {
         let layout = Layout::new(u16::MAX, u16::MAX);
         let frame = compose_frame(&layout, &[], &[], &[]);
-        let cap = max(1, MAX_FRAME_CELLS / usize::from(u16::MAX));
+        let cap = std::cmp::max(1, MAX_FRAME_CELLS / usize::from(u16::MAX));
         assert!(
             frame.len() <= cap,
             "composed rows {} exceed the cell budget {cap}",
@@ -1046,26 +838,26 @@ mod tests {
     }
 
     #[test]
-    fn thirds_hold_for_common_full_widths() {
-        for cols in [80u16, 81, 99, 100, 120, 132, 200, 400] {
-            let layout = Layout::new(cols, 24);
-            assert!(!layout.compact, "{cols} columns is the full shell");
-            assert_eq!(
-                layout.left_width + layout.center_width + layout.right_width + 2,
-                cols,
-                "{cols}: widths must sum with the two borders"
-            );
-            let left_border = layout.left_width;
-            let right_border = layout.left_width + 1 + layout.center_width;
+    fn zero_and_tiny_viewports_stay_safe() {
+        for (cols, rows) in [
+            (0, 0),
+            (0, 30),
+            (120, 0),
+            (1, 1),
+            (10, 4),
+            (80, 2),
+            (80, 24),
+        ] {
+            let layout = Layout::new(cols, rows);
+            let frame = compose_frame(&layout, &[line("Sessions")], &[line("> x")], &[line("MCP")]);
             assert!(
-                (left_border as i32 - i32::from(cols / 3)).abs() <= 2,
-                "{cols}: left border {left_border} near {}/3",
-                cols
+                frame.len() <= usize::from(rows),
+                "{cols}x{rows} must not emit more rows than it has"
             );
-            assert!(
-                (right_border as i32 - i32::from(cols - cols / 3)).abs() <= 2,
-                "{cols}: right border {right_border} near cols-cols/3"
-            );
+            for row in &frame {
+                assert_eq!(cells(row), usize::from(cols), "{cols}x{rows} row width");
+            }
+            assert_eq!(layout.left_width, 0, "{cols}x{rows}: no left pane");
         }
     }
 
@@ -1074,7 +866,7 @@ mod tests {
         let layout = Layout {
             cols: 10,
             rows: 3,
-            left_width: 9,
+            left_width: 0,
             center_width: 9,
             right_width: 9,
             compact: false,
@@ -1091,27 +883,17 @@ mod tests {
         }
     }
 
-    // --- v2: bounded scanning, cluster boundaries, flow non-loss ----------
+    // --- bounded scanning, cluster boundaries --------------------------
 
     #[test]
     fn unterminated_osc_stops_at_bounded_scan_prefix() {
-        // A 10 MiB unterminated OSC: the scan stops at the bounded prefix
-        // (it never hunts for a terminator and never emits raw escape
-        // bytes), so payload beyond the budget is neither scanned to the
-        // end nor rendered.
         let mut payload = String::from("\x1b]0;");
         payload.push_str(&"A".repeat(10 * 1024 * 1024));
         payload.push_str("PAYLOAD-BEYOND-SCAN");
-        let layout = Layout::new(120, 30);
-        let frame = compose_frame(
-            &layout,
-            &[payload],
-            &[line("workspace"), line("> ")],
-            &[line("MCP")],
-        );
+        let frame = compose(160, 30, &[payload], &[line("MCP")]);
         assert_eq!(frame.len(), 30);
         for (index, row) in frame.iter().enumerate() {
-            assert_eq!(cells(row), 120, "row {index} width");
+            assert_eq!(cells(row), 160, "row {index} width");
             assert!(!row.contains('\x1b'), "row {index} leaked ESC");
         }
         assert!(!frame[0].contains('A'), "OSC payload never renders");
@@ -1119,18 +901,16 @@ mod tests {
             !frame[0].contains("PAYLOAD-BEYOND-SCAN"),
             "scan stopped at the bounded prefix, not at the input end"
         );
-        assert!(frame[0].contains("MCP"), "right pane content intact");
+        assert!(frame[0].contains("MCP"), "sidebar content intact");
     }
 
     #[test]
     fn unterminated_dcs_and_csi_never_emit_raw() {
         let dcs = format!("\x1bPq{}TAIL", "B".repeat(8192));
         let csi = format!("\x1b[38;2;1;2;3{}", "9".repeat(8192));
-        let layout = Layout::new(120, 30);
-        let frame = compose_frame(&layout, &[dcs], &[csi], &[line("MCP")]);
+        let frame = compose(160, 30, &[csi], &[dcs]);
         let row = &frame[0];
-        assert_eq!(cells(row), 120);
-        assert!(row.contains("MCP"));
+        assert_eq!(cells(row), 160);
         assert!(!row.contains('B'), "DCS payload never renders");
         assert!(!row.contains('9'), "CSI parameters never render");
         assert!(!row.contains('\x1b'), "raw escape bytes never render");
@@ -1143,9 +923,6 @@ mod tests {
         let fitted = fit(&text, 40);
         assert_eq!(cells(&fitted), 40);
         assert!(fitted.starts_with("e\u{0301}"), "base keeps its first mark");
-        // Marks beyond MAX_CONTINUATIONS are dropped and the scan stops at
-        // the per-line byte budget, so retained bytes stay within the
-        // documented cluster-plus-padding bound.
         assert!(fitted.chars().count() <= 40 + MAX_CONTINUATIONS);
         assert!(
             fitted.len() <= 40 * MAX_CLUSTER_BYTES + 40,
@@ -1155,10 +932,7 @@ mod tests {
 
     #[test]
     fn zwj_cluster_is_dropped_whole_at_a_pane_edge() {
-        // 19 wide glyphs fill 38 of 39 cells: the 2-cell joined cluster
-        // would cross the boundary, so it is dropped whole — never a
-        // leading emoji with a dangling ZWJ.
-        let joined = "\u{1F469}\u{200D}\u{1F4BB}"; // woman + ZWJ + laptop
+        let joined = "\u{1F469}\u{200D}\u{1F4BB}";
         let edge = format!("{}{}", "漢".repeat(19), joined);
         let fitted = fit(&edge, 39);
         assert_eq!(cells(&fitted), 39);
@@ -1167,50 +941,30 @@ mod tests {
             !fitted.contains('\u{1F469}'),
             "overflow cluster dropped whole"
         );
-        // One glyph less and the joined cluster fits intact.
         let fits = format!("{}{}", "漢".repeat(18), joined);
         let fitted2 = fit(&fits, 39);
-        // Complete literal expectation instead of the naive scalar-sum
-        // `cells()` observer (which counts the joined cluster as 4 scalars
-        // 2+0+2 and reports 41): 18 wide glyphs (36 cells) + the joined
-        // cluster as one 2-cell group + exactly one ASCII pad cell = 39
-        // display cells. Exact string equality carries the 39-cell contract
-        // without mirroring the implementation.
         let expected = format!("{}\u{1F469}\u{200D}\u{1F4BB} ", "漢".repeat(18));
-        assert_eq!(
-            fitted2, expected,
-            "joined cluster kept whole with exactly one pad cell (39 cells)"
-        );
-        assert!(
-            fitted2.contains("\u{1F469}\u{200D}\u{1F4BB}"),
-            "joined cluster kept whole"
-        );
+        assert_eq!(fitted2, expected);
+        assert!(fitted2.contains("\u{1F469}\u{200D}\u{1F4BB}"));
     }
 
     #[test]
     fn variation_selector_stays_with_its_base_and_orphan_drops() {
-        let heart = "\u{2764}\u{FE0F}"; // heart + VS16
+        let heart = "\u{2764}\u{FE0F}";
         let fitted = fit(&format!("{}{}", "漢".repeat(18), heart), 39);
         assert!(fitted.contains(heart), "VS16 stays attached to its base");
         assert_eq!(cells(&fitted), 39);
         let orphan = fit("\u{FE0F}abc", 40);
-        assert!(
-            !orphan.starts_with('\u{FE0F}'),
-            "an orphan variation selector is dropped"
-        );
+        assert!(!orphan.starts_with('\u{FE0F}'), "orphan VS is dropped");
         assert!(orphan.starts_with("abc"));
         assert_eq!(cells(&orphan), 40);
     }
 
     #[test]
     fn flag_pair_kept_whole_half_flag_dropped() {
-        let jp = "\u{1F1EF}\u{1F1F5}"; // regional-indicator pair
+        let jp = "\u{1F1EF}\u{1F1F5}";
         let fitted = fit(&format!("{jp}ok"), 40);
         assert!(fitted.starts_with(jp), "RI pair renders as one flag");
-        // Literal alignment regression: the completed pair charges 2 cells,
-        // so ASCII padding fills 40 - 2 - 2 ("ok") = 36 spaces. A naive
-        // scalar-sum accounting (4 cells for the pair) would pad 34 and fail
-        // this exact string — no width-table guess, no implementation mirror.
         assert_eq!(
             fitted,
             format!("{jp}ok{}", " ".repeat(36)),
@@ -1223,145 +977,5 @@ mod tests {
             "a lone regional indicator is dropped, never a half flag"
         );
         assert_eq!(cells(&half), 40);
-    }
-
-    #[test]
-    fn composer_row_collision_retains_the_left_item() {
-        let layout = Layout::new(120, 8);
-        let left = vec![line("left0"), line("KEEP-ME"), line("left2"), line("left3")];
-        let center = vec![line("workspace"), line("> prompt")];
-        let right = vec![line("Status"), line("MCP")];
-        let frame = compose_frame(&layout, &left, &center, &right);
-        // The composer row (center index 1) is reserved in the left flow:
-        // the item shifts below it instead of being overwritten.
-        let composer = frame
-            .iter()
-            .position(|row| {
-                let at = indent(row);
-                (40..80).contains(&at) && row.chars().nth(at) == Some('>')
-            })
-            .expect("composer row");
-        assert_eq!(composer, 1, "composer renders at its center index");
-        assert!(frame[composer].trim_start().starts_with('>'));
-        let kept = frame
-            .iter()
-            .position(|row| row.contains("KEEP-ME"))
-            .expect("left item retained");
-        assert!(kept > composer, "item shifted below the reserved row");
-        assert!(
-            !frame.iter().any(|row| row.contains('+')),
-            "no overflow marker when every item fits"
-        );
-        assert_eq!(frame.len(), 8);
-        for row in &frame {
-            assert_eq!(cells(row), 120);
-        }
-    }
-
-    #[test]
-    fn left_overflow_renders_an_explicit_marker() {
-        let layout = Layout::new(120, 6);
-        let left: Vec<String> = (0..6).map(|i| format!("item{i}")).collect();
-        let center = vec![line("workspace"), line("> x")];
-        let right = vec![line("Status"), line("MCP")];
-        let frame = compose_frame(&layout, &left, &center, &right);
-        assert_eq!(frame.len(), 6);
-        // Row 1 is reserved for the composer: 5 free rows hold the first 4
-        // items, and the last free row states the honest overflow count
-        // (6 items - 4 kept = 2). Nothing is silently discarded.
-        assert!(frame[0].contains("item0"));
-        assert!(frame[2].contains("item1"));
-        assert!(frame[3].contains("item2"));
-        assert!(frame[4].contains("item3"));
-        assert!(
-            frame[5].contains("+2 more"),
-            "overflow is explicit, never a silent drop"
-        );
-        assert!(
-            !frame.iter().any(|row| row.contains("item4")),
-            "counted items are not rendered past the marker"
-        );
-        assert_eq!(indent(&frame[1]), 41, "composer row stays reserved");
-        for row in &frame {
-            assert_eq!(cells(row), 120);
-        }
-    }
-
-    #[test]
-    fn compact_overflow_is_explicit() {
-        let layout = Layout::new(79, 3);
-        let frame = compose_frame(
-            &layout,
-            &[line("l0")],
-            &[line("c0"), line("c1")],
-            &[line("r0")],
-        );
-        assert_eq!(frame.len(), 3);
-        assert_eq!(frame[0].trim_end(), "c0");
-        assert_eq!(frame[1].trim_end(), "c1");
-        // 4 items, 2 rows of content: l0 and r0 are counted, not silent.
-        assert!(
-            frame[2].contains("+2 more"),
-            "compact tail overflow is counted, not silent"
-        );
-        for row in &frame {
-            assert_eq!(cells(row), 79);
-            assert!(!row.contains(BORDER), "compact keeps no borders");
-        }
-    }
-
-    #[test]
-    fn short_viewports_are_center_priority_and_explicit() {
-        // Height 0: nothing is emitted, nothing is claimed.
-        let l0 = Layout::new(80, 0);
-        assert!(l0.compact, "zero height reports compact");
-        assert!(compose_frame(&l0, &[line("Sessions")], &[], &[]).is_empty());
-
-        // Height 1: compact center-priority row. The sole row keeps center
-        // content (the real UI need at 80x1 is the Help line on row 0);
-        // side panes are hidden by the documented policy, not silently
-        // truncated full-shell rows, and no composer reservation can drop
-        // left content because no full shell exists here.
-        let l1 = Layout::new(80, 1);
-        assert!(l1.compact, "height below MIN_FULL_HEIGHT is compact");
-        assert_eq!(l1.center_width, 80, "center takes the whole width");
-        let frame = compose_frame(
-            &l1,
-            &[line("Sessions"), line("model")],
-            &[line("Help")],
-            &[line("MCP")],
-        );
-        assert_eq!(frame.len(), 1, "height 1 emits exactly one row");
-        assert_eq!(
-            frame[0].trim_end(),
-            "Help",
-            "row 0 preserved for center content"
-        );
-        assert_eq!(cells(&frame[0]), 80);
-        assert!(!frame[0].contains(BORDER), "no borders at height 1");
-
-        // A hand-built full-mode `Layout` with height 1 normalizes to the
-        // same center-priority policy inside compose_frame.
-        let hand_built = Layout {
-            cols: 80,
-            rows: 1,
-            left_width: 26,
-            center_width: 27,
-            right_width: 25,
-            compact: false,
-        };
-        let frame2 = compose_frame(
-            &hand_built,
-            &[line("Sessions")],
-            &[line("Help")],
-            &[line("MCP")],
-        );
-        assert_eq!(frame2.len(), 1);
-        assert_eq!(
-            frame2[0].trim_end(),
-            "Help",
-            "hand-built short viewport follows the same center-priority policy"
-        );
-        assert_eq!(cells(&frame2[0]), 80);
     }
 }

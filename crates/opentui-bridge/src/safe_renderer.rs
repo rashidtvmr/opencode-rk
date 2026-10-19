@@ -234,6 +234,7 @@ pub enum BridgeError {
     RenderFailed,
     ZeroSize,
     TextTooLarge,
+    TextControl,
     TitleNul,
     TerminalFailed,
 }
@@ -247,6 +248,7 @@ impl fmt::Display for BridgeError {
             Self::RenderFailed => "render failed",
             Self::ZeroSize => "zero-size renderer",
             Self::TextTooLarge => "text exceeds size limit",
+            Self::TextControl => "text contains control bytes",
             Self::TitleNul => "title contains NUL byte",
             Self::TerminalFailed => "terminal input mode operation failed",
         };
@@ -882,6 +884,70 @@ impl Renderer {
         }
     }
 
+    /// Draw `text` with explicit foreground/background colors and terminal
+    /// attributes through the already-exported native `bufferDrawText`
+    /// (`fg` non-null, `bg` nullable `?[*]u16`). Same validation order and
+    /// bounds contract as [`Renderer::draw_text`]: `MAX_TEXT_BYTES` cap,
+    /// in-viewport origin, then the live-handle check — plus a control-byte
+    /// policy: any `char::is_control` scalar (C0 and C1) is rejected with
+    /// [`BridgeError::TextControl`] before the native call, so untrusted
+    /// frame content never reaches the cell buffer as a control scalar.
+    /// `bg: None` passes a null pointer, keeping the cell's existing
+    /// background (the native optional pointer); pointers are stack locals
+    /// that outlive the call. `attributes` is passed through unchanged
+    /// (callers in the CLI pass `0` until the pinned Zig attribute bits are
+    /// verified).
+    pub fn draw_text_styled(
+        &self,
+        x: u32,
+        y: u32,
+        text: &str,
+        fg: Rgba,
+        bg: Option<Rgba>,
+        attributes: u32,
+    ) -> Result<(), BridgeError> {
+        if text.len() > MAX_TEXT_BYTES {
+            return Err(BridgeError::TextTooLarge);
+        }
+        if text.chars().any(char::is_control) {
+            return Err(BridgeError::TextControl);
+        }
+        if x >= self.cols || y >= self.rows {
+            return Err(BridgeError::RenderFailed);
+        }
+        let handle = self.live()?;
+        #[cfg(not(feature = "native"))]
+        {
+            let _ = (handle, fg, bg, attributes);
+            return Err(BridgeError::InvalidHandle);
+        }
+        #[cfg(feature = "native")]
+        {
+            let fg = fg.to_packed();
+            let bg = bg.map(Rgba::to_packed);
+            // SAFETY: live handle; `text`, `fg` and the optional `bg` lanes
+            // are locals that outlive the call; null `bg` selects the
+            // native default background (nullable `?[*]u16`).
+            unsafe {
+                let buf = getNextBuffer(handle);
+                if buf == INVALID_HANDLE {
+                    return Err(BridgeError::RenderFailed);
+                }
+                bufferDrawText(
+                    buf,
+                    text.as_ptr(),
+                    text.len().min(u32::MAX as usize) as u32,
+                    x,
+                    y,
+                    fg.as_ptr(),
+                    bg.as_ref().map_or(std::ptr::null(), |lanes| lanes.as_ptr()),
+                    attributes,
+                );
+            }
+            Ok(())
+        }
+    }
+
     pub fn fill_rect(
         &self,
         x: u32,
@@ -1094,6 +1160,55 @@ mod tests {
             r.draw_text(0, 0, &big).unwrap_err(),
             BridgeError::TextTooLarge
         );
+        assert_eq!(
+            r.draw_text_styled(0, 0, &big, Rgba::rgb(1, 2, 3), None, 0)
+                .unwrap_err(),
+            BridgeError::TextTooLarge,
+            "styled path enforces the same byte cap before any draw"
+        );
+    }
+
+    /// `draw_text_styled` rejects every control scalar (C0 and C1) and
+    /// out-of-viewport origins before the handle check, matching the plain
+    /// method's size/bounds validation order.
+    #[test]
+    fn styled_text_rejects_controls_and_out_of_bounds() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let r = fake(80, 24);
+        let fg = Rgba::rgb(0xee, 0xee, 0xee);
+        assert_eq!(
+            r.draw_text_styled(0, 0, "a\nb", fg, None, 0).unwrap_err(),
+            BridgeError::TextControl
+        );
+        assert_eq!(
+            r.draw_text_styled(0, 0, "a\u{9b}b", fg, None, 0)
+                .unwrap_err(),
+            BridgeError::TextControl,
+            "C1 control scalars are rejected too"
+        );
+        assert_eq!(
+            r.draw_text_styled(80, 0, "x", fg, None, 0).unwrap_err(),
+            BridgeError::RenderFailed
+        );
+        assert_eq!(
+            r.draw_text_styled(0, 24, "x", fg, None, 0).unwrap_err(),
+            BridgeError::RenderFailed
+        );
+        // Close the synthetic handle before valid-input validation: the
+        // test must never send a fabricated renderer ID across native FFI.
+        drop(r);
+        let r = Renderer {
+            handle: INVALID_HANDLE,
+            cols: 80,
+            rows: 24,
+            _no_send: PhantomData,
+        };
+        assert_eq!(
+            r.draw_text_styled(79, 23, "ok", fg, Some(Rgba::rgb(0x14, 0x14, 0x14)), 0)
+                .unwrap_err(),
+            BridgeError::InvalidHandle,
+            "valid input reaches the closed-handle check in either build"
+        );
     }
 
     #[test]
@@ -1141,6 +1256,7 @@ mod tests {
             BridgeError::RenderFailed,
             BridgeError::ZeroSize,
             BridgeError::TextTooLarge,
+            BridgeError::TextControl,
             BridgeError::TitleNul,
         ] {
             assert!(!e.to_string().is_empty());

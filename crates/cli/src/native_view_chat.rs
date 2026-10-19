@@ -356,11 +356,358 @@ fn plural(n: usize) -> &'static str {
     }
 }
 
-// Typed tool/question/subagent formatting is intentionally absent: it
-// belongs to the caller, which builds `transcript: &[String]` rows from
-// whatever actual public contract it already holds (for example
-// `native_transcript` sanitization helpers). This module makes no
-// storage-type assumptions and invents no history types.
+// Typed rendering lives above ([`ChatMessage`] / [`ChatView::render_typed`]):
+// roles and parts are caller-supplied backend facts and are never inferred
+// from text. The flat `transcript: &[String]` API stays for callers that only
+// hold pre-formatted rows; this module still invents no history types and
+// executes no tool.
+
+/// Bound on parts displayed from one message (further parts are skipped).
+pub const MAX_PARTS_PER_MESSAGE: usize = 128;
+/// Bound on display rows one message may contribute.
+pub const MAX_MESSAGE_ROWS: usize = MAX_VIEW_ROWS;
+/// Bound in bytes for a rendered inline label (agent/model/tool name/id).
+pub const MAX_LABEL_BYTES: usize = 256;
+
+/// Role of one typed chat message, exactly as supplied by the caller's real
+/// backend projection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChatRole {
+    User,
+    Assistant,
+    Tool,
+    System,
+}
+
+/// One typed message part. `ToolResult::is_error` is the backend's own
+/// result fact — never a guess derived from output text.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ChatPart {
+    Text(String),
+    Thinking(String),
+    ToolCall {
+        name: String,
+        id: String,
+    },
+    ToolResult {
+        name: String,
+        output: String,
+        is_error: bool,
+    },
+}
+
+/// One typed chat message: caller-supplied role plus ordered parts, with the
+/// optional agent/model facts the caller actually knows for this message.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct ChatMessage {
+    pub role: ChatRole,
+    pub parts: Vec<ChatPart>,
+    pub agent: Option<String>,
+    pub model: Option<String>,
+}
+
+impl ChatMessage {
+    /// Text-only convenience message.
+    #[must_use]
+    pub fn text(role: ChatRole, text: impl Into<String>) -> Self {
+        Self {
+            role,
+            parts: vec![ChatPart::Text(text.into())],
+            agent: None,
+            model: None,
+        }
+    }
+
+    /// Bounded, sanitized `agent`/`model` metadata row, or `None` when the
+    /// caller supplied neither fact.
+    fn metadata_row(&self) -> Option<String> {
+        let agent = self
+            .agent
+            .as_deref()
+            .map(bounded_label)
+            .filter(|value| !value.is_empty());
+        let model = self
+            .model
+            .as_deref()
+            .map(bounded_label)
+            .filter(|value| !value.is_empty());
+        match (agent, model) {
+            (None, None) => None,
+            (Some(agent), None) => Some(format!("  agent: {agent}")),
+            (None, Some(model)) => Some(format!("  model: {model}")),
+            (Some(agent), Some(model)) => Some(format!("  agent: {agent}  model: {model}")),
+        }
+    }
+}
+
+/// Display class of one rendered frame row. Paint metadata only: the paint
+/// layer may style thinking rows muted or tool headers distinctly; this view
+/// invents no colors and no backend facts.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ChatRowClass {
+    /// Blank group separator before a new user/system block.
+    Separator,
+    /// Caller-provided agent/model fact row.
+    Metadata,
+    /// Message text (any role).
+    Text,
+    /// Reasoning/thinking part text.
+    Thinking,
+    /// Tool call header (`[tool] name (id)`).
+    ToolCall,
+    /// Tool result header or successful output row.
+    ToolResult,
+    /// Errored tool result header or output row.
+    ToolError,
+    /// Transcript header (workspace / busy / scroll suffix).
+    Header,
+    /// Padding row keeping transcript content bottom-anchored.
+    Blank,
+    /// Composer row (`> ` prompt, continuation or overflow marker).
+    Composer,
+}
+
+/// Bounded inline label: clipped, then every control scalar (newline, ESC,
+/// C0/C1) becomes a space and ANSI sequences are stripped.
+fn bounded_label(text: &str) -> String {
+    sanitize_inline(clip_utf8_prefix_bytes(text, MAX_LABEL_BYTES))
+}
+
+fn sanitize_inline(text: &str) -> String {
+    strip_ansi(text)
+        .chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
+/// Left padding for message text of `role`. User (and tool-role) bodies are
+/// indented as the upstream marker block; assistant/system text is flush.
+fn text_prefix(role: ChatRole) -> &'static str {
+    match role {
+        ChatRole::User | ChatRole::Tool => "  ",
+        ChatRole::Assistant | ChatRole::System => "",
+    }
+}
+
+/// True when message `index` starts a new display group: every user message,
+/// and the first system message of a run. Assistant/tool messages continue
+/// the surrounding block.
+fn starts_new_group(index: usize, messages: &[ChatMessage]) -> bool {
+    if index == 0 {
+        return false;
+    }
+    match messages[index].role {
+        ChatRole::User => true,
+        ChatRole::System => messages[index - 1].role != ChatRole::System,
+        ChatRole::Assistant | ChatRole::Tool => false,
+    }
+}
+
+/// `[tool] name (id)` / `[result] name` / `[error] name` header, from
+/// caller-supplied facts only; an absent id renders no parenthesized part.
+fn tool_header(kind: &str, name: &str, id: &str) -> String {
+    let name = bounded_label(name);
+    let id = bounded_label(id);
+    if id.is_empty() {
+        format!("  [{kind}] {name}")
+    } else {
+        format!("  [{kind}] {name} ({id})")
+    }
+}
+
+/// Wrap one part's text with `prefix` and push `class` rows, bounded to the
+/// per-message row cap. Input bytes are read as a bounded UTF-8 prefix and
+/// sanitized; `width == 0` keeps the existing no-wrap behavior.
+fn push_wrapped(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    text: &str,
+    prefix: &str,
+    class: ChatRowClass,
+) {
+    let clean = sanitize(clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES));
+    let content_width = if width == 0 {
+        0
+    } else {
+        width.saturating_sub(prefix.len()).max(1)
+    };
+    for line in clean.split('\n') {
+        for row in render_lines(
+            &[TranscriptLine {
+                id: 0,
+                text: line.to_owned(),
+            }],
+            content_width,
+        ) {
+            if rows.len() >= MAX_MESSAGE_ROWS {
+                return;
+            }
+            rows.push((truncate_row(&format!("{prefix}{row}"), width), class));
+        }
+    }
+}
+
+/// Display rows of one typed message: optional group separator, optional
+/// agent/model metadata row, then its parts in order. Tool results are
+/// labeled `[result]`/`[error]` with indented output — the view never
+/// executes, simulates or re-parses a tool.
+fn typed_message_rows(
+    width: usize,
+    message: &ChatMessage,
+    separator: bool,
+) -> Vec<(String, ChatRowClass)> {
+    let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
+    if separator {
+        rows.push((String::new(), ChatRowClass::Separator));
+    }
+    if let Some(metadata) = message.metadata_row() {
+        if rows.len() < MAX_MESSAGE_ROWS {
+            rows.push((truncate_row(&metadata, width), ChatRowClass::Metadata));
+        }
+    }
+    for part in message.parts.iter().take(MAX_PARTS_PER_MESSAGE) {
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            break;
+        }
+        match part {
+            ChatPart::Text(text) => {
+                push_wrapped(
+                    &mut rows,
+                    width,
+                    text,
+                    text_prefix(message.role),
+                    ChatRowClass::Text,
+                );
+            }
+            ChatPart::Thinking(text) => {
+                push_wrapped(&mut rows, width, text, "  ", ChatRowClass::Thinking);
+            }
+            ChatPart::ToolCall { name, id } => {
+                rows.push((
+                    truncate_row(&tool_header("tool", name, id), width),
+                    ChatRowClass::ToolCall,
+                ));
+            }
+            ChatPart::ToolResult {
+                name,
+                output,
+                is_error,
+            } => {
+                let (kind, header_class, body_class) = if *is_error {
+                    ("error", ChatRowClass::ToolError, ChatRowClass::ToolError)
+                } else {
+                    ("result", ChatRowClass::ToolResult, ChatRowClass::ToolResult)
+                };
+                rows.push((
+                    truncate_row(&tool_header(kind, name, ""), width),
+                    header_class,
+                ));
+                push_wrapped(&mut rows, width, output, "    ", body_class);
+            }
+        }
+    }
+    rows
+}
+
+impl ChatView {
+    /// Typed counterpart of [`ChatView::render`]: same bounded frame
+    /// (workspace header, bottom-anchored transcript window ending at the
+    /// tail, composer on the last rows), but the transcript is built from
+    /// caller-typed [`ChatMessage`] roles/parts. Roles are never inferred
+    /// from rendered text.
+    #[must_use]
+    pub fn render_typed(
+        &self,
+        width: usize,
+        height: usize,
+        workspace: &str,
+        messages: &[ChatMessage],
+        draft: &str,
+        busy: bool,
+    ) -> Vec<String> {
+        self.render_typed_classified(width, height, workspace, messages, draft, busy)
+            .into_iter()
+            .map(|(row, _)| row)
+            .collect()
+    }
+
+    /// Same frame as [`ChatView::render_typed`] with each row's display
+    /// class retained for the paint layer.
+    #[must_use]
+    pub fn render_typed_classified(
+        &self,
+        width: usize,
+        height: usize,
+        workspace: &str,
+        messages: &[ChatMessage],
+        draft: &str,
+        busy: bool,
+    ) -> Vec<(String, ChatRowClass)> {
+        let height = height.min(MAX_VIEW_ROWS);
+        if height == 0 {
+            return Vec::new();
+        }
+        let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
+        let draft_lines = draft.split('\n').count();
+        let composer_h = draft_lines.clamp(1, (height / 2).max(1));
+        let header_h = usize::from(height > composer_h);
+        let transcript_h = height - composer_h - header_h;
+
+        let mut rows: Vec<(String, ChatRowClass)> = Vec::with_capacity(height);
+        if header_h == 1 {
+            rows.push((
+                render_header(width, workspace, busy, self.scroll),
+                ChatRowClass::Header,
+            ));
+        }
+        let window = self.typed_window(width, transcript_h, messages);
+        for _ in 0..transcript_h.saturating_sub(window.len()) {
+            rows.push((String::new(), ChatRowClass::Blank));
+        }
+        rows.extend(window);
+        let composer = bounded_composer_rows(draft, composer_h + 1);
+        for row in render_composer(width, composer_h, &composer.rows, composer.total_lines) {
+            rows.push((row, ChatRowClass::Composer));
+        }
+        rows.truncate(height);
+        rows
+    }
+
+    /// Visible typed rows: the `height` rows ending `scroll` rows above the
+    /// tail. Walks messages backwards from the tail and stops as soon as
+    /// `scroll + height` rows exist; only the touched messages are rendered
+    /// (each bounded by [`MAX_MESSAGE_ROWS`]) — following the tail never
+    /// materializes the whole history.
+    fn typed_window(
+        &self,
+        width: usize,
+        height: usize,
+        messages: &[ChatMessage],
+    ) -> Vec<(String, ChatRowClass)> {
+        if height == 0 || messages.is_empty() {
+            return Vec::new();
+        }
+        let target = self.scroll.saturating_add(height);
+        let mut rev: Vec<(String, ChatRowClass)> = Vec::with_capacity(target.min(4096));
+        'walk: for (index, message) in messages.iter().enumerate().rev() {
+            let rows = typed_message_rows(width, message, starts_new_group(index, messages));
+            for row in rows.into_iter().rev() {
+                rev.push(row);
+                if rev.len() >= target {
+                    break 'walk;
+                }
+            }
+        }
+        rev.reverse();
+        let total = rev.len();
+        if self.scroll >= total {
+            return Vec::new();
+        }
+        let end = (total - self.scroll).min(height);
+        rev.truncate(end);
+        rev
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -368,6 +715,219 @@ mod tests {
 
     fn history(n: usize) -> Vec<String> {
         (0..n).map(|i| format!("entry {i}")).collect()
+    }
+
+    // --- typed roles/parts: caller facts, never inferred from text -------
+
+    /// Roles come from the enum only: user text that literally starts with
+    /// `assistant:` stays user text (indented marker block), assistant text
+    /// keeps its literal `user:` prefix, and neither creates a group or tool
+    /// row. A second user message is the only new group.
+    #[test]
+    fn typed_roles_are_enums_never_text_prefixes() {
+        let view = ChatView::new();
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "assistant: not the assistant role"),
+            ChatMessage::text(ChatRole::Assistant, "user: not a user block"),
+            ChatMessage::text(ChatRole::User, "second question"),
+        ];
+        let rows = view.render_typed_classified(60, 10, "ws", &messages, "", false);
+        let user = rows
+            .iter()
+            .find(|(row, class)| {
+                *class == ChatRowClass::Text && row.contains("assistant: not the assistant")
+            })
+            .expect("user text renders as text");
+        assert!(
+            user.0.starts_with("  assistant:"),
+            "user block keeps its left padding: {:?}",
+            user.0
+        );
+        let assistant = rows
+            .iter()
+            .find(|(row, class)| {
+                *class == ChatRowClass::Text && row.contains("user: not a user block")
+            })
+            .expect("assistant text renders as text");
+        assert!(
+            assistant.0.starts_with("user: not a user block"),
+            "assistant text is never re-labelled: {:?}",
+            assistant.0
+        );
+        assert_eq!(
+            rows.iter()
+                .filter(|(_, class)| *class == ChatRowClass::Separator)
+                .count(),
+            1,
+            "only the second user message starts a new group"
+        );
+        assert!(
+            !rows
+                .iter()
+                .any(|(_, class)| *class == ChatRowClass::ToolCall
+                    || *class == ChatRowClass::ToolResult),
+            "text prefixes never create tool rows"
+        );
+    }
+
+    /// Tool part labels and classes come from the typed parts (names, ids,
+    /// backend `is_error`), while a user text that looks like a tool header
+    /// stays text; thinking rows are their own class.
+    #[test]
+    fn typed_tool_thinking_and_metadata_rows_are_labeled_from_facts() {
+        let view = ChatView::new();
+        let messages = vec![
+            ChatMessage {
+                role: ChatRole::User,
+                parts: vec![ChatPart::Text("tool: rm -rf /".to_owned())],
+                agent: None,
+                model: None,
+            },
+            ChatMessage {
+                role: ChatRole::Assistant,
+                parts: vec![
+                    ChatPart::Thinking("weigh options".to_owned()),
+                    ChatPart::ToolCall {
+                        name: "bash".to_owned(),
+                        id: "call-1".to_owned(),
+                    },
+                    ChatPart::ToolResult {
+                        name: "bash".to_owned(),
+                        output: "exit 0".to_owned(),
+                        is_error: false,
+                    },
+                    ChatPart::ToolCall {
+                        name: "write".to_owned(),
+                        id: String::new(),
+                    },
+                    ChatPart::ToolResult {
+                        name: "write".to_owned(),
+                        output: "denied by policy".to_owned(),
+                        is_error: true,
+                    },
+                ],
+                agent: Some("build".to_owned()),
+                model: Some("provider/model-1".to_owned()),
+            },
+        ];
+        let rows = view.render_typed_classified(72, 16, "ws", &messages, "", false);
+        assert!(rows
+            .iter()
+            .any(|(row, class)| *class == ChatRowClass::Thinking && row.trim() == "weigh options"));
+        assert!(rows
+            .iter()
+            .any(|(row, class)| *class == ChatRowClass::ToolCall
+                && row.trim() == "[tool] bash (call-1)"));
+        assert!(rows
+            .iter()
+            .any(|(row, class)| *class == ChatRowClass::ToolCall && row.trim() == "[tool] write"));
+        assert!(rows.iter().any(
+            |(row, class)| *class == ChatRowClass::ToolResult && row.trim() == "[result] bash"
+        ));
+        assert!(rows
+            .iter()
+            .any(|(row, class)| *class == ChatRowClass::ToolResult && row.trim() == "exit 0"));
+        assert!(
+            rows.iter()
+                .any(|(row, class)| *class == ChatRowClass::ToolError
+                    && row.trim() == "[error] write")
+        );
+        assert!(rows
+            .iter()
+            .any(|(row, class)| *class == ChatRowClass::ToolError
+                && row.trim() == "denied by policy"));
+        assert!(rows
+            .iter()
+            .any(|(row, class)| *class == ChatRowClass::Metadata
+                && row.trim() == "agent: build  model: provider/model-1"));
+        assert!(rows
+            .iter()
+            .any(|(row, class)| *class == ChatRowClass::Text && row.trim() == "tool: rm -rf /"));
+        assert!(
+            !rows
+                .iter()
+                .any(|(row, class)| *class == ChatRowClass::ToolCall && row.contains("rm -rf")),
+            "user text is never promoted to a tool fact"
+        );
+    }
+
+    /// Hostile sizes stay bounded: parts past the cap are skipped, retained
+    /// rows are width-bounded, ANSI/C0 never reach a row, and a multi-megabyte
+    /// part is read only as a bounded UTF-8 prefix.
+    #[test]
+    fn typed_parts_rows_and_inputs_are_bounded_and_sanitized() {
+        let view = ChatView::new();
+        let hostile = format!("\x1b[31mred\x07{}", "x".repeat(1024 * 1024));
+        let mut parts: Vec<ChatPart> = vec![ChatPart::Text(hostile)];
+        parts.extend((0..MAX_PARTS_PER_MESSAGE * 8).map(|i| ChatPart::Text(format!("part {i}"))));
+        let messages = vec![ChatMessage {
+            role: ChatRole::Assistant,
+            parts,
+            agent: Some("agent\nname".to_owned()),
+            model: None,
+        }];
+        let rows = view.render_typed_classified(50, MAX_VIEW_ROWS, "ws", &messages, "", false);
+        assert!(rows.len() <= MAX_VIEW_ROWS, "frame row cap");
+        assert_eq!(
+            messages[0].metadata_row().as_deref(),
+            Some("  agent: agent name"),
+            "metadata is sanitized inline before viewport clipping"
+        );
+        for (row, _) in &rows {
+            assert!(row.chars().count() <= 50, "row exceeds width: {row:?}");
+            assert!(!row.contains('\x1b'), "ESC leaked: {row:?}");
+            for c in row.chars() {
+                assert!(!c.is_control(), "control scalar {c:?} leaked: {row:?}");
+            }
+        }
+        let messages = vec![ChatMessage::text(ChatRole::User, "y".repeat(1024 * 1024))];
+        let rows = view.render_typed(40, 8, "ws", &messages, "", false);
+        assert_eq!(rows.len(), 8, "huge single part still renders one frame");
+    }
+
+    /// Tail following, overscroll, and the sticky-bottom composer keep the
+    /// existing `render` contract for typed input: 5000 messages never
+    /// materialize the whole history below the window.
+    #[test]
+    fn typed_window_tail_follows_and_composer_stays_bottom() {
+        let mut view = ChatView::new();
+        let messages: Vec<ChatMessage> = (0..5000)
+            .map(|i| ChatMessage::text(ChatRole::Assistant, format!("entry {i}")))
+            .collect();
+        let rows = view.render_typed(40, 10, "ws", &messages, "", false);
+        assert_eq!(rows.len(), 10);
+        assert!(rows.iter().any(|row| row.contains("entry 4999")));
+        assert!(
+            !rows
+                .iter()
+                .any(|row| row.trim_start().starts_with("entry 0")),
+            "only the tail window is rendered"
+        );
+        view.scroll_up(MAX_SCROLL_ROWS);
+        let rows = view.render_typed(40, 10, "ws", &messages, "", false);
+        assert!(
+            !rows.iter().any(|row| row.contains("entry ")),
+            "overscroll renders an empty transcript region"
+        );
+        view.follow_tail();
+        let rows = view.render_typed(40, 10, "ws", &messages, "first\nsecond\nthird", false);
+        assert_eq!(rows.last().map(String::as_str), Some("  third"));
+        assert!(rows.iter().any(|row| row.starts_with("> first")));
+    }
+
+    /// Zero/one-row viewports and huge hostile drafts stay safe.
+    #[test]
+    fn typed_tiny_viewports_and_hostile_drafts_stay_safe() {
+        let view = ChatView::new();
+        let messages = vec![ChatMessage::text(ChatRole::User, "hi")];
+        assert!(view
+            .render_typed(80, 0, "ws", &messages, "", false)
+            .is_empty());
+        assert_eq!(view.render_typed(0, 6, "ws", &messages, "", false).len(), 6);
+        let hostile = "line\n".repeat(MAX_DRAFT_BYTES);
+        let rows = view.render_typed(40, 10, "ws", &messages, &hostile, true);
+        assert_eq!(rows.len(), 10, "draft bound keeps the frame whole");
+        assert!(rows.iter().all(|row| row.chars().count() <= 40));
     }
 
     /// 5000-entry history: bounded window, tail follow, meaningful scroll,

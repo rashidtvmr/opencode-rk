@@ -28,6 +28,10 @@ mod native_transcript;
 #[cfg(feature = "native")]
 #[path = "native_turn.rs"]
 mod native_turn;
+#[cfg(feature = "native")]
+use crate::native_chat_history::NativeChatHistory;
+#[cfg(feature = "native")]
+use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
 use clap::{Args, ValueEnum};
 #[cfg(feature = "native")]
 use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
@@ -220,6 +224,10 @@ struct LiveSnapshot {
     message_count: usize,
     last_text: Option<String>,
     history: Vec<String>,
+    #[cfg(feature = "native")]
+    typed_history: Vec<ChatMessage>,
+    #[cfg(feature = "native")]
+    parent_session: bool,
 }
 
 /// Minimal bounded HTTP/1.1 client for the daemon API (std-only, http
@@ -412,6 +420,12 @@ fn snapshot_from_listing(
         message_count: messages.len(),
         last_text: last_text,
         history,
+        #[cfg(feature = "native")]
+        typed_history: crate::native_chat_projection::project_history(&messages),
+        #[cfg(feature = "native")]
+        parent_session: target["parent_session_id"]
+            .as_str()
+            .is_some_and(|id| !id.is_empty()),
     })
 }
 
@@ -618,33 +632,271 @@ fn native_size() -> (u32, u32) {
     }
 }
 
+/// Exact paint context for one native frame: the facade's region geometry
+/// plus the modal overlay state. No string scraping — `modal_rows` comes
+/// from the caller's own overlay/dialog content length, and `home` from the
+/// explicit route fact, so text roles are projected from known structure.
+#[cfg(feature = "native")]
+struct PaintCtx {
+    palette: crate::native_theme_runtime::Palette,
+    /// Region geometry for this frame (positions for the style pass).
+    presentation: crate::native_view::ViewPresentation,
+    /// `Some(n)` when a modal panel owns the frame: `n` content rows
+    /// starting at the shared modal's content_y, after one inner padding row.
+    modal_rows: Option<usize>,
+    modal: crate::native_view::ModalPresentation,
+    sidebar_backdrop_alpha: u8,
+    chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
+    /// True when this frame is the Home column (explicit route fact).
+    home: bool,
+    composer: Option<(u16, u16, u16, u16)>,
+    logo: Option<(u16, u16)>,
+}
+
+/// Content rows of a rendered modal block: the last non-blank rendered row
+/// (modal renderers pad to full height with blank rows, so the row count is
+/// the last non-blank index + 1 — never the padded height).
+#[cfg(feature = "native")]
+fn modal_content_rows(lines: &[String]) -> usize {
+    lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .map_or(0, |index| index + 1)
+}
+
+/// Home-row role by position over the known Home structure (logo block,
+/// draft lines, final model row) — never a global substring scan.
+#[cfg(feature = "native")]
+fn home_row_fg(
+    lines: &[String],
+    row: usize,
+    palette: crate::native_theme_runtime::Palette,
+) -> Rgba {
+    use crate::native_theme_runtime::Slot;
+    let first = lines.iter().position(|line| !line.trim().is_empty());
+    let logo_end = first.and_then(|start| {
+        lines[start..]
+            .iter()
+            .position(|line| line.trim().is_empty())
+            .map(|offset| start + offset)
+    });
+    let last = lines
+        .iter()
+        .rposition(|line| !line.trim().is_empty())
+        .unwrap_or(usize::MAX);
+    if let (Some(start), Some(end)) = (first, logo_end) {
+        if (start..end).contains(&row) {
+            return paint_color(palette, Slot::Primary);
+        }
+    }
+    if row == last {
+        return paint_color(palette, Slot::TextMuted);
+    }
+    paint_color(palette, Slot::Text)
+}
+
+/// Modal row role from known dialog structure: heading row = readable text,
+/// ` > ` selection marker = primary, everything else muted.
+#[cfg(feature = "native")]
+fn modal_row_fg(line: &str, heading: bool, palette: crate::native_theme_runtime::Palette) -> Rgba {
+    use crate::native_theme_runtime::Slot;
+    if heading {
+        paint_color(palette, Slot::Text)
+    } else if line.trim_start().starts_with("> ") {
+        paint_color(palette, Slot::Primary)
+    } else {
+        paint_color(palette, Slot::TextMuted)
+    }
+}
+
+#[cfg(feature = "native")]
+fn paint_color(
+    palette: crate::native_theme_runtime::Palette,
+    slot: crate::native_theme_runtime::Slot,
+) -> Rgba {
+    use crate::native_theme_runtime::{source_over, Palette, Slot};
+    let background = source_over(
+        Palette::opencode_dark().get(Slot::Background),
+        palette.get(Slot::Background),
+    );
+    let [r, g, b, a] = source_over(background, palette.get(slot));
+    Rgba::new(r, g, b, a)
+}
+
+/// Native styled paint with cell-aligned semantic spans and explicit opaque
+/// backgrounds. Modal/sidebar source-over dimming is resolved in Rust before
+/// FFI; native alpha or null-background preservation is not assumed.
 #[cfg(feature = "native")]
 fn native_paint(
     renderer: &mut NativeRenderer,
     lines: &[String],
+    ctx: PaintCtx,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    renderer.fill_rect(
-        0,
-        0,
-        renderer.cols(),
-        renderer.rows(),
-        Rgba::new(0, 0, 0, 255),
-    )?;
-    for (row, line) in lines.iter().enumerate().take(renderer.rows() as usize) {
-        // Paste remains literal in the draft, including control-like text.
-        // Only printable, bounded row text may cross the renderer boundary.
-        let text: String = line
-            .chars()
-            .take((renderer.cols() as usize).min(MAX_NATIVE_LINE_CHARS))
-            .map(|character| {
-                if character.is_control() {
-                    ' '
+    let cols = renderer.cols();
+    let rows = renderer.rows();
+    let presentation = ctx.presentation;
+    use crate::native_theme_runtime::Slot;
+    let background = paint_color(ctx.palette, Slot::Background);
+    let panel = paint_color(ctx.palette, Slot::BackgroundPanel);
+    let element = paint_color(ctx.palette, Slot::BackgroundElement);
+    let text_color = paint_color(ctx.palette, Slot::Text);
+    let muted = paint_color(ctx.palette, Slot::TextMuted);
+    let error = paint_color(ctx.palette, Slot::Error);
+    fn dim(color: Rgba, alpha: u8) -> Rgba {
+        let [r, g, b, a] =
+            crate::native_theme_runtime::dim([color.r, color.g, color.b, color.a], alpha);
+        Rgba::new(r, g, b, a)
+    }
+    // Resolve alpha in Rust. Every span supplies an opaque background;
+    // native null-background/alpha behavior is not relied upon.
+    let modal = ctx.modal_rows.and_then(|count| {
+        let width = u32::from(ctx.modal.width).min(cols);
+        let x = u32::from(ctx.modal.x);
+        let y = u32::from(ctx.modal.y);
+        if y >= rows || count == 0 || width == 0 {
+            None
+        } else {
+            let height = (count.saturating_add(2) as u32).min(rows - y);
+            Some((x, y, width, height))
+        }
+    });
+    let base_alpha = if modal.is_some() {
+        ctx.modal.backdrop_alpha
+    } else {
+        ctx.sidebar_backdrop_alpha
+    };
+    renderer.fill_rect(0, 0, cols, rows, dim(background, base_alpha))?;
+    for (row, line) in lines.iter().enumerate().take(rows as usize) {
+        let y = row as u32;
+        let modal_text = crate::native_view_layout::slice_cells(
+            line,
+            ctx.modal.x.saturating_add(2),
+            ctx.modal.content_width,
+        );
+        use crate::native_view_chat::ChatRowClass;
+        let normal_fg = match ctx.chat_row_classes.get(row) {
+            Some(
+                ChatRowClass::Thinking
+                | ChatRowClass::Metadata
+                | ChatRowClass::ToolCall
+                | ChatRowClass::ToolResult,
+            ) => muted,
+            Some(ChatRowClass::ToolError) => error,
+            Some(_) => text_color,
+            None if ctx.home => home_row_fg(lines, row, ctx.palette),
+            None => text_color,
+        };
+        let mut spans: Vec<(u32, String, Rgba, Rgba)> = Vec::with_capacity(8);
+        crate::native_view_layout::visit_cells(
+            line,
+            cols.min(u16::MAX as u32) as u16,
+            |x, glyph, _| {
+                let x = u32::from(x);
+                let sidebar = presentation.sidebar_offset.is_some_and(|left| {
+                    x >= u32::from(left)
+                        && x < u32::from(left) + u32::from(presentation.sidebar_width)
+                });
+                let in_modal = modal.is_some_and(|(left, top, width, height)| {
+                    x >= left && x < left + width && y >= top && y < top + height
+                });
+                let composer = ctx.composer.is_some_and(|(left, top, width, height)| {
+                    x >= u32::from(left)
+                        && x < u32::from(left) + u32::from(width)
+                        && y >= u32::from(top)
+                        && y < u32::from(top) + u32::from(height)
+                });
+                let mut bg = if sidebar || in_modal {
+                    panel
+                } else if composer {
+                    element
                 } else {
-                    character
+                    background
+                };
+                let mut fg = if in_modal {
+                    modal_row_fg(
+                        modal_text.trim_start(),
+                        y == u32::from(ctx.modal.content_y),
+                        ctx.palette,
+                    )
+                } else {
+                    normal_fg
+                };
+                if !in_modal {
+                    let alpha = if modal.is_some() {
+                        ctx.modal.backdrop_alpha
+                    } else if !sidebar {
+                        ctx.sidebar_backdrop_alpha
+                    } else {
+                        0
+                    };
+                    bg = dim(bg, alpha);
+                    fg = dim(fg, alpha);
                 }
-            })
-            .collect();
-        renderer.draw_text(0, row as u32, &text)?;
+                if let Some((_, text, last_fg, last_bg)) = spans.last_mut() {
+                    if *last_fg == fg
+                        && *last_bg == bg
+                        && text.len().saturating_add(glyph.len()) <= 32 * 1024
+                    {
+                        text.push_str(glyph);
+                        return;
+                    }
+                }
+                spans.push((x, glyph.to_owned(), fg, bg));
+            },
+        );
+        for (x, text, fg, bg) in spans {
+            renderer.draw_text_styled(x, y, &text, fg, Some(bg), 0)?;
+        }
+    }
+    // logo.ts + component/logo.tsx: two 19-cell halves separated by one
+    // cell, muted left/text right, with 25%-tinted marker backgrounds.
+    if let Some((x, y)) = ctx.logo {
+        let logo = [
+            ("                   ", "             ▄     "),
+            ("█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█"),
+            ("█__█ █__█ █^^^ █__█", "█___ █__█ █__█ █^^^"),
+            ("▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"),
+        ];
+        for (row, (left, right)) in logo.iter().enumerate() {
+            let py = u32::from(y) + row as u32;
+            if py >= rows || modal.is_some_and(|(_, dy, _, h)| (dy..dy + h).contains(&py)) {
+                continue;
+            }
+            for (offset, raw, original_fg) in [(0u32, *left, muted), (20, *right, text_color)] {
+                let shadow = dim(
+                    Rgba::new(
+                        ((3 * u16::from(background.r) + u16::from(original_fg.r) + 2) / 4) as u8,
+                        ((3 * u16::from(background.g) + u16::from(original_fg.g) + 2) / 4) as u8,
+                        ((3 * u16::from(background.b) + u16::from(original_fg.b) + 2) / 4) as u8,
+                        255,
+                    ),
+                    base_alpha,
+                );
+                let fg = dim(original_fg, base_alpha);
+                for (col, marker) in raw.chars().enumerate() {
+                    let px = u32::from(x) + offset + col as u32;
+                    if px >= cols {
+                        break;
+                    }
+                    let (glyph, color, background) = match marker {
+                        '_' => (' ', fg, Some(shadow)),
+                        '^' => ('▀', fg, Some(shadow)),
+                        '~' => ('▀', shadow, Some(dim(background, base_alpha))),
+                        ',' => ('▄', shadow, Some(dim(background, base_alpha))),
+                        other => (other, fg, Some(dim(background, base_alpha))),
+                    };
+                    let mut bytes = [0u8; 4];
+                    renderer.draw_text_styled(
+                        px,
+                        py,
+                        glyph.encode_utf8(&mut bytes),
+                        color,
+                        background,
+                        0,
+                    )?;
+                }
+            }
+        }
     }
     renderer.frame(|_| {})?;
     Ok(())
@@ -669,7 +921,7 @@ fn current_workspace_label() -> String {
 #[cfg(feature = "native")]
 fn bind_session(
     view: &mut crate::native_view::NativeView,
-    transcript: &mut Vec<String>,
+    transcript: &mut NativeChatHistory,
     global_draft: &str,
     origin: &str,
     session: Option<&str>,
@@ -698,8 +950,8 @@ fn bind_session(
                 snapshot.message_count,
             )),
             global_draft,
-            transcript,
-            append_transcript,
+            &mut transcript.lines,
+            append_legacy_transcript,
         )?
         .draft;
     // Successful bind: re-assert the accepted binding from the SAME
@@ -712,6 +964,8 @@ fn bind_session(
         Some(snapshot.title.clone()),
         Some(snapshot.message_count),
     );
+    transcript.reset(snapshot.history.clone(), snapshot.typed_history.clone());
+    view.set_parent_session(snapshot.parent_session);
     Ok((snapshot, draft))
 }
 
@@ -818,7 +1072,7 @@ fn fetch_permission(
 #[cfg(feature = "native")]
 fn dispatch_permission_reply(
     view: &mut crate::native_view::NativeView,
-    transcript: &mut Vec<String>,
+    transcript: &mut NativeChatHistory,
     origin: Option<&str>,
     auth: Option<&str>,
     intent: crate::native_view_dialogs::DecisionIntent,
@@ -927,12 +1181,102 @@ pub(crate) fn parse_created_session_id(response: &str) -> Result<String, String>
 }
 
 #[cfg(feature = "native")]
+fn load_native_theme(
+    name: &str,
+    mode: crate::native_theme_runtime::ThemeMode,
+    config_paths: &[std::path::PathBuf],
+) -> Result<crate::native_theme_runtime::RuntimeTheme, String> {
+    use crate::native_theme_runtime::{RuntimeTheme, ThemeMode};
+    crate::native_ui_budget::check_paths(config_paths)?;
+    let mut budget = crate::native_ui_budget::ReadBudget::default();
+    let (name, mode) = match name {
+        "dark" => ("opencode", ThemeMode::Dark),
+        "light" => ("opencode", ThemeMode::Light),
+        "system" => ("opencode", mode),
+        _ => (name, mode),
+    };
+    if name.is_empty()
+        || name.len() > 64
+        || name
+            .chars()
+            .any(|c| c.is_control() || c == '/' || c == '\\')
+    {
+        return Err("invalid theme name".into());
+    }
+    for path in config_paths.iter().rev() {
+        let Some(directory) = path.parent() else {
+            continue;
+        };
+        let candidate = directory.join("themes").join(format!("{name}.json"));
+        if let Some(text) = budget.read(&candidate, 262144, "theme asset")? {
+            let value = serde_json::from_str(&text).map_err(|_| "invalid theme JSON")?;
+            return RuntimeTheme::from_asset(name, &value, mode)
+                .map_err(|error| format!("invalid theme: {error}"));
+        }
+    }
+    let json =
+        crate::native_theme_assets::lookup(name).ok_or_else(|| format!("unknown theme: {name}"))?;
+    let value = serde_json::from_str(json).map_err(|_| "invalid bundled theme JSON")?;
+    RuntimeTheme::from_asset(name, &value, mode).map_err(|error| format!("invalid theme: {error}"))
+}
+
+#[cfg(feature = "native")]
+fn native_tui_config_paths() -> Result<Vec<std::path::PathBuf>, String> {
+    use std::path::PathBuf;
+    let home = env::var_os("HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute());
+    let global = env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| home.as_ref().map(|home| home.join(".config")));
+    let mut paths = Vec::new();
+    let mut budget = crate::native_ui_budget::ReadBudget::default();
+    let mut add = |directory: PathBuf| -> Result<(), String> {
+        for name in ["tui.json", "tui.jsonc"] {
+            let path = directory.join(name);
+            budget.check_path(&path)?;
+            paths.push(path);
+        }
+        Ok(())
+    };
+    if let Some(global) = global {
+        add(global.join("opencode"))?;
+    }
+    if let Ok(directory) = env::current_dir() {
+        let mut ancestors: Vec<_> = directory
+            .ancestors()
+            .take(crate::native_ui_budget::MAX_PATHS + 1)
+            .collect();
+        if ancestors.len() > crate::native_ui_budget::MAX_PATHS {
+            return Err("TUI config ancestor budget exceeded".into());
+        }
+        ancestors.reverse();
+        for directory in &ancestors {
+            add(directory.to_path_buf())?;
+        }
+        for directory in ancestors {
+            add(directory.join(".opencode"))?;
+        }
+    }
+    if let Some(directory) = env::var_os("OPENCODE_CONFIG_DIR")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+    {
+        add(directory)?;
+    }
+    Ok(paths)
+}
+
+#[cfg(feature = "native")]
 fn native_loop(
     memory: &[MemoryFile],
     mut live: Option<LiveSnapshot>,
     auth: Option<&str>,
     startup_view: Option<crate::app_start::StartupView>,
     keymap: SubmitKeymap,
+    data_dir: &Path,
+    explicit_session_route: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cols, rows) = native_size();
     let mut renderer = NativeRenderer::create(cols, rows)?;
@@ -963,7 +1307,7 @@ fn native_loop(
     let models_loaded = models_fetch.is_some();
     let models = models_fetch.unwrap_or_default();
     let mut selected = native_setup::selected(&models);
-    let mut transcript = Vec::new();
+    let mut transcript = NativeChatHistory::default();
     // In-flight turn worker wrapped with the binding identity it was
     // launched under: events apply only while session AND generation still
     // match; a superseded (stale) worker is drained and never touches the
@@ -991,12 +1335,52 @@ fn native_loop(
         for line in &snapshot.history {
             append_transcript(&mut transcript, line.clone());
         }
+        transcript.reset(snapshot.history.clone(), snapshot.typed_history.clone());
     }
     // Three-pane shell facade: populated from the actual initial daemon,
     // session, model, workspace and existing history, then maintained on
     // every frame and turn event below. Fetches use the existing bounded
     // authenticated client; the facade itself never performs IO.
     let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
+    let state_path = data_dir.join("state/kv.json");
+    let config_paths = native_tui_config_paths().unwrap_or_else(|error| {
+        append_transcript(&mut transcript, format!("error: {error}"));
+        Vec::new()
+    });
+    let preferences = crate::native_ui_preferences::UiPreferences::load(&config_paths, &state_path)
+        .unwrap_or_else(|error| {
+            append_transcript(&mut transcript, format!("error: {error}"));
+            crate::native_ui_preferences::UiPreferences::default()
+        });
+    for diagnostic in &preferences.diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
+    let theme_mode = if preferences.theme_mode.as_deref() == Some("light") {
+        crate::native_theme_runtime::ThemeMode::Light
+    } else {
+        crate::native_theme_runtime::ThemeMode::Dark
+    };
+    let mut theme = match load_native_theme(
+        preferences.theme.as_deref().unwrap_or("opencode"),
+        theme_mode,
+        &config_paths,
+    ) {
+        Ok(theme) => theme,
+        Err(error) => {
+            append_transcript(&mut transcript, format!("error: {error}"));
+            crate::native_theme_runtime::RuntimeTheme::builtin_default(theme_mode)
+        }
+    };
+    view.set_sidebar_hidden(preferences.sidebar_hidden);
+    view.set_prompt_width(match preferences.prompt_width {
+        Some(crate::native_ui_preferences::PromptWidth::Auto) => {
+            crate::native_view::PromptWidth::Auto
+        }
+        Some(crate::native_ui_preferences::PromptWidth::Fixed(width)) => {
+            crate::native_view::PromptWidth::Fixed(width)
+        }
+        None => crate::native_view::PromptWidth::Default,
+    });
     // Honest status-v2 facts: a model claim only after the catalogue was
     // actually observed (failed fetch -> `Unavailable`, not `unset`); the
     // connection is confirmed only when the startup snapshot fetch ACKed.
@@ -1027,6 +1411,10 @@ fn native_loop(
         None => view.set_session(None),
     }
     view.set_workspace(current_workspace_label());
+    view.set_parent_session(
+        live.as_ref()
+            .is_some_and(|snapshot| snapshot.parent_session),
+    );
     if let Some(snapshot) = live.as_ref() {
         // Left pane: real backend session listing (GET /api/sessions).
         match http_request(&snapshot.origin, "GET", "/api/sessions", None, auth).and_then(|body| {
@@ -1068,6 +1456,19 @@ fn native_loop(
     // Session picker: highlight moves locally; the active session changes
     // only after a backend-ACKed fetch (Ctrl-G confirmation below).
     let mut pending_session: Option<String> = None;
+    // Explicit route fact mirrored from the same accepted sources as
+    // `view.set_session_route` (startup snapshot history, backend
+    // user-message ACK, successful bind): true = session route, false =
+    // Home. The paint pass reads only this fact for Home text roles; it is
+    // never inferred from memory/error text.
+    let mut session_route = explicit_session_route
+        || live
+            .as_ref()
+            .is_some_and(|snapshot| !snapshot.history.is_empty());
+    view.set_session_route(session_route);
+    // Upstream leader chord state (`LeaderDefault = "ctrl+x"`, then `b` →
+    // `session.sidebar.toggle`): armed only from the chat composer.
+    let mut leader_pending = false;
     let mut byte = [0u8; 1];
     loop {
         if let Ok(Some(size)) = renderer.terminal_size() {
@@ -1087,6 +1488,7 @@ fn native_loop(
             )
         });
         let mut worker_finished = false;
+        let mut turn_succeeded = false;
         if let Some(owned) = worker.as_mut() {
             if binding_active {
                 let mut settled = false;
@@ -1094,34 +1496,53 @@ fn native_loop(
                     needs_paint = true;
                     view.follow_tail();
                     match event {
-                        native_turn::Event::User => {}
+                        // Backend user-message ACK: the accepted first user
+                        // turn moves the main column to the session route
+                        // (Home → session), explicitly and only on ACK.
+                        native_turn::Event::User => {
+                            if !session_route {
+                                session_route = true;
+                                view.set_session_route(true);
+                            }
+                        }
                         native_turn::Event::Delta(delta) => {
                             partial.push_str(&delta);
                             replace_partial(&mut transcript, &partial);
                         }
                         native_turn::Event::ToolCall(name) => {
-                            append_transcript(
-                                &mut transcript,
+                            transcript.append(
                                 format!("tool: {}", native_transcript::strip_ansi(&name)),
+                                ChatMessage {
+                                    role: ChatRole::Assistant,
+                                    parts: vec![ChatPart::ToolCall {
+                                        name,
+                                        id: String::new(),
+                                    }],
+                                    agent: None,
+                                    model: None,
+                                },
                             );
                         }
                         native_turn::Event::ToolOutput(name, output) => {
-                            append_transcript(
-                                &mut transcript,
+                            transcript.append(
                                 format!(
                                     "tool {}: {}",
                                     native_transcript::strip_ansi(&name),
                                     native_transcript::strip_ansi(&output)
                                 ),
+                                // This stream event does not carry an error flag.
+                                // Retain its tool role without inventing success.
+                                ChatMessage::text(ChatRole::Tool, format!("{name}: {output}")),
                             );
                         }
                         native_turn::Event::Assistant(text) => {
+                            turn_succeeded = true;
                             partial.clear();
                             remove_partial(&mut transcript);
                             settled = true;
-                            append_transcript(
-                                &mut transcript,
+                            transcript.append(
                                 format!("assistant: {}", native_transcript::strip_ansi(&text)),
+                                ChatMessage::text(ChatRole::Assistant, text),
                             );
                         }
                         native_turn::Event::Error(error) => {
@@ -1150,6 +1571,35 @@ fn native_loop(
         }
         if worker_finished {
             worker = None;
+            if binding_active {
+                if let Some(current) = live.as_ref() {
+                    match fetch_snapshot(&current.origin, Some(&current.session_id), auth) {
+                        Ok(snapshot) => {
+                            view.set_session_binding(
+                                Some(snapshot.session_id.clone()),
+                                Some(snapshot.title.clone()),
+                                Some(snapshot.message_count),
+                            );
+                            view.set_parent_session(snapshot.parent_session);
+                            if turn_succeeded {
+                                transcript.reset(
+                                    snapshot.history.clone(),
+                                    snapshot.typed_history.clone(),
+                                );
+                            }
+                            live = Some(snapshot);
+                            needs_paint = true;
+                        }
+                        Err(error) => {
+                            view.set_connection_unknown();
+                            append_transcript(
+                                &mut transcript,
+                                format!("error: completed-turn snapshot unavailable: {error}"),
+                            );
+                        }
+                    }
+                }
+            }
         }
         // Bounded permission poll (existing authenticated client, 500ms
         // cadence): only while a turn owns this binding, or while an open
@@ -1257,10 +1707,13 @@ fn native_loop(
             native_setup::Dialog::None => Vec::new(),
             native_setup::Dialog::Provider => {
                 let mut panel = vec!["Connect a provider".to_owned()];
-                if !models.is_empty() && "openai".contains(&draft.trim().to_lowercase()) {
+                // The dialog's own bounded filter buffer (typing goes to
+                // `filter_input`, never the chat draft) — the overlay must
+                // echo and filter the SAME buffer the user is typing into.
+                if !models.is_empty() && "openai".contains(&filter_input.trim().to_lowercase()) {
                     panel.push("  OpenAI (API key)".to_owned());
                 }
-                panel.push(format!("filter: {draft} (enter / escape)"));
+                panel.push(format!("filter: {filter_input} (enter / escape)"));
                 panel
             }
             native_setup::Dialog::ApiKey => vec![
@@ -1272,14 +1725,16 @@ fn native_loop(
             ],
             native_setup::Dialog::Model => {
                 let mut panel = vec!["Select model (OpenAI)".to_owned()];
+                // Same buffer fix as Provider: filter and echo read the
+                // dialog-local `filter_input`, never the chat draft.
                 panel.extend(
                     models
                         .iter()
-                        .filter(|model| model.matches(&draft))
+                        .filter(|model| model.matches(&filter_input))
                         .take(6)
                         .map(|model| format!("  {} — {}", model.id, model.name)),
                 );
-                panel.push(format!("filter: {draft} (enter / escape)"));
+                panel.push(format!("filter: {filter_input} (enter / escape)"));
                 panel
             }
         };
@@ -1298,7 +1753,7 @@ fn native_loop(
         } else {
             // Busy reflects only the worker that owns the CURRENT binding;
             // a stale (superseded) worker never shows busy here.
-            view.render(draft_echo, &transcript, binding_active, &overlay)
+            view.render_typed(draft_echo, &transcript.messages, binding_active, &overlay)
         };
         // Help owns the whole frame: heading at row 0 with static content
         // clipped to the terminal, so a short window still shows the page.
@@ -1320,7 +1775,56 @@ fn native_loop(
                 .collect();
         }
         if needs_paint {
-            native_paint(&mut renderer, &lines)?;
+            // Exact paint context: region geometry from the facade, modal
+            // row count from this loop's own overlay content (or the
+            // permission dialog's rendered content rows — rendered output
+            // pads to full height, so count to the last non-blank row),
+            // and the explicit Home route fact. Help owns the whole frame
+            // and never paints a modal rectangle.
+            let presentation = view.presentation();
+            let modal_rows = if help_open {
+                None
+            } else if dialog_open {
+                Some(modal_content_rows(&view.dialogs.render(
+                    view.modal_presentation().content_width as usize,
+                    presentation.rows as usize,
+                )))
+            } else if !overlay.is_empty() {
+                Some(overlay.len())
+            } else if view.page() == crate::native_view_pages::Page::Theme {
+                Some(view.theme_dialog().len())
+            } else {
+                None
+            };
+            let home = !help_open
+                && matches!(
+                    view.page(),
+                    crate::native_view_pages::Page::Chat | crate::native_view_pages::Page::Theme
+                )
+                && !session_route;
+            native_paint(
+                &mut renderer,
+                &lines,
+                PaintCtx {
+                    palette: theme.palette,
+                    presentation,
+                    modal_rows,
+                    modal: view.modal_presentation(),
+                    sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+                    chat_row_classes: view.chat_row_classes().to_vec(),
+                    home,
+                    composer: if help_open {
+                        None
+                    } else {
+                        view.composer_region(draft_echo)
+                    },
+                    logo: if help_open {
+                        None
+                    } else {
+                        view.home_logo_region(draft_echo)
+                    },
+                },
+            )?;
             needs_paint = false;
         }
         let now = Instant::now();
@@ -1368,7 +1872,9 @@ fn native_loop(
         // precedence over both.
         let page_query_open = matches!(
             view.page(),
-            crate::native_view_pages::Page::Sessions | crate::native_view_pages::Page::Commands
+            crate::native_view_pages::Page::Sessions
+                | crate::native_view_pages::Page::Commands
+                | crate::native_view_pages::Page::Theme
         );
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
@@ -1525,6 +2031,17 @@ fn native_loop(
                 filter_input.clear();
                 utf8.reset();
             }
+            // Leader chord arming: Ctrl-X (`keybind.ts` `LeaderDefault =
+            // "ctrl+x"`), upstream `<leader>b` → `session.sidebar.toggle`.
+            // Only the chat composer can arm it — the permission-modal,
+            // Help and page gates above already `continue` for this byte,
+            // and a credential/model dialog (which owns focus here) refuses
+            // to arm. No backend side effect: the chord only flips view
+            // state when the follow-up key is `b` (below).
+            24 => {
+                leader_pending = matches!(dialog, native_setup::Dialog::None);
+                utf8.reset();
+            }
             // Page navigation while a page owns focus (Enter confirms).
             14 if page_open => {
                 view.page_next();
@@ -1607,6 +2124,11 @@ fn native_loop(
                         });
                     match bound {
                         Ok((snapshot, restored_draft)) => {
+                            // Route follows the accepted snapshot: a bind
+                            // with history restores the session route; an
+                            // empty target (/new) returns to Home.
+                            session_route = true;
+                            view.set_session_route(session_route);
                             live = Some(snapshot);
                             draft = restored_draft;
                             // Committed ONLY on a successful bind.
@@ -1734,6 +2256,8 @@ fn native_loop(
                                     });
                                 match bound {
                                     Ok((snapshot, restored_draft)) => {
+                                        session_route = true;
+                                        view.set_session_route(session_route);
                                         live = Some(snapshot);
                                         draft = restored_draft;
                                         // Committed ONLY on a real bind
@@ -1809,6 +2333,14 @@ fn native_loop(
                                 view.close_page();
                                 command_route = Some(route);
                             }
+                            // `/sidebar` is a recognized chat-only local
+                            // (the static Commands table has no row for
+                            // it): the exact typed query routes through the
+                            // same chain, never a fabricated route.
+                            None if view.page_query().trim() == "/sidebar" => {
+                                view.close_page();
+                                command_route = Some("/sidebar");
+                            }
                             None => append_transcript(
                                 &mut transcript,
                                 format!("error: unrecognized local command: {}", view.page_query()),
@@ -1826,7 +2358,22 @@ fn native_loop(
                         // mutation — and NEVER a composer draft clear
                         // (only an accepted turn or a recognized
                         // chat-composer local command clears the draft).
-                        view.confirm_page(&mut draft);
+                        if view.page() == crate::native_view_pages::Page::Theme {
+                            if let Some(row) = view.page_selected().filter(|row| row.enabled) {
+                                let name = row.id.clone();
+                                match load_native_theme(&name, theme.mode, &config_paths) {
+                                    Ok(next) => {
+                                        match crate::native_ui_preferences::UiPreferences::persist_theme_selection(&state_path, &name, next.mode.key()) {
+                                            Ok(()) => { theme = next; view.close_page(); }
+                                            Err(error) => append_transcript(&mut transcript, format!("error: {error}")),
+                                        }
+                                    }
+                                    Err(error) => append_transcript(&mut transcript, format!("error: {error}")),
+                                }
+                            }
+                        } else {
+                            view.confirm_page(&mut draft);
+                        }
                         continue;
                     }
                 }
@@ -2022,6 +2569,34 @@ fn native_loop(
                         view.open_commands_page();
                     } else {
                         view.open_page(page);
+                        if page == crate::native_view_pages::Page::Theme {
+                            let mut rows: Vec<_> = crate::native_theme_assets::ASSETS
+                                .iter()
+                                .map(|(name, _)| crate::native_view_pages::PageRow {
+                                    id: (*name).into(),
+                                    label: (*name).into(),
+                                    detail: if *name == theme.name {
+                                        "selected".into()
+                                    } else {
+                                        String::new()
+                                    },
+                                    enabled: true,
+                                })
+                                .collect();
+                            rows.push(crate::native_view_pages::PageRow {
+                                id: "dark".into(),
+                                label: "OpenCode dark".into(),
+                                detail: String::new(),
+                                enabled: true,
+                            });
+                            rows.push(crate::native_view_pages::PageRow {
+                                id: "light".into(),
+                                label: "OpenCode light".into(),
+                                detail: String::new(),
+                                enabled: true,
+                            });
+                            view.set_page_rows(rows);
+                        }
                     }
                     consume_local_command(&mut draft, command, from_chat_composer);
                     utf8.reset();
@@ -2157,6 +2732,10 @@ fn native_loop(
                                 });
                             match bound {
                                 Ok((snapshot, restored_draft)) => {
+                                    // An accepted explicit bind owns the session
+                                    // route even before its first message.
+                                    session_route = true;
+                                    view.set_session_route(session_route);
                                     live = Some(snapshot);
                                     // Visible draft updates ONLY on this
                                     // successful commit.
@@ -2211,6 +2790,25 @@ fn native_loop(
                     utf8.reset();
                     continue;
                 }
+                if command == "/sidebar" {
+                    // Local sidebar toggle command: the same recognized
+                    // local-command chain as /connect (typed chat-composer
+                    // text is consumed; a Commands-page source's own
+                    // buffer is untouched, so the draft is preserved
+                    // exactly). Pure view state — upstream
+                    // `session.sidebar.toggle` with no backend call.
+                    view.toggle_sidebar();
+                    if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_sidebar(
+                        &state_path,
+                        view.sidebar_hidden(),
+                    ) {
+                        append_transcript(&mut transcript, format!("error: {error}"));
+                    }
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
                 if !command.is_empty() {
                     if worker.as_ref().is_some_and(|owned| {
                         owned.owns(
@@ -2224,7 +2822,10 @@ fn native_loop(
                     }
                     if let Some(snapshot) = live.as_ref() {
                         {
-                            append_transcript(&mut transcript, format!("you: {text}"));
+                            transcript.append(
+                                format!("you: {text}"),
+                                ChatMessage::text(ChatRole::User, text.clone()),
+                            );
                             let result = selected
                                 .as_ref()
                                 .ok_or_else(|| "select a model with /connect".to_owned())
@@ -2253,7 +2854,10 @@ fn native_loop(
                             }
                         }
                     } else {
-                        append_transcript(&mut transcript, format!("you: {text}"));
+                        transcript.append(
+                            format!("you: {text}"),
+                            ChatMessage::text(ChatRole::User, text.clone()),
+                        );
                         append_transcript(
                             &mut transcript,
                             "offline: turn not executed".to_string(),
@@ -2264,6 +2868,33 @@ fn native_loop(
                 utf8.reset();
             }
             b if b >= 0x20 && b != b'\t' => {
+                // Leader follow-up: `Ctrl-X` then `b` toggles the sidebar;
+                // any other key just ends the chord. The chord (and its
+                // follow-up key) is consumed WITHOUT touching the composer
+                // draft, the credential buffer or any page query, and only
+                // while the chat composer owns focus — never while a
+                // credential/model dialog, Help or a page is open.
+                if leader_pending
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && !page_open
+                    && !help_open
+                {
+                    leader_pending = false;
+                    if b == b'b' {
+                        view.toggle_sidebar();
+                        if let Err(error) =
+                            crate::native_ui_preferences::UiPreferences::persist_sidebar(
+                                &state_path,
+                                view.sidebar_hidden(),
+                            )
+                        {
+                            append_transcript(&mut transcript, format!("error: {error}"));
+                        }
+                    }
+                    utf8.reset();
+                    continue;
+                }
+                leader_pending = false;
                 if page_query_open {
                     // Sessions filter / command buffer: the query is
                     // facade-owned and bounded (char + byte caps); the
@@ -2316,7 +2947,7 @@ fn native_loop(
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new")
+        || matches!(command, "/commands" | "/new" | "/sidebar")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
@@ -2356,7 +2987,12 @@ fn command_transaction_draft(draft: &str, command: &str, from_chat_composer: boo
 }
 
 #[cfg(feature = "native")]
-fn append_transcript(transcript: &mut Vec<String>, mut line: String) {
+fn append_transcript(transcript: &mut NativeChatHistory, line: String) {
+    transcript.notice(line);
+}
+
+#[cfg(feature = "native")]
+fn append_legacy_transcript(transcript: &mut Vec<String>, mut line: String) {
     if line.chars().count() > MAX_NATIVE_LINE_CHARS {
         line = line.chars().take(MAX_NATIVE_LINE_CHARS).collect();
     }
@@ -2368,20 +3004,13 @@ fn append_transcript(transcript: &mut Vec<String>, mut line: String) {
 }
 
 #[cfg(feature = "native")]
-fn replace_partial(transcript: &mut Vec<String>, text: &str) {
-    remove_partial(transcript);
-    append_transcript(
-        transcript,
-        format!(
-            "assistant (streaming): {}",
-            native_transcript::strip_ansi(text)
-        ),
-    );
+fn replace_partial(transcript: &mut NativeChatHistory, text: &str) {
+    transcript.replace_partial(text);
 }
 
 #[cfg(feature = "native")]
-fn remove_partial(transcript: &mut Vec<String>) {
-    transcript.retain(|line| !line.starts_with("assistant (streaming): "));
+fn remove_partial(transcript: &mut NativeChatHistory) {
+    transcript.remove_partial();
 }
 
 /// Follow mode: poll the bound session, re-render only on change, stop after
@@ -2522,7 +3151,15 @@ pub fn run_with_dir(
                 }
                 #[cfg(feature = "native")]
                 {
-                    return native_loop(&memory, Some(snapshot), auth, startup_view, keymap);
+                    return native_loop(
+                        &memory,
+                        Some(snapshot),
+                        auth,
+                        startup_view,
+                        keymap,
+                        effective_data_dir,
+                        args.session.is_some(),
+                    );
                 }
                 #[cfg(not(feature = "native"))]
                 {
@@ -2556,7 +3193,15 @@ pub fn run_with_dir(
     }
     #[cfg(feature = "native")]
     {
-        native_loop(&memory, None, auth, startup_view, keymap)
+        native_loop(
+            &memory,
+            None,
+            auth,
+            startup_view,
+            keymap,
+            effective_data_dir,
+            args.session.is_some(),
+        )
     }
     #[cfg(not(feature = "native"))]
     {
