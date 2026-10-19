@@ -1717,7 +1717,7 @@ fn native_loop(
                 panel
             }
             native_setup::Dialog::ApiKey => vec![
-                "API key (OpenAI)".to_owned(),
+                "API key".to_owned(),
                 format!(
                     "key: {} (enter / escape)",
                     "*".repeat(key_input.chars().count().min(40))
