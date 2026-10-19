@@ -413,19 +413,26 @@ def run_second_client(state, binary):
 
 
 class CallbackEvent(threading.Event):
-    def __init__(self, callback):
+    def __init__(self, callback, ready=None):
         super().__init__()
         self.callback = callback
+        self.ready = ready
         self.callback_used = False
+        self.callback_error = None
         self.callback_lock = threading.Lock()
 
     def set(self):
         with self.callback_lock:
-            invoke = not self.callback_used
-            self.callback_used = True
+            invoke = not self.callback_used and (self.ready is None or self.ready())
+            if invoke:
+                self.callback_used = True
         try:
             if invoke:
                 self.callback()
+        except BaseException as error:
+            # Event release is also used by the golden fixture's finally.
+            # Do not let callback failures skip its daemon/server cleanup.
+            self.callback_error = error
         finally:
             super().set()
 
@@ -445,7 +452,13 @@ def run(binary, library, manifest, artifacts):
             self.second_client_unsafe = False
             self.second_client_diagnostic = None
             self.partial_visible = CallbackEvent(
-                lambda: observations.append(run_second_client(self, binary))
+                lambda: observations.append(run_second_client(self, binary)),
+                ready=lambda: (
+                    self.phase == "waiting_partial_observation"
+                    and self.error is None
+                    and not self.release_partial.is_set()
+                    and request_count(self) == 1
+                ),
             )
 
     golden.ProviderState = SecondClientState
@@ -456,6 +469,11 @@ def run(binary, library, manifest, artifacts):
         raise
     finally:
         golden.ProviderState = original_state
+    state = active.get("state")
+    if state is not None and state.partial_visible.callback_error is not None:
+        error = state.partial_visible.callback_error
+        write_failure_evidence(artifacts, redact(str(error)))
+        raise error
     if len(observations) != 1:
         raise RuntimeError("second-client overlap probe did not run exactly once")
     if (artifacts / "native-stream-tool-failure.json").is_file():
