@@ -4,6 +4,8 @@
 //! retains fixed-size keyboard prefixes and at most one 32 KiB paste body.
 //! Only a complete, valid UTF-8 paste becomes an atomic event; rejected frames
 //! are consumed through their closing marker without leaking keyboard events.
+//! OSC and other terminal reply strings are discarded with constant-size state
+//! through their terminator, including replies split across input reads.
 //! The caller's four-byte UTF-8 decoder still handles ordinary input.
 
 use std::time::{Duration, Instant};
@@ -11,6 +13,7 @@ use std::time::{Duration, Instant};
 pub(crate) const ESCAPE_GRACE: Duration = Duration::from_millis(150);
 pub(crate) const MAX_PASTE_BYTES: usize = 32 * 1024;
 const PASTE_FRAME_TIMEOUT: Duration = Duration::from_secs(5);
+const CONTROL_STRING_TIMEOUT: Duration = Duration::from_secs(5);
 const PASTE_END: &[u8] = b"\x1b[201~";
 const MAX_SEQUENCE: usize = 32;
 const MAX_EVENTS: usize = 8;
@@ -30,6 +33,11 @@ enum State {
     Ss3,
     DiscardCsi,
     DiscardSs3,
+    ControlString {
+        bell_terminated: bool,
+        escape: bool,
+        abandoned: bool,
+    },
     Paste,
     DiscardPaste,
     AbandonedPaste,
@@ -44,6 +52,7 @@ pub(crate) struct TerminalInputDecoder {
     paste: Vec<u8>,
     paste_end_len: usize,
     paste_deadline: Option<Instant>,
+    string_deadline: Option<Instant>,
     events: [Option<InputEvent>; MAX_EVENTS],
     head: usize,
     count: usize,
@@ -59,6 +68,7 @@ impl Default for TerminalInputDecoder {
             paste: Vec::new(),
             paste_end_len: 0,
             paste_deadline: None,
+            string_deadline: None,
             events: std::array::from_fn(|_| None),
             head: 0,
             count: 0,
@@ -111,6 +121,8 @@ impl TerminalInputDecoder {
             State::Escape => match byte {
                 b'[' => self.begin(State::Csi, now),
                 b'O' => self.begin(State::Ss3, now),
+                b']' => self.begin_control_string(true, now),
+                b'P' | b'_' | b'^' | b'X' => self.begin_control_string(false, now),
                 0x1b => self.deadline = Some(now + ESCAPE_GRACE),
                 _ => {
                     self.emit(InputEvent::Escape);
@@ -119,6 +131,26 @@ impl TerminalInputDecoder {
                 }
             },
             State::Csi | State::Ss3 => self.sequence_byte(byte, now),
+            State::ControlString {
+                bell_terminated,
+                escape,
+                abandoned,
+            } => {
+                if (bell_terminated && byte == 0x07) || (escape && byte == b'\\') {
+                    self.reset();
+                } else {
+                    self.state = State::ControlString {
+                        bell_terminated,
+                        escape: byte == 0x1b,
+                        abandoned,
+                    };
+                    self.deadline = if abandoned {
+                        (byte == 0x1b).then(|| now + ESCAPE_GRACE)
+                    } else {
+                        self.string_deadline.map(|end| end.min(now + ESCAPE_GRACE))
+                    };
+                }
+            }
             State::Paste | State::DiscardPaste | State::AbandonedPaste => {
                 self.paste_byte(byte, now)
             }
@@ -135,6 +167,29 @@ impl TerminalInputDecoder {
 
     pub(crate) fn expire(&mut self, now: Instant) {
         if self.deadline.is_some_and(|deadline| now >= deadline) {
+            if let State::ControlString {
+                bell_terminated,
+                escape,
+                abandoned,
+            } = self.state
+            {
+                if abandoned && escape {
+                    self.reset();
+                    self.emit(InputEvent::Escape);
+                } else {
+                    // An idle or overlong reply is abandoned, not converted
+                    // into text. A new quiet ESC provides explicit recovery,
+                    // as for an abandoned paste. A late ST can still close it.
+                    self.state = State::ControlString {
+                        bell_terminated,
+                        escape,
+                        abandoned: true,
+                    };
+                    self.deadline = None;
+                    self.string_deadline = None;
+                }
+                return;
+            }
             if self.state == State::Paste {
                 self.discard_paste();
                 self.state = State::AbandonedPaste;
@@ -157,6 +212,7 @@ impl TerminalInputDecoder {
                     State::DiscardCsi => State::DiscardCsi,
                     State::DiscardSs3 => State::DiscardSs3,
                     State::Paste | State::DiscardPaste | State::AbandonedPaste => self.state,
+                    State::ControlString { .. } => self.state,
                     State::Ground | State::Escape => State::Ground,
                 };
                 self.len = 0;
@@ -169,6 +225,19 @@ impl TerminalInputDecoder {
         self.state = state;
         self.len = 0;
         self.deadline = Some(now + ESCAPE_GRACE);
+    }
+
+    fn begin_control_string(&mut self, bell_terminated: bool, now: Instant) {
+        self.reset();
+        self.state = State::ControlString {
+            bell_terminated,
+            escape: false,
+            abandoned: false,
+        };
+        self.string_deadline = Some(now + CONTROL_STRING_TIMEOUT);
+        self.deadline = Some(now + ESCAPE_GRACE);
+        // Retain no payload. Timing out abandons framing without releasing a
+        // late reply tail into the composer. Ctrl-C/Ctrl-D keep exit priority.
     }
 
     fn sequence_byte(&mut self, byte: u8, now: Instant) {
@@ -367,6 +436,7 @@ impl TerminalInputDecoder {
         self.paste.clear();
         self.paste_end_len = 0;
         self.paste_deadline = None;
+        self.string_deadline = None;
     }
 }
 
