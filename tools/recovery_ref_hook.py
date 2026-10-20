@@ -1,10 +1,24 @@
 #!/usr/bin/env python3
-"""Git reference-transaction guard for active Recovery Mode.
+"""Git reference-transaction guard for active Recovery Mode.  (PROPOSED AMENDMENT)
 
 Installed into the shared Git hooks directory by ``tools/recovery_state.py init``.
 The hook rejects new local branches, mutation/deletion of frozen legacy heads,
 stashes/tags/custom refs, and deletion of fixed Recovery Mode heads. Remote
 tracking refs remain fetchable.
+
+Amendment (reviewed one-use transition): a single bounded bootstrap
+window.  While ``recovery-state/transition-capability.json`` has status
+``ARMED`` AND the transaction is exactly one row advancing the canonical head
+from the recorded old canonical SHA to a tree whose changed paths and
+per-path blobs match the capability record exactly, AND
+``OC2_RECOVERY_TRANSITION_CAP`` equals the capability id, the transition
+transaction is allowed.  Every other transaction falls through to the
+original fail-closed enforcement below, and the window closes as soon as
+``tools/recovery_transition.py`` records ``APPLIED`` (or the capability is
+rejected).  No other behavior of this driver changes: in particular
+``AUTO_MERGE`` (and every other non-approved ref) is still denied exactly as
+in the current canonical driver — no zero or nonzero ``AUTO_MERGE`` allowance
+is added by this amendment.
 """
 
 from __future__ import annotations
@@ -15,6 +29,7 @@ import os
 import pathlib
 import subprocess
 import sys
+import datetime as dt
 
 ZERO = "0" * 40
 
@@ -41,6 +56,95 @@ def common_git_dir() -> pathlib.Path:
     return raw
 
 
+def _git_out(args: list[str]) -> str | None:
+    try:
+        return subprocess.check_output(args, text=True, stderr=subprocess.DEVNULL).strip()
+    except subprocess.CalledProcessError:
+        return None
+
+
+def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
+    """Bounded one-use bootstrap window for the reviewed controller transition.
+
+    Fail-closed: any unreadable, malformed, wrong-mode, non-ARMED, or
+    mismatching capability simply returns False and the caller applies the
+    original enforcement.
+    """
+    cap_path = common_git_dir() / "recovery-state" / "transition-capability.json"
+    try:
+        mode = cap_path.stat().st_mode & 0o777
+    except OSError:
+        return False
+    if mode != 0o600:
+        return False
+    try:
+        cap = json.loads(cap_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    if not isinstance(cap, dict) or cap.get("status") != "ARMED":
+        return False
+    bootstrap = {"config/recovery-mode.json", "tools/recovery_ref_hook.py", "tools/recovery_transition.py"}
+    observer = {"tests/e2e/native_provider_setup.py", "tests/e2e/native_stream_tool.py", "tests/e2e/native_utf8_input.py", "tests/e2e/native_escape_input.py", "tests/e2e/native_resize.py", "tests/e2e/native_bracketed_paste.py"}
+    kind = cap.get("kind")
+    expected = bootstrap if kind == "bootstrap-controller" else observer if kind == "observer-correction" else None
+    allowed = cap.get("allowedPaths")
+    proposed = cap.get("proposedBlobs")
+    if expected is None or not isinstance(allowed, list) or set(allowed) != expected or len(allowed) != len(set(allowed)) or not isinstance(proposed, dict) or set(proposed) != expected:
+        return False
+    if any(not isinstance(v, str) or len(v) != 40 or any(c not in "0123456789abcdef" for c in v) for v in proposed.values()):
+        return False
+    if cap.get("canonicalHead") != "main-v2" or not isinstance(cap.get("baseSha"), str) or len(cap.get("baseSha")) != 40:
+        return False
+    try:
+        if dt.datetime.now(dt.timezone.utc) >= dt.datetime.fromisoformat(str(cap.get("expiresAt"))):
+            return False
+    except (ValueError, TypeError, OverflowError):
+        return False
+    if os.environ.get("OC2_RECOVERY_TRANSITION_CAP", "") != str(cap.get("capabilityId", "")):
+        return False
+    policy_path = common_git_dir() / "recovery-state" / "ref-policy.json"
+    try:
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        if policy.get("canonicalHead") != cap.get("canonicalHead"):
+            return False
+        supplied = os.environ.get("OC2_RECOVERY_CANONICAL_TOKEN", "")
+        if hashlib.sha256(supplied.encode()).hexdigest() != str(policy.get("canonicalWriteTokenSha256", "")):
+            return False
+    except Exception:
+        return False
+    if len(rows) != 1:
+        return False
+    old, new, ref = rows[0]
+    if ref != f"refs/heads/{cap.get('canonicalHead', '')}":
+        return False
+    if old != cap.get("baseSha") or new == ZERO:
+        return False
+    parents = _git_out(["git", "rev-list", "--parents", "-n", "1", new])
+    if parents is None or parents.split() != [new, old]:
+        return False
+    allowed = cap.get("allowedPaths")
+    proposed = cap.get("proposedBlobs")
+    if cap.get("kind") == "observer-correction" and set(map(str, allowed or [])) != {
+        "tests/e2e/native_provider_setup.py", "tests/e2e/native_stream_tool.py",
+        "tests/e2e/native_utf8_input.py", "tests/e2e/native_escape_input.py",
+        "tests/e2e/native_resize.py", "tests/e2e/native_bracketed_paste.py",
+    }:
+        return False
+    if not isinstance(allowed, list) or not isinstance(proposed, dict) or set(map(str, allowed)) != set(proposed):
+        return False
+    diff = _git_out(["git", "diff", "--name-only", old, new])
+    if diff is None:
+        return False
+    changed = sorted(line for line in diff.splitlines() if line)
+    if changed != sorted(str(p) for p in allowed):
+        return False
+    for rel, blob in proposed.items():
+        actual = _git_out(["git", "rev-parse", f"{new}:{rel}"])
+        if actual is None or actual != str(blob):
+            return False
+    return True
+
+
 def main() -> int:
     phase = sys.argv[1] if len(sys.argv) > 1 else ""
     if phase != "prepared":
@@ -57,12 +161,19 @@ def main() -> int:
     protected = [str(path) for path in policy.get("protectedPaths", [])]
 
     errors: list[str] = []
+    rows: list[tuple[str, str, str]] = []
+    malformed = False
     for raw in sys.stdin:
         fields = raw.rstrip("\n").split()
         if len(fields) != 3:
+            malformed = True
             errors.append(f"malformed reference transaction row: {raw.rstrip()!r}")
             continue
-        old, new, ref = fields
+        rows.append((fields[0], fields[1], fields[2]))
+    if not malformed and transition_window_allows(rows):
+        return 0
+
+    for old, new, ref in rows:
         if ref.startswith("refs/remotes/"):
             continue
         if ref in {

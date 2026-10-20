@@ -227,5 +227,22 @@
     "maxFailedCandidateCyclesBeforeStrategyReview": 3,
     "strategyReviewRequiresIndependentEvaluator": true,
     "strategyReviewMustRecordDiagnosisAndNewApproach": true
+  },
+  "transitionPolicy": {
+    "mechanism": "tools/recovery_transition.py",
+    "requiredApprovals": 2,
+    "requiredRoles": [
+      "security",
+      "test"
+    ],
+    "authorMayNotApprove": true,
+    "oneUse": true,
+    "boundToCanonicalSha": true,
+    "boundToExactBlobs": true,
+    "capabilityLocation": "git-common-dir/recovery-state/transition-capability.json",
+    "failClosedOnActiveClaims": true,
+    "failClosedOnIntegrationLock": true,
+    "capabilityExpirySeconds": 900,
+    "authorizedObserverBlobsAreExact": true
   }
 }
