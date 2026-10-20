@@ -454,7 +454,7 @@ pub struct OpenAiResponsesStream {
 pub struct OpenAiResponsesClient {
     http: reqwest::Client,
     base_url: String,
-    api_key: String,
+    api_key: Option<String>,
     max_output_tokens: u32,
 }
 
@@ -465,7 +465,7 @@ impl OpenAiResponsesClient {
         let key = crate::persisted_auth::api_key("openai", &config.api_key_env)
             .await
             .ok_or_else(|| ResponsesError::MissingCredential(config.api_key_env.clone()))?;
-        Self::from_config(config, key)
+        Self::from_config(config, Some(key))
     }
 
     pub fn from_env() -> Result<Self, ResponsesError> {
@@ -475,10 +475,11 @@ impl OpenAiResponsesClient {
             .get_api_key()
             .filter(|value| !value.trim().is_empty())
             .ok_or_else(|| ResponsesError::MissingCredential(config.api_key_env.clone()))?;
-        Self::from_config(config, api_key)
+        Self::from_config(config, Some(api_key))
     }
 
-    fn from_config(config: ProviderConfig, api_key: String) -> Result<Self, ResponsesError> {
+    pub fn from_config(config: ProviderConfig, api_key: Option<String>) -> Result<Self, ResponsesError> {
+        config.validate().map_err(ResponsesError::InvalidConfig)?;
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs.clamp(1, 300)))
             .redirect(Policy::none())
@@ -513,12 +514,9 @@ impl OpenAiResponsesClient {
     ) -> Result<String, ResponsesError> {
         let mut payload = responses_request_payload(model, reasoning_effort, items, &[], false)?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
-        let mut response = self
-            .http
-            .post(format!("{}/responses", self.base_url))
-            .bearer_auth(&self.api_key)
-            .json(&payload)
-            .send()
+        let mut request = self.http.post(format!("{}/responses", self.base_url)).json(&payload);
+        if let Some(key) = self.api_key.as_deref() { request = request.bearer_auth(key); }
+        let mut response = request.send()
             .await
             .map_err(|error| ResponsesError::Request(error.to_string()))?;
         let status = response.status();
@@ -559,12 +557,9 @@ impl OpenAiResponsesClient {
         let mut payload = responses_request_payload(model, reasoning_effort, items, tools, true)?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
         payload["reasoning"]["summary"] = json!("auto");
-        let mut response = self
-            .http
-            .post(format!("{}/responses", self.base_url))
-            .bearer_auth(&self.api_key)
-            .json(&payload)
-            .send()
+        let mut request = self.http.post(format!("{}/responses", self.base_url)).json(&payload);
+        if let Some(key) = self.api_key.as_deref() { request = request.bearer_auth(key); }
+        let mut response = request.send()
             .await
             .map_err(|error| ResponsesError::Request(error.to_string()))?;
         let status = response.status();

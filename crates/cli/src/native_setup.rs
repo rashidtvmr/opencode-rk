@@ -7,7 +7,7 @@ use std::{
     path::PathBuf,
 };
 
-const MAX_MODELS: usize = 500;
+const MAX_MODELS: usize = 5000;
 const MAX_STATE_BYTES: usize = 64 * 1024;
 const MAX_RECENT: usize = 32;
 
@@ -15,10 +15,11 @@ const MAX_RECENT: usize = 32;
 pub(super) struct Model {
     pub id: String,
     pub name: String,
+    pub provider_id: String,
 }
 
 impl Model {
-    pub fn qualified(&self) -> String { format!("openai/{}", self.id) }
+    pub fn qualified(&self) -> String { format!("{}/{}", self.provider_id, self.id) }
     pub fn matches(&self, query: &str) -> bool {
         let query = query.trim().to_lowercase();
         query.is_empty() || self.id.to_lowercase().contains(&query)
@@ -45,22 +46,26 @@ pub(super) fn selected_row(models: &[Model], query: &str, row: usize) -> Option<
 pub(super) enum Dialog {
     None,
     Provider,
+    ProviderId,
+    BaseUrl,
     ApiKey,
     Model,
 }
 
 pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
+    if body.len() > 8 * 1024 * 1024 { return Err("model catalogue is too large".into()); }
     let value: Value = serde_json::from_str(body).map_err(|_| "invalid model catalogue")?;
     let entries = value["models"]
         .as_array()
         .ok_or("missing model catalogue")?;
+    if entries.len() > MAX_MODELS { return Err("model catalogue exceeds 5000-model limit".into()); }
     let mut models = Vec::new();
     for entry in entries.iter().take(MAX_MODELS) {
-        // Other providers remain unavailable until they have a native turn adapter.
-        if entry["provider_id"].as_str() != Some("openai") {
+        let provider = entry["provider_id"].as_str().unwrap_or("openai");
+        if provider.is_empty() || provider.len() > 128 || !provider.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') {
             continue;
         }
-        let Some(id) = entry["model_id"].as_str() else {
+        let Some(id) = entry["model_id"].as_str().or_else(|| entry["id"].as_str()) else {
             continue;
         };
         let name = entry["name"].as_str().unwrap_or(id);
@@ -72,10 +77,11 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
         {
             continue;
         }
-        if !models.iter().any(|model: &Model| model.id == id) {
+        if !models.iter().any(|model: &Model| model.id == id && model.provider_id == provider) {
             models.push(Model {
                 id: id.to_owned(),
                 name: name.to_owned(),
+                provider_id: provider.to_owned(),
             });
         }
     }
@@ -88,10 +94,10 @@ pub(super) fn selected(models: &[Model]) -> Option<Model> {
         if let Ok(value) = read_state(&path) {
             if let Some(recent) = value["recent"].as_array() {
                 for entry in recent.iter().take(MAX_RECENT) {
-                    if entry["providerID"].as_str() == Some("openai") {
+                    if let Some(provider) = entry["providerID"].as_str() {
                         if let Some(model) = models
                             .iter()
-                            .find(|model| entry["modelID"].as_str() == Some(&model.id))
+                            .find(|model| entry["modelID"].as_str() == Some(&model.id) && model.provider_id == provider)
                         {
                             return Some(model.clone());
                         }
@@ -107,10 +113,66 @@ pub(super) fn selected(models: &[Model]) -> Option<Model> {
         .cloned()
 }
 
+pub(super) fn recent_provider() -> Option<String> {
+    let value = read_state(&state_path()?).ok()?;
+    value["recent"].as_array()?.first()?["providerID"].as_str().map(str::to_owned)
+}
+
+pub(super) struct ModelLoad {
+    pub provider_id: String,
+    rx: tokio::sync::mpsc::Receiver<Result<Vec<Model>, String>>,
+    task: tokio::task::JoinHandle<()>,
+}
+
+impl ModelLoad {
+    pub fn start(origin: &str, auth: Option<&str>, provider: &str) -> Result<Self, String> {
+        if !provider.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') || provider.is_empty() {
+            return Err("invalid provider id".into());
+        }
+        let auth = auth.filter(|token| crate::daemon_client::is_wellformed_token(token))
+            .ok_or("daemon authentication unavailable")?.to_owned();
+        let url = reqwest::Url::parse(origin).map_err(|_| "invalid daemon URL")?;
+        if url.scheme() != "http" || !matches!(url.host_str(), Some("127.0.0.1" | "localhost" | "[::1]" | "::1")) || !url.username().is_empty() || url.password().is_some() {
+            return Err("model discovery requires authenticated local daemon".into());
+        }
+        let endpoint = format!("{}/api/providers/{provider}/models", origin.trim_end_matches('/'));
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let task = tokio::spawn(async move {
+            let result = async {
+                let client = reqwest::Client::builder().redirect(reqwest::redirect::Policy::none())
+                    .timeout(std::time::Duration::from_secs(16)).build().map_err(|_| "unable to create model discovery client")?;
+                let mut response = client.get(endpoint).header("Authorization", crate::daemon_client::authorization_header(&auth))
+                    .send().await.map_err(|_| "model discovery timed out or daemon unavailable")?;
+                if !response.status().is_success() { return Err(format!("model discovery failed (HTTP {}); check provider URL and API key", response.status().as_u16())); }
+                let mut bytes = Vec::new();
+                while let Some(chunk) = response.chunk().await.map_err(|_| "model discovery response interrupted")? {
+                    if bytes.len() + chunk.len() > 8 * 1024 * 1024 { return Err("model list exceeds size limit".into()); }
+                    bytes.extend_from_slice(&chunk);
+                }
+                catalogue(std::str::from_utf8(&bytes).map_err(|_| "invalid model list encoding")?)
+            }.await;
+            let _ = tx.send(result).await;
+        });
+        Ok(Self { rx, task, provider_id: provider.to_owned() })
+    }
+
+    pub fn poll(&mut self) -> Option<Result<Vec<Model>, String>> {
+        match self.rx.try_recv() {
+            Ok(result) => Some(result),
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => Some(Err("model discovery interrupted".into())),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
+        }
+    }
+}
+
+impl Drop for ModelLoad {
+    fn drop(&mut self) { self.task.abort(); }
+}
+
 pub(super) fn save_model(model: &Model) -> Result<(), String> {
     let path = state_path().ok_or("unable to resolve model state directory")?;
     let mut value = read_state(&path)?;
-    let mut recent = vec![json!({"providerID":"openai", "modelID":model.id})];
+    let mut recent = vec![json!({"providerID":model.provider_id, "modelID":model.id})];
     if let Some(previous) = value["recent"].as_array() {
         recent.extend(
             previous
@@ -118,7 +180,7 @@ pub(super) fn save_model(model: &Model) -> Result<(), String> {
                 .filter(|entry| {
                     entry["providerID"].is_string()
                         && entry["modelID"].is_string()
-                        && !(entry["providerID"].as_str() == Some("openai")
+                        && !(entry["providerID"].as_str() == Some(&model.provider_id)
                             && entry["modelID"].as_str() == Some(&model.id))
                 })
                 .take(MAX_RECENT - 1)
@@ -201,7 +263,17 @@ fn read_state(path: &PathBuf) -> Result<Value, String> {
 #[cfg(test)]
 mod picker_tests {
     use super::*;
-    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into() }, Model { id: "k-model".into(), name: "Kappa".into() }] }
+
+    #[test]
+    fn custom_catalogue_preserves_router_identity_and_complete_list() {
+        let rows: Vec<_> = (0..1159).map(|i| json!({"id":format!("route/model-{i}"),"provider_id":"9router","name":format!("Model {i}")})).collect();
+        let models = catalogue(&json!({"models": rows}).to_string()).unwrap();
+        assert_eq!(models.len(), 1159);
+        let index = models.iter().position(|model| model.id == "route/model-1158").unwrap();
+        assert_eq!(models[index].qualified(), "9router/route/model-1158");
+        assert_eq!(visible_rows(&models, "9router/route/model-1158"), vec![index]);
+    }
+    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into() }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into() }] }
     #[test] fn query_is_utf8_and_jk_are_search_text() {
         let m = models();
         assert_eq!(visible_rows(&m, "öhn"), vec![0]);

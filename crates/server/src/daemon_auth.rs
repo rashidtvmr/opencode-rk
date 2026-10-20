@@ -249,7 +249,8 @@ pub async fn require_bearer(
     // Event routes are explicitly origin-bound-BrowserResume compatible
     // (same admission contract as the other approved API reads); no blanket
     // whitelist beyond these exact paths.
-    let resume_api_path = path == "/api/capabilities"
+    let resume_api_path = custom_provider_resume_path(&method, &path)
+        || path == "/api/capabilities"
         || path == "/api/workspaces"
         || path == "/api/models"
         || path.starts_with("/api/models/")
@@ -357,6 +358,16 @@ pub async fn require_bearer(
     }
 }
 
+fn custom_provider_resume_path(method: &axum::http::Method, path: &str) -> bool {
+    let read = *method == axum::http::Method::GET || *method == axum::http::Method::HEAD;
+    if path == "/api/providers" { return read; }
+    let Some(tail) = path.strip_prefix("/api/providers/") else { return false; };
+    if read {
+        return tail.strip_suffix("/models").is_some_and(opencode_rk_providers::custom_provider::valid_id);
+    }
+    *method == axum::http::Method::POST && opencode_rk_providers::custom_provider::valid_id(tail)
+}
+
 fn missing_credential() -> Response {
     (
         StatusCode::UNAUTHORIZED,
@@ -392,6 +403,38 @@ fn loopback_origin_from_host(host: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn browser_resume_custom_providers_are_exact_and_origin_bound() {
+        use tower::ServiceExt;
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+        let auth = DaemonAuth::mint().unwrap();
+        let origin = "http://127.0.0.1:4096";
+        let (capability, _) = auth.browser_resume().issue(origin, 60000).unwrap();
+        let admitted = Arc::new(AtomicUsize::new(0));
+        let handler_count = admitted.clone();
+        let app = axum::Router::new().fallback(move || {
+            let count = handler_count.clone();
+            async move { count.fetch_add(1, Ordering::SeqCst); StatusCode::NO_CONTENT }
+        }).layer(axum::middleware::from_fn_with_state(auth, require_bearer));
+        for (method, path, supplied_origin, expected) in [
+            ("GET", "/api/providers", None, StatusCode::NO_CONTENT),
+            ("GET", "/api/providers/9router/models", None, StatusCode::NO_CONTENT),
+            ("POST", "/api/providers/9router", Some(origin), StatusCode::NO_CONTENT),
+            ("POST", "/api/providers/9router", None, StatusCode::FORBIDDEN),
+            ("POST", "/api/providers/9router", Some("http://localhost:9999"), StatusCode::FORBIDDEN),
+            ("GET", "/api/providers/9router/secrets", None, StatusCode::FORBIDDEN),
+            ("POST", "/api/providers/9router/models", Some(origin), StatusCode::FORBIDDEN),
+            ("GET", "/api/providers/../secrets/models", None, StatusCode::FORBIDDEN),
+        ] {
+            let mut request = axum::http::Request::builder().method(method).uri(path)
+                .header("Host", "127.0.0.1:4096").header("Authorization", format!("BrowserResume {capability}"));
+            if let Some(origin) = supplied_origin { request = request.header("Origin", origin); }
+            let response = app.clone().oneshot(request.body(axum::body::Body::empty()).unwrap()).await.unwrap();
+            assert_eq!(response.status(), expected, "{method} {path}");
+        }
+        assert_eq!(admitted.load(Ordering::SeqCst), 3, "denied requests must not reach handlers");
+    }
 
     #[test]
     fn rc01_t01_mint_is_hex_and_unique() {

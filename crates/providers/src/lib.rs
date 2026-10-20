@@ -15,6 +15,7 @@ pub mod claude_oauth;
 pub mod codex_oauth;
 pub mod config;
 pub mod cost;
+pub mod custom_provider;
 pub mod debug_export;
 pub mod fallback;
 pub mod handler_projection;

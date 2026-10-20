@@ -98,6 +98,7 @@ use opencode_rk_providers::responses::{
     ResponsesStopReason, ResponsesStreamEvent, ResponsesTool, MAX_RESPONSES_INPUT_BYTES,
     MAX_RESPONSES_INPUT_MESSAGES,
 };
+use opencode_rk_providers::custom_provider::{self, CustomProviderConfig};
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{
     HistoryItem, SessionError, SessionService, ToolCallAdmission, ToolRound,
@@ -168,6 +169,9 @@ pub fn router_with_events(
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
         .route("/api/models/{provider}/{model}", get(get_model))
+        .route("/api/providers", get(list_custom_providers))
+        .route("/api/providers/{id}", post(save_custom_provider))
+        .route("/api/providers/{id}/models", get(discover_custom_provider_models))
         // Authenticated MCP status/lifecycle projection. Registered ahead of
         // the SPA asset fallback, so it can never be served by the public
         // fallback, and its `/api/*` prefix puts it under `require_bearer`
@@ -397,6 +401,45 @@ async fn save_provider_auth(
         .await
         .map_err(ApiFailure::internal)?;
     Ok(Json(json!(true)))
+}
+
+#[derive(Deserialize)]
+struct CustomProviderBody { name: String, base_url: String, api_key: Option<String> }
+
+async fn list_custom_providers() -> Result<Json<Value>, ApiFailure> {
+    let providers = custom_provider::list().await.map_err(ApiFailure::internal)?;
+    Ok(Json(json!({"providers": providers.into_iter().map(|p| json!({"id":p.id,"name":p.name,"base_url":p.base_url})).collect::<Vec<_>>() })))
+}
+
+async fn save_custom_provider(
+    Path(id): Path<String>, Json(body): Json<CustomProviderBody>,
+) -> Result<Json<Value>, ApiFailure> {
+    let config = CustomProviderConfig { id, name: body.name, base_url: body.base_url, api_key: body.api_key.filter(|key| !key.trim().is_empty()) };
+    let api_key = config.api_key.clone();
+    let provider_id = config.id.clone();
+    custom_provider::save(config).await.map_err(|e| ApiFailure::bad_request(e.to_string()))?;
+    if let Some(key) = api_key {
+        opencode_rk_providers::persisted_auth::save_api_key(provider_id, key, None)
+            .await.map_err(ApiFailure::bad_request)?;
+    }
+    Ok(Json(json!(true)))
+}
+
+async fn responses_client(provider_id: &str) -> Result<OpenAiResponsesClient, ResponsesError> {
+    if provider_id == "openai" { return OpenAiResponsesClient::from_persisted_env().await; }
+    let config = custom_provider::load(provider_id).await.map_err(|e| ResponsesError::InvalidConfig(e.to_string()))?
+        .ok_or_else(|| ResponsesError::InvalidConfig("provider not found".into()))?;
+    let provider_config = opencode_rk_providers::config::ProviderConfig {
+        provider_id: config.id.clone(), base_url: config.base_url, api_key_env: format!("{}_API_KEY", config.id.to_uppercase()),
+        timeout_secs: 60, max_tokens: 4096, temperature: 0.7,
+    };
+    OpenAiResponsesClient::from_config(provider_config, config.api_key)
+}
+
+async fn discover_custom_provider_models(Path(id): Path<String>) -> Result<Json<Value>, ApiFailure> {
+    let config = custom_provider::load(&id).await.map_err(ApiFailure::internal)?.ok_or_else(|| ApiFailure::not_found("provider not found"))?;
+    let models = custom_provider::discover_models(&config).await.map_err(|error| ApiFailure::bad_gateway(error.to_string()))?;
+    Ok(Json(json!({"models": models.into_iter().map(|(model,name)| json!({"id":model,"name":name,"provider_id":id})).collect::<Vec<_>>() })))
 }
 async fn interrupt_session(
     Path(id): Path<String>,
@@ -1097,11 +1140,6 @@ async fn create_turn(
         .split_once('/')
         .filter(|(provider, model)| !provider.is_empty() && !model.is_empty())
         .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
-    if provider_id != "openai" {
-        return Err(ApiFailure::bad_request(format!(
-            "provider '{provider_id}' does not have a native turn adapter yet"
-        )));
-    }
     if !body.reasoning_effort.is_empty()
         && !matches!(
             body.reasoning_effort.as_str(),
@@ -1111,7 +1149,7 @@ async fn create_turn(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
-    let provider = OpenAiResponsesClient::from_persisted_env()
+    let provider = responses_client(provider_id)
         .await
         .map_err(provider_failure)?;
     let user_message = state
@@ -1415,11 +1453,6 @@ async fn create_turn_stream(
         .split_once('/')
         .filter(|(provider, model)| !provider.is_empty() && !model.is_empty())
         .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
-    if provider_id != "openai" {
-        return Err(ApiFailure::bad_request(format!(
-            "provider '{provider_id}' does not have a native turn adapter yet"
-        )));
-    }
     if !body.reasoning_effort.is_empty()
         && !matches!(
             body.reasoning_effort.as_str(),
@@ -1429,7 +1462,7 @@ async fn create_turn_stream(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
-    let client = OpenAiResponsesClient::from_persisted_env()
+    let client = responses_client(provider_id)
         .await
         .map_err(provider_failure)?;
     let user_message = state

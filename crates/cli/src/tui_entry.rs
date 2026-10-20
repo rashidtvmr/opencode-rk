@@ -1330,8 +1330,36 @@ fn native_loop(
         .ok()
     });
     let models_loaded = models_fetch.is_some();
-    let models = models_fetch.unwrap_or_default();
+    let mut models = models_fetch.unwrap_or_default();
     let mut selected = native_setup::selected(&models);
+    let mut provider_id = native_setup::recent_provider().unwrap_or_else(|| "openai".into());
+    let mut provider_url = "http://localhost:20128/v1".to_owned();
+    let mut providers = vec![("openai".to_owned(), "OpenAI".to_owned(), String::new()),
+        ("9router".to_owned(), "9router (local)".to_owned(), provider_url.clone())];
+    if let Some(snapshot) = live.as_ref() {
+        if let Ok(body) = http_request(&snapshot.origin, "GET", "/api/providers", None, auth) {
+            if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
+                for row in value["providers"].as_array().into_iter().flatten().take(128) {
+                    if let (Some(id), Some(url)) = (row["id"].as_str(), row["base_url"].as_str()) {
+                        if id.len() <= 128 && url.len() <= 2048 && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') {
+                            let name = row["name"].as_str().unwrap_or(id).chars().filter(|c| !c.is_control()).take(128).collect();
+                            if let Some(existing) = providers.iter_mut().find(|row| row.0 == id) { *existing = (id.into(), name, url.into()); }
+                            else { providers.push((id.into(), name, url.into())); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    providers.push(("custom".into(), "Other — custom OpenAI-compatible provider".into(), String::new()));
+    let mut model_load = None;
+    let mut setup_error: Option<String> = None;
+    if provider_id != "openai" && providers.iter().any(|row| row.0 == provider_id) {
+        selected = None;
+        if let Some(snapshot) = live.as_ref() {
+            model_load = native_setup::ModelLoad::start(&snapshot.origin, auth, &provider_id).ok();
+        }
+    }
     let mut transcript = NativeChatHistory::default();
     // In-flight turn worker wrapped with the binding identity it was
     // launched under: events apply only while session AND generation still
@@ -1413,7 +1441,7 @@ fn native_loop(
     if let Some(model) = &selected {
         view.set_model(Some(model.qualified()));
         // The native setup catalogue currently admits only the OpenAI adapter.
-        view.set_composer_model(&model.name, "OpenAI");
+        view.set_composer_model(&model.name, &model.provider_id);
     } else if models_loaded {
         view.set_model(None); // confirmed: catalogue observed, no model
     } else {
@@ -1499,6 +1527,24 @@ fn native_loop(
     let mut leader_pending = false;
     let mut byte = [0u8; 1];
     loop {
+        if let Some((loaded_provider, result)) = model_load.as_mut().and_then(|load| load.poll().map(|result| (load.provider_id.clone(), result))) {
+            model_load = None;
+            needs_paint = true;
+            match result {
+                Ok(rows) => {
+                    models.retain(|row| row.provider_id != loaded_provider);
+                    models.extend(rows);
+                    if dialog == native_setup::Dialog::Model && loaded_provider == provider_id { filter_input = format!("{provider_id}/"); model_row = 0; }
+                    if selected.is_none() { if let Some(model) = native_setup::selected(&models) {
+                        selected = Some(model.clone());
+                        view.set_model(Some(model.qualified()));
+                        view.set_composer_model(&model.name, &model.provider_id);
+                        if dialog == native_setup::Dialog::Provider && model.provider_id == loaded_provider { dialog = native_setup::Dialog::None; }
+                    } }
+                }
+                Err(error) => { setup_error = Some(error); }
+            }
+        }
         if let Ok(Some(size)) = renderer.terminal_size() {
             if size != observed_size {
                 renderer.resize(size.0, size.1)?;
@@ -1731,28 +1777,35 @@ fn native_loop(
         // Center dialog overlay (native_setup): credentials stay masked in
         // its own lines; the facade keeps all three panes visible and
         // echoes the composer draft (never an API key) below it.
-        let overlay: Vec<String> = match dialog {
+        let mut overlay: Vec<String> = match dialog {
             native_setup::Dialog::None => Vec::new(),
             native_setup::Dialog::Provider => {
                 let mut panel = vec!["Connect a provider".to_owned()];
                 // The dialog's own bounded filter buffer (typing goes to
                 // `filter_input`, never the chat draft) — the overlay must
                 // echo and filter the SAME buffer the user is typing into.
-                if !models.is_empty() && "openai".contains(&filter_input.trim().to_lowercase()) {
-                    panel.push("  OpenAI (API key)".to_owned());
+                let query = filter_input.trim().to_lowercase();
+                for (index, row) in providers.iter().filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query)).enumerate() {
+                    panel.push(format!("{} {}", if index == model_row { ">" } else { " " }, row.1));
                 }
+                if let Some(error) = &setup_error { panel.push(format!("Error: {error}")); }
+                if model_load.is_some() { panel.push("Loading saved provider models… Escape cancels".into()); }
                 panel.push(format!("filter: {filter_input} (enter / escape)"));
                 panel
             }
+            native_setup::Dialog::ProviderId => vec!["Custom provider".into(), "Provider ID (lowercase letters, numbers, - or _)".into(), format!("ID: {filter_input}"), "Enter: continue · Escape: cancel".into()],
+            native_setup::Dialog::BaseUrl => vec![format!("Configure {provider_id}"), "OpenAI-compatible base URL (include /v1)".into(), format!("URL: {filter_input}"), "Enter: continue · Escape: cancel".into()],
             native_setup::Dialog::ApiKey => vec![
-                "API key".to_owned(),
+                if provider_id == "openai" { "API key".to_owned() } else { format!("API key — {provider_id} (optional for local server)") },
                 format!(
                     "key: {} (enter / escape)",
                     "*".repeat(key_input.chars().count().min(40))
                 ),
             ],
             native_setup::Dialog::Model => {
-                let mut panel = vec!["Select model (OpenAI)".to_owned()];
+                let mut panel = vec!["Select model".to_owned()];
+                if model_load.is_some() { panel.push(format!("Loading models from {provider_id}… Escape cancels")); }
+                if let Some(error) = &setup_error { panel.push(format!("Error: {error} · /connect to retry")); }
                 // Same buffer fix as Provider: filter and echo read the
                 // dialog-local `filter_input`, never the chat draft.
                 let visible = native_setup::visible_rows(&models, &filter_input);
@@ -1762,12 +1815,15 @@ fn native_loop(
                     .clamp(1, 10);
                 let start = active.saturating_sub(capacity - 1);
                 panel.extend(visible.iter().enumerate().skip(start).take(capacity).filter_map(|(shown, index)| {
-                    models.get(*index).map(|model| format!("{} {} — {}", if shown == active { ">" } else { " " }, model.id, model.name))
+                    models.get(*index).map(|model| format!("{} {} — {}", if shown == active { ">" } else { " " }, model.qualified(), model.name))
                 }));
-                panel.push(format!("filter: {filter_input} (enter / escape)"));
+                panel.push(format!("{} models · filter: {filter_input} (enter / escape)", visible.len()));
                 panel
             }
         };
+        if matches!(dialog, native_setup::Dialog::ProviderId | native_setup::Dialog::BaseUrl | native_setup::Dialog::ApiKey) {
+            if let Some(error) = &setup_error { overlay.push(format!("Error: {error}")); }
+        }
         let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
             ""
         } else {
@@ -1942,6 +1998,12 @@ fn native_loop(
                     );
                     continue;
                 }
+                if dialog == native_setup::Dialog::Provider {
+                    let query = filter_input.trim().to_lowercase();
+                    let count = providers.iter().filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query)).count();
+                    model_row = native_setup::move_row(model_row, count, matches!(direction, native_input_decoder::InputEvent::ArrowDown));
+                    continue;
+                }
                 if !page_open || help_open || view.dialogs.intercepts_input()
                     || !matches!(dialog, native_setup::Dialog::None) { continue; }
                 if direction == native_input_decoder::InputEvent::ArrowUp { 2 } else { 14 }
@@ -2114,6 +2176,8 @@ fn native_loop(
                 // the segregated key buffer are dialog-local and are
                 // discarded; the chat draft is never the dialog buffer.
                 dialog = native_setup::Dialog::None;
+                model_load = None;
+                setup_error = None;
                 key_input.clear();
                 filter_input.clear();
                 model_row = 0;
@@ -2502,15 +2566,57 @@ fn native_loop(
                 if !matches!(dialog, native_setup::Dialog::None) {
                     match dialog {
                         native_setup::Dialog::Provider => {
-                            if !models.is_empty() && "openai".contains(&text.to_lowercase()) {
-                                dialog = native_setup::Dialog::ApiKey;
-                                // Fresh start for the segregated key buffer.
+                            let query = text.to_lowercase();
+                            let rows: Vec<_> = providers.iter().filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query)).collect();
+                            if let Some(row) = rows.get(native_setup::clamp_row(model_row, rows.len())) {
+                                model_load = None;
+                                provider_id = row.0.clone();
+                                provider_url = row.2.clone();
+                                setup_error = None;
                                 key_input.clear();
-                            } else {
-                                append_transcript(
-                                    &mut transcript,
-                                    "error: no supported provider matches".to_owned(),
-                                );
+                                dialog = if provider_id == "custom" { native_setup::Dialog::ProviderId }
+                                    else if provider_id == "openai" { native_setup::Dialog::ApiKey }
+                                    else { native_setup::Dialog::BaseUrl };
+                                filter_input = provider_url.clone();
+                            } else { setup_error = Some("No provider matches".into()); }
+                        }
+                        native_setup::Dialog::ProviderId => {
+                            if !text.is_empty() && text.len() <= 128 && text.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_') && text != "openai" && text != "custom" {
+                                provider_id = text;
+                                dialog = native_setup::Dialog::BaseUrl;
+                                filter_input = "http://localhost:20128/v1".into();
+                                setup_error = None;
+                            } else { setup_error = Some("Use a lowercase provider ID (letters, numbers, - or _)".into()); }
+                        }
+                        native_setup::Dialog::BaseUrl => {
+                            if let Ok(url) = reqwest::Url::parse(&text) {
+                                if matches!(url.scheme(), "http" | "https") && url.host_str().is_some() && url.username().is_empty() && url.password().is_none() && url.query().is_none() && url.fragment().is_none() && text.len() <= 2048 {
+                                    provider_url = text.trim_end_matches('/').to_owned();
+                                    dialog = native_setup::Dialog::ApiKey;
+                                    key_input.clear();
+                                    filter_input.clear();
+                                    setup_error = None;
+                                } else { setup_error = Some("Enter a valid provider base URL without credentials, query or fragment".into()); }
+                            } else { setup_error = Some("Enter a valid provider base URL".into()); }
+                        }
+                        native_setup::Dialog::ApiKey if provider_id != "openai" => {
+                            let payload = serde_json::json!({"name":provider_id,"base_url":provider_url,"api_key":if text.is_empty() { None } else { Some(text.as_str()) }}).to_string();
+                            let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|snapshot| {
+                                http_request(&snapshot.origin, "POST", &format!("/api/providers/{provider_id}"), Some(&payload), auth)?;
+                                native_setup::ModelLoad::start(&snapshot.origin, auth, &provider_id)
+                            });
+                            key_input.clear();
+                            match result {
+                                Ok(load) => {
+                                    if !providers.iter().any(|row| row.0 == provider_id) { providers.insert(providers.len()-1, (provider_id.clone(), provider_id.clone(), provider_url.clone())); }
+                                    else if let Some(row) = providers.iter_mut().find(|row| row.0 == provider_id) { row.2 = provider_url.clone(); }
+                                    model_load = Some(load);
+                                    setup_error = None;
+                                    filter_input = format!("{provider_id}/");
+                                    dialog = native_setup::Dialog::Model;
+                                    model_row = 0;
+                                }
+                                Err(_) => setup_error = Some("Unable to save provider; check base URL and daemon".into()),
                             }
                         }
                         native_setup::Dialog::ApiKey => {
@@ -2558,10 +2664,11 @@ fn native_loop(
                                 match native_setup::save_model(&model) {
                                     Ok(()) => {
                                         selected = Some(model.clone());
+                                        provider_id = model.provider_id.clone();
                                         // Confirmed local config write:
                                         // honest live model status update.
                                         view.set_model(selected.as_ref().map(|m| m.qualified()));
-                                        view.set_composer_model(&model.name, "OpenAI");
+                                        view.set_composer_model(&model.name, &model.provider_id);
                                         dialog = native_setup::Dialog::None;
                                         model_row = 0;
                                     }
@@ -2583,7 +2690,7 @@ fn native_loop(
                     // buffer: the API-key dialog keeps its segregated
                     // buffer and the chat draft is preserved verbatim
                     // through the entire provider/model/API-key flow.
-                    if !was_api {
+                    if !was_api && !matches!(dialog, native_setup::Dialog::BaseUrl | native_setup::Dialog::ProviderId) {
                         filter_input.clear();
                     }
                     key_input.clear();
@@ -2865,6 +2972,8 @@ fn native_loop(
                     // buffer, and cancel returns the exact draft state at
                     // dispatch (blank for a consumed command).
                     dialog = native_setup::Dialog::Provider;
+                    model_row = 0;
+                    setup_error = None;
                     consume_local_command(&mut draft, command, from_chat_composer);
                     filter_input.clear();
                     utf8.reset();
@@ -2875,6 +2984,15 @@ fn native_loop(
                     // chat-composer typed "/models" is consumed, the
                     // dialog-local filter only is touched.
                     dialog = native_setup::Dialog::Model;
+                    model_row = 0;
+                    if provider_id != "openai" && model_load.is_none() {
+                        if let Some(snapshot) = live.as_ref() {
+                            match native_setup::ModelLoad::start(&snapshot.origin, auth, &provider_id) {
+                                Ok(load) => { model_load = Some(load); setup_error = None; }
+                                Err(error) => setup_error = Some(error),
+                            }
+                        }
+                    }
                     consume_local_command(&mut draft, command, from_chat_composer);
                     filter_input.clear();
                     utf8.reset();
@@ -3012,7 +3130,7 @@ fn native_loop(
                             .is_some_and(|len| len <= limit)
                         {
                             target.push(character);
-                            if matches!(dialog, native_setup::Dialog::Model) { model_row = 0; }
+                            if matches!(dialog, native_setup::Dialog::Model | native_setup::Dialog::Provider) { model_row = 0; }
                         }
                     }
                 }
