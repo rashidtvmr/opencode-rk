@@ -170,10 +170,10 @@ def write_cap(path: pathlib.Path, record: dict) -> None:
     os.replace(tmp, path)
 
 
-CAPABILITY_KINDS = {"bootstrap-controller", "observer-correction"}
+CAPABILITY_KINDS = {"bootstrap-controller", "observer-correction", "lane-sync-controller"}
 CAPABILITY_STATUSES = {"PENDING", "ARMED", "APPLIED", "REJECTED"}
-CAPABILITY_ID = re.compile(r"^(?:ui-phase-transition-v2|observer-correction)-[0-9a-f]{16}$")
-KIND_PATHS = {"bootstrap-controller": frozenset(ALLOWED_PATHS), "observer-correction": frozenset(OBSERVER_PATHS)}
+CAPABILITY_ID = re.compile(r"^(?:ui-phase-transition-v2|observer-correction|lane-sync-controller)-[0-9a-f]{16}$")
+KIND_PATHS = {"bootstrap-controller": frozenset(ALLOWED_PATHS), "observer-correction": frozenset(OBSERVER_PATHS), "lane-sync-controller": frozenset({"tools/recovery_state.py"})}
 
 def validate_capability_schema(record: dict) -> None:
     if not isinstance(record, dict):
@@ -191,6 +191,8 @@ def validate_capability_schema(record: dict) -> None:
         raise TransitionError("capability path set does not match its closed kind")
     if not isinstance(proposed, dict) or set(proposed) != set(KIND_PATHS[kind]) or any(not SHA40.fullmatch(str(v)) for v in proposed.values()):
         raise TransitionError("capability blob map does not match its closed kind")
+    if kind == "lane-sync-controller" and record.get("authorizedObserverBlobs") != {}:
+        raise TransitionError("lane-sync controller capability may not authorize observer blobs")
     if not SHA40.fullmatch(str(record.get("baseSha"))) or not record.get("canonicalHead") or not record.get("capabilityId"):
         raise TransitionError("capability identity/base is malformed")
     if not isinstance(record.get("expiresAt"), str):
@@ -217,6 +219,7 @@ def capability_digest(record: dict) -> str:
             "allowedPaths": record.get("allowedPaths"),
             "proposedBlobs": record.get("proposedBlobs"),
             "authorizedObserverBlobs": record.get("authorizedObserverBlobs"),
+            "futureControllerBlob": record.get("futureControllerBlob"),
             "originalProtectedEvaluatorBlobs": record.get("originalProtectedEvaluatorBlobs"),
             "expiresAt": record.get("expiresAt"),
         },
@@ -264,10 +267,38 @@ def validate_config_delta(old: dict, new: dict) -> list[str]:
             errors.append(
                 f"transitionPolicy.{key} mismatch: {added_policy.get(key)!r} != {expected!r}"
             )
+    lane_pin = added_policy.get("laneSyncController")
+    if not isinstance(lane_pin, dict) or set(lane_pin) != {"kind", "path", "blob", "maxLifetimeSeconds"}:
+        errors.append("transitionPolicy.laneSyncController must be the exact hard-pin object")
+    elif (lane_pin.get("kind") != "lane-sync-controller" or lane_pin.get("path") != "tools/recovery_state.py"
+          or not SHA40.fullmatch(str(lane_pin.get("blob", ""))) or lane_pin.get("maxLifetimeSeconds") != 60):
+        errors.append("transitionPolicy.laneSyncController is not the exact single-controller pin")
     if old_n != new_n:
         errors.append("config changed outside transitionPolicy")
     return errors
 
+
+def validate_lane_sync_bootstrap_delta(old: dict, new: dict, proposed_blobs: dict) -> list[str]:
+    """Stage one adds only the exact state-controller hard pin to existing policy."""
+    errors: list[str] = []
+    old_n = copy.deepcopy(old)
+    new_n = copy.deepcopy(new)
+    old_policy = old_n.pop("transitionPolicy", None)
+    new_policy = new_n.pop("transitionPolicy", None)
+    if old_n != new_n:
+        errors.append("stage-one config changed outside transitionPolicy")
+    if not isinstance(old_policy, dict) or not isinstance(new_policy, dict):
+        return errors + ["stage-one requires the existing transitionPolicy"]
+    pin = new_policy.pop("laneSyncController", None)
+    if old_policy != new_policy:
+        errors.append("stage-one changed existing transitionPolicy fields")
+    expected = {
+        "kind": "lane-sync-controller", "path": "tools/recovery_state.py",
+        "blob": proposed_blobs.get("tools/recovery_state.py"), "maxLifetimeSeconds": 60,
+    }
+    if pin != expected or not SHA40.fullmatch(str(expected["blob"])):
+        errors.append("stage-one config must hard-pin the exact proposed recovery_state.py blob")
+    return errors
 
 def active_blockers(root: pathlib.Path) -> list[str]:
     errors: list[str] = []
@@ -385,7 +416,14 @@ def prepare(root: pathlib.Path, proposal_root: pathlib.Path, author: str, observ
     proposal_config = json.loads(
         (proposal_root / "config" / "recovery-mode.json").read_text(encoding="utf-8")
     )
-    delta_errors = validate_config_delta(base_config, proposal_config)
+    if isinstance(proposal_config.get("transitionPolicy", {}).get("laneSyncController"), dict):
+        state_source = proposal_root / "tools" / "recovery_state.py"
+        state_blob = git_blob_id(root, state_source.read_bytes()) if state_source.is_file() else ""
+        delta_errors = validate_lane_sync_bootstrap_delta(
+            base_config, proposal_config, {"tools/recovery_state.py": state_blob}
+        )
+    else:
+        delta_errors = validate_config_delta(base_config, proposal_config)
     if delta_errors:
         raise TransitionError("proposal config delta rejected: " + "; ".join(delta_errors))
     content: dict[str, str] = {}
@@ -434,6 +472,7 @@ def prepare(root: pathlib.Path, proposal_root: pathlib.Path, author: str, observ
         "allowedPaths": list(ALLOWED_PATHS),
         "proposedBlobs": blobs,
         "proposedContent": content,
+        "futureControllerBlob": state_blob if isinstance(proposal_config.get("transitionPolicy", {}).get("laneSyncController"), dict) else None,
         "createdAt": now(),
         "expiresAt": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=900)).isoformat(),
         "authorizedObserverBlobs": observer_blobs,
@@ -456,6 +495,44 @@ def prepare(root: pathlib.Path, proposal_root: pathlib.Path, author: str, observ
         write_cap(path, record)
     return record
 
+
+
+def prepare_lane_sync_controller(root: pathlib.Path, proposal: pathlib.Path, author: str) -> dict:
+    if not author or author == "unknown":
+        raise TransitionError("lane-sync controller preparation requires named author")
+    base = git(root, "rev-parse", "main-v2")
+    if active_blockers(root) or revision_blockers(root):
+        raise TransitionError("lane-sync controller prepare requires idle consistent runtime state")
+    policy = json.loads((state_dir(root) / "policy.json").read_text(encoding="utf-8"))
+    pinned = policy.get("protectedEvaluatorBlobs")
+    if not isinstance(pinned, dict):
+        raise TransitionError("protected evaluator pins unavailable")
+    current_config = json.loads(git(root, "show", f"{base}:config/recovery-mode.json"))
+    pin = current_config.get("transitionPolicy", {}).get("laneSyncController")
+    if not isinstance(pin, dict) or set(pin) != {"kind", "path", "blob", "maxLifetimeSeconds"} or pin.get("kind") != "lane-sync-controller" or pin.get("path") != "tools/recovery_state.py" or pin.get("maxLifetimeSeconds") != 60:
+        raise TransitionError("stage-1 lane-sync controller pin missing/malformed")
+    data = proposal.read_bytes()
+    blob = git_blob_id(root, data)
+    if blob != pin.get("blob"):
+        raise TransitionError("proposed recovery_state.py differs from exact stage-1 hard pin")
+    if git(root, "rev-parse", f"{base}:tools/recovery_state.py") != pinned.get("tools/recovery_state.py"):
+        raise TransitionError("current protected recovery_state.py pin has drifted")
+    record = {
+        "schemaVersion": 3, "kind":"lane-sync-controller", "capabilityId":"lane-sync-controller-"+secrets.token_hex(8),
+        "status":"PENDING", "author":author, "baseSha":base, "canonicalHead":"main-v2",
+        "allowedPaths":["tools/recovery_state.py"], "proposedBlobs":{"tools/recovery_state.py":blob},
+        "proposedContent":{"tools/recovery_state.py":data.decode("utf-8")}, "createdAt":now(),
+        "expiresAt":(dt.datetime.now(dt.timezone.utc)+dt.timedelta(seconds=900)).isoformat(),
+        "authorizedObserverBlobs":{}, "originalProtectedEvaluatorBlobs":{str(k):str(v) for k,v in sorted(pinned.items())}, "approvals":[],
+    }
+    validate_capability_schema(record)
+    with locked(state_dir(root)/"state.lock"):
+        if cap_path(root).exists():
+            raise TransitionError("capability slot occupied; archive terminal record before preparation")
+        errors=active_blockers(root)+revision_blockers(root)
+        if errors: raise TransitionError("runtime changed during prepare: "+"; ".join(errors))
+        write_cap(cap_path(root),record)
+    return record
 
 def prepare_observer_correction(
     root: pathlib.Path, proposal_root: pathlib.Path, baseline_manifest: pathlib.Path, author: str
@@ -583,8 +660,8 @@ def _finish_policy(root: pathlib.Path, record: dict, applied_sha: str) -> None:
             if new_blob != record["proposedBlobs"].get(rel, new_blob):
                 raise TransitionError(f"landed blob for {rel} does not match capability")
         policy["protectedEvaluatorBlobs"][rel] = new_blob
-    if record.get("kind") != "observer-correction":
-        driver_bytes = record["proposedContent"]["tools/recovery_ref_hook.py"].encode()
+    if record.get("kind") in {"bootstrap-controller", "lane-sync-controller"}:
+        driver_bytes = record["proposedContent"]["tools/recovery_ref_hook.py"].encode() if record.get("kind") == "bootstrap-controller" else git(root, "show", f"{applied_sha}:tools/recovery_ref_hook.py").encode()
         policy["referenceHookDriverSha256"] = sha256_bytes(driver_bytes)
     policy["transitionApplied"] = {
         "capabilityId": record["capabilityId"],
@@ -605,18 +682,35 @@ def _activation_blockers(root: pathlib.Path, record: dict) -> list[str]:
         errors.append("capability is expired or has invalid expiry")
     errors.extend(validate_approvals(record))
     observer_blobs = record.get("authorizedObserverBlobs")
-    if not isinstance(observer_blobs, dict) or not observer_blobs:
-        errors.append("exact authorized observer blob manifest is required")
-    elif any(not SHA40.fullmatch(str(v)) for v in observer_blobs.values()):
-        errors.append("authorized observer blob manifest contains invalid Git blob")
+    if record.get("kind") == "bootstrap-controller":
+        if not isinstance(observer_blobs, dict) or not observer_blobs:
+            errors.append("exact authorized observer blob manifest is required")
+        elif any(not SHA40.fullmatch(str(v)) for v in observer_blobs.values()):
+            errors.append("authorized observer blob manifest contains invalid Git blob")
+    elif observer_blobs != {}:
+        errors.append("non-bootstrap controller capability cannot authorize observer blobs")
     errors.extend(active_blockers(root))
     errors.extend(revision_blockers(root))
     errors.extend(dirty_blockers(root, list(record.get("allowedPaths", []))))
-    if record.get("kind") != "observer-correction":
+    if record.get("kind") == "lane-sync-controller":
+        try:
+            config = json.loads(git(root, "show", f"{record['baseSha']}:config/recovery-mode.json"))
+            pin = config["transitionPolicy"]["laneSyncController"]
+            if pin != {"kind":"lane-sync-controller", "path":"tools/recovery_state.py", "blob":record["proposedBlobs"]["tools/recovery_state.py"], "maxLifetimeSeconds":60}:
+                errors.append("lane-sync controller blob does not match the exact stage-1 hard pin")
+        except Exception as exc:
+            errors.append(f"lane-sync controller hard pin unavailable: {exc}")
+    if record.get("kind") == "bootstrap-controller":
         try:
             base_config = json.loads(git(root, "show", f"{record['baseSha']}:config/recovery-mode.json"))
             proposed = json.loads(record["proposedContent"]["config/recovery-mode.json"])
-            errors.extend(validate_config_delta(base_config, proposed))
+            if isinstance(proposed.get("transitionPolicy", {}).get("laneSyncController"), dict):
+                future_blob = record.get("futureControllerBlob")
+                errors.extend(validate_lane_sync_bootstrap_delta(
+                    base_config, proposed, {"tools/recovery_state.py": future_blob}
+                ))
+            else:
+                errors.extend(validate_config_delta(base_config, proposed))
         except Exception as exc:
             errors.append(f"cannot validate config delta: {exc}")
     policy_path = state_dir(root) / "policy.json"
@@ -1059,6 +1153,11 @@ def main(argv: list[str]) -> int:
             proposal_root = pathlib.Path(argv[3]).resolve() if len(argv) > 3 else root
             manifest = pathlib.Path(argv[4]).resolve() if len(argv) > 4 else None
             record = prepare(root, proposal_root, os.environ.get("USER", "unknown"), manifest)
+        elif cmd == "prepare-lane-sync-controller":
+            if len(argv) < 4:
+                raise TransitionError("prepare-lane-sync-controller requires <root> <exact-script-path>")
+            record = prepare_lane_sync_controller(root, pathlib.Path(argv[3]).resolve(), os.environ.get("USER", "unknown"))
+            print(f"CAPABILITY-PENDING {record['capabilityId']} base={record['baseSha']}")
         elif cmd == "prepare-observer":
             if len(argv) < 5:
                 raise TransitionError("prepare-observer requires <root> <proposal-root> <baseline-manifest>")

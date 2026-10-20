@@ -30,6 +30,8 @@ import pathlib
 import subprocess
 import sys
 import datetime as dt
+import stat
+import re
 
 ZERO = "0" * 40
 
@@ -84,15 +86,39 @@ def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
     if not isinstance(cap, dict) or cap.get("status") != "ARMED":
         return False
     bootstrap = {"config/recovery-mode.json", "tools/recovery_ref_hook.py", "tools/recovery_transition.py"}
+    lane_controller = {"tools/recovery_state.py"}
     observer = {"tests/e2e/native_provider_setup.py", "tests/e2e/native_stream_tool.py", "tests/e2e/native_utf8_input.py", "tests/e2e/native_escape_input.py", "tests/e2e/native_resize.py", "tests/e2e/native_bracketed_paste.py"}
     kind = cap.get("kind")
-    expected = bootstrap if kind == "bootstrap-controller" else observer if kind == "observer-correction" else None
+    expected = bootstrap if kind == "bootstrap-controller" else observer if kind == "observer-correction" else lane_controller if kind == "lane-sync-controller" else None
     allowed = cap.get("allowedPaths")
     proposed = cap.get("proposedBlobs")
     if expected is None or not isinstance(allowed, list) or set(allowed) != expected or len(allowed) != len(set(allowed)) or not isinstance(proposed, dict) or set(proposed) != expected:
         return False
     if any(not isinstance(v, str) or len(v) != 40 or any(c not in "0123456789abcdef" for c in v) for v in proposed.values()):
         return False
+    if kind == "bootstrap-controller" and cap.get("futureControllerBlob"):
+        try:
+            proposal_config = json.loads(_git_out(["git", "show", f"{cap.get('baseSha')}:config/recovery-mode.json"]) or "{}")
+            # Stage-1 base has no lane pin; approval digest binds this exact
+            # future blob, and the candidate config carries that pin.
+            if not re.fullmatch(r"[0-9a-f]{40}", str(cap["futureControllerBlob"])):
+                return False
+        except Exception:
+            return False
+    if kind == "lane-sync-controller":
+        if set(allowed) != {"tools/recovery_state.py"} or set(proposed) != {"tools/recovery_state.py"}:
+            return False
+        try:
+            if kind == "bootstrap-controller":
+                config = json.loads(cap["proposedContent"]["config/recovery-mode.json"])
+            else:
+                config = json.loads(_git_out(["git", "show", f"{cap.get('baseSha')}:config/recovery-mode.json"]) or "{}")
+            hardpin = config["transitionPolicy"]["laneSyncController"]
+            expected_blob = cap.get("futureControllerBlob") if kind == "bootstrap-controller" else proposed["tools/recovery_state.py"]
+            if hardpin != {"kind":"lane-sync-controller", "path":"tools/recovery_state.py", "blob":expected_blob, "maxLifetimeSeconds":60}:
+                return False
+        except Exception:
+            return False
     if cap.get("canonicalHead") != "main-v2" or not isinstance(cap.get("baseSha"), str) or len(cap.get("baseSha")) != 40:
         return False
     try:
@@ -145,8 +171,124 @@ def transition_window_allows(rows: list[tuple[str, str, str]]) -> bool:
     return True
 
 
+
+def lane_sync_allows(rows: list[tuple[str, str, str]], phase: str) -> bool:
+    """Validate one state-command-minted fixed-lane synchronization.
+
+    Only the prepared phase grants the ref update. Git calls this hook again
+    with committed/aborted after the transaction resolves; those callbacks
+    consume the record. A prepared record is never accepted for a second ref
+    transaction.
+    """
+    common = common_git_dir()
+    cap_path = common / "recovery-state" / "lane-sync-capability.json"
+    try:
+        cap_fd = os.open(cap_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+        try:
+            st = os.fstat(cap_fd)
+            if (not stat.S_ISREG(st.st_mode) or st.st_uid != os.getuid()
+                    or stat.S_IMODE(st.st_mode) != 0o600 or st.st_size > 16384):
+                return False
+            raw = os.read(cap_fd, 16385)
+            if len(raw) != st.st_size or os.read(cap_fd, 1):
+                return False
+        finally:
+            os.close(cap_fd)
+        cap = json.loads(raw.decode("utf-8"))
+        if not isinstance(cap, dict) or cap.get("schemaVersion") != 1:
+            return False
+        lane = cap.get("lane")
+        operation = cap.get("operation")
+        if (not isinstance(lane, str) or not isinstance(operation, str)
+                or not re.fullmatch(r"lane-sync-[0-9a-f]{32}", operation)):
+            return False
+        mutable_policy = json.loads((common / "recovery-state" / "ref-policy.json").read_text(encoding="utf-8"))
+        mutable = set(mutable_policy.get("mutableHeads", [])) - {str(mutable_policy.get("canonicalHead", ""))}
+        expected_ref = f"refs/heads/{lane}"
+        if lane not in mutable or cap.get("laneRef") != expected_ref:
+            return False
+        if (cap.get("canonicalRef") != f"refs/heads/{mutable_policy.get('canonicalHead', '')}"
+                or cap.get("status") not in {"ARMED", "PREPARED"}):
+            return False
+        if os.environ.get("OC2_RECOVERY_LANE_SYNC_CAP", "") != operation:
+            return False
+        lock_path = common / "recovery-state" / "integration.lock"
+        try:
+            lock = json.loads(lock_path.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        if lock.get("kind") != "lane-sync" or lock.get("operation") != operation or lock.get("lane") != lane:
+            return False
+        try:
+            if dt.datetime.now(dt.timezone.utc) >= dt.datetime.fromisoformat(str(cap.get("expiresAt"))):
+                return False
+        except (ValueError, TypeError, OverflowError):
+            return False
+        policy_path = common / "recovery-state" / "policy.json"
+        policy = json.loads(policy_path.read_text(encoding="utf-8"))
+        pins = policy.get("protectedEvaluatorBlobs")
+        protected = mutable_policy.get("protectedPaths")
+        if (not isinstance(pins, dict) or not isinstance(protected, list) or set(pins) != set(protected)
+                or any(not re.fullmatch(r"[0-9a-f]{40}", str(blob)) for blob in pins.values())):
+            return False
+        if len(rows) != 1:
+            return False
+        old, new, ref = rows[0]
+        if phase == "prepared":
+            if cap.get("status") != "ARMED" or ref != expected_ref:
+                return False
+            canonical_head = str(mutable_policy.get("canonicalHead", ""))
+            canonical_sha = _git_out(["git", "rev-parse", f"refs/heads/{canonical_head}"])
+            if (not re.fullmatch(r"[0-9a-f]{40}", str(cap.get("oldLaneSha", "")))
+                    or not re.fullmatch(r"[0-9a-f]{40}", str(cap.get("canonicalSha", "")))
+                    or old != cap.get("oldLaneSha") or new != cap.get("canonicalSha")
+                    or new != canonical_sha or new == ZERO):
+                return False
+            if cap.get("targetTree") != _git_out(["git", "rev-parse", f"{new}^{{tree}}"]):
+                return False
+            ancestry = subprocess.run(
+                ["git", "merge-base", "--is-ancestor", old, new],
+                capture_output=True, check=False,
+            )
+            if ancestry.returncode != 0:
+                return False
+            for rel, blob in pins.items():
+                if _git_out(["git", "rev-parse", f"{new}:{rel}"]) != str(blob):
+                    return False
+            cap["status"] = "PREPARED"
+            tmp = cap_path.with_name(f".{cap_path.name}.{os.getpid()}.tmp")
+            tmp.write_text(json.dumps(cap, sort_keys=True) + "\n", encoding="utf-8")
+            os.chmod(tmp, 0o600)
+            os.replace(tmp, cap_path)
+            return True
+        if phase in {"committed", "aborted"}:
+            if cap.get("status") != "PREPARED" or rows != [(cap.get("oldLaneSha"), cap.get("canonicalSha"), expected_ref)]:
+                return False
+            # Both outcomes irreversibly consume permission. An aborted
+            # transaction must be freshly re-preflighted, never replayed.
+            cap_path.unlink(missing_ok=True)
+            return True
+        return False
+    except Exception:
+        return False
+
 def main() -> int:
-    phase = sys.argv[1] if len(sys.argv) > 1 else ""
+    phase = sys.argv[1] if sys.argv[1:] else ""
+    raw_rows = []
+    malformed = False
+    for raw in sys.stdin:
+        fields = raw.rstrip("\n").split()
+        if len(fields) != 3:
+            malformed = True
+            continue
+        raw_rows.append((fields[0], fields[1], fields[2]))
+    if not malformed and lane_sync_allows(raw_rows, phase):
+        return 0
+    if phase in {"committed", "aborted"}:
+        # If this was a lane-sync prepared callback but capability validation
+        # fails, preserve the record for fail-closed diagnosis; unrelated Git
+        # terminal callbacks retain the original no-op behavior.
+        return 0
     if phase != "prepared":
         return 0
     policy_path = common_git_dir() / "recovery-state" / "ref-policy.json"
@@ -161,15 +303,9 @@ def main() -> int:
     protected = [str(path) for path in policy.get("protectedPaths", [])]
 
     errors: list[str] = []
-    rows: list[tuple[str, str, str]] = []
-    malformed = False
-    for raw in sys.stdin:
-        fields = raw.rstrip("\n").split()
-        if len(fields) != 3:
-            malformed = True
-            errors.append(f"malformed reference transaction row: {raw.rstrip()!r}")
-            continue
-        rows.append((fields[0], fields[1], fields[2]))
+    rows = raw_rows
+    if malformed:
+        errors.append("malformed reference transaction row")
     if not malformed and transition_window_allows(rows):
         return 0
 

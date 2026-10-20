@@ -243,6 +243,12 @@
     "failClosedOnActiveClaims": true,
     "failClosedOnIntegrationLock": true,
     "capabilityExpirySeconds": 900,
-    "authorizedObserverBlobsAreExact": true
+    "authorizedObserverBlobsAreExact": true,
+    "laneSyncController": {
+      "kind": "lane-sync-controller",
+      "path": "tools/recovery_state.py",
+      "blob": "43b1e60e8151f5376f4e49077b2cc7ecdb809f2f",
+      "maxLifetimeSeconds": 60
+    }
   }
 }
