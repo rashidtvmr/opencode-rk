@@ -580,7 +580,17 @@ fn typed_message_rows(
                 );
             }
             ChatPart::Thinking(text) => {
-                push_wrapped(&mut rows, width, text, "  ", ChatRowClass::Thinking);
+                // Match the pinned TUI's reasoning presentation: providers can
+                // mark encrypted/unavailable reasoning with this literal token;
+                // it is a placeholder, not user-facing reasoning content.
+                // Bound the input before replacement so this transformation
+                // cannot allocate in proportion to an untrusted provider string.
+                let text = clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES);
+                let display = text.replace("[REDACTED]", "");
+                let display = display.trim();
+                if !display.is_empty() {
+                    push_wrapped(&mut rows, width, display, "  ", ChatRowClass::Thinking);
+                }
             }
             ChatPart::ToolCall { name, id } => {
                 rows.push((
@@ -773,6 +783,43 @@ mod tests {
     /// Tool part labels and classes come from the typed parts (names, ids,
     /// backend `is_error`), while a user text that looks like a tool header
     /// stays text; thinking rows are their own class.
+    #[test]
+    fn reasoning_redaction_placeholder_is_not_rendered_as_content() {
+        // Upstream's ReasoningPart removes this provider placeholder and trims
+        // the remaining summary before rendering it.
+        let message = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::Thinking(
+                "  [REDACTED] private reasoning [REDACTED]  ".to_owned(),
+            )],
+            agent: None,
+            model: None,
+        };
+        let rows = ChatView::new().render_typed_classified(48, 6, "ws", &[message], "", false);
+        assert!(rows.iter().any(|(row, class)| {
+            *class == ChatRowClass::Thinking && row.trim() == "private reasoning"
+        }));
+        assert!(!rows.iter().any(|(row, _)| row.contains("[REDACTED]")));
+
+        let only_placeholder = ChatMessage {
+            role: ChatRole::Assistant,
+            parts: vec![ChatPart::Thinking("[REDACTED]".to_owned())],
+            agent: None,
+            model: None,
+        };
+        let rows = ChatView::new().render_typed_classified(
+            48,
+            6,
+            "ws",
+            &[only_placeholder],
+            "",
+            false,
+        );
+        assert!(!rows
+            .iter()
+            .any(|(_, class)| *class == ChatRowClass::Thinking));
+    }
+
     #[test]
     fn typed_tool_thinking_and_metadata_rows_are_labeled_from_facts() {
         let view = ChatView::new();

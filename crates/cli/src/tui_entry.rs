@@ -67,7 +67,7 @@ const NATIVE_HELP_LINES: [&str; 10] = [
     "  Backspace: delete last draft character",
     "  Esc: close Help or dialog",
     "  Ctrl-C / Ctrl-D: exit",
-    "  Ctrl-P: open model picker",
+    "  Ctrl-P: open Commands (/models opens model picker)",
     "  Ctrl-K: commands",
     "  /connect: connect a provider",
     "  /models: select a model",
@@ -85,7 +85,7 @@ const NATIVE_HELP_LINES_CTRLJ: [&str; 10] = [
     "  Backspace: delete last draft character",
     "  Esc: close Help or dialog",
     "  Ctrl-C / Ctrl-D: exit",
-    "  Ctrl-P: open model picker",
+    "  Ctrl-P: open Commands (/models opens model picker)",
     "  Ctrl-K: commands",
     "  /connect: connect a provider",
     "  /models: select a model",
@@ -742,6 +742,7 @@ fn native_paint(
     let text_color = paint_color(ctx.palette, Slot::Text);
     let muted = paint_color(ctx.palette, Slot::TextMuted);
     let error = paint_color(ctx.palette, Slot::Error);
+    let accent = paint_color(ctx.palette, Slot::Primary);
     fn dim(color: Rgba, alpha: u8) -> Rgba {
         let [r, g, b, a] =
             crate::native_theme_runtime::dim([color.r, color.g, color.b, color.a], alpha);
@@ -766,6 +767,12 @@ fn native_paint(
         ctx.sidebar_backdrop_alpha
     };
     renderer.fill_rect(0, 0, cols, rows, dim(background, base_alpha))?;
+    if let Some((left, top, width, height)) = ctx.composer {
+        renderer.fill_rect(
+            u32::from(left), u32::from(top), u32::from(width), u32::from(height),
+            dim(element, base_alpha),
+        )?;
+    }
     for (row, line) in lines.iter().enumerate().take(rows as usize) {
         let y = row as u32;
         let modal_text = crate::native_view_layout::slice_cells(
@@ -821,6 +828,24 @@ fn native_paint(
                 } else {
                     normal_fg
                 };
+                if ctx.home && !in_modal {
+                    if let Some((left, top, width, height)) = ctx.composer {
+                        if x >= u32::from(left) && x < u32::from(left + width)
+                            && y >= u32::from(top) && y < u32::from(top + height)
+                        {
+                            if x == u32::from(left) {
+                                fg = accent;
+                                bg = background;
+                            } else if y == u32::from(top + height - 1) {
+                                // Bottom half-block carries the element color
+                                // over the root background, matching the prompt
+                                // separator rather than drawing a bright rule.
+                                fg = element;
+                                bg = background;
+                            }
+                        }
+                    }
+                }
                 if !in_modal {
                     let alpha = if modal.is_some() {
                         ctx.modal.backdrop_alpha
@@ -1321,6 +1346,7 @@ fn native_loop(
     // text. Opening a picker preserves the chat draft verbatim, filtering
     // never mutates it, and cancel returns the exact original draft.
     let mut filter_input = String::new();
+    let mut model_row: usize = 0;
     let mut last_permission_poll = Instant::now();
     let mut permission_error: Option<String> = None;
     let mut partial = String::new();
@@ -1729,13 +1755,15 @@ fn native_loop(
                 let mut panel = vec!["Select model (OpenAI)".to_owned()];
                 // Same buffer fix as Provider: filter and echo read the
                 // dialog-local `filter_input`, never the chat draft.
-                panel.extend(
-                    models
-                        .iter()
-                        .filter(|model| model.matches(&filter_input))
-                        .take(6)
-                        .map(|model| format!("  {} — {}", model.id, model.name)),
-                );
+                let visible = native_setup::visible_rows(&models, &filter_input);
+                let active = native_setup::clamp_row(model_row, visible.len());
+                let capacity = (renderer.rows() as usize)
+                    .saturating_sub(usize::from(view.modal_presentation().content_y) + 3)
+                    .clamp(1, 10);
+                let start = active.saturating_sub(capacity - 1);
+                panel.extend(visible.iter().enumerate().skip(start).take(capacity).filter_map(|(shown, index)| {
+                    models.get(*index).map(|model| format!("{} {} — {}", if shown == active { ">" } else { " " }, model.id, model.name))
+                }));
                 panel.push(format!("filter: {filter_input} (enter / escape)"));
                 panel
             }
@@ -1791,6 +1819,8 @@ fn native_loop(
                     view.modal_presentation().content_width as usize,
                     presentation.rows as usize,
                 )))
+            } else if view.command_palette_open() {
+                Some(modal_content_rows(&view.command_palette_render()))
             } else if !overlay.is_empty() {
                 Some(overlay.len())
             } else if view.page() == crate::native_view_pages::Page::Theme {
@@ -1804,6 +1834,14 @@ fn native_loop(
                     crate::native_view_pages::Page::Chat | crate::native_view_pages::Page::Theme
                 )
                 && !session_route;
+            let cursor = if !help_open && !dialog_open && !view.command_palette_open()
+                && matches!(dialog, native_setup::Dialog::None)
+                && view.page() == crate::native_view_pages::Page::Chat
+            { view.home_cursor(draft_echo) } else { None };
+            if renderer.cols() > 0 && renderer.rows() > 0 {
+                let (x, y) = cursor.unwrap_or((0, 0));
+                renderer.set_cursor(u32::from(x), u32::from(y), cursor.is_some())?;
+            }
             native_paint(
                 &mut renderer,
                 &lines,
@@ -1883,21 +1921,30 @@ fn native_loop(
             direction @ (native_input_decoder::InputEvent::ArrowUp
             | native_input_decoder::InputEvent::ArrowDown) => {
                 utf8.reset();
+                if view.command_palette_open() && !help_open && !view.dialogs.intercepts_input() {
+                    if direction == native_input_decoder::InputEvent::ArrowUp {
+                        view.command_palette_prev();
+                    } else {
+                        view.command_palette_next();
+                    }
+                    continue;
+                }
                 // Page selection owns arrows only when no higher-priority
                 // overlay owns focus. Never turn them into composer text or
                 // permission/credential actions.
-                if !page_open
-                    || help_open
-                    || view.dialogs.intercepts_input()
-                    || !matches!(dialog, native_setup::Dialog::None)
+                if !page_open && !help_open && !view.dialogs.intercepts_input()
+                    && matches!(dialog, native_setup::Dialog::Model)
                 {
+                    let visible = native_setup::visible_rows(&models, &filter_input);
+                    model_row = native_setup::move_row(
+                        model_row, visible.len(),
+                        matches!(direction, native_input_decoder::InputEvent::ArrowDown),
+                    );
                     continue;
                 }
-                if direction == native_input_decoder::InputEvent::ArrowUp {
-                    2 // existing previous-row dispatch
-                } else {
-                    14 // existing next-row dispatch
-                }
+                if !page_open || help_open || view.dialogs.intercepts_input()
+                    || !matches!(dialog, native_setup::Dialog::None) { continue; }
+                if direction == native_input_decoder::InputEvent::ArrowUp { 2 } else { 14 }
             }
             native_input_decoder::InputEvent::Paste(text) => {
                 utf8.reset();
@@ -1909,6 +1956,12 @@ fn native_loop(
                 }
                 if help_open {
                     // Help owns focus; paste must not mutate the hidden draft.
+                    continue;
+                }
+                if view.command_palette_open() {
+                    for character in text.chars() {
+                        if !view.command_palette_push(character) { break; }
+                    }
                     continue;
                 }
                 if page_open {
@@ -1929,8 +1982,10 @@ fn native_loop(
                 // key buffer, never in the chat composer draft.
                 let (target, limit) = if matches!(dialog, native_setup::Dialog::ApiKey) {
                     (&mut key_input, 16 * 1024)
-                } else {
+                } else if matches!(dialog, native_setup::Dialog::None) {
                     (&mut draft, MAX_NATIVE_DRAFT_BYTES)
+                } else {
+                    (&mut filter_input, MAX_NATIVE_DRAFT_BYTES)
                 };
                 if target
                     .len()
@@ -1997,6 +2052,32 @@ fn native_loop(
             utf8.reset();
             continue;
         }
+        // The palette owns a separate query and returns only an existing
+        // local route. All side effects remain in the shared dispatcher.
+        let mut palette_route = None;
+        if view.command_palette_open() && !matches!(byte, 3 | 4) {
+            match byte {
+                27 => view.close_command_palette(),
+                14 => view.command_palette_next(),
+                2 => view.command_palette_prev(),
+                8 | 127 => { view.command_palette_backspace(); }
+                13 | 10 => {
+                    if let Some(crate::native_command_palette::PaletteAction::Route(route)) = view.command_palette_activate() {
+                        if native_exit_route(route) { break; }
+                        palette_route = Some(route);
+                        view.close_command_palette();
+                    }
+                }
+                value if value >= 0x20 => {
+                    if let Some(character) = utf8.push(value) {
+                        view.command_palette_push(character);
+                    }
+                }
+                _ => {}
+            }
+            if byte < 0x20 || byte == 127 { utf8.reset(); }
+            if palette_route.is_none() { continue; }
+        }
         // An open page owns focus the same way: only exit/close plus page
         // navigation (Ctrl-N / Ctrl-B) and confirmation (Enter) act; no
         // draft, dialog, paste or turn side effect can occur. On the
@@ -2035,6 +2116,7 @@ fn native_loop(
                 dialog = native_setup::Dialog::None;
                 key_input.clear();
                 filter_input.clear();
+                model_row = 0;
                 utf8.reset();
             }
             27 => {
@@ -2043,13 +2125,8 @@ fn native_loop(
                 draft.clear();
                 utf8.reset();
             }
-            16 => {
-                // Ctrl-P opens the real Models picker with the composer
-                // draft preserved verbatim; filtering uses the dialog's
-                // own bounded buffer, never the chat draft.
-                dialog = native_setup::Dialog::Model;
-                key_input.clear();
-                filter_input.clear();
+            16 if matches!(dialog, native_setup::Dialog::None) => {
+                view.open_command_palette(live.is_some());
                 utf8.reset();
             }
             // Leader chord arming: Ctrl-X (`keybind.ts` `LeaderDefault =
@@ -2196,6 +2273,7 @@ fn native_loop(
             // (multiline composer); Ctrl-J (b'\n') still submits below.
             b'\r'
                 if matches!(keymap, SubmitKeymap::CtrlJ)
+                    && palette_route.is_none()
                     && !page_open
                     && matches!(dialog, native_setup::Dialog::None) =>
             {
@@ -2209,7 +2287,7 @@ fn native_loop(
                 // Set only by command-input Enter (Commands page); the
                 // composer path leaves it `None` and parses the draft
                 // exactly as before.
-                let mut command_route: Option<&'static str> = None;
+                let mut command_route: Option<&'static str> = palette_route;
                 if page_open {
                     if matches!(view.page(), crate::native_view_pages::Page::Sessions) {
                         // Sessions page Enter: the selected backend row
@@ -2417,7 +2495,7 @@ fn native_loop(
                 };
                 let command = text.trim();
                 if matches!(dialog, native_setup::Dialog::None)
-                    && matches!(command, ":q" | ":quit" | "/exit" | "/quit")
+                    && native_exit_route(command)
                 {
                     break;
                 }
@@ -2473,12 +2551,11 @@ fn native_loop(
                             }
                         }
                         native_setup::Dialog::Model => {
-                            let choice = models
-                                .iter()
-                                .find(|model| model.id == text || model.qualified() == text)
-                                .or_else(|| models.iter().find(|model| model.matches(&text)));
+                            // Enter commits the focused advertised row. Query text is
+                            // never itself a model identity.
+                            let choice = native_setup::selected_row(&models, &filter_input, model_row);
                             if let Some(model) = choice {
-                                match native_setup::save_model(model) {
+                                match native_setup::save_model(&model) {
                                     Ok(()) => {
                                         selected = Some(model.clone());
                                         // Confirmed local config write:
@@ -2486,6 +2563,7 @@ fn native_loop(
                                         view.set_model(selected.as_ref().map(|m| m.qualified()));
                                         view.set_composer_model(&model.name, "OpenAI");
                                         dialog = native_setup::Dialog::None;
+                                        model_row = 0;
                                     }
                                     Err(error) => append_transcript(
                                         &mut transcript,
@@ -2573,17 +2651,7 @@ fn native_loop(
                 // chat-composer typed command is consumed at dispatch so
                 // Esc restores the pre-command blank composer; a
                 // segregated source (Ctrl-K query) keeps its draft intact.
-                let local_page = match command {
-                    "/status" => Some(crate::native_view_pages::Page::Status),
-                    "/mcp" => Some(crate::native_view_pages::Page::Mcp),
-                    "/theme" => Some(crate::native_view_pages::Page::Theme),
-                    "/workspace" => Some(crate::native_view_pages::Page::Workspaces),
-                    "/agents" => Some(crate::native_view_pages::Page::Agents),
-                    "/context" => Some(crate::native_view_pages::Page::Context),
-                    "/diff" => Some(crate::native_view_pages::Page::Diff),
-                    "/commands" => Some(crate::native_view_pages::Page::Commands),
-                    _ => None,
-                };
+                let local_page = native_local_page_route(command);
                 if let Some(page) = local_page {
                     if matches!(page, crate::native_view_pages::Page::Commands) {
                         // Single production path: the static route rows
@@ -2944,6 +3012,7 @@ fn native_loop(
                             .is_some_and(|len| len <= limit)
                         {
                             target.push(character);
+                            if matches!(dialog, native_setup::Dialog::Model) { model_row = 0; }
                         }
                     }
                 }
@@ -2988,6 +3057,27 @@ fn is_recognized_local_command(command: &str) -> bool {
 fn consume_local_command(draft: &mut String, command: &str, from_chat_composer: bool) {
     if from_chat_composer && is_recognized_local_command(command) {
         draft.clear();
+    }
+}
+
+#[cfg(feature = "native")]
+fn native_exit_route(command: &str) -> bool {
+    matches!(command, ":q" | ":quit" | "/exit" | "/quit")
+}
+
+#[cfg(feature = "native")]
+fn native_local_page_route(command: &str) -> Option<crate::native_view_pages::Page> {
+    use crate::native_view_pages::Page;
+    match command {
+        "/status" => Some(Page::Status),
+        "/mcp" => Some(Page::Mcp),
+        "/theme" => Some(Page::Theme),
+        "/workspace" => Some(Page::Workspaces),
+        "/agents" => Some(Page::Agents),
+        "/context" => Some(Page::Context),
+        "/diff" => Some(Page::Diff),
+        "/commands" => Some(Page::Commands),
+        _ => None,
     }
 }
 
@@ -3289,6 +3379,23 @@ fn print_native_or_legacy(frame: &str) -> String {
 
 #[cfg(all(test, feature = "native"))]
 mod command_consumption_tests {
+    #[test]
+    fn every_palette_entry_is_a_local_action_not_a_provider_prompt() {
+        let mut palette = crate::native_command_palette::CommandPalette::default();
+        palette.open(true);
+        for entry in palette.visible() {
+            let crate::native_command_palette::PaletteAction::Route(route) = entry.action;
+            assert!(super::native_exit_route(route)
+                || super::native_local_page_route(route).is_some()
+                || matches!(route, "/help" | "/sessions" | "/new" | "/connect" | "/models"),
+                "palette action has no local handler: {route}");
+        }
+        assert_eq!(super::native_local_page_route("/status"), Some(crate::native_view_pages::Page::Status));
+        assert_eq!(super::native_local_page_route("/theme"), Some(crate::native_view_pages::Page::Theme));
+        assert!(super::native_exit_route("/exit"));
+        assert_eq!(super::native_local_page_route("/not-a-local-command"), None);
+        assert!(!super::native_exit_route("/not-a-local-command"));
+    }
     use super::{consume_local_command, is_recognized_local_command};
 
     /// Installed bug reproduced as a pure production-helper contract:

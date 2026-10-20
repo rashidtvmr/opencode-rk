@@ -67,11 +67,12 @@ pub struct NativeView {
     sessions: SessionView,
     chat: ChatView,
     pages: PageState,
+    command_palette: crate::native_command_palette::CommandPalette,
     status: StatusView,
     /// Held from day one; `DialogView::request/answer` wiring is explicitly
     /// pending until the dialogs part delivers its request/answer API
     /// (inventing calls here would not compile). The live `/connect`,
-    /// `/models`, Ctrl-P credential dialogs remain the existing
+    /// `/models` and `/connect` credential dialogs remain the existing
     /// `native_setup` center-dialog path in `tui_entry`.
     pub dialogs: DialogView,
     /// Facade-owned permission retry correlation (NOT part of the approved
@@ -201,6 +202,19 @@ pub struct BindCommit {
 }
 
 impl NativeView {
+    pub fn open_command_palette(&mut self, has_session: bool) { self.command_palette.open(has_session); }
+    pub fn command_palette_open(&self) -> bool { self.command_palette.is_open() }
+    pub fn close_command_palette(&mut self) { self.command_palette.close(); }
+    pub fn command_palette_push(&mut self, ch: char) -> bool { self.command_palette.push_query(ch) }
+    pub fn command_palette_backspace(&mut self) -> bool { self.command_palette.backspace() }
+    pub fn command_palette_next(&mut self) { self.command_palette.next(); }
+    pub fn command_palette_prev(&mut self) { self.command_palette.prev(); }
+    pub fn command_palette_activate(&self) -> Option<crate::native_command_palette::PaletteAction> { self.command_palette.activate() }
+    pub fn command_palette_render(&self) -> Vec<String> {
+        let geometry = self.modal_presentation();
+        self.command_palette.render(geometry.content_width, self.render_height().saturating_sub(usize::from(geometry.content_y)))
+    }
+
     /// Startup composition for the given kernel geometry.
     pub fn new(cols: u16, rows: u16) -> Self {
         Self {
@@ -210,6 +224,7 @@ impl NativeView {
             pages: PageState::default(),
             status: StatusView::default(),
             dialogs: DialogView::default(),
+            command_palette: crate::native_command_palette::CommandPalette::default(),
             permission_retry_attempt: None,
             workspace: String::new(),
             submit_with_ctrl_j: false,
@@ -337,7 +352,7 @@ impl NativeView {
             .cols
             .saturating_sub(2)
             .min(self.dialog_size.width());
-        let y = self.render_height() as u16 / 4;
+        let y = (self.render_height() as u16).div_ceil(4);
         ModalPresentation {
             x: (self.layout.cols - width) / 2,
             y,
@@ -366,13 +381,13 @@ impl NativeView {
         // The qualified label retains provider identity even before richer
         // catalogue display metadata has been observed.
         parts.push(match &self.composer_model {
-            Some((model, provider)) => format!("{model}  {provider}"),
+            Some((model, provider)) => format!("{model} {provider}"),
             None => self.status.model_label().to_owned(),
         });
         if let Some(variant) = &self.composer_variant {
             parts.push(variant.clone());
         }
-        parts.join("  ")
+        parts.join(" · ")
     }
 
     // ---------- route / sidebar facts (set from the input loop) ----------
@@ -462,26 +477,13 @@ impl NativeView {
                 (composer_height + usize::from(height >= 4)) as u16,
             ))
         } else {
-            let count = draft
-                .chars()
-                .take(MAX_RENDER_DRAFT_CHARS)
-                .collect::<String>()
-                .split('\n')
-                .take((height / 2).clamp(1, 12))
-                .count();
-            let block_height = 8 + count;
-            let top = height.saturating_sub(block_height + 1) / 2;
-            let input_top = if height >= block_height + 1 {
-                top + 6
-            } else {
-                height.saturating_sub(count + 2)
-            };
+            let (count, _, input_top) = self.home_positions(draft);
             let prompt_width = self.home_prompt_width();
             Some((
-                (width - prompt_width) / 2,
+                (width - prompt_width).div_ceil(2),
                 input_top.saturating_sub(1) as u16,
                 prompt_width,
-                (count + 3).min(height - input_top.saturating_sub(1)) as u16,
+                (count + 4).min(height - input_top.saturating_sub(1)) as u16,
             ))
         }
     }
@@ -489,25 +491,36 @@ impl NativeView {
     pub fn home_logo_region(&self, draft: &str) -> Option<(u16, u16)> {
         let height = self.render_height();
         let width = self.presentation().main_width;
-        let count = draft
-            .chars()
-            .take(MAX_RENDER_DRAFT_CHARS)
-            .collect::<String>()
-            .split('\n')
-            .take((height / 2).clamp(1, 12))
-            .count();
-        let block_height = 8 + count;
+        let (count, top, _) = self.home_positions(draft);
         if self.session_route
             || !matches!(self.pages.page(), Page::Chat | Page::Theme)
             || width < 43
-            || height < block_height + 1
+            || height < count + 15
         {
             return None;
         }
         Some((
-            (width - 39) / 2,
-            (height.saturating_sub(block_height + 1) / 2) as u16,
+            (width - 39).div_ceil(2),
+            top as u16,
         ))
+    }
+
+    pub fn home_cursor(&self, draft: &str) -> Option<(u16, u16)> {
+        if self.session_route { return None; }
+        let (left, top, width, height) = self.composer_region(draft)?;
+        if width <= 3 || height <= 3 { return None; }
+        let bounded: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
+        let clean = crate::native_transcript::strip_ansi(&bounded);
+        let mut lines = clean.split('\n').take(129);
+        let mut last = lines.next().unwrap_or("");
+        let mut row = 0u16;
+        for line in lines { row += 1; last = line; }
+        if row >= height.saturating_sub(4) { return None; }
+        let mut cells = 0u16;
+        crate::native_view_layout::visit_cells(last, width - 3, |x, _, advance| {
+            cells = x.saturating_add(advance);
+        });
+        Some((left + 3 + cells.min(width - 4), top + 1 + row))
     }
 
     pub fn set_session(&mut self, session: Option<String>) {
@@ -1115,6 +1128,8 @@ impl NativeView {
         let modal = if self.dialogs.is_open() {
             self.dialogs
                 .render(dialog_width.saturating_sub(4) as usize, height)
+        } else if self.command_palette.is_open() {
+            self.command_palette_render()
         } else if self.pages.page() == Page::Theme {
             self.theme_dialog()
         } else {
@@ -1152,6 +1167,23 @@ impl NativeView {
         frame
     }
 
+    // home.tsx: two flex-grow spacers, four fixed rows before the logo,
+    // one spacer and one prompt padding row. Keep painter and text geometry
+    // derived from the same bounded draft, including compact terminals.
+    fn home_positions(&self, draft: &str) -> (usize, usize, usize) {
+        let height = self.render_height();
+        let bounded: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
+        let clean = crate::native_transcript::strip_ansi(&bounded);
+        let count = clean.split('\n').take((height / 2).clamp(1, 12)).count();
+        let required = count + 15;
+        if height >= required {
+            let top = 4 + (height - required) / 2;
+            (count, top, top + 7)
+        } else {
+            (count, 0, height.saturating_sub(count + 4).max(usize::from(height > 1)))
+        }
+    }
+
     /// Pinned Home composition: centered four-row logo and a 75-cell maximum
     /// prompt, constrained by the parent's two-cell horizontal padding.
     fn home_column(&self, width: u16, height: usize, draft: &str) -> Vec<String> {
@@ -1160,12 +1192,11 @@ impl NativeView {
             return rows;
         }
         let prompt_width = self.home_prompt_width();
-        let left = width.saturating_sub(prompt_width) / 2;
+        let left = width.saturating_sub(prompt_width).div_ceil(2);
         let draft: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
         let draft = crate::native_transcript::strip_ansi(&draft);
         let input: Vec<_> = draft.split('\n').take((height / 2).clamp(1, 12)).collect();
-        let block_height = 4 + 2 + input.len() + 2;
-        let top = height.saturating_sub(block_height + 1) / 2;
+        let (_, top, input_top) = self.home_positions(&draft);
         // logo.ts marker substitutions match component/logo.tsx's glyphs;
         // marker-specific shading is applied by the native paint layer.
         let logo = [
@@ -1174,9 +1205,9 @@ impl NativeView {
             ("█__█ █__█ █^^^ █__█", "█___ █__█ █__█ █^^^"),
             ("▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"),
         ];
-        if height >= block_height + 1 {
+        if height >= input.len() + 15 {
             let logo_width = width.saturating_sub(4).min(39);
-            let logo_left = width.saturating_sub(logo_width) / 2;
+            let logo_left = width.saturating_sub(logo_width).div_ceil(2);
             for (index, (left_line, right_line)) in logo.iter().enumerate() {
                 let line: String = format!("{left_line} {right_line}")
                     .chars()
@@ -1194,11 +1225,11 @@ impl NativeView {
                 );
             }
         }
-        let input_top = if height >= block_height + 1 {
-            top + 6
-        } else {
-            height.saturating_sub(input.len() + 2)
-        };
+        let border_top = input_top.saturating_sub(1);
+        let box_bottom = input_top.saturating_add(input.len() + 2);
+        for row in rows.iter_mut().take(box_bottom.min(height)).skip(border_top) {
+            *row = format!("{}┃{}", " ".repeat(left as usize), " ".repeat(prompt_width.saturating_sub(1) as usize));
+        }
         for (index, line) in input.iter().enumerate() {
             if input_top + index < height {
                 let normal = [
@@ -1218,19 +1249,26 @@ impl NativeView {
                     line
                 };
                 rows[input_top + index] = format!(
-                    "{}{}",
+                    "{}┃  {}",
                     " ".repeat(left as usize),
-                    padded(label, prompt_width)
+                    fit(label, prompt_width.saturating_sub(3))
                 );
             }
         }
-        let model_row = input_top + input.len();
+        let model_row = input_top + input.len() + 1;
         if model_row < height {
             rows[model_row] = format!(
-                "{}{}",
+                "{}┃  {}",
                 " ".repeat(left as usize),
-                padded(&self.composer_metadata(), prompt_width)
+                fit(&self.composer_metadata(), prompt_width.saturating_sub(3))
             );
+        }
+        if box_bottom < height {
+            rows[box_bottom] = format!("{}╹{}", " ".repeat(left as usize), "▀".repeat(prompt_width.saturating_sub(1) as usize));
+        }
+        if box_bottom + 1 < height.saturating_sub(1) {
+            let hint = "ctrl+p commands";
+            rows[box_bottom + 1] = format!("{}{}", " ".repeat(usize::from(left + prompt_width.saturating_sub(hint.len() as u16))), hint);
         }
         let mut right = env!("CARGO_PKG_VERSION").to_owned();
         if self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
@@ -1302,7 +1340,7 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
             id: "models".to_owned(),
             label: "Models".to_owned(),
             detail: if backend {
-                "GET /api/models (picker via /models or Ctrl-P)".to_owned()
+                "GET /api/models (picker via /models or Commands)".to_owned()
             } else {
                 "unavailable: daemon offline".to_owned()
             },

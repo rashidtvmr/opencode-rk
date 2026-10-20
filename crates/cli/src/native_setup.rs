@@ -11,26 +11,37 @@ const MAX_MODELS: usize = 500;
 const MAX_STATE_BYTES: usize = 64 * 1024;
 const MAX_RECENT: usize = 32;
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Model {
     pub id: String,
     pub name: String,
 }
 
 impl Model {
-    pub fn qualified(&self) -> String {
-        format!("openai/{}", self.id)
-    }
-
+    pub fn qualified(&self) -> String { format!("openai/{}", self.id) }
     pub fn matches(&self, query: &str) -> bool {
         let query = query.trim().to_lowercase();
-        query.is_empty()
-            || self.id.to_lowercase().contains(&query)
+        query.is_empty() || self.id.to_lowercase().contains(&query)
             || self.name.to_lowercase().contains(&query)
             || self.qualified().to_lowercase().contains(&query)
     }
 }
 
+/// Rows are catalogue indices, never arbitrary query text.
+pub(super) fn visible_rows(models: &[Model], query: &str) -> Vec<usize> {
+    models.iter().enumerate().filter_map(|(index, model)| model.matches(query).then_some(index)).collect()
+}
+pub(super) fn clamp_row(row: usize, visible_len: usize) -> usize { row.min(visible_len.saturating_sub(1)) }
+pub(super) fn move_row(row: usize, visible_len: usize, down: bool) -> usize {
+    if visible_len == 0 { return 0; }
+    if down { row.saturating_add(1).min(visible_len - 1) } else { row.saturating_sub(1) }
+}
+pub(super) fn selected_row(models: &[Model], query: &str, row: usize) -> Option<Model> {
+    let rows = visible_rows(models, query);
+    rows.get(clamp_row(row, rows.len())).and_then(|index| models.get(*index)).cloned()
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Dialog {
     None,
     Provider,
@@ -185,4 +196,27 @@ fn read_state(path: &PathBuf) -> Result<Value, String> {
         return Err("invalid model state".to_owned());
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod picker_tests {
+    use super::*;
+    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into() }, Model { id: "k-model".into(), name: "Kappa".into() }] }
+    #[test] fn query_is_utf8_and_jk_are_search_text() {
+        let m = models();
+        assert_eq!(visible_rows(&m, "öhn"), vec![0]);
+        assert_eq!(visible_rows(&m, "j"), vec![0]);
+        assert_eq!(visible_rows(&m, "k"), vec![1]);
+    }
+    #[test] fn focused_row_clamps_and_no_result_cannot_select() {
+        let m = models();
+        assert_eq!(selected_row(&m, "k", 99).unwrap().id, "k-model");
+        assert!(selected_row(&m, "no-match", 0).is_none());
+        assert_eq!(move_row(99, 0, true), 0);
+    }
+    #[test] fn exact_identity_not_variant_or_typed_fallback() {
+        let m = models();
+        assert_eq!(selected_row(&m, "j-model-extra", 0), None);
+        assert_eq!(m[0].qualified(), "openai/j-model");
+    }
 }
