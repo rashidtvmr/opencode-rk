@@ -1160,28 +1160,131 @@ def cmd_integrate(cfg: dict, args: argparse.Namespace) -> int:
 
 
 def cmd_sync_lane(cfg: dict, args: argparse.Namespace) -> int:
-    lanes = set(cfg.get("executionLanes", []))
-    if args.lane not in lanes:
-        raise RuntimeError(f"{args.lane!r} is not an execution lane")
-    _, failures, _, _, _ = require_state(cfg)
-    if any(
-        row.get("lane") == args.lane and row.get("status") in ACTIVE_STATES
-        for row in failures.get("failures", [])
-    ):
-        raise RuntimeError(f"{args.lane} has active work and cannot be synchronized")
-    lane_root = pathlib.Path(cfg["approvedRecoveryWorktrees"][args.lane]).resolve()
-    if subprocess.check_output(
-        ["git", "-C", str(lane_root), "status", "--porcelain"], text=True
-    ).strip():
-        raise RuntimeError(f"{args.lane} worktree is dirty")
-    subprocess.check_call(
-        ["git", "-C", str(lane_root), "merge", "--ff-only", cfg["canonicalBranch"]]
-    )
-    lane_sha = git("rev-parse", args.lane)
-    canonical = main_sha(cfg)
-    if lane_sha != canonical:
-        raise RuntimeError(f"{args.lane} did not synchronize to canonical {canonical}")
-    print(f"LANE SYNCED {args.lane} {canonical}")
+    """Adopt the current canonical tip under a private, one-ref authorization.
+
+    Exclusion order is integration.lock (created O_EXCL), then state.lock, then
+    capability file. Both locks remain held through Git's full ref transaction.
+    A crash leaves the integration lock/capability and blocks future work; it
+    never silently reuses authority.
+    """
+    paths = state_paths(cfg)
+    lane = str(args.lane)
+    fixed = set(cfg.get("executionLanes", [])) & set(cfg.get("fixedMutableBranches", []))
+    if lane not in fixed:
+        raise RuntimeError(f"{lane!r} is not a fixed execution lane")
+    lane_root = pathlib.Path(cfg["approvedRecoveryWorktrees"][lane]).resolve()
+    capability = paths["lock"].parent / "lane-sync-capability.json"
+    operation = "lane-sync-" + secrets.token_hex(16)
+    try:
+        fd = os.open(paths["integration_lock"], os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+    except FileExistsError as exc:
+        raise RuntimeError("integration lock exists; lane sync fails closed") from exc
+    lock_owned = True
+    preserve_lock = False
+    capability_minted = False
+    ref_committed = False
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump({"kind": "lane-sync", "lane": lane, "operation": operation, "startedAt": now()}, handle)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        with locked(paths["lock"]):
+            _, failures, _, _, paths = require_state(cfg)
+            if capability.exists():
+                preserve_lock = True
+                raise RuntimeError("stale lane-sync capability exists; fail closed and inspect controller runtime")
+            if any(row.get("lane") == lane and row.get("status") in ACTIVE_STATES
+                   for row in failures.get("failures", [])):
+                raise RuntimeError(f"{lane} has active work and cannot be synchronized")
+            dirty = subprocess.check_output(
+                ["git", "-C", str(lane_root), "status", "--porcelain", "--untracked-files=all"], text=True
+            ).strip()
+            if dirty:
+                raise RuntimeError(f"{lane} worktree is dirty")
+            canonical = main_sha(cfg)
+            old = git("rev-parse", lane)
+            checked_out = subprocess.check_output(
+                ["git", "-C", str(lane_root), "symbolic-ref", "--short", "HEAD"], text=True
+            ).strip()
+            worktree_head = subprocess.check_output(
+                ["git", "-C", str(lane_root), "rev-parse", "HEAD"], text=True
+            ).strip()
+            if checked_out != lane or worktree_head != old:
+                raise RuntimeError(f"{lane} worktree HEAD/ref mismatch: {checked_out}@{worktree_head} != {lane}@{old}")
+            if git("rev-parse", lane) != old or main_sha(cfg) != canonical:
+                raise RuntimeError("lane or canonical moved during sync preflight")
+            # Dry-run Git's two-tree worktree update before granting ref
+            # authority. This detects ignored/untracked collisions that status
+            # may omit, so a later index refresh cannot strand a moved lane.
+            subprocess.run(
+                ["git", "-C", str(lane_root), "read-tree", "--dry-run", "-m", "-u", old, canonical],
+                check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            )
+            record = {
+                "schemaVersion": 1, "status": "ARMED", "operation": operation,
+                "lane": lane, "laneRef": f"refs/heads/{lane}", "oldLaneSha": old,
+                "canonicalRef": f"refs/heads/{cfg['canonicalBranch']}", "canonicalSha": canonical,
+                "targetTree": git("rev-parse", f"{canonical}^{{tree}}"),
+                "expiresAt": (dt.datetime.now(dt.timezone.utc) + dt.timedelta(seconds=60)).isoformat(),
+            }
+            atomic_write(capability, record)
+            os.chmod(capability, 0o600)
+            capability_minted = True
+            # Repeat preflight immediately before entering Git's prepared phase.
+            # No dirty user data may be hidden by the subsequent index refresh.
+            if (main_sha(cfg) != canonical or git("rev-parse", lane) != old
+                    or subprocess.check_output(["git", "-C", str(lane_root), "status", "--porcelain", "--untracked-files=all"], text=True).strip()):
+                capability.unlink(missing_ok=True)
+                raise RuntimeError("canonical, lane, or worktree changed after capability mint")
+            env = dict(os.environ)
+            env["OC2_RECOVERY_LANE_SYNC_CAP"] = operation
+            try:
+                # update-ref yields one atomic ref transaction. Unlike merge,
+                # it does not propose AUTO_MERGE or any side ref to the hook.
+                transaction = (
+                    "start\n"
+                    f"update refs/heads/{lane} {canonical} {old}\n"
+                    "prepare\ncommit\n"
+                )
+                subprocess.run(
+                    ["git", "-C", str(lane_root), "update-ref", "--stdin"],
+                    input=transaction, text=True, check=True, env=env,
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                )
+                if git("rev-parse", lane) != canonical or main_sha(cfg) != canonical:
+                    raise RuntimeError("post-sync lane/canonical SHA differs from authorized target")
+                ref_committed = True
+                # Ref transaction has committed and the hook consumed authority.
+                # If a concurrent local edit appeared, preserve it and stop;
+                # otherwise refresh only index/worktree, never refs.
+                index_tree = subprocess.check_output(["git", "-C", str(lane_root), "write-tree"], text=True).strip()
+                old_tree = git("rev-parse", f"{old}^{{tree}}")
+                worktree_delta = subprocess.check_output(["git", "-C", str(lane_root), "diff", "--name-only"], text=True).strip()
+                untracked = subprocess.check_output(["git", "-C", str(lane_root), "ls-files", "--others", "--exclude-standard"], text=True).strip()
+                if index_tree != old_tree or worktree_delta or untracked:
+                    raise RuntimeError("lane ref synchronized but worktree/index changed concurrently; preserve work and inspect")
+                subprocess.check_call(["git", "-C", str(lane_root), "read-tree", "--reset", "-u", canonical])
+            except Exception:
+                if not ref_committed:
+                    capability.unlink(missing_ok=True)
+                else:
+                    preserve_lock = True
+                raise
+            capability.unlink(missing_ok=True)
+    finally:
+        if lock_owned and capability_minted and capability.exists():
+            # An interrupted or failed operation with an armed record blocks
+            # follow-on integration/sync until explicit diagnosis.
+            preserve_lock = True
+        if lock_owned and not preserve_lock:
+            try:
+                owner = load_json(paths["integration_lock"])
+            except (OSError, ValueError, TypeError):
+                owner = {}
+            if owner.get("operation") == operation and owner.get("kind") == "lane-sync":
+                paths["integration_lock"].unlink(missing_ok=True)
+    print(f"LANE SYNCED {lane} {canonical}")
     return 0
 
 
