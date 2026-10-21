@@ -285,6 +285,20 @@ impl StateLocation {
                 .map_err(|_| "TUI state working directory unavailable")?
                 .join(path)
         };
+        // macOS exposes these system-owned aliases as symlinks. Rewrite only
+        // their exact leading components; arbitrary caller symlinks still go
+        // through the anchored NOFOLLOW walk below and are rejected.
+        #[cfg(target_os = "macos")]
+        let path = {
+            let mut physical = path.clone();
+            for (alias, target) in [("/var", "/private/var"), ("/tmp", "/private/tmp")] {
+                if let Ok(relative) = path.strip_prefix(alias) {
+                    physical = Path::new(target).join(relative);
+                    break;
+                }
+            }
+            physical
+        };
         if path.as_os_str().len() > 32768 || path.components().count() > 128 {
             return Err("TUI state path exceeds bounds".into());
         }
