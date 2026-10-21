@@ -150,10 +150,14 @@ pub struct ApprovalBoard {
     started: VecDeque<OperationDigest>,
     interrupted: VecDeque<OperationDigest>,
     in_flight: Option<OperationDigest>,
+    grants: VecDeque<AlwaysGrant>,
     broadcast_seq: u64,
 }
 
 impl ApprovalBoard {
+    /// Upper bound on tracked always-allow grants (oldest dropped first).
+    pub const MAX_GRANTS: usize = 16;
+
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -346,6 +350,92 @@ impl ApprovalBoard {
         }
     }
 
+    /// Settle the pending request as an always-allow grant for `tool` under
+    /// `scope`. Safe risk is single-step; destructive still requires the
+    /// arm + `Confirm::Confirmed` two-step; human-only is always refused
+    /// with zero mutation (human-only grants are never persistent). An
+    /// empty tool name is refused like a stale digest. On success the
+    /// decision settles exactly like [`Self::approve`] and an
+    /// [`AlwaysGrant`] is recorded (bounded, oldest dropped).
+    pub fn approve_always(
+        &mut self,
+        digest: &OperationDigest,
+        tool: &str,
+        scope: &ApprovalScope,
+        confirm: Confirm,
+        now: u64,
+    ) -> Outcome {
+        if tool.is_empty() {
+            // Nothing worth granting: refuse exactly like a replayed digest.
+            return Outcome::Refused(Refusal::StaleOrReplayed);
+        }
+        let Some(idx) = self.pending.iter().position(|p| &p.digest == digest) else {
+            return Outcome::Refused(Refusal::StaleOrReplayed);
+        };
+        if self.pending[idx].risk == Risk::HumanOnly {
+            // Human-only grants are never persistent: refuse with zero
+            // mutation (no decision, no grant, pending untouched).
+            return Outcome::Refused(Refusal::ConfirmationRequired);
+        }
+        if self.pending[idx].scope != *scope {
+            // Scope mismatch: bound exactly like a stale digest.
+            return Outcome::Refused(Refusal::StaleOrReplayed);
+        }
+        let request = self.pending.remove(idx).expect("position verified");
+        if request.is_expired(now) {
+            // Expired grants settle as a non-effect denial, no grant recorded.
+            let decision = Decision {
+                digest: request.digest,
+                scope: request.scope,
+                approved: false,
+                confirmed_twice: false,
+                expired: true,
+            };
+            self.record(decision.clone());
+            self.bump();
+            return Outcome::Decided(decision);
+        }
+        let two_step = request.needs_two_step();
+        if two_step && !(request.armed && confirm == Confirm::Confirmed) {
+            self.pending.insert(idx, request);
+            self.bump();
+            return Outcome::Refused(Refusal::ConfirmationRequired);
+        }
+        let decision = Decision {
+            digest: request.digest,
+            scope: request.scope.clone(),
+            approved: true,
+            confirmed_twice: two_step,
+            expired: false,
+        };
+        self.record(decision.clone());
+        if self.grants.len() >= Self::MAX_GRANTS {
+            self.grants.pop_front();
+        }
+        self.grants.push_back(AlwaysGrant {
+            tool: tool.to_string(),
+            scope: request.scope,
+        });
+        self.bump();
+        Outcome::Decided(decision)
+    }
+
+    /// True only when an exact `tool` + `ApprovalScope` grant exists and has
+    /// not expired (`now < expires_at_tick`). Denied or expired operations
+    /// never match.
+    #[must_use]
+    pub fn is_always_allowed(&self, tool: &str, scope: &ApprovalScope, now: u64) -> bool {
+        self.grants
+            .iter()
+            .any(|g| g.tool == tool && g.scope == *scope && now < g.scope.expires_at_tick)
+    }
+
+    /// Recorded always-allow grants, oldest first, bounded. Read-only view.
+    #[must_use]
+    pub fn grants(&self) -> &VecDeque<AlwaysGrant> {
+        &self.grants
+    }
+
     /// Record a settled decision, dropping the oldest on overflow (bounded).
     fn record(&mut self, decision: Decision) {
         if self.history.len() >= MAX_HISTORY {
@@ -356,6 +446,230 @@ impl ApprovalBoard {
 
     fn bump(&mut self) {
         self.broadcast_seq = self.broadcast_seq.wrapping_add(1);
+    }
+}
+
+/// A persistent always-allow grant: the granted tool plus the exact scope the
+/// reviewer approved (never for human-only operations).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct AlwaysGrant {
+    pub tool: String,
+    pub scope: ApprovalScope,
+}
+
+/// A choice offered by the approval popup. `AlwaysAllow` is never offered
+/// for human-only operations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Choice {
+    AllowOnce,
+    AlwaysAllow,
+    Deny,
+}
+
+impl Choice {
+    /// Plain-text label used by render and announce.
+    #[must_use]
+    pub fn label(self) -> &'static str {
+        match self {
+            Choice::AllowOnce => "Allow once",
+            Choice::AlwaysAllow => "Always allow",
+            Choice::Deny => "Deny",
+        }
+    }
+}
+
+/// A key dispatched to the popup. `Digit(n)` carries the 1-based digit value
+/// (the caller maps key characters, e.g. `b'2' - b'0'`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupKey {
+    Digit(u8),
+    Up,
+    Down,
+    Tab,
+    Enter,
+    Escape,
+}
+
+/// What a popup key/click means for the board: submit a choice, cancel, or
+/// nothing (movement / out-of-range input).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PopupAction {
+    Submit(Choice),
+    Cancel,
+    Ignored,
+}
+
+/// Pure approval popup state: options per risk, keyboard/mouse selection,
+/// canonical rendering (char-safe, fixed clamp width) and screen-reader text.
+/// No IO, no clock; the caller dispatches the textual lines.
+#[derive(Debug)]
+pub struct ApprovalPopup {
+    risk: Risk,
+    options: Vec<Choice>,
+    selected: usize,
+    cancelled: bool,
+}
+
+impl ApprovalPopup {
+    /// The hint row printed under the options.
+    const HINT: &'static str =
+        "↑/↓ or Tab select · Enter confirm · 1-3 quick select · Esc deny-free cancel";
+    /// The human-only notice printed under the title.
+    const HUMAN_ONLY_NOTICE: &'static str =
+        "Human-only action: always-allow is not available.";
+    /// Visible, non-color focus marker for the selected row.
+    const MARKER: &'static str = "› ";
+    /// Render widths clamp to this inclusive range.
+    const MIN_WIDTH: usize = 30;
+    const MAX_WIDTH: usize = 80;
+
+    /// Build a popup for `risk`. Safe and destructive list Allow once, Always
+    /// allow, Deny; human-only never lists Always allow (human-only grants
+    /// are never persistent).
+    #[must_use]
+    pub fn new(risk: Risk) -> Self {
+        let options = match risk {
+            Risk::HumanOnly => vec![Choice::AllowOnce, Choice::Deny],
+            Risk::Safe | Risk::Destructive => {
+                vec![Choice::AllowOnce, Choice::AlwaysAllow, Choice::Deny]
+            }
+        };
+        Self {
+            risk,
+            options,
+            selected: 0,
+            cancelled: false,
+        }
+    }
+
+    /// The choices offered, in display order.
+    #[must_use]
+    pub fn options(&self) -> &[Choice] {
+        &self.options
+    }
+
+    /// The currently selected choice.
+    #[must_use]
+    pub fn selected(&self) -> Choice {
+        self.options[self.selected]
+    }
+
+    /// The currently selected row index.
+    #[must_use]
+    pub fn selected_index(&self) -> usize {
+        self.selected
+    }
+
+    /// Move one row down, wrapping. True when a row exists (always).
+    pub fn move_next(&mut self) -> bool {
+        let len = self.options.len();
+        if len == 0 {
+            return false;
+        }
+        self.selected = (self.selected + 1) % len;
+        true
+    }
+
+    /// Move one row up, wrapping. True when a row exists (always).
+    pub fn move_prev(&mut self) -> bool {
+        if self.options.is_empty() {
+            return false;
+        }
+        let len = self.options.len();
+        self.selected = (self.selected + len - 1) % len;
+        true
+    }
+
+    /// Dispatch a key. Digits 1..=len submit that choice immediately; Up /
+    /// Down / Tab only move (Ignored); Enter submits the selected row;
+    /// Escape cancels, and a cancelled popup never submits again.
+    pub fn handle_key(&mut self, key: PopupKey) -> PopupAction {
+        if self.cancelled {
+            return PopupAction::Cancel;
+        }
+        match key {
+            PopupKey::Digit(n) => {
+                let row = usize::from(n);
+                if row >= 1 && row <= self.options.len() {
+                    self.selected = row - 1;
+                    PopupAction::Submit(self.options[self.selected])
+                } else {
+                    PopupAction::Ignored
+                }
+            }
+            PopupKey::Up => {
+                self.move_prev();
+                PopupAction::Ignored
+            }
+            PopupKey::Down | PopupKey::Tab => {
+                self.move_next();
+                PopupAction::Ignored
+            }
+            PopupKey::Enter => PopupAction::Submit(self.selected()),
+            PopupKey::Escape => {
+                self.cancelled = true;
+                PopupAction::Cancel
+            }
+        }
+    }
+
+    /// Mouse activation of a 0-based option row: selects it and submits.
+    /// Out-of-range rows are ignored without changing selection.
+    pub fn handle_click(&mut self, row: usize) -> PopupAction {
+        if self.cancelled || row >= self.options.len() {
+            return PopupAction::Ignored;
+        }
+        self.selected = row;
+        PopupAction::Submit(self.options[row])
+    }
+
+    /// Render the dialog as lines of exactly `clamp(30..=80)` characters
+    /// (char-safe padding/truncation, never panics). The selected row carries
+    /// the only visible "› " marker so focus never depends on color.
+    #[must_use]
+    pub fn render(&self, width: usize) -> Vec<String> {
+        let width = width.clamp(Self::MIN_WIDTH, Self::MAX_WIDTH);
+        let mut lines = vec![Self::pad("Permission required", width)];
+        if self.risk == Risk::HumanOnly {
+            lines.push(Self::pad(Self::HUMAN_ONLY_NOTICE, width));
+        }
+        for (i, choice) in self.options.iter().enumerate() {
+            let row = format!("{}. {}", i + 1, choice.label());
+            let text = if i == self.selected {
+                format!("{}{}", Self::MARKER, row)
+            } else {
+                row
+            };
+            lines.push(Self::pad(&text, width));
+        }
+        lines.push(Self::pad(Self::HINT, width));
+        lines
+    }
+
+    /// Screen-reader text: numbered options, labels and the current selection.
+    #[must_use]
+    pub fn announce(&self) -> String {
+        let list: Vec<String> = self
+            .options
+            .iter()
+            .enumerate()
+            .map(|(i, c)| format!("{}. {}", i + 1, c.label()))
+            .collect();
+        format!(
+            "Permission required. Options: {}. selected: {}.",
+            list.join(", "),
+            self.selected().label()
+        )
+    }
+
+    /// Pad or char-safe truncate `text` to exactly `width` characters.
+    fn pad(text: &str, width: usize) -> String {
+        let mut line: String = text.chars().take(width).collect();
+        let len = line.chars().count();
+        if len < width {
+            line.push_str(&" ".repeat(width - len));
+        }
+        line
     }
 }
 
@@ -677,5 +991,353 @@ mod tests {
         }
         assert_eq!(board.history().len(), MAX_HISTORY);
         assert_eq!(board.history()[0].digest.0, format!("h8"));
+    }
+}
+
+#[cfg(test)]
+mod popup_tests {
+    use super::*;
+
+    fn scope() -> ApprovalScope {
+        ApprovalScope {
+            workspace: "ws:demo".into(),
+            requester: "user".into(),
+            expires_at_tick: 600,
+            policy_version: 7,
+        }
+    }
+
+    fn req(digest: &str, risk: Risk) -> ApprovalRequest {
+        ApprovalRequest {
+            digest: OperationDigest(digest.to_string()),
+            summary: format!("op {digest}"),
+            scope: scope(),
+            risk,
+            armed: false,
+        }
+    }
+
+    /// (a) Option sets per risk.
+    #[test]
+    fn safe_lists_three_options_human_only_two() {
+        let safe = ApprovalPopup::new(Risk::Safe);
+        assert_eq!(
+            safe.options(),
+            &[Choice::AllowOnce, Choice::AlwaysAllow, Choice::Deny]
+        );
+        let destructive = ApprovalPopup::new(Risk::Destructive);
+        assert_eq!(
+            destructive.options(),
+            &[Choice::AllowOnce, Choice::AlwaysAllow, Choice::Deny]
+        );
+        let human = ApprovalPopup::new(Risk::HumanOnly);
+        assert_eq!(human.options(), &[Choice::AllowOnce, Choice::Deny]);
+        assert!(
+            !human.options().contains(&Choice::AlwaysAllow),
+            "always-allow is never offered for human-only grants"
+        );
+    }
+
+    /// (b) Digit keys: in-range submits with that choice, out of range ignores.
+    #[test]
+    fn digit_quick_select_submits_and_out_of_range_ignored() {
+        // Safe: Digit(2) is AlwaysAllow.
+        let mut safe = ApprovalPopup::new(Risk::Safe);
+        assert_eq!(safe.handle_key(PopupKey::Digit(2)), PopupAction::Submit(Choice::AlwaysAllow));
+        // Out of range: ignored, no selection change.
+        let mut popup = ApprovalPopup::new(Risk::Safe);
+        assert_eq!(popup.handle_key(PopupKey::Digit(9)), PopupAction::Ignored);
+        assert_eq!(popup.selected_index(), 0, "digit out of range changes nothing");
+        // Zero and one past the end are out of range too.
+        assert_eq!(popup.handle_key(PopupKey::Digit(0)), PopupAction::Ignored);
+        assert_eq!(popup.handle_key(PopupKey::Digit(4)), PopupAction::Ignored);
+        assert_eq!(popup.selected_index(), 0);
+        // Digit('1') submits AllowOnce.
+        let mut one = ApprovalPopup::new(Risk::Safe);
+        assert_eq!(one.handle_key(PopupKey::Digit(b'1' - b'0')), PopupAction::Submit(Choice::AllowOnce));
+        // HumanOnly: Digit(2) is Deny; Digit(3) is out of range (only 2 options).
+        let mut human = ApprovalPopup::new(Risk::HumanOnly);
+        assert_eq!(human.handle_key(PopupKey::Digit(b'2' - b'0')), PopupAction::Submit(Choice::Deny));
+        assert_eq!(
+            human.handle_key(PopupKey::Digit(b'3' - b'0')),
+            PopupAction::Ignored,
+            "digit past HumanOnly option count is out of range"
+        );
+    }
+
+    /// (c) Up/Down/Tab wrap; selection tracks; Enter submits the current row.
+    #[test]
+    fn movement_wraps_and_enter_submits_current() {
+        let mut popup = ApprovalPopup::new(Risk::Safe);
+        assert_eq!(popup.selected(), Choice::AllowOnce);
+        assert!(popup.move_prev(), "wrap backwards from first to last");
+        assert_eq!(popup.selected(), Choice::Deny);
+        assert!(popup.move_next(), "wrap forwards from last to first");
+        assert_eq!(popup.selected(), Choice::AllowOnce);
+        assert!(popup.move_next());
+        assert_eq!(popup.selected(), Choice::AlwaysAllow);
+        assert!(popup.move_next());
+        assert_eq!(popup.selected(), Choice::Deny);
+        // Tab behaves like Down (next, wrapping).
+        assert!(popup.move_next());
+        assert_eq!(popup.selected(), Choice::AllowOnce, "next from last wraps to first");
+        assert!(popup.move_prev());
+        assert_eq!(popup.selected(), Choice::Deny, "prev from first wraps to last");
+        // Enter submits the currently selected row.
+        assert_eq!(popup.handle_key(PopupKey::Enter), PopupAction::Submit(Choice::Deny));
+    }
+
+    /// (d) Escape cancels; a subsequent Enter still returns Cancel, never Submit.
+    #[test]
+    fn escape_cancels_and_blocked_enter_stays_cancelled() {
+        let mut popup = ApprovalPopup::new(Risk::Safe);
+        popup.move_next();
+        assert_eq!(popup.handle_key(PopupKey::Escape), PopupAction::Cancel);
+        // Movement after cancel still cannot resurrect approval.
+        assert_eq!(popup.handle_key(PopupKey::Digit(1)), PopupAction::Cancel);
+        assert_eq!(popup.handle_key(PopupKey::Enter), PopupAction::Cancel);
+        assert_eq!(popup.handle_key(PopupKey::Escape), PopupAction::Cancel);
+    }
+
+    /// (e) Render: fixed width, numbered labels, one focus marker, hint mentions Esc.
+    #[test]
+    fn render_lines_fixed_width_with_single_marker() {
+        let mut popup = ApprovalPopup::new(Risk::Safe);
+        popup.move_next(); // select AlwaysAllow
+        // Width invariance only: every line exactly clamp(30..=80) chars.
+        for width in [0usize, 30, 44, 80, usize::MAX] {
+            let lines = popup.render(width);
+            assert!(lines.len() >= 3, "title, options, hint");
+            for line in &lines {
+                assert_eq!(line.chars().count(), width.clamp(30, 80), "line width clamped");
+            }
+            assert_eq!(lines[0].trim_end(), "Permission required", "title first");
+        }
+        // Content checks at full width (short widths truncate the hint tail).
+        let lines = popup.render(80);
+        let joined = lines.join("\n");
+        assert!(joined.contains("1. Allow once"));
+        assert!(joined.contains("2. Always allow"));
+        assert!(joined.contains("3. Deny"));
+        assert!(joined.contains("Esc"), "hint mentions Esc deny-free cancel");
+        let markers = joined.matches("› ").count();
+        assert_eq!(markers, 1, "exactly one selected-row marker");
+        assert!(lines[2].starts_with("› "), "selected row carries the focus marker");
+        assert!(
+            !lines[1].starts_with("› ") && !lines[3].starts_with("› "),
+            "only the selected row is marked"
+        );
+        // HumanOnly renders the always-allow notice and only 2 option rows.
+        let human = ApprovalPopup::new(Risk::HumanOnly);
+        let lines = human.render(80);
+        let joined = lines.join("\n");
+        assert!(joined.contains("Human-only action: always-allow is not available."));
+        assert!(joined.contains("1. Allow once"));
+        assert!(joined.contains("2. Deny"));
+        assert!(!joined.contains("Always allow"));
+    }
+
+    /// (f) Mouse: click selects and submits; out-of-range click is ignored.
+    #[test]
+    fn click_submits_row_and_out_of_range_ignored() {
+        let mut popup = ApprovalPopup::new(Risk::Safe);
+        assert_eq!(popup.handle_click(1), PopupAction::Submit(Choice::AlwaysAllow));
+        let mut again = ApprovalPopup::new(Risk::Safe);
+        assert_eq!(again.handle_click(0), PopupAction::Submit(Choice::AllowOnce));
+        assert_eq!(again.handle_click(2), PopupAction::Submit(Choice::Deny));
+        let mut fresh = ApprovalPopup::new(Risk::Safe);
+        assert_eq!(fresh.handle_click(3), PopupAction::Ignored);
+        assert_eq!(fresh.handle_click(99), PopupAction::Ignored);
+        assert_eq!(fresh.selected_index(), 0, "ignored click changes nothing");
+    }
+
+    /// (g) announce() is screen-reader text: numbered options + current selection.
+    #[test]
+    fn announce_lists_options_and_selection() {
+        let mut popup = ApprovalPopup::new(Risk::Safe);
+        let text = popup.announce();
+        assert!(text.contains("Allow once"));
+        assert!(text.contains("Always allow"));
+        assert!(text.contains("Deny"));
+        assert!(text.contains("selected:"));
+        assert!(text.contains("selected: Allow once"));
+        popup.move_next();
+        assert!(popup.announce().contains("selected: Always allow"));
+        let human = ApprovalPopup::new(Risk::HumanOnly);
+        let text = human.announce();
+        assert!(text.contains("1. Allow once"));
+        assert!(text.contains("2. Deny"));
+        assert!(!text.contains("Always allow"));
+    }
+
+    /// (h) Board: safe always-allow binds scope+expiry; wrong scope never matches.
+    #[test]
+    fn board_always_allow_records_and_matches_scope() {
+        let mut board = ApprovalBoard::new();
+        board.offer(req("lsof", Risk::Safe)).unwrap();
+        let digest = OperationDigest("lsof".into());
+        assert_eq!(
+            board.approve_always(&digest, "shell", &scope(), Confirm::Unconfirmed, 100),
+            Outcome::Decided(Decision {
+                digest: digest.clone(),
+                scope: scope(),
+                approved: true,
+                confirmed_twice: false,
+                expired: false,
+            }),
+            "safe risk is single-step"
+        );
+        assert_eq!(board.pending_len(), 0);
+        assert_eq!(board.history().len(), 1);
+        assert_eq!(
+            board.grants().len(),
+            1,
+            "exactly one grant recorded"
+        );
+        assert_eq!(
+            board.grants()[0],
+            AlwaysGrant {
+                tool: "shell".into(),
+                scope: scope(),
+            }
+        );
+        assert!(board.is_always_allowed("shell", &scope(), 100));
+        assert!(board.is_always_allowed("shell", &scope(), 599));
+        // Wrong workspace: no match.
+        let mut other = scope();
+        other.workspace = "ws:other".into();
+        assert!(!board.is_always_allowed("shell", &other, 100));
+        // Older policy version: no match.
+        let mut older = scope();
+        older.policy_version = 6;
+        assert!(!board.is_always_allowed("shell", &older, 100));
+        // Expired: no match.
+        assert!(!board.is_always_allowed("shell", &scope(), 600));
+        assert!(!board.is_always_allowed("shell", &scope(), 601));
+        // Wrong tool: no match.
+        assert!(!board.is_always_allowed("edit", &scope(), 100));
+        // Denied operations never grant.
+        let mut board2 = ApprovalBoard::new();
+        board2.offer(req("un", Risk::Safe)).unwrap();
+        assert!(matches!(
+            board2.deny(&OperationDigest("un".into()), 0),
+            Outcome::Decided(_)
+        ));
+        assert!(board2.grants().is_empty());
+        assert!(!board2.is_always_allowed("shell", &scope(), 0));
+        // Empty tool name refused with zero mutation.
+        let mut board3 = ApprovalBoard::new();
+        board3.offer(req("e", Risk::Safe)).unwrap();
+        let seq = board3.broadcast_seq();
+        assert_eq!(
+            board3.approve_always(&OperationDigest("e".into()), "", &scope(), Confirm::Unconfirmed, 0),
+            Outcome::Refused(Refusal::StaleOrReplayed)
+        );
+        assert_eq!(board3.pending_len(), 1, "empty tool leaves pending untouched");
+        assert!(board3.grants().is_empty());
+        assert_eq!(board3.broadcast_seq(), seq, "empty tool refusal mutates nothing");
+        // Scope mismatch on approve_always is stale.
+        let mut board4 = ApprovalBoard::new();
+        board4.offer(req("m", Risk::Safe)).unwrap();
+        let mut evil = scope();
+        evil.requester = "other".into();
+        let seq4 = board4.broadcast_seq();
+        assert_eq!(
+            board4.approve_always(&OperationDigest("m".into()), "shell", &evil, Confirm::Unconfirmed, 0),
+            Outcome::Refused(Refusal::StaleOrReplayed)
+        );
+        assert_eq!(board4.pending_len(), 1);
+        assert!(board4.grants().is_empty());
+        assert_eq!(board4.broadcast_seq(), seq4);
+    }
+
+    /// (i) HumanOnly: always-allow refused, zero mutation, pending intact.
+    #[test]
+    fn board_always_allow_human_only_refused_with_zero_mutation() {
+        let mut board = ApprovalBoard::new();
+        board.offer(req("acct", Risk::HumanOnly)).unwrap();
+        let seq = board.broadcast_seq();
+        assert_eq!(
+            board.approve_always(
+                &OperationDigest("acct".into()),
+                "account-manager",
+                &scope(),
+                Confirm::Confirmed,
+                0
+            ),
+            Outcome::Refused(Refusal::ConfirmationRequired),
+            "human-only grants are never persistent"
+        );
+        assert_eq!(board.pending_len(), 1, "pending untouched");
+        assert!(board.grants().is_empty());
+        assert!(board.history().is_empty());
+        assert_eq!(
+            board.broadcast_seq(),
+            seq,
+            "human-only always-allow refusal mutates nothing"
+        );
+        assert!(!board.is_always_allowed("account-manager", &scope(), 0));
+    }
+
+    /// (j) Destructive: always-allow needs arm + Confirmed; then confirmed_twice.
+    #[test]
+    fn board_always_allow_destructive_needs_two_steps() {
+        let mut board = ApprovalBoard::new();
+        board.offer(req("rm", Risk::Destructive)).unwrap();
+        // Unconfirmed refuses and leaves the request pending.
+        let seq = board.broadcast_seq();
+        assert_eq!(
+            board.approve_always(&OperationDigest("rm".into()), "shell", &scope(), Confirm::Unconfirmed, 0),
+            Outcome::Refused(Refusal::ConfirmationRequired)
+        );
+        assert_eq!(board.pending_len(), 1);
+        assert!(board.grants().is_empty());
+        assert!(
+            board.broadcast_seq() > seq,
+            "confirmed-required refusal is observable, request stays pending"
+        );
+        // Confirmed without arming still refuses.
+        assert_eq!(
+            board.approve_always(&OperationDigest("rm".into()), "shell", &scope(), Confirm::Confirmed, 0),
+            Outcome::Refused(Refusal::ConfirmationRequired)
+        );
+        assert_eq!(board.pending_len(), 1);
+        // Arm + explicit confirm: approves with both steps recorded, grant lands.
+        assert!(board.arm(&OperationDigest("rm".into())));
+        let digest = OperationDigest("rm".into());
+        assert_eq!(
+            board.approve_always(&digest, "shell", &scope(), Confirm::Confirmed, 0),
+            Outcome::Decided(Decision {
+                digest,
+                scope: scope(),
+                approved: true,
+                confirmed_twice: true,
+                expired: false,
+            })
+        );
+        assert_eq!(board.pending_len(), 0);
+        assert_eq!(board.grants().len(), 1);
+        assert!(board.is_always_allowed("shell", &scope(), 0));
+    }
+
+    /// (k) Grants are bounded: oldest dropped at MAX_GRANTS.
+    #[test]
+    fn board_grants_bounded_at_max() {
+        let mut board = ApprovalBoard::new();
+        for i in 0..(ApprovalBoard::MAX_GRANTS + 4) {
+            let digest = OperationDigest(format!("g{i}"));
+            board.offer(req(&digest.0, Risk::Safe)).unwrap();
+            let outcome = board.approve_always(&digest, &format!("tool{i}"), &scope(), Confirm::Unconfirmed, 0);
+            assert!(
+                matches!(outcome, Outcome::Decided(_)),
+                "grant {i} should settle"
+            );
+        }
+        assert_eq!(board.grants().len(), ApprovalBoard::MAX_GRANTS);
+        // Oldest dropped first: the four newest survive, g0..g3 are gone.
+        assert_eq!(board.grants()[0].tool, "tool4");
+        assert_eq!(board.grants().back().map(|g| g.tool.as_str()), Some("tool19"));
+        assert!(!board.is_always_allowed("tool0", &scope(), 0));
+        assert!(board.is_always_allowed("tool19", &scope(), 0));
     }
 }

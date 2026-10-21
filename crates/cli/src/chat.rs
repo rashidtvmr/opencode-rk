@@ -24,6 +24,7 @@ use fs2::FileExt;
 use serde_json::Value;
 
 use crate::daemon_client;
+use crate::permission_command::{self, PermissionAction, PermissionStore};
 use opencode_rk_server::daemon as server_daemon;
 
 const DEFAULT_DAEMON_ADDR: &str = "127.0.0.1:4096";
@@ -143,6 +144,8 @@ pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
         auth: lease.auth.clone(),
         session: None,
         model: DEFAULT_MODEL.to_owned(),
+        data_dir: data_dir.to_path_buf(),
+        permissions: PermissionStore::load(data_dir),
     };
     chat.banner(&origin_label, lease.attached());
     chat.bind_recent_session();
@@ -157,6 +160,10 @@ struct Chat {
     auth: Option<String>,
     session: Option<String>,
     model: String,
+    /// Directory holding `permissions.json`; also passed to a spawned daemon.
+    data_dir: PathBuf,
+    /// Manual per-tool allow/deny set, persisted via [`permission_command`].
+    permissions: PermissionStore,
 }
 
 impl Chat {
@@ -178,6 +185,10 @@ impl Chat {
              /open <id>    open a session (id prefix is enough)\n\
              /models       list models\n\
              /model <p/m>  switch model (provider/model)\n\
+             /permission [list]         show allowed/denied tools\n\
+             /permission allow <tool>   enable a tool\n\
+             /permission disallow <tool> block a tool (deny wins)\n\
+             /permission reset          clear both lists\n\
              /exit         quit"
         );
     }
@@ -444,6 +455,34 @@ impl Chat {
         }
     }
 
+    /// `/permission ...`: mutate the persisted allow/deny set. Takes effect for
+    /// the next daemon this client spawns (an already-running daemon keeps the
+    /// environment it was started with).
+    fn permission_command(&mut self, line: &str) {
+        let action = match permission_command::parse(line) {
+            Ok(action) => action,
+            Err(error) => {
+                println!("[error] {error}");
+                return;
+            }
+        };
+        if action == PermissionAction::Help {
+            println!("{}", permission_command::usage());
+            return;
+        }
+        match self.permissions.apply(&action) {
+            Ok(lines) => lines.iter().for_each(|line| println!("{line}")),
+            Err(error) => {
+                println!("[error] {error}");
+                return;
+            }
+        }
+        if let Err(error) = self.permissions.save(&self.data_dir) {
+            println!("[error] {error}");
+        }
+        println!("note: takes effect for the next daemon this client spawns");
+    }
+
     fn loop_until_exit(&mut self) -> Result<(), Box<dyn std::error::Error>> {
         let stdin = std::io::stdin();
         for line in stdin.lock().lines() {
@@ -469,6 +508,7 @@ impl Chat {
                         self.set_model(arg);
                     }
                 }
+                rest if rest.starts_with("/permission") => self.permission_command(rest),
                 rest if rest.starts_with('/') => {
                     println!("[error] unknown command {rest}; /help lists commands");
                 }
@@ -530,6 +570,14 @@ fn reuse_credential(data_dir: &Path, probed_origin: &str, healthy: bool) -> Opti
     credential
 }
 
+/// `OPENCODE_RK_TURN_TOOLS` value for a spawned daemon: `None` when nothing is
+/// enabled (the child stays deny-by-default), otherwise the comma-joined,
+/// already-sorted enabled set.
+fn permission_turn_tools(store: &PermissionStore) -> Option<String> {
+    let enabled = store.enabled();
+    (!enabled.is_empty()).then(|| enabled.join(","))
+}
+
 /// Spawn `serve` from this same binary and wait for readiness. Returns the
 /// child handle so it remains owned by the lease while attached. Dropping the
 /// lease closes this client's handle without terminating the shared daemon.
@@ -551,6 +599,19 @@ fn spawn_daemon(addr: &str, data_dir: &Path) -> Option<Child> {
     // a custom HOME: clap's `env = "OPENCODE_RK_HOME"` on `--data-dir`
     // overrides the env, so clearing it cannot regress the default path.
     cmd.env_remove("OPENCODE_RK_HOME");
+    // Only an explicit allowlist travels: an empty set leaves the child on the
+    // deny-by-default policy rather than exporting an empty (allow-nothing but
+    // still set) variable.
+    match permission_turn_tools(&PermissionStore::load(data_dir)) {
+        Some(tools) => {
+            cmd.env("OPENCODE_RK_TURN_TOOLS", tools);
+        }
+        None => {
+            // An explicit disallow must not be lifted by an allowlist this
+            // client inherited from its own environment.
+            cmd.env_remove("OPENCODE_RK_TURN_TOOLS");
+        }
+    }
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -759,5 +820,56 @@ mod tests {
             wire.ends_with(r#"{"title":"Chat"}"#),
             "body bytes intact: {wire:?}"
         );
+    }
+
+    fn store_with(actions: &[PermissionAction]) -> PermissionStore {
+        let mut store = PermissionStore::new();
+        for action in actions {
+            store.apply(action).expect("test action must apply");
+        }
+        store
+    }
+
+    #[test]
+    fn permission_turn_tools_empty_is_none() {
+        assert_eq!(permission_turn_tools(&PermissionStore::new()), None);
+    }
+
+    #[test]
+    fn permission_turn_tools_joins_sorted_enabled() {
+        let store = store_with(&[
+            PermissionAction::Allow("write".into()),
+            PermissionAction::Allow("bash".into()),
+        ]);
+        assert_eq!(permission_turn_tools(&store).as_deref(), Some("bash,write"));
+    }
+
+    #[test]
+    fn permission_turn_tools_deny_wins() {
+        let store = store_with(&[
+            PermissionAction::Allow("write".into()),
+            PermissionAction::Allow("bash".into()),
+            PermissionAction::Disallow("bash".into()),
+        ]);
+        assert_eq!(permission_turn_tools(&store).as_deref(), Some("write"));
+        let all_denied = store_with(&[
+            PermissionAction::Allow("bash".into()),
+            PermissionAction::Disallow("bash".into()),
+        ]);
+        assert_eq!(permission_turn_tools(&all_denied), None, "nothing enabled");
+    }
+
+    #[test]
+    fn permission_parse_allow_reaches_store() {
+        let action = permission_command::parse("/permission allow bash").expect("valid line");
+        let mut store = PermissionStore::new();
+        store.apply(&action).expect("apply must succeed");
+        assert!(store.is_enabled("bash"));
+    }
+
+    #[test]
+    fn permission_wildcard_line_errors() {
+        let error = permission_command::parse("/permission allow *").expect_err("wildcard denied");
+        assert_eq!(error.to_string(), "wildcards never grant: \"*\"");
     }
 }

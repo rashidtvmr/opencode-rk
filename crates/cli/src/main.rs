@@ -45,6 +45,7 @@ mod native_timeline;
 mod native_transcript;
 mod onboarding;
 mod pair;
+mod permission_command;
 mod service_commands;
 mod shutdown;
 mod terminal_host;
