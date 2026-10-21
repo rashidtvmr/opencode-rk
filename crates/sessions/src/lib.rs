@@ -436,6 +436,14 @@ impl SessionService {
         run_blocking(move || storage.session_directory(id)).await
     }
 
+    pub async fn has_tool_admissions(&self, id: SessionId) -> Result<bool, SessionError> {
+        // Alternate fork ledgers are not writable by the ordinary turn path.
+        // Fail closed rather than interpreting an alternate ledger as empty.
+        if self.fork_manager_for(id).await?.is_some() { return Ok(true); }
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.has_tool_admissions(id)).await
+    }
+
     pub async fn display_tool_history(
         &self,
         id: SessionId,

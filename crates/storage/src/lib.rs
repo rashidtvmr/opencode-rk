@@ -808,6 +808,16 @@ impl Storage {
         Ok(path.map(PathBuf::from))
     }
 
+    /// Session-wide effect-replay guard, independent of display pagination.
+    pub fn has_tool_admissions(&self, id: SessionId) -> Result<bool, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let found: Option<i64> = connection.query_row(
+            "SELECT 1 FROM tool_rounds WHERE session_id=?1 LIMIT 1",
+            params![id.to_string()], |row| row.get(0),
+        ).optional()?;
+        Ok(found.is_some())
+    }
+
     /// Bounded display hydration includes pending calls without claiming they
     /// have completed. Provider replay continues using the strict pair reader.
     pub fn display_tool_history(

@@ -60,6 +60,7 @@ pub mod runtime_wiring;
 pub mod sdk_client;
 pub mod sdk_spawns;
 pub mod sync_log;
+mod task_children;
 pub mod transcript_lane;
 pub mod turn_parts;
 pub mod turn_service;
@@ -156,6 +157,7 @@ pub fn router_with_events(
     // injected as an `Extension`, so two routers never share entries and
     // there is no static global. Fresh router ⇒ empty registry ⇒ `{}`.
     let mcp_registry = mcp_http::McpStatusRegistry::new();
+    let children = task_children::Children::default();
     let app = Router::new()
         .route("/health", get(health))
         .route(
@@ -238,6 +240,10 @@ pub fn router_with_events(
         .route("/api/sessions/{id}/fork", get(get_fork_provenance))
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
+        .route("/api/sessions/{id}/children", get(task_children::list))
+        .route("/api/sessions/{id}/children/{child}/stop", post(task_children::stop))
+        .route("/api/sessions/{id}/children/{child}/retry", post(task_children::retry))
+        .route("/api/sessions/{id}/children/{child}/continue", post(task_children::followup))
         .route("/api/sessions/{id}/shell/stream", post(native_shell_stream))
         .route("/api/session/{id}/interrupt", post(interrupt_session))
         .route("/api/event", get(event_http::handle_events_sse))
@@ -253,6 +259,7 @@ pub fn router_with_events(
         .fallback(web_assets::serve)
         .layer(axum::extract::Extension(events))
         .layer(axum::extract::Extension(mcp_registry))
+        .layer(axum::extract::Extension(children))
         .with_state(state);
     match auth {
         Some(credential) => app
@@ -509,6 +516,7 @@ async fn interrupt_session(
 async fn list_session_permissions(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    Extension(children): Extension<task_children::Children>,
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&id)?;
     state.sessions.get(id).await.map_err(|error| {
@@ -518,10 +526,17 @@ async fn list_session_permissions(
             ApiFailure::internal(error)
         }
     })?;
-    let data = run_owner::active(id)
+    let mut data = run_owner::active(id)
         .and_then(|owner| owner.pending())
         .into_iter()
         .collect::<Vec<_>>();
+    for (_, mut pending) in children.pending(id) {
+        // Parent projection is transport-only. Reply resolves the exact owned
+        // child and the broker still mints/consumes a child-bound proof.
+        pending.session_id = id.to_string();
+        pending.action = format!("Subagent: {}", pending.action);
+        data.push(pending);
+    }
     Ok(Json(json!({"data":data})))
 }
 
@@ -534,6 +549,7 @@ struct PermissionReplyBody {
 async fn reply_session_permission(
     Path((id, request_id)): Path<(String, String)>,
     State(state): State<AppState>,
+    Extension(children): Extension<task_children::Children>,
     Json(body): Json<PermissionReplyBody>,
 ) -> Result<StatusCode, ApiFailure> {
     let id = parse_session_id(&id)?;
@@ -544,13 +560,14 @@ async fn reply_session_permission(
             ApiFailure::internal(error)
         }
     })?;
-    let Some(owner) = run_owner::active(id) else {
+    let Some(owner) = run_owner::active(id).filter(|owner| owner.pending().is_some_and(|p| p.id == request_id))
+        .or_else(|| children.permission_owner(id, &request_id)) else {
         return Err(ApiFailure::not_found("permission request not found"));
     };
     let Some(pending) = owner.pending() else {
         return Err(ApiFailure::not_found("permission request not found"));
     };
-    if pending.id != request_id || pending.session_id != id.to_string() {
+    if pending.id != request_id || pending.session_id != owner.session_id.to_string() {
         return Err(ApiFailure::not_found("permission request not found"));
     }
     match body.reply.as_str() {
@@ -1367,7 +1384,7 @@ async fn get_fork_provenance(
     }))})))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct CreateTurnBody {
     text: String,
     model: String,
@@ -1378,6 +1395,8 @@ struct CreateTurnBody {
     agent_prompt: Option<String>,
     #[serde(skip)]
     read_only: bool,
+    #[serde(skip)]
+    replay_requires_no_tools: bool,
 }
 
 async fn command_inventory(root: PathBuf) -> Result<configured_commands::Inventory, ApiFailure> {
@@ -1412,6 +1431,7 @@ async fn run_configured_command(
     State(state): State<AppState>,
     Path(raw_id): Path<String>,
     Extension(events): Extension<event_bus::EventBus>,
+    Extension(children): Extension<task_children::Children>,
     Json(body): Json<ConfiguredCommandBody>,
 ) -> Result<Response, ApiFailure> {
     if body.command.is_empty() || body.command.len() > 128 || body.command.chars().any(|ch| ch.is_whitespace() || ch.is_control()) {
@@ -1454,8 +1474,8 @@ async fn run_configured_command(
     let prompt = agent.and_then(|value| value.get("prompt")).and_then(Value::as_str).unwrap_or("");
     if prompt.len() > 32 * 1024 { return Err(ApiFailure::bad_request("agent prompt exceeds limit")); }
     let agent_prompt = Some(format!("Agent: {agent_name}\n{prompt}"));
-    create_turn_stream(State(state), Path(raw_id), Extension(events), Json(CreateTurnBody {
-        text, model, reasoning_effort, workdir: None, agent_prompt, read_only: agent_name == "plan",
+    create_turn_stream(State(state), Path(raw_id), Extension(events), Extension(children), Json(CreateTurnBody {
+        text, model, reasoning_effort, workdir: None, agent_prompt, read_only: agent_name == "plan", replay_requires_no_tools:false,
     })).await
 }
 
@@ -1792,6 +1812,9 @@ async fn create_turn(
 }
 
 struct TurnStreamState {
+    app: AppState,
+    children: task_children::Children,
+    qualified_model: String,
     client: OpenAiResponsesClient,
     provider: OpenAiResponsesStream,
     sessions: SessionService,
@@ -1838,14 +1861,14 @@ struct TurnStreamState {
 /// the available tool set but never grants permissions.
 fn turn_tool_config() -> Vec<String> {
     std::env::var("OPENCODE_RK_TURN_TOOLS")
-        .unwrap_or_else(|_| "bash,shell,read,write,edit,grep,glob".to_owned())
+        .unwrap_or_else(|_| "bash,shell,read,write,edit,grep,glob,websearch,webfetch,task".to_owned())
         .split(',')
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .filter(|name| {
             matches!(
                 *name,
-                "bash" | "shell" | "read" | "write" | "edit" | "grep" | "glob"
+                "bash" | "shell" | "read" | "write" | "edit" | "grep" | "glob" | "websearch" | "webfetch" | "task"
             )
         })
         .map(str::to_owned)
@@ -2030,15 +2053,23 @@ enum TurnStreamStage {
     Done,
 }
 
-async fn create_turn_stream(
+fn create_turn_stream(
     State(state): State<AppState>,
     Path(id): Path<String>,
     Extension(events): Extension<event_bus::EventBus>,
+    Extension(children): Extension<task_children::Children>,
     Json(body): Json<CreateTurnBody>,
-) -> Result<Response, ApiFailure> {
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, ApiFailure>> + Send>> {
+    Box::pin(async move {
     let id = parse_session_id(&id)?;
     let permit = TurnExecutionPermit::acquire(id).map_err(turn_admission_failure)?;
     let owner = permit.owner();
+    // Hold this session's exclusive permit across the durable replay check
+    // and prompt admission; another client cannot insert an effect between.
+    if body.replay_requires_no_tools
+        && state.sessions.has_tool_admissions(id).await.map_err(ApiFailure::internal)? {
+        return Err(ApiFailure::bad_request("retry refused: child session has tool admissions"));
+    }
     let project_root = session_workdir(&state.sessions, id, body.workdir.as_deref()).await?;
     let file_tool = FileTool::with_project_root(project_root.clone());
     let broker = PermissionBroker::new(SecurityPolicy::lean_default(project_root));
@@ -2090,11 +2121,12 @@ async fn create_turn_stream(
     // explicitly enabled (OPENCODE_RK_TURN_TOOLS). The list is deny-by-default:
     // an advertised tool is executable, an unadvertised one is not.
     let mut turn_tools = turn_tool_config();
+    if children.is_child(id) { turn_tools.retain(|name| name != "task"); }
     if body.read_only {
-        turn_tools.retain(|name| matches!(name.as_str(), "read" | "grep" | "glob"));
+        turn_tools.retain(|name| matches!(name.as_str(), "read" | "grep" | "glob" | "websearch" | "webfetch"));
     }
     let registry = ToolRegistry::new();
-    let tools: Vec<ResponsesTool> = registry
+    let mut tools: Vec<ResponsesTool> = registry
         .list()
         .into_iter()
         .filter(|tool| turn_tools.contains(&tool.id))
@@ -2106,6 +2138,7 @@ async fn create_turn_stream(
             )
         })
         .collect();
+    if turn_tools.iter().any(|name| name == "task") { tools.push(task_children::schema()); }
     let max_steps = std::env::var("OPENCODE_RK_TURN_MAX_STEPS")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
@@ -2121,6 +2154,9 @@ async fn create_turn_stream(
 
     let stream = stream::unfold(
         TurnStreamState {
+            app: state.clone(),
+            children,
+            qualified_model: body.model.clone(),
             client,
             provider,
             sessions: state.sessions,
@@ -2421,7 +2457,17 @@ async fn create_turn_stream(
                                     "error: step budget per round exceeded (max {MAX_CALLS_PER_ROUND} calls); call not executed"
                                 )
                             } else if permitted {
-                                if call.name == "write" {
+                                if call.name == "task" {
+                                    let outcome = task_children::execute(
+                                        state.app.clone(), state.children.clone(), state.events.clone(),
+                                        &state.owner, &state.broker, state.turn_message_id, &call,
+                                        &state.qualified_model,
+                                        state.file_tool.project_root_path().expect("turn file capability is rooted"),
+                                    ).await;
+                                    stop_after_output = outcome.stop_after_outputs;
+                                    explicit_success = Some(outcome.success);
+                                    outcome.output
+                                } else if call.name == "write" {
                                     let outcome = execute_write(
                                         &call.arguments,
                                         &state.broker,
@@ -2661,6 +2707,7 @@ async fn create_turn_stream(
         Body::from_stream(response_stream),
     )
         .into_response())
+    })
 }
 
 fn ndjson(value: Value) -> Bytes {

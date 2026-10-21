@@ -316,6 +316,7 @@ impl ToolExecutor {
                     },
                 })
             }
+            "websearch" | "webfetch" => crate::native_web::intent(&call.name, &call.input),
             other => Err(format!("unsupported tool: {other}")),
         }
     }
@@ -372,6 +373,12 @@ impl ToolExecutor {
                     Decision::Deny { reason } | Decision::RequireHuman { reason, .. } => {
                         fail(&call, start, reason)
                     }
+                }
+            }
+            "websearch" | "webfetch" => {
+                match broker.authorize_with_human_approval(&intent, approval, session_id, run_id, call_id) {
+                    Decision::Allow => self.web_unchecked(&call, start).await,
+                    Decision::Deny { reason } | Decision::RequireHuman { reason, .. } => fail(&call, start, reason),
                 }
             }
             _ => fail(&call, start, "unsupported approved tool"),
@@ -565,8 +572,30 @@ impl ToolExecutor {
                 }
             }
             "grep" | "glob" => self.search(&call).await,
+            "websearch" | "webfetch" => {
+                match self.intent(&call).and_then(|intent| self.authorize(intent)) {
+                    Ok(()) => self.web_unchecked(&call, start).await,
+                    Err(error) => fail(&call, start, error),
+                }
+            }
             "echo" => self.echo(&call, d).await,
             _ => fail(&call, start, format!("Unknown tool: {}", call.name)),
+        }
+    }
+    async fn web_unchecked(&self, call: &ToolCall, start: Instant) -> ToolResult {
+        let request = crate::native_web::execute(&call.name, &call.input);
+        let mut cancellation = self.cancellation.clone();
+        let result = if let Some(cancelled) = cancellation.as_mut() {
+            if *cancelled.borrow() { return fail(call, start, "web request cancelled"); }
+            tokio::select! {
+                biased;
+                _ = cancelled.changed() => return fail(call, start, "web request cancelled"),
+                result = request => result,
+            }
+        } else { request.await };
+        match result {
+            Ok(output) => ToolResult { tool_id: call.tool_id.clone(), output, success: true, duration_ms: elapsed(start), error: None },
+            Err(error) => fail(call, start, error),
         }
     }
     async fn echo(&self, call: &ToolCall, d: Duration) -> ToolResult {

@@ -463,6 +463,10 @@ impl PermissionBroker {
                 statement,
                 database,
             } => self.authorize_sql(statement, database),
+            OperationIntent::Tool { name, .. } if matches!(name.as_str(), "websearch" | "webfetch" | "task") => Decision::RequireHuman {
+                approval_id: ApprovalId::new(),
+                reason: "network access or child task requires human approval".into(),
+            },
             OperationIntent::Tool { .. } => Decision::Allow,
         }
     }

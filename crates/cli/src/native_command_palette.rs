@@ -98,6 +98,13 @@ impl CommandPalette {
         ));
         if self.has_session {
             regular.push(entry(
+                "agent:subagents.list",
+                "subagents.list",
+                "View subagents",
+                "Agent",
+                "/subagents",
+            ));
+            regular.push(entry(
                 "session:session.list",
                 "session.list",
                 "Switch session",
@@ -236,7 +243,11 @@ impl CommandPalette {
         if !self.open || width == 0 || height == 0 {
             return Vec::new();
         }
-        let mut lines = vec!["Commands".to_owned(), format!("Search: {}", self.query)];
+        let roomy = height >= 9;
+        let mut lines = vec!["Commands".to_owned()];
+        if roomy { lines.push(String::new()); }
+        lines.push(format!("Search: {}", self.query));
+        if roomy { lines.push(String::new()); }
         let visible = self.visible();
         let mut body = Vec::new();
         let mut selected_row = 0;
@@ -244,6 +255,7 @@ impl CommandPalette {
         let selected = self.selected_id;
         for item in visible {
             if last_category != Some(item.category) {
+                if roomy && last_category.is_some() { body.push(String::new()); }
                 body.push(item.category.to_owned());
                 last_category = Some(item.category);
             }
@@ -263,9 +275,10 @@ impl CommandPalette {
         if self.visible().is_empty() {
             body.push("No results found".to_owned());
         }
-        let capacity = height.saturating_sub(3);
+        let capacity = height.saturating_sub(lines.len() + 1 + usize::from(roomy));
         let start = selected_row.saturating_sub(capacity.saturating_sub(1));
         lines.extend(body.into_iter().skip(start).take(capacity));
+        if roomy { lines.push(String::new()); }
         lines.push("↑/↓ move · Enter select · Esc close".to_owned());
         lines
             .into_iter()

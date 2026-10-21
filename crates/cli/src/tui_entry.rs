@@ -750,15 +750,15 @@ fn home_row_fg(
     paint_color(palette, Slot::Text)
 }
 
-/// Modal row role from known dialog structure: heading row = readable text,
-/// ` > ` selection marker = primary, everything else muted.
+/// Modal row role from known dialog structure. Selected choices are painted
+/// with an opaque accent background below, so their foreground must contrast.
 #[cfg(feature = "native")]
 fn modal_row_fg(line: &str, heading: bool, palette: crate::native_theme_runtime::Palette) -> Rgba {
     use crate::native_theme_runtime::Slot;
     if heading {
         paint_color(palette, Slot::Text)
     } else if line.trim_start().starts_with("> ") {
-        paint_color(palette, Slot::Primary)
+        paint_color(palette, Slot::Background)
     } else {
         paint_color(palette, Slot::TextMuted)
     }
@@ -908,6 +908,14 @@ fn native_paint(
                 } else {
                     normal_fg
                 };
+                if in_modal
+                    && modal_text.trim_start().starts_with("> ")
+                    && x >= u32::from(ctx.modal.x.saturating_add(2))
+                    && x < u32::from(ctx.modal.x.saturating_add(2))
+                        + u32::from(ctx.modal.content_width)
+                {
+                    bg = accent;
+                }
                 if ctx.home && !in_modal {
                     if let Some((left, top, width, height)) = ctx.composer {
                         if x >= u32::from(left)
@@ -1604,6 +1612,8 @@ fn native_loop(
     // authenticated client; the facade itself never performs IO.
     let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
     let state_path = data_dir.join("state/kv.json");
+    let mut children_panel = crate::native_children::Panel::default();
+    let mut children_refresh = Instant::now();
     let mut appearance = crate::native_appearance::AppearanceEditor::new(
         crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
     );
@@ -1740,6 +1750,25 @@ fn native_loop(
     let mut configured_commands_loaded = false;
     let mut byte = [0u8; 1];
     loop {
+        if children_panel.open && children_refresh.elapsed() >= Duration::from_millis(750) {
+            children_refresh = Instant::now();
+            if let Some(snapshot) = live.as_ref() {
+                let result = http_request(&snapshot.origin, "GET", &format!("/api/sessions/{}/children", children_panel.parent), None, auth)
+                    .and_then(|body| serde_json::from_str(&body).map_err(|_| "invalid child listing JSON".to_owned()))
+                    .and_then(|value| children_panel.update(&value));
+                if let Err(error) = result { children_panel.error = Some(error); }
+                if children_panel.detail {
+                    if let Some(id) = children_panel.selected_id() {
+                        match http_request(&snapshot.origin, "GET", &format!("/api/sessions/{id}/messages?limit=200"), None, auth)
+                            .and_then(|body| serde_json::from_str(&body).map_err(|_| "invalid child history JSON".to_owned())) {
+                            Ok(value) => children_panel.history(&value),
+                            Err(error) => children_panel.error = Some(error),
+                        }
+                    }
+                }
+            }
+            needs_paint = true;
+        }
         if view.page() == crate::native_view_pages::Page::Commands {
             if !configured_commands_loaded {
                 configured_commands_loaded = true;
@@ -1767,8 +1796,12 @@ fn native_loop(
                     models.retain(|row| row.provider_id != loaded_provider);
                     models.extend(rows);
                     if dialog == native_setup::Dialog::Model && loaded_provider == provider_id {
-                        filter_input = format!("{provider_id}/");
-                        model_row = 0;
+                        // Catalogue refresh must not erase a query typed while
+                        // the request was in flight or move its focused row.
+                        model_row = native_setup::clamp_row(
+                            model_row,
+                            native_setup::visible_rows(&models, &filter_input).len(),
+                        );
                     }
                     if selected.is_none() {
                         if let Some(model) = native_setup::selected(&models) {
@@ -1967,7 +2000,7 @@ fn native_loop(
         // decision still needs backend-resolution detection. No queues, no
         // new threads, existing 2s/1MiB http_request limits.
         if !view.dialogs.pending()
-            && (binding_active || view.dialogs.is_open())
+            && (binding_active || view.dialogs.is_open() || children_panel.open)
             && last_permission_poll.elapsed() >= Duration::from_millis(500)
         {
             last_permission_poll = Instant::now();
@@ -2075,42 +2108,58 @@ fn native_loop(
             native_setup::Dialog::Provider => {
                 let mut panel = vec![
                     "Connect a provider".to_owned(),
+                    String::new(),
                     format!("Search providers: {filter_input}▏"),
+                    String::new(),
                 ];
                 // The dialog's own bounded filter buffer (typing goes to
                 // `filter_input`, never the chat draft) — the overlay must
                 // echo and filter the SAME buffer the user is typing into.
                 let query = filter_input.trim().to_lowercase();
-                for (index, row) in providers
+                let visible: Vec<_> = providers
                     .iter()
                     .filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query))
-                    .enumerate()
+                    .collect();
+                let active = native_setup::clamp_row(model_row, visible.len());
+                let capacity = (renderer.rows() as usize)
+                    .saturating_sub(usize::from(view.modal_presentation().content_y) + 9)
+                    .clamp(1, 10);
+                let start = active.saturating_sub(capacity - 1);
+                for (index, row) in visible.iter().enumerate().skip(start).take(capacity)
                 {
                     panel.push(format!(
                         "{} {}",
-                        if index == model_row { ">" } else { " " },
+                        if index == active { ">" } else { " " },
                         row.1
                     ));
                 }
+                if visible.is_empty() {
+                    panel.push("No matching providers".into());
+                }
+                panel.push(String::new());
                 if let Some(error) = &setup_error {
                     panel.push(format!("Error: {error}"));
                 }
                 if model_load.is_some() {
                     panel.push("Loading saved provider models… Escape cancels".into());
                 }
-                panel.push("Type to search · ↑/↓ select · Enter connect · Escape close".into());
+                panel.push("↑/↓ select · Enter connect · Esc close".into());
                 panel
             }
             native_setup::Dialog::ProviderId => vec![
                 "Custom provider".into(),
+                String::new(),
                 "Provider ID (lowercase letters, numbers, - or _)".into(),
                 format!("ID: {filter_input}"),
+                String::new(),
                 "Enter: continue · Escape: cancel".into(),
             ],
             native_setup::Dialog::BaseUrl => vec![
                 format!("Configure {provider_id}"),
+                String::new(),
                 "OpenAI-compatible base URL (include /v1)".into(),
                 format!("URL: {filter_input}"),
+                String::new(),
                 "Enter: continue · Escape: cancel".into(),
             ],
             native_setup::Dialog::ApiKey => vec![
@@ -2119,15 +2168,20 @@ fn native_loop(
                 } else {
                     format!("API key — {provider_id} (optional for local server)")
                 },
+                String::new(),
                 format!(
-                    "key: {} (enter / escape)",
+                    "Key: {}▏",
                     "*".repeat(key_input.chars().count().min(40))
                 ),
+                String::new(),
+                "Enter save · Esc cancel".into(),
             ],
             native_setup::Dialog::Model => {
                 let mut panel = vec![
                     "Select model".to_owned(),
+                    String::new(),
                     format!("Search models: {filter_input}▏"),
+                    String::new(),
                 ];
                 if model_load.is_some() {
                     panel.push(format!("Loading models from {provider_id}… Escape cancels"));
@@ -2140,7 +2194,7 @@ fn native_loop(
                 let visible = native_setup::visible_rows(&models, &filter_input);
                 let active = native_setup::clamp_row(model_row, visible.len());
                 let capacity = (renderer.rows() as usize)
-                    .saturating_sub(usize::from(view.modal_presentation().content_y) + 4)
+                    .saturating_sub(usize::from(view.modal_presentation().content_y) + 9)
                     .clamp(1, 10);
                 let start = active.saturating_sub(capacity - 1);
                 panel.extend(
@@ -2160,8 +2214,12 @@ fn native_loop(
                             })
                         }),
                 );
+                if visible.is_empty() && model_load.is_none() {
+                    panel.push("No matching models".into());
+                }
+                panel.push(String::new());
                 panel.push(format!(
-                    "{} models · ↑/↓ select · Enter confirm · Escape close",
+                    "{} models · ↑/↓ select · Enter use · Esc close",
                     visible.len()
                 ));
                 panel
@@ -2182,6 +2240,9 @@ fn native_loop(
         }
         if appearance.open {
             overlay = appearance.rows(view.modal_presentation().content_width);
+        }
+        if children_panel.open {
+            overlay = children_panel.render(view.modal_presentation().content_width, view.modal_content_height());
         }
         view.set_box_appearance(appearance.style.clone());
         view.set_prompt_mode(draft.starts_with('!'));
@@ -2239,7 +2300,7 @@ fn native_loop(
             } else if dialog_open {
                 Some(modal_content_rows(&view.dialogs.render(
                     view.modal_presentation().content_width as usize,
-                    presentation.rows as usize,
+                    view.modal_content_height(),
                 )))
             } else if view.command_palette_open() {
                 Some(modal_content_rows(&view.command_palette_render()))
@@ -2483,6 +2544,22 @@ fn native_loop(
             direction @ (native_input_decoder::InputEvent::ArrowUp
             | native_input_decoder::InputEvent::ArrowDown) => {
                 utf8.reset();
+                // A decision dialog owns focus before every other overlay.
+                // Route the documented arrow keys to the same selection state
+                // as Ctrl-N/Ctrl-B; navigation never submits a decision.
+                if view.dialogs.intercepts_input() {
+                    if direction == native_input_decoder::InputEvent::ArrowUp {
+                        view.dialogs.prev();
+                    } else {
+                        view.dialogs.next();
+                    }
+                    continue;
+                }
+                if children_panel.open {
+                    children_panel.key(if direction == native_input_decoder::InputEvent::ArrowUp { 2 } else { 14 });
+                    needs_paint = true;
+                    continue;
+                }
                 if view.command_palette_open() && !help_open && !view.dialogs.intercepts_input() {
                     if direction == native_input_decoder::InputEvent::ArrowUp {
                         view.command_palette_prev();
@@ -2543,6 +2620,10 @@ fn native_loop(
                     // never reaches the composer or the dialog.
                     continue;
                 }
+                if children_panel.open {
+                    for character in text.chars() { children_panel.text(character); }
+                    continue;
+                }
                 if help_open {
                     // Help owns focus; paste must not mutate the hidden draft.
                     continue;
@@ -2592,6 +2673,31 @@ fn native_loop(
             // draft) while keeping protocol escape bytes out of the composer.
             native_input_decoder::InputEvent::Escape => 27,
         };
+        if children_panel.open && !view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
+            let composing = children_panel.composing;
+            let action = if composing && byte >= 0x20 && byte != 127 {
+                if let Some(character) = utf8.push(byte) { children_panel.text(character); }
+                None
+            } else {
+                utf8.reset();
+                children_panel.key(byte)
+            };
+            if let Some(action) = action {
+                if let Some(snapshot) = live.as_ref() {
+                    use crate::native_children::Action;
+                    let (id, operation, body) = match action {
+                        Action::Stop(id) => (id, "stop", serde_json::json!({})),
+                        Action::Retry(id) => (id, "retry", serde_json::json!({})),
+                        Action::Followup(id, text) => (id, "continue", serde_json::json!({"text":text})),
+                    };
+                    children_panel.action_error = http_request(&snapshot.origin, "POST", &format!("/api/sessions/{}/children/{id}/{operation}", children_panel.parent), Some(&body.to_string()), auth).err();
+                }
+                children_refresh = Instant::now() - Duration::from_secs(1);
+            }
+            if !children_panel.open { view.set_dialog_size(crate::native_view::DialogSize::Medium); }
+            needs_paint = true;
+            continue;
+        }
         if appearance.open && !matches!(byte, 3 | 4) {
             if appearance.key(byte) {
                 if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_appearance(
@@ -3624,6 +3730,23 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                if command == "/subagents" {
+                    if let Some(snapshot) = live.as_ref() {
+                        children_panel.show(&snapshot.session_id);
+                        children_refresh = Instant::now() - Duration::from_secs(1);
+                        view.close_command_palette();
+                        view.close_page();
+                        help_open = false;
+                        appearance.open = false;
+                        dialog = native_setup::Dialog::None;
+                        view.set_dialog_size(crate::native_view::DialogSize::Large);
+                        consume_local_command(&mut draft, command, from_chat_composer);
+                    } else {
+                        append_transcript(&mut transcript, "error: daemon unavailable".into());
+                    }
+                    needs_paint = true;
+                    continue;
+                }
                 if command == "/appearance" {
                     appearance.open = true;
                     consume_local_command(&mut draft, command, from_chat_composer);
@@ -3883,7 +4006,7 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new" | "/sidebar" | "/appearance")
+        || matches!(command, "/commands" | "/new" | "/sidebar" | "/appearance" | "/subagents")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
@@ -4285,7 +4408,7 @@ mod command_consumption_tests {
                     || super::native_local_page_route(route).is_some()
                     || matches!(
                         route,
-                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance"
+                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance" | "/subagents"
                     ),
                 "palette action has no local handler: {route}"
             );

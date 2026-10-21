@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 //! Visible focus-owning dialog views for permission / question / confirm /
-//! error overlays (SOURCE-PROPOSAL-UNINTEGRATED — not wired into any binary).
+//! error overlays used by the native interactive client.
 //!
 //! Pure state + pure rendering: no IO, no threads, no clock, no network, no
 //! execution tools, no secret/credential access. The module never fetches,
@@ -748,6 +748,10 @@ impl DialogView {
         if let Some(dialog) = self.dialog.as_ref() {
             // Heading first: prioritized on short terminals.
             lines.push(dialog.title.clone());
+            let roomy = height >= 9;
+            if roomy {
+                lines.push(String::new());
+            }
             match dialog.kind {
                 DialogKind::Permission => {
                     lines.push("permission — explicit approve or deny required".to_string());
@@ -762,10 +766,24 @@ impl DialogView {
                     lines.push(dialog.error.detail().to_string());
                 }
             }
-            for line in dialog.message_lines.iter() {
+            let has_footer = !matches!(dialog.kind, DialogKind::Error)
+                && !(dialog.kind == DialogKind::Question && !self.question_capable);
+            let footer_rows = usize::from(has_footer && height > 1);
+            let choice_rows = dialog.choices.len().min(height.saturating_sub(3)).max(1);
+            let message_budget = height.saturating_sub(
+                lines.len() + footer_rows + choice_rows + if roomy { 2 } else { 0 },
+            );
+            for line in dialog.message_lines.iter().take(message_budget) {
                 lines.push(format!("  {line}"));
             }
-            for (index, choice) in dialog.choices.iter().enumerate() {
+            if roomy && !dialog.choices.is_empty() {
+                lines.push(String::new());
+            }
+            // Keep the active choice in the viewport; supplementary text may
+            // shrink, but neither focus nor the action hint may scroll away.
+            let capacity = height.saturating_sub(lines.len() + footer_rows + usize::from(roomy));
+            let start = self.selection.unwrap_or(0).saturating_sub(capacity.saturating_sub(1));
+            for (index, choice) in dialog.choices.iter().enumerate().skip(start).take(capacity) {
                 let marker = if self.selection == Some(index) {
                     " > "
                 } else {
@@ -778,16 +796,24 @@ impl DialogView {
                 };
                 lines.push(format!("{marker}{}. {}{suffix}", index + 1, choice));
             }
+            if roomy && has_footer {
+                lines.push(String::new());
+            }
+            let footer = if self.phase == Phase::Pending {
+                "decision sent — waiting for backend acknowledgement"
+            } else if self.rejected {
+                "Decision rejected — ↑/↓ choose · Enter retry · Esc deny"
+            } else {
+                "↑/↓ choose · Enter submit · Esc deny/cancel"
+            };
             match dialog.kind {
                 DialogKind::Question if !self.question_capable => {}
                 DialogKind::Error => {}
-                _ => lines.push("up/down: move  enter: submit  esc: deny/cancel".to_string()),
-            }
-            if self.phase == Phase::Pending {
-                lines.push("decision sent — waiting for backend acknowledgement".to_string());
-            }
-            if self.rejected {
-                lines.push("backend rejected the last decision — choose again".to_string());
+                _ if height > 1 => {
+                    lines.truncate(height - 1);
+                    lines.push(footer.to_owned());
+                }
+                _ => {}
             }
         }
 
@@ -845,6 +871,27 @@ impl DialogView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn short_dialog_keeps_focused_choice_and_keyboard_footer_visible() {
+        let mut view = open_permission();
+        view.next();
+        view.next();
+        let rows = view.render(56, 5);
+        assert!(rows.iter().any(|row| row.contains("> 2. deny")));
+        assert!(rows.last().unwrap().contains("Enter"), "{rows:?}");
+    }
+
+    #[test]
+    fn roomy_dialog_separates_heading_choices_and_footer() {
+        let view = open_permission();
+        let rows = view.render(56, 12);
+        assert_eq!(rows[1], "");
+        let choice = rows.iter().position(|row| row.contains("1. approve once")).unwrap();
+        assert_eq!(rows[choice - 1], "");
+        let footer = rows.iter().position(|row| row.contains("Enter")).unwrap();
+        assert_eq!(rows[footer - 1], "");
+    }
 
     fn permission_request() -> DialogRequest {
         DialogRequest {

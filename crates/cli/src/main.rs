@@ -43,6 +43,7 @@ mod native_chat_history;
 mod native_chat_projection;
 #[cfg(feature = "native")]
 mod native_command_palette;
+mod native_children;
 mod native_composer;
 mod native_debug;
 mod native_layout;

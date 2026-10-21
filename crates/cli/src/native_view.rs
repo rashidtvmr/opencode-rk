@@ -254,8 +254,7 @@ impl NativeView {
         let geometry = self.modal_presentation();
         self.command_palette.render(
             geometry.content_width,
-            self.render_height()
-                .saturating_sub(usize::from(geometry.content_y)),
+            self.modal_content_height(),
         )
     }
 
@@ -418,6 +417,12 @@ impl NativeView {
         } else {
             0
         }
+    }
+
+    /// Window modal content below its top inset and above its bottom border.
+    pub fn modal_content_height(&self) -> usize {
+        self.render_height()
+            .saturating_sub(usize::from(self.modal_presentation().content_y) + 1)
     }
 
     fn composer_metadata(&self) -> String {
@@ -1265,7 +1270,7 @@ impl NativeView {
         let dialog_width = modal_geometry.width;
         let modal = if self.dialogs.is_open() {
             self.dialogs
-                .render(dialog_width.saturating_sub(4) as usize, height)
+                .render(dialog_width.saturating_sub(4) as usize, self.modal_content_height())
         } else if self.command_palette.is_open() {
             self.command_palette_render()
         } else if self.pages.page() == Page::Theme {

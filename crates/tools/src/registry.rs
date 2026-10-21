@@ -153,6 +153,12 @@ impl ToolRegistry {
                 .with_type(ty);
             self.register(tool);
         }
+        self.register(Tool::new("websearch", "websearch", "Search the public web for current information using Exa; returns sources and excerpts.",
+            json!({"type":"object","properties":{"query":{"type":"string","maxLength":4096},"numResults":{"type":"integer","minimum":1,"maximum":10},"type":{"type":"string","enum":["auto","fast","deep"]},"livecrawl":{"type":"string","enum":["fallback","preferred"]},"contextMaxCharacters":{"type":"integer","minimum":1,"maximum":16384}},"required":["query"],"additionalProperties":false}),
+            string_schema.clone()).with_tags(&["web", "search"]).with_type("network"));
+        self.register(Tool::new("webfetch", "webfetch", "Fetch a public HTTP(S) URL as raw text or HTML. Private networks, credentials and redirects are refused.",
+            json!({"type":"object","properties":{"url":{"type":"string","maxLength":4096},"format":{"type":"string","enum":["text","html"]}},"required":["url"],"additionalProperties":false}),
+            string_schema).with_tags(&["web", "read"]).with_type("network"));
     }
 
     /// Register a user-defined or additional tool.
@@ -284,8 +290,10 @@ mod tests {
     #[test]
     fn count_includes_builtins() {
         let reg = ToolRegistry::new();
-        // Eight built-in tools registered by default.
-        assert_eq!(reg.count(), 8);
+        // Eight local tools and two brokered public-network tools.
+        assert_eq!(reg.count(), 10);
+        assert!(reg.get("websearch").is_some());
+        assert!(reg.get("webfetch").is_some());
         assert!(reg.get("bash").is_some());
         assert!(reg.get("grep").is_some());
         assert!(reg.get("file").is_some());

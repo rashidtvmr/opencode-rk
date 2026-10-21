@@ -98,7 +98,10 @@ impl Inventory {
                 }
             }
         }
-        if self.commands.len() > 256 || self.agents.len() > 256 { return Err("command inventory exceeds limit".into()); }
+        // Agent catalogues can legitimately contain hundreds of provider/model
+        // specializations. Their input bytes are already bounded by the scan
+        // budget; keep a separate finite metadata cap from the command UI cap.
+        if self.commands.len() > 256 || self.agents.len() > 4096 { return Err("command inventory exceeds limit".into()); }
         Ok(())
     }
 
@@ -200,6 +203,39 @@ pub fn load(project: &Path) -> Result<Inventory, String> {
     Ok(inventory)
 }
 
+/// Look up one agent without enumerating unrelated commands or agent entries.
+/// Large user agent catalogues must not prevent a built-in task from starting.
+pub fn load_agent(project: &Path, agent: &str) -> Result<Option<Value>, String> {
+    let mut budget = 16 * 1024 * 1024;
+    let mut selected = None;
+    let global = std::env::var_os("OPENCODE_CONFIG_DIR").map(PathBuf::from)
+        .or_else(|| std::env::var_os("XDG_CONFIG_HOME").map(|path| PathBuf::from(path).join("opencode")))
+        .or_else(|| std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".config/opencode")));
+    let mut paths = Vec::new();
+    if let Some(global) = global {
+        for name in ["opencode.json", "opencode.jsonc"] { paths.push(global.join(name)); }
+    }
+    let ancestors: Vec<_> = project.ancestors().take(65).collect();
+    if ancestors.len() > 64 { return Err("agent configuration ancestry exceeds limit".into()); }
+    for hidden in [false, true] {
+        for directory in ancestors.iter().rev() {
+            for name in ["opencode.json", "opencode.jsonc"] {
+                paths.push(if hidden { directory.join(".opencode").join(name) } else { directory.join(name) });
+            }
+        }
+    }
+    for path in paths {
+        if let Some(value) = read_config(&path, &mut budget)? {
+            for field in ["agent", "agents"] {
+                if let Some(value) = value.get(field).and_then(|agents| agents.get(agent)) {
+                    selected = Some(value.clone());
+                }
+            }
+        }
+    }
+    Ok(selected)
+}
+
 pub fn expand(template: &str, arguments: &str) -> Result<String, String> {
     if arguments.len() > MAX_PROMPT || template.len() > MAX_PROMPT { return Err("command arguments or template exceed size limit".into()); }
     // Shell interpolation may never bypass the application's permission broker.
@@ -272,6 +308,15 @@ pub fn expand(template: &str, arguments: &str) -> Result<String, String> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn large_agent_catalogue_does_not_hide_commands() {
+        let agents: serde_json::Map<String, serde_json::Value> = (0..600)
+            .map(|index| (format!("model-agent-{index}"), serde_json::json!({"prompt":"investigate"}))).collect();
+        let mut inventory = super::Inventory::default();
+        inventory.merge(serde_json::json!({"agents":agents,"commands":{"inspect":{"template":"inspect $ARGUMENTS"}}})).unwrap();
+        assert_eq!(inventory.agents.len(),600);
+        assert!(inventory.commands.contains_key("inspect"));
+    }
     use super::*;
     #[test]
     fn raw_multiline_positions_quotes_and_fallback() {
