@@ -43,7 +43,7 @@
 //! accepted, preserving state on ambiguous failures, and never
 //! auto-resending are integrator responsibilities, not view state.
 
-use crate::native_transcript::{render_lines, strip_ansi, TranscriptLine};
+use crate::native_transcript::{TranscriptLine, render_lines, strip_ansi};
 
 /// Max rows a single view will scroll up from the tail. Bounds both the
 /// stored scroll state and the per-render wrap walk, so a hostile or
@@ -336,6 +336,20 @@ fn render_composer(
 }
 
 /// Sanitize one display row: ANSI/C0 controls (tab included) removed.
+/// Total rows a bordered composer reserves: `2` borders + inner padding
+/// above/below plus at most half the available body for draft content.
+/// Shared with `NativeView::composer_region` so paint and text agree.
+pub(crate) fn framed_composer_height(draft: &str, available: usize, padding: u8) -> usize {
+    let overhead = 2 + 2 * usize::from(padding);
+    if available <= overhead {
+        return available;
+    }
+    let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
+    let lines = draft.split('\n').count();
+    let content = lines.clamp(1, ((available - overhead) / 2).max(1));
+    content + overhead
+}
+
 fn sanitize(text: &str) -> String {
     strip_ansi(text).replace('\t', " ")
 }
@@ -349,11 +363,7 @@ fn truncate_row(text: &str, width: usize) -> String {
 }
 
 fn plural(n: usize) -> &'static str {
-    if n == 1 {
-        ""
-    } else {
-        "s"
-    }
+    if n == 1 { "" } else { "s" }
 }
 
 // Typed rendering lives above ([`ChatMessage`] / [`ChatView::render_typed`]):
@@ -393,6 +403,38 @@ pub enum ChatPart {
         name: String,
         output: String,
         is_error: bool,
+    },
+    ToolState {
+        name: String,
+        id: String,
+        status: String,
+        args: String,
+        output: String,
+        is_error: bool,
+    },
+    File {
+        filename: String,
+        mime: String,
+    },
+    Subtask {
+        agent: String,
+        description: String,
+        background: bool,
+    },
+    Retry {
+        attempt: usize,
+        message: String,
+    },
+    Step {
+        kind: String,
+        detail: String,
+    },
+    Compaction {
+        reason: String,
+    },
+    Patch {
+        path: String,
+        diff: String,
     },
 }
 
@@ -451,6 +493,11 @@ pub enum ChatRowClass {
     Metadata,
     /// Message text (any role).
     Text,
+    UserCard,
+    AssistantCard,
+    SystemCard,
+    DiffAdded,
+    DiffRemoved,
     /// Reasoning/thinking part text.
     Thinking,
     /// Tool call header (`[tool] name (id)`).
@@ -465,6 +512,108 @@ pub enum ChatRowClass {
     Blank,
     /// Composer row (`> ` prompt, continuation or overflow marker).
     Composer,
+}
+
+/// A styled row carries its explicit selectable cell interval. Decoration and
+/// padding are never recovered by parsing the rendered glyphs.
+pub type StyledChatRow = (String, ChatRowClass, Option<(u16, u16)>);
+
+fn boxed_message_rows(
+    width: usize,
+    message: &ChatMessage,
+    separator: bool,
+    appearance: &crate::native_box_style::BoxAppearance,
+) -> Vec<StyledChatRow> {
+    use crate::native_box_style::BoxId;
+    let id = if message.role == ChatRole::Tool
+        || message.parts.iter().any(|part| {
+            matches!(
+                part,
+                ChatPart::ToolCall { .. }
+                    | ChatPart::ToolResult { .. }
+                    | ChatPart::ToolState { .. }
+                    | ChatPart::Subtask { .. }
+            )
+        }) {
+        BoxId::Tool
+    } else {
+        match message.role {
+            ChatRole::User => BoxId::User,
+            ChatRole::System => BoxId::System,
+            ChatRole::Assistant => BoxId::Assistant,
+            ChatRole::Tool => BoxId::Tool,
+        }
+    };
+    let style = appearance.effective(id);
+    let pad = usize::from(style.padding);
+    let overhead = 2 + pad * 2;
+    if width <= overhead || appearance == &crate::native_box_style::BoxAppearance::default() {
+        return typed_message_rows(width, message, separator)
+            .into_iter()
+            .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
+            .collect();
+    }
+    let inner = width - overhead;
+    let corners = style.corner_glyphs();
+    let (h, v) = match style.border_style {
+        crate::native_box_style::BorderStyle::Single => ('─', '│'),
+        crate::native_box_style::BorderStyle::Double => ('═', '║'),
+        crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
+    };
+    let mut output = Vec::new();
+    if separator {
+        output.push((String::new(), ChatRowClass::Separator, None));
+    }
+    output.push((
+        format!(
+            "{}{}{}",
+            corners.top_left,
+            h.to_string().repeat(width - 2),
+            corners.top_right
+        ),
+        ChatRowClass::Separator,
+        None,
+    ));
+    let empty = format!("{v}{}{v}", " ".repeat(width - 2));
+    for _ in 0..pad {
+        output.push((empty.clone(), ChatRowClass::Blank, None));
+    }
+    for (text, class) in typed_message_rows(inner, message, false)
+        .into_iter()
+        .take(MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad))
+    {
+        let text =
+            crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
+        let mut cells = 0;
+        crate::native_view_layout::visit_cells(
+            &text,
+            inner.min(u16::MAX as usize) as u16,
+            |x, _, w| cells = usize::from(x + w),
+        );
+        output.push((
+            format!(
+                "{v}{}{text}{}{v}",
+                " ".repeat(pad),
+                " ".repeat(inner.saturating_sub(cells) + pad)
+            ),
+            class,
+            Some(((1 + pad) as u16, inner as u16)),
+        ));
+    }
+    for _ in 0..pad {
+        output.push((empty.clone(), ChatRowClass::Blank, None));
+    }
+    output.push((
+        format!(
+            "{}{}{}",
+            corners.bottom_left,
+            h.to_string().repeat(width - 2),
+            corners.bottom_right
+        ),
+        ChatRowClass::Separator,
+        None,
+    ));
+    output
 }
 
 /// Bounded inline label: clipped, then every control scalar (newline, ESC,
@@ -576,7 +725,12 @@ fn typed_message_rows(
                     width,
                     text,
                     text_prefix(message.role),
-                    ChatRowClass::Text,
+                    match message.role {
+                        ChatRole::User => ChatRowClass::UserCard,
+                        ChatRole::Assistant => ChatRowClass::AssistantCard,
+                        ChatRole::System => ChatRowClass::SystemCard,
+                        ChatRole::Tool => ChatRowClass::ToolResult,
+                    },
                 );
             }
             ChatPart::Thinking(text) => {
@@ -613,6 +767,91 @@ fn typed_message_rows(
                     header_class,
                 ));
                 push_wrapped(&mut rows, width, output, "    ", body_class);
+            }
+            ChatPart::ToolState {
+                name,
+                id,
+                status,
+                args,
+                output,
+                is_error,
+            } => {
+                let class = if *is_error {
+                    ChatRowClass::ToolError
+                } else {
+                    ChatRowClass::ToolCall
+                };
+                rows.push((truncate_row(&tool_header(status, name, id), width), class));
+                if !args.is_empty() {
+                    push_wrapped(&mut rows, width, args, "    ", class);
+                }
+                if !output.is_empty() {
+                    push_wrapped(&mut rows, width, output, "    ", class);
+                }
+            }
+            ChatPart::File { filename, mime } => push_wrapped(
+                &mut rows,
+                width,
+                &format!("[file] {filename} ({mime})"),
+                "  ",
+                ChatRowClass::Metadata,
+            ),
+            ChatPart::Subtask {
+                agent,
+                description,
+                background,
+            } => push_wrapped(
+                &mut rows,
+                width,
+                &format!(
+                    "[task] {agent}{} — {description}",
+                    if *background { " (background)" } else { "" }
+                ),
+                "  ",
+                ChatRowClass::ToolCall,
+            ),
+            ChatPart::Retry { attempt, message } => push_wrapped(
+                &mut rows,
+                width,
+                &format!("[retry {attempt}] {message}"),
+                "  ",
+                ChatRowClass::ToolError,
+            ),
+            ChatPart::Step { kind, detail } => push_wrapped(
+                &mut rows,
+                width,
+                &format!("[{kind}] {detail}"),
+                "  ",
+                ChatRowClass::Metadata,
+            ),
+            ChatPart::Compaction { reason } => push_wrapped(
+                &mut rows,
+                width,
+                &format!("[compaction] {reason}"),
+                "  ",
+                ChatRowClass::Metadata,
+            ),
+            ChatPart::Patch { path, diff } => {
+                rows.push((
+                    truncate_row(&format!("[diff] {path}"), width),
+                    ChatRowClass::Metadata,
+                ));
+                for line in clip_utf8_prefix_bytes(diff, MAX_INPUT_ROW_BYTES)
+                    .lines()
+                    .take(MAX_MESSAGE_ROWS)
+                {
+                    let class = if line.starts_with('+') && !line.starts_with("+++") {
+                        ChatRowClass::DiffAdded
+                    } else if line.starts_with('-') && !line.starts_with("---") {
+                        ChatRowClass::DiffRemoved
+                    } else {
+                        ChatRowClass::Metadata
+                    };
+                    push_wrapped(&mut rows, width, line, "    ", class);
+                    if rows.len() >= MAX_MESSAGE_ROWS {
+                        break;
+                    }
+                }
             }
         }
     }
@@ -688,6 +927,95 @@ impl ChatView {
     /// `scroll + height` rows exist; only the touched messages are rendered
     /// (each bounded by [`MAX_MESSAGE_ROWS`]) — following the tail never
     /// materializes the whole history.
+    /// Typed rows with the composer drawn as a real bordered frame.
+    ///
+    /// Same header/transcript/composer budget as
+    /// [`ChatView::render_typed_classified`], but the composer region
+    /// reserves two border rows plus the effective inner padding, and the
+    /// draft is painted INSIDE the border (never over it). Narrow panes
+    /// fall back to the legacy unframed prompt.
+    #[must_use]
+    pub fn render_typed_classified_framed(
+        &self,
+        width: usize,
+        height: usize,
+        workspace: &str,
+        messages: &[ChatMessage],
+        draft: &str,
+        busy: bool,
+        frame: crate::native_box_style::EffectiveBox,
+    ) -> Vec<(String, ChatRowClass)> {
+        let height = height.min(MAX_VIEW_ROWS);
+        let pad = usize::from(frame.padding);
+        let overhead = 2 + 2 * pad;
+        if height <= overhead + 1 || width < 3 + 2 * pad {
+            return self.render_typed_classified(width, height, workspace, messages, draft, busy);
+        }
+        let frame_h = framed_composer_height(draft, height, frame.padding);
+        if frame_h <= overhead {
+            return self.render_typed_classified(width, height, workspace, messages, draft, busy);
+        }
+        let body_h = height - frame_h;
+        let content_h = frame_h - overhead;
+        let content_w = width - 2 - 2 * pad;
+        let header_h = usize::from(body_h > 0);
+        let window = self.typed_window(width, body_h - header_h, messages);
+        let mut rows = Vec::with_capacity(height);
+        if header_h > 0 {
+            rows.push((
+                render_header(width, workspace, busy, self.scroll),
+                ChatRowClass::Header,
+            ));
+        }
+        while rows.len() < body_h.saturating_sub(window.len()) {
+            rows.push((String::new(), ChatRowClass::Blank));
+        }
+        rows.extend(window);
+        let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
+        let composer = bounded_composer_rows(draft, content_h + 1);
+        let mut text_rows =
+            render_composer(content_w, content_h, &composer.rows, composer.total_lines);
+        while text_rows.len() < content_h {
+            text_rows.push(String::new());
+        }
+        let corners = frame.corner_glyphs();
+        let (horizontal, vertical) = match frame.border_style {
+            crate::native_box_style::BorderStyle::Single => ('─', '│'),
+            crate::native_box_style::BorderStyle::Double => ('═', '║'),
+            crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
+        };
+        let inside = width - 2;
+        let line = horizontal.to_string().repeat(inside);
+        let pad_row = format!("{vertical}{}{vertical}", " ".repeat(inside));
+        rows.push((
+            format!("{}{line}{}", corners.top_left, corners.top_right),
+            ChatRowClass::Composer,
+        ));
+        for _ in 0..pad {
+            rows.push((pad_row.clone(), ChatRowClass::Composer));
+        }
+        for row in text_rows {
+            let clipped =
+                crate::native_view_layout::fit(&row, content_w.min(u16::MAX as usize) as u16);
+            rows.push((
+                format!(
+                    "{vertical}{}{clipped}{}{vertical}",
+                    " ".repeat(pad),
+                    " ".repeat(pad)
+                ),
+                ChatRowClass::Composer,
+            ));
+        }
+        for _ in 0..pad {
+            rows.push((pad_row.clone(), ChatRowClass::Composer));
+        }
+        rows.push((
+            format!("{}{line}{}", corners.bottom_left, corners.bottom_right),
+            ChatRowClass::Composer,
+        ));
+        rows
+    }
+
     fn typed_window(
         &self,
         width: usize,
@@ -717,11 +1045,104 @@ impl ChatView {
         rev.truncate(end);
         rev
     }
+
+    pub fn render_styled(
+        &self,
+        width: usize,
+        height: usize,
+        workspace: &str,
+        messages: &[ChatMessage],
+        draft: &str,
+        busy: bool,
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) -> Vec<StyledChatRow> {
+        let mut rows = self.render_typed_classified_framed(
+            width,
+            height,
+            workspace,
+            &[],
+            draft,
+            busy,
+            appearance.effective(crate::native_box_style::BoxId::ChatComposer),
+        );
+        let body_h = rows
+            .iter()
+            .position(|(_, class)| *class == ChatRowClass::Composer)
+            .unwrap_or(rows.len());
+        let transcript_h = body_h.saturating_sub(1);
+        let target = self.scroll.saturating_add(transcript_h);
+        let mut reversed = Vec::new();
+        if transcript_h > 0 {
+            'messages: for (index, message) in messages.iter().enumerate().rev() {
+                for row in boxed_message_rows(
+                    width,
+                    message,
+                    starts_new_group(index, messages),
+                    appearance,
+                )
+                .into_iter()
+                .rev()
+                {
+                    reversed.push(row);
+                    if reversed.len() >= target {
+                        break 'messages;
+                    }
+                }
+            }
+        }
+        reversed.reverse();
+        let keep = reversed.len().saturating_sub(self.scroll).min(transcript_h);
+        reversed.truncate(keep);
+        let first = body_h.saturating_sub(reversed.len());
+        let mut bounds = vec![None; rows.len()];
+        for (index, (text, class, range)) in reversed.into_iter().enumerate() {
+            rows[first + index] = (text, class);
+            bounds[first + index] = range;
+        }
+        rows.into_iter()
+            .zip(bounds)
+            .map(|((text, class), bounds)| (text, class, bounds))
+            .collect()
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn styled_message_boxes_keep_real_text_bounds_separate_from_decoration() {
+        use crate::native_box_style::{BoxAppearance, BoxId, BoxOverride, RadiusPreset};
+        let mut style = BoxAppearance::default();
+        style.preset = RadiusPreset::IosSquircle;
+        style.padding = 1;
+        style.overrides.insert(
+            BoxId::User,
+            BoxOverride {
+                preset: Some(RadiusPreset::Sharp),
+                ..Default::default()
+            },
+        );
+        for (role, expected) in [
+            (ChatRole::User, '┌'),
+            (ChatRole::Assistant, '╭'),
+            (ChatRole::System, '╭'),
+            (ChatRole::Tool, '╭'),
+        ] {
+            let message = ChatMessage::text(role, "ACTUAL_TEXT");
+            let rows = boxed_message_rows(40, &message, false, &style);
+            assert!(rows[0].0.starts_with(expected));
+            assert_eq!(rows[0].2, None);
+            let (text, _, bounds) = rows
+                .iter()
+                .find(|(text, _, _)| text.contains("ACTUAL_TEXT"))
+                .unwrap();
+            let (left, width) = bounds.unwrap();
+            let content = crate::native_view_layout::slice_cells(text, left, width);
+            assert_eq!(content.trim(), "ACTUAL_TEXT");
+            assert!(!content.contains('│'));
+        }
+    }
 
     fn history(n: usize) -> Vec<String> {
         (0..n).map(|i| format!("entry {i}")).collect()
@@ -745,7 +1166,7 @@ mod tests {
         let user = rows
             .iter()
             .find(|(row, class)| {
-                *class == ChatRowClass::Text && row.contains("assistant: not the assistant")
+                *class == ChatRowClass::UserCard && row.contains("assistant: not the assistant")
             })
             .expect("user text renders as text");
         assert!(
@@ -756,7 +1177,7 @@ mod tests {
         let assistant = rows
             .iter()
             .find(|(row, class)| {
-                *class == ChatRowClass::Text && row.contains("user: not a user block")
+                *class == ChatRowClass::AssistantCard && row.contains("user: not a user block")
             })
             .expect("assistant text renders as text");
         assert!(
@@ -807,17 +1228,13 @@ mod tests {
             agent: None,
             model: None,
         };
-        let rows = ChatView::new().render_typed_classified(
-            48,
-            6,
-            "ws",
-            &[only_placeholder],
-            "",
-            false,
+        let rows =
+            ChatView::new().render_typed_classified(48, 6, "ws", &[only_placeholder], "", false);
+        assert!(
+            !rows
+                .iter()
+                .any(|(_, class)| *class == ChatRowClass::Thinking)
         );
-        assert!(!rows
-            .iter()
-            .any(|(_, class)| *class == ChatRowClass::Thinking));
     }
 
     #[test]
@@ -858,38 +1275,48 @@ mod tests {
             },
         ];
         let rows = view.render_typed_classified(72, 16, "ws", &messages, "", false);
-        assert!(rows
-            .iter()
-            .any(|(row, class)| *class == ChatRowClass::Thinking && row.trim() == "weigh options"));
-        assert!(rows
-            .iter()
-            .any(|(row, class)| *class == ChatRowClass::ToolCall
-                && row.trim() == "[tool] bash (call-1)"));
-        assert!(rows
-            .iter()
-            .any(|(row, class)| *class == ChatRowClass::ToolCall && row.trim() == "[tool] write"));
+        assert!(
+            rows.iter()
+                .any(|(row, class)| *class == ChatRowClass::Thinking
+                    && row.trim() == "weigh options")
+        );
+        assert!(
+            rows.iter()
+                .any(|(row, class)| *class == ChatRowClass::ToolCall
+                    && row.trim() == "[tool] bash (call-1)")
+        );
+        assert!(
+            rows.iter().any(
+                |(row, class)| *class == ChatRowClass::ToolCall && row.trim() == "[tool] write"
+            )
+        );
         assert!(rows.iter().any(
             |(row, class)| *class == ChatRowClass::ToolResult && row.trim() == "[result] bash"
         ));
-        assert!(rows
-            .iter()
-            .any(|(row, class)| *class == ChatRowClass::ToolResult && row.trim() == "exit 0"));
+        assert!(
+            rows.iter()
+                .any(|(row, class)| *class == ChatRowClass::ToolResult && row.trim() == "exit 0")
+        );
         assert!(
             rows.iter()
                 .any(|(row, class)| *class == ChatRowClass::ToolError
                     && row.trim() == "[error] write")
         );
-        assert!(rows
-            .iter()
-            .any(|(row, class)| *class == ChatRowClass::ToolError
-                && row.trim() == "denied by policy"));
-        assert!(rows
-            .iter()
-            .any(|(row, class)| *class == ChatRowClass::Metadata
-                && row.trim() == "agent: build  model: provider/model-1"));
-        assert!(rows
-            .iter()
-            .any(|(row, class)| *class == ChatRowClass::Text && row.trim() == "tool: rm -rf /"));
+        assert!(
+            rows.iter()
+                .any(|(row, class)| *class == ChatRowClass::ToolError
+                    && row.trim() == "denied by policy")
+        );
+        assert!(
+            rows.iter()
+                .any(|(row, class)| *class == ChatRowClass::Metadata
+                    && row.trim() == "agent: build  model: provider/model-1")
+        );
+        assert!(
+            rows.iter()
+                .any(|(row, class)| *class == ChatRowClass::UserCard
+                    && row.trim() == "tool: rm -rf /")
+        );
         assert!(
             !rows
                 .iter()
@@ -967,9 +1394,10 @@ mod tests {
     fn typed_tiny_viewports_and_hostile_drafts_stay_safe() {
         let view = ChatView::new();
         let messages = vec![ChatMessage::text(ChatRole::User, "hi")];
-        assert!(view
-            .render_typed(80, 0, "ws", &messages, "", false)
-            .is_empty());
+        assert!(
+            view.render_typed(80, 0, "ws", &messages, "", false)
+                .is_empty()
+        );
         assert_eq!(view.render_typed(0, 6, "ws", &messages, "", false).len(), 6);
         let hostile = "line\n".repeat(MAX_DRAFT_BYTES);
         let rows = view.render_typed(40, 10, "ws", &messages, &hostile, true);
@@ -1122,9 +1550,11 @@ mod tests {
             let rows = ChatView::new().render(20, height, "ws", &h, "a\nb", false);
             assert!(rows.len() <= height, "height {height} exceeded");
         }
-        assert!(ChatView::new()
-            .render(20, 0, "ws", &h, "", false)
-            .is_empty());
+        assert!(
+            ChatView::new()
+                .render(20, 0, "ws", &h, "", false)
+                .is_empty()
+        );
         // Empty history still yields header + prompt, no fake filler.
         let rows = ChatView::new().render(20, 6, "ws", &[], "", false);
         assert_eq!(rows[0], "ws");
@@ -1183,9 +1613,11 @@ mod tests {
         let rows = ChatView::new().render(20, 1, workspace, &h, "draft", false);
         assert_eq!(rows.len(), 1, "height 1 stays bounded");
         assert!(rows[0].starts_with("> "), "height 1 shows the prompt");
-        assert!(ChatView::new()
-            .render(20, 0, workspace, &h, "draft", false)
-            .is_empty());
+        assert!(
+            ChatView::new()
+                .render(20, 0, workspace, &h, "draft", false)
+                .is_empty()
+        );
     }
 
     /// Empty / short history keeps the composer on the pane's bottom row

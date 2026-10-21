@@ -89,38 +89,122 @@ impl CommandPalette {
     pub fn visible(&self) -> Vec<PaletteEntry> {
         let mut regular = Vec::with_capacity(MAX_ENTRIES);
         // Retain source categories and exact source command names/targets.
-        regular.push(entry("agent:model.list", "model.list", "Switch model", "Agent", "/models"));
+        regular.push(entry(
+            "agent:model.list",
+            "model.list",
+            "Switch model",
+            "Agent",
+            "/models",
+        ));
         if self.has_session {
-            regular.push(entry("session:session.list", "session.list", "Switch session", "Session", "/sessions"));
-            regular.push(entry("session:session.new", "session.new", "New session", "Session", "/new"));
+            regular.push(entry(
+                "session:session.list",
+                "session.list",
+                "Switch session",
+                "Session",
+                "/sessions",
+            ));
+            regular.push(entry(
+                "session:session.new",
+                "session.new",
+                "New session",
+                "Session",
+                "/new",
+            ));
         }
-        regular.push(entry("provider:provider.connect", "provider.connect", "Connect provider", "Provider", "/connect"));
-        regular.push(entry("system:opencode.status", "opencode.status", "View status", "System", "/status"));
-        regular.push(entry("system:theme.switch", "theme.switch", "Switch theme", "System", "/theme"));
-        regular.push(entry("system:help.show", "help.show", "Help", "System", "/help"));
-        regular.push(entry("system:app.exit", "app.exit", "Exit the app", "System", "/exit"));
+        regular.push(entry(
+            "provider:provider.connect",
+            "provider.connect",
+            "Connect provider",
+            "Provider",
+            "/connect",
+        ));
+        regular.push(entry(
+            "system:opencode.status",
+            "opencode.status",
+            "View status",
+            "System",
+            "/status",
+        ));
+        regular.push(entry(
+            "system:theme.switch",
+            "theme.switch",
+            "Switch theme",
+            "System",
+            "/theme",
+        ));
+        regular.push(entry(
+            "system:appearance.edit",
+            "appearance.edit",
+            "Box appearance",
+            "System",
+            "/appearance",
+        ));
+        regular.push(entry(
+            "system:help.show",
+            "help.show",
+            "Help",
+            "System",
+            "/help",
+        ));
+        regular.push(entry(
+            "system:app.exit",
+            "app.exit",
+            "Exit the app",
+            "System",
+            "/exit",
+        ));
         let needle = self.query.to_lowercase();
         let mut entries = Vec::with_capacity(MAX_ENTRIES);
         if needle.is_empty() {
             // Pinned upstream `dialog-select.tsx` duplicates suggested
             // entries only before filtering; query results use their real
             // category and each command remains a single selectable entry.
-            entries.push(entry("suggested:model.list", "model.list", "Switch model", "Suggested", "/models"));
+            entries.push(entry(
+                "suggested:model.list",
+                "model.list",
+                "Switch model",
+                "Suggested",
+                "/models",
+            ));
             if self.has_session {
-                entries.push(entry("suggested:session.list", "session.list", "Switch session", "Suggested", "/sessions"));
-                entries.push(entry("suggested:session.new", "session.new", "New session", "Suggested", "/new"));
+                entries.push(entry(
+                    "suggested:session.list",
+                    "session.list",
+                    "Switch session",
+                    "Suggested",
+                    "/sessions",
+                ));
+                entries.push(entry(
+                    "suggested:session.new",
+                    "session.new",
+                    "New session",
+                    "Suggested",
+                    "/new",
+                ));
             }
         }
         entries.extend(regular);
-        if needle.is_empty() { return entries.into_iter().take(MAX_ENTRIES).collect(); }
-        let mut filtered: Vec<_> = entries.into_iter().filter_map(|item| {
-            let title = fuzzy_score(&needle, item.title);
-            let category = fuzzy_score(&needle, item.category);
-            if title.is_none() && category.is_none() { return None; }
-            Some((title.unwrap_or(0) * 2 + category.unwrap_or(0), item))
-        }).collect();
+        if needle.is_empty() {
+            return entries.into_iter().take(MAX_ENTRIES).collect();
+        }
+        let mut filtered: Vec<_> = entries
+            .into_iter()
+            .filter_map(|item| {
+                let title = fuzzy_score(&needle, item.title);
+                let category = fuzzy_score(&needle, item.category);
+                if title.is_none() && category.is_none() {
+                    return None;
+                }
+                Some((title.unwrap_or(0) * 2 + category.unwrap_or(0), item))
+            })
+            .collect();
         filtered.sort_by(|a, b| b.0.cmp(&a.0));
-        filtered.into_iter().take(MAX_ENTRIES).map(|(_, item)| item).collect()
+        filtered
+            .into_iter()
+            .take(MAX_ENTRIES)
+            .map(|(_, item)| item)
+            .collect()
     }
 
     pub fn next(&mut self) {
@@ -163,9 +247,17 @@ impl CommandPalette {
                 body.push(item.category.to_owned());
                 last_category = Some(item.category);
             }
-            let marker = if selected == Some(item.id) { "> " } else { "  " };
-            if selected == Some(item.id) { selected_row = body.len(); }
-            let key = item.key_label.map_or(String::new(), |label| format!("  {label}"));
+            let marker = if selected == Some(item.id) {
+                "> "
+            } else {
+                "  "
+            };
+            if selected == Some(item.id) {
+                selected_row = body.len();
+            }
+            let key = item
+                .key_label
+                .map_or(String::new(), |label| format!("  {label}"));
             body.push(format!("{marker}{}{key}", item.title));
         }
         if self.visible().is_empty() {
@@ -214,19 +306,33 @@ fn fuzzy_score(needle: &str, value: &str) -> Option<usize> {
     let haystack: Vec<_> = value.to_lowercase().chars().collect();
     let query: Vec<_> = needle.chars().collect();
     let first = *query.first()?;
-    haystack.iter().enumerate().filter(|(_, ch)| **ch == first).filter_map(|(start, _)| {
-        let mut previous = start;
-        let mut score = 4 + if start == 0 || !haystack[start - 1].is_alphanumeric() { 8 } else { 0 };
-        for &character in &query[1..] {
-            let cursor = previous + 1;
-            let offset = haystack.get(cursor..)?.iter().position(|&item| item == character)?;
-            let position = cursor + offset;
-            score += if position == cursor { 16 } else { 4 };
-            if !haystack[position - 1].is_alphanumeric() { score += 8; }
-            previous = position;
-        }
-        Some(score)
-    }).max()
+    haystack
+        .iter()
+        .enumerate()
+        .filter(|(_, ch)| **ch == first)
+        .filter_map(|(start, _)| {
+            let mut previous = start;
+            let mut score = 4 + if start == 0 || !haystack[start - 1].is_alphanumeric() {
+                8
+            } else {
+                0
+            };
+            for &character in &query[1..] {
+                let cursor = previous + 1;
+                let offset = haystack
+                    .get(cursor..)?
+                    .iter()
+                    .position(|&item| item == character)?;
+                let position = cursor + offset;
+                score += if position == cursor { 16 } else { 4 };
+                if !haystack[position - 1].is_alphanumeric() {
+                    score += 8;
+                }
+                previous = position;
+            }
+            Some(score)
+        })
+        .max()
 }
 
 fn entry(
@@ -284,7 +390,11 @@ mod tests {
         let visible = palette.visible();
         assert_eq!(visible.len(), 2);
         assert!(visible.iter().all(|entry| entry.category == "Session"));
-        assert!(visible.iter().all(|entry| !entry.id.starts_with("suggested:")));
+        assert!(
+            visible
+                .iter()
+                .all(|entry| !entry.id.starts_with("suggested:"))
+        );
         assert_eq!(palette.selected().unwrap().id, "session:session.list");
         assert_eq!(palette.activate(), Some(PaletteAction::Route("/sessions")));
         palette.prev();

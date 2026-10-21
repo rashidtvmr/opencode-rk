@@ -49,7 +49,10 @@ fn modal_heading_uses_upstream_top_padding_and_inner_two_cell_inset() {
     assert_eq!(modal.x, 30);
     assert_eq!(modal.y, 8, "dialog backdrop starts at height / 4");
     assert_eq!(modal.content_y, 9, "panel has one inner top-padding row");
-    assert_eq!(modal.content_width, 56, "panel content is inset by two cells");
+    assert_eq!(
+        modal.content_width, 56,
+        "panel content is inset by two cells"
+    );
     assert_eq!(modal.backdrop_alpha, 150);
 
     let frame = view.render("draft", &[], false, &[]);
@@ -99,23 +102,43 @@ fn home_prompt_width_modes_follow_config_and_appear_in_real_rows() {
 
     assert_eq!(view.home_prompt_width(), 75, "default Home max width");
     view.set_prompt_width(PromptWidth::Auto);
-    assert_eq!(view.home_prompt_width(), 112, "floor(160 * .7) wins over 75");
+    assert_eq!(
+        view.home_prompt_width(),
+        112,
+        "floor(160 * .7) wins over 75"
+    );
     view.set_prompt_width(PromptWidth::Fixed(200));
-    assert_eq!(view.home_prompt_width(), 156, "Home padding leaves cols - 4");
+    assert_eq!(
+        view.home_prompt_width(),
+        156,
+        "Home padding leaves cols - 4"
+    );
 
     // Use a fixed value so the externally returned row has a deterministic
-    // content start: outer prompt left + the view's two-cell inner padding.
+    // content start: outer prompt left + one border cell + two inner cells.
     view.set_prompt_width(PromptWidth::Fixed(30));
     let frame = view.render("home draft", &[], false, &[]);
     let row = frame
         .iter()
         .find(|line| line.contains("home draft"))
         .expect("Home draft is present in an actual rendered row");
-    assert_eq!(row.find("home draft"), Some(65 + 2));
+    let prefix = &row[..row.find("home draft").unwrap()];
+    assert_eq!(
+        prefix,
+        format!("{}┃  ", " ".repeat(65)),
+        "centered border and exact inner padding"
+    );
+    // This known prefix consists only of single-cell spaces and a box glyph;
+    // str::find returns bytes and cannot measure terminal-cell geometry.
+    assert_eq!(prefix.chars().count(), 65 + 1 + 2);
 
     view.resize(40, 24);
     view.set_prompt_width(PromptWidth::Auto);
-    assert_eq!(view.home_prompt_width(), 36, "auto width is constrained by cols - 4");
+    assert_eq!(
+        view.home_prompt_width(),
+        36,
+        "auto width is constrained by cols - 4"
+    );
 }
 
 #[test]
@@ -131,7 +154,11 @@ fn sidebar_dim_matches_narrow_overlay_and_wide_inline_layout() {
     let mut wide = NativeView::new(121, 24);
     assert_eq!(wide.presentation().sidebar_width, 42);
     assert_eq!(wide.presentation().sidebar_offset, Some(79));
-    assert_eq!(wide.sidebar_backdrop_alpha(), 0, "wide sidebar is inline, not dimmed");
+    assert_eq!(
+        wide.sidebar_backdrop_alpha(),
+        0,
+        "wide sidebar is inline, not dimmed"
+    );
     let wide_frame = wide.render("draft", &[], false, &[]);
     assert_eq!(wide_frame.len(), 24);
     assert!(wide_frame.iter().all(|row| row.chars().count() == 121));
@@ -142,7 +169,10 @@ fn extreme_and_tiny_viewports_render_without_panic_and_stay_bounded() {
     let mut huge = NativeView::new(u16::MAX, 256);
     let huge_frame = huge.render("draft", &[], false, &["overlay".to_owned()]);
     let row_bound = (1usize << 20) / usize::from(u16::MAX);
-    assert!(!huge_frame.is_empty(), "the bounded huge viewport still paints");
+    assert!(
+        !huge_frame.is_empty(),
+        "the bounded huge viewport still paints"
+    );
     assert!(huge_frame.len() <= row_bound);
     assert!(huge_frame.len() <= 256);
     assert_eq!(
@@ -180,12 +210,18 @@ fn home_route_preserves_workspace_and_model_identity_without_missing_agent_claim
 
     let frame = view.render("", &[], false, &[]);
     let rendered = frame.join("\n");
-    assert!(rendered.contains("/real/workspace"), "Home footer keeps workspace identity");
+    assert!(
+        rendered.contains("/real/workspace"),
+        "Home footer keeps workspace identity"
+    );
     assert!(
         rendered.contains(env!("CARGO_PKG_VERSION")),
         "Home footer keeps the upstream version component"
     );
-    assert!(rendered.contains("provider/model"), "Home prompt keeps model identity");
+    assert!(
+        rendered.contains("provider/model"),
+        "Home prompt keeps model identity"
+    );
     assert!(
         !rendered.to_ascii_lowercase().contains("agent"),
         "Home must not claim a missing agent when no agent fact was observed"

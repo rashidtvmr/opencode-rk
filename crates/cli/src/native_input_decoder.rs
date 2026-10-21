@@ -25,6 +25,7 @@ pub(crate) enum InputEvent {
     ArrowUp,
     ArrowDown,
     Paste(String),
+    Mouse { x: u16, y: u16, kind: u8 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -262,6 +263,13 @@ impl TerminalInputDecoder {
                 });
             } else if self.state == State::Csi && byte == b'u' {
                 self.decode_kitty();
+            } else if self.state == State::Csi
+                && matches!(byte, b'M' | b'm')
+                && self.sequence.first() == Some(&b'<')
+            {
+                if let Some(event) = decode_mouse(&self.sequence[..self.len], byte) {
+                    self.emit(event);
+                }
             }
             self.reset();
         } else if byte == 0x1b {
@@ -453,6 +461,26 @@ impl TerminalInputDecoder {
     }
 }
 
+fn decode_mouse(sequence: &[u8], end: u8) -> Option<InputEvent> {
+    let parameters = sequence.strip_prefix(b"<")?;
+    let mut fields = parameters.split(|byte| *byte == b';');
+    let button = parse_number(fields.next()?)?;
+    let x = u16::try_from(parse_number(fields.next()?)?.checked_sub(1)?).ok()?;
+    let y = u16::try_from(parse_number(fields.next()?)?.checked_sub(1)?).ok()?;
+    if fields.next().is_some() {
+        return None;
+    }
+    let kind = match (button & !28, end) {
+        (0, b'M') => 0,
+        (32, b'M') => 1,
+        (0 | 3, b'm') => 2,
+        (64, b'M') => 3,
+        (65, b'M') => 4,
+        _ => return None,
+    };
+    Some(InputEvent::Mouse { x, y, kind })
+}
+
 fn parse_number(bytes: &[u8]) -> Option<u32> {
     if bytes.is_empty() {
         return None;
@@ -467,4 +495,59 @@ fn parse_number(bytes: &[u8]) -> Option<u32> {
             .and_then(|value| value.checked_add((byte - b'0') as u32))?;
     }
     Some(value)
+}
+
+#[cfg(test)]
+mod mouse_protocol_tests {
+    use super::*;
+    #[test]
+    fn sgr_drag_press_and_release_are_real_events_not_draft_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[<0;3;5M\x1b[<32;9;5M\x1b[<0;9;5m" {
+            decoder.push(*byte, now);
+        }
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse {
+                x: 2,
+                y: 4,
+                kind: 0
+            })
+        );
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse {
+                x: 8,
+                y: 4,
+                kind: 1
+            })
+        );
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse {
+                x: 8,
+                y: 4,
+                kind: 2
+            })
+        );
+        assert_eq!(decoder.pop(), None);
+    }
+    #[test]
+    fn malformed_mouse_coordinates_are_discarded_without_input_leak() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for frame in [
+            b"\x1b[<0;0;4M".as_slice(),
+            b"\x1b[<0;99999999999999999999;4M",
+            b"\x1b[<0;2;3;4M",
+        ] {
+            for byte in frame {
+                decoder.push(*byte, now);
+            }
+        }
+        assert_eq!(decoder.pop(), None);
+        decoder.push(b'a', now);
+        assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'a')));
+    }
 }

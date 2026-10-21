@@ -13,7 +13,7 @@
 
 use crate::native_view_chat::ChatView;
 use crate::native_view_dialogs::DialogView;
-use crate::native_view_layout::{compose_frame, fit, Layout};
+use crate::native_view_layout::{Layout, compose_frame, fit};
 use crate::native_view_pages::{Page, PageRow, PageState};
 use crate::native_view_sessions::{SessionRow, SessionView};
 use crate::native_view_status::StatusView;
@@ -107,6 +107,10 @@ pub struct NativeView {
     composer_variant: Option<String>,
     composer_model: Option<(String, String)>,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
+    chat_text_bounds: Vec<Option<(u16, u16)>>,
+    /// Persisted global + per-box appearance; the framed composer reads the
+    /// `BoxId::ChatComposer` effective values (default = upstream sharp).
+    box_appearance: crate::native_box_style::BoxAppearance,
 }
 
 #[cfg(test)]
@@ -116,8 +120,13 @@ mod native_home_feedback_tests {
     fn native_home_displays_rejected_turn_without_hiding_the_draft() {
         let mut view = NativeView::new(100, 30);
         view.set_session_route(false);
-        let messages = [crate::native_view_chat::ChatMessage::text(crate::native_view_chat::ChatRole::System, "error: provider HTTP 429; prompt preserved")];
-        let rows = view.render_typed("retained café", &messages, false, &[]).join("\n");
+        let messages = [crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::System,
+            "error: provider HTTP 429; prompt preserved",
+        )];
+        let rows = view
+            .render_typed("retained café", &messages, false, &[])
+            .join("\n");
         assert!(rows.contains("HTTP 429"));
         assert!(rows.contains("retained café"));
         assert!(!view.session_route);
@@ -217,17 +226,37 @@ pub struct BindCommit {
 }
 
 impl NativeView {
-    pub fn open_command_palette(&mut self, has_session: bool) { self.command_palette.open(has_session); }
-    pub fn command_palette_open(&self) -> bool { self.command_palette.is_open() }
-    pub fn close_command_palette(&mut self) { self.command_palette.close(); }
-    pub fn command_palette_push(&mut self, ch: char) -> bool { self.command_palette.push_query(ch) }
-    pub fn command_palette_backspace(&mut self) -> bool { self.command_palette.backspace() }
-    pub fn command_palette_next(&mut self) { self.command_palette.next(); }
-    pub fn command_palette_prev(&mut self) { self.command_palette.prev(); }
-    pub fn command_palette_activate(&self) -> Option<crate::native_command_palette::PaletteAction> { self.command_palette.activate() }
+    pub fn open_command_palette(&mut self, has_session: bool) {
+        self.command_palette.open(has_session);
+    }
+    pub fn command_palette_open(&self) -> bool {
+        self.command_palette.is_open()
+    }
+    pub fn close_command_palette(&mut self) {
+        self.command_palette.close();
+    }
+    pub fn command_palette_push(&mut self, ch: char) -> bool {
+        self.command_palette.push_query(ch)
+    }
+    pub fn command_palette_backspace(&mut self) -> bool {
+        self.command_palette.backspace()
+    }
+    pub fn command_palette_next(&mut self) {
+        self.command_palette.next();
+    }
+    pub fn command_palette_prev(&mut self) {
+        self.command_palette.prev();
+    }
+    pub fn command_palette_activate(&self) -> Option<crate::native_command_palette::PaletteAction> {
+        self.command_palette.activate()
+    }
     pub fn command_palette_render(&self) -> Vec<String> {
         let geometry = self.modal_presentation();
-        self.command_palette.render(geometry.content_width, self.render_height().saturating_sub(usize::from(geometry.content_y)))
+        self.command_palette.render(
+            geometry.content_width,
+            self.render_height()
+                .saturating_sub(usize::from(geometry.content_y)),
+        )
     }
 
     /// Startup composition for the given kernel geometry.
@@ -255,6 +284,8 @@ impl NativeView {
             composer_variant: None,
             composer_model: None,
             chat_row_classes: Vec::new(),
+            chat_text_bounds: Vec::new(),
+            box_appearance: crate::native_box_style::BoxAppearance::default(),
         }
     }
 
@@ -309,6 +340,9 @@ impl NativeView {
     }
     pub fn chat_row_classes(&self) -> &[crate::native_view_chat::ChatRowClass] {
         &self.chat_row_classes
+    }
+    pub fn chat_text_bounds(&self) -> &[Option<(u16, u16)>] {
+        &self.chat_text_bounds
     }
 
     pub fn set_prompt_mode(&mut self, shell: bool) {
@@ -411,6 +445,12 @@ impl NativeView {
     /// composer), `false` shows Home. Set explicitly from the real
     /// transcript/backend state; startup memory/error text must never force
     /// this on its own.
+    /// Install the persisted global + per-box appearance. The native
+    /// composer frame resolves `BoxId::ChatComposer` from this value.
+    pub fn set_box_appearance(&mut self, appearance: crate::native_box_style::BoxAppearance) {
+        self.box_appearance = appearance;
+    }
+
     pub fn set_session_route(&mut self, session_route: bool) {
         self.session_route = session_route;
     }
@@ -480,11 +520,23 @@ impl NativeView {
         }
         if self.session_route {
             let body_height = if height >= 4 { height - 2 } else { height };
-            let composer_height = draft
-                .split('\n')
-                .take(129)
-                .count()
-                .clamp(1, (body_height / 2).max(1));
+            let frame = self
+                .box_appearance
+                .effective(crate::native_box_style::BoxId::ChatComposer);
+            let padding = usize::from(frame.padding);
+            // Same formula as `ChatView::render_typed_classified_framed`.
+            // Narrow panes keep the legacy prompt geometry (no frame).
+            let composer_height = if (width - 4) as usize > 2 + 2 * padding
+                && body_height > 2 + 2 * padding
+            {
+                crate::native_view_chat::framed_composer_height(draft, body_height, frame.padding)
+            } else {
+                draft
+                    .split('\n')
+                    .take(129)
+                    .count()
+                    .clamp(1, (body_height / 2).max(1))
+            };
             Some((
                 2,
                 body_height.saturating_sub(composer_height) as u16,
@@ -514,23 +566,29 @@ impl NativeView {
         {
             return None;
         }
-        Some((
-            (width - 39).div_ceil(2),
-            top as u16,
-        ))
+        Some(((width - 39).div_ceil(2), top as u16))
     }
 
     pub fn home_cursor(&self, draft: &str) -> Option<(u16, u16)> {
-        if self.session_route { return None; }
+        if self.session_route {
+            return None;
+        }
         let (left, top, width, height) = self.composer_region(draft)?;
-        if width <= 3 || height <= 3 { return None; }
+        if width <= 3 || height <= 3 {
+            return None;
+        }
         let bounded: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
         let clean = crate::native_transcript::strip_ansi(&bounded);
         let mut lines = clean.split('\n').take(129);
         let mut last = lines.next().unwrap_or("");
         let mut row = 0u16;
-        for line in lines { row += 1; last = line; }
-        if row >= height.saturating_sub(4) { return None; }
+        for line in lines {
+            row += 1;
+            last = line;
+        }
+        if row >= height.saturating_sub(4) {
+            return None;
+        }
         let mut cells = 0u16;
         crate::native_view_layout::visit_cells(last, width - 3, |x, _, advance| {
             cells = x.saturating_add(advance);
@@ -1041,6 +1099,7 @@ impl NativeView {
         overlay: &[String],
     ) -> Vec<String> {
         self.chat_row_classes.clear();
+        self.chat_text_bounds.clear();
         let height = self.render_height();
         if self.layout.cols == 0 || height == 0 {
             return Vec::new();
@@ -1064,17 +1123,24 @@ impl NativeView {
         } else if self.session_route {
             let body_height = if height >= 4 { height - 2 } else { height };
             let mut body = if let Some(messages) = messages {
-                let rows = self.chat.render_typed_classified(
+                let rows = self.chat.render_styled(
                     inner_width as usize,
                     body_height,
                     &self.workspace,
                     messages,
                     draft,
                     busy,
+                    &self.box_appearance,
                 );
                 self.chat_row_classes
-                    .extend(rows.iter().map(|(_, class)| *class));
-                rows.into_iter().map(|(text, _)| text).collect::<Vec<_>>()
+                    .extend(rows.iter().map(|(_, class, _)| *class));
+                self.chat_text_bounds
+                    .extend(rows.iter().map(|(_, _, bounds)| {
+                        bounds.map(|(left, width)| (left.saturating_add(2), width))
+                    }));
+                rows.into_iter()
+                    .map(|(text, _, _)| text)
+                    .collect::<Vec<_>>()
             } else {
                 self.chat.render(
                     inner_width as usize,
@@ -1100,19 +1166,26 @@ impl NativeView {
             let mut home = self.home_column(width, height, draft);
             let notice = transcript.last().map(String::as_str).or_else(|| {
                 let last = messages?.last()?;
-                if last.role != crate::native_view_chat::ChatRole::System { return None; }
-                last.parts.iter().rev().find_map(|part| match part { crate::native_view_chat::ChatPart::Text(text) => Some(text.as_str()), _ => None })
+                if last.role != crate::native_view_chat::ChatRole::System {
+                    return None;
+                }
+                last.parts.iter().rev().find_map(|part| match part {
+                    crate::native_view_chat::ChatPart::Text(text) => Some(text.as_str()),
+                    _ => None,
+                })
             });
             if height >= 2 {
                 if busy {
                     home[height - 2] = padded("  Sending… waiting for provider", width);
-                } else if let Some(notice) = notice.filter(|notice| notice.starts_with("error:") || notice.starts_with("offline:")) {
+                } else if let Some(notice) = notice
+                    .filter(|notice| notice.starts_with("error:") || notice.starts_with("offline:"))
+                {
                     home[height - 2] = padded(&crate::native_transcript::strip_ansi(notice), width);
                 }
             }
             home
         };
-        let sidebar: Vec<String> = if presentation.sidebar_width > 0 {
+        let mut sidebar: Vec<String> = if presentation.sidebar_width > 0 {
             // Backend facts remain available in the optional session sidebar;
             // the all-sessions picker is a separate page, never sidebar chrome.
             self.status
@@ -1123,6 +1196,43 @@ impl NativeView {
         } else {
             Vec::new()
         };
+        if presentation.sidebar_width >= 4
+            && height >= 3
+            && self.box_appearance != crate::native_box_style::BoxAppearance::default()
+        {
+            let style = self
+                .box_appearance
+                .effective(crate::native_box_style::BoxId::Sidebar);
+            let corners = style.corner_glyphs();
+            let (h, v) = match style.border_style {
+                crate::native_box_style::BorderStyle::Single => ('─', '│'),
+                crate::native_box_style::BorderStyle::Double => ('═', '║'),
+                crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
+            };
+            let inside = usize::from(presentation.sidebar_width - 2);
+            let pad = usize::from(style.padding).min(inside.saturating_sub(1) / 2);
+            let mut framed = vec![format!(
+                "{}{}{}",
+                corners.top_left,
+                h.to_string().repeat(inside),
+                corners.top_right
+            )];
+            for row in sidebar.iter().take(height - 2) {
+                let content = crate::native_view_layout::fit(row, (inside - 2 * pad) as u16);
+                framed.push(format!(
+                    "{v}{}{content}{}{v}",
+                    " ".repeat(pad),
+                    " ".repeat(pad)
+                ));
+            }
+            framed.push(format!(
+                "{}{}{}",
+                corners.bottom_left,
+                h.to_string().repeat(inside),
+                corners.bottom_right
+            ));
+            sidebar = framed;
+        }
         let inline = presentation.sidebar_width > 0 && self.layout.cols > 120;
         let effective = Layout {
             center_width: width,
@@ -1208,7 +1318,13 @@ impl NativeView {
             let top = 4 + (height - required) / 2;
             (count, top, top + 7)
         } else {
-            (count, 0, height.saturating_sub(count + 4).max(usize::from(height > 1)))
+            (
+                count,
+                0,
+                height
+                    .saturating_sub(count + 4)
+                    .max(usize::from(height > 1)),
+            )
         }
     }
 
@@ -1255,8 +1371,51 @@ impl NativeView {
         }
         let border_top = input_top.saturating_sub(1);
         let box_bottom = input_top.saturating_add(input.len() + 2);
-        for row in rows.iter_mut().take(box_bottom.min(height)).skip(border_top) {
-            *row = format!("{}┃{}", " ".repeat(left as usize), " ".repeat(prompt_width.saturating_sub(1) as usize));
+        // Default Home keeps upstream's left rail + 2-cell padding exactly;
+        // a configured appearance swaps in its preset corners/line weight.
+        let home_frame = self.box_appearance != crate::native_box_style::BoxAppearance::default();
+        let home_effective = self
+            .box_appearance
+            .effective(crate::native_box_style::BoxId::ChatComposer);
+        let home_corners = home_effective.corner_glyphs();
+        let (home_h, home_v) = match home_effective.border_style {
+            crate::native_box_style::BorderStyle::Single => ('─', '│'),
+            crate::native_box_style::BorderStyle::Double => ('═', '║'),
+            crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
+        };
+        let home_v = if home_frame { home_v } else { '┃' };
+        for index in border_top..box_bottom.min(height) {
+            let rail = if home_frame && index == border_top {
+                home_corners.top_left
+            } else {
+                home_v
+            };
+            rows[index] = if home_frame && prompt_width >= 2 {
+                if index == border_top {
+                    format!(
+                        "{}{}{}{}",
+                        " ".repeat(left as usize),
+                        home_corners.top_left,
+                        home_h
+                            .to_string()
+                            .repeat(prompt_width.saturating_sub(2) as usize),
+                        home_corners.top_right
+                    )
+                } else {
+                    format!(
+                        "{}{rail}{}{home_v}",
+                        " ".repeat(left as usize),
+                        " ".repeat(prompt_width.saturating_sub(2) as usize)
+                    )
+                }
+            } else {
+                format!(
+                    "{}{}{}",
+                    " ".repeat(left as usize),
+                    rail,
+                    " ".repeat(prompt_width.saturating_sub(1) as usize)
+                )
+            };
         }
         for (index, line) in input.iter().enumerate() {
             if input_top + index < height {
@@ -1276,27 +1435,67 @@ impl NativeView {
                 } else {
                     line
                 };
-                rows[input_top + index] = format!(
-                    "{}┃  {}",
-                    " ".repeat(left as usize),
-                    fit(label, prompt_width.saturating_sub(3))
-                );
+                rows[input_top + index] = if home_frame && prompt_width >= 5 {
+                    format!(
+                        "{}{home_v}  {}{home_v}",
+                        " ".repeat(left as usize),
+                        fit(label, prompt_width.saturating_sub(4))
+                    )
+                } else {
+                    format!(
+                        "{}{}  {}",
+                        " ".repeat(left as usize),
+                        home_v,
+                        fit(label, prompt_width.saturating_sub(3))
+                    )
+                };
             }
         }
         let model_row = input_top + input.len() + 1;
         if model_row < height {
-            rows[model_row] = format!(
-                "{}┃  {}",
-                " ".repeat(left as usize),
-                fit(&self.composer_metadata(), prompt_width.saturating_sub(3))
-            );
+            rows[model_row] = if home_frame && prompt_width >= 5 {
+                format!(
+                    "{}{home_v}  {}{home_v}",
+                    " ".repeat(left as usize),
+                    fit(&self.composer_metadata(), prompt_width.saturating_sub(4))
+                )
+            } else {
+                format!(
+                    "{}{}  {}",
+                    " ".repeat(left as usize),
+                    home_v,
+                    fit(&self.composer_metadata(), prompt_width.saturating_sub(3))
+                )
+            };
         }
         if box_bottom < height {
-            rows[box_bottom] = format!("{}╹{}", " ".repeat(left as usize), "▀".repeat(prompt_width.saturating_sub(1) as usize));
+            rows[box_bottom] = if home_frame && prompt_width >= 2 {
+                format!(
+                    "{}{}{}{}",
+                    " ".repeat(left as usize),
+                    home_corners.bottom_left,
+                    home_h
+                        .to_string()
+                        .repeat(prompt_width.saturating_sub(2) as usize),
+                    home_corners.bottom_right
+                )
+            } else {
+                format!(
+                    "{}╹{}",
+                    " ".repeat(left as usize),
+                    "▀".repeat(prompt_width.saturating_sub(1) as usize)
+                )
+            };
         }
         if box_bottom + 1 < height.saturating_sub(1) {
             let hint = "ctrl+p commands";
-            rows[box_bottom + 1] = format!("{}{}", " ".repeat(usize::from(left + prompt_width.saturating_sub(hint.len() as u16))), hint);
+            rows[box_bottom + 1] = format!(
+                "{}{}",
+                " ".repeat(usize::from(
+                    left + prompt_width.saturating_sub(hint.len() as u16)
+                )),
+                hint
+            );
         }
         let mut right = env!("CARGO_PKG_VERSION").to_owned();
         if self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
@@ -1324,6 +1523,83 @@ impl NativeView {
         );
         rows[height - 1] = padded(&footer, width);
         rows
+    }
+}
+
+#[cfg(test)]
+mod framed_composer_tests {
+    use super::*;
+
+    #[test]
+    fn default_composer_frame_has_exact_corners_draft_and_region() {
+        let mut view = NativeView::new(60, 24);
+        view.set_session_route(true);
+        let draft = "hello frame";
+        let rows = view.render_typed(draft, &[], false, &[]);
+        let (left, top, width, region_h) = view.composer_region(draft).expect("region");
+        let (left, top, width) = (left as usize, top as usize, width as usize);
+        let frame_h = 3usize; // one draft row + two borders (default padding 0)
+        assert_eq!(width, view.presentation().main_width as usize - 4);
+        assert_eq!(top, view.render_height() - 2 - frame_h);
+        assert_eq!(region_h as usize, frame_h + 1);
+        let row = |index: usize| rows[index].chars().collect::<Vec<_>>();
+        assert_eq!(row(top)[left], '┌');
+        assert_eq!(row(top)[left + width - 1], '┐');
+        assert_eq!(row(top + frame_h - 1)[left], '└');
+        assert_eq!(row(top + frame_h - 1)[left + width - 1], '┘');
+        assert_eq!(row(top + 1)[left], '│');
+        assert_eq!(row(top + 1)[left + width - 1], '│');
+        assert!(rows[top + 1].contains(draft), "draft inside the border");
+        assert!(!rows[top].contains(draft), "border row is not painted over");
+    }
+
+    #[test]
+    fn configured_preset_applies_rounded_corners_and_inner_padding() {
+        let mut view = NativeView::new(60, 24);
+        view.set_session_route(true);
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.preset = crate::native_box_style::RadiusPreset::Rounded;
+        appearance.padding = 2;
+        view.set_box_appearance(appearance);
+        let rows = view.render_typed("rounded", &[], false, &[]);
+        let (left, top, width, _) = view.composer_region("rounded").expect("region");
+        let (left, top, width) = (left as usize, top as usize, width as usize);
+        let row = |index: usize| rows[index].chars().collect::<Vec<_>>();
+        assert_eq!(row(top)[left], '╭');
+        assert_eq!(row(top)[left + width - 1], '╮');
+        assert_eq!(row(top + 6)[left], '╰');
+        assert_eq!(row(top + 6)[left + width - 1], '╯');
+        let pad_row: String = rows[top + 1]
+            .chars()
+            .skip(left + 1)
+            .take(width - 2)
+            .collect();
+        assert!(pad_row.trim().is_empty(), "inner top padding row");
+        assert!(rows[top + 3].contains("rounded"));
+    }
+
+    #[test]
+    fn narrow_one_column_falls_back_and_home_border_stays_default() {
+        let mut narrow = NativeView::new(1, 10);
+        narrow.set_session_route(true);
+        assert_eq!(narrow.render_typed("x", &[], false, &[]).len(), 10);
+        assert_eq!(narrow.composer_region("x"), None);
+
+        let mut home = NativeView::new(80, 30);
+        home.set_session_route(false);
+        let default_rows = home.render_typed("hi", &[], false, &[]);
+        assert!(default_rows.iter().any(|row| row.contains('┃')));
+        assert!(default_rows.iter().any(|row| row.contains('╹')));
+
+        let mut rounded = NativeView::new(80, 30);
+        rounded.set_session_route(false);
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.preset = crate::native_box_style::RadiusPreset::Rounded;
+        rounded.set_box_appearance(appearance);
+        let rounded_rows = rounded.render_typed("hi", &[], false, &[]);
+        assert!(rounded_rows.iter().any(|row| row.contains('╭')));
+        assert!(rounded_rows.iter().any(|row| row.contains('╰')));
+        assert!(!rounded_rows.iter().any(|row| row.contains('┃')));
     }
 }
 

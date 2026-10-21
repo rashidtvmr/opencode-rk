@@ -36,9 +36,8 @@ use clap::{Args, ValueEnum};
 #[cfg(feature = "native")]
 use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use opencode_rk_sessions::tui_state::{
-    context_breakdown, footer_hints, keybinding_help, status_click, Composer, MemoryFile,
-    MemoryViewer, SourceUsage, StatusAction, StatusItem, SubmitKeymap, MAX_MEMORY_FILES,
-    MAX_SOURCES,
+    Composer, MAX_MEMORY_FILES, MAX_SOURCES, MemoryFile, MemoryViewer, SourceUsage, StatusAction,
+    StatusItem, SubmitKeymap, context_breakdown, footer_hints, keybinding_help, status_click,
 };
 use std::{
     env, fs,
@@ -246,9 +245,15 @@ fn http_request_with_status(
 ) -> Result<(String, u16), String> {
     let started = Instant::now();
     let route = path.split('?').next().unwrap_or(path);
-    crate::native_debug::event("http.request", serde_json::json!({"method":method,"route":route,"request_bytes":body.map_or(0,str::len),"credential_present":auth.is_some()}));
+    crate::native_debug::event(
+        "http.request",
+        serde_json::json!({"method":method,"route":route,"request_bytes":body.map_or(0,str::len),"credential_present":auth.is_some()}),
+    );
     let result = http_request_with_status_inner(origin, method, path, body, auth);
-    crate::native_debug::event("http.response", serde_json::json!({"method":method,"route":route,"elapsed_ms":started.elapsed().as_millis(),"ok":result.is_ok(),"status":result.as_ref().ok().map(|(_,status)|status),"response_bytes":result.as_ref().ok().map(|(body,_)|body.len())}));
+    crate::native_debug::event(
+        "http.response",
+        serde_json::json!({"method":method,"route":route,"elapsed_ms":started.elapsed().as_millis(),"ok":result.is_ok(),"status":result.as_ref().ok().map(|(_,status)|status),"response_bytes":result.as_ref().ok().map(|(body,_)|body.len())}),
+    );
     result
 }
 
@@ -662,6 +667,10 @@ struct PaintCtx {
     modal: crate::native_view::ModalPresentation,
     sidebar_backdrop_alpha: u8,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
+    selection: Vec<(u32, u32, u32)>,
+    appearance: crate::native_box_style::BoxAppearance,
+    modal_box: crate::native_box_style::BoxId,
+    loading: Option<(char, &'static str)>,
     /// True when this frame is the Home column (explicit route fact).
     home: bool,
     composer: Option<(u16, u16, u16, u16)>,
@@ -677,6 +686,37 @@ fn modal_content_rows(lines: &[String]) -> usize {
         .iter()
         .rposition(|line| !line.trim().is_empty())
         .map_or(0, |index| index + 1)
+}
+
+#[cfg(feature = "native")]
+fn selection_clipboard_frame(text: &str) -> String {
+    const TABLE: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let bytes = text.as_bytes();
+    let mut output = String::with_capacity(bytes.len().div_ceil(3) * 4 + 16);
+    output.push_str("\x1b]52;c;");
+    for chunk in bytes.chunks(3) {
+        let a = chunk[0];
+        let b = *chunk.get(1).unwrap_or(&0);
+        let c = *chunk.get(2).unwrap_or(&0);
+        for value in [
+            TABLE[(a >> 2) as usize],
+            TABLE[(((a & 3) << 4) | (b >> 4)) as usize],
+            if chunk.len() > 1 {
+                TABLE[(((b & 15) << 2) | (c >> 6)) as usize]
+            } else {
+                b'='
+            },
+            if chunk.len() > 2 {
+                TABLE[(c & 63) as usize]
+            } else {
+                b'='
+            },
+        ] {
+            output.push(value as char);
+        }
+    }
+    output.push('\x07');
+    output
 }
 
 /// Home-row role by position over the known Home structure (logo block,
@@ -729,7 +769,7 @@ fn paint_color(
     palette: crate::native_theme_runtime::Palette,
     slot: crate::native_theme_runtime::Slot,
 ) -> Rgba {
-    use crate::native_theme_runtime::{source_over, Palette, Slot};
+    use crate::native_theme_runtime::{Palette, Slot, source_over};
     let background = source_over(
         Palette::opencode_dark().get(Slot::Background),
         palette.get(Slot::Background),
@@ -751,6 +791,13 @@ fn native_paint(
     let rows = renderer.rows();
     let presentation = ctx.presentation;
     use crate::native_theme_runtime::Slot;
+    let selected_cells: std::collections::BTreeSet<(u32, u32)> = ctx
+        .selection
+        .iter()
+        .flat_map(|&(row, start, width)| {
+            (start..start.saturating_add(width).min(renderer.cols())).map(move |x| (row, x))
+        })
+        .collect();
     let background = paint_color(ctx.palette, Slot::Background);
     let panel = paint_color(ctx.palette, Slot::BackgroundPanel);
     let element = paint_color(ctx.palette, Slot::BackgroundElement);
@@ -784,7 +831,10 @@ fn native_paint(
     renderer.fill_rect(0, 0, cols, rows, dim(background, base_alpha))?;
     if let Some((left, top, width, height)) = ctx.composer {
         renderer.fill_rect(
-            u32::from(left), u32::from(top), u32::from(width), u32::from(height),
+            u32::from(left),
+            u32::from(top),
+            u32::from(width),
+            u32::from(height),
             dim(element, base_alpha),
         )?;
     }
@@ -803,6 +853,11 @@ fn native_paint(
                 | ChatRowClass::ToolCall
                 | ChatRowClass::ToolResult,
             ) => muted,
+            Some(ChatRowClass::UserCard) => text_color,
+            Some(ChatRowClass::AssistantCard) => text_color,
+            Some(ChatRowClass::SystemCard) => muted,
+            Some(ChatRowClass::DiffAdded) => text_color,
+            Some(ChatRowClass::DiffRemoved) => error,
             Some(ChatRowClass::ToolError) => error,
             Some(_) => text_color,
             None if ctx.home => home_row_fg(lines, row, ctx.palette),
@@ -827,8 +882,18 @@ fn native_paint(
                         && y >= u32::from(top)
                         && y < u32::from(top) + u32::from(height)
                 });
+                let role_bg = match ctx.chat_row_classes.get(row) {
+                    Some(ChatRowClass::UserCard) => Some(panel),
+                    Some(ChatRowClass::AssistantCard) => Some(background),
+                    Some(ChatRowClass::SystemCard) => Some(element),
+                    Some(ChatRowClass::DiffAdded) => Some(Rgba::new(20, 70, 35, 255)),
+                    Some(ChatRowClass::DiffRemoved) => Some(Rgba::new(80, 25, 30, 255)),
+                    _ => None,
+                };
                 let mut bg = if sidebar || in_modal {
                     panel
+                } else if let Some(role_bg) = role_bg {
+                    role_bg
                 } else if composer {
                     element
                 } else {
@@ -845,8 +910,10 @@ fn native_paint(
                 };
                 if ctx.home && !in_modal {
                     if let Some((left, top, width, height)) = ctx.composer {
-                        if x >= u32::from(left) && x < u32::from(left + width)
-                            && y >= u32::from(top) && y < u32::from(top + height)
+                        if x >= u32::from(left)
+                            && x < u32::from(left + width)
+                            && y >= u32::from(top)
+                            && y < u32::from(top + height)
                         {
                             if x == u32::from(left) {
                                 fg = accent;
@@ -871,6 +938,10 @@ fn native_paint(
                     };
                     bg = dim(bg, alpha);
                     fg = dim(fg, alpha);
+                }
+                if selected_cells.contains(&(y, x)) {
+                    bg = accent;
+                    fg = background;
                 }
                 if let Some((_, text, last_fg, last_bg)) = spans.last_mut() {
                     if *last_fg == fg
@@ -936,6 +1007,60 @@ fn native_paint(
                     )?;
                 }
             }
+        }
+    }
+    if let (Some(count), Some((left, top, width, height))) = (ctx.modal_rows, modal) {
+        let style = ctx.appearance.effective(ctx.modal_box);
+        let corners = style.corner_glyphs();
+        let (horizontal, vertical) = match style.border_style {
+            crate::native_box_style::BorderStyle::Single => ('─', "│"),
+            crate::native_box_style::BorderStyle::Double => ('═', "║"),
+            crate::native_box_style::BorderStyle::Heavy => ('━', "┃"),
+        };
+        let bottom = top
+            .saturating_add(height.saturating_sub(1))
+            .min(rows.saturating_sub(1));
+        if width >= 4 && count > 0 && bottom > top {
+            let edge = horizontal
+                .to_string()
+                .repeat(width.saturating_sub(2).min(512) as usize);
+            renderer.draw_text_styled(
+                left,
+                top,
+                &format!("{}{edge}{}", corners.top_left, corners.top_right),
+                accent,
+                Some(panel),
+                0,
+            )?;
+            renderer.draw_text_styled(
+                left,
+                bottom,
+                &format!("{}{edge}{}", corners.bottom_left, corners.bottom_right),
+                accent,
+                Some(panel),
+                0,
+            )?;
+            for y in top + 1..bottom {
+                renderer.draw_text_styled(left, y, vertical, accent, Some(panel), 0)?;
+                renderer.draw_text_styled(left + width - 1, y, vertical, accent, Some(panel), 0)?;
+            }
+        }
+    }
+    if let (Some((glyph, label)), Some((left, top, width, _))) = (ctx.loading, ctx.composer) {
+        if modal.is_none() && width >= 18 {
+            let label = crate::native_view_layout::slice_cells(
+                &format!("{glyph} {label}"),
+                0,
+                width.saturating_sub(4),
+            );
+            renderer.draw_text_styled(
+                u32::from(left + 2),
+                u32::from(top),
+                &label,
+                accent,
+                Some(element),
+                0,
+            )?;
         }
     }
     renderer.frame(|_| {})?;
@@ -1150,7 +1275,10 @@ fn dispatch_permission_reply(
             )
         });
     let accepted = matches!(result, Ok(()));
-    crate::native_debug::event("permission.reply", serde_json::json!({"decision":reply,"attempt":attempt,"acknowledged":accepted,"request_id":request_id,"session_id":session_id}));
+    crate::native_debug::event(
+        "permission.reply",
+        serde_json::json!({"decision":reply,"attempt":attempt,"acknowledged":accepted,"request_id":request_id,"session_id":session_id}),
+    );
     if let Err(error) = &result {
         append_transcript(
             transcript,
@@ -1321,7 +1449,10 @@ fn native_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cols, rows) = native_size();
     let mut renderer = NativeRenderer::create(cols, rows)?;
-    crate::native_debug::event("ui.start", serde_json::json!({"cols":cols,"rows":rows,"daemon_attached":live.is_some(),"startup_view":format!("{startup_view:?}")}));
+    crate::native_debug::event(
+        "ui.start",
+        serde_json::json!({"cols":cols,"rows":rows,"daemon_attached":live.is_some(),"startup_view":format!("{startup_view:?}")}),
+    );
     renderer.setup_terminal()?;
     // Native owns mouse input; otherwise the terminal selects the entire
     // painted rectangular buffer, including Home whitespace and decoration.
@@ -1329,6 +1460,7 @@ fn native_loop(
     let _ = renderer.enable_kitty_keyboard(1);
     renderer.set_title("OpenCode RK")?;
     let mut draft = String::new();
+    let mut selection = crate::native_text_selection::TextSelection::default();
     // Setup is an action from Home, not a mandatory startup modal. In
     // particular, custom-provider discovery must never steal composer input.
     let mut dialog = native_setup::Dialog::None;
@@ -1352,24 +1484,53 @@ fn native_loop(
     let mut selected = native_setup::selected(&models);
     let mut provider_id = native_setup::recent_provider().unwrap_or_else(|| "openai".into());
     let mut provider_url = "http://localhost:20128/v1".to_owned();
-    let mut providers = vec![("openai".to_owned(), "OpenAI".to_owned(), String::new()),
-        ("9router".to_owned(), "9router (local)".to_owned(), provider_url.clone())];
+    let mut providers = vec![
+        ("openai".to_owned(), "OpenAI".to_owned(), String::new()),
+        (
+            "9router".to_owned(),
+            "9router (local)".to_owned(),
+            provider_url.clone(),
+        ),
+    ];
     if let Some(snapshot) = live.as_ref() {
         if let Ok(body) = http_request(&snapshot.origin, "GET", "/api/providers", None, auth) {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
-                for row in value["providers"].as_array().into_iter().flatten().take(128) {
+                for row in value["providers"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .take(128)
+                {
                     if let (Some(id), Some(url)) = (row["id"].as_str(), row["base_url"].as_str()) {
-                        if id.len() <= 128 && url.len() <= 2048 && id.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_') {
-                            let name = row["name"].as_str().unwrap_or(id).chars().filter(|c| !c.is_control()).take(128).collect();
-                            if let Some(existing) = providers.iter_mut().find(|row| row.0 == id) { *existing = (id.into(), name, url.into()); }
-                            else { providers.push((id.into(), name, url.into())); }
+                        if id.len() <= 128
+                            && url.len() <= 2048
+                            && id
+                                .bytes()
+                                .all(|c| c.is_ascii_alphanumeric() || c == b'-' || c == b'_')
+                        {
+                            let name = row["name"]
+                                .as_str()
+                                .unwrap_or(id)
+                                .chars()
+                                .filter(|c| !c.is_control())
+                                .take(128)
+                                .collect();
+                            if let Some(existing) = providers.iter_mut().find(|row| row.0 == id) {
+                                *existing = (id.into(), name, url.into());
+                            } else {
+                                providers.push((id.into(), name, url.into()));
+                            }
                         }
                     }
                 }
             }
         }
     }
-    providers.push(("custom".into(), "Other — custom OpenAI-compatible provider".into(), String::new()));
+    providers.push((
+        "custom".into(),
+        "Other — custom OpenAI-compatible provider".into(),
+        String::new(),
+    ));
     let mut model_load = None;
     let mut setup_error: Option<String> = None;
     if provider_id != "openai" && providers.iter().any(|row| row.0 == provider_id) {
@@ -1416,6 +1577,11 @@ fn native_loop(
     // authenticated client; the facade itself never performs IO.
     let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
     let state_path = data_dir.join("state/kv.json");
+    let mut appearance = crate::native_appearance::AppearanceEditor::new(
+        crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
+    );
+    let animation_start = Instant::now();
+    let mut animation_tick = 0u128;
     let config_paths = native_tui_config_paths().unwrap_or_else(|error| {
         append_transcript(&mut transcript, format!("error: {error}"));
         Vec::new()
@@ -1546,27 +1712,44 @@ fn native_loop(
     let mut leader_pending = false;
     let mut byte = [0u8; 1];
     loop {
-        if let Some((loaded_provider, result)) = model_load.as_mut().and_then(|load| load.poll().map(|result| (load.provider_id.clone(), result))) {
+        if let Some((loaded_provider, result)) = model_load
+            .as_mut()
+            .and_then(|load| load.poll().map(|result| (load.provider_id.clone(), result)))
+        {
             model_load = None;
             needs_paint = true;
             match result {
                 Ok(rows) => {
                     models.retain(|row| row.provider_id != loaded_provider);
                     models.extend(rows);
-                    if dialog == native_setup::Dialog::Model && loaded_provider == provider_id { filter_input = format!("{provider_id}/"); model_row = 0; }
-                    if selected.is_none() { if let Some(model) = native_setup::selected(&models) {
-                        selected = Some(model.clone());
-                        view.set_model(Some(model.qualified()));
-                        view.set_composer_model(&model.name, &model.provider_id);
-                        if dialog == native_setup::Dialog::Provider && model.provider_id == loaded_provider { dialog = native_setup::Dialog::None; }
-                    } }
+                    if dialog == native_setup::Dialog::Model && loaded_provider == provider_id {
+                        filter_input = format!("{provider_id}/");
+                        model_row = 0;
+                    }
+                    if selected.is_none() {
+                        if let Some(model) = native_setup::selected(&models) {
+                            selected = Some(model.clone());
+                            view.set_model(Some(model.qualified()));
+                            view.set_composer_model(&model.name, &model.provider_id);
+                            if dialog == native_setup::Dialog::Provider
+                                && model.provider_id == loaded_provider
+                            {
+                                dialog = native_setup::Dialog::None;
+                            }
+                        }
+                    }
                 }
-                Err(error) => { setup_error = Some(error); }
+                Err(error) => {
+                    setup_error = Some(error);
+                }
             }
         }
         if let Ok(Some(size)) = renderer.terminal_size() {
             if size != observed_size {
-                crate::native_debug::event("ui.resize", serde_json::json!({"old_cols":observed_size.0,"old_rows":observed_size.1,"cols":size.0,"rows":size.1}));
+                crate::native_debug::event(
+                    "ui.resize",
+                    serde_json::json!({"old_cols":observed_size.0,"old_rows":observed_size.1,"cols":size.0,"rows":size.1}),
+                );
                 renderer.resize(size.0, size.1)?;
                 observed_size = size;
                 view.resize(size.0 as u16, size.1 as u16);
@@ -1594,10 +1777,19 @@ fn native_loop(
                         // turn moves the main column to the session route
                         // (Home → session), explicitly and only on ACK.
                         native_turn::Event::User => {
+                            transcript.begin_reasoning_turn();
                             if let Some(captured) = pending_submission.take() {
-                                crate::native_composer::acknowledge_submitted_draft(&captured, &mut draft);
-                                transcript.append(format!("you: {captured}"), ChatMessage::text(ChatRole::User, captured));
-                                crate::native_debug::event("turn.admission_ack", serde_json::json!({"composer_bytes":draft.len()}));
+                                crate::native_composer::acknowledge_submitted_draft(
+                                    &captured, &mut draft,
+                                );
+                                transcript.append(
+                                    format!("you: {captured}"),
+                                    ChatMessage::text(ChatRole::User, captured),
+                                );
+                                crate::native_debug::event(
+                                    "turn.admission_ack",
+                                    serde_json::json!({"composer_bytes":draft.len()}),
+                                );
                             }
                             if !session_route {
                                 session_route = true;
@@ -1608,30 +1800,53 @@ fn native_loop(
                             partial.push_str(&delta);
                             replace_partial(&mut transcript, &partial);
                         }
-                        native_turn::Event::ToolCall(name) => {
+                        native_turn::Event::ReasoningDelta(delta) => transcript.reasoning_event(&delta,false),
+                        native_turn::Event::ReasoningFinal(summary) => transcript.reasoning_event(&summary,true),
+                        native_turn::Event::ToolCall {
+                            call_id,
+                            name,
+                            arguments,
+                        } => {
                             transcript.append(
                                 format!("tool: {}", native_transcript::strip_ansi(&name)),
                                 ChatMessage {
                                     role: ChatRole::Assistant,
-                                    parts: vec![ChatPart::ToolCall {
+                                    parts: vec![ChatPart::ToolState {
                                         name,
-                                        id: String::new(),
+                                        id: call_id,
+                                        status: "call".into(),
+                                        args: arguments.to_string(),
+                                        output: String::new(),
+                                        is_error: false,
                                     }],
                                     agent: None,
                                     model: None,
                                 },
                             );
                         }
-                        native_turn::Event::ToolOutput(name, output) => {
+                        native_turn::Event::ToolOutput {
+                            call_id,
+                            name,
+                            output,
+                            error,
+                        } => {
                             transcript.append(
                                 format!(
                                     "tool {}: {}",
                                     native_transcript::strip_ansi(&name),
                                     native_transcript::strip_ansi(&output)
                                 ),
-                                // This stream event does not carry an error flag.
-                                // Retain its tool role without inventing success.
-                                ChatMessage::text(ChatRole::Tool, format!("{name}: {output}")),
+                                ChatMessage {
+                                    role: ChatRole::Tool,
+                                    parts: crate::native_chat_projection::tool_output_parts(
+                                        &name,
+                                        &call_id,
+                                        &output,
+                                        error.is_some(),
+                                    ),
+                                    agent: None,
+                                    model: None,
+                                },
                             );
                         }
                         native_turn::Event::Assistant(text) => {
@@ -1804,35 +2019,77 @@ fn native_loop(
         // Center dialog overlay (native_setup): credentials stay masked in
         // its own lines; the facade keeps all three panes visible and
         // echoes the composer draft (never an API key) below it.
+        let busy_animation = worker.is_some() || model_load.is_some();
+        let next_tick = animation_start.elapsed().as_millis() / 80;
+        if busy_animation && next_tick != animation_tick {
+            animation_tick = next_tick;
+            needs_paint = true;
+        }
         let mut overlay: Vec<String> = match dialog {
             native_setup::Dialog::None => Vec::new(),
             native_setup::Dialog::Provider => {
-                let mut panel = vec!["Connect a provider".to_owned(), format!("Search providers: {filter_input}▏")];
+                let mut panel = vec![
+                    "Connect a provider".to_owned(),
+                    format!("Search providers: {filter_input}▏"),
+                ];
                 // The dialog's own bounded filter buffer (typing goes to
                 // `filter_input`, never the chat draft) — the overlay must
                 // echo and filter the SAME buffer the user is typing into.
                 let query = filter_input.trim().to_lowercase();
-                for (index, row) in providers.iter().filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query)).enumerate() {
-                    panel.push(format!("{} {}", if index == model_row { ">" } else { " " }, row.1));
+                for (index, row) in providers
+                    .iter()
+                    .filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query))
+                    .enumerate()
+                {
+                    panel.push(format!(
+                        "{} {}",
+                        if index == model_row { ">" } else { " " },
+                        row.1
+                    ));
                 }
-                if let Some(error) = &setup_error { panel.push(format!("Error: {error}")); }
-                if model_load.is_some() { panel.push("Loading saved provider models… Escape cancels".into()); }
+                if let Some(error) = &setup_error {
+                    panel.push(format!("Error: {error}"));
+                }
+                if model_load.is_some() {
+                    panel.push("Loading saved provider models… Escape cancels".into());
+                }
                 panel.push("Type to search · ↑/↓ select · Enter connect · Escape close".into());
                 panel
             }
-            native_setup::Dialog::ProviderId => vec!["Custom provider".into(), "Provider ID (lowercase letters, numbers, - or _)".into(), format!("ID: {filter_input}"), "Enter: continue · Escape: cancel".into()],
-            native_setup::Dialog::BaseUrl => vec![format!("Configure {provider_id}"), "OpenAI-compatible base URL (include /v1)".into(), format!("URL: {filter_input}"), "Enter: continue · Escape: cancel".into()],
+            native_setup::Dialog::ProviderId => vec![
+                "Custom provider".into(),
+                "Provider ID (lowercase letters, numbers, - or _)".into(),
+                format!("ID: {filter_input}"),
+                "Enter: continue · Escape: cancel".into(),
+            ],
+            native_setup::Dialog::BaseUrl => vec![
+                format!("Configure {provider_id}"),
+                "OpenAI-compatible base URL (include /v1)".into(),
+                format!("URL: {filter_input}"),
+                "Enter: continue · Escape: cancel".into(),
+            ],
             native_setup::Dialog::ApiKey => vec![
-                if provider_id == "openai" { "API key".to_owned() } else { format!("API key — {provider_id} (optional for local server)") },
+                if provider_id == "openai" {
+                    "API key".to_owned()
+                } else {
+                    format!("API key — {provider_id} (optional for local server)")
+                },
                 format!(
                     "key: {} (enter / escape)",
                     "*".repeat(key_input.chars().count().min(40))
                 ),
             ],
             native_setup::Dialog::Model => {
-                let mut panel = vec!["Select model".to_owned(), format!("Search models: {filter_input}▏")];
-                if model_load.is_some() { panel.push(format!("Loading models from {provider_id}… Escape cancels")); }
-                if let Some(error) = &setup_error { panel.push(format!("Error: {error} · /connect to retry")); }
+                let mut panel = vec![
+                    "Select model".to_owned(),
+                    format!("Search models: {filter_input}▏"),
+                ];
+                if model_load.is_some() {
+                    panel.push(format!("Loading models from {provider_id}… Escape cancels"));
+                }
+                if let Some(error) = &setup_error {
+                    panel.push(format!("Error: {error} · /connect to retry"));
+                }
                 // Same buffer fix as Provider: filter and echo read the
                 // dialog-local `filter_input`, never the chat draft.
                 let visible = native_setup::visible_rows(&models, &filter_input);
@@ -1841,16 +2098,48 @@ fn native_loop(
                     .saturating_sub(usize::from(view.modal_presentation().content_y) + 4)
                     .clamp(1, 10);
                 let start = active.saturating_sub(capacity - 1);
-                panel.extend(visible.iter().enumerate().skip(start).take(capacity).filter_map(|(shown, index)| {
-                    models.get(*index).map(|model| format!("{} {} — {}", if shown == active { ">" } else { " " }, model.qualified(), model.name))
-                }));
-                panel.push(format!("{} models · ↑/↓ select · Enter confirm · Escape close", visible.len()));
+                panel.extend(
+                    visible
+                        .iter()
+                        .enumerate()
+                        .skip(start)
+                        .take(capacity)
+                        .filter_map(|(shown, index)| {
+                            models.get(*index).map(|model| {
+                                format!(
+                                    "{} {} — {}",
+                                    if shown == active { ">" } else { " " },
+                                    model.qualified(),
+                                    model.name
+                                )
+                            })
+                        }),
+                );
+                panel.push(format!(
+                    "{} models · ↑/↓ select · Enter confirm · Escape close",
+                    visible.len()
+                ));
                 panel
             }
         };
-        if matches!(dialog, native_setup::Dialog::ProviderId | native_setup::Dialog::BaseUrl | native_setup::Dialog::ApiKey) {
-            if let Some(error) = &setup_error { overlay.push(format!("Error: {error}")); }
+        if matches!(
+            dialog,
+            native_setup::Dialog::ProviderId
+                | native_setup::Dialog::BaseUrl
+                | native_setup::Dialog::ApiKey
+        ) {
+            if let Some(error) = &setup_error {
+                overlay.push(format!("Error: {error}"));
+            }
         }
+        if view.dialogs.is_open() {
+            appearance.open = false;
+        }
+        if appearance.open {
+            overlay = appearance.rows(view.modal_presentation().content_width);
+        }
+        view.set_box_appearance(appearance.style.clone());
+        view.set_prompt_mode(draft.starts_with('!'));
         let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
             ""
         } else {
@@ -1889,7 +2178,10 @@ fn native_loop(
         }
         if needs_paint {
             let paint_started = Instant::now();
-            crate::native_debug::event("ui.state", serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"palette":view.command_palette_open(),"help":help_open,"session_route":session_route,"model":selected.as_ref().map(|model|model.qualified()),"model_count":models.len(),"model_loading":model_load.is_some(),"composer_bytes":draft.len(),"busy":worker.is_some(),"permission":dialog_open}));
+            crate::native_debug::event(
+                "ui.state",
+                serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"palette":view.command_palette_open(),"help":help_open,"session_route":session_route,"model":selected.as_ref().map(|model|model.qualified()),"model_count":models.len(),"model_loading":model_load.is_some(),"composer_bytes":draft.len(),"busy":worker.is_some(),"permission":dialog_open}),
+            );
             // Exact paint context: region geometry from the facade, modal
             // row count from this loop's own overlay content (or the
             // permission dialog's rendered content rows — rendered output
@@ -1919,14 +2211,61 @@ fn native_loop(
                     crate::native_view_pages::Page::Chat | crate::native_view_pages::Page::Theme
                 )
                 && !session_route;
-            let cursor = if !help_open && !dialog_open && !view.command_palette_open()
+            let cursor = if !help_open
+                && !dialog_open
+                && !view.command_palette_open()
                 && matches!(dialog, native_setup::Dialog::None)
                 && view.page() == crate::native_view_pages::Page::Chat
-            { view.home_cursor(draft_echo) } else { None };
+            {
+                view.home_cursor(draft_echo)
+            } else {
+                None
+            };
             if renderer.cols() > 0 && renderer.rows() > 0 {
                 let (x, y) = cursor.unwrap_or((0, 0));
                 renderer.set_cursor(u32::from(x), u32::from(y), cursor.is_some())?;
             }
+            let selectable: Vec<String> = lines
+                .iter()
+                .enumerate()
+                .map(|(row, line)| {
+                    use crate::native_view_chat::ChatRowClass as C;
+                    if !home
+                        && modal_rows.is_none()
+                        && !help_open
+                        && matches!(
+                            view.chat_row_classes().get(row),
+                            Some(
+                                C::UserCard
+                                    | C::AssistantCard
+                                    | C::SystemCard
+                                    | C::Text
+                                    | C::Thinking
+                                    | C::ToolCall
+                                    | C::ToolResult
+                                    | C::ToolError
+                                    | C::DiffAdded
+                                    | C::DiffRemoved
+                            )
+                        )
+                    {
+                        if let Some((left, width)) =
+                            view.chat_text_bounds().get(row).copied().flatten()
+                        {
+                            format!(
+                                "{}{}",
+                                " ".repeat(usize::from(left)),
+                                crate::native_view_layout::slice_cells(line, left, width)
+                            )
+                        } else {
+                            String::new()
+                        }
+                    } else {
+                        String::new()
+                    }
+                })
+                .collect();
+            selection.set_rows(&selectable, 0, 0, u32::from(presentation.main_width));
             native_paint(
                 &mut renderer,
                 &lines,
@@ -1937,6 +2276,27 @@ fn native_loop(
                     modal: view.modal_presentation(),
                     sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                     chat_row_classes: view.chat_row_classes().to_vec(),
+                    selection: selection.spans(),
+                    appearance: appearance.style.clone(),
+                    modal_box: if view.command_palette_open() {
+                        crate::native_box_style::BoxId::Menu
+                    } else {
+                        crate::native_box_style::BoxId::Dialog
+                    },
+                    loading: busy_animation.then(|| {
+                        (
+                            crate::native_box_style::frame(
+                                animation_start.elapsed().as_millis().min(u64::MAX as u128) as u64,
+                            ),
+                            if dialog_open {
+                                "Waiting approval"
+                            } else if model_load.is_some() {
+                                "Loading models"
+                            } else {
+                                "Working"
+                            },
+                        )
+                    }),
                     home,
                     composer: if help_open {
                         None
@@ -1951,11 +2311,15 @@ fn native_loop(
                 },
             )?;
             needs_paint = false;
-            crate::native_debug::event("ui.frame", serde_json::json!({"cols":renderer.cols(),"rows":renderer.rows(),"paint_us":paint_started.elapsed().as_micros()}));
+            crate::native_debug::event(
+                "ui.frame",
+                serde_json::json!({"cols":renderer.cols(),"rows":renderer.rows(),"paint_us":paint_started.elapsed().as_micros()}),
+            );
         }
         let now = Instant::now();
         input.expire(now);
-        let worker_deadline = (worker.is_some() || model_load.is_some()).then(|| now + Duration::from_millis(20));
+        let worker_deadline =
+            (worker.is_some() || model_load.is_some()).then(|| now + Duration::from_millis(20));
         let timeout = match (worker_deadline, input.next_deadline()) {
             (Some(a), Some(b)) => a.min(b).saturating_duration_since(now),
             (Some(a), None) => a.saturating_duration_since(now),
@@ -1978,7 +2342,10 @@ fn native_loop(
             if renderer.read_input(&mut byte)? == 0 {
                 break;
             }
-            crate::native_debug::event("input.raw", serde_json::json!({"bytes":1,"kind":if byte[0] == 27 {"escape_prefix"} else if byte[0] < 32 || byte[0] == 127 {"control"} else {"text_or_protocol"}}));
+            crate::native_debug::event(
+                "input.raw",
+                serde_json::json!({"bytes":1,"kind":if byte[0] == 27 {"escape_prefix"} else if byte[0] < 32 || byte[0] == 127 {"control"} else {"text_or_protocol"}}),
+            );
             // A terminal protocol prefix is a control boundary.  Do not let
             // an incomplete UTF-8 scalar straddle it; bytes emitted later by
             // a decoded Kitty event are ordinary input and remain eligible.
@@ -1989,14 +2356,20 @@ fn native_loop(
         }
         let Some(event) = input.pop() else { continue };
         let (kind, size, control) = match &event {
-            native_input_decoder::InputEvent::Byte(byte) if *byte < 32 || *byte == 127 => ("control", 1, Some(*byte)),
+            native_input_decoder::InputEvent::Byte(byte) if *byte < 32 || *byte == 127 => {
+                ("control", 1, Some(*byte))
+            }
             native_input_decoder::InputEvent::Byte(_) => ("text", 1, None),
             native_input_decoder::InputEvent::Paste(text) => ("paste", text.len(), None),
             native_input_decoder::InputEvent::ArrowUp => ("up", 0, None),
             native_input_decoder::InputEvent::ArrowDown => ("down", 0, None),
             native_input_decoder::InputEvent::Escape => ("escape", 0, None),
+            native_input_decoder::InputEvent::Mouse { .. } => ("mouse", 0, None),
         };
-        crate::native_debug::event("input.event", serde_json::json!({"kind":kind,"bytes":size,"control":control,"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"palette":view.command_palette_open(),"help":help_open,"permission":view.dialogs.intercepts_input(),"composer_bytes":draft.len(),"busy":worker.is_some()}));
+        crate::native_debug::event(
+            "input.event",
+            serde_json::json!({"kind":kind,"bytes":size,"control":control,"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"palette":view.command_palette_open(),"help":help_open,"permission":view.dialogs.intercepts_input(),"composer_bytes":draft.len(),"busy":worker.is_some()}),
+        );
         needs_paint = true;
         // Focus snapshot for this event: an open (non-Chat) page behaves
         // like the frozen Help overlay for focus purposes.
@@ -2009,6 +2382,59 @@ fn native_loop(
         let page_query_open = view.page().accepts_search();
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
+            native_input_decoder::InputEvent::Mouse { x, y, kind } => {
+                if appearance.open {
+                    let modal = view.modal_presentation();
+                    if appearance.pointer(
+                        x,
+                        y,
+                        kind,
+                        modal.x.saturating_add(2),
+                        modal.content_y,
+                        modal.content_width,
+                    ) && kind == 2
+                    {
+                        if let Err(error) =
+                            crate::native_ui_preferences::UiPreferences::persist_appearance(
+                                &state_path,
+                                &appearance.style,
+                            )
+                        {
+                            append_transcript(&mut transcript, format!("error: {error}"));
+                        }
+                    }
+                    needs_paint = true;
+                    continue;
+                }
+                match kind {
+                    0 => {
+                        selection.press(u32::from(x), u32::from(y));
+                    }
+                    1 => selection.drag(u32::from(x), u32::from(y)),
+                    2 => selection.release(),
+                    3 if !view.dialogs.is_open()
+                        && !view.command_palette_open()
+                        && matches!(dialog, native_setup::Dialog::None)
+                        && !help_open =>
+                    {
+                        selection.clear();
+                        view.scroll_up(3);
+                    }
+                    4 if !view.dialogs.is_open()
+                        && !view.command_palette_open()
+                        && matches!(dialog, native_setup::Dialog::None)
+                        && !help_open =>
+                    {
+                        selection.clear();
+                        view.scroll_down(3);
+                    }
+                    _ => {
+                        selection.clear();
+                    }
+                }
+                needs_paint = true;
+                continue;
+            }
             direction @ (native_input_decoder::InputEvent::ArrowUp
             | native_input_decoder::InputEvent::ArrowDown) => {
                 utf8.reset();
@@ -2023,25 +2449,46 @@ fn native_loop(
                 // Page selection owns arrows only when no higher-priority
                 // overlay owns focus. Never turn them into composer text or
                 // permission/credential actions.
-                if !page_open && !help_open && !view.dialogs.intercepts_input()
+                if !page_open
+                    && !help_open
+                    && !view.dialogs.intercepts_input()
                     && matches!(dialog, native_setup::Dialog::Model)
                 {
                     let visible = native_setup::visible_rows(&models, &filter_input);
                     model_row = native_setup::move_row(
-                        model_row, visible.len(),
+                        model_row,
+                        visible.len(),
                         matches!(direction, native_input_decoder::InputEvent::ArrowDown),
                     );
                     continue;
                 }
                 if dialog == native_setup::Dialog::Provider {
                     let query = filter_input.trim().to_lowercase();
-                    let count = providers.iter().filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query)).count();
-                    model_row = native_setup::move_row(model_row, count, matches!(direction, native_input_decoder::InputEvent::ArrowDown));
+                    let count = providers
+                        .iter()
+                        .filter(|row| {
+                            row.0.contains(&query) || row.1.to_lowercase().contains(&query)
+                        })
+                        .count();
+                    model_row = native_setup::move_row(
+                        model_row,
+                        count,
+                        matches!(direction, native_input_decoder::InputEvent::ArrowDown),
+                    );
                     continue;
                 }
-                if !page_open || help_open || view.dialogs.intercepts_input()
-                    || !matches!(dialog, native_setup::Dialog::None) { continue; }
-                if direction == native_input_decoder::InputEvent::ArrowUp { 2 } else { 14 }
+                if !page_open
+                    || help_open
+                    || view.dialogs.intercepts_input()
+                    || !matches!(dialog, native_setup::Dialog::None)
+                {
+                    continue;
+                }
+                if direction == native_input_decoder::InputEvent::ArrowUp {
+                    2
+                } else {
+                    14
+                }
             }
             native_input_decoder::InputEvent::Paste(text) => {
                 utf8.reset();
@@ -2057,7 +2504,9 @@ fn native_loop(
                 }
                 if view.command_palette_open() {
                     for character in text.chars() {
-                        if !view.command_palette_push(character) { break; }
+                        if !view.command_palette_push(character) {
+                            break;
+                        }
                     }
                     continue;
                 }
@@ -2098,6 +2547,35 @@ fn native_loop(
             // draft) while keeping protocol escape bytes out of the composer.
             native_input_decoder::InputEvent::Escape => 27,
         };
+        if appearance.open && !matches!(byte, 3 | 4) {
+            if appearance.key(byte) {
+                if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_appearance(
+                    &state_path,
+                    &appearance.style,
+                ) {
+                    append_transcript(&mut transcript, format!("error: {error}"));
+                }
+            }
+            needs_paint = true;
+            continue;
+        }
+        if byte == 3 {
+            if let Some(text) = selection.selected_text() {
+                let frame = selection_clipboard_frame(&text);
+                let mut stdout = std::io::stdout().lock();
+                stdout.write_all(frame.as_bytes())?;
+                stdout.flush()?;
+                crate::native_debug::event(
+                    "ui.selection_copy",
+                    serde_json::json!({"bytes":text.len()}),
+                );
+                selection.clear();
+                needs_paint = true;
+                continue;
+            }
+        } else if byte == 27 {
+            selection.clear();
+        }
         // Modal precedence: a pending permission decision owns input over
         // the Help frame and open pages — printables, page bindings and the
         // composer are intercepted; only choice navigation (Ctrl-N / Ctrl-B),
@@ -2157,10 +2635,16 @@ fn native_loop(
                 27 => view.close_command_palette(),
                 14 => view.command_palette_next(),
                 2 => view.command_palette_prev(),
-                8 | 127 => { view.command_palette_backspace(); }
+                8 | 127 => {
+                    view.command_palette_backspace();
+                }
                 13 | 10 => {
-                    if let Some(crate::native_command_palette::PaletteAction::Route(route)) = view.command_palette_activate() {
-                        if native_exit_route(route) { break; }
+                    if let Some(crate::native_command_palette::PaletteAction::Route(route)) =
+                        view.command_palette_activate()
+                    {
+                        if native_exit_route(route) {
+                            break;
+                        }
                         palette_route = Some(route);
                         view.close_command_palette();
                     }
@@ -2172,8 +2656,12 @@ fn native_loop(
                 }
                 _ => {}
             }
-            if byte < 0x20 || byte == 127 { utf8.reset(); }
-            if palette_route.is_none() { continue; }
+            if byte < 0x20 || byte == 127 {
+                utf8.reset();
+            }
+            if palette_route.is_none() {
+                continue;
+            }
         }
         // An open page owns focus the same way: only exit/close plus page
         // navigation (Ctrl-N / Ctrl-B) and confirmation (Enter) act; no
@@ -2382,7 +2870,10 @@ fn native_loop(
                 }
             }
             b'\r' | b'\n' => {
-                crate::native_debug::event("input.enter", serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"composer_bytes":draft.len(),"model":selected.as_ref().map(|model|model.qualified()),"daemon_attached":live.is_some(),"busy":worker.is_some()}));
+                crate::native_debug::event(
+                    "input.enter",
+                    serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"composer_bytes":draft.len(),"model":selected.as_ref().map(|model|model.qualified()),"daemon_attached":live.is_some(),"busy":worker.is_some()}),
+                );
                 utf8.reset();
                 // Set only by command-input Enter (Commands page); the
                 // composer path leaves it `None` and parses the draft
@@ -2594,65 +3085,130 @@ fn native_loop(
                     },
                 };
                 let command = text.trim();
-                if matches!(dialog, native_setup::Dialog::None)
-                    && native_exit_route(command)
-                {
+                if matches!(dialog, native_setup::Dialog::None) && native_exit_route(command) {
                     break;
                 }
                 if !matches!(dialog, native_setup::Dialog::None) {
                     match dialog {
                         native_setup::Dialog::Provider => {
                             let query = text.to_lowercase();
-                            let rows: Vec<_> = providers.iter().filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query)).collect();
-                            if let Some(row) = rows.get(native_setup::clamp_row(model_row, rows.len())) {
+                            let rows: Vec<_> = providers
+                                .iter()
+                                .filter(|row| {
+                                    row.0.contains(&query) || row.1.to_lowercase().contains(&query)
+                                })
+                                .collect();
+                            if let Some(row) =
+                                rows.get(native_setup::clamp_row(model_row, rows.len()))
+                            {
                                 model_load = None;
                                 provider_id = row.0.clone();
                                 provider_url = row.2.clone();
                                 setup_error = None;
                                 key_input.clear();
-                                dialog = if provider_id == "custom" { native_setup::Dialog::ProviderId }
-                                    else if provider_id == "openai" { native_setup::Dialog::ApiKey }
-                                    else { native_setup::Dialog::BaseUrl };
+                                dialog = if provider_id == "custom" {
+                                    native_setup::Dialog::ProviderId
+                                } else if provider_id == "openai" {
+                                    native_setup::Dialog::ApiKey
+                                } else {
+                                    native_setup::Dialog::BaseUrl
+                                };
                                 filter_input = provider_url.clone();
-                            } else { setup_error = Some("No provider matches".into()); }
+                            } else {
+                                setup_error = Some("No provider matches".into());
+                            }
                         }
                         native_setup::Dialog::ProviderId => {
-                            if !text.is_empty() && text.len() <= 128 && text.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_') && text != "openai" && text != "custom" {
+                            if !text.is_empty()
+                                && text.len() <= 128
+                                && text.bytes().all(|b| {
+                                    b.is_ascii_lowercase()
+                                        || b.is_ascii_digit()
+                                        || b == b'-'
+                                        || b == b'_'
+                                })
+                                && text != "openai"
+                                && text != "custom"
+                            {
                                 provider_id = text;
                                 dialog = native_setup::Dialog::BaseUrl;
                                 filter_input = "http://localhost:20128/v1".into();
                                 setup_error = None;
-                            } else { setup_error = Some("Use a lowercase provider ID (letters, numbers, - or _)".into()); }
+                            } else {
+                                setup_error = Some(
+                                    "Use a lowercase provider ID (letters, numbers, - or _)".into(),
+                                );
+                            }
                         }
                         native_setup::Dialog::BaseUrl => {
                             if let Ok(url) = reqwest::Url::parse(&text) {
-                                if matches!(url.scheme(), "http" | "https") && url.host_str().is_some() && url.username().is_empty() && url.password().is_none() && url.query().is_none() && url.fragment().is_none() && text.len() <= 2048 {
+                                if matches!(url.scheme(), "http" | "https")
+                                    && url.host_str().is_some()
+                                    && url.username().is_empty()
+                                    && url.password().is_none()
+                                    && url.query().is_none()
+                                    && url.fragment().is_none()
+                                    && text.len() <= 2048
+                                {
                                     provider_url = text.trim_end_matches('/').to_owned();
                                     dialog = native_setup::Dialog::ApiKey;
                                     key_input.clear();
                                     filter_input.clear();
                                     setup_error = None;
-                                } else { setup_error = Some("Enter a valid provider base URL without credentials, query or fragment".into()); }
-                            } else { setup_error = Some("Enter a valid provider base URL".into()); }
+                                } else {
+                                    setup_error = Some("Enter a valid provider base URL without credentials, query or fragment".into());
+                                }
+                            } else {
+                                setup_error = Some("Enter a valid provider base URL".into());
+                            }
                         }
                         native_setup::Dialog::ApiKey if provider_id != "openai" => {
                             let payload = serde_json::json!({"name":provider_id,"base_url":provider_url,"api_key":if text.is_empty() { None } else { Some(text.as_str()) }}).to_string();
-                            let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|snapshot| {
-                                http_request(&snapshot.origin, "POST", &format!("/api/providers/{provider_id}"), Some(&payload), auth)?;
-                                native_setup::ModelLoad::start(&snapshot.origin, auth, &provider_id)
-                            });
+                            let result = live
+                                .as_ref()
+                                .ok_or_else(|| "daemon unavailable".to_owned())
+                                .and_then(|snapshot| {
+                                    http_request(
+                                        &snapshot.origin,
+                                        "POST",
+                                        &format!("/api/providers/{provider_id}"),
+                                        Some(&payload),
+                                        auth,
+                                    )?;
+                                    native_setup::ModelLoad::start(
+                                        &snapshot.origin,
+                                        auth,
+                                        &provider_id,
+                                    )
+                                });
                             key_input.clear();
                             match result {
                                 Ok(load) => {
-                                    if !providers.iter().any(|row| row.0 == provider_id) { providers.insert(providers.len()-1, (provider_id.clone(), provider_id.clone(), provider_url.clone())); }
-                                    else if let Some(row) = providers.iter_mut().find(|row| row.0 == provider_id) { row.2 = provider_url.clone(); }
+                                    if !providers.iter().any(|row| row.0 == provider_id) {
+                                        providers.insert(
+                                            providers.len() - 1,
+                                            (
+                                                provider_id.clone(),
+                                                provider_id.clone(),
+                                                provider_url.clone(),
+                                            ),
+                                        );
+                                    } else if let Some(row) =
+                                        providers.iter_mut().find(|row| row.0 == provider_id)
+                                    {
+                                        row.2 = provider_url.clone();
+                                    }
                                     model_load = Some(load);
                                     setup_error = None;
                                     filter_input = format!("{provider_id}/");
                                     dialog = native_setup::Dialog::Model;
                                     model_row = 0;
                                 }
-                                Err(_) => setup_error = Some("Unable to save provider; check base URL and daemon".into()),
+                                Err(_) => {
+                                    setup_error = Some(
+                                        "Unable to save provider; check base URL and daemon".into(),
+                                    )
+                                }
                             }
                         }
                         native_setup::Dialog::ApiKey => {
@@ -2695,7 +3251,8 @@ fn native_loop(
                         native_setup::Dialog::Model => {
                             // Enter commits the focused advertised row. Query text is
                             // never itself a model identity.
-                            let choice = native_setup::selected_row(&models, &filter_input, model_row);
+                            let choice =
+                                native_setup::selected_row(&models, &filter_input, model_row);
                             if let Some(model) = choice {
                                 match native_setup::save_model(&model) {
                                     Ok(()) => {
@@ -2726,7 +3283,12 @@ fn native_loop(
                     // buffer: the API-key dialog keeps its segregated
                     // buffer and the chat draft is preserved verbatim
                     // through the entire provider/model/API-key flow.
-                    if !was_api && !matches!(dialog, native_setup::Dialog::BaseUrl | native_setup::Dialog::ProviderId) {
+                    if !was_api
+                        && !matches!(
+                            dialog,
+                            native_setup::Dialog::BaseUrl | native_setup::Dialog::ProviderId
+                        )
+                    {
                         filter_input.clear();
                     }
                     key_input.clear();
@@ -3001,6 +3563,12 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                if command == "/appearance" {
+                    appearance.open = true;
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    needs_paint = true;
+                    continue;
+                }
                 if command == "/connect" {
                     // Open the provider picker. A chat-composer typed
                     // "/connect" is consumed (command invocation, not an
@@ -3023,8 +3591,15 @@ fn native_loop(
                     model_row = 0;
                     if provider_id != "openai" && model_load.is_none() {
                         if let Some(snapshot) = live.as_ref() {
-                            match native_setup::ModelLoad::start(&snapshot.origin, auth, &provider_id) {
-                                Ok(load) => { model_load = Some(load); setup_error = None; }
+                            match native_setup::ModelLoad::start(
+                                &snapshot.origin,
+                                auth,
+                                &provider_id,
+                            ) {
+                                Ok(load) => {
+                                    model_load = Some(load);
+                                    setup_error = None;
+                                }
                                 Err(error) => setup_error = Some(error),
                             }
                         }
@@ -3065,49 +3640,72 @@ fn native_loop(
                         continue;
                     }
                     if let Some(snapshot) = live.as_ref() {
-                        if selected.is_none() {
+                        if selected.is_none() && !text.starts_with('!') {
                             if model_load.is_some() {
                                 append_transcript(&mut transcript, "error: models are still loading; prompt preserved. Press Enter when ready.".into());
                             } else {
-                                dialog = if models.is_empty() { native_setup::Dialog::Provider } else { native_setup::Dialog::Model };
+                                dialog = if models.is_empty() {
+                                    native_setup::Dialog::Provider
+                                } else {
+                                    native_setup::Dialog::Model
+                                };
                                 filter_input.clear();
                                 model_row = 0;
-                                setup_error = Some("Choose a model to send this prompt; your draft is preserved.".into());
+                                setup_error = Some(
+                                    "Choose a model to send this prompt; your draft is preserved."
+                                        .into(),
+                                );
                             }
                             continue;
                         }
                         {
-                            let result = selected
-                                .as_ref()
-                                .ok_or_else(|| "select a model with /connect".to_owned())
-                                .and_then(|model| {
-                                    native_turn::TurnWorker::start(
-                                        &snapshot.origin,
-                                        &snapshot.session_id,
-                                        auth.ok_or("missing daemon token")?,
-                                        &text,
-                                        &model.qualified(),
-                                    )
-                                })
-                                .map(|next| {
-                                    pending_submission = Some(text.clone());
-                                    // Capture the binding identity this
-                                    // worker is launched under: events only
-                                    // apply while both still match.
-                                    worker = Some(crate::native_view::OwnedWorker::new(
-                                        next,
-                                        snapshot.session_id.clone(),
-                                        binding_generation,
-                                    ));
-                                    partial.clear();
-                                });
+                            let result = if let Some(command) = text.strip_prefix('!') {
+                                native_turn::TurnWorker::start_shell(
+                                    &snapshot.origin,
+                                    &snapshot.session_id,
+                                    auth.ok_or("missing daemon token")?,
+                                    command.trim(),
+                                    None,
+                                )
+                            } else {
+                                selected
+                                    .as_ref()
+                                    .ok_or_else(|| "select a model with /connect".to_owned())
+                                    .and_then(|model| {
+                                        native_turn::TurnWorker::start(
+                                            &snapshot.origin,
+                                            &snapshot.session_id,
+                                            auth.ok_or("missing daemon token")?,
+                                            &text,
+                                            &model.qualified(),
+                                        )
+                                    })
+                            }
+                            .map(|next| {
+                                pending_submission = Some(text.clone());
+                                // Capture the binding identity this
+                                // worker is launched under: events only
+                                // apply while both still match.
+                                worker = Some(crate::native_view::OwnedWorker::new(
+                                    next,
+                                    snapshot.session_id.clone(),
+                                    binding_generation,
+                                ));
+                                partial.clear();
+                            });
                             if let Err(error) = result {
-                                crate::native_debug::event("turn.submit_rejected", serde_json::json!({"category":"worker_start_failed"}));
+                                crate::native_debug::event(
+                                    "turn.submit_rejected",
+                                    serde_json::json!({"category":"worker_start_failed"}),
+                                );
                                 append_transcript(&mut transcript, format!("error: {error}"));
                             }
                         }
                     } else {
-                        crate::native_debug::event("turn.submit_rejected", serde_json::json!({"category":"daemon_offline"}));
+                        crate::native_debug::event(
+                            "turn.submit_rejected",
+                            serde_json::json!({"category":"daemon_offline"}),
+                        );
                         append_transcript(
                             &mut transcript,
                             "offline: turn not executed".to_string(),
@@ -3173,7 +3771,12 @@ fn native_loop(
                             .is_some_and(|len| len <= limit)
                         {
                             target.push(character);
-                            if matches!(dialog, native_setup::Dialog::Model | native_setup::Dialog::Provider) { model_row = 0; }
+                            if matches!(
+                                dialog,
+                                native_setup::Dialog::Model | native_setup::Dialog::Provider
+                            ) {
+                                model_row = 0;
+                            }
                         }
                     }
                 }
@@ -3199,7 +3802,7 @@ fn native_loop(
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new" | "/sidebar")
+        || matches!(command, "/commands" | "/new" | "/sidebar" | "/appearance")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
@@ -3397,9 +4000,27 @@ pub fn run_with_dir(
         );
     }
     if let Some(origin) = &args.origin {
-        let snapshot_result = match fetch_snapshot(origin, args.session.as_deref(), auth) {
+        let fresh_id = if interactive && !args.once && args.session.is_none() {
+            let body = serde_json::json!({"title":"Chat","directory":std::env::current_dir()?})
+                .to_string();
+            let created = http_request(origin, "POST", "/api/sessions", Some(&body), auth)?;
+            let value: serde_json::Value = serde_json::from_str(&created)?;
+            Some(
+                value
+                    .pointer("/session/id")
+                    .and_then(|id| id.as_str())
+                    .ok_or("session create response missing id")?
+                    .to_owned(),
+            )
+        } else {
+            None
+        };
+        let requested_session = args.session.as_deref().or(fresh_id.as_deref());
+        let snapshot_result = match fetch_snapshot(origin, requested_session, auth) {
             Err(error) if error.contains("has no sessions yet") && auth.is_some() => {
-                let body = serde_json::json!({ "title": "Chat" }).to_string();
+                let body =
+                    serde_json::json!({ "title": "Chat", "directory":std::env::current_dir()? })
+                        .to_string();
                 let created = http_request(origin, "POST", "/api/sessions", Some(&body), auth)
                     .map_err(|error| format!("session create failed: {error}"))?;
                 let value: serde_json::Value = serde_json::from_str(&created)
@@ -3411,7 +4032,7 @@ pub fn run_with_dir(
                 {
                     return Err("session create response missing id".into());
                 }
-                fetch_snapshot(origin, args.session.as_deref(), auth)
+                fetch_snapshot(origin, requested_session, auth)
             }
             result => result,
         };
@@ -3546,13 +4167,24 @@ mod command_consumption_tests {
         palette.open(true);
         for entry in palette.visible() {
             let crate::native_command_palette::PaletteAction::Route(route) = entry.action;
-            assert!(super::native_exit_route(route)
-                || super::native_local_page_route(route).is_some()
-                || matches!(route, "/help" | "/sessions" | "/new" | "/connect" | "/models"),
-                "palette action has no local handler: {route}");
+            assert!(
+                super::native_exit_route(route)
+                    || super::native_local_page_route(route).is_some()
+                    || matches!(
+                        route,
+                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance"
+                    ),
+                "palette action has no local handler: {route}"
+            );
         }
-        assert_eq!(super::native_local_page_route("/status"), Some(crate::native_view_pages::Page::Status));
-        assert_eq!(super::native_local_page_route("/theme"), Some(crate::native_view_pages::Page::Theme));
+        assert_eq!(
+            super::native_local_page_route("/status"),
+            Some(crate::native_view_pages::Page::Status)
+        );
+        assert_eq!(
+            super::native_local_page_route("/theme"),
+            Some(crate::native_view_pages::Page::Theme)
+        );
         assert!(super::native_exit_route("/exit"));
         assert_eq!(super::native_local_page_route("/not-a-local-command"), None);
         assert!(!super::native_exit_route("/not-a-local-command"));

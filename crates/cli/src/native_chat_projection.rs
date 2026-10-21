@@ -145,6 +145,146 @@ fn tool_result_part(message: &Value, budget: &mut usize) -> Option<ChatPart> {
     })
 }
 
+fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
+    let Some(parts) = message.get("parts").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+    let mut output = Vec::new();
+    for part in parts.iter().take(64) {
+        let text = |key: &str| part.get(key).and_then(Value::as_str).unwrap_or("");
+        let projected = match text("type") {
+            "tool_call" => Some(ChatPart::ToolState {
+                name: take(text("name"), budget),
+                id: take(text("call_id"), budget),
+                status: take(
+                    part.get("status").and_then(Value::as_str).unwrap_or("call"),
+                    budget,
+                ),
+                args: take(
+                    &part
+                        .get("arguments")
+                        .map(Value::to_string)
+                        .unwrap_or_default(),
+                    budget,
+                ),
+                output: String::new(),
+                is_error: false,
+            }),
+            "tool_output" => {
+                let is_error = part
+                    .get("is_error")
+                    .and_then(Value::as_bool)
+                    .or_else(|| {
+                        part.get("success")
+                            .and_then(Value::as_bool)
+                            .map(|success| !success)
+                    })
+                    .or_else(|| part.get("error").map(|error| !error.is_null()))
+                    .unwrap_or(false);
+                output.extend(tool_output_parts_bounded(
+                    text("name"),
+                    text("call_id"),
+                    text("output"),
+                    is_error,
+                    budget,
+                ));
+                None
+            }
+            "text" => Some(ChatPart::Text(take(text("text"), budget))),
+            "reasoning" => Some(ChatPart::Thinking(take(text("text"), budget))),
+            "file" => Some(ChatPart::File {
+                filename: take(
+                    part.get("filename")
+                        .or_else(|| part.get("path"))
+                        .and_then(Value::as_str)
+                        .unwrap_or(""),
+                    budget,
+                ),
+                mime: take(text("mime"), budget),
+            }),
+            "subtask" | "task" => Some(ChatPart::Subtask {
+                agent: take(text("agent"), budget),
+                description: take(text("description"), budget),
+                background: part
+                    .get("background")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            }),
+            "retry" => Some(ChatPart::Retry {
+                attempt: part
+                    .get("attempt")
+                    .and_then(Value::as_u64)
+                    .unwrap_or(0)
+                    .min(usize::MAX as u64) as usize,
+                message: take(text("message"), budget),
+            }),
+            "step-start" | "step-finish" | "snapshot" | "agent" | "agent-switched"
+            | "model-switched" => Some(ChatPart::Step {
+                kind: take(text("type"), budget),
+                detail: take(&part.to_string(), budget),
+            }),
+            "compaction" => Some(ChatPart::Compaction {
+                reason: take(text("reason"), budget),
+            }),
+            "patch" => Some(ChatPart::Patch {
+                path: take(text("path"), budget),
+                diff: take(text("diff"), budget),
+            }),
+            _ => None,
+        };
+        if let Some(part) = projected {
+            output.push(part);
+        }
+    }
+    output
+}
+
+/// Only a versioned real-tool envelope supplies diff facts. Ordinary prose
+/// resembling a patch stays ordinary tool output.
+pub fn tool_output_parts(name: &str, id: &str, output: &str, is_error: bool) -> Vec<ChatPart> {
+    let mut budget = MAX_MESSAGE_BYTES;
+    tool_output_parts_bounded(name, id, output, is_error, &mut budget)
+}
+fn tool_output_parts_bounded(
+    name: &str,
+    id: &str,
+    output: &str,
+    is_error: bool,
+    budget: &mut usize,
+) -> Vec<ChatPart> {
+    let mut parts = Vec::new();
+    let mut end = output.len().min(MAX_MESSAGE_BYTES);
+    while !output.is_char_boundary(end) {
+        end -= 1;
+    }
+    let output = &output[..end];
+    let typed = serde_json::from_str::<Value>(output)
+        .ok()
+        .filter(|value| value["format"] == "opencode.file-edit.v1" && !is_error);
+    let body = typed
+        .as_ref()
+        .and_then(|value| value["output"].as_str())
+        .unwrap_or(output);
+    let status = take(if is_error { "error" } else { "result" }, budget);
+    parts.push(ChatPart::ToolState {
+        name: take(name, budget),
+        id: take(id, budget),
+        status,
+        args: String::new(),
+        output: take(body, budget),
+        is_error,
+    });
+    if let Some(edit) = typed {
+        if let Some(diff) = edit["diff"].as_str() {
+            parts.push(ChatPart::Patch {
+                path: take(edit["path"].as_str().unwrap_or(""), budget),
+                diff: take(diff, budget),
+            });
+        }
+    }
+    parts
+}
+
 /// Project one daemon message record into a typed chat message.
 ///
 /// `None` for anything that is not a well-formed record with at least one
@@ -160,18 +300,22 @@ pub fn project_message(message: &Value) -> Option<ChatMessage> {
     let mut budget = MAX_MESSAGE_BYTES;
     let mut parts: Vec<ChatPart> = Vec::with_capacity(4);
 
+    parts.extend(hydrated_parts(message, &mut budget));
+
     // Real inline payload only: `{"body":{"storage":"inline","text":...}}`.
     // A blob body has no inline text here and never gets a placeholder.
-    if let Some(text) = message
-        .get("body")
-        .filter(|body| body.get("storage").and_then(Value::as_str) == Some("inline"))
-        .and_then(|body| body.get("text"))
-        .and_then(Value::as_str)
-        .filter(|text| !text.is_empty())
-    {
-        let text = take(text, &mut budget);
-        if !text.is_empty() {
-            parts.push(ChatPart::Text(text));
+    if message.get("parts").and_then(Value::as_array).is_none() {
+        if let Some(text) = message
+            .get("body")
+            .filter(|body| body.get("storage").and_then(Value::as_str) == Some("inline"))
+            .and_then(|body| body.get("text"))
+            .and_then(Value::as_str)
+            .filter(|text| !text.is_empty())
+        {
+            let text = take(text, &mut budget);
+            if !text.is_empty() {
+                parts.push(ChatPart::Text(text));
+            }
         }
     }
 
@@ -230,6 +374,29 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn actual_hydrated_call_arguments_and_diff_are_visible() {
+        let record = json!({"role":"tool","parts":[
+            {"type":"tool_call","call_id":"edit-real","name":"edit","status":"completed","arguments":{"path":"source","oldString":"before","newString":"after"}},
+            {"type":"tool_output","call_id":"edit-real","name":"edit","success":true,"output":json!({"format":"opencode.file-edit.v1","path":"source","diff":"--- source\n+++ source\n@@ -1 +1 @@\n-before\n+after\n"}).to_string()}
+        ]});
+        let message = project_message(&record).unwrap();
+        let rows = super::super::native_view_chat::ChatView::new().render_typed_classified(
+            120,
+            30,
+            "workspace",
+            &[message],
+            "",
+            false,
+        );
+        assert!(
+            rows.iter().any(|(row, _)| row.contains("oldString")),
+            "actual call arguments were discarded"
+        );
+        assert!(rows.iter().any(|(row, _)| row.contains("-before")));
+        assert!(rows.iter().any(|(row, _)| row.contains("+after")));
+    }
+
     /// The exact `/api/sessions/{id}/messages` record shape
     /// (`contracts::MessageRecord` + `PayloadRef::Inline` tags).
     fn inline(role: &str, text: &str) -> Value {
@@ -261,6 +428,27 @@ mod tests {
     }
 
     #[test]
+    fn hydrated_typed_tool_parts_preserve_order_and_backend_status() {
+        let mut value = inline("assistant", "answer");
+        value["parts"] = serde_json::json!([
+            {"type":"tool_call", "call_id":"c1", "name":"bash", "arguments":{"command":"printf hi"}},
+            {"type":"tool_output", "call_id":"c1", "name":"bash", "output":"hi", "error":null}
+        ]);
+        let projected = project_message(&value).expect("typed message");
+        assert_eq!(
+            projected.parts.len(),
+            2,
+            "hydrated typed parts must be authoritative"
+        );
+        assert!(
+            matches!(&projected.parts[0], ChatPart::ToolState { name, id, args, .. } if name == "bash" && id == "c1" && args.contains("printf hi"))
+        );
+        assert!(
+            matches!(&projected.parts[1], ChatPart::ToolState { name, id, output, is_error, .. } if name == "bash" && id == "c1" && output == "hi" && !is_error)
+        );
+    }
+
+    #[test]
     fn roles_are_never_parsed_from_text() {
         // Explicit role wins; a text body shaped like a role prefix is text.
         let message = project_message(&inline("assistant", "user: actually assistant")).unwrap();
@@ -270,15 +458,19 @@ mod tests {
             vec![ChatPart::Text("user: actually assistant".to_owned())]
         );
         // Unknown and missing roles project to None — never a fake System.
-        assert!(project_message(&json!({
-            "role": "wizard",
-            "body": {"storage": "inline", "text": "x"}
-        }))
-        .is_none());
-        assert!(project_message(&json!({
-            "body": {"storage": "inline", "text": "x"}
-        }))
-        .is_none());
+        assert!(
+            project_message(&json!({
+                "role": "wizard",
+                "body": {"storage": "inline", "text": "x"}
+            }))
+            .is_none()
+        );
+        assert!(
+            project_message(&json!({
+                "body": {"storage": "inline", "text": "x"}
+            }))
+            .is_none()
+        );
         assert!(project_message(&json!("user: hi")).is_none());
         assert!(project_message(&json!(null)).is_none());
         assert!(project_message(&json!({"role": 7, "body": {}})).is_none());
@@ -292,11 +484,13 @@ mod tests {
         });
         assert!(project_message(&blob).is_none(), "no fabricated text");
         // Unknown storage tag is equally unpresentable here.
-        assert!(project_message(&json!({
-            "role": "user",
-            "body": {"storage": "future", "text": "x"}
-        }))
-        .is_none());
+        assert!(
+            project_message(&json!({
+                "role": "user",
+                "body": {"storage": "future", "text": "x"}
+            }))
+            .is_none()
+        );
         // Empty inline text carries no part either.
         assert!(project_message(&inline("assistant", "")).is_none());
     }
@@ -402,11 +596,13 @@ mod tests {
             }]
         );
         // A tool part without a name is refused, never guessed.
-        assert!(project_message(&json!({
-            "role": "tool",
-            "tool_output": {"output": "x"}
-        }))
-        .is_none());
+        assert!(
+            project_message(&json!({
+                "role": "tool",
+                "tool_output": {"output": "x"}
+            }))
+            .is_none()
+        );
     }
 
     #[test]
@@ -441,6 +637,22 @@ mod tests {
             .map(|part| match part {
                 ChatPart::Text(text) | ChatPart::Thinking(text) => text.len(),
                 ChatPart::ToolCall { name, id } => name.len() + id.len(),
+                ChatPart::ToolState {
+                    name,
+                    id,
+                    status,
+                    args,
+                    output,
+                    ..
+                } => name.len() + id.len() + status.len() + args.len() + output.len(),
+                ChatPart::File { filename, mime } => filename.len() + mime.len(),
+                ChatPart::Subtask {
+                    agent, description, ..
+                } => agent.len() + description.len(),
+                ChatPart::Retry { message, .. } => message.len(),
+                ChatPart::Step { kind, detail } => kind.len() + detail.len(),
+                ChatPart::Compaction { reason } => reason.len(),
+                ChatPart::Patch { path, diff } => path.len() + diff.len(),
                 ChatPart::ToolResult { name, output, .. } => name.len() + output.len(),
             })
             .sum();

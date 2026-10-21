@@ -5,12 +5,13 @@ use opencode_rk_contracts::{
     CapabilityReport, DiagnosticReport, MessageRole, SessionId, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_server::{
+    AppState,
     daemon::{
-        publish_backend_descriptor_with_auth, read_backend_descriptor, DaemonError, DaemonPaths,
-        SingletonDaemon,
+        DaemonError, DaemonPaths, SingletonDaemon, publish_backend_descriptor_with_auth,
+        read_backend_descriptor,
     },
     daemon_auth::DaemonAuth,
-    router_with_auth, AppState,
+    router_with_auth,
 };
 use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
@@ -25,7 +26,6 @@ use tui_entry::TuiArgs;
 mod app_start;
 mod chat;
 mod daemon_client;
-mod native_debug;
 mod diagnostics;
 mod graph;
 mod headless_engine;
@@ -33,18 +33,25 @@ mod install_commands;
 mod medown;
 mod modals;
 mod native_app;
+#[cfg(feature = "native")]
+mod native_appearance;
 mod native_approvals;
+#[cfg(feature = "native")]
+mod native_box_style;
 mod native_chat_history;
 #[cfg(feature = "native")]
 mod native_chat_projection;
-mod native_composer;
 #[cfg(feature = "native")]
 mod native_command_palette;
+mod native_composer;
+mod native_debug;
 mod native_layout;
 mod native_navigation;
 mod native_palette;
 mod native_shell;
 mod native_status;
+#[cfg(feature = "native")]
+mod native_text_selection;
 mod native_theme;
 #[cfg(feature = "native")]
 mod native_theme_assets;
@@ -104,6 +111,9 @@ struct Cli {
     /// Non-global: the `tui` subcommand keeps its own `--once`.
     #[arg(long)]
     once: bool,
+    /// Resume an exact session; interactive launch otherwise creates a new one.
+    #[arg(short = 's', long)]
+    session: Option<String>,
     /// No subcommand opens the interactive chat TUI.
     #[command(subcommand)]
     command: Option<Command>,
@@ -245,8 +255,14 @@ enum ModelCommand {
 async fn main() {
     let cli = Cli::parse();
     if let Ok(data) = resolve_data_dir(cli.data_dir.clone()) {
-        let role = if matches!(&cli.command, Some(Command::Serve(_))) { "daemon" } else { "client" };
-        if let Err(error) = native_debug::init(&data, role) { eprintln!("event log unavailable: {error}"); }
+        let role = if matches!(&cli.command, Some(Command::Serve(_))) {
+            "daemon"
+        } else {
+            "client"
+        };
+        if let Err(error) = native_debug::init(&data, role) {
+            eprintln!("event log unavailable: {error}");
+        }
     }
     tracing_subscriber::fmt()
         .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,opencode_rk_cli=debug,opencode_rk_server=debug,opencode_rk_providers=debug".into()))
@@ -254,7 +270,10 @@ async fn main() {
         .with_writer(native_debug::trace_writer)
         .init();
     if let Err(e) = run(cli).await {
-        native_debug::event("app.error", serde_json::json!({"category":"command_failed"}));
+        native_debug::event(
+            "app.error",
+            serde_json::json!({"category":"command_failed"}),
+        );
         eprintln!("error: {e}");
         std::process::exit(1);
     }
@@ -278,7 +297,7 @@ async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
                         let args = TuiArgs {
                             once: cli.once,
                             origin: None,
-                            session: None,
+                            session: cli.session,
                             follow: false,
                             follow_for: None,
                             poll_ms: 1000,
@@ -418,7 +437,10 @@ async fn doctor(args: DoctorArgs) -> Result<(), Box<dyn std::error::Error>> {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
         println!("OpenCode RK {}", output.report.version);
-        println!("native core: yes\nembedded sqlite: yes\njavascript compatibility host: disabled\nos sandbox: {}", diagnostics::sandbox_backend_name());
+        println!(
+            "native core: yes\nembedded sqlite: yes\njavascript compatibility host: disabled\nos sandbox: {}",
+            diagnostics::sandbox_backend_name()
+        );
         println!("auth: {}", output.checks.auth.status);
         println!("connectivity: {}", output.checks.connectivity.status);
         println!("tools: {}", output.checks.tools.status);

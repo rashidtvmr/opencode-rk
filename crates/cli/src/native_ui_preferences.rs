@@ -40,6 +40,26 @@ pub struct UiPreferences {
 }
 
 impl UiPreferences {
+    pub fn appearance(state_path: &Path) -> Result<crate::native_box_style::BoxAppearance, String> {
+        let state = read_state(state_path)?;
+        state
+            .get("box_appearance")
+            .cloned()
+            .map(|value| {
+                serde_json::from_value(value)
+                    .map_err(|error| format!("invalid box appearance: {error}"))
+            })
+            .transpose()
+            .map(|value| value.unwrap_or_default())
+    }
+    pub fn persist_appearance(
+        state_path: &Path,
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) -> Result<(), String> {
+        appearance.validate()?;
+        let value = serde_json::to_value(appearance).map_err(|error| error.to_string())?;
+        update_state(state_path, "box_appearance", Some(value))
+    }
     /// Load configs in increasing precedence (global first, project last) and
     /// then read OpenTUI state from the explicit `.../opencode/kv.json` path.
     /// Invalid files are skipped independently, matching upstream's last-good
@@ -293,7 +313,7 @@ impl StateLocation {
                     match rfs::mkdirat(&directory, component, rfs::Mode::from_raw_mode(0o700)) {
                         Ok(()) | Err(rustix::io::Errno::EXIST) => {}
                         Err(_) => {
-                            return Err("unable to create anchored TUI state directory".into())
+                            return Err("unable to create anchored TUI state directory".into());
                         }
                     }
                     rfs::openat(&directory, component, flags, rfs::Mode::empty())
@@ -480,6 +500,44 @@ mod anchored_race_tests {
     }
 
     #[test]
+    fn appearance_roundtrip_preserves_other_preferences_and_per_box_override() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("kv.json");
+        fs::write(
+            &path,
+            br#"{"sidebar":"hide","theme":"user-theme","unrelated":{"keep":42}}"#,
+        )
+        .unwrap();
+        let mut style = crate::native_box_style::BoxAppearance::default();
+        style.preset = crate::native_box_style::RadiusPreset::IosSquircle;
+        style.overrides.insert(
+            crate::native_box_style::BoxId::ChatComposer,
+            crate::native_box_style::BoxOverride {
+                radius: Some(17),
+                preset: Some(crate::native_box_style::RadiusPreset::Custom),
+                ..Default::default()
+            },
+        );
+        UiPreferences::persist_appearance(&path, &style).unwrap();
+        assert_eq!(UiPreferences::appearance(&path).unwrap(), style);
+        let saved: Value = serde_json::from_slice(&fs::read(path).unwrap()).unwrap();
+        assert_eq!(saved["sidebar"], "hide");
+        assert_eq!(saved["theme"], "user-theme");
+        assert_eq!(saved["unrelated"]["keep"], 42);
+    }
+    #[test]
+    fn invalid_appearance_never_replaces_good_preferences() {
+        let fixture = Fixture::new();
+        let path = fixture.0.join("kv.json");
+        let bytes = br#"{"theme":"preserved"}"#;
+        fs::write(&path, bytes).unwrap();
+        let mut style = crate::native_box_style::BoxAppearance::default();
+        style.radius = 51;
+        assert!(UiPreferences::persist_appearance(&path, &style).is_err());
+        assert_eq!(fs::read(path).unwrap(), bytes);
+    }
+
+    #[test]
     fn destination_replacement_after_anchor_does_not_touch_symlink_target() {
         let fixture = Fixture::new();
         let path = fixture.0.join("kv.json");
@@ -493,10 +551,12 @@ mod anchored_race_tests {
         symlink(&target, &path).unwrap();
         assert!(location.write(value).is_err());
         assert_eq!(fs::read(&target).unwrap(), bytes);
-        assert!(fs::symlink_metadata(&path)
-            .unwrap()
-            .file_type()
-            .is_symlink());
+        assert!(
+            fs::symlink_metadata(&path)
+                .unwrap()
+                .file_type()
+                .is_symlink()
+        );
     }
 }
 
