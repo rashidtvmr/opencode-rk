@@ -14,7 +14,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from native_provider_setup import (  # noqa: E402
     HOST_LIBRARY_SUFFIX, MAX_PTY, TerminalScreen, checked_artifact, descriptor,
-    free_loopback_port, read_until, stop_owned_daemon,
+    free_loopback_port, read_until, home_ready, model_ready, persisted_session_id, session_ready, stop_owned_daemon,
 )
 
 MAX_REQUEST, MAX_RESPONSE, TIMEOUT = 128 * 1024, 256 * 1024, 20
@@ -248,7 +248,7 @@ def run(binary, library, manifest, artifacts):
         if descriptor_value.get("schema_version") != 1:
             raise RuntimeError("unexpected daemon descriptor schema")
         read_until(master, time.monotonic() + TIMEOUT, captures, b"OpenCode", 0,
-                    screen, lambda: screen.contains("model: openai/" + MODEL))
+                    screen, lambda: home_ready(screen, "Escape fixture"))
         raw_seen = not bool(termios.tcgetattr(master)[3] & termios.ICANON)
         # Seed, fragmented CSI/SS3 arrows, cursor report, Kitty Unicode 'c',
         # then a scalar backspace that removes the temporary emoji.

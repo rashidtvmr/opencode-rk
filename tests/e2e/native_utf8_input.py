@@ -7,7 +7,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from native_provider_setup import (  # noqa: E402
     HOST_LIBRARY_SUFFIX, MAX_PTY, TerminalScreen, checked_artifact, descriptor,
-    free_loopback_port, read_until,
+    free_loopback_port, read_until, home_ready, model_ready, persisted_session_id, session_ready,
 )
 from native_stream_tool import reap_cli_then_daemon  # noqa: E402
 
@@ -77,8 +77,8 @@ def write_fragments(master):
         os.write(master, bytes([byte])); time.sleep(.012)
     os.write(master, b"\x7f")
 
-def launch(exe, root, env, master, slave):
-    return subprocess.Popen([str(exe), "--data-dir", str(root / "data")], cwd=root / "project", env=env,
+def launch(exe, root, env, master, slave, resume_id=None):
+    return subprocess.Popen([str(exe), "--data-dir", str(root / "data")]+(["--session",resume_id] if resume_id else []), cwd=root / "project", env=env,
                             stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
 
 def run(binary, library, manifest, artifacts):
@@ -102,19 +102,21 @@ def run(binary, library, manifest, artifacts):
         master, slave = pty.openpty(); saved_attrs = termios.tcgetattr(master); import fcntl; fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",24,80,0,0))
         daemon = launch(install/"bin"/"oc2", root, env, master, slave); os.close(slave); slave = None
         d = descriptor(root/"data", port, daemon, time.monotonic()+TIMEOUT); descriptors.append(d)
-        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", 0, screen, lambda: screen.contains("model: openai/" + MODEL))
+        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", 0, screen, lambda: home_ready(screen, "UTF8 fixture"))
         raw_seen.append(not (termios.tcgetattr(master)[3] & termios.ICANON))
         write_fragments(master); os.write(master, b"\r")
         read_until(master, time.monotonic()+TIMEOUT, captures, ASSISTANT.encode(), len(captures), screen, lambda: screen.contains(ASSISTANT))
         if state.error or len(state.requests) != 1 or state.semantic_errors: raise AssertionError(state.error or state.semantic_errors or "expected one first request")
+        resume_id = persisted_session_id(d, ASSISTANT)
         reap_cli_then_daemon(daemon, d, master)
         cli_exits.append(daemon.returncode)
         restored.append(termios.tcgetattr(master) == saved_attrs)
         if not restored[-1]: raise AssertionError("first native PTY was not restored")
         daemon = None; os.close(master); master = None
-        master, slave = pty.openpty(); second_saved_attrs = termios.tcgetattr(master); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",24,80,0,0)); daemon = launch(install/"bin"/"oc2", root, env, master, slave); os.close(slave); slave=None
+        master, slave = pty.openpty(); second_saved_attrs = termios.tcgetattr(master); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH",24,80,0,0)); daemon = launch(install/"bin"/"oc2", root, env, master, slave, resume_id); os.close(slave); slave=None
         d2 = descriptor(root/"data", port, daemon, time.monotonic()+TIMEOUT); descriptors.append(d2); state.restart_generation=1; screen=TerminalScreen(); start=len(captures)
-        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", start, screen, lambda: screen.contains("model: openai/" + MODEL) and screen.contains(ASSISTANT))
+        read_until(master, time.monotonic()+TIMEOUT, captures, b"OpenCode", start, screen, lambda: session_ready(screen,resume_id,"UTF8 fixture") and screen.contains(ASSISTANT))
+        if persisted_session_id(d2, ASSISTANT) != resume_id: raise AssertionError("restart changed session identity")
         raw_seen.append(not (termios.tcgetattr(master)[3] & termios.ICANON))
         for byte in RESUMED.encode("utf-8"): os.write(master, bytes([byte])); time.sleep(.008)
         os.write(master, b"\r"); read_until(master, time.monotonic()+TIMEOUT, captures, b"UTF8_RESUMED_RESPONSE", start, screen, lambda: screen.contains("UTF8_RESUMED_RESPONSE"))
@@ -144,7 +146,7 @@ def run(binary, library, manifest, artifacts):
         cli_ok = bool(cli_exits) and all(code == 0 for code in cli_exits)
         lifecycle_ok = termios_ok and cli_ok and daemons_gone and thread_joined and len(raw_seen) == 2 and all(raw_seen)
         success = not (state.error or cleanup_error or state.semantic_errors or secret_echo) and lifecycle_ok and len(state.requests) == 2
-        evidence = {"phase":"success" if success else "failed", "error":state.error or cleanup_error or ("fixture credential echoed" if secret_echo else "" if success else "native ownership/terminal cleanup contract failed"), "source_sha":source, "binary_sha256":binary_sha,"native_library_sha256":library_sha, "test_sha256":sha256(pathlib.Path(__file__)), "requests":state.requests, "semantic_errors":state.semantic_errors, "raw_mode_seen":raw_seen, "pty_restoration_checks":restored, "cli_exit_codes":cli_exits, "termios_restored":termios_ok, "cli_reaped_zero":cli_ok, "validated_daemons_gone":daemons_gone, "provider_thread_joined":thread_joined, "max_captured_bytes":len(captures), "captured_bytes":bytes(captures).replace(KEY.encode(), b"[REDACTED]").decode("utf-8", "replace")}
+        evidence = {"phase":"success" if success else "failed", "error":state.error or cleanup_error or ("fixture credential echoed" if secret_echo else "" if success else "native ownership/terminal cleanup contract failed"), "source_sha":source, "binary_sha256":binary_sha,"native_library_sha256":library_sha, "resumed_session_id":locals().get("resume_id"), "test_sha256":sha256(pathlib.Path(__file__)), "requests":state.requests, "semantic_errors":state.semantic_errors, "raw_mode_seen":raw_seen, "pty_restoration_checks":restored, "cli_exit_codes":cli_exits, "termios_restored":termios_ok, "cli_reaped_zero":cli_ok, "validated_daemons_gone":daemons_gone, "provider_thread_joined":thread_joined, "max_captured_bytes":len(captures), "captured_bytes":bytes(captures).replace(KEY.encode(), b"[REDACTED]").decode("utf-8", "replace")}
         raw = json.dumps(evidence, ensure_ascii=False, indent=2) + "\n"
         if len(raw.encode()) > 512 * 1024: raise RuntimeError("evidence exceeded 512 KiB")
         (artifacts/("native-utf8-result.json" if evidence["phase"] == "success" else "native-utf8-failure.json")).write_text(raw)

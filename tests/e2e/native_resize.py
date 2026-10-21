@@ -28,7 +28,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from native_provider_setup import (  # noqa: E402
     HOST_LIBRARY_SUFFIX, MAX_PTY, TerminalScreen, checked_artifact, descriptor,
-    free_loopback_port, read_until, stop_owned_daemon,
+    free_loopback_port, read_until, home_ready, model_ready, stop_owned_daemon,
 )
 from native_escape_input import (  # noqa: E402
     FIRST, FIRST_REPLY, KEY, MODEL, SECOND, SECOND_REPLY, Fixture, Handler,
@@ -72,7 +72,7 @@ def bounded_resize_read(master, captured, screen, deadline, start):
             raise AssertionError("PTY EOF before resized native frame")
         captured.extend(chunk)
         screen.feed(chunk)
-        if len(captured) > start and screen.contains("OpenCode RK") and screen.contains(">"):
+        if len(captured) > start and model_ready(screen,"Resize fixture") and screen.contains(">"):
             return
     if len(captured) >= MAX_PTY:
         raise AssertionError("PTY capture bound reached while awaiting resized frame")
@@ -182,17 +182,17 @@ def run(binary, library, manifest, artifacts):
         if not isinstance(token, str) or len(token) != 64 or not re.fullmatch(r"[0-9a-fA-F]{64}", token):
             raise AssertionError("descriptor auth token is not a 64-hex capability")
         read_until(master, time.monotonic() + TIMEOUT, captured, b"OpenCode", 0,
-                    initial_screen, lambda: initial_screen.contains("model: openai/" + MODEL))
+                    initial_screen, lambda: home_ready(initial_screen,"Resize fixture"))
         raw_mode_seen = not bool(termios.tcgetattr(master)[3] & termios.ICANON)
         controlling_terminal_seen = os.tcgetpgrp(master) == child.pid
         if not controlling_terminal_seen:
             raise AssertionError("CLI does not own the foreground controlling-terminal group")
         send_fragments(master, FIRST.encode() + b"\r")
         read_until(master, time.monotonic() + TIMEOUT, captured, FIRST_REPLY.encode(),
-                    len(captured), initial_screen, lambda: initial_screen.contains("assistant: " + FIRST_REPLY))
+                    len(captured), initial_screen, lambda: initial_screen.contains(FIRST_REPLY))
         send_fragments(master, SECOND.encode() + b"\r")
         read_until(master, time.monotonic() + TIMEOUT, captured, SECOND_REPLY.encode(),
-                    len(captured), initial_screen, lambda: initial_screen.contains("assistant: " + SECOND_REPLY))
+                    len(captured), initial_screen, lambda: initial_screen.contains(SECOND_REPLY))
         messages = history(descriptor_value)
         if state.error or state.semantic_errors or len(state.requests) != 2:
             raise AssertionError(state.error or state.semantic_errors or "expected exactly two provider requests")

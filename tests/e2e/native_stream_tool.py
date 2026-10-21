@@ -40,7 +40,7 @@ from native_provider_setup import (  # noqa: E402
     descriptor,
     free_loopback_port,
     read_until,
-    stop_owned_daemon,
+    stop_owned_daemon, home_ready, session_ready, persisted_session_id,
 )
 
 MAX_REQUEST = 128 * 1024
@@ -298,7 +298,7 @@ def run(binary, library, manifest, artifacts):
         daemon = subprocess.Popen([str(install / "bin" / "oc2"), "--data-dir", str(root / "data")], cwd=root / "project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
         os.close(slave); slave = None
         d = descriptor(root / "data", port, daemon, time.monotonic() + FIXTURE_TIMEOUT); descriptors.append(d)
-        start = len(captures); read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, b"OpenCode", start, screen)
+        start = len(captures); read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, b"native Home", start, screen, lambda:home_ready(screen,"stream fixture"))
         os.write(master, (FIRST + "\r").encode())
         read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, PARTIAL.encode(), start, screen, lambda: screen.contains(PARTIAL))
         if state.phase != "waiting_partial_observation" or not state.stream_request_seen.is_set():
@@ -314,6 +314,7 @@ def run(binary, library, manifest, artifacts):
         if not screen.contains("success") and not screen.contains("completed"):
             raise AssertionError("native screen did not visibly identify tool completion")
         second_start = len(captures); os.write(master, (SECOND + "\r").encode()); read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, SECOND_FINAL.encode(), second_start, screen, lambda: screen.contains(SECOND_FINAL))
+        resume_id = persisted_session_id(d, SECOND_FINAL)
         old_daemon = daemon
         reap_cli_then_daemon(old_daemon, d, master)
         daemon = None
@@ -322,13 +323,14 @@ def run(binary, library, manifest, artifacts):
         # has terminated, preserving terminal ownership boundaries.
         os.close(master); master = None
         master, slave = pty.openpty(); fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-        daemon = subprocess.Popen([str(install / "bin" / "oc2"), "--data-dir", str(root / "data")], cwd=root / "project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
+        daemon = subprocess.Popen([str(install / "bin" / "oc2"), "--data-dir", str(root / "data"), "--session",resume_id], cwd=root / "project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
         os.close(slave); slave = None
         d2 = descriptor(root / "data", port, daemon, time.monotonic() + FIXTURE_TIMEOUT); descriptors.append(d2)
         state.restart_generation = 1
         screen = TerminalScreen(80, 24)
         start = len(captures)
-        read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, b"OpenCode", start, screen, lambda: screen.contains(FIRST) and screen.contains(MODEL))
+        read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, b"OpenCode", start, screen, lambda: session_ready(screen,resume_id,"stream fixture") and screen.contains(FIRST))
+        if persisted_session_id(d2, SECOND_FINAL) != resume_id: raise AssertionError("restart changed session identity")
         os.write(master, (RESUMED + "\r").encode())
         read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, RESUME.encode(), start, screen, lambda: screen.contains(RESUME))
         if state.error or len(state.requests) != 4 or state.restart_generation != 1:
@@ -365,7 +367,7 @@ def run(binary, library, manifest, artifacts):
                 except PermissionError:
                     owned_daemon_gone = False
                     state.fail("validated daemon ownership probe denied")
-        evidence = {"phase": state.phase, "error": redact(state.error or ""), "source_sha": source, "binary_sha256": binary_sha, "native_library_sha256": library_sha, "test_sha256": sha256(pathlib.Path(__file__)), "fixture_root": str(root), "provider_requests": len(state.requests), "requests": [{"model": x.get("model"), "stream": x.get("stream", False), "input": x.get("input")} for x in state.requests], "screen": redact(screen.text()), "captured_output": redact(bytes(captures[:MAX_PTY]).decode("utf-8", "replace")), "owned_process_cleanup": bool(daemon is None or daemon.poll() is not None) and owned_daemon_gone, "owned_descriptors": descriptors}
+        evidence = {"phase": state.phase, "error": redact(state.error or ""), "source_sha": source, "binary_sha256": binary_sha, "native_library_sha256": library_sha, "resumed_session_id":locals().get("resume_id"), "test_sha256": sha256(pathlib.Path(__file__)), "fixture_root": str(root), "provider_requests": len(state.requests), "requests": [{"model": x.get("model"), "stream": x.get("stream", False), "input": x.get("input")} for x in state.requests], "screen": redact(screen.text()), "captured_output": redact(bytes(captures[:MAX_PTY]).decode("utf-8", "replace")), "owned_process_cleanup": bool(daemon is None or daemon.poll() is not None) and owned_daemon_gone, "owned_descriptors": descriptors}
         raw_evidence = json.dumps(evidence, indent=2) + "\n"
         if len(raw_evidence.encode()) > 512 * 1024: raise RuntimeError("evidence exceeded 512 KiB")
         evidence_name = "native-stream-tool-result.json" if state.phase == "success" and not state.error else "native-stream-tool-failure.json"

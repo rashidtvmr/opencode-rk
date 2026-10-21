@@ -13,6 +13,18 @@ KEY, MODEL = "fixture-generated-key-7f3a", "gpt-5.6-mini"
 PROMPTS = ["native provider contract first", "native provider contract second"]
 HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 HOST_LIBRARY_SUFFIX = ".dylib" if sys.platform == "darwin" else ".so"
+# SOURCE: crates/contracts/src/lib.rs:73 `uuid_id!(SessionId)` renders the
+# canonical lowercase hyphenated UUID that the server accepts on its routes.
+CANONICAL_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+LOOPBACK_ORIGIN = re.compile(r"^http://127\.0\.0\.1:([1-9]\d{0,4})$")
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    # urllib's default opener re-sends Authorization on 301/302/303/307/308.
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise AssertionError("authenticated request redirect forbidden")
+
+# ProxyHandler({}) stops environment proxies from seeing the bearer token.
+HTTP_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoRedirect())
 
 class TerminalScreen:
     """Small bounded ANSI screen model; assertions use visible cells, not diffs."""
@@ -90,8 +102,13 @@ class TerminalScreen:
 
     def text(self): return "\n".join("".join(row).rstrip() for row in self.cells)
     def contains(self, marker): return marker.casefold() in self.text().casefold()
-    def has_model_status(self): return re.search(r"(?m)^model:\s*openai/" + re.escape(MODEL) + r"\b(?:\s*\(ctrl-p\))?\s*$", self.text()) is not None
-    def has_api_prompt(self): return re.search(r"(?m)^API key \(OpenAI\)\s*$", self.text()) is not None
+    def has_model_status(self): return model_ready(self, "Non-default fixture")
+    def has_api_prompt(self):
+        # SOURCE: crates/cli/src/tui_entry.rs:2078 renders "key: {} (enter /
+        # escape)" with an empty mask before typing, so zero stars is valid.
+        lines = [line.strip(" ╭╮╰╯│║┌┐└┘┃") for line in self.text().splitlines()]
+        return any(title == "API key" and re.fullmatch(r"key:\s*\*{0,40}\s*\(enter / escape\)", entry)
+                   for title, entry in zip(lines, lines[1:]))
     def has_assistant(self, text): return text.casefold() in self.text().casefold()
     def picker_closed(self): return not self.contains("Select model")
 
@@ -100,6 +117,49 @@ def sha256(path):
     with open(path, "rb") as f:
         for chunk in iter(lambda: f.read(65536), b""): h.update(chunk)
     return h.hexdigest()
+
+# Pinned 95daf906 Home logo: visible glyphs, not the discarded OSC title.
+HOME_LOGO = tuple(row.replace("_", " ").replace("^", "▀").replace("~", "▀") for row in (
+    "█▀▀█ █▀▀█ █▀▀█ █▀▀▄ █▀▀▀ █▀▀█ █▀▀█ █▀▀█",
+    "█__█ █__█ █^^^ █__█ █___ █__█ █__█ █^^^",
+    "▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀",
+))
+
+def model_ready(screen, model_label):
+    return screen.picker_closed() and re.search(r"(?:^|[\s·│║┃])"+re.escape(model_label)+r"\s+openai(?=$|[\s│║┃·])",screen.text(),re.MULTILINE) is not None
+
+def home_ready(screen, model_label=None):
+    return all(screen.contains(row) for row in HOME_LOGO) and screen.contains("Ask anything") and (model_label is None or model_ready(screen, model_label))
+
+def session_ready(screen, session_id, model_label):
+    composer = any(re.fullmatch(r"\s*[│║┃]\s*>\s*[│║┃]\s*",line) for line in screen.text().splitlines())
+    # Sidebar identity may be hidden at 80 columns; authenticate it separately.
+    return composer and model_ready(screen,model_label)
+
+def authenticated_json(descriptor_value, route):
+    """Exact loopback origin + fixture token; no redirect, no proxy, bounded read."""
+    match = LOOPBACK_ORIGIN.fullmatch(descriptor_value.get("http_origin", ""))
+    token = descriptor_value.get("auth_token", "")
+    if not match or int(match.group(1)) > 65535 or not isinstance(token, str) or not HEX64.fullmatch(token):
+        raise AssertionError("authenticated request needs exact loopback origin and fixture token")
+    request = urllib.request.Request(descriptor_value["http_origin"] + route, headers={"Authorization": "Bearer " + token})
+    with HTTP_OPENER.open(request, timeout=2) as response:
+        raw = response.read(MAX_RESPONSE + 1)
+        if response.status != 200 or len(raw) > MAX_RESPONSE:
+            raise AssertionError("bounded authenticated request failed")
+        return json.loads(raw)
+
+def persisted_session_id(descriptor_value, expected_assistant=None):
+    """Select only the sole authenticated session in this disposable fixture."""
+    sessions=authenticated_json(descriptor_value,"/api/sessions").get("sessions")
+    if not isinstance(sessions,list) or len(sessions)!=1:raise AssertionError("fixture must have exactly one persisted session")
+    selected=sessions[0].get("id")
+    if not isinstance(selected,str) or not CANONICAL_UUID.fullmatch(selected):raise AssertionError("invalid persisted session identity")
+    messages=authenticated_json(descriptor_value,f"/api/sessions/{selected}/messages").get("messages")
+    if not isinstance(messages,list) or not messages or any(message.get("session_id")!=selected for message in messages):raise AssertionError("persisted session history has missing/foreign identity")
+    if expected_assistant is not None and not any(message.get("role") == "assistant" and message.get("body", {}).get("text") == expected_assistant for message in messages):
+        raise AssertionError("persisted assistant role/content did not match")
+    return selected
 
 def checked_artifact(raw_binary, raw_library, raw_manifest):
     # Check the user-supplied spelling before resolve(); relative paths must not
@@ -213,16 +273,14 @@ def descriptor(data_root, port, child, deadline):
                 try: same_group = os.getpgid(daemon_pid) == child.pid
                 except OSError: same_group = False
             if same_group and origin == "http://127.0.0.1:%d" % port and HEX64.fullmatch(d.get("auth_token", "")):
-                req = urllib.request.Request("http://127.0.0.1:%d/api/models?limit=20" % port, headers={"Authorization":"Bearer "+d["auth_token"]})
-                with urllib.request.urlopen(req, timeout=2) as r:
-                    value = json.loads(r.read(MAX_RESPONSE))
-                    ids = {item.get("model_id") for item in value.get("models", [])
-                           if isinstance(item, dict) and item.get("provider_id") == "openai"}
-                    if r.status == 200 and {"gpt-5.6", MODEL} <= ids:
-                        d["_validated_pid"] = daemon_pid
-                        d["_owner_pgid"] = child.pid
-                        return d
-        except (OSError, ValueError, urllib.error.URLError): pass
+                value = authenticated_json(d, "/api/models?limit=20")
+                ids = {item.get("model_id") for item in value.get("models", [])
+                       if isinstance(item, dict) and item.get("provider_id") == "openai"}
+                if {"gpt-5.6", MODEL} <= ids:
+                    d["_validated_pid"] = daemon_pid
+                    d["_owner_pgid"] = child.pid
+                    return d
+        except (OSError, ValueError, urllib.error.URLError, AssertionError): pass
         time.sleep(.03)
     raise RuntimeError("owned authenticated daemon/models readiness failed")
 
@@ -247,16 +305,23 @@ def stop_owned_daemon(descriptor_value):
     except ProcessLookupError:
         return
 
-def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, auth_path):
+def run_ui(exe, env, root, first, captures, daemon_port, descriptor_records, auth_path, resume_id=None):
     master, slave = pty.openpty(); child = None; buf = bytearray(); descriptor_value = None; capture_added = False; screen = TerminalScreen()
     try:
         fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
-        child = subprocess.Popen([str(exe), "--data-dir", str(root/"d")], cwd=root/"project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
+        args=[str(exe), "--data-dir", str(root/"d")]
+        if not first:
+            if resume_id is None:raise AssertionError("restart requires the authenticated persisted session identity")
+            args += ["--session",resume_id]
+        child = subprocess.Popen(args, cwd=root/"project", env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True, close_fds=True)
         os.close(slave); slave = None
         descriptor_value = descriptor(root/"d", daemon_port, child, time.monotonic()+20)
         descriptor_records.append({"pid": descriptor_value["_validated_pid"], "owner_pgid": descriptor_value["_owner_pgid"], "origin": descriptor_value["http_origin"], "port": daemon_port})
         descriptor_records[-1]["phase"] = "initial_frame"
-        read_until(master, time.monotonic()+20, buf, b"OpenCode", 0, screen)
+        read_until(master, time.monotonic()+20, buf, b"native frame", 0, screen,
+                   lambda:home_ready(screen) if first else session_ready(screen,resume_id,"Non-default fixture") and screen.contains("G2 first response"))
+        if not first and persisted_session_id(descriptor_value, "G2 first response") != resume_id:
+            raise AssertionError("restart selected a different persisted session")
         def cmd(text, marker, predicate=None):
             descriptor_records[-1]["phase"] = "await_" + marker.decode("ascii")
             start = len(buf); previous = screen.text(); os.write(master, text.encode()+b"\r"); read_until(master, time.monotonic()+20, buf, marker, start, screen, predicate)
@@ -314,7 +379,7 @@ def self_check():
     terminal.feed(b"\x1b[2J\x1b[2;1Hmodel: openai/gpt-5.6")
     assert terminal.contains("model: openai/gpt-5.6")
     terminal.feed(b"\x1b[>0q\x1b[>1u\x1b[2;22H-mini (ctrl-p)")
-    assert terminal.has_model_status()
+    assert not terminal.has_model_status()  # obsolete status line is not a composer
     terminal.feed(b"\x1b]0;ignored title\x07\x1b[1;1H\xc3")
     terminal.feed(b"\xa9")
     assert terminal.text().startswith("model") or "model:" in terminal.text()
@@ -324,7 +389,16 @@ def self_check():
     observed = TerminalScreen()
     for chunk in (b"\x1b[2J\x1b[2;1Hmodel: openai/gpt-5.6", b"\x1b[2;22H-", b"mini (ctrl-p)"):
         observed.feed(chunk)
+    assert not observed.has_model_status()
+    observed.feed(b"\x1b[2J\x1b[2;1HNon-default fixture openai")
     assert observed.has_model_status()
+    observed.feed(b"\x1b[3;1HSelect model")
+    assert not observed.has_model_status()  # picker text cannot impersonate selection
+    fresh = TerminalScreen()
+    fresh.feed(("\x1b[2J"+"\n".join(HOME_LOGO)+"\nAsk anything\nNon-default fixture openai").encode())
+    assert home_ready(fresh,"Non-default fixture")
+    assert not home_ready(fresh,"Default fixture")
+    assert not home_ready(observed,"Non-default fixture")
     secret_screen = TerminalScreen()
     try:
         secret_screen.feed(KEY[:8].encode()); secret_screen.feed(KEY[8:].encode())
@@ -383,16 +457,17 @@ def main():
     fixture=Fixture(("127.0.0.1",0),Handler); fixture.state=State(); import threading; thread=threading.Thread(target=fixture.serve_forever); thread.start(); captures=bytearray(); descriptor_info=None; descriptor_records=[]
     provider_port=fixture.server_port; daemon_port=free_loopback_port()
     env={"HOME":str(root/"home"),"XDG_CONFIG_HOME":str(root/"home"/".config"),"XDG_DATA_HOME":str(data),"XDG_RUNTIME_DIR":str(data/"runtime"),"OPENCODE_RK_HOME":str(data),"OPENCODE_RK_DAEMON_ADDR":"127.0.0.1:%d"%daemon_port,"OPENCODE_PROJECT_DIR":str(root/"project"),"PATH":"/usr/bin:/bin","TERM":"xterm-256color","OPENAI_BASE_URL":"http://127.0.0.1:%d/v1"%provider_port}
-    (root/"home"/".config").mkdir(); failed=False
+    (root/"home"/".config").mkdir(); failed=False; resume_id=None
     try:
         auth=data/"opencode"/"auth.json"
         first_descriptor=run_ui(install/"bin"/"oc2",env,root,True,captures,daemon_port,descriptor_records,auth); descriptor_info=descriptor_records[-1]
         if not auth.is_file() or auth.stat().st_mode&0o777!=0o600: raise AssertionError("UI did not create 0600 auth.json")
         saved=json.loads(auth.read_text()).get("openai",{}); assert saved.get("type")=="api" and saved.get("key")==KEY
+        resume_id=persisted_session_id(first_descriptor, "G2 first response")
         stop_owned_daemon(first_descriptor)
-        second_descriptor = run_ui(install/"bin"/"oc2",env,root,False,captures,daemon_port,descriptor_records,auth)
+        second_descriptor = run_ui(install/"bin"/"oc2",env,root,False,captures,daemon_port,descriptor_records,auth,resume_id)
         if fixture.state.error or len(fixture.state.requests)!=2: raise AssertionError(fixture.state.error or "expected exactly two provider requests")
-        (artifacts/"native-provider-evidence.json").write_text(json.dumps({"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"model":MODEL,"request_count":2,"requests":[{"model":r.get("model"),"input":r.get("input")} for r in fixture.state.requests]},indent=2)+"\n")
+        (artifacts/"native-provider-evidence.json").write_text(json.dumps({"resumed_session_id":resume_id,"source_sha":source,"binary_sha256":binary_sha,"native_library_sha256":library_sha,"model":MODEL,"request_count":2,"requests":[{"model":r.get("model"),"input":r.get("input")} for r in fixture.state.requests]},indent=2)+"\n")
     except Exception: failed=True; raise
     finally:
         for record in descriptor_records:

@@ -53,7 +53,7 @@ HERE = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 from native_provider_setup import (  # noqa: E402
     HOST_LIBRARY_SUFFIX, MAX_PTY, TerminalScreen, checked_artifact, descriptor,
-    free_loopback_port, read_until, stop_owned_daemon,
+    free_loopback_port, read_until, home_ready, stop_owned_daemon,
 )
 
 MAX_REQUEST, MAX_RESPONSE, TIMEOUT, TOTAL_TIMEOUT = 128 * 1024, 256 * 1024, 20, 90
@@ -500,7 +500,7 @@ def run(binary, library, manifest, artifacts):
         if not isinstance(token, str) or not re.fullmatch(r"[0-9a-fA-F]{64}", token):
             raise RuntimeError("descriptor auth token is not a 64-hex capability")
         read_until(master, time.monotonic() + TIMEOUT, captures, b"OpenCode", 0,
-                    screen, lambda: screen.contains("model: openai/" + MODEL))
+                    screen, lambda: home_ready(screen,"Paste fixture"))
         raw_seen = not bool(termios.tcgetattr(master)[3] & termios.ICANON)
         controlling_terminal_seen = os.tcgetpgrp(master) == child.pid
         if not controlling_terminal_seen:

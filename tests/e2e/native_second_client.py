@@ -4,7 +4,7 @@
 A second local client attaches through the real native TUI path while the
 first client's streamed turn is in-flight (gated on the first provider
 delta). It must reuse the validated daemon descriptor (no second daemon),
-auto-resume the same live session through the product snapshot path, render
+explicitly resume the same live session through the product snapshot path, render
 the known first-turn user prompt visibly, and cause no additional provider
 request. The probe reuses the frozen native_stream_tool journey unmodified
 and only injects the overlap callback.
@@ -45,7 +45,7 @@ MAX_HTTP_BODY = 256 * 1024
 HEX64 = re.compile(r"^[0-9a-fA-F]{64}$")
 KEY = golden.KEY
 FIRST = golden.FIRST
-NATIVE_MARKER = "OpenCode RK (native)"
+NATIVE_MODEL_METADATA = "stream fixture openai"
 
 
 def sha256(path):
@@ -110,7 +110,7 @@ def authed_get(descriptor, path):
 
 
 def live_session_info(descriptor):
-    """Return (id, title) of the newest session, mirroring product auto-resume."""
+    """Return (id, title) of the sole authenticated fixture session."""
     value = authed_get(descriptor, "/api/sessions")
     sessions = value.get("sessions") if isinstance(value, dict) else None
     if not isinstance(sessions, list) or len(sessions) != 1:
@@ -140,6 +140,8 @@ def message_texts(descriptor, session_id):
     for message in messages:
         if not isinstance(message, dict):
             raise RuntimeError("message entry is not an object")
+        if message.get("session_id") != session_id:
+            raise RuntimeError("message belongs to a foreign session")
         role = message.get("role")
         body = message.get("body")
         if not isinstance(role, str) or not isinstance(body, dict):
@@ -170,6 +172,10 @@ def run_second_client(state, binary):
         raise RuntimeError("first client's validated daemon is not live") from error
     first_session, first_title = live_session_info(before)
     persisted = message_texts(before, first_session)
+    history_path = "/api/sessions/" + urllib.parse.quote(first_session, safe="") + "/messages?limit=200"
+    persisted_records = authed_get(before, history_path)
+    if (project / golden.FILE).exists():
+        raise RuntimeError("tool effect occurred before the paused provider emitted its call")
     if not any(role == "user" and text == FIRST for role, text in persisted):
         raise RuntimeError("first-turn user prompt is not yet persisted for the second client")
 
@@ -208,6 +214,8 @@ def run_second_client(state, binary):
                 str(binary),
                 "--data-dir",
                 str(data),
+                "--session",
+                first_session,
             ],
             cwd=project,
             env=env,
@@ -219,7 +227,9 @@ def run_second_client(state, binary):
         )
         os.close(slave)
         slave = None
-        expected_live = f"session: {first_title} (live)"
+        # native_view::composer_metadata renders the catalogue label/provider.
+        # Default 80-column sessions have no banner/title/count chrome. Session
+        # identity and unchanged message count are authenticated below instead.
         # native_loop labels the prompt as `you:` (the second-client screen is
         # the product's rendered snapshot, not the provider's role spelling).
         # Keep this assertion tied to the visible transcript rather than the
@@ -234,10 +244,10 @@ def run_second_client(state, binary):
             master,
             deadline,
             captured,
-            NATIVE_MARKER.encode(),
+            NATIVE_MODEL_METADATA.encode(),
             0,
             screen,
-            lambda: screen.contains(NATIVE_MARKER),
+            lambda: screen.contains(NATIVE_MODEL_METADATA) and screen.contains(">"),
         )
         if child.poll() is not None:
             raise RuntimeError("second client exited instead of attaching")
@@ -251,16 +261,6 @@ def run_second_client(state, binary):
         # for a *fresh* byte when given a predicate, so first accept the frame
         # already parsed by the marker read and only wait for a redraw when the
         # required transcript is genuinely absent.
-        if not screen.contains(expected_live):
-            read_until(
-                master,
-                deadline,
-                captured,
-                expected_live.encode(),
-                len(captured),
-                screen,
-                lambda: screen.contains(expected_live),
-            )
         if not screen.contains(expected_prompt):
             read_until(
                 master,
@@ -272,14 +272,10 @@ def run_second_client(state, binary):
                 lambda: screen.contains(expected_prompt),
             )
         visible = screen.text()
-        if NATIVE_MARKER not in visible:
+        if NATIVE_MODEL_METADATA not in visible or ">" not in visible:
             raise RuntimeError("second client did not render through the native TUI path")
-        if expected_live not in visible:
-            raise RuntimeError("second client did not render the live session title")
         if FIRST not in visible:
             raise RuntimeError("second client did not render the known first-turn prompt")
-        if "message" not in visible.lower():
-            raise RuntimeError("second client did not render a message count")
         after = backend_descriptor(data)
         if (after["pid"], after["origin"], after["token"]) != (
             before["pid"],
@@ -290,6 +286,12 @@ def run_second_client(state, binary):
         second_session, second_title = live_session_info(after)
         if second_session != first_session or second_title != first_title:
             raise RuntimeError("second client resumed a different session")
+        if message_texts(after, second_session) != persisted:
+            raise RuntimeError("second client changed the in-flight persisted history")
+        if authed_get(after, history_path) != persisted_records:
+            raise RuntimeError("second client changed persisted message identities or metadata")
+        if (project / golden.FILE).exists():
+            raise RuntimeError("second-client attachment caused a tool effect during the paused turn")
         if request_count(state) != 1:
             raise RuntimeError("second client duplicated provider work")
         if KEY.encode() in captured or KEY in visible:
@@ -340,7 +342,11 @@ def run_second_client(state, binary):
         return {
             "attached_to_existing_daemon": True,
             "daemon_pid": before["pid"],
-            "native_marker_observed": True,
+            "native_composer_observed": True,
+            "explicit_session_resume": first_session,
+            "unchanged_persisted_message_count": len(persisted),
+            "unchanged_persisted_records": True,
+            "no_tool_effect_during_attachment": True,
             "live_session_title": first_title,
             "live_session_id_match": True,
             "first_turn_prompt_rendered": True,
@@ -498,7 +504,8 @@ def run(binary, library, manifest, artifacts):
         "test_sha256": sha256(pathlib.Path(__file__).resolve()),
         "second_client": observations[0],
         "provider_requests": 4,
-        "typed_history_and_restart_resume": True,
+        "golden_journey_completed": True,
+        "golden_journey_scope": "native_stream_tool.run completed its provider typed-history and restart assertions after the overlap callback",
     }
     (artifacts / "native-second-client-result.json").write_text(
         json.dumps(evidence, indent=2) + "\n"
@@ -542,7 +549,7 @@ def self_check():
         sessions_seen = {
             "sessions": [{"id": "s1", "title": "Chat"}],
             "messages": [
-                {"role": "user", "body": {"storage": "inline", "text": FIRST}},
+                {"session_id": "s1", "role": "user", "body": {"storage": "inline", "text": FIRST}},
             ],
         }
 
@@ -606,18 +613,24 @@ def self_check():
                 raise AssertionError("empty messages accepted")
             except RuntimeError:
                 pass
-            sessions_seen["messages"] = [{"role": "user", "body": {"storage": "blob"}}]
+            sessions_seen["messages"] = [{"session_id": "s1", "role": "user", "body": {"storage": "blob"}}]
             try:
                 message_texts(fake, "s1")
                 raise AssertionError("non-inline body accepted")
-            except RuntimeError:
-                pass
+            except RuntimeError as error:
+                assert "inline text" in str(error), "non-inline negative exercised the wrong validation"
+            sessions_seen["messages"] = [{"session_id": "s2", "role": "user", "body": {"storage": "inline", "text": FIRST}}]
+            try:
+                message_texts(fake, "s1")
+                raise AssertionError("foreign session history accepted")
+            except RuntimeError as error:
+                assert "foreign session" in str(error), "ownership negative exercised the wrong validation"
             wrong = dict(fake, token="cd" * 32)
             try:
                 live_session_info(wrong)
                 raise AssertionError("wrong bearer accepted")
-            except Exception:
-                pass
+            except urllib.error.HTTPError as error:
+                assert error.code == 401, "wrong bearer failed for an unrelated reason"
         finally:
             server.shutdown()
             server.server_close()
