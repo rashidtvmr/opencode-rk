@@ -447,6 +447,81 @@ pub struct OpenAiResponsesStream {
     pending: Vec<u8>,
     received_bytes: usize,
     parser: ResponsesStreamParser,
+    buffered: bool,
+    buffered_events: std::collections::VecDeque<ResponsesStreamEvent>,
+    buffered_loaded: bool,
+}
+
+/// Validated complete Responses result, adapted to the same typed event
+/// protocol used by streaming providers. No events escape before validation.
+pub struct BufferedResponsesBody(Vec<ResponsesStreamEvent>);
+impl BufferedResponsesBody {
+    pub fn parse(body: &str) -> Result<Self, ResponsesError> {
+        if body.len() > MAX_RESPONSES_BODY_BYTES { return Err(ResponsesError::ResponseTooLarge { max: MAX_RESPONSES_BODY_BYTES }); }
+        let value: Value = serde_json::from_str(body).map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        let kind = match value["status"].as_str() {
+            Some("completed") => "response.completed",
+            Some("incomplete") => "response.incomplete",
+            Some("failed") => "response.failed",
+            _ => return Err(ResponsesError::UnexpectedStreamEnd),
+        };
+        let mut parser = ResponsesStreamParser::new();
+        let invalid = || ResponsesError::InvalidJson("invalid buffered Responses output".into());
+        if value.get("error").is_some_and(|error| !error.is_null()) || kind == "response.failed" {
+            return Err(ResponsesError::StreamFailed(value.pointer("/error/message").and_then(Value::as_str).unwrap_or("provider response failed").chars().take(1024).collect()));
+        }
+        let output = value["output"].as_array().ok_or_else(invalid)?;
+        if output.len() > 128 { return Err(invalid()); }
+        let mut events = Vec::new();
+        let mut calls = std::collections::BTreeSet::new();
+        let mut argument_bytes: usize = 0;
+        for item in output {
+            // Compatible providers may omit item status. An explicit status
+            // must agree with a completed envelope before any call can escape.
+            if kind == "response.completed" && item.get("status").is_some_and(|status| status.as_str() != Some("completed")) { return Err(invalid()); }
+            match item["type"].as_str() {
+                Some("message") => {
+                    if item["role"].as_str() != Some("assistant") { return Err(invalid()); }
+                    let content = item["content"].as_array().ok_or_else(invalid)?;
+                    for part in content {
+                        let text = match part["type"].as_str() {
+                            Some("output_text") => part["text"].as_str(),
+                            Some("refusal") => part["refusal"].as_str(),
+                            _ => return Err(invalid()),
+                        }.ok_or_else(invalid)?;
+                        if let Some(event) = parser.parse_event(None, &json!({"type":"response.output_text.delta","delta":text}).to_string())? { events.push(event); }
+                    }
+                }
+                Some("reasoning") => {
+                    if let Some(summary) = item.get("summary") {
+                        for part in summary.as_array().ok_or_else(invalid)? {
+                            if part["type"].as_str() != Some("summary_text") { return Err(invalid()); }
+                            let text = part["text"].as_str().ok_or_else(invalid)?;
+                            if let Some(event) = parser.parse_event(None, &json!({"type":"response.reasoning_summary_text.delta","delta":text}).to_string())? { events.push(event); }
+                        }
+                    }
+                }
+                Some("function_call") => {
+                    if kind == "response.incomplete" { continue; }
+                    let call_id = item["call_id"].as_str().ok_or_else(invalid)?;
+                    let name = item["name"].as_str().ok_or_else(invalid)?;
+                    let arguments = item["arguments"].as_str().ok_or_else(invalid)?;
+                    if call_id.is_empty() || call_id.len() > 256 || call_id.chars().any(char::is_control) || name.is_empty() || name.len() > 256 || name.chars().any(char::is_control) || !calls.insert(call_id) { return Err(invalid()); }
+                    argument_bytes = argument_bytes.saturating_add(arguments.len());
+                    if argument_bytes > MAX_INLINE_PAYLOAD_BYTES { return Err(ResponsesError::OutputTooLarge { max: MAX_INLINE_PAYLOAD_BYTES }); }
+                    let args: Value = serde_json::from_str(arguments).map_err(|_| invalid())?;
+                    if !args.is_object() { return Err(invalid()); }
+                    // Incomplete output can contain partial calls. Never turn
+                    // those into executable work; terminal semantics survive.
+                    events.push(ResponsesStreamEvent::FunctionCall { call_id:call_id.into(), name:name.into(), arguments:arguments.into() });
+                }
+                _ => return Err(invalid()),
+            }
+        }
+        if let Some(event) = parser.parse_event(Some(kind), &json!({"type":kind,"response":value}).to_string())? { events.push(event); }
+        Ok(Self(events))
+    }
+    pub fn into_events(self) -> Vec<ResponsesStreamEvent> { self.0 }
 }
 
 /// One reusable, redirect-disabled OpenAI Responses client.
@@ -456,6 +531,7 @@ pub struct OpenAiResponsesClient {
     base_url: String,
     api_key: Option<String>,
     max_output_tokens: u32,
+    buffered_model_ids: Vec<String>,
 }
 
 impl OpenAiResponsesClient {
@@ -491,7 +567,15 @@ impl OpenAiResponsesClient {
             base_url: config.base_url.trim_end_matches('/').to_owned(),
             api_key,
             max_output_tokens: config.max_tokens.clamp(1, 65_536),
+            buffered_model_ids: Vec::new(),
         })
+    }
+
+    /// Explicit capability selection, evaluated per request before dispatch.
+    /// This never retries an SSE failure or replays a partially executed round.
+    pub fn with_buffered_models(mut self, models: Vec<String>) -> Self {
+        self.buffered_model_ids = models;
+        self
     }
 
     pub async fn create(
@@ -554,7 +638,9 @@ impl OpenAiResponsesClient {
         items: &[ResponsesItem],
         tools: &[ResponsesTool],
     ) -> Result<OpenAiResponsesStream, ResponsesError> {
-        let mut payload = responses_request_payload(model, reasoning_effort, items, tools, true)?;
+        let buffered = self.buffered_model_ids.iter().any(|id| id == model);
+        let mut payload = responses_request_payload(model, reasoning_effort, items, tools, !buffered)?;
+        if buffered { payload["stream"] = json!(false); }
         payload["max_output_tokens"] = json!(self.max_output_tokens);
         payload["reasoning"]["summary"] = json!("auto");
         let mut request = self.http.post(format!("{}/responses", self.base_url)).json(&payload);
@@ -584,12 +670,26 @@ impl OpenAiResponsesClient {
             pending: Vec::new(),
             received_bytes: 0,
             parser: ResponsesStreamParser::new(),
+            buffered,
+            buffered_events: std::collections::VecDeque::new(),
+            buffered_loaded: false,
         })
     }
 }
 
 impl OpenAiResponsesStream {
     pub async fn next_event(&mut self) -> Result<Option<ResponsesStreamEvent>, ResponsesError> {
+        if self.buffered {
+            if !self.buffered_loaded {
+                // Buffer inside the cancellable event driver, not admission.
+                // Fully validate before a single tool call becomes observable.
+                self.buffered_loaded = true;
+                let body = read_bounded_body(&mut self.response).await?;
+                let text = std::str::from_utf8(&body).map_err(|_| ResponsesError::InvalidJson("invalid buffered UTF-8".into()))?;
+                self.buffered_events = BufferedResponsesBody::parse(text)?.into_events().into();
+            }
+            return Ok(self.buffered_events.pop_front());
+        }
         if self.parser.is_exhausted() {
             return Ok(None);
         }

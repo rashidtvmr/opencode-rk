@@ -14,6 +14,8 @@ pub struct CustomProviderConfig {
     pub id: String,
     pub name: String,
     pub base_url: String,
+    #[serde(default)]
+    pub buffered_model_ids: Vec<String>,
     #[serde(default, skip_serializing)]
     pub api_key: Option<String>,
 }
@@ -76,7 +78,9 @@ fn decode_configs(root: &Value) -> Result<Vec<CustomProviderConfig>, CustomProvi
         let name = value["name"].as_str().unwrap_or(id);
         if !valid_id(id) || name.len() > 256 || name.chars().any(char::is_control) { return Err(CustomProviderError::Invalid("invalid provider id or name".into())); }
         validate_base_url(base_url)?;
-        Ok(CustomProviderConfig { id: id.clone(), name: name.into(), base_url: base_url.into(), api_key: None })
+        let buffered_model_ids = value.get("buffered_model_ids").cloned().map(serde_json::from_value::<Vec<String>>).transpose().map_err(|_| CustomProviderError::Invalid("buffered_model_ids must be an array of model IDs".into()))?.unwrap_or_default();
+        validate_buffered_models(&buffered_model_ids)?;
+        Ok(CustomProviderConfig { id: id.clone(), name: name.into(), base_url: base_url.into(), api_key: None, buffered_model_ids })
     }).collect()
 }
 
@@ -95,18 +99,34 @@ pub async fn load(id: &str) -> Result<Option<CustomProviderConfig>, CustomProvid
 }
 
 pub async fn save(config: CustomProviderConfig) -> Result<(), CustomProviderError> {
+    save_options(config, false).await
+}
+
+/// UI registration updates that omit capabilities retain the on-disk mode
+/// under the same writer lock as the update (no read/update race).
+pub async fn save_preserving_buffered_models(config: CustomProviderConfig) -> Result<(), CustomProviderError> {
+    save_options(config, true).await
+}
+
+async fn save_options(config: CustomProviderConfig, preserve_buffered: bool) -> Result<(), CustomProviderError> {
     if !valid_id(&config.id) || config.name.is_empty() || config.name.len() > 256 || config.name.chars().any(char::is_control)
         || config.api_key.as_ref().is_some_and(|key| key.len() > 16 * 1024 || key.chars().any(char::is_control)) {
         return Err(CustomProviderError::Invalid("invalid provider id, name or credential".into()));
     }
     validate_base_url(&config.base_url)?;
+    validate_buffered_models(&config.buffered_model_ids)?;
     let path = config_path().ok_or(CustomProviderError::Io)?;
     static WRITER: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
     let permit = WRITER.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone().acquire_owned().await.map_err(|_| CustomProviderError::Io)?;
-    tokio::task::spawn_blocking(move || { let _permit = permit; save_at(&path, &config) }).await.map_err(|_| CustomProviderError::Io)?
+    tokio::task::spawn_blocking(move || { let _permit = permit; save_at_with_mode(&path, &config, preserve_buffered) }).await.map_err(|_| CustomProviderError::Io)?
 }
 
 fn save_at(path: &Path, config: &CustomProviderConfig) -> Result<(), CustomProviderError> {
+    save_at_with_mode(path, config, false)
+}
+
+fn save_at_with_mode(path: &Path, config: &CustomProviderConfig, preserve_buffered: bool) -> Result<(), CustomProviderError> {
+    validate_buffered_models(&config.buffered_model_ids)?;
     let mut root = read_root(path)?;
     let providers = root["providers"].as_object_mut().ok_or(CustomProviderError::Json)?;
     if providers.len() >= 128 && !providers.contains_key(&config.id) { return Err(CustomProviderError::Invalid("too many providers".into())); }
@@ -114,6 +134,9 @@ fn save_at(path: &Path, config: &CustomProviderConfig) -> Result<(), CustomProvi
     let item = providers.entry(config.id.clone()).or_insert_with(|| json!({})).as_object_mut().ok_or(CustomProviderError::Json)?;
     item.insert("name".into(), json!(config.name));
     item.insert("base_url".into(), json!(config.base_url));
+    if !preserve_buffered || !item.contains_key("buffered_model_ids") {
+        item.insert("buffered_model_ids".into(), json!(config.buffered_model_ids));
+    }
     let bytes = serde_json::to_vec_pretty(&root).map_err(|_| CustomProviderError::Json)?;
     if bytes.len() > MAX_CONFIG_BYTES { return Err(CustomProviderError::TooLarge(MAX_CONFIG_BYTES)); }
     let parent = path.parent().ok_or(CustomProviderError::Io)?;
@@ -126,6 +149,14 @@ fn save_at(path: &Path, config: &CustomProviderConfig) -> Result<(), CustomProvi
     let result = (|| { file.write_all(&bytes)?; file.sync_all()?; std::fs::rename(&temporary, path) })();
     if result.is_err() { let _ = std::fs::remove_file(&temporary); }
     result.map_err(|_| CustomProviderError::Io)
+}
+
+fn validate_buffered_models(models: &[String]) -> Result<(), CustomProviderError> {
+    let mut seen = BTreeSet::new();
+    if models.len() > 128 || models.iter().any(|id| id.is_empty() || id.len() > 256 || id.chars().any(char::is_control) || !seen.insert(id)) {
+        return Err(CustomProviderError::Invalid("buffered_model_ids must contain at most 128 distinct nonempty model IDs of at most 256 bytes".into()));
+    }
+    Ok(())
 }
 
 fn parse_models(bytes: &[u8]) -> Result<Vec<(String, String)>, CustomProviderError> {
@@ -173,8 +204,29 @@ mod tests {
     #[test] fn persistence_preserves_settings_and_excludes_credentials() {
         let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("custom.json");
         std::fs::write(&path, br#"{"other":true,"providers":{"keep":{"name":"Keep","base_url":"https://example.org/v1"},"9router":{"extra":true}}}"#).unwrap();
-        save_at(&path, &CustomProviderConfig { id:"9router".into(), name:"9router".into(), base_url:"http://localhost:20128/v1".into(), api_key:Some("fixture-key".into()) }).unwrap();
+        save_at(&path, &CustomProviderConfig { id:"9router".into(), name:"9router".into(), base_url:"http://localhost:20128/v1".into(), api_key:Some("fixture-key".into()), buffered_model_ids:Vec::new() }).unwrap();
         let root = read_root(&path).unwrap(); assert_eq!(root["other"], true); assert_eq!(root["providers"]["9router"]["extra"], true); assert!(root["providers"]["keep"].is_object());
         assert!(!std::fs::read_to_string(path).unwrap().contains("fixture-key"));
+    }
+    #[test] fn buffered_mode_persists_and_omitted_update_preserves_it() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("custom.json");
+        let mut config = CustomProviderConfig { id:"9router".into(),name:"Router".into(),base_url:"http://localhost:20128/v1".into(),api_key:None,buffered_model_ids:vec!["oc/deepseek-v4.1-flash-free".into()] };
+        save_at(&path,&config).unwrap();
+        assert_eq!(decode_configs(&read_root(&path).unwrap()).unwrap()[0].buffered_model_ids,config.buffered_model_ids);
+        config.name = "Renamed".into(); config.buffered_model_ids.clear();
+        save_at_with_mode(&path,&config,true).unwrap();
+        let loaded = decode_configs(&read_root(&path).unwrap()).unwrap();
+        assert_eq!(loaded[0].name,"Renamed");
+        assert_eq!(loaded[0].buffered_model_ids,vec!["oc/deepseek-v4.1-flash-free"]);
+        save_at(&path,&config).unwrap();
+        assert!(decode_configs(&read_root(&path).unwrap()).unwrap()[0].buffered_model_ids.is_empty());
+    }
+    #[test] fn buffered_mode_defaults_empty_and_rejects_malformed_or_unbounded_ids() {
+        let mut root = json!({"providers":{"9router":{"base_url":"http://localhost:20128/v1"}}});
+        assert!(decode_configs(&root).unwrap()[0].buffered_model_ids.is_empty());
+        for invalid in [json!(true),json!([""]),json!(["x","x"]),json!(["secret\n"]),json!(["x".repeat(257)]),json!((0..129).map(|index|format!("m{index}")).collect::<Vec<_>>())] {
+            root["providers"]["9router"]["buffered_model_ids"] = invalid;
+            assert!(decode_configs(&root).is_err());
+        }
     }
 }

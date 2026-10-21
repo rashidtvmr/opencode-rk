@@ -404,20 +404,23 @@ async fn save_provider_auth(
 }
 
 #[derive(Deserialize)]
-struct CustomProviderBody { name: String, base_url: String, api_key: Option<String> }
+struct CustomProviderBody { name: String, base_url: String, api_key: Option<String>, buffered_model_ids: Option<Vec<String>> }
 
 async fn list_custom_providers() -> Result<Json<Value>, ApiFailure> {
     let providers = custom_provider::list().await.map_err(ApiFailure::internal)?;
-    Ok(Json(json!({"providers": providers.into_iter().map(|p| json!({"id":p.id,"name":p.name,"base_url":p.base_url})).collect::<Vec<_>>() })))
+    Ok(Json(json!({"providers": providers.into_iter().map(|p| json!({"id":p.id,"name":p.name,"base_url":p.base_url,"buffered_model_ids":p.buffered_model_ids})).collect::<Vec<_>>() })))
 }
 
 async fn save_custom_provider(
     Path(id): Path<String>, Json(body): Json<CustomProviderBody>,
 ) -> Result<Json<Value>, ApiFailure> {
-    let config = CustomProviderConfig { id, name: body.name, base_url: body.base_url, api_key: body.api_key.filter(|key| !key.trim().is_empty()) };
+    let preserve_buffered = body.buffered_model_ids.is_none();
+    let buffered_model_ids = body.buffered_model_ids.unwrap_or_default();
+    let config = CustomProviderConfig { id, name: body.name, base_url: body.base_url, api_key: body.api_key.filter(|key| !key.trim().is_empty()), buffered_model_ids };
     let api_key = config.api_key.clone();
     let provider_id = config.id.clone();
-    custom_provider::save(config).await.map_err(|e| ApiFailure::bad_request(e.to_string()))?;
+    if preserve_buffered { custom_provider::save_preserving_buffered_models(config).await }
+    else { custom_provider::save(config).await }.map_err(|e| ApiFailure::bad_request(e.to_string()))?;
     if let Some(key) = api_key {
         opencode_rk_providers::persisted_auth::save_api_key(provider_id, key, None)
             .await.map_err(ApiFailure::bad_request)?;
@@ -433,7 +436,7 @@ async fn responses_client(provider_id: &str) -> Result<OpenAiResponsesClient, Re
         provider_id: config.id.clone(), base_url: config.base_url, api_key_env: format!("{}_API_KEY", config.id.to_uppercase()),
         timeout_secs: 60, max_tokens: 4096, temperature: 0.7,
     };
-    OpenAiResponsesClient::from_config(provider_config, config.api_key)
+    OpenAiResponsesClient::from_config(provider_config, config.api_key).map(|client| client.with_buffered_models(config.buffered_model_ids))
 }
 
 async fn discover_custom_provider_models(Path(id): Path<String>) -> Result<Json<Value>, ApiFailure> {
