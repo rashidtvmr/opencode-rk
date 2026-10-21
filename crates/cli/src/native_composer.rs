@@ -36,6 +36,29 @@ use std::fmt;
 pub const MAX_PASTE_BYTES: usize = 32 * 1024;
 /// Max total draft bytes retained (32 KiB).
 pub const MAX_DRAFT_BYTES: usize = 32 * 1024;
+
+/// Clear only the exact draft acknowledged by the backend. Edits made while
+/// admission is in flight belong to the user and must survive that ACK.
+pub fn acknowledge_submitted_draft(captured: &str, draft: &mut String) -> bool {
+    if draft == captured { draft.clear(); true } else { false }
+}
+
+#[cfg(test)]
+mod native_submission_ack_tests {
+    use super::acknowledge_submitted_draft;
+    #[test]
+    fn native_backend_ack_consumes_only_the_captured_unicode_draft() {
+        let mut draft = "change café 世界".to_owned();
+        assert!(acknowledge_submitted_draft("change café 世界", &mut draft));
+        assert!(draft.is_empty());
+        let mut edited = "change café 世界, then add a test".to_owned();
+        assert!(!acknowledge_submitted_draft("change café 世界", &mut edited));
+        assert_eq!(edited, "change café 世界, then add a test");
+        let mut replacement = "new task".to_owned();
+        assert!(!acknowledge_submitted_draft("old task", &mut replacement));
+        assert_eq!(replacement, "new task");
+    }
+}
 /// Max drafts queued while a turn is in flight.
 pub const BUSY_QUEUE_CAP: usize = 32;
 /// Undo snapshots retained per buffer.

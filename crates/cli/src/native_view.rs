@@ -109,6 +109,21 @@ pub struct NativeView {
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
 }
 
+#[cfg(test)]
+mod native_home_feedback_tests {
+    use super::*;
+    #[test]
+    fn native_home_displays_rejected_turn_without_hiding_the_draft() {
+        let mut view = NativeView::new(100, 30);
+        view.set_session_route(false);
+        let messages = [crate::native_view_chat::ChatMessage::text(crate::native_view_chat::ChatRole::System, "error: provider HTTP 429; prompt preserved")];
+        let rows = view.render_typed("retained café", &messages, false, &[]).join("\n");
+        assert!(rows.contains("HTTP 429"));
+        assert!(rows.contains("retained café"));
+        assert!(!view.session_route);
+    }
+}
+
 /// Region geometry for the current frame, without ANSI. Downstream style
 /// writers derive cell positions from this instead of parsing the frame.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1082,7 +1097,20 @@ impl NativeView {
             }
             body
         } else {
-            self.home_column(width, height, draft)
+            let mut home = self.home_column(width, height, draft);
+            let notice = transcript.last().map(String::as_str).or_else(|| {
+                let last = messages?.last()?;
+                if last.role != crate::native_view_chat::ChatRole::System { return None; }
+                last.parts.iter().rev().find_map(|part| match part { crate::native_view_chat::ChatPart::Text(text) => Some(text.as_str()), _ => None })
+            });
+            if height >= 2 {
+                if busy {
+                    home[height - 2] = padded("  Sending… waiting for provider", width);
+                } else if let Some(notice) = notice.filter(|notice| notice.starts_with("error:") || notice.starts_with("offline:")) {
+                    home[height - 2] = padded(&crate::native_transcript::strip_ansi(notice), width);
+                }
+            }
+            home
         };
         let sidebar: Vec<String> = if presentation.sidebar_width > 0 {
             // Backend facts remain available in the optional session sidebar;

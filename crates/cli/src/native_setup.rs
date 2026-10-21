@@ -126,6 +126,7 @@ pub(super) struct ModelLoad {
 
 impl ModelLoad {
     pub fn start(origin: &str, auth: Option<&str>, provider: &str) -> Result<Self, String> {
+        crate::native_debug::event("models.discovery_start", json!({"provider":provider,"credential_present":auth.is_some()}));
         if !provider.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_') || provider.is_empty() {
             return Err("invalid provider id".into());
         }
@@ -151,6 +152,7 @@ impl ModelLoad {
                 }
                 catalogue(std::str::from_utf8(&bytes).map_err(|_| "invalid model list encoding")?)
             }.await;
+            crate::native_debug::event("models.discovery_result", json!({"ok":result.is_ok(),"count":result.as_ref().ok().map(Vec::len)}));
             let _ = tx.send(result).await;
         });
         Ok(Self { rx, task, provider_id: provider.to_owned() })
@@ -166,7 +168,10 @@ impl ModelLoad {
 }
 
 impl Drop for ModelLoad {
-    fn drop(&mut self) { self.task.abort(); }
+    fn drop(&mut self) {
+        crate::native_debug::event("models.discovery_owner_drop", json!({"provider":self.provider_id,"finished":self.task.is_finished()}));
+        self.task.abort();
+    }
 }
 
 pub(super) fn save_model(model: &Model) -> Result<(), String> {

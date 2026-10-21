@@ -25,6 +25,7 @@ use tui_entry::TuiArgs;
 mod app_start;
 mod chat;
 mod daemon_client;
+mod native_debug;
 mod diagnostics;
 mod graph;
 mod headless_engine;
@@ -242,15 +243,22 @@ enum ModelCommand {
 }
 #[tokio::main]
 async fn main() {
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .with_writer(std::io::stderr)
-        .init();
     let cli = Cli::parse();
+    if let Ok(data) = resolve_data_dir(cli.data_dir.clone()) {
+        let role = if matches!(&cli.command, Some(Command::Serve(_))) { "daemon" } else { "client" };
+        if let Err(error) = native_debug::init(&data, role) { eprintln!("event log unavailable: {error}"); }
+    }
+    tracing_subscriber::fmt()
+        .with_env_filter(tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "warn,opencode_rk_cli=debug,opencode_rk_server=debug,opencode_rk_providers=debug".into()))
+        .with_ansi(false)
+        .with_writer(native_debug::trace_writer)
+        .init();
     if let Err(e) = run(cli).await {
+        native_debug::event("app.error", serde_json::json!({"category":"command_failed"}));
         eprintln!("error: {e}");
         std::process::exit(1);
     }
+    native_debug::event("app.exit", serde_json::json!({"status":"ok"}));
 }
 async fn run(cli: Cli) -> Result<(), Box<dyn std::error::Error>> {
     match cli.command {

@@ -1,0 +1,17 @@
+# A draining real-PTY driver. Commands on stdin are hexadecimal input bytes.
+set timeout 10
+log_user 0
+log_file -a [lindex $argv 2]
+set env(DYLD_LIBRARY_PATH) [lindex $argv 3]
+spawn -noecho [lindex $argv 0] --data-dir [lindex $argv 1] --native
+proc input_ready {} {
+    global spawn_id
+    if {[gets stdin command] < 0} { send -- "\004"; fileevent stdin readable {}; return }
+    send -i $spawn_id -- [encoding convertfrom utf-8 [binary format H* $command]]
+}
+fileevent stdin readable input_ready
+expect_background {
+    -re {.+} {}
+    eof { exit 0 }
+}
+vwait done

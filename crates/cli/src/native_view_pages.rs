@@ -202,6 +202,11 @@ impl Page {
         }
     }
 
+    /// Selection lists give typing to their search field, never the composer.
+    pub const fn accepts_search(self) -> bool {
+        matches!(self, Self::Sessions | Self::Models | Self::Providers | Self::Agents | Self::Workspaces | Self::Theme | Self::Mcp | Self::Commands)
+    }
+
     /// Static local route for this page (`None` for the `Chat` home page and
     /// for `Commands` itself).
     #[must_use]
@@ -269,6 +274,24 @@ impl Page {
             Page::Context => Page::Diff,
             Page::Commands => Page::Context,
         }
+    }
+}
+
+#[cfg(test)]
+mod searchable_selection_tests {
+    use super::*;
+    #[test]
+    fn native_selection_pages_have_an_explicit_search_field_above_results() {
+        let mut state = PageState::new();
+        for page in [Page::Sessions, Page::Models, Page::Providers, Page::Agents, Page::Workspaces, Page::Mcp, Page::Commands] {
+            state.open(page);
+            let rows = state.render(80, 10);
+            assert!(page.accepts_search());
+            assert!(rows[1].starts_with("Search:"), "{page:?}: {}", rows[1]);
+        }
+        assert!(!Page::Chat.accepts_search());
+        assert!(!Page::Help.accepts_search());
+        assert!(!Page::Status.accepts_search());
     }
 }
 
@@ -729,7 +752,7 @@ impl PageState {
         }
         out.push(clip_chars(
             &format!(
-                "/{} · {} of {} rows · theme {}",
+                "Search: {} · {} of {} rows · theme {}",
                 self.search,
                 visible.len(),
                 self.rows.len(),

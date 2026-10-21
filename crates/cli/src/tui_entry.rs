@@ -244,6 +244,21 @@ fn http_request_with_status(
     body: Option<&str>,
     auth: Option<&str>,
 ) -> Result<(String, u16), String> {
+    let started = Instant::now();
+    let route = path.split('?').next().unwrap_or(path);
+    crate::native_debug::event("http.request", serde_json::json!({"method":method,"route":route,"request_bytes":body.map_or(0,str::len),"credential_present":auth.is_some()}));
+    let result = http_request_with_status_inner(origin, method, path, body, auth);
+    crate::native_debug::event("http.response", serde_json::json!({"method":method,"route":route,"elapsed_ms":started.elapsed().as_millis(),"ok":result.is_ok(),"status":result.as_ref().ok().map(|(_,status)|status),"response_bytes":result.as_ref().ok().map(|(body,_)|body.len())}));
+    result
+}
+
+fn http_request_with_status_inner(
+    origin: &str,
+    method: &str,
+    path: &str,
+    body: Option<&str>,
+    auth: Option<&str>,
+) -> Result<(String, u16), String> {
     if path.starts_with("/api/") || path.starts_with("/auth/") {
         match auth {
             Some(token) if crate::daemon_client::is_wellformed_token(token) => {}
@@ -1135,6 +1150,7 @@ fn dispatch_permission_reply(
             )
         });
     let accepted = matches!(result, Ok(()));
+    crate::native_debug::event("permission.reply", serde_json::json!({"decision":reply,"attempt":attempt,"acknowledged":accepted,"request_id":request_id,"session_id":session_id}));
     if let Err(error) = &result {
         append_transcript(
             transcript,
@@ -1305,15 +1321,17 @@ fn native_loop(
 ) -> Result<(), Box<dyn std::error::Error>> {
     let (cols, rows) = native_size();
     let mut renderer = NativeRenderer::create(cols, rows)?;
+    crate::native_debug::event("ui.start", serde_json::json!({"cols":cols,"rows":rows,"daemon_attached":live.is_some(),"startup_view":format!("{startup_view:?}")}));
     renderer.setup_terminal()?;
+    // Native owns mouse input; otherwise the terminal selects the entire
+    // painted rectangular buffer, including Home whitespace and decoration.
+    renderer.enable_mouse(false)?;
     let _ = renderer.enable_kitty_keyboard(1);
     renderer.set_title("OpenCode RK")?;
     let mut draft = String::new();
-    let mut dialog = if startup_view == Some(crate::app_start::StartupView::Setup) {
-        native_setup::Dialog::Provider
-    } else {
-        native_setup::Dialog::None
-    };
+    // Setup is an action from Home, not a mandatory startup modal. In
+    // particular, custom-provider discovery must never steal composer input.
+    let mut dialog = native_setup::Dialog::None;
     let mut help_open = false;
     // Track whether the model catalogue was actually observed (HTTP + parse
     // succeeded): a failed fetch yields `None`, never a fabricated "confirmed
@@ -1366,6 +1384,7 @@ fn native_loop(
     // match; a superseded (stale) worker is drained and never touches the
     // current busy flag, transcript or live snapshot.
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
+    let mut pending_submission: Option<String> = None;
     let mut binding_generation: u64 = 0;
     // Segregated API-key dialog buffer: never stored as (or merged into)
     // the chat composer draft, never saved by any draft transaction.
@@ -1547,6 +1566,7 @@ fn native_loop(
         }
         if let Ok(Some(size)) = renderer.terminal_size() {
             if size != observed_size {
+                crate::native_debug::event("ui.resize", serde_json::json!({"old_cols":observed_size.0,"old_rows":observed_size.1,"cols":size.0,"rows":size.1}));
                 renderer.resize(size.0, size.1)?;
                 observed_size = size;
                 view.resize(size.0 as u16, size.1 as u16);
@@ -1574,6 +1594,11 @@ fn native_loop(
                         // turn moves the main column to the session route
                         // (Home → session), explicitly and only on ACK.
                         native_turn::Event::User => {
+                            if let Some(captured) = pending_submission.take() {
+                                crate::native_composer::acknowledge_submitted_draft(&captured, &mut draft);
+                                transcript.append(format!("you: {captured}"), ChatMessage::text(ChatRole::User, captured));
+                                crate::native_debug::event("turn.admission_ack", serde_json::json!({"composer_bytes":draft.len()}));
+                            }
                             if !session_route {
                                 session_route = true;
                                 view.set_session_route(true);
@@ -1620,6 +1645,7 @@ fn native_loop(
                             );
                         }
                         native_turn::Event::Error(error) => {
+                            pending_submission = None;
                             partial.clear();
                             remove_partial(&mut transcript);
                             settled = true;
@@ -1645,6 +1671,7 @@ fn native_loop(
         }
         if worker_finished {
             worker = None;
+            pending_submission = None;
             if binding_active {
                 if let Some(current) = live.as_ref() {
                     match fetch_snapshot(&current.origin, Some(&current.session_id), auth) {
@@ -1780,7 +1807,7 @@ fn native_loop(
         let mut overlay: Vec<String> = match dialog {
             native_setup::Dialog::None => Vec::new(),
             native_setup::Dialog::Provider => {
-                let mut panel = vec!["Connect a provider".to_owned()];
+                let mut panel = vec!["Connect a provider".to_owned(), format!("Search providers: {filter_input}▏")];
                 // The dialog's own bounded filter buffer (typing goes to
                 // `filter_input`, never the chat draft) — the overlay must
                 // echo and filter the SAME buffer the user is typing into.
@@ -1790,7 +1817,7 @@ fn native_loop(
                 }
                 if let Some(error) = &setup_error { panel.push(format!("Error: {error}")); }
                 if model_load.is_some() { panel.push("Loading saved provider models… Escape cancels".into()); }
-                panel.push(format!("filter: {filter_input} (enter / escape)"));
+                panel.push("Type to search · ↑/↓ select · Enter connect · Escape close".into());
                 panel
             }
             native_setup::Dialog::ProviderId => vec!["Custom provider".into(), "Provider ID (lowercase letters, numbers, - or _)".into(), format!("ID: {filter_input}"), "Enter: continue · Escape: cancel".into()],
@@ -1803,7 +1830,7 @@ fn native_loop(
                 ),
             ],
             native_setup::Dialog::Model => {
-                let mut panel = vec!["Select model".to_owned()];
+                let mut panel = vec!["Select model".to_owned(), format!("Search models: {filter_input}▏")];
                 if model_load.is_some() { panel.push(format!("Loading models from {provider_id}… Escape cancels")); }
                 if let Some(error) = &setup_error { panel.push(format!("Error: {error} · /connect to retry")); }
                 // Same buffer fix as Provider: filter and echo read the
@@ -1811,13 +1838,13 @@ fn native_loop(
                 let visible = native_setup::visible_rows(&models, &filter_input);
                 let active = native_setup::clamp_row(model_row, visible.len());
                 let capacity = (renderer.rows() as usize)
-                    .saturating_sub(usize::from(view.modal_presentation().content_y) + 3)
+                    .saturating_sub(usize::from(view.modal_presentation().content_y) + 4)
                     .clamp(1, 10);
                 let start = active.saturating_sub(capacity - 1);
                 panel.extend(visible.iter().enumerate().skip(start).take(capacity).filter_map(|(shown, index)| {
                     models.get(*index).map(|model| format!("{} {} — {}", if shown == active { ">" } else { " " }, model.qualified(), model.name))
                 }));
-                panel.push(format!("{} models · filter: {filter_input} (enter / escape)", visible.len()));
+                panel.push(format!("{} models · ↑/↓ select · Enter confirm · Escape close", visible.len()));
                 panel
             }
         };
@@ -1861,6 +1888,8 @@ fn native_loop(
                 .collect();
         }
         if needs_paint {
+            let paint_started = Instant::now();
+            crate::native_debug::event("ui.state", serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"palette":view.command_palette_open(),"help":help_open,"session_route":session_route,"model":selected.as_ref().map(|model|model.qualified()),"model_count":models.len(),"model_loading":model_load.is_some(),"composer_bytes":draft.len(),"busy":worker.is_some(),"permission":dialog_open}));
             // Exact paint context: region geometry from the facade, modal
             // row count from this loop's own overlay content (or the
             // permission dialog's rendered content rows — rendered output
@@ -1922,10 +1951,11 @@ fn native_loop(
                 },
             )?;
             needs_paint = false;
+            crate::native_debug::event("ui.frame", serde_json::json!({"cols":renderer.cols(),"rows":renderer.rows(),"paint_us":paint_started.elapsed().as_micros()}));
         }
         let now = Instant::now();
         input.expire(now);
-        let worker_deadline = worker.is_some().then(|| now + Duration::from_millis(20));
+        let worker_deadline = (worker.is_some() || model_load.is_some()).then(|| now + Duration::from_millis(20));
         let timeout = match (worker_deadline, input.next_deadline()) {
             (Some(a), Some(b)) => a.min(b).saturating_duration_since(now),
             (Some(a), None) => a.saturating_duration_since(now),
@@ -1948,6 +1978,7 @@ fn native_loop(
             if renderer.read_input(&mut byte)? == 0 {
                 break;
             }
+            crate::native_debug::event("input.raw", serde_json::json!({"bytes":1,"kind":if byte[0] == 27 {"escape_prefix"} else if byte[0] < 32 || byte[0] == 127 {"control"} else {"text_or_protocol"}}));
             // A terminal protocol prefix is a control boundary.  Do not let
             // an incomplete UTF-8 scalar straddle it; bytes emitted later by
             // a decoded Kitty event are ordinary input and remain eligible.
@@ -1957,6 +1988,15 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(event) = input.pop() else { continue };
+        let (kind, size, control) = match &event {
+            native_input_decoder::InputEvent::Byte(byte) if *byte < 32 || *byte == 127 => ("control", 1, Some(*byte)),
+            native_input_decoder::InputEvent::Byte(_) => ("text", 1, None),
+            native_input_decoder::InputEvent::Paste(text) => ("paste", text.len(), None),
+            native_input_decoder::InputEvent::ArrowUp => ("up", 0, None),
+            native_input_decoder::InputEvent::ArrowDown => ("down", 0, None),
+            native_input_decoder::InputEvent::Escape => ("escape", 0, None),
+        };
+        crate::native_debug::event("input.event", serde_json::json!({"kind":kind,"bytes":size,"control":control,"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"palette":view.command_palette_open(),"help":help_open,"permission":view.dialogs.intercepts_input(),"composer_bytes":draft.len(),"busy":worker.is_some()}));
         needs_paint = true;
         // Focus snapshot for this event: an open (non-Chat) page behaves
         // like the frozen Help overlay for focus purposes.
@@ -1966,12 +2006,7 @@ fn native_loop(
         // facade-owned bounded query; every other open page stays fully
         // inert, and the permission modal / Help gates above keep
         // precedence over both.
-        let page_query_open = matches!(
-            view.page(),
-            crate::native_view_pages::Page::Sessions
-                | crate::native_view_pages::Page::Commands
-                | crate::native_view_pages::Page::Theme
-        );
+        let page_query_open = view.page().accepts_search();
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             direction @ (native_input_decoder::InputEvent::ArrowUp
@@ -2347,6 +2382,7 @@ fn native_loop(
                 }
             }
             b'\r' | b'\n' => {
+                crate::native_debug::event("input.enter", serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"composer_bytes":draft.len(),"model":selected.as_ref().map(|model|model.qualified()),"daemon_attached":live.is_some(),"busy":worker.is_some()}));
                 utf8.reset();
                 // Set only by command-input Enter (Commands page); the
                 // composer path leaves it `None` and parses the draft
@@ -3029,11 +3065,18 @@ fn native_loop(
                         continue;
                     }
                     if let Some(snapshot) = live.as_ref() {
+                        if selected.is_none() {
+                            if model_load.is_some() {
+                                append_transcript(&mut transcript, "error: models are still loading; prompt preserved. Press Enter when ready.".into());
+                            } else {
+                                dialog = if models.is_empty() { native_setup::Dialog::Provider } else { native_setup::Dialog::Model };
+                                filter_input.clear();
+                                model_row = 0;
+                                setup_error = Some("Choose a model to send this prompt; your draft is preserved.".into());
+                            }
+                            continue;
+                        }
                         {
-                            transcript.append(
-                                format!("you: {text}"),
-                                ChatMessage::text(ChatRole::User, text.clone()),
-                            );
                             let result = selected
                                 .as_ref()
                                 .ok_or_else(|| "select a model with /connect".to_owned())
@@ -3047,6 +3090,7 @@ fn native_loop(
                                     )
                                 })
                                 .map(|next| {
+                                    pending_submission = Some(text.clone());
                                     // Capture the binding identity this
                                     // worker is launched under: events only
                                     // apply while both still match.
@@ -3058,21 +3102,20 @@ fn native_loop(
                                     partial.clear();
                                 });
                             if let Err(error) = result {
+                                crate::native_debug::event("turn.submit_rejected", serde_json::json!({"category":"worker_start_failed"}));
                                 append_transcript(&mut transcript, format!("error: {error}"));
                             }
                         }
                     } else {
-                        transcript.append(
-                            format!("you: {text}"),
-                            ChatMessage::text(ChatRole::User, text.clone()),
-                        );
+                        crate::native_debug::event("turn.submit_rejected", serde_json::json!({"category":"daemon_offline"}));
                         append_transcript(
                             &mut transcript,
                             "offline: turn not executed".to_string(),
                         );
                     }
                 }
-                draft.clear();
+                // Admission ACK consumes the captured draft. A transport,
+                // provider, offline or model-selection failure leaves it intact.
                 utf8.reset();
             }
             b if b >= 0x20 && b != b'\t' => {
