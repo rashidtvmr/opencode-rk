@@ -19,6 +19,7 @@ pub mod auto_window;
 mod browser_resume;
 pub mod chat_composer;
 pub mod clients;
+mod configured_commands;
 pub mod context_accounting;
 pub mod context_report;
 pub mod control_decode;
@@ -168,6 +169,7 @@ pub fn router_with_events(
         .route("/api/capabilities", get(web_capabilities))
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
+        .route("/api/commands", get(list_configured_commands))
         .route("/api/models/{provider}/{model}", get(get_model))
         .route("/api/providers", get(list_custom_providers))
         .route("/api/providers/{id}", post(save_custom_provider))
@@ -200,6 +202,7 @@ pub fn router_with_events(
             get(list_messages).post(append_message),
         )
         .route("/api/sessions/{id}/history", get(list_history_page))
+        .route("/api/sessions/{id}/command", post(run_configured_command))
         .route(
             "/api/sessions/{id}/attachments",
             get(list_draft_attachments)
@@ -1371,6 +1374,89 @@ struct CreateTurnBody {
     #[serde(default)]
     reasoning_effort: String,
     workdir: Option<String>,
+    #[serde(skip)]
+    agent_prompt: Option<String>,
+    #[serde(skip)]
+    read_only: bool,
+}
+
+async fn command_inventory(root: PathBuf) -> Result<configured_commands::Inventory, ApiFailure> {
+    static SCANS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
+    let permit = SCANS.try_acquire().map_err(|_| ApiFailure::too_many_requests("command inventory is busy"))?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        configured_commands::load(&root)
+    })
+        .await.map_err(|_| ApiFailure::internal("command configuration worker failed"))?
+        .map_err(ApiFailure::bad_request)
+}
+
+async fn list_configured_commands() -> Result<Json<Value>, ApiFailure> {
+    let root = std::env::current_dir().map_err(ApiFailure::internal)?;
+    let inventory = command_inventory(root).await?;
+    Ok(Json(json!({"commands": inventory.commands.into_iter().map(|(name, command)|
+        json!({"name":name,"description":command.description,"agent":command.agent,"model":command.model})
+    ).collect::<Vec<_>>()})))
+}
+
+#[derive(Deserialize)]
+struct ConfiguredCommandBody {
+    command: String,
+    #[serde(default)]
+    arguments: String,
+    model: Option<String>,
+    agent: Option<String>,
+}
+
+async fn run_configured_command(
+    State(state): State<AppState>,
+    Path(raw_id): Path<String>,
+    Extension(events): Extension<event_bus::EventBus>,
+    Json(body): Json<ConfiguredCommandBody>,
+) -> Result<Response, ApiFailure> {
+    if body.command.is_empty() || body.command.len() > 128 || body.command.chars().any(|ch| ch.is_whitespace() || ch.is_control()) {
+        return Err(ApiFailure::bad_request("invalid command name"));
+    }
+    let id = parse_session_id(&raw_id)?;
+    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    let root = session_workdir(&state.sessions, id, None).await?;
+    let inventory = command_inventory(root).await?;
+    let command = inventory.commands.get(&body.command)
+        .ok_or_else(|| ApiFailure::not_found("configured command not found"))?;
+    let agent_name = command.agent.as_deref().or(body.agent.as_deref()).unwrap_or("build");
+    if agent_name.is_empty() || agent_name.len() > 128 || agent_name.chars().any(|ch| ch.is_whitespace() || ch.is_control()) {
+        return Err(ApiFailure::bad_request("invalid configured command agent name"));
+    }
+    let agent = inventory.agents.get(agent_name);
+    if !matches!(agent_name, "build" | "plan") && agent.is_none() {
+        return Err(ApiFailure::bad_request("configured command agent not found"));
+    }
+    if agent.is_some_and(|value| value.get("disable").and_then(Value::as_bool) == Some(true)
+        || value.get("disabled").and_then(Value::as_bool) == Some(true)) {
+        return Err(ApiFailure::bad_request("configured command agent is disabled"));
+    }
+    if agent.is_some_and(|value| value.get("permissions").is_some() || value.get("permission").is_some()) {
+        return Err(ApiFailure::bad_request("command agent-specific permission rules are not available"));
+    }
+    if command.subagent.or(command.subtask).unwrap_or(false)
+        || agent.and_then(|value| value.get("mode")).and_then(Value::as_str) == Some("subagent") {
+        return Err(ApiFailure::bad_request("background command execution is not available"));
+    }
+    let configured_model = command.model.as_deref()
+        .or_else(|| agent.and_then(|value| value.get("model")).and_then(Value::as_str))
+        .or(body.model.as_deref())
+        .ok_or_else(|| ApiFailure::bad_request("command requires a model"))?;
+    let (model, mut reasoning_effort) = configured_model.rsplit_once('#')
+        .map(|(model, variant)| (model.to_owned(), variant.to_owned()))
+        .unwrap_or_else(|| (configured_model.to_owned(), "high".into()));
+    if let Some(variant) = command.variant.as_ref() { reasoning_effort = variant.clone(); }
+    let text = configured_commands::expand(&command.template, &body.arguments).map_err(ApiFailure::bad_request)?;
+    let prompt = agent.and_then(|value| value.get("prompt")).and_then(Value::as_str).unwrap_or("");
+    if prompt.len() > 32 * 1024 { return Err(ApiFailure::bad_request("agent prompt exceeds limit")); }
+    let agent_prompt = Some(format!("Agent: {agent_name}\n{prompt}"));
+    create_turn_stream(State(state), Path(raw_id), Extension(events), Json(CreateTurnBody {
+        text, model, reasoning_effort, workdir: None, agent_prompt, read_only: agent_name == "plan",
+    })).await
 }
 
 fn turn_admission_failure(error: run_owner::AdmissionError) -> ApiFailure {
@@ -1728,6 +1814,7 @@ struct TurnStreamState {
     /// File capability rooted at the turn's captured project directory.
     file_tool: FileTool,
     history_items: Vec<ResponsesItem>,
+    agent_prompt: Option<String>,
     loop_control: LoopController,
     pending_calls: Vec<RequestedCall>,
     executed_outputs: Vec<CallOutputItem>,
@@ -1987,19 +2074,25 @@ async fn create_turn_stream(
         message_id: user_message.id,
     });
     let user_message_id = user_message.id;
-    let input = bounded_typed_history(
+    let mut input = bounded_typed_history(
         &state.sessions,
         id,
-        MAX_RESPONSES_INPUT_MESSAGES,
-        MAX_RESPONSES_INPUT_BYTES,
+        MAX_RESPONSES_INPUT_MESSAGES - usize::from(body.agent_prompt.is_some()),
+        MAX_RESPONSES_INPUT_BYTES.saturating_sub(body.agent_prompt.as_ref().map_or(0, String::len)),
     )
     .await
     .map_err(ApiFailure::internal)?;
+    if let Some(prompt) = body.agent_prompt.as_ref() {
+        input.insert(0, ResponsesItem::Text { role: ResponsesRole::System, content: prompt.clone() });
+    }
 
     // Agentic loop setup: advertise tools only when turn-tool execution is
     // explicitly enabled (OPENCODE_RK_TURN_TOOLS). The list is deny-by-default:
     // an advertised tool is executable, an unadvertised one is not.
-    let turn_tools = turn_tool_config();
+    let mut turn_tools = turn_tool_config();
+    if body.read_only {
+        turn_tools.retain(|name| matches!(name.as_str(), "read" | "grep" | "glob"));
+    }
     let registry = ToolRegistry::new();
     let tools: Vec<ResponsesTool> = registry
         .list()
@@ -2045,6 +2138,7 @@ async fn create_turn_stream(
             broker,
             file_tool,
             history_items,
+            agent_prompt: body.agent_prompt,
             loop_control: LoopController::with_cap(max_steps),
             pending_calls: Vec::new(),
             executed_outputs: Vec::new(),
@@ -2478,11 +2572,11 @@ async fn create_turn_stream(
                         }
                         // Next provider round: reload typed history from storage
                         // to ensure accurate replay across restarts.
-                        let history_items = match bounded_typed_history(
+                        let mut history_items = match bounded_typed_history(
                             &state.sessions,
                             state.session_id,
-                            MAX_RESPONSES_INPUT_MESSAGES,
-                            MAX_RESPONSES_INPUT_BYTES,
+                            MAX_RESPONSES_INPUT_MESSAGES - usize::from(state.agent_prompt.is_some()),
+                            MAX_RESPONSES_INPUT_BYTES.saturating_sub(state.agent_prompt.as_ref().map_or(0, String::len)),
                         )
                         .await
                         {
@@ -2498,6 +2592,9 @@ async fn create_turn_stream(
                                 ));
                             }
                         };
+                        if let Some(prompt) = state.agent_prompt.as_ref() {
+                            history_items.insert(0, ResponsesItem::Text { role: ResponsesRole::System, content: prompt.clone() });
+                        }
                         state.history_items = history_items;
                         match state
                             .client

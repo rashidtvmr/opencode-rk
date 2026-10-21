@@ -1167,6 +1167,33 @@ fn session_page_rows(
         .collect())
 }
 
+#[cfg(feature = "native")]
+fn configured_command_rows(value: &serde_json::Value) -> Result<Vec<crate::native_view_pages::PageRow>, String> {
+    let commands = value.get("commands").and_then(serde_json::Value::as_array)
+        .ok_or("command listing is not an array")?;
+    let mut rows = crate::native_view_pages::command_rows();
+    if commands.len() + rows.len() > crate::native_view_pages::MAX_ROWS {
+        return Err("command listing exceeds row limit".into());
+    }
+    let mut names = std::collections::HashSet::new();
+    for command in commands {
+        let name = command.get("name").and_then(serde_json::Value::as_str)
+            .filter(|name| !name.is_empty() && name.len() <= 128 && !name.starts_with('/')
+                && !name.chars().any(|ch| ch.is_whitespace() || ch.is_control()))
+            .ok_or("invalid configured command name")?;
+        if !names.insert(name) { return Err("duplicate configured command name".into()); }
+        let invocation = format!("/{name}");
+        if is_recognized_local_command(&invocation) || native_exit_route(&invocation) { continue; }
+        rows.push(crate::native_view_pages::PageRow {
+            id: format!("configured:{name}"),
+            label: invocation,
+            detail: command.get("description").and_then(serde_json::Value::as_str).unwrap_or("").to_owned(),
+            enabled: true,
+        });
+    }
+    Ok(rows)
+}
+
 /// One pending backend permission request for the bound session
 /// (`GET /api/session/{id}/permission`, existing bounded authenticated
 /// client). `Ok(None)` is an honest "no request pending".
@@ -1710,8 +1737,25 @@ fn native_loop(
     // Upstream leader chord state (`LeaderDefault = "ctrl+x"`, then `b` →
     // `session.sidebar.toggle`): armed only from the chat composer.
     let mut leader_pending = false;
+    let mut configured_commands_loaded = false;
     let mut byte = [0u8; 1];
     loop {
+        if view.page() == crate::native_view_pages::Page::Commands {
+            if !configured_commands_loaded {
+                configured_commands_loaded = true;
+                let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned())
+                    .and_then(|snapshot| http_request(&snapshot.origin, "GET", "/api/commands", None, auth))
+                    .and_then(|body| serde_json::from_str(&body).map_err(|_| "invalid command listing JSON".to_owned()))
+                    .and_then(|value| configured_command_rows(&value));
+                match result {
+                    Ok(rows) => view.set_page_rows(rows),
+                    Err(error) => append_transcript(&mut transcript, format!("error: configured commands: {error}")),
+                }
+                needs_paint = true;
+            }
+        } else {
+            configured_commands_loaded = false;
+        }
         if let Some((loaded_provider, result)) = model_load
             .as_mut()
             .and_then(|load| load.poll().map(|result| (load.provider_id.clone(), result)))
@@ -1776,12 +1820,13 @@ fn native_loop(
                         // Backend user-message ACK: the accepted first user
                         // turn moves the main column to the session route
                         // (Home → session), explicitly and only on ACK.
-                        native_turn::Event::User => {
+                        native_turn::Event::User { text: accepted_text } => {
                             transcript.begin_reasoning_turn();
                             if let Some(captured) = pending_submission.take() {
                                 crate::native_composer::acknowledge_submitted_draft(
                                     &captured, &mut draft,
                                 );
+                                let captured = accepted_text.unwrap_or(captured);
                                 transcript.append(
                                     format!("you: {captured}"),
                                     ChatMessage::text(ChatRole::User, captured),
@@ -3007,6 +3052,22 @@ fn native_loop(
                         continue;
                     }
                     if matches!(view.page(), crate::native_view_pages::Page::Commands) {
+                        if let Some(name) = view.page_selected().filter(|row| row.enabled)
+                            .and_then(|row| row.id.strip_prefix("configured:")) {
+                            if name.len().saturating_add(2).saturating_add(draft.len()) > MAX_NATIVE_DRAFT_BYTES {
+                                append_transcript(&mut transcript, "error: command prefix exceeds composer limit; draft preserved".into());
+                                needs_paint = true;
+                                continue;
+                            }
+                            // Selecting a template wraps the existing draft as
+                            // its arguments; submitting still requires Enter
+                            // and the normal backend ACK owns draft clearing.
+                            draft = format!("/{name} {draft}");
+                            view.close_page();
+                            utf8.reset();
+                            needs_paint = true;
+                            continue;
+                        }
                         // Command-input Enter: the bounded command buffer
                         // (page query) resolves a recognized LOCAL route —
                         // an exact typed route first, else the selected
@@ -3640,7 +3701,7 @@ fn native_loop(
                         continue;
                     }
                     if let Some(snapshot) = live.as_ref() {
-                        if selected.is_none() && !text.starts_with('!') {
+                        if selected.is_none() && !text.starts_with('!') && configured_command_input(&text).is_none() {
                             if model_load.is_some() {
                                 append_transcript(&mut transcript, "error: models are still loading; prompt preserved. Press Enter when ready.".into());
                             } else {
@@ -3667,17 +3728,26 @@ fn native_loop(
                                     command.trim(),
                                     None,
                                 )
+                            } else if let Some((name, arguments)) = configured_command_input(&text) {
+                                native_turn::TurnWorker::start_command(
+                                    &snapshot.origin,
+                                    &snapshot.session_id,
+                                    auth.ok_or("missing daemon token")?,
+                                    name,
+                                    arguments,
+                                    &selected.as_ref().map(|model| model.qualified()).unwrap_or_default(),
+                                )
                             } else {
                                 selected
                                     .as_ref()
                                     .ok_or_else(|| "select a model with /connect".to_owned())
                                     .and_then(|model| {
                                         native_turn::TurnWorker::start(
-                                            &snapshot.origin,
-                                            &snapshot.session_id,
-                                            auth.ok_or("missing daemon token")?,
-                                            &text,
-                                            &model.qualified(),
+                                                &snapshot.origin,
+                                                &snapshot.session_id,
+                                                auth.ok_or("missing daemon token")?,
+                                                &text,
+                                                &model.qualified(),
                                         )
                                     })
                             }
@@ -3790,6 +3860,17 @@ fn native_loop(
     let _ = renderer.restore_terminal_modes();
     renderer.close();
     Ok(())
+}
+
+/// Split only the invocation separator; argument whitespace belongs to the
+/// configured template, rather than the client's local route parser.
+#[cfg(feature = "native")]
+fn configured_command_input(text: &str) -> Option<(&str, &str)> {
+    let invocation = text.strip_prefix('/')?;
+    Some(match invocation.char_indices().find(|(_, ch)| ch.is_whitespace()) {
+        Some((index, ch)) => (&invocation[..index], &invocation[index + ch.len_utf8()..]),
+        None => (invocation, ""),
+    })
 }
 
 /// Recognized LOCAL slash-command surface, resolved through the
@@ -4161,6 +4242,38 @@ fn print_native_or_legacy(frame: &str) -> String {
 
 #[cfg(all(test, feature = "native"))]
 mod command_consumption_tests {
+    #[test]
+    fn configured_discovery_keeps_metadata_and_local_routes() {
+        let rows = super::configured_command_rows(&serde_json::json!({"commands":[
+            {"name":"team/review","description":"Review a package"},
+            {"name":"models","description":"must not replace local picker"}
+        ]})).unwrap();
+        let custom: Vec<_> = rows.iter().filter(|row| row.id.starts_with("configured:")).collect();
+        assert_eq!(custom.len(), 1);
+        assert_eq!(custom[0].id, "configured:team/review");
+        assert_eq!(custom[0].label, "/team/review");
+        assert_eq!(custom[0].detail, "Review a package");
+        assert!(rows.iter().any(|row| row.id == "/models"));
+        for malformed in [
+            serde_json::json!({"commands":[{"name":"bad\nname"}]}),
+            serde_json::json!({"commands":[{"name":"same"},{"name":"same"}]}),
+            serde_json::json!({"commands":null}),
+        ] {
+            assert!(super::configured_command_rows(&malformed).is_err());
+        }
+    }
+
+    #[test]
+    fn configured_command_keeps_multiline_arguments_and_nested_name() {
+        assert_eq!(
+            super::configured_command_input("/team/review first\n  second 世界\n"),
+            Some(("team/review", "first\n  second 世界\n"))
+        );
+        assert_eq!(super::configured_command_input("/review"), Some(("review", "")));
+        assert_eq!(super::configured_command_input("plain text"), None);
+        assert_eq!(super::configured_command_input("! pwd"), None);
+    }
+
     #[test]
     fn every_palette_entry_is_a_local_action_not_a_provider_prompt() {
         let mut palette = crate::native_command_palette::CommandPalette::default();

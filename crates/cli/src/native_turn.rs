@@ -13,7 +13,7 @@ const MAX_TOTAL: usize = 256 * 1024;
 
 #[derive(Debug)]
 pub enum Event {
-    User,
+    User { text: Option<String> },
     Delta(String),
     ReasoningDelta(String),
     ReasoningFinal(String),
@@ -38,6 +38,25 @@ pub struct TurnWorker {
 }
 
 impl TurnWorker {
+    /// Configured slash commands use the daemon's expansion and turn engine.
+    /// The raw argument tail is kept intact, including embedded newlines.
+    pub fn start_command(
+        origin: &str,
+        session: &str,
+        auth: &str,
+        command: &str,
+        arguments: &str,
+        model: &str,
+    ) -> Result<Self, String> {
+        Self::start_path(
+            origin,
+            session,
+            auth,
+            "/command",
+            serde_json::json!({"command": command, "arguments": arguments, "model": if model.is_empty() { None } else { Some(model) }}),
+        )
+    }
+
     pub fn start_shell(
         origin: &str,
         session: &str,
@@ -219,7 +238,10 @@ fn decode(value: Value, retained: &mut usize) -> Result<Option<Event>, String> {
         Ok(text.to_owned())
     };
     Ok(Some(match kind {
-        "user_message" => Event::User,
+        "user_message" => Event::User {
+            text: value.get("message").and_then(|message| message.get("body"))
+                .and_then(|body| body.get("text")).and_then(Value::as_str).map(str::to_owned),
+        },
         "assistant_delta" => Event::Delta(field("delta", retained)?),
         "tool_call" => Event::ToolCall {
             call_id: field_optional(&value, "call_id", retained),
@@ -296,6 +318,9 @@ fn journal_frame_type(value: &Value) -> &'static str {
 fn provider_error_summary(status: u16, body: &[u8]) -> String {
     let value: Value = serde_json::from_slice(body).unwrap_or(Value::Null);
     let message = value["message"].as_str().unwrap_or("");
+    if message == "configured command not found" {
+        return "Configured command not found; prompt preserved.".into();
+    }
     let tokens: Vec<_> = message.split_whitespace().take(64).collect();
     let upstream = tokens.windows(2).find_map(|pair| {
         (pair[0] == "HTTP")
