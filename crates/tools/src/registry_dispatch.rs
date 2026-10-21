@@ -224,7 +224,9 @@ impl RegistryDispatcher {
         store: &Mutex<OutputStore>,
         requests: Vec<(String, Value, String)>,
     ) -> Vec<Result<DispatchRecord, DispatchError>> {
-        let _ = executor;
+        // Preserve the caller-owned cwd, broker and timeout configuration in
+        // every batch item; never recreate a default executor here.
+        let executor = Arc::new(executor.clone_for_dispatch());
         enum Ready {
             Immediate(Result<DispatchRecord, DispatchError>),
             Spawn {
@@ -279,14 +281,14 @@ impl RegistryDispatcher {
                 let sem = self.semaphore.clone();
                 let max_out = self.config.max_output_bytes;
                 spawned_idx.push(idx);
+                let executor = Arc::clone(&executor);
                 set.spawn(async move {
                     let _permit = sem
                         .acquire_owned()
                         .await
                         .expect("dispatcher holds the semaphore open");
                     let call = ToolCall::new(tool.id.clone(), tool.name.clone(), input);
-                    let exec = ToolExecutor::new();
-                    let result = exec.execute(call).await;
+                    let result = executor.execute(call).await;
                     let bounded = bound_output(result.output.clone(), max_out);
                     let record = DispatchRecord {
                         tool_id: result.tool_id.clone(),

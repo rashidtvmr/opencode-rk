@@ -843,10 +843,22 @@ fn is_system_path(path: &Path) -> bool {
         )
         || lower.starts_with("c:/windows/")
         || lower.starts_with("c:/program files/")
+        // macOS /etc is an alias for /private/etc. Both spellings must
+        // retain mandatory system-write protection, including with root cwd.
+        || (cfg!(target_os = "macos")
+            && (lower == "/private/etc" || lower.starts_with("/private/etc/")))
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(target_os="macos")]
+    #[test]
+    fn canonical_etc_alias_keeps_system_write_mandatory_deny() {
+        let broker=PermissionBroker::new(SecurityPolicy::lean_default("/")).with_permissions(PermissionSet::star());
+        for path in ["/etc/opencode-deny-probe","/private/etc/opencode-deny-probe"] {
+            assert!(matches!(broker.authorize(&OperationIntent::File{action:FileAction::Write,path:PathBuf::from(path)}),Decision::Deny{..}),"system alias escaped mandatory protection: {path}");
+        }
+    }
     fn broker() -> PermissionBroker {
         PermissionBroker::new(SecurityPolicy::lean_default("/work/project"))
     }

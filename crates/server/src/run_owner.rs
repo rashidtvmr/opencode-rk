@@ -4,10 +4,10 @@
 use opencode_rk_contracts::SessionId;
 use opencode_rk_security::{HumanApproval, OperationIntent, PermissionBroker, PolicyContext};
 use std::sync::{
-    atomic::{AtomicU64, Ordering},
     Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
 };
-use tokio::sync::{oneshot, watch, Semaphore, SemaphorePermit};
+use tokio::sync::{Semaphore, SemaphorePermit, oneshot, watch};
 
 pub const MAX_ACTIVE_TURNS: usize = 2;
 const MAX_ALWAYS_GRANTS: usize = 128;
@@ -107,11 +107,11 @@ impl RunOwner {
     }
 
     pub fn cancel(&self) {
-        if let Ok(_gate) = self.effect_gate.lock() {
-            self.cancellation.send_replace(true);
-        } else {
-            self.cancellation.send_replace(true);
-        }
+        // Cancellation can originate in a response-body Drop on the runtime
+        // thread. Never block that thread on filesystem work owned by a
+        // spawn_blocking task. begin_effect checks this signal under its gate;
+        // explicit cancellation acknowledgements await wait_finished below.
+        self.cancellation.send_replace(true);
         self.clear_pending();
     }
 

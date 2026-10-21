@@ -31,6 +31,7 @@ pub mod mcp_catalog_search;
 pub mod mcp_lifecycle;
 pub mod mcp_payload_filter;
 pub mod mcp_spawn;
+pub mod native_search;
 pub mod op_receipts;
 pub mod ops_backup;
 pub mod ops_plan;

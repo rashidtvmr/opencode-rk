@@ -1,13 +1,58 @@
-use std::sync::Arc;
+//! Reason honesty for `/api/capabilities` under the shipped default.
+//!
+//! Every capability/tool entry must carry a non-empty, honest reason that names
+//! the turn-adapter boundary. Default (`OPENCODE_RK_TURN_TOOLS` unset) is the
+//! operator default: the seven real turn tools (bash, shell, read, write, edit,
+//! grep, glob) are advertised true while the legacy registered `file` inspector
+//! stays non-dispatchable. An explicit env value is not required to make the
+//! reasons honest — never over-constrain a token that is not the wire contract.
+#![forbid(unsafe_code)]
 
-use axum::{body::to_bytes, body::Body, http::Request, http::StatusCode};
+use std::{
+    env,
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
+};
+
+use axum::{body::Body, body::to_bytes, http::Request, http::StatusCode};
 use opencode_rk_catalog::Catalog;
-use opencode_rk_server::{router, AppState};
+use opencode_rk_server::{AppState, router};
 use opencode_rk_sessions::SessionService;
 use opencode_rk_storage::Storage;
 use serde_json::Value;
 use tempfile::tempdir;
 use tower::ServiceExt;
+
+/// Built-in registry ids in sorted order: seven real turn tools plus `file`.
+const TURN_IDS: [&str; 7] = ["bash", "edit", "glob", "grep", "read", "shell", "write"];
+const TURN_ALLOWLIST_KEY: &str = "OPENCODE_RK_TURN_TOOLS";
+
+fn env_lock() -> MutexGuard<'static, ()> {
+    static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    LOCK.get_or_init(Mutex::default).lock().unwrap()
+}
+
+struct EnvGuard {
+    key: &'static str,
+    previous: Option<String>,
+}
+
+impl EnvGuard {
+    fn unset(key: &'static str) -> Self {
+        let previous = env::var(key).ok();
+        env::remove_var(key);
+        Self { key, previous }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous.as_ref() {
+            env::set_var(self.key, previous);
+        } else {
+            env::remove_var(self.key);
+        }
+    }
+}
 
 async fn get_capabilities(uri: &str) -> Value {
     let dir = tempdir().unwrap();
@@ -25,19 +70,48 @@ async fn get_capabilities(uri: &str) -> Value {
     serde_json::from_slice(&body).unwrap()
 }
 
+fn file_entry<'a>(value: &'a Value) -> &'a Value {
+    value["tools"]
+        .as_array()
+        .expect("tools array")
+        .iter()
+        .find(|tool| tool["id"].as_str() == Some("file"))
+        .expect("legacy registered file id must be listed")
+}
+
 #[tokio::test]
 async fn web_013_reason_unavailable_entries_carry_non_empty_reasons() {
+    let _lock = env_lock();
+    let _ambient = EnvGuard::unset(TURN_ALLOWLIST_KEY);
     let value = get_capabilities("/api/capabilities").await;
     for key in ["search", "deep_research", "voice"] {
         assert_eq!(value[key]["available"], false);
         let reason = value[key]["reason"].as_str().unwrap();
         assert!(!reason.is_empty(), "{key} reason must be non-empty");
     }
-    for tool in value["tools"].as_array().unwrap() {
-        assert_eq!(tool["available_for_web_turn"], false);
+    // Honesty in both directions: no entry claims silence, every reason names
+    // the turn-adapter boundary, and the default advertisement is truthful.
+    let tools = value["tools"].as_array().expect("tools array");
+    for tool in tools {
+        let id = tool["id"].as_str().expect("tool id");
         let reason = tool["reason"].as_str().unwrap();
-        assert!(!reason.is_empty(), "tool reason must be non-empty");
+        assert!(!reason.is_empty(), "{id} reason must be non-empty");
+        assert!(
+            reason.contains("turn adapter"),
+            "{id} reason must name the turn-adapter boundary"
+        );
     }
+    let expected_true: Vec<&str> = TURN_IDS.to_vec();
+    for tool in tools {
+        let id = tool["id"].as_str().expect("tool id");
+        let turn = tool["available_for_web_turn"].as_bool().expect("bool");
+        assert_eq!(
+            turn,
+            expected_true.contains(&id),
+            "{id} default advertisement must be honest"
+        );
+    }
+    assert_eq!(file_entry(&value)["available_for_web_turn"], false);
     for key in ["plugins", "approvals", "attachments"] {
         assert_eq!(value[key]["available_for_web_turn"], false);
         let reason = value[key]["reason"].as_str().unwrap();
@@ -63,6 +137,14 @@ async fn web_013_reason_names_adapter_boundary() {
     assert!(
         voice.contains("transcription") || voice.contains("audio"),
         "voice reason must name the audio gap"
+    );
+    // Non-dispatchable ids keep an honest boundary reason under the default.
+    assert!(
+        file_entry(&value)["reason"]
+            .as_str()
+            .unwrap()
+            .contains("turn adapter"),
+        "file must name the turn-adapter boundary"
     );
 }
 

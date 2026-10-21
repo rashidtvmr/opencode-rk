@@ -56,11 +56,11 @@ pub use branch_v2::ForkProvenance;
 use chrono::{DateTime, Utc};
 use opencode_rk_contracts::{
     ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, AssistantActivity, AttachmentId,
-    DraftAttachment, MessageId, MessageRecord, MessageRole, PayloadRef, SessionId, SessionState,
-    SessionSummary, Timestamp, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES,
+    DraftAttachment, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageId, MessageRecord,
+    MessageRole, PayloadRef, SessionId, SessionState, SessionSummary, Timestamp,
 };
 use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, StorageError, V2Writer};
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::{
     path::{Path, PathBuf},
     sync::{Arc, Mutex},
@@ -398,6 +398,14 @@ impl SessionService {
         Ok(Some(workspaces))
     }
     pub async fn create(&self, title: impl Into<String>) -> Result<SessionSummary, SessionError> {
+        self.create_in_directory(title, None).await
+    }
+
+    pub async fn create_in_directory(
+        &self,
+        title: impl Into<String>,
+        directory: Option<PathBuf>,
+    ) -> Result<SessionSummary, SessionError> {
         let now = Timestamp::now();
         let session = SessionSummary {
             id: SessionId::new(),
@@ -409,8 +417,32 @@ impl SessionService {
         };
         let storage = Arc::clone(&self.storage);
         let candidate = session.clone();
-        run_blocking(move || storage.create_session(&candidate)).await?;
+        run_blocking(move || {
+            let directory = directory
+                .as_ref()
+                .map(|path| {
+                    path.to_str()
+                        .ok_or_else(|| StorageError::Sqlite(rusqlite::Error::InvalidQuery))
+                })
+                .transpose()?;
+            storage.create_session_with_directory(&candidate, directory)
+        })
+        .await?;
         Ok(session)
+    }
+
+    pub async fn directory(&self, id: SessionId) -> Result<Option<PathBuf>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.session_directory(id)).await
+    }
+
+    pub async fn display_tool_history(
+        &self,
+        id: SessionId,
+        limit: usize,
+    ) -> Result<Vec<opencode_rk_storage::ToolHistoryItem>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.display_tool_history(id, limit)).await
     }
     pub async fn get(&self, id: SessionId) -> Result<SessionSummary, SessionError> {
         if let Some(manager) = self.fork_manager_for(id).await? {
@@ -1006,7 +1038,9 @@ pub enum SessionError {
         "branching blob-backed history is unavailable until the format-2 blob adapter is active"
     )]
     BranchPayloadUnsupported,
-    #[error("draft attachments are unavailable for format-2 branch sessions until blob stores are unified")]
+    #[error(
+        "draft attachments are unavailable for format-2 branch sessions until blob stores are unified"
+    )]
     DraftAttachmentUnavailable,
     #[error("draft attachment exceeds the supported size bound")]
     DraftAttachmentTooLarge,

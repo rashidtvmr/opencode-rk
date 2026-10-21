@@ -7,9 +7,9 @@ pub mod admission_bounds;
 pub mod agent_loop;
 pub mod app_client;
 pub use agent_loop::{
-    function_call_output as loop_function_call_output, truncate_tool_output, CallOutput,
-    LoopController, RequestedCall, TurnStop, MAX_CALLS_PER_ROUND, MAX_TOOL_OUTPUT_CHARS,
-    MAX_TURN_STEPS,
+    CallOutput, LoopController, MAX_CALLS_PER_ROUND, MAX_TOOL_OUTPUT_CHARS, MAX_TURN_STEPS,
+    RequestedCall, TurnStop, function_call_output as loop_function_call_output,
+    truncate_tool_output,
 };
 pub mod app_protocols;
 pub mod app_runtime;
@@ -79,26 +79,26 @@ pub mod web_turn_adapter;
 pub mod workspace_proxy;
 pub mod workspace_sessions;
 use axum::{
+    Json, Router,
     body::{Body, Bytes},
     extract::{DefaultBodyLimit, Extension, Path, Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{delete, get, post},
-    Json, Router,
 };
-use futures_util::{stream, StreamExt};
+use futures_util::{StreamExt, stream};
 use opencode_rk_agents::agent_executor::AgentExecutor;
 use opencode_rk_catalog::{Catalog, CatalogQuery};
 use opencode_rk_contracts::{
-    ArtifactId, ArtifactKind, AttachmentId, MessageId, MessageRecord, MessageRole, PayloadRef,
-    SessionId, Timestamp, MAX_DRAFT_ATTACHMENT_BYTES, WIRE_SCHEMA_VERSION,
-};
-use opencode_rk_providers::responses::{
-    OpenAiResponsesClient, OpenAiResponsesStream, ResponsesError, ResponsesItem, ResponsesRole,
-    ResponsesStopReason, ResponsesStreamEvent, ResponsesTool, MAX_RESPONSES_INPUT_BYTES,
-    MAX_RESPONSES_INPUT_MESSAGES,
+    ArtifactId, ArtifactKind, AttachmentId, MAX_DRAFT_ATTACHMENT_BYTES, MessageId, MessageRecord,
+    MessageRole, PayloadRef, SessionId, Timestamp, WIRE_SCHEMA_VERSION,
 };
 use opencode_rk_providers::custom_provider::{self, CustomProviderConfig};
+use opencode_rk_providers::responses::{
+    MAX_RESPONSES_INPUT_BYTES, MAX_RESPONSES_INPUT_MESSAGES, OpenAiResponsesClient,
+    OpenAiResponsesStream, ResponsesError, ResponsesItem, ResponsesRole, ResponsesStopReason,
+    ResponsesStreamEvent, ResponsesTool,
+};
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{
     HistoryItem, SessionError, SessionService, ToolCallAdmission, ToolRound,
@@ -107,7 +107,7 @@ use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::file_ops::{FileOperation, FileTool};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 use std::{convert::Infallible, path::PathBuf, str::FromStr, sync::Arc};
 
 use run_owner::{
@@ -171,7 +171,10 @@ pub fn router_with_events(
         .route("/api/models/{provider}/{model}", get(get_model))
         .route("/api/providers", get(list_custom_providers))
         .route("/api/providers/{id}", post(save_custom_provider))
-        .route("/api/providers/{id}/models", get(discover_custom_provider_models))
+        .route(
+            "/api/providers/{id}/models",
+            get(discover_custom_provider_models),
+        )
         // Authenticated MCP status/lifecycle projection. Registered ahead of
         // the SPA asset fallback, so it can never be served by the public
         // fallback, and its `/api/*` prefix puts it under `require_bearer`
@@ -232,6 +235,7 @@ pub fn router_with_events(
         .route("/api/sessions/{id}/fork", get(get_fork_provenance))
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
+        .route("/api/sessions/{id}/shell/stream", post(native_shell_stream))
         .route("/api/session/{id}/interrupt", post(interrupt_session))
         .route("/api/event", get(event_http::handle_events_sse))
         .route("/events", get(event_http::handle_events_sse))
@@ -404,45 +408,84 @@ async fn save_provider_auth(
 }
 
 #[derive(Deserialize)]
-struct CustomProviderBody { name: String, base_url: String, api_key: Option<String>, buffered_model_ids: Option<Vec<String>> }
+struct CustomProviderBody {
+    name: String,
+    base_url: String,
+    api_key: Option<String>,
+    buffered_model_ids: Option<Vec<String>>,
+}
 
 async fn list_custom_providers() -> Result<Json<Value>, ApiFailure> {
-    let providers = custom_provider::list().await.map_err(ApiFailure::internal)?;
-    Ok(Json(json!({"providers": providers.into_iter().map(|p| json!({"id":p.id,"name":p.name,"base_url":p.base_url,"buffered_model_ids":p.buffered_model_ids})).collect::<Vec<_>>() })))
+    let providers = custom_provider::list()
+        .await
+        .map_err(ApiFailure::internal)?;
+    Ok(Json(
+        json!({"providers": providers.into_iter().map(|p| json!({"id":p.id,"name":p.name,"base_url":p.base_url,"buffered_model_ids":p.buffered_model_ids})).collect::<Vec<_>>() }),
+    ))
 }
 
 async fn save_custom_provider(
-    Path(id): Path<String>, Json(body): Json<CustomProviderBody>,
+    Path(id): Path<String>,
+    Json(body): Json<CustomProviderBody>,
 ) -> Result<Json<Value>, ApiFailure> {
     let preserve_buffered = body.buffered_model_ids.is_none();
     let buffered_model_ids = body.buffered_model_ids.unwrap_or_default();
-    let config = CustomProviderConfig { id, name: body.name, base_url: body.base_url, api_key: body.api_key.filter(|key| !key.trim().is_empty()), buffered_model_ids };
+    let config = CustomProviderConfig {
+        id,
+        name: body.name,
+        base_url: body.base_url,
+        api_key: body.api_key.filter(|key| !key.trim().is_empty()),
+        buffered_model_ids,
+    };
     let api_key = config.api_key.clone();
     let provider_id = config.id.clone();
-    if preserve_buffered { custom_provider::save_preserving_buffered_models(config).await }
-    else { custom_provider::save(config).await }.map_err(|e| ApiFailure::bad_request(e.to_string()))?;
+    if preserve_buffered {
+        custom_provider::save_preserving_buffered_models(config).await
+    } else {
+        custom_provider::save(config).await
+    }
+    .map_err(|e| ApiFailure::bad_request(e.to_string()))?;
     if let Some(key) = api_key {
         opencode_rk_providers::persisted_auth::save_api_key(provider_id, key, None)
-            .await.map_err(ApiFailure::bad_request)?;
+            .await
+            .map_err(ApiFailure::bad_request)?;
     }
     Ok(Json(json!(true)))
 }
 
 async fn responses_client(provider_id: &str) -> Result<OpenAiResponsesClient, ResponsesError> {
-    if provider_id == "openai" { return OpenAiResponsesClient::from_persisted_env().await; }
-    let config = custom_provider::load(provider_id).await.map_err(|e| ResponsesError::InvalidConfig(e.to_string()))?
+    if provider_id == "openai" {
+        return OpenAiResponsesClient::from_persisted_env().await;
+    }
+    let config = custom_provider::load(provider_id)
+        .await
+        .map_err(|e| ResponsesError::InvalidConfig(e.to_string()))?
         .ok_or_else(|| ResponsesError::InvalidConfig("provider not found".into()))?;
     let provider_config = opencode_rk_providers::config::ProviderConfig {
-        provider_id: config.id.clone(), base_url: config.base_url, api_key_env: format!("{}_API_KEY", config.id.to_uppercase()),
-        timeout_secs: 60, max_tokens: 4096, temperature: 0.7,
+        provider_id: config.id.clone(),
+        base_url: config.base_url,
+        api_key_env: format!("{}_API_KEY", config.id.to_uppercase()),
+        timeout_secs: 60,
+        max_tokens: 4096,
+        temperature: 0.7,
     };
-    OpenAiResponsesClient::from_config(provider_config, config.api_key).map(|client| client.with_buffered_models(config.buffered_model_ids))
+    OpenAiResponsesClient::from_config(provider_config, config.api_key)
+        .map(|client| client.with_buffered_models(config.buffered_model_ids))
 }
 
-async fn discover_custom_provider_models(Path(id): Path<String>) -> Result<Json<Value>, ApiFailure> {
-    let config = custom_provider::load(&id).await.map_err(ApiFailure::internal)?.ok_or_else(|| ApiFailure::not_found("provider not found"))?;
-    let models = custom_provider::discover_models(&config).await.map_err(|error| ApiFailure::bad_gateway(error.to_string()))?;
-    Ok(Json(json!({"models": models.into_iter().map(|(model,name)| json!({"id":model,"name":name,"provider_id":id})).collect::<Vec<_>>() })))
+async fn discover_custom_provider_models(
+    Path(id): Path<String>,
+) -> Result<Json<Value>, ApiFailure> {
+    let config = custom_provider::load(&id)
+        .await
+        .map_err(ApiFailure::internal)?
+        .ok_or_else(|| ApiFailure::not_found("provider not found"))?;
+    let models = custom_provider::discover_models(&config)
+        .await
+        .map_err(|error| ApiFailure::bad_gateway(error.to_string()))?;
+    Ok(Json(
+        json!({"models": models.into_iter().map(|(model,name)| json!({"id":model,"name":name,"provider_id":id})).collect::<Vec<_>>() }),
+    ))
 }
 async fn interrupt_session(
     Path(id): Path<String>,
@@ -527,7 +570,7 @@ async fn reply_session_permission(
         _ => {
             return Err(ApiFailure::bad_request(
                 "reply must be once, always, or reject",
-            ))
+            ));
         }
     }
     Ok(StatusCode::NO_CONTENT)
@@ -704,26 +747,191 @@ async fn list_sessions(
         .list(p.all.unwrap_or(false))
         .await
         .map_err(ApiFailure::internal)?;
-    Ok(Json(json!({"sessions":sessions})))
+    let mut rows = Vec::with_capacity(sessions.len());
+    for session in sessions {
+        let directory = state
+            .sessions
+            .directory(session.id)
+            .await
+            .map_err(ApiFailure::internal)?;
+        let mut value = serde_json::to_value(session).map_err(ApiFailure::internal)?;
+        if let Some(directory) = directory {
+            value["directory"] = json!(directory);
+        }
+        rows.push(value);
+    }
+    Ok(Json(json!({"sessions":rows})))
 }
 #[derive(Debug, Deserialize)]
 struct CreateSessionBody {
     title: String,
+    directory: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct NativeShellBody {
+    command: String,
+    workdir: Option<String>,
+}
+
+struct NativeShellReceiver {
+    receiver: tokio::sync::mpsc::Receiver<Result<Bytes, Infallible>>,
+    owner: Arc<RunOwner>,
+}
+impl Drop for NativeShellReceiver {
+    fn drop(&mut self) {
+        self.owner.cancel();
+    }
+}
+
+async fn native_shell_stream(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Extension(events): Extension<event_bus::EventBus>,
+    Json(body): Json<NativeShellBody>,
+) -> Result<Response, ApiFailure> {
+    let id = parse_session_id(&id)?;
+    let permit = TurnExecutionPermit::acquire(id).map_err(turn_admission_failure)?;
+    let owner = permit.owner();
+    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    if body.command.trim().is_empty()
+        || body.command.len() > 32 * 1024
+        || body.command.contains('\0')
+    {
+        return Err(ApiFailure::bad_request("invalid shell command"));
+    }
+    let cwd = session_workdir(&state.sessions, id, body.workdir.as_deref()).await?;
+    let broker = PermissionBroker::new(SecurityPolicy::lean_default(cwd.clone()));
+    let executor = ToolExecutor::new()
+        .with_cwd(cwd.clone())
+        .with_broker(broker.clone());
+    let user = state
+        .sessions
+        .append_text(id, MessageRole::User, format!("!{}", body.command))
+        .await
+        .map_err(ApiFailure::internal)?;
+    let message_id = MessageId::new();
+    let call_id = format!("shell-{message_id}");
+    let arguments = json!({"command":body.command,"workdir":cwd});
+    let round = ToolRound {
+        round_id: format!("round-{}-0", user.id),
+        session_id: id,
+        turn_message_id: user.id,
+        round_ordinal: 0,
+        expected_pairs: 1,
+    };
+    state
+        .sessions
+        .admit_tool_round(
+            round.clone(),
+            vec![ToolCallAdmission {
+                call_id: call_id.clone(),
+                name: "bash".to_owned(),
+                arguments: arguments.to_string(),
+                message: MessageRecord {
+                    id: message_id,
+                    session_id: id,
+                    role: MessageRole::Tool,
+                    body: PayloadRef::inline("[bash] pending").map_err(ApiFailure::internal)?,
+                    created_at: Timestamp::now(),
+                },
+            }],
+        )
+        .await
+        .map_err(ApiFailure::internal)?;
+    let (sender, receiver) = tokio::sync::mpsc::channel::<Result<Bytes, Infallible>>(16);
+    let receiving_owner = Arc::clone(&owner);
+    tokio::spawn(async move {
+        let _permit = permit;
+        let _ = events.publish(event_bus::ServerEvent::MessageStored {
+            session: id,
+            message_id: user.id,
+        });
+        let _ = sender
+            .send(Ok(ndjson(json!({"type":"user_message","message":user}))))
+            .await;
+        let _=sender.send(Ok(ndjson(json!({"type":"tool_call","call_id":call_id,"name":"bash","arguments":arguments.to_string()})))).await;
+        let outcome = execute_native_tool(
+            opencode_rk_tools::executor::ToolCall::new(&call_id, "bash", arguments),
+            &executor,
+            &broker,
+            &owner,
+            user.id,
+        )
+        .await;
+        let (output, payload) = native_result_payload(&outcome.output, Some(outcome.success));
+        if let Err(error) = state
+            .sessions
+            .persist_tool_output(round, 0, payload, message_id)
+            .await
+        {
+            let _ = sender
+                .send(Ok(stream_error("internal_error", error.to_string())))
+                .await;
+            return;
+        }
+        let _ = events.publish(event_bus::ServerEvent::MessageStored {
+            session: id,
+            message_id,
+        });
+        let _=sender.send(Ok(ndjson(json!({"type":"tool_output","call_id":call_id,"name":"bash","output":output,"success":outcome.success,"is_error":!outcome.success})))).await;
+        match state
+            .sessions
+            .append_text(id, MessageRole::Assistant, String::new())
+            .await
+        {
+            Ok(message) => {
+                let _ = events.publish(event_bus::ServerEvent::MessageStored {
+                    session: id,
+                    message_id: message.id,
+                });
+                let _=sender.send(Ok(ndjson(json!({"type":"assistant_message","message":message,"stop_reason":"completed"})))).await;
+            }
+            Err(error) => {
+                let _ = sender
+                    .send(Ok(stream_error("internal_error", error.to_string())))
+                    .await;
+            }
+        }
+    });
+    let response_stream = stream::unfold(
+        NativeShellReceiver {
+            receiver,
+            owner: receiving_owner,
+        },
+        |mut state| async move { state.receiver.recv().await.map(|event| (event, state)) },
+    );
+    Ok((
+        [
+            (header::CONTENT_TYPE, "application/x-ndjson"),
+            (header::CACHE_CONTROL, "no-store"),
+        ],
+        Body::from_stream(response_stream),
+    )
+        .into_response())
 }
 async fn create_session(
     State(state): State<AppState>,
     Extension(events): Extension<event_bus::EventBus>,
     Json(body): Json<CreateSessionBody>,
 ) -> Result<(StatusCode, Json<Value>), ApiFailure> {
+    let directory = match body.directory.as_deref() {
+        Some(path) => Some(validate_directory(path, None).await?),
+        None => None,
+    };
     let session = state
         .sessions
-        .create(body.title)
+        .create_in_directory(body.title, directory.clone())
         .await
         .map_err(ApiFailure::internal)?;
     // Publish only after the durable create succeeded; the bus allocates the
     // shared publication identity (all SSE subscribers observe the same id).
     let _ = events.publish(event_bus::ServerEvent::SessionCreated(session.id));
-    Ok((StatusCode::CREATED, Json(json!({"session":session}))))
+    let mut value = serde_json::to_value(session).map_err(ApiFailure::internal)?;
+    if let Some(directory) = directory {
+        value["directory"] = json!(directory);
+    }
+    Ok((StatusCode::CREATED, Json(json!({"session":value}))))
 }
 async fn get_session(
     State(state): State<AppState>,
@@ -737,7 +945,16 @@ async fn get_session(
             ApiFailure::internal(e)
         }
     })?;
-    Ok(Json(json!({"session":session})))
+    let mut value = serde_json::to_value(session).map_err(ApiFailure::internal)?;
+    if let Some(directory) = state
+        .sessions
+        .directory(id)
+        .await
+        .map_err(ApiFailure::internal)?
+    {
+        value["directory"] = json!(directory);
+    }
+    Ok(Json(json!({"session":value})))
 }
 #[derive(Debug, Deserialize)]
 struct RenameSessionBody {
@@ -788,12 +1005,60 @@ async fn list_messages(
     Query(params): Query<MessageListParams>,
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&id)?;
+    let limit = params.limit.unwrap_or(100).clamp(1, 500);
     let messages = state
         .sessions
-        .messages(id, params.limit.unwrap_or(100).clamp(1, 500))
+        .messages(id, limit)
         .await
         .map_err(ApiFailure::internal)?;
-    Ok(Json(json!({"messages":messages})))
+    let tools = state
+        .sessions
+        .display_tool_history(id, limit)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let activities = state
+        .sessions
+        .assistant_activity(id, limit)
+        .await
+        .map_err(ApiFailure::internal)?;
+    let mut rows = Vec::with_capacity(messages.len());
+    for message in messages {
+        let message_id = message.id;
+        let mut value = serde_json::to_value(message).map_err(ApiFailure::internal)?;
+        let mut parts = Vec::new();
+        for tool in tools.iter().filter(|tool| tool.message_id == message_id) {
+            if tool.kind == "call" {
+                parts.push(json!({"type":"tool_call","call_id":tool.call_id,"name":tool.name,
+                    "arguments":serde_json::from_str::<Value>(&tool.payload).unwrap_or_else(|_|json!({})),
+                    "status":if tools.iter().any(|output|output.kind=="output" && output.call_id==tool.call_id && output.round_id==tool.round_id){"completed"}else{"pending"}}));
+            } else if tool.kind == "output" {
+                let envelope = serde_json::from_str::<Value>(&tool.payload)
+                    .ok()
+                    .filter(|value| value["format"] == "opencode.tool-result.v1");
+                let output = envelope
+                    .as_ref()
+                    .and_then(|value| value["output"].as_str())
+                    .unwrap_or(&tool.payload);
+                let success = envelope
+                    .as_ref()
+                    .and_then(|value| value["success"].as_bool());
+                parts.push(json!({"type":"tool_output","call_id":tool.call_id,"name":tool.name,"output":output,
+                    "success":success,"is_error":success.map(|success|!success),
+                    "error":if success==Some(false){Some(output)}else{None}}));
+            }
+        }
+        // Assistant activity is already durable and bounded independently of the display body.
+        for activity in &activities {
+            if activity.message_id == message_id {
+                value["reasoning_summary"] = json!(activity.reasoning_summary);
+            }
+        }
+        if !parts.is_empty() {
+            value["parts"] = json!(parts);
+        }
+        rows.push(value);
+    }
+    Ok(Json(json!({"messages":rows})))
 }
 
 async fn list_history_page(
@@ -1105,6 +1370,7 @@ struct CreateTurnBody {
     model: String,
     #[serde(default)]
     reasoning_effort: String,
+    workdir: Option<String>,
 }
 
 fn turn_admission_failure(error: run_owner::AdmissionError) -> ApiFailure {
@@ -1121,6 +1387,241 @@ fn turn_admission_failure(error: run_owner::AdmissionError) -> ApiFailure {
         run_owner::AdmissionError::RegistryUnavailable => {
             ApiFailure::internal("turn ownership registry unavailable")
         }
+    }
+}
+
+async fn validate_directory(
+    raw: &str,
+    base: Option<&std::path::Path>,
+) -> Result<PathBuf, ApiFailure> {
+    if raw.is_empty() || raw.len() > 4096 || raw.contains('\0') {
+        return Err(ApiFailure::bad_request("invalid working directory"));
+    }
+    let path = PathBuf::from(raw);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        base.ok_or_else(|| ApiFailure::bad_request("working directory must be absolute"))?
+            .join(path)
+    };
+    let path = tokio::fs::canonicalize(path)
+        .await
+        .map_err(|_| ApiFailure::bad_request("working directory does not exist"))?;
+    if !tokio::fs::metadata(&path)
+        .await
+        .map_err(ApiFailure::internal)?
+        .is_dir()
+    {
+        return Err(ApiFailure::bad_request(
+            "working directory is not a directory",
+        ));
+    }
+    Ok(path)
+}
+
+async fn session_workdir(
+    sessions: &SessionService,
+    id: SessionId,
+    requested: Option<&str>,
+) -> Result<PathBuf, ApiFailure> {
+    let base = sessions
+        .directory(id)
+        .await
+        .map_err(ApiFailure::internal)?
+        .unwrap_or(std::env::current_dir().map_err(ApiFailure::internal)?);
+    match requested {
+        Some(path) => validate_directory(path, Some(&base)).await,
+        None => Ok(base),
+    }
+}
+
+struct NativeToolOutcome {
+    output: String,
+    success: bool,
+    stop_after_outputs: bool,
+}
+
+/// Bound encoded durable bytes, including JSON escapes, while retaining valid
+/// typed edit previews. A sliced JSON string is not a replayable tool result.
+fn native_result_payload(raw: &str, success: Option<bool>) -> (String, String) {
+    let encode = |output: &str| match success {
+        Some(success) => {
+            json!({"format":"opencode.tool-result.v1","output":output,"success":success})
+                .to_string()
+        }
+        None => output.to_owned(),
+    };
+    let shorten = |text: &str| {
+        let mut end = text.len() / 2;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text[..end].to_owned()
+    };
+    if let Ok(mut edit) = serde_json::from_str::<Value>(raw) {
+        if edit["format"] == "opencode.file-edit.v1" && edit["diff"].is_string() {
+            edit["output"] = json!("Edit applied");
+            for field in ["diff", "path"] {
+                loop {
+                    let output = edit.to_string();
+                    let payload = encode(&output);
+                    if output.len() <= MAX_TOOL_OUTPUT_CHARS
+                        && payload.len() <= opencode_rk_contracts::MAX_INLINE_PAYLOAD_BYTES
+                    {
+                        return (output, payload);
+                    }
+                    let Some(text) = edit[field].as_str().filter(|text| text.len() > 64) else {
+                        break;
+                    };
+                    edit[field] = json!(shorten(text));
+                    edit[format!("{field}_truncated")] = json!(true);
+                }
+            }
+        }
+    }
+    let mut output = truncate_tool_output(raw);
+    loop {
+        let payload = encode(&output);
+        if payload.len() <= opencode_rk_contracts::MAX_INLINE_PAYLOAD_BYTES {
+            return (output, payload);
+        }
+        output = format!("{}\n[truncated]", shorten(&output));
+    }
+}
+
+/// Permission and actual execution share the executor's exact normalized intent.
+async fn execute_native_tool(
+    call: opencode_rk_tools::executor::ToolCall,
+    executor: &ToolExecutor,
+    broker: &PermissionBroker,
+    owner: &Arc<RunOwner>,
+    message_id: MessageId,
+) -> NativeToolOutcome {
+    let failed = |message: String, stop| NativeToolOutcome {
+        output: message,
+        success: false,
+        stop_after_outputs: stop,
+    };
+    let intent = match executor.intent(&call) {
+        Ok(intent) => intent,
+        Err(error) => return failed(format!("error: {error}"), false),
+    };
+    let resource = match serde_json::to_string(&intent) {
+        Ok(resource) => resource,
+        Err(_) => return failed("error: invalid tool intent".to_owned(), false),
+    };
+    let approval = match broker.authorize(&intent) {
+        Decision::Allow => None,
+        Decision::Deny { reason } => {
+            return failed(format!("error: {} denied: {reason}", call.name), false);
+        }
+        Decision::RequireHuman { .. } => {
+            let request = PermissionRequest {
+                id: format!("per_{}", opencode_rk_contracts::ApprovalId::new()),
+                session_id: owner.session_id.to_string(),
+                action: call.name.clone(),
+                resources: vec![resource],
+                source: PermissionSource {
+                    kind: "tool",
+                    message_id: message_id.to_string(),
+                    call_id: call.tool_id.clone(),
+                },
+            };
+            let request_id = request.id.clone();
+            let receiver = match owner.install_pending(request, intent.clone(), broker) {
+                Ok(receiver) => receiver,
+                Err(_) => return failed("error: permission request unavailable".to_owned(), true),
+            };
+            let _pending = PendingPermissionGuard::new(Arc::clone(owner), request_id);
+            let mut cancelled = owner.cancellation_receiver();
+            let reply = tokio::select! {
+                biased;
+                _=cancelled.changed()=>ApprovedPermission{reply:PermissionReply::Cancelled,capability:None},
+                reply=receiver=>reply.unwrap_or(ApprovedPermission{reply:PermissionReply::Cancelled,capability:None}),
+            };
+            match reply.reply {
+                PermissionReply::Reject => return failed(format!("{} rejected", call.name), true),
+                PermissionReply::Cancelled => {
+                    return failed(format!("{} cancelled", call.name), true);
+                }
+                PermissionReply::Once | PermissionReply::Always => match reply.capability {
+                    Some(capability) => Some(capability),
+                    None => return failed("error: permission proof missing".to_owned(), true),
+                },
+            }
+        }
+    };
+    if matches!(call.name.as_str(), "read" | "write" | "edit") {
+        let executor = executor.clone();
+        let owner = Arc::clone(owner);
+        let result = tokio::task::spawn_blocking(move || {
+            let Some(_effect) = owner.begin_effect() else {
+                return None;
+            };
+            let identity = call.tool_id.clone();
+            let approval =
+                approval.map(|proof| (proof, owner.session_id.to_string(), owner.run_id, identity));
+            Some(executor.execute_file_operation(call, approval))
+        })
+        .await;
+        return match result {
+            Ok(Some(result)) => NativeToolOutcome {
+                output: if result.success {
+                    result.output
+                } else {
+                    format!(
+                        "error: {}",
+                        result.error.unwrap_or_else(|| "tool failed".to_owned())
+                    )
+                },
+                success: result.success,
+                stop_after_outputs: false,
+            },
+            Ok(None) => failed("tool cancelled".to_owned(), true),
+            Err(_) => failed("tool execution worker failed".to_owned(), true),
+        };
+    }
+    let Some(_effect) = owner.begin_effect() else {
+        return failed("tool cancelled".to_owned(), true);
+    };
+    // Admission is linearized before cancellation, but a blocking mutex guard
+    // must never cross an async process wait. The biased cancellation branch
+    // below prevents polling an execution cancelled before it starts.
+    drop(_effect);
+    let call_id = call.tool_id.clone();
+    let executor = executor
+        .clone()
+        .with_cancellation(owner.cancellation_receiver());
+    let execution = async {
+        match approval {
+            Some(approval) => {
+                executor
+                    .execute_human_approved(
+                        call,
+                        approval,
+                        &owner.session_id.to_string(),
+                        owner.run_id,
+                        &call_id,
+                    )
+                    .await
+            }
+            None => executor.execute(call).await,
+        }
+    };
+    // The process executor observes cancellation and kills/awaits its owned
+    // process group. Dropping its future here would skip that cleanup receipt.
+    let result = execution.await;
+    NativeToolOutcome {
+        output: if result.success {
+            result.output
+        } else {
+            format!(
+                "error: {}",
+                result.error.unwrap_or_else(|| "tool failed".to_owned())
+            )
+        },
+        success: result.success,
+        stop_after_outputs: false,
     }
 }
 
@@ -1245,13 +1746,21 @@ struct TurnStreamState {
 }
 
 /// Turn-tool allowlist from OPENCODE_RK_TURN_TOOLS (comma-separated tool ids).
-/// Empty by default: tool execution is opt-in, deny-by-default.
+/// Advertise working native tools by default, matching the interactive product.
+/// Every effect still crosses the broker; an explicit environment list narrows
+/// the available tool set but never grants permissions.
 fn turn_tool_config() -> Vec<String> {
     std::env::var("OPENCODE_RK_TURN_TOOLS")
-        .unwrap_or_default()
+        .unwrap_or_else(|_| "bash,shell,read,write,edit,grep,glob".to_owned())
         .split(',')
         .map(str::trim)
         .filter(|name| !name.is_empty())
+        .filter(|name| {
+            matches!(
+                *name,
+                "bash" | "shell" | "read" | "write" | "edit" | "grep" | "glob"
+            )
+        })
         .map(str::to_owned)
         .collect()
 }
@@ -1262,6 +1771,7 @@ struct CallOutputItem {
     call_id: String,
     name: String,
     output: String,
+    success: Option<bool>,
 }
 
 const MAX_FILE_WRITE_ARGUMENT_BYTES: usize = 1024 * 1024;
@@ -1442,8 +1952,7 @@ async fn create_turn_stream(
     let id = parse_session_id(&id)?;
     let permit = TurnExecutionPermit::acquire(id).map_err(turn_admission_failure)?;
     let owner = permit.owner();
-    let project_root = std::env::current_dir()
-        .map_err(|_| ApiFailure::internal("could not determine project root"))?;
+    let project_root = session_workdir(&state.sessions, id, body.workdir.as_deref()).await?;
     let file_tool = FileTool::with_project_root(project_root.clone());
     let broker = PermissionBroker::new(SecurityPolicy::lean_default(project_root));
     state.sessions.get(id).await.map_err(ApiFailure::internal)?;
@@ -1500,7 +2009,7 @@ async fn create_turn_stream(
             ResponsesTool::function(
                 tool.id.clone(),
                 tool.description.clone(),
-                json!({ "type": "object", "properties": {} }),
+                tool.input_schema.clone(),
             )
         })
         .collect();
@@ -1728,7 +2237,14 @@ async fn create_turn_stream(
                         // tool dispatch batch. The budget was checked at
                         // the completed event; consume it here.
                         let _ = state.loop_control.begin_round();
-                        let executor = ToolExecutor::new();
+                        let executor = ToolExecutor::new()
+                            .with_cwd(
+                                state
+                                    .file_tool
+                                    .project_root_path()
+                                    .expect("turn file capability is rooted"),
+                            )
+                            .with_broker(state.broker.clone());
                         let batch = std::mem::take(&mut state.pending_calls);
                         let admissions: Result<Vec<_>, SessionError> = batch
                             .iter()
@@ -1800,6 +2316,7 @@ async fn create_turn_stream(
                         {
                             let permitted = state.enabled_tools.contains(&call.name);
                             let mut stop_after_output = false;
+                            let mut explicit_success = None;
                             let raw_output = if state.owner.is_cancelled() {
                                 "error: call not executed because turn was cancelled".to_owned()
                             } else if state.stop_after_outputs {
@@ -1823,42 +2340,27 @@ async fn create_turn_stream(
                                     stop_after_output = outcome.stop_after_outputs;
                                     outcome.output
                                 } else {
-                                    match state.broker.authorize(&OperationIntent::Tool {
-                                        name: call.name.clone(),
-                                        description: "turn tool call".to_owned(),
-                                    }) {
-                                        Decision::Allow => {
-                                            let arguments: Value =
-                                                serde_json::from_str(&call.arguments)
-                                                    .unwrap_or_else(|_| json!({}));
-                                            let result = executor
-                                                .execute(
-                                                    opencode_rk_tools::executor::ToolCall::new(
-                                                        call.call_id.clone(),
-                                                        call.name.clone(),
-                                                        arguments,
-                                                    ),
-                                                )
-                                                .await;
-                                            if result.success {
-                                                result.output
-                                            } else {
-                                                result
-                                                    .error
-                                                    .unwrap_or_else(|| "tool failed".to_owned())
-                                            }
-                                        }
-                                        Decision::Deny { reason } => {
-                                            format!(
-                                                "error: tool '{}' denied: {}",
-                                                call.name, reason
+                                    match serde_json::from_str::<Value>(&call.arguments) {
+                                        Ok(arguments) => {
+                                            let outcome = execute_native_tool(
+                                                opencode_rk_tools::executor::ToolCall::new(
+                                                    &call.call_id,
+                                                    &call.name,
+                                                    arguments,
+                                                ),
+                                                &executor,
+                                                &state.broker,
+                                                &state.owner,
+                                                state.turn_message_id,
                                             )
+                                            .await;
+                                            stop_after_output = outcome.stop_after_outputs;
+                                            explicit_success = Some(outcome.success);
+                                            outcome.output
                                         }
-                                        Decision::RequireHuman { reason, .. } => {
-                                            format!(
-                                                "error: tool '{}' requires human approval: {}",
-                                                call.name, reason
-                                            )
+                                        Err(_) => {
+                                            explicit_success = Some(false);
+                                            "error: invalid tool JSON arguments".to_owned()
                                         }
                                     }
                                 }
@@ -1868,7 +2370,8 @@ async fn create_turn_stream(
                                     call.name
                                 )
                             };
-                            let bounded = truncate_tool_output(&raw_output);
+                            let (bounded, persisted) =
+                                native_result_payload(&raw_output, explicit_success);
                             // Persist the real output before exposing its event:
                             // a disconnected reader cannot discard a completed pair.
                             if let Err(error) = state
@@ -1876,7 +2379,7 @@ async fn create_turn_stream(
                                 .persist_tool_output(
                                     round.clone(),
                                     index as u64,
-                                    bounded.clone(),
+                                    persisted,
                                     message_id,
                                 )
                                 .await
@@ -1895,6 +2398,7 @@ async fn create_turn_stream(
                                     call_id: call.call_id.clone(),
                                     name: call.name,
                                     output: bounded,
+                                    success: explicit_success,
                                 });
                             }
                             if stop_after_output {
@@ -1917,7 +2421,9 @@ async fn create_turn_stream(
                                     "type": "tool_output",
                                     "call_id": item.call_id,
                                     "name": item.name,
-                                    "output": item.output,
+                                     "output": item.output,
+                                     "success": item.success,
+                                     "is_error": item.success.map(|success|!success),
                                 }))),
                                 state,
                             ));

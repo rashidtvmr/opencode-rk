@@ -27,16 +27,16 @@ pub use gc_v2::GcV2;
 pub use import_v2::ImportV2;
 use opencode_rk_contracts::{
     ArtifactDocument, ArtifactId, ArtifactKind, ArtifactSummary, ArtifactVersion,
-    AssistantActivity, AttachmentId, DraftAttachment, MessageId, MessageRecord, MessageRole,
-    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp, MAX_ARTIFACTS_PER_SESSION,
-    MAX_ARTIFACT_CONTENT_BYTES, MAX_ARTIFACT_LANGUAGE_BYTES, MAX_ARTIFACT_TITLE_BYTES,
-    MAX_ARTIFACT_TOTAL_BYTES, MAX_ARTIFACT_VERSIONS, MAX_ATTACHMENT_MIME_BYTES,
-    MAX_ATTACHMENT_NAME_BYTES, MAX_DRAFT_ATTACHMENTS, MAX_DRAFT_ATTACHMENT_BYTES,
-    MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES,
+    AssistantActivity, AttachmentId, DraftAttachment, MAX_ARTIFACT_CONTENT_BYTES,
+    MAX_ARTIFACT_LANGUAGE_BYTES, MAX_ARTIFACT_TITLE_BYTES, MAX_ARTIFACT_TOTAL_BYTES,
+    MAX_ARTIFACT_VERSIONS, MAX_ARTIFACTS_PER_SESSION, MAX_ATTACHMENT_MIME_BYTES,
+    MAX_ATTACHMENT_NAME_BYTES, MAX_DRAFT_ATTACHMENT_BYTES, MAX_DRAFT_ATTACHMENTS,
+    MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES, MessageId, MessageRecord, MessageRole,
+    PayloadRef, SessionId, SessionState, SessionSummary, Timestamp,
 };
 pub use quota_v2::QuotaV2;
 pub use retention_v2::RetentionV2;
-use rusqlite::{params, Connection, OptionalExtension, TransactionBehavior};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub use schema_v2::SchemaV2;
 pub use snapshot_v2::SnapshotV2;
 use std::{
@@ -767,12 +767,109 @@ impl Storage {
     }
 
     pub fn create_session(&self, session: &SessionSummary) -> Result<(), StorageError> {
+        self.create_session_with_directory(session, None)
+    }
+
+    pub fn create_session_with_directory(
+        &self,
+        session: &SessionSummary,
+        directory: Option<&str>,
+    ) -> Result<(), StorageError> {
         session
             .validate()
             .map_err(|_| StorageError::Sqlite(rusqlite::Error::InvalidQuery))?;
-        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        if directory.is_some_and(|value| {
+            value.is_empty() || value.len() > 4096 || !std::path::Path::new(value).is_absolute()
+        }) {
+            return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let connection = connection.transaction_with_behavior(TransactionBehavior::Immediate)?;
         connection.execute("INSERT INTO sessions (id,title,state,created_at,updated_at,archived_at) VALUES (?1,?2,?3,?4,?5,?6)",params![session.id.to_string(),session.title,encode_state(session.state),session.created_at.to_string(),session.updated_at.to_string(),session.archived_at.map(Timestamp::to_rfc3339)])?;
+        if let Some(directory) = directory {
+            connection.execute(
+                "INSERT INTO session_directories(session_id,directory) VALUES(?1,?2)",
+                params![session.id.to_string(), directory],
+            )?;
+        }
+        connection.commit()?;
         Ok(())
+    }
+
+    pub fn session_directory(&self, id: SessionId) -> Result<Option<PathBuf>, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let path: Option<String> = connection
+            .query_row(
+                "SELECT directory FROM session_directories WHERE session_id=?1 LIMIT 1",
+                params![id.to_string()],
+                |row| row.get(0),
+            )
+            .optional()?;
+        Ok(path.map(PathBuf::from))
+    }
+
+    /// Bounded display hydration includes pending calls without claiming they
+    /// have completed. Provider replay continues using the strict pair reader.
+    pub fn display_tool_history(
+        &self,
+        id: SessionId,
+        limit: usize,
+    ) -> Result<Vec<ToolHistoryItem>, StorageError> {
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let mut query = connection.prepare(
+            "SELECT r.round_id,r.pair_index,r.kind,r.call_id,r.name,r.payload,r.message_id,r.byte_len
+            FROM typed_tool_records r JOIN tool_rounds t ON t.round_id=r.round_id
+            WHERE t.session_id=?1 AND r.message_id IN
+            (SELECT id FROM messages WHERE session_id=?1 ORDER BY rowid ASC LIMIT ?2)
+            ORDER BY r.rowid ASC LIMIT 1000",
+        )?;
+        let records = query.query_map(
+            params![id.to_string(), limit.clamp(1, 1000) as i64],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, String>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )?;
+        let mut output = Vec::new();
+        let mut bytes = 0usize;
+        for record in records {
+            let (round, pair_index, kind, call_id, name, payload, message, byte_len) = record?;
+            if !matches!(kind.as_str(), "call" | "output")
+                || usize::try_from(byte_len).ok() != Some(payload.len())
+                || payload.len() > MAX_INLINE_PAYLOAD_BYTES
+            {
+                return Err(StorageError::TypedHistoryIdentity);
+            }
+            validate_typed_text(&round)?;
+            validate_typed_text(&call_id)?;
+            validate_typed_text(&name)?;
+            bytes = bytes.saturating_add(payload.len() + call_id.len() + name.len());
+            if bytes > 4 * 1024 * 1024 {
+                break;
+            }
+            let pair_index =
+                u64::try_from(pair_index).map_err(|_| StorageError::TypedHistoryIdentity)?;
+            output.push(ToolHistoryItem {
+                round_id: Arc::from(round),
+                pair_index,
+                kind,
+                call_id,
+                name,
+                payload,
+                message_id: message
+                    .parse()
+                    .map_err(|_| StorageError::TypedHistoryIdentity)?,
+            });
+        }
+        Ok(output)
     }
     pub fn get_session(&self, id: SessionId) -> Result<SessionSummary, StorageError> {
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
@@ -1342,6 +1439,12 @@ impl Storage {
                 PRIMARY KEY(artifact_id,version)
             );",
         )?;
+        connection.execute_batch(
+            "CREATE TABLE IF NOT EXISTS session_directories(
+            session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+            directory TEXT NOT NULL CHECK(length(CAST(directory AS BLOB)) BETWEEN 1 AND 4096)
+        );",
+        )?;
         Self::migrate_typed_history(connection)?;
         Ok(())
     }
@@ -1357,7 +1460,16 @@ impl Storage {
                 )
                 .optional()?
             {
-                if kind != "table" || sql.as_deref().unwrap_or("").to_ascii_lowercase().replace(' ', "") != "createtablefeature_migrations(featuretextprimarykey,versionintegernotnullcheck(version>=1),applied_attextnotnull)" { return Err(StorageError::TypedHistorySchema); }
+                if kind != "table"
+                    || sql
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_ascii_lowercase()
+                        .replace(' ', "")
+                        != "createtablefeature_migrations(featuretextprimarykey,versionintegernotnullcheck(version>=1),applied_attextnotnull)"
+                {
+                    return Err(StorageError::TypedHistorySchema);
+                }
             } else {
                 connection.execute_batch("CREATE TABLE feature_migrations(feature TEXT PRIMARY KEY,version INTEGER NOT NULL CHECK(version >= 1),applied_at TEXT NOT NULL);")?;
             }

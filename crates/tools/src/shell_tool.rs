@@ -3,15 +3,16 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use opencode_rk_security::{Decision, OperationIntent, PermissionBroker};
+use opencode_rk_security::{Decision, HumanApproval, OperationIntent, PermissionBroker};
 
 use thiserror::Error;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::Child;
+use tokio::sync::watch;
 #[cfg(test)]
-use tokio::time::{Duration, timeout as tokio_timeout};
+use tokio::time::timeout as tokio_timeout;
 
 /// Maximum output bytes retained for stdout/stderr (10 MiB).
 const MAX_OUTPUT_BYTES: usize = 10 * 1024 * 1024;
@@ -88,6 +89,10 @@ pub struct ShellTool {
     /// new callers; deny of a missing broker is a future upgrade).
     pub authz: Option<PermissionBroker>,
     child: Option<Child>,
+    process_group: Option<u32>,
+    cancellation: Option<watch::Receiver<bool>>,
+    timeout: Option<Duration>,
+    human_approval: Option<(HumanApproval, String, u64, String)>,
 }
 
 impl ShellTool {
@@ -101,6 +106,10 @@ impl ShellTool {
             cwd: None,
             authz: None,
             child: None,
+            process_group: None,
+            cancellation: None,
+            timeout: None,
+            human_approval: None,
         }
     }
 
@@ -128,6 +137,23 @@ impl ShellTool {
         self
     }
 
+    /// Builder: fixed wall-clock deadline spanning child + pipe completion.
+    pub fn deadline(mut self, deadline: Duration) -> Self {
+        self.timeout = Some(deadline);
+        self
+    }
+
+    /// Builder: precise timeout in milliseconds (overrides legacy seconds).
+    pub fn timeout_millis(self, millis: u64) -> Self {
+        self.deadline(Duration::from_millis(millis))
+    }
+
+    /// Builder: cooperative cancellation via a pre-filled watch channel.
+    pub fn cancellation(mut self, receiver: watch::Receiver<bool>) -> Self {
+        self.cancellation = Some(receiver);
+        self
+    }
+
     /// Builder: working directory.
     pub fn cwd(mut self, cwd: impl Into<String>) -> Self {
         self.cwd = Some(cwd.into());
@@ -137,6 +163,19 @@ impl ShellTool {
     /// Builder: permission broker consulted before spawn (mcp_spawn.rs:379).
     pub fn broker(mut self, broker: PermissionBroker) -> Self {
         self.authz = Some(broker);
+        self
+    }
+
+    /// Execute with a proof minted by the live permission-reply path. The
+    /// exact argv/cwd/call identity is rechecked at the effect boundary.
+    pub fn human_approved(
+        mut self,
+        approval: HumanApproval,
+        session_id: impl Into<String>,
+        run_id: u64,
+        call_id: impl Into<String>,
+    ) -> Self {
+        self.human_approval = Some((approval, session_id.into(), run_id, call_id.into()));
         self
     }
 
@@ -160,6 +199,14 @@ impl ShellTool {
         if !self.is_allowed(&config) {
             return Err(ShellError::CommandNotAllowed);
         }
+        // Already-cancelled token: fail closed before broker/spawn work.
+        if self
+            .cancellation
+            .as_ref()
+            .is_some_and(|receiver| *receiver.borrow())
+        {
+            return Err(ShellError::Cancelled);
+        }
         // Broker approval gates spawn (mcp_spawn.rs:379): intent built from
         // the exact argv that would exec. Deny/RequireHuman fail closed and
         // spawn no process. `None` broker = legacy allowlist-only.
@@ -173,7 +220,19 @@ impl ShellTool {
                     .map(PathBuf::from)
                     .unwrap_or_else(|| PathBuf::from("/tmp")),
             };
-            match broker.authorize(&intent) {
+            let decision =
+                if let Some((approval, session_id, run_id, call_id)) = self.human_approval.take() {
+                    broker.authorize_with_human_approval(
+                        &intent,
+                        approval,
+                        &session_id,
+                        run_id,
+                        &call_id,
+                    )
+                } else {
+                    broker.authorize(&intent)
+                };
+            match decision {
                 Decision::Allow => (),
                 Decision::Deny { reason } => return Err(ShellError::Denied(reason)),
                 Decision::RequireHuman { reason, .. } => {
@@ -206,44 +265,76 @@ impl ShellTool {
         cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
 
         cmd.kill_on_drop(true);
+        #[cfg(unix)]
+        cmd.process_group(0);
         let child = cmd.spawn().map_err(|e| ShellError::Spawn(e.to_string()))?;
+        self.process_group = child.id();
         self.child = Some(child);
-
-        // Borrow child for reading; take it back before we await kill on drop.
-        let child_ref = self.child.as_mut().expect("child set");
-
-        let stdout_fut = async {
-            if let Some(mut out) = child_ref.stdout.take() {
-                let mut buf = Vec::with_capacity(8 * 1024);
-                let _ = out.read_to_end(&mut buf).await;
-                buf
-            } else {
-                Vec::new()
-            }
-        };
-        let stderr_fut = async {
-            if let Some(mut err) = child_ref.stderr.take() {
-                let mut buf = Vec::with_capacity(8 * 1024);
-                let _ = err.read_to_end(&mut buf).await;
-                buf
-            } else {
-                Vec::new()
-            }
-        };
-
         let start = Instant::now();
-        let (stdout_bytes, stderr_bytes) = tokio::join!(stdout_fut, stderr_fut);
+        let duration = self
+            .timeout
+            .unwrap_or_else(|| Duration::from_secs(config.timeout_secs.max(1)));
+        let mut cancellation = self.cancellation.take();
+        let result = {
+            let child = self.child.as_mut().expect("child set");
+            let stdout = child.stdout.take();
+            let stderr = child.stderr.take();
+            let completion = async {
+                let (status, stdout, stderr) = tokio::join!(
+                    child.wait(),
+                    drain_bounded(stdout, limit),
+                    drain_bounded(stderr, limit)
+                );
+                Ok::<_, ShellError>((status?, stdout, stderr))
+            };
+            let cancelled = async {
+                if let Some(receiver) = cancellation.as_mut() {
+                    loop {
+                        if *receiver.borrow_and_update() {
+                            break;
+                        }
+                        if receiver.changed().await.is_err() {
+                            break;
+                        }
+                    }
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            };
+            tokio::select! {
+                biased;
+                _=cancelled=>Err(ShellError::Cancelled),
+                _=tokio::time::sleep(duration)=>Err(ShellError::Timeout(duration.as_secs().max(1))),
+                result=completion=>result,
+            }
+        };
+        // Keep the pgid independently of Child::id(), which becomes None once
+        // wait() reaps a parent whose descendants still own the output pipes.
+        let (status, stdout_bytes, stderr_bytes) = match result {
+            Ok(result) => result,
+            Err(error) => {
+                self.kill_group();
+                if let Some(child) = self.child.as_mut() {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                }
+                self.child = None;
+                self.process_group = None;
+                return Err(error);
+            }
+        };
         let duration_ms = start.elapsed().as_millis();
 
         // Truncate to limit, converting bytes -> truncated flag.
         let stdout = truncate_to_limit(stdout_bytes, limit);
         let stderr = truncate_to_limit(stderr_bytes, limit);
 
-        let exit_code = child_ref.wait().await?.code();
+        let exit_code = status.code();
         let success = exit_code == Some(0);
 
         // Clear child so drop cannot kill an already-reaped process.
         self.child = None;
+        self.process_group = None;
 
         Ok(ShellResult {
             success,
@@ -256,8 +347,19 @@ impl ShellTool {
 
     /// Hard-cancel an in-flight command. Safe to call when no child exists.
     pub fn cancel(&mut self) {
+        self.kill_group();
         if let Some(child) = self.child.as_mut() {
             let _ = child.start_kill();
+        }
+    }
+
+    fn kill_group(&self) {
+        #[cfg(unix)]
+        if let Some(pid) = self
+            .process_group
+            .and_then(|id| rustix::process::Pid::from_raw(id as i32))
+        {
+            let _ = rustix::process::kill_process_group(pid, rustix::process::Signal::KILL);
         }
     }
 
@@ -265,6 +367,24 @@ impl ShellTool {
     pub fn is_running(&self) -> bool {
         self.child.is_some()
     }
+}
+
+async fn drain_bounded<R: AsyncRead + Unpin>(reader: Option<R>, limit: usize) -> Vec<u8> {
+    let Some(mut reader) = reader else {
+        return Vec::new();
+    };
+    let mut retained = Vec::with_capacity(limit.min(8192));
+    let mut buffer = [0u8; 8192];
+    loop {
+        match reader.read(&mut buffer).await {
+            Ok(0) | Err(_) => break,
+            Ok(length) => {
+                let keep = length.min(limit.saturating_add(1).saturating_sub(retained.len()));
+                retained.extend_from_slice(&buffer[..keep]);
+            }
+        }
+    }
+    retained
 }
 
 impl Drop for ShellTool {

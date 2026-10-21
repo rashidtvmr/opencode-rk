@@ -73,7 +73,11 @@ impl ToolRegistry {
 
     /// Register the built-in core tools: bash, grep, file, read, write, edit.
     fn register_builtins(&mut self) {
-        let empty_schema = json!({ "type": "object", "properties": {} });
+        let shell_schema = json!({"type":"object","properties":{"command":{"type":"string"},"workdir":{"type":"string"},"timeout":{"type":"integer","minimum":1}},"required":["command"],"additionalProperties":false});
+        let read_schema = json!({"type":"object","properties":{"path":{"type":"string"},"offset":{"type":"integer","minimum":0},"limit":{"type":"integer","minimum":1}},"required":["path"],"additionalProperties":false});
+        let write_schema = json!({"type":"object","properties":{"path":{"type":"string"},"content":{"type":"string"}},"required":["path","content"],"additionalProperties":false});
+        let edit_schema = json!({"type":"object","properties":{"path":{"type":"string"},"oldString":{"type":"string"},"newString":{"type":"string"},"replaceAll":{"type":"boolean"}},"required":["path","oldString","newString"],"additionalProperties":false});
+        let search_schema = json!({"type":"object","properties":{"pattern":{"type":"string","maxLength":256},"path":{"type":"string"},"include":{"type":"string","maxLength":256},"literal":{"type":"boolean","enum":[true],"default":true,"description":"Literal text matching; regular expressions are not supported."},"caseSensitive":{"type":"boolean"},"hidden":{"type":"boolean"},"limit":{"type":"integer","minimum":1,"maximum":1000}},"required":["pattern"],"additionalProperties":false});
         let string_schema = json!({ "type": "string" });
 
         let builtins: &[(&str, &str, &str, &str, &[&str])] = &[
@@ -83,6 +87,20 @@ impl ToolRegistry {
                 "Execute a shell command in the workspace directory.",
                 "shell",
                 &["shell", "system"],
+            ),
+            (
+                "shell",
+                "shell",
+                "Execute a shell command in the workspace directory.",
+                "shell",
+                &["shell", "system"],
+            ),
+            (
+                "glob",
+                "glob",
+                "Match files in the workspace.",
+                "filesystem",
+                &["filesystem", "search"],
             ),
             (
                 "grep",
@@ -122,7 +140,15 @@ impl ToolRegistry {
         ];
 
         for (id, name, desc, ty, tags) in builtins {
-            let tool = Tool::new(id, name, desc, empty_schema.clone(), string_schema.clone())
+            let input = match *id {
+                "bash" | "shell" => shell_schema.clone(),
+                "read" => read_schema.clone(),
+                "write" => write_schema.clone(),
+                "edit" => edit_schema.clone(),
+                "grep" | "glob" => search_schema.clone(),
+                _ => json!({"type":"object","properties":{"path":{"type":"string"}}}),
+            };
+            let tool = Tool::new(id, name, desc, input, string_schema.clone())
                 .with_tags(tags)
                 .with_type(ty);
             self.register(tool);
@@ -258,8 +284,8 @@ mod tests {
     #[test]
     fn count_includes_builtins() {
         let reg = ToolRegistry::new();
-        // Six built-in tools registered by default.
-        assert_eq!(reg.count(), 6);
+        // Eight built-in tools registered by default.
+        assert_eq!(reg.count(), 8);
         assert!(reg.get("bash").is_some());
         assert!(reg.get("grep").is_some());
         assert!(reg.get("file").is_some());
@@ -273,11 +299,12 @@ mod tests {
         let reg = ToolRegistry::new();
         // bash and grep are both tagged, plus file/edit/inspect/transform.
         let shell = reg.find_by_tag("shell");
-        assert_eq!(shell.len(), 1);
+        assert_eq!(shell.len(), 2);
         assert_eq!(shell[0].id, "bash");
+        assert_eq!(shell[1].id, "shell");
 
         let filesystem = reg.find_by_tag("filesystem");
-        assert_eq!(filesystem.len(), 4);
+        assert_eq!(filesystem.len(), 5);
     }
 
     #[test]

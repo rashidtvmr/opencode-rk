@@ -17,7 +17,7 @@ type WriteHook = Option<fn(&Path, bool) -> Result<(), ToolError>>;
 type RootObserver<'a> = Option<&'a mut dyn FnMut(&std::os::fd::OwnedFd) -> Result<(), ToolError>>;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-use rustix::fs::{self as rustix_fs, fstat, mkdirat, openat, Mode, OFlags};
+use rustix::fs::{self as rustix_fs, Mode, OFlags, fstat, mkdirat, openat};
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 use std::ffi::OsStr;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -244,12 +244,12 @@ impl FileTool {
             {
                 Decision::Allow => (),
                 Decision::Deny { reason } => {
-                    return Ok(FileResult::failure(format!("write denied: {reason}")))
+                    return Ok(FileResult::failure(format!("write denied: {reason}")));
                 }
                 Decision::RequireHuman { reason, .. } => {
                     return Ok(FileResult::failure(format!(
                         "write requires human approval: {reason}"
-                    )))
+                    )));
                 }
             }
         }
@@ -385,28 +385,105 @@ fn read_file(
     offset: Option<usize>,
     limit: Option<usize>,
 ) -> Result<FileResult, ToolError> {
+    let metadata = match fs::symlink_metadata(path) {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(FileResult::failure(format!("File not found: {:?}", path)));
+        }
+        Err(error) => return Err(ToolError::IoError(error)),
+    };
+    if metadata.file_type().is_symlink() {
+        return Ok(FileResult::failure("read denied: symlink target"));
+    }
+    if !metadata.is_file() {
+        return list_dir(path);
+    }
+    if metadata.len() > 16 * 1024 * 1024 {
+        return Ok(FileResult::failure(
+            "read denied: file exceeds 16 MiB limit",
+        ));
+    }
     if !path.exists() {
         return Ok(FileResult::failure(format!("File not found: {:?}", path)));
     }
 
-    let mut content = fs::read_to_string(path).map_err(ToolError::IoError)?;
+    let file = fs::File::open(path).map_err(ToolError::IoError)?;
+    read_open_file(file, metadata.len(), offset, limit)
+}
+
+fn read_open_file(
+    file: fs::File,
+    length: u64,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<FileResult, ToolError> {
+    use std::io::Read;
+    if length > 16 * 1024 * 1024 {
+        return Ok(FileResult::failure(
+            "read denied: file exceeds 16 MiB limit",
+        ));
+    }
+    let mut bytes = Vec::with_capacity(length.min(1024 * 1024) as usize);
+    file.take(16 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)
+        .map_err(ToolError::IoError)?;
+    if bytes.len() > 16 * 1024 * 1024 {
+        return Ok(FileResult::failure(
+            "read denied: file exceeds 16 MiB limit",
+        ));
+    }
+    let mut content = String::from_utf8(bytes)
+        .map_err(|_| ToolError::FileError("binary files are not readable".into()))?;
 
     if let Some(off) = offset {
-        if off > content.len() {
+        if off > content.lines().count() {
             return Ok(FileResult::failure(format!(
                 "Offset {} exceeds file length {}",
                 off,
-                content.len()
+                content.lines().count()
             )));
         }
-        content = content[off..].to_string();
+        content = content.lines().skip(off).collect::<Vec<_>>().join("\n");
     }
 
     if let Some(lim) = limit {
-        content = content.chars().take(lim).collect();
+        content = content.lines().take(lim).collect::<Vec<_>>().join("\n");
     }
 
     Ok(FileResult::success(content))
+}
+
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+fn read_directory_handle(
+    file: &fs::File,
+    offset: Option<usize>,
+    limit: Option<usize>,
+) -> Result<FileResult, ToolError> {
+    let directory =
+        rustix::fs::Dir::read_from(file).map_err(|error| ToolError::IoError(error.into()))?;
+    let mut names = Vec::new();
+    let mut bytes = 0usize;
+    for entry in directory.take(1002) {
+        let entry = entry.map_err(|error| ToolError::IoError(error.into()))?;
+        let name = entry.file_name().to_string_lossy();
+        if name == "." || name == ".." {
+            continue;
+        }
+        bytes = bytes.saturating_add(name.len());
+        if bytes > 1024 * 1024 || names.len() >= 1000 {
+            break;
+        }
+        names.push(name.into_owned());
+    }
+    names.sort();
+    let names: Vec<_> = names
+        .into_iter()
+        .skip(offset.unwrap_or(0))
+        .take(limit.unwrap_or(1000).min(1000))
+        .collect();
+    Ok(FileResult::success(serde_json::to_string(&names).map_err(
+        |error| ToolError::FileError(error.to_string()),
+    )?))
 }
 
 /// Writes content to a file at the given path.
@@ -439,7 +516,56 @@ fn execute_rooted(root: &Path, op: FileOperation) -> Result<FileResult, ToolErro
             offset,
             limit,
         } => {
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            if normalize_lexical_path(&path) == normalize_lexical_path(root)
+                || path == Path::new(".")
+            {
+                let file = fs::File::from(open_write_root_at(root, None)?);
+                return read_directory_handle(&file, offset, limit);
+            }
             let path = rooted_path(root, &path)?;
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            {
+                let normalized = normalize_rooted_path(root, &path)?;
+                let root_fd = open_write_root_at(root, None)?;
+                let parent = traverse_write_parent(
+                    &root_fd,
+                    &normalized.components[..normalized.components.len() - 1],
+                    false,
+                )?;
+                let directory = parent.last().ok_or_else(|| {
+                    ToolError::FileError("read denied: missing parent".to_owned())
+                })?;
+                let fd = match openat(
+                    directory.as_fd(),
+                    OsStr::new(normalized.components.last().expect("validated leaf")),
+                    OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC | OFlags::NONBLOCK,
+                    Mode::empty(),
+                ) {
+                    Ok(fd) => fd,
+                    Err(error) if error == rustix::io::Errno::NOENT => {
+                        return Ok(FileResult::failure(format!("File not found: {:?}", path)));
+                    }
+                    Err(error) => return Err(ToolError::IoError(error.into())),
+                };
+                let file = fs::File::from(fd);
+                let metadata = file.metadata().map_err(ToolError::IoError)?;
+                if metadata.is_dir() {
+                    return read_directory_handle(&file, offset, limit);
+                }
+                if !metadata.is_file() {
+                    return Ok(FileResult::failure(
+                        "read denied: target is not a regular file",
+                    ));
+                }
+                if std::os::unix::fs::MetadataExt::nlink(&metadata) != 1 {
+                    return Ok(FileResult::failure(
+                        "read denied: opened file has multiple hard links",
+                    ));
+                }
+                read_open_file(file, metadata.len(), offset, limit)
+            }
+            #[cfg(not(any(target_os = "linux", target_os = "macos")))]
             read_file(&path, offset, limit)
         }
         FileOperation::Write {
@@ -626,15 +752,29 @@ fn write_file_descriptor_at(
     let parent = pinned
         .last()
         .ok_or_else(|| ToolError::FileError("write denied: missing parent".to_owned()))?;
-    let mut flags = OFlags::WRONLY | OFlags::CREATE | OFlags::NOFOLLOW | OFlags::CLOEXEC;
-    flags |= if append {
-        OFlags::APPEND
-    } else {
-        OFlags::TRUNC
-    };
+    // Opening must not truncate before validating the actual inode. A path
+    // checked by the broker can be replaced with a hardlink or FIFO before
+    // openat; NONBLOCK also keeps such a substitution from parking a worker.
+    let mut flags = OFlags::WRONLY
+        | OFlags::CREATE
+        | OFlags::NOFOLLOW
+        | OFlags::CLOEXEC
+        | OFlags::NONBLOCK;
+    if append {
+        flags |= OFlags::APPEND;
+    }
     let fd = openat(parent.as_fd(), OsStr::new(leaf), flags, Mode::from(0o600))
         .map_err(|error| ToolError::IoError(error.into()))?;
     let mut file = std::fs::File::from(fd);
+    let metadata = file.metadata().map_err(ToolError::IoError)?;
+    if !metadata.is_file() || std::os::unix::fs::MetadataExt::nlink(&metadata) != 1 {
+        return Ok(FileResult::failure(
+            "write denied: opened target must be a single-link regular file",
+        ));
+    }
+    if !append {
+        file.set_len(0).map_err(ToolError::IoError)?;
+    }
     file.write_all(content.as_bytes())
         .map_err(ToolError::IoError)?;
 
@@ -648,6 +788,31 @@ fn write_file_descriptor_at(
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn normalized_path(root: &Path, path: &NormalizedWritePath) -> PathBuf {
     root.join(path.components.iter().collect::<PathBuf>())
+}
+
+#[cfg(all(test,any(target_os="linux",target_os="macos")))]
+mod opened_inode_regressions {
+    use super::*;
+    #[test]
+    fn hardlink_substitution_at_open_never_truncates_another_file() {
+        fn swap(path:&Path,_append:bool)->Result<(),ToolError> {
+            fs::remove_file(path).map_err(ToolError::IoError)?;
+            fs::hard_link(path.parent().unwrap().join(".env"),path).map_err(ToolError::IoError)
+        }
+        let fixture=tempfile::tempdir().unwrap();let root=fixture.path().canonicalize().unwrap();
+        let secret=root.join(".env");let target=root.join("allowed.txt");
+        fs::write(&secret,"fixture-secret-preserved").unwrap();fs::write(&target,"ordinary").unwrap();
+        let result=write_file_rooted(&root,&target,"must-not-overwrite",false,Some(swap));
+        assert!(result.is_err() || !result.unwrap().success,"opened hardlink alias was accepted");
+        assert_eq!(fs::read_to_string(secret).unwrap(),"fixture-secret-preserved");
+    }
+    #[test]
+    fn rooted_read_rejects_the_opened_hardlink_inode() {
+        let fixture=tempfile::tempdir().unwrap();let root=fixture.path().canonicalize().unwrap();
+        fs::write(root.join(".env"),"fixture-secret-preserved").unwrap();fs::hard_link(root.join(".env"),root.join("allowed.txt")).unwrap();
+        let result=execute_rooted(&root,FileOperation::Read{path:root.join("allowed.txt"),offset:None,limit:None});
+        assert!(result.is_err() || !result.unwrap().success,"descriptor read disclosed a multi-link inode");
+    }
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
@@ -1361,12 +1526,13 @@ mod tests {
         );
 
         let outside_path = outside.path().join("escape.txt");
-        assert!(tool
-            .execute(FileOperation::write(
+        assert!(
+            tool.execute(FileOperation::write(
                 outside_path.clone(),
                 "escape".to_owned()
             ))
-            .is_err());
+            .is_err()
+        );
         assert!(!outside_path.exists());
     }
 
@@ -1377,12 +1543,13 @@ mod tests {
         let escaped = outside.join("rooted-traversal-denied.txt");
         let tool = FileTool::with_project_root(project.path().to_path_buf());
 
-        assert!(tool
-            .execute(FileOperation::write(
+        assert!(
+            tool.execute(FileOperation::write(
                 PathBuf::from("../rooted-traversal-denied.txt"),
                 "escape".to_owned(),
             ))
-            .is_err());
+            .is_err()
+        );
         assert!(!escaped.exists());
     }
 
