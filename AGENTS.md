@@ -2,6 +2,32 @@
 
 This repository is in **product-convergence mode**. The goal is a working OpenCode-compatible Rust application, not a larger task graph.
 
+## Temporary user override — finish Phase 1 first (2026-10-21)
+
+The user explicitly directed: "lets ignore the guards and running python script
+and focus on compelte the phase-1 task, we can hardne the rules afterward" and
+asked that this direction be recorded here. This section takes precedence over
+conflicting Recovery Mode process requirements below while completing Phase 1.
+
+- Do not block product implementation, integration or installed verification on
+  recovery guard scripts, queue-state transitions, controller migration,
+  capability/receipt ceremonies or recovery bookkeeping. Defer process hardening.
+- Apply the already independently reviewed observer corrections and repair actual
+  failing product behavior. Preserve semantic acceptance assertions; never turn
+  an unexecuted or failing product check into a claimed PASS.
+- Scoped direct commits on `main-v2` and command-local bypass of the Recovery Mode
+  Git hook are authorized for this work when that hook blocks the required edits.
+  Do not persistently disable Git hooks or change global Git configuration.
+- Reuse the existing fixed lanes and one integration writer. Preserve legacy refs,
+  user work, history, databases and preferences; do not force-push or bulk-delete.
+- Product permission/security enforcement remains required. This override concerns
+  repository orchestration, not the running application's permission broker.
+- Run focused tests and the real installed Phase-1 journeys on the exact final
+  release SHA. Report procedural checks waived by this override separately from
+  product PASS/FAIL, and retain evidence and independent review of meaningful fixes.
+- Do not create a replacement orchestration framework or another controller
+  migration project. Finish the working local native application first.
+
 ## Recovery Mode is active
 
 Read these first, in this order, before changing product code:
