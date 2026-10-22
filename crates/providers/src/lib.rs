@@ -28,6 +28,7 @@ pub mod int_events;
 pub mod int_ledger;
 pub mod int_mapping;
 pub mod int_retry;
+pub mod imported_config;
 pub mod int_routekey;
 pub mod int_state;
 pub mod int_status;

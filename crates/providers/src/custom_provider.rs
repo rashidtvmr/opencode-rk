@@ -86,14 +86,62 @@ fn decode_configs(root: &Value) -> Result<Vec<CustomProviderConfig>, CustomProvi
 
 pub async fn list() -> Result<Vec<CustomProviderConfig>, CustomProviderError> {
     let path = config_path().ok_or(CustomProviderError::Io)?;
-    tokio::task::spawn_blocking(move || decode_configs(&read_root(&path)?)).await.map_err(|_| CustomProviderError::Io)?
+    let mut configs: Vec<CustomProviderConfig> = tokio::task::spawn_blocking(move || {
+        decode_configs(&read_root(&path)?)
+    })
+    .await
+    .map_err(|_| CustomProviderError::Io)??;
+
+    // Merge imported providers from the native own config file as an additive
+    // layer. Imported providers augment the existing `custom-providers.json`
+    // list; they do not replace or remove entries.
+    let imported = crate::imported_config::load_imported_providers()
+        .map_err(|e| CustomProviderError::Invalid(e.to_string()))?;
+    for imp in imported {
+        let existing = configs.iter().any(|c| c.id == imp.id);
+        if !existing {
+            configs.push(CustomProviderConfig {
+                id: imp.id,
+                name: imp.name,
+                base_url: imp.base_url,
+                api_key: None,
+                buffered_model_ids: imp.buffered_model_ids,
+            });
+        }
+    }
+    Ok(configs)
 }
 
 pub async fn load(id: &str) -> Result<Option<CustomProviderConfig>, CustomProviderError> {
     if !valid_id(id) { return Err(CustomProviderError::Invalid("invalid provider id".into())); }
     let mut config = list().await?.into_iter().find(|config| config.id == id);
     if let Some(config) = &mut config {
-        config.api_key = crate::persisted_auth::api_key(id, &format!("{}_API_KEY", id.to_uppercase())).await;
+        // Check if this provider came from the imported own config file
+        // (and was NOT overridden by a legacy custom-providers.json entry
+        // with the same ID). Only imported providers get their declared
+        // `api_key_env` used for credential resolution.
+        let id_owned = id.to_owned();
+        let imported = crate::imported_config::load_imported_providers()
+            .map_err(|e| CustomProviderError::Invalid(e.to_string()))?;
+        let ambient_name = match imported.iter().find(|p| p.id == id) {
+            Some(imp) => {
+                // This provider exists in imported config. Check if it was
+                // shadowed by a legacy custom-providers.json entry: if the
+                // legacy config also has this ID, use the legacy convention.
+                let path = config_path().ok_or(CustomProviderError::Io)?;
+                let has_legacy = tokio::task::spawn_blocking(move || {
+                    let root = read_root(&path)?;
+                    Ok::<bool, CustomProviderError>(root["providers"].get(&id_owned).is_some())
+                }).await.map_err(|_| CustomProviderError::Io)??;
+                if has_legacy {
+                    format!("{}_API_KEY", id.to_uppercase())
+                } else {
+                    imp.api_key_env.clone().unwrap_or_else(|| format!("{}_API_KEY", id.to_uppercase()))
+                }
+            }
+            None => format!("{}_API_KEY", id.to_uppercase()),
+        };
+        config.api_key = crate::persisted_auth::api_key(id, &ambient_name).await;
     }
     Ok(config)
 }
