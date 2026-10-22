@@ -274,14 +274,101 @@ pub enum ResponsesStreamEvent {
 /// `event_name` is the SSE `event:` field when the peer sends one.
 #[derive(Debug, Default)]
 pub struct ResponsesStreamParser {
+    usage: Option<ReportedUsage>,
     output_bytes: usize,
     reasoning_summary_bytes: usize,
     completed: bool,
 }
 
+/// Token counts exactly as the provider reported them for one turn.
+///
+/// `input_tokens` and `output_tokens` are taken only from values the
+/// provider actually reported; when either is absent, null or malformed,
+/// [`ReportedUsage::parse`] returns `None` and the whole usage stays
+/// unreported instead of being synthesized. `cached_tokens` and
+/// `reasoning_tokens` are `Option<u64>`: `Some(count)` only when the
+/// provider reported the number verbatim (an explicit zero is preserved
+/// as `Some(0)`); absent, null or malformed detail fields stay `None`
+/// ("unreported") instead of being conflated with a provider-asserted
+/// zero. Reported numbers pass through verbatim; the client never
+/// "corrects" them, even when they look inconsistent. Serialization
+/// emits `null` for unreported subsets.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+pub struct ReportedUsage {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cached_tokens: Option<u64>,
+    pub reasoning_tokens: Option<u64>,
+}
+
+/// Provider-reported count: a non-negative integer, tolerating JSON floats
+/// with an integral value (`120.0`, how some compatible providers serialize
+/// JS numbers). Anything else is "not reported".
+fn reported_token(value: Option<&Value>) -> Option<u64> {
+    let value = value?;
+    if let Some(count) = value.as_u64() {
+        return Some(count);
+    }
+    value
+        .as_f64()
+        .filter(|count| *count >= 0.0 && count.fract() == 0.0 && *count <= 9_007_199_254_740_991.0)
+        .map(|count| count as u64)
+}
+
+impl ReportedUsage {
+    fn parse(value: &Value) -> Option<Self> {
+        let input_tokens = reported_token(value.get("input_tokens"))?;
+        let output_tokens = reported_token(value.get("output_tokens"))?;
+        Some(Self {
+            input_tokens,
+            output_tokens,
+            cached_tokens: reported_token(value.pointer("/input_tokens_details/cached_tokens")),
+            reasoning_tokens: reported_token(
+                value.pointer("/output_tokens_details/reasoning_tokens"),
+            ),
+        })
+    }
+}
+
+#[cfg(test)]
+mod reported_usage_tests {
+    use super::*;
+
+    #[test]
+    fn usage_is_provider_reported_and_subsets_are_not_invented() {
+        let mut parser = ResponsesStreamParser::new();
+        parser
+            .parse_event(
+                None,
+                r#"{"type":"response.completed","response":{"usage":{"input_tokens":120,"output_tokens":30,"input_tokens_details":{"cached_tokens":40},"output_tokens_details":{"reasoning_tokens":10}}}}"#,
+            )
+            .unwrap();
+        assert_eq!(
+            parser.usage,
+            Some(ReportedUsage {
+                input_tokens: 120,
+                output_tokens: 30,
+                cached_tokens: Some(40),
+                reasoning_tokens: Some(10),
+            })
+        );
+        let mut missing = ResponsesStreamParser::new();
+        missing
+            .parse_event(None, r#"{"type":"response.completed","response":{}}"#)
+            .unwrap();
+        assert_eq!(missing.usage, None);
+    }
+}
+
 impl ResponsesStreamParser {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Usage reported by the stream's terminal event, when the provider
+    /// sent one. `None` means "provider did not report usage", never zero.
+    pub fn usage(&self) -> Option<ReportedUsage> {
+        self.usage
     }
 
     pub fn is_exhausted(&self) -> bool {
@@ -395,12 +482,14 @@ impl ResponsesStreamParser {
                 }))
             }
             Some("response.completed") => {
+                self.usage = value.pointer("/response/usage").and_then(ReportedUsage::parse);
                 self.completed = true;
                 Ok(Some(ResponsesStreamEvent::Completed {
                     stop_reason: ResponsesStopReason::Completed,
                 }))
             }
             Some("response.incomplete") => {
+                self.usage = value.pointer("/response/usage").and_then(ReportedUsage::parse);
                 self.completed = true;
                 let reason = value
                     .pointer("/response/incomplete_details/reason")
@@ -454,7 +543,10 @@ pub struct OpenAiResponsesStream {
 
 /// Validated complete Responses result, adapted to the same typed event
 /// protocol used by streaming providers. No events escape before validation.
-pub struct BufferedResponsesBody(Vec<ResponsesStreamEvent>);
+pub struct BufferedResponsesBody {
+    events: Vec<ResponsesStreamEvent>,
+    usage: Option<ReportedUsage>,
+}
 impl BufferedResponsesBody {
     pub fn parse(body: &str) -> Result<Self, ResponsesError> {
         if body.len() > MAX_RESPONSES_BODY_BYTES { return Err(ResponsesError::ResponseTooLarge { max: MAX_RESPONSES_BODY_BYTES }); }
@@ -518,10 +610,23 @@ impl BufferedResponsesBody {
                 _ => return Err(invalid()),
             }
         }
-        if let Some(event) = parser.parse_event(Some(kind), &json!({"type":kind,"response":value}).to_string())? { events.push(event); }
-        Ok(Self(events))
+        if let Some(event) = parser.parse_event(Some(kind), &json!({"type": kind, "response": value}).to_string())? {
+            events.push(event);
+        }
+        Ok(Self {
+            events,
+            usage: parser.usage,
+        })
     }
-    pub fn into_events(self) -> Vec<ResponsesStreamEvent> { self.0 }
+
+    /// Usage reported by the buffered envelope, when the provider sent one.
+    pub fn usage(&self) -> Option<ReportedUsage> {
+        self.usage
+    }
+
+    pub fn into_events(self) -> Vec<ResponsesStreamEvent> {
+        self.events
+    }
 }
 
 /// One reusable, redirect-disabled OpenAI Responses client.
@@ -532,6 +637,47 @@ pub struct OpenAiResponsesClient {
     api_key: Option<String>,
     max_output_tokens: u32,
     buffered_model_ids: Vec<String>,
+}
+
+/// Only unambiguous pre-execution admission failures are retried. Other 5xx
+/// statuses stay non-retryable so callers see them immediately.
+fn retryable_status(status: u16) -> bool {
+    matches!(status, 429 | 503)
+}
+
+/// Integer `Retry-After` seconds, capped at 2s, never shorter than backoff.
+fn retry_delay(attempt: u32, retry_after_secs: Option<u64>) -> Duration {
+    let backoff = Duration::from_millis(200u64 << attempt.saturating_sub(1).min(2));
+    retry_after_secs
+        .map(|secs| Duration::from_millis(secs.saturating_mul(1000).min(2000)))
+        .map_or(backoff, |retry_after| retry_after.max(backoff))
+}
+
+#[cfg(test)]
+mod retry_policy_tests {
+    use super::*;
+
+    #[test]
+    fn backoff_doubles_per_attempt() {
+        assert_eq!(retry_delay(1, None), Duration::from_millis(200));
+        assert_eq!(retry_delay(2, None), Duration::from_millis(400));
+    }
+
+    #[test]
+    fn retry_after_is_capped_and_never_below_backoff() {
+        assert_eq!(retry_delay(1, Some(1)), Duration::from_millis(1000));
+        assert_eq!(retry_delay(2, Some(1)), Duration::from_millis(1000));
+        assert_eq!(retry_delay(1, Some(9)), Duration::from_millis(2000));
+        assert_eq!(retry_delay(2, Some(0)), Duration::from_millis(400));
+    }
+
+    #[test]
+    fn only_429_and_503_are_retryable() {
+        assert!(retryable_status(429));
+        assert!(retryable_status(503));
+        assert!(!retryable_status(500));
+        assert!(!retryable_status(400));
+    }
 }
 
 impl OpenAiResponsesClient {
@@ -578,6 +724,51 @@ impl OpenAiResponsesClient {
         self
     }
 
+    /// Dispatch one already-built payload, retrying only 429/503 up to three
+    /// attempts. Network errors and all other non-success statuses are returned
+    /// immediately; success returns before any body is consumed.
+    async fn send_with_retry(
+        &self,
+        payload: &Value,
+    ) -> Result<reqwest::Response, ResponsesError> {
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut attempt = 0;
+        loop {
+            attempt += 1;
+            let mut request = self.http.post(format!("{}/responses", self.base_url)).json(payload);
+            if let Some(key) = self.api_key.as_deref() { request = request.bearer_auth(key); }
+            let response = request.send()
+                .await
+                .map_err(|error| ResponsesError::Request(error.to_string()))?;
+            let status = response.status();
+            if status.is_success() {
+                return Ok(response);
+            }
+            let retryable = retryable_status(status.as_u16());
+            if retryable && attempt < MAX_ATTEMPTS {
+                let retry_after = response
+                    .headers()
+                    .get(reqwest::header::RETRY_AFTER)
+                    .and_then(|value| value.to_str().ok())
+                    .and_then(|value| value.trim().parse::<u64>().ok());
+                tokio::time::sleep(retry_delay(attempt, retry_after)).await;
+                continue;
+            }
+            let mut response = response;
+            let body = read_bounded_body(&mut response).await?;
+            let message = upstream_message(&body);
+            let message = if retryable {
+                format!("{message} (retry exhausted after {MAX_ATTEMPTS} attempts)")
+            } else {
+                message
+            };
+            return Err(ResponsesError::Upstream {
+                status: status.as_u16(),
+                message,
+            });
+        }
+    }
+
     pub async fn create(
         &self,
         model: &str,
@@ -598,20 +789,8 @@ impl OpenAiResponsesClient {
     ) -> Result<String, ResponsesError> {
         let mut payload = responses_request_payload(model, reasoning_effort, items, &[], false)?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
-        let mut request = self.http.post(format!("{}/responses", self.base_url)).json(&payload);
-        if let Some(key) = self.api_key.as_deref() { request = request.bearer_auth(key); }
-        let mut response = request.send()
-            .await
-            .map_err(|error| ResponsesError::Request(error.to_string()))?;
-        let status = response.status();
+        let mut response = self.send_with_retry(&payload).await?;
         let body = read_bounded_body(&mut response).await?;
-
-        if !status.is_success() {
-            return Err(ResponsesError::Upstream {
-                status: status.as_u16(),
-                message: upstream_message(&body),
-            });
-        }
 
         let value: Value = serde_json::from_slice(&body)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
@@ -643,19 +822,7 @@ impl OpenAiResponsesClient {
         if buffered { payload["stream"] = json!(false); }
         payload["max_output_tokens"] = json!(self.max_output_tokens);
         payload["reasoning"]["summary"] = json!("auto");
-        let mut request = self.http.post(format!("{}/responses", self.base_url)).json(&payload);
-        if let Some(key) = self.api_key.as_deref() { request = request.bearer_auth(key); }
-        let mut response = request.send()
-            .await
-            .map_err(|error| ResponsesError::Request(error.to_string()))?;
-        let status = response.status();
-        if !status.is_success() {
-            let body = read_bounded_body(&mut response).await?;
-            return Err(ResponsesError::Upstream {
-                status: status.as_u16(),
-                message: upstream_message(&body),
-            });
-        }
+        let response = self.send_with_retry(&payload).await?;
         if response
             .content_length()
             .is_some_and(|length| length > MAX_RESPONSES_BODY_BYTES as u64)
@@ -678,6 +845,10 @@ impl OpenAiResponsesClient {
 }
 
 impl OpenAiResponsesStream {
+    pub fn usage(&self) -> Option<ReportedUsage> {
+        self.parser.usage
+    }
+
     pub async fn next_event(&mut self) -> Result<Option<ResponsesStreamEvent>, ResponsesError> {
         if self.buffered {
             if !self.buffered_loaded {
@@ -685,8 +856,11 @@ impl OpenAiResponsesStream {
                 // Fully validate before a single tool call becomes observable.
                 self.buffered_loaded = true;
                 let body = read_bounded_body(&mut self.response).await?;
-                let text = std::str::from_utf8(&body).map_err(|_| ResponsesError::InvalidJson("invalid buffered UTF-8".into()))?;
-                self.buffered_events = BufferedResponsesBody::parse(text)?.into_events().into();
+                let text = std::str::from_utf8(&body)
+                    .map_err(|_| ResponsesError::InvalidJson("invalid buffered UTF-8".into()))?;
+                let buffered = BufferedResponsesBody::parse(text)?;
+                self.parser.usage = buffered.usage();
+                self.buffered_events = buffered.into_events().into();
             }
             return Ok(self.buffered_events.pop_front());
         }
