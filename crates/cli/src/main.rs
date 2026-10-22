@@ -43,8 +43,11 @@ mod native_chat_history;
 mod native_chat_projection;
 #[cfg(feature = "native")]
 mod native_command_palette;
+#[cfg(feature = "native")]
 mod native_children;
 mod native_composer;
+#[cfg(feature = "native")]
+mod native_completion;
 mod native_debug;
 mod native_layout;
 mod native_navigation;
@@ -64,6 +67,8 @@ mod native_transcript;
 mod native_ui_budget;
 #[cfg(feature = "native")]
 mod native_ui_preferences;
+#[cfg(feature = "native")]
+mod native_ui_style;
 #[cfg(all(test, feature = "native"))]
 #[path = "../tests/support/security_preferences.rs"]
 mod security_preferences;

@@ -77,6 +77,19 @@ fn jsonc(text: &str) -> Result<String, String> {
 }
 
 impl Inventory {
+    pub fn mention_agents(&self) -> Vec<Value> {
+        let mut agents = self.agents.clone();
+        for (name, description) in [("general", "General-purpose subagent"), ("explore", "Explore the codebase")] {
+            agents.entry(name.into()).or_insert_with(|| serde_json::json!({"description":description}));
+        }
+        agents.into_iter().filter_map(|(name, agent)| {
+            if name.is_empty() || name.len() > 128 || name.chars().any(|ch| ch.is_whitespace() || ch.is_control())
+                || agent.get("hidden").and_then(Value::as_bool) == Some(true)
+                || agent.get("disable").and_then(Value::as_bool) == Some(true)
+                || agent.get("mode").and_then(Value::as_str) == Some("primary") { return None; }
+            Some(serde_json::json!({"name":name,"description":agent.get("description").and_then(Value::as_str).unwrap_or("").chars().take(256).collect::<String>()}))
+        }).collect()
+    }
     fn merge(&mut self, document: Value) -> Result<(), String> {
         for field in ["command", "commands"] {
             if let Some(commands) = document.get(field) {
@@ -146,6 +159,25 @@ impl Inventory {
             }
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod mention_catalogue_tests {
+    use super::*;
+    #[test]
+    fn agent_suggestions_hide_primary_hidden_and_invalid_names() {
+        let mut inventory = Inventory::default();
+        inventory.agents.insert("reviewer".into(), serde_json::json!({"description":"Review code", "mode":"subagent"}));
+        inventory.agents.insert("hidden".into(), serde_json::json!({"hidden":true}));
+        inventory.agents.insert("primary".into(), serde_json::json!({"mode":"primary"}));
+        inventory.agents.insert("bad name".into(), serde_json::json!({}));
+        let agents = inventory.mention_agents();
+        assert!(agents.iter().any(|a| a["name"] == "reviewer" && a["description"] == "Review code"));
+        for name in ["hidden", "primary", "bad name"] {
+            assert!(!agents.iter().any(|a| a["name"] == name));
+        }
+        assert!(agents.iter().any(|a| a["name"] == "explore"));
     }
 }
 

@@ -10,7 +10,9 @@
 //! Daemon ownership rule: a daemon this process spawned is owned by the
 //! per-data-directory service and survives client exit; a pre-existing daemon
 //! is left running. The default listen address
-//! is `127.0.0.1:4096`, overridable with `OPENCODE_RK_DAEMON_ADDR`.
+//! is discovered from this data directory's authenticated descriptor. New
+//! services use an available loopback port unless `OPENCODE_RK_DAEMON_ADDR`
+//! explicitly selects a listen address.
 
 use std::{
     io::{BufRead, Read, Write},
@@ -47,46 +49,24 @@ fn daemon_origin(addr: &str) -> String {
 
 /// Entry bound from `main.rs` when no subcommand is given.
 pub fn run(data_dir: &Path) -> Result<(), Box<dyn std::error::Error>> {
-    let addr = daemon_addr();
-    let origin = daemon_origin(&addr);
-    let mut owned_daemon: Option<Child> = None;
-    if !probe_daemon(&origin) {
-        owned_daemon = spawn_daemon(&addr, data_dir);
-    }
-    let attached = probe_daemon(&origin);
-    // Credential-bound reuse (`daemon_client.rs:722-735`
-    // `decide_lifecycle_authed`): a validated descriptor plus a healthy
-    // probe yields the bearer; every other outcome carries no credential and
-    // every `/api/*` call below then fails closed without sending.
-    // Reload after spawn: an owned daemon mints its token at startup.
-    let mut credential = reuse_credential(data_dir, &origin, attached);
-    if attached && credential.is_none() && owned_daemon.is_some() {
-        credential = reuse_credential(data_dir, &origin, true);
-    }
+    let lease = prepare_daemon(data_dir);
+    let origin = lease.origin.clone().unwrap_or_else(|| daemon_origin(&daemon_addr()));
+    let attached = lease.origin.is_some();
     if !attached {
         println!(
-            "[offline] daemon unavailable (port {addr} unwinnable); \
+            "[offline] daemon unavailable ({origin}); \
              start it manually with: opencode-rk serve"
         );
     }
     let mut chat = Chat {
-        origin: attached.then(|| origin.clone()),
-        auth: credential,
+        origin: lease.origin.clone(),
+        auth: lease.auth.clone(),
         session: None,
         model: DEFAULT_MODEL.to_owned(),
     };
     chat.banner(&origin, attached);
     chat.bind_recent_session();
-    let result = chat.loop_until_exit();
-    if let Some(child) = owned_daemon {
-        // The daemon is shared service state.  Reap only the child spawned by
-        // this invocation, without terminating it when this client exits.
-        std::thread::spawn(move || {
-            let mut child = child;
-            let _ = child.wait();
-        });
-    }
-    result
+    chat.loop_until_exit()
 }
 
 /// Owned daemon lease used by the native entrypoint.  The lease deliberately
@@ -129,23 +109,50 @@ impl Drop for DaemonLease {
 /// the descriptor origin must match the probed origin and the descriptor must
 /// pass `decide_lifecycle_authed`.
 pub fn prepare_daemon(data_dir: &Path) -> DaemonLease {
-    let addr = daemon_addr();
-    let origin = daemon_origin(&addr);
-    let mut owned = None;
-    if !probe_daemon(&origin) {
-        owned = spawn_daemon(&addr, data_dir);
+    let requested = std::env::var("OPENCODE_RK_DAEMON_ADDR").ok()
+        .filter(|value| !value.trim().is_empty());
+    if let Some(origin) = published_target(data_dir, requested.as_deref()) {
+        if let Some(auth) = reuse_credential(data_dir, &origin, probe_daemon(&origin)) {
+            return DaemonLease { origin: Some(origin), auth: Some(auth), owned: None };
+        }
     }
-    let attached = probe_daemon(&origin);
-    let mut auth = reuse_credential(data_dir, &origin, attached);
-    if attached && auth.is_none() && owned.is_some() {
-        auth = reuse_credential(data_dir, &origin, true);
-    }
+    // A healthy public /health response on 4096 is not ownership evidence.
+    // In particular, another workspace/test service must not strand Setup or
+    // receive this data directory's bearer. The singleton lock still belongs
+    // to the data directory; the OS selects only the HTTP port.
+    let owned = spawn_daemon(requested.as_deref().unwrap_or("127.0.0.1:0"), data_dir);
+    let origin = published_target(data_dir, requested.as_deref());
+    let auth = origin.as_ref().and_then(|origin| reuse_credential(data_dir, origin, probe_daemon(origin)));
     DaemonLease {
-        // Never expose an origin as attached unless its descriptor was
-        // validated and a credential was recovered for that exact origin.
-        origin: (attached && auth.is_some()).then_some(origin),
+        origin: origin.filter(|_| auth.is_some()),
         auth,
         owned,
+    }
+}
+
+fn published_target(data_dir: &Path, requested: Option<&str>) -> Option<String> {
+    let descriptor = server_daemon::read_backend_descriptor(data_dir).ok()??;
+    if requested.is_some_and(|address| address != "127.0.0.1:0" && daemon_origin(address) != descriptor.http_origin) { return None; }
+    Some(descriptor.http_origin)
+}
+
+#[cfg(test)]
+mod daemon_target_tests {
+    use super::*;
+    #[test]
+    fn absent_descriptor_never_trusts_a_default_port_listener() {
+        let root = std::env::temp_dir().join(format!("oc2-no-descriptor-{}", std::process::id()));
+        assert!(published_target(&root, None).is_none());
+    }
+    #[test]
+    fn discovery_reuses_own_published_ephemeral_port_and_honors_explicit_target() {
+        let root = std::env::temp_dir().join(format!("oc2-published-target-{}", std::process::id()));
+        server_daemon::publish_backend_descriptor_with_auth(&root, "127.0.0.1:18579".parse().unwrap(), "a".repeat(64)).unwrap();
+        assert_eq!(published_target(&root, None).as_deref(), Some("http://127.0.0.1:18579"));
+        assert_eq!(published_target(&root, Some("127.0.0.1:0")).as_deref(), Some("http://127.0.0.1:18579"));
+        assert!(published_target(&root, Some("127.0.0.1:18580")).is_none());
+        assert_eq!(published_target(&root, Some("127.0.0.1:18579")).as_deref(), Some("http://127.0.0.1:18579"));
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -558,7 +565,9 @@ fn spawn_daemon(addr: &str, data_dir: &Path) -> Option<Child> {
         .ok()?;
     // Keep the frozen startup bound: at most 200 probes, 10ms apart.
     for _ in 0..200 {
-        if probe_daemon(&daemon_origin(addr)) {
+        if server_daemon::read_backend_descriptor(data_dir).ok().flatten()
+            .filter(|descriptor| descriptor.pid == child.id())
+            .is_some_and(|descriptor| probe_daemon(&descriptor.http_origin)) {
             return Some(child);
         }
         if let Ok(Some(_status)) = child.try_wait() {

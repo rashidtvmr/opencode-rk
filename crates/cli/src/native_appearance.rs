@@ -126,6 +126,10 @@ impl AppearanceEditor {
             _ => false,
         }
     }
+    pub fn move_target(&mut self, down: bool) {
+        let count = BoxId::ALL.len() + 1;
+        self.target = if down { (self.target + 1) % count } else { (self.target + count - 1) % count };
+    }
     pub fn track_width(content_width: u16) -> u16 {
         content_width.saturating_sub(6).min(40)
     }
@@ -182,7 +186,7 @@ impl AppearanceEditor {
             .collect();
         vec![
             "Box appearance".into(),
-            format!("Target: {target} · Tab: next box"),
+            format!("> Target: {target} · ↑/↓ or Tab: next box"),
             format!("Preset: {:?}", effective.preset),
             format!("Roundedness: {radius}/50 logical"),
             format!("  [{track}]"),
@@ -201,6 +205,18 @@ impl AppearanceEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn arrows_change_highlighted_target_without_changing_preferences() {
+        let mut editor = AppearanceEditor::new(BoxAppearance::default());
+        let original = editor.style.clone();
+        editor.move_target(true);
+        assert_eq!(editor.target, 1);
+        assert_eq!(editor.style, original);
+        assert!(editor.rows(60)[1].starts_with("> Target:"));
+        editor.move_target(false);
+        assert_eq!(editor.target, 0);
+        assert_eq!(editor.style, original);
+    }
     #[test]
     fn squircle_all_clears_individual_override() {
         let mut editor = AppearanceEditor::new(BoxAppearance::default());

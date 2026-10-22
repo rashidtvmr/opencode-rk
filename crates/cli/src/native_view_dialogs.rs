@@ -741,29 +741,35 @@ impl DialogView {
     /// by Unicode scalar (the layout worker applies final cell width).
     #[must_use]
     pub fn render(&self, width: usize, height: usize) -> Vec<String> {
+        self.render_styled(width, height).into_iter().map(|line| line.text).collect()
+    }
+
+    pub fn render_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
+        use crate::native_ui_style::{Line, Role};
         if height == 0 {
             return Vec::new();
         }
-        let mut lines: Vec<String> = Vec::new();
+        let mut lines = Vec::new();
+        let line = |text, role| Line {text,role,detail_from:None};
         if let Some(dialog) = self.dialog.as_ref() {
             // Heading first: prioritized on short terminals.
-            lines.push(dialog.title.clone());
+            lines.push(line(dialog.title.clone(), Role::Heading));
             let roomy = height >= 9;
             if roomy {
-                lines.push(String::new());
+                lines.push(line(String::new(), Role::Description));
             }
             match dialog.kind {
                 DialogKind::Permission => {
-                    lines.push("permission — explicit approve or deny required".to_string());
+                    lines.push(line("permission — explicit approve or deny required".to_string(), Role::Description));
                 }
                 DialogKind::Question if !self.question_capable => {
-                    lines.push("question backend unavailable".to_string());
+                    lines.push(line("question backend unavailable".to_string(), Role::Error));
                 }
-                DialogKind::Question => lines.push("question — select an answer".to_string()),
-                DialogKind::Confirm => lines.push("confirmation required".to_string()),
+                DialogKind::Question => lines.push(line("question — select an answer".to_string(), Role::Description)),
+                DialogKind::Confirm => lines.push(line("confirmation required".to_string(), Role::Description)),
                 DialogKind::Error => {
-                    lines.push(dialog.error.headline().to_string());
-                    lines.push(dialog.error.detail().to_string());
+                    lines.push(line(dialog.error.headline().to_string(), Role::Error));
+                    lines.push(line(dialog.error.detail().to_string(), Role::Description));
                 }
             }
             let has_footer = !matches!(dialog.kind, DialogKind::Error)
@@ -773,11 +779,11 @@ impl DialogView {
             let message_budget = height.saturating_sub(
                 lines.len() + footer_rows + choice_rows + if roomy { 2 } else { 0 },
             );
-            for line in dialog.message_lines.iter().take(message_budget) {
-                lines.push(format!("  {line}"));
+            for message in dialog.message_lines.iter().take(message_budget) {
+                lines.push(line(format!("  {message}"), Role::Item));
             }
             if roomy && !dialog.choices.is_empty() {
-                lines.push(String::new());
+                lines.push(line(String::new(), Role::Description));
             }
             // Keep the active choice in the viewport; supplementary text may
             // shrink, but neither focus nor the action hint may scroll away.
@@ -794,10 +800,11 @@ impl DialogView {
                 } else {
                     ""
                 };
-                lines.push(format!("{marker}{}. {}{suffix}", index + 1, choice));
+                lines.push(line(format!("{marker}{}. {}{suffix}", index + 1, choice),
+                    if self.selection == Some(index) { Role::Selected } else if dialog.disabled[index] { Role::Description } else { Role::Item }));
             }
             if roomy && has_footer {
-                lines.push(String::new());
+                lines.push(line(String::new(), Role::Description));
             }
             let footer = if self.phase == Phase::Pending {
                 "decision sent — waiting for backend acknowledgement"
@@ -811,7 +818,7 @@ impl DialogView {
                 DialogKind::Error => {}
                 _ if height > 1 => {
                     lines.truncate(height - 1);
-                    lines.push(footer.to_owned());
+                    lines.push(line(footer.to_owned(), if self.rejected { Role::Error } else { Role::Hint }));
                 }
                 _ => {}
             }
@@ -819,9 +826,9 @@ impl DialogView {
 
         lines.truncate(height);
         while lines.len() < height {
-            lines.push(String::new());
+            lines.push(line(String::new(), Role::Description));
         }
-        lines.into_iter().map(|line| clip(&line, width)).collect()
+        lines.into_iter().map(|mut line| { line.text = clip(&line.text, width); line }).collect()
     }
 
     fn require_interactive(&self) -> Result<(), DialogError> {

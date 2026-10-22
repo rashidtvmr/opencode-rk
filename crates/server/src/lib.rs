@@ -1413,7 +1413,8 @@ async fn command_inventory(root: PathBuf) -> Result<configured_commands::Invento
 async fn list_configured_commands() -> Result<Json<Value>, ApiFailure> {
     let root = std::env::current_dir().map_err(ApiFailure::internal)?;
     let inventory = command_inventory(root).await?;
-    Ok(Json(json!({"commands": inventory.commands.into_iter().map(|(name, command)|
+    let agents = inventory.mention_agents();
+    Ok(Json(json!({"agents":agents,"commands": inventory.commands.into_iter().map(|(name, command)|
         json!({"name":name,"description":command.description,"agent":command.agent,"model":command.model})
     ).collect::<Vec<_>>()})))
 }

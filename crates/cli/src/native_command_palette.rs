@@ -240,14 +240,19 @@ impl CommandPalette {
     /// only bindings this native component actually handles.
     #[must_use]
     pub fn render(&self, width: u16, height: usize) -> Vec<String> {
+        self.render_styled(width, height).into_iter().map(|line| line.text).collect()
+    }
+
+    pub fn render_styled(&self, width: u16, height: usize) -> Vec<crate::native_ui_style::Line> {
+        use crate::native_ui_style::{Line, Role};
         if !self.open || width == 0 || height == 0 {
             return Vec::new();
         }
         let roomy = height >= 9;
-        let mut lines = vec!["Commands".to_owned()];
-        if roomy { lines.push(String::new()); }
-        lines.push(format!("Search: {}", self.query));
-        if roomy { lines.push(String::new()); }
+        let mut lines = vec![("Commands".to_owned(), Role::Heading)];
+        if roomy { lines.push((String::new(), Role::Description)); }
+        lines.push((format!("Search: {}", self.query), Role::Description));
+        if roomy { lines.push((String::new(), Role::Description)); }
         let visible = self.visible();
         let mut body = Vec::new();
         let mut selected_row = 0;
@@ -255,8 +260,8 @@ impl CommandPalette {
         let selected = self.selected_id;
         for item in visible {
             if last_category != Some(item.category) {
-                if roomy && last_category.is_some() { body.push(String::new()); }
-                body.push(item.category.to_owned());
+                if roomy && last_category.is_some() { body.push((String::new(), Role::Description)); }
+                body.push((item.category.to_owned(), Role::Heading));
                 last_category = Some(item.category);
             }
             let marker = if selected == Some(item.id) {
@@ -270,20 +275,20 @@ impl CommandPalette {
             let key = item
                 .key_label
                 .map_or(String::new(), |label| format!("  {label}"));
-            body.push(format!("{marker}{}{key}", item.title));
+            body.push((format!("{marker}{}{key}", item.title), if selected == Some(item.id) { Role::Selected } else { Role::Item }));
         }
         if self.visible().is_empty() {
-            body.push("No results found".to_owned());
+            body.push(("No results found".to_owned(), Role::Description));
         }
         let capacity = height.saturating_sub(lines.len() + 1 + usize::from(roomy));
         let start = selected_row.saturating_sub(capacity.saturating_sub(1));
         lines.extend(body.into_iter().skip(start).take(capacity));
-        if roomy { lines.push(String::new()); }
-        lines.push("↑/↓ move · Enter select · Esc close".to_owned());
+        if roomy { lines.push((String::new(), Role::Description)); }
+        lines.push(("↑/↓ move · Enter select · Esc close".to_owned(), Role::Hint));
         lines
             .into_iter()
             .take(height)
-            .map(|line| fit(&line, width))
+            .map(|(text, role)| Line {text:fit(&text, width),role,detail_from:None})
             .collect()
     }
 

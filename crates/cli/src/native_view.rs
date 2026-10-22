@@ -111,6 +111,41 @@ pub struct NativeView {
     /// Persisted global + per-box appearance; the framed composer reads the
     /// `BoxId::ChatComposer` effective values (default = upstream sharp).
     box_appearance: crate::native_box_style::BoxAppearance,
+    ui_regions: Vec<crate::native_ui_style::Region>,
+    overlay_roles: Vec<crate::native_ui_style::Role>,
+}
+
+#[cfg(test)]
+mod page_spacing_tests {
+    use super::*;
+    #[test]
+    fn every_page_has_outer_space_heading_hierarchy_and_selected_row_roles() {
+        for page in [Page::Sessions, Page::Help, Page::Models, Page::Providers, Page::Agents,
+            Page::Workspaces, Page::Status, Page::Mcp, Page::Diff, Page::Context, Page::Commands] {
+            let mut view = NativeView::new(100, 30);
+            view.open_page(page);
+            view.set_page_rows(vec![PageRow { id:"one".into(), label:"Example item".into(), detail:"Secondary description".into(), enabled:true }]);
+            let frame = view.render("unsent", &[], false, &[]);
+            assert!(frame[0].trim().is_empty(), "{page:?}: outer top margin");
+            let regions = view.ui_regions();
+            assert!(regions.iter().any(|row| row.role == crate::native_ui_style::Role::Heading), "{page:?}: heading role");
+            if page != Page::Status {
+                let selected = regions.iter().find(|row| row.role == crate::native_ui_style::Role::Selected).expect("selection role");
+                assert!(selected.x >= 4 && selected.width <= 92, "{page:?}: horizontal insets");
+            }
+        }
+    }
+    #[test]
+    fn selected_page_row_stays_visible_after_many_arrow_moves_and_resize() {
+        let mut view = NativeView::new(80, 16);
+        view.open_page(Page::Sessions);
+        view.set_page_rows((0..30).map(|i| PageRow {id:format!("id-{i}"),label:format!("Item {i}"),detail:"details".into(),enabled:true}).collect());
+        for _ in 0..25 { view.page_next(); }
+        let frame = view.render("", &[], false, &[]).join("\n");
+        assert!(frame.contains("Item 25"));
+        let regions = view.ui_regions();
+        assert!(regions.iter().any(|row| row.role == crate::native_ui_style::Role::Selected && row.y < 16));
+    }
 }
 
 #[cfg(test)]
@@ -226,6 +261,18 @@ pub struct BindCommit {
 }
 
 impl NativeView {
+    pub fn ui_regions(&self) -> Vec<crate::native_ui_style::Region> { self.ui_regions.clone() }
+    pub fn set_overlay_roles(&mut self, roles: Vec<crate::native_ui_style::Role>) { self.overlay_roles = roles; }
+
+    pub fn page_panel(&self) -> Option<(u16, u16, u16, u16)> {
+        if matches!(self.page(), Page::Chat | Page::Theme) { return None; }
+        let presentation = self.presentation();
+        let width = presentation.main_width.saturating_sub(if presentation.main_width >= 20 { 4 } else { 0 }).min(104);
+        let y = u16::from(self.render_height() >= 8);
+        Some((presentation.main_offset + (presentation.main_width - width) / 2, y,
+            width, (self.render_height() as u16).saturating_sub(2 * y)))
+    }
+
     pub fn open_command_palette(&mut self, has_session: bool) {
         self.command_palette.open(has_session);
     }
@@ -285,6 +332,8 @@ impl NativeView {
             chat_row_classes: Vec::new(),
             chat_text_bounds: Vec::new(),
             box_appearance: crate::native_box_style::BoxAppearance::default(),
+            ui_regions: Vec::new(),
+            overlay_roles: Vec::new(),
         }
     }
 
@@ -1105,6 +1154,7 @@ impl NativeView {
     ) -> Vec<String> {
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
+        self.ui_regions.clear();
         let height = self.render_height();
         if self.layout.cols == 0 || height == 0 {
             return Vec::new();
@@ -1113,18 +1163,26 @@ impl NativeView {
         let width = presentation.main_width;
         let inner_width = width.saturating_sub(4);
         let is_chat = matches!(self.pages.page(), Page::Chat | Page::Theme);
-        let center = if self.pages.page() == Page::Status {
-            self.status
-                .render(inner_width as usize, height)
-                .into_iter()
-                .map(|line| padded(&line, width))
-                .collect()
-        } else if !is_chat {
-            self.pages
-                .render(inner_width as usize, height)
-                .into_iter()
-                .map(|line| padded(&line, width))
-                .collect()
+        let center = if !is_chat {
+            let (left, top, panel_width, panel_height) = self.page_panel().unwrap();
+            let inset = if panel_width >= 8 { 2 } else { 0 };
+            let content_width = panel_width.saturating_sub(2 * inset);
+            let vertical = usize::from(panel_height >= 4);
+            let content_height = usize::from(panel_height).saturating_sub(2 * vertical);
+            let lines = if self.pages.page() == Page::Status {
+                self.status.render_styled(content_width as usize, content_height)
+            } else { self.pages.render_styled(content_width as usize, content_height) };
+            let mut center = vec![String::new(); height];
+            for (index, line) in lines.into_iter().enumerate().take(content_height) {
+                let row = usize::from(top) + vertical + index;
+                if row >= height { break; }
+                let x = left + inset;
+                center[row] = format!("{}{}", " ".repeat(usize::from(x)), fit(&line.text, content_width));
+                self.ui_regions.push(crate::native_ui_style::Region {
+                    x, y: row as u16, width: content_width, role: line.role, detail_from: line.detail_from, modal:false,
+                });
+            }
+            center
         } else if self.session_route {
             let body_height = if height >= 4 { height - 2 } else { height };
             let mut body = if let Some(messages) = messages {
@@ -1190,17 +1248,17 @@ impl NativeView {
             }
             home
         };
-        let mut sidebar: Vec<String> = if presentation.sidebar_width > 0 {
+        let sidebar_styled = if presentation.sidebar_width > 0 {
             // Backend facts remain available in the optional session sidebar;
             // the all-sessions picker is a separate page, never sidebar chrome.
             self.status
-                .render_sidebar(38, height.saturating_sub(1))
-                .into_iter()
-                .map(|line| padded(&line, presentation.sidebar_width))
-                .collect()
+                .render_sidebar_styled(38, height.saturating_sub(1))
         } else {
             Vec::new()
         };
+        let mut sidebar: Vec<String> = sidebar_styled.iter().map(|line| padded(&line.text, presentation.sidebar_width)).collect();
+        let mut sidebar_inset = 2;
+        let mut sidebar_top = 0;
         if presentation.sidebar_width >= 4
             && height >= 3
             && self.box_appearance != crate::native_box_style::BoxAppearance::default()
@@ -1216,6 +1274,8 @@ impl NativeView {
             };
             let inside = usize::from(presentation.sidebar_width - 2);
             let pad = usize::from(style.padding).min(inside.saturating_sub(1) / 2);
+            sidebar_inset += 1 + pad as u16;
+            sidebar_top = 1;
             let mut framed = vec![format!(
                 "{}{}{}",
                 corners.top_left,
@@ -1237,6 +1297,15 @@ impl NativeView {
                 corners.bottom_right
             ));
             sidebar = framed;
+        }
+        if let Some(left) = presentation.sidebar_offset {
+            for (index, line) in sidebar_styled.iter().enumerate().take(height.saturating_sub(sidebar_top)) {
+                self.ui_regions.push(crate::native_ui_style::Region {
+                    x:left.saturating_add(sidebar_inset),y:(index + sidebar_top) as u16,
+                    width:presentation.sidebar_width.saturating_sub(sidebar_inset + 1),
+                    role:line.role,detail_from:None,modal:false,
+                });
+            }
         }
         let inline = presentation.sidebar_width > 0 && self.layout.cols > 120;
         let effective = Layout {
@@ -1268,16 +1337,28 @@ impl NativeView {
         // conversation column: dialog.tsx medium=60, maxWidth=cols-2, top=h/4.
         let modal_geometry = self.modal_presentation();
         let dialog_width = modal_geometry.width;
-        let modal = if self.dialogs.is_open() {
+        let modal_lines = if self.dialogs.is_open() {
             self.dialogs
-                .render(dialog_width.saturating_sub(4) as usize, self.modal_content_height())
+                .render_styled(dialog_width.saturating_sub(4) as usize, self.modal_content_height())
         } else if self.command_palette.is_open() {
-            self.command_palette_render()
+            self.command_palette.render_styled(modal_geometry.content_width, self.modal_content_height())
         } else if self.pages.page() == Page::Theme {
-            self.theme_dialog()
+            let height = self.modal_content_height().min(16);
+            let mut lines = self.pages.render_styled(usize::from(modal_geometry.content_width), height);
+            if let Some(first) = lines.first_mut() { first.text = "Themes".into(); }
+            lines
         } else {
-            overlay.iter().take(height).cloned().collect()
+            overlay.iter().take(height).enumerate().map(|(index, text)| crate::native_ui_style::Line {
+                text:text.clone(),role:self.overlay_roles.get(index).copied().unwrap_or(if index == 0 {crate::native_ui_style::Role::Heading} else {crate::native_ui_style::Role::Description}),detail_from:None,
+            }).collect()
         };
+        for (index, line) in modal_lines.iter().enumerate() {
+            self.ui_regions.push(crate::native_ui_style::Region {
+                x:modal_geometry.x.saturating_add(2), y:modal_geometry.content_y.saturating_add(index.min(u16::MAX as usize) as u16),
+                width:modal_geometry.content_width, role:line.role, detail_from:line.detail_from,modal:true,
+            });
+        }
+        let modal: Vec<String> = modal_lines.into_iter().map(|line| line.text).collect();
         let content_rows = modal
             .iter()
             .rposition(|line| !line.trim().is_empty())

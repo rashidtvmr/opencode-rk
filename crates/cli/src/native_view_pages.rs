@@ -738,19 +738,22 @@ impl PageState {
     /// explicit empty/unavailable note.
     #[must_use]
     pub fn render(&self, width: usize, height: usize) -> Vec<String> {
+        self.render_styled(width, height).into_iter().map(|line| line.text).collect()
+    }
+
+    pub fn render_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
+        use crate::native_ui_style::{Line, Role};
         if height == 0 || width == 0 {
             return Vec::new();
         }
         let visible = self.visible();
-        let mut out: Vec<String> = Vec::with_capacity(height.min(64));
-        out.push(clip_chars(
-            &format!("== {} ==", self.current.title()),
-            width,
-        ));
+        let line = |text: &str, role, detail_from| Line { text: clip_chars(text, width), role, detail_from };
+        let mut out = Vec::with_capacity(height.min(64));
+        out.push(line(self.current.title(), Role::Heading, None));
         if height == 1 {
             return out;
         }
-        out.push(clip_chars(
+        out.push(line(
             &format!(
                 "Search: {} · {} of {} rows · theme {}",
                 self.search,
@@ -758,12 +761,14 @@ impl PageState {
                 self.rows.len(),
                 self.theme
             ),
-            width,
+            Role::Description, None,
         ));
         if height == 2 {
             return out;
         }
-        let budget = height - 3;
+        let roomy = height >= 8;
+        if roomy { out.push(line("", Role::Description, None)); }
+        let budget = height - 3 - 2 * usize::from(roomy);
         let position = self.pos_of(&visible).unwrap_or(0);
         if visible.is_empty() {
             if budget > 0 {
@@ -774,7 +779,7 @@ impl PageState {
                 } else {
                     "  (no rows)"
                 };
-                out.push(clip_chars(note, width));
+                out.push(line(note, Role::Description, None));
             }
         } else if budget > 0 {
             let start = if position >= budget {
@@ -795,16 +800,20 @@ impl PageState {
                 } else {
                     format!("{cursor}{} [disabled]", row.label)
                 };
-                let line = if row.detail.is_empty() {
+                let mut body_width = 0;
+                crate::native_view_layout::visit_cells(&body, width.min(u16::MAX as usize) as u16,
+                    |x, _, cells| body_width = x + cells);
+                let text = if row.detail.is_empty() {
                     body
                 } else {
                     format!("{body} · {}", row.detail)
                 };
-                out.push(clip_chars(&line, width));
+                out.push(line(&text, if start + offset == position { Role::Selected } else { Role::Item },
+                    (!row.detail.is_empty()).then_some(body_width.saturating_add(3))));
             }
         }
         while out.len() + 1 < height {
-            out.push(String::new());
+            out.push(line("", Role::Description, None));
         }
         let footer = match &self.error {
             Some(message) => format!("error: {message}"),
@@ -813,14 +822,12 @@ impl PageState {
                     .iter()
                     .filter(|&&index| !self.rows[index].enabled)
                     .count();
-                format!(
-                    "{} rows, {} disabled · tab: next page · esc: close · enter: select",
-                    visible.len(),
-                    disabled
-                )
+                if width >= 96 {
+                    format!("↑/↓ move · Enter select · Tab page · Esc close  ·  {} disabled", disabled)
+                } else { "↑/↓ move · Enter select · Tab page · Esc close".to_owned() }
             }
         };
-        out.push(clip_chars(&footer, width));
+        out.push(line(&footer, if self.error.is_some() { Role::Error } else { Role::Hint }, None));
         out
     }
 

@@ -674,6 +674,9 @@ struct PaintCtx {
     /// True when this frame is the Home column (explicit route fact).
     home: bool,
     composer: Option<(u16, u16, u16, u16)>,
+    completion: Option<crate::native_completion::Panel>,
+    ui_regions: Vec<crate::native_ui_style::Region>,
+    page_panel: Option<(u16, u16, u16, u16)>,
     logo: Option<(u16, u16)>,
 }
 
@@ -756,7 +759,7 @@ fn home_row_fg(
 fn modal_row_fg(line: &str, heading: bool, palette: crate::native_theme_runtime::Palette) -> Rgba {
     use crate::native_theme_runtime::Slot;
     if heading {
-        paint_color(palette, Slot::Text)
+        paint_color(palette, crate::native_ui_style::style(crate::native_ui_style::Role::Heading).foreground)
     } else if line.trim_start().starts_with("> ") {
         paint_color(palette, Slot::Background)
     } else {
@@ -829,6 +832,9 @@ fn native_paint(
         ctx.sidebar_backdrop_alpha
     };
     renderer.fill_rect(0, 0, cols, rows, dim(background, base_alpha))?;
+    if let Some((x, y, width, height)) = ctx.page_panel {
+        renderer.fill_rect(u32::from(x), u32::from(y), u32::from(width), u32::from(height), dim(panel, base_alpha))?;
+    }
     if let Some((left, top, width, height)) = ctx.composer {
         renderer.fill_rect(
             u32::from(left),
@@ -863,7 +869,7 @@ fn native_paint(
             None if ctx.home => home_row_fg(lines, row, ctx.palette),
             None => text_color,
         };
-        let mut spans: Vec<(u32, String, Rgba, Rgba)> = Vec::with_capacity(8);
+        let mut spans: Vec<(u32, String, Rgba, Rgba, u32)> = Vec::with_capacity(8);
         crate::native_view_layout::visit_cells(
             line,
             cols.min(u16::MAX as u32) as u16,
@@ -890,7 +896,11 @@ fn native_paint(
                     Some(ChatRowClass::DiffRemoved) => Some(Rgba::new(80, 25, 30, 255)),
                     _ => None,
                 };
-                let mut bg = if sidebar || in_modal {
+                let in_page = ctx.page_panel.is_some_and(|(left, top, width, height)| {
+                    x >= u32::from(left) && x < u32::from(left + width)
+                        && y >= u32::from(top) && y < u32::from(top + height)
+                });
+                let mut bg = if sidebar || in_modal || in_page {
                     panel
                 } else if let Some(role_bg) = role_bg {
                     role_bg
@@ -908,7 +918,25 @@ fn native_paint(
                 } else {
                     normal_fg
                 };
-                if in_modal
+                let mut attributes = 0;
+                if in_modal && (y == u32::from(ctx.modal.content_y)
+                    || modal_text.trim_start().starts_with("> ")) {
+                    attributes = crate::native_ui_style::style(crate::native_ui_style::Role::Heading).attributes;
+                }
+                let styled_region = ctx.ui_regions.iter().rev().find(|region| (!in_modal || region.modal)
+                    && u32::from(region.y) == y
+                    && x >= u32::from(region.x) && x < u32::from(region.x + region.width));
+                if let Some(region) = styled_region {
+                        let role = if region.role == crate::native_ui_style::Role::Item
+                            && region.detail_from.is_some_and(|offset| x >= u32::from(region.x + offset)) {
+                            crate::native_ui_style::Role::Description
+                        } else { region.role };
+                        let style = crate::native_ui_style::style(role);
+                        fg = paint_color(ctx.palette, style.foreground);
+                        if let Some(slot) = style.background { bg = paint_color(ctx.palette, slot); }
+                        attributes = style.attributes;
+                }
+                if in_modal && styled_region.is_none()
                     && modal_text.trim_start().starts_with("> ")
                     && x >= u32::from(ctx.modal.x.saturating_add(2))
                     && x < u32::from(ctx.modal.x.saturating_add(2))
@@ -951,20 +979,21 @@ fn native_paint(
                     bg = accent;
                     fg = background;
                 }
-                if let Some((_, text, last_fg, last_bg)) = spans.last_mut() {
+                if let Some((_, text, last_fg, last_bg, last_attributes)) = spans.last_mut() {
                     if *last_fg == fg
                         && *last_bg == bg
+                        && *last_attributes == attributes
                         && text.len().saturating_add(glyph.len()) <= 32 * 1024
                     {
                         text.push_str(glyph);
                         return;
                     }
                 }
-                spans.push((x, glyph.to_owned(), fg, bg));
+                spans.push((x, glyph.to_owned(), fg, bg, attributes));
             },
         );
-        for (x, text, fg, bg) in spans {
-            renderer.draw_text_styled(x, y, &text, fg, Some(bg), 0)?;
+        for (x, text, fg, bg, attributes) in spans {
+            renderer.draw_text_styled(x, y, &text, fg, Some(bg), attributes)?;
         }
     }
     // logo.ts + component/logo.tsx: two 19-cell halves separated by one
@@ -1068,6 +1097,23 @@ fn native_paint(
                 accent,
                 Some(element),
                 0,
+            )?;
+        }
+    }
+    if let Some(completion) = ctx.completion {
+        for (index, (line, selected)) in completion.rows.iter().enumerate() {
+            let y = u32::from(completion.y) + index as u32;
+            let role = if index == 0 { crate::native_ui_style::Role::Heading }
+                else if *selected { crate::native_ui_style::Role::Selected }
+                else if index + 1 == completion.rows.len() { crate::native_ui_style::Role::Hint }
+                else { crate::native_ui_style::Role::Item };
+            let style = crate::native_ui_style::style(role);
+            let bg = style.background.map(|slot| paint_color(ctx.palette, slot)).unwrap_or(panel);
+            renderer.fill_rect(u32::from(completion.x), y, u32::from(completion.width), 1, bg)?;
+            renderer.draw_text_styled(
+                u32::from(completion.x), y,
+                &crate::native_view_layout::fit(line, completion.width),
+                paint_color(ctx.palette, style.foreground), Some(bg), style.attributes,
             )?;
         }
     }
@@ -1748,8 +1794,61 @@ fn native_loop(
     // `session.sidebar.toggle`): armed only from the chat composer.
     let mut leader_pending = false;
     let mut configured_commands_loaded = false;
+    let mut completion = crate::native_completion::Completion::default();
+    completion.commands = crate::native_view_pages::command_rows().into_iter()
+        .map(|row| crate::native_completion::Item { value: row.label, description: row.detail }).collect();
+    for (value, description) in [
+        ("/commands", "Browse commands"), ("/new", "New session"),
+        ("/sidebar", "Toggle sidebar"), ("/appearance", "Adjust appearance"),
+        ("/subagents", "View subagents"), ("/exit", "Exit"),
+    ] {
+        completion.commands.push(crate::native_completion::Item { value: value.into(), description: description.into() });
+    }
+    let (completion_tx, mut completion_rx) = tokio::sync::mpsc::channel(1);
+    let mut completion_load = None;
+    let mut completion_loaded = false;
     let mut byte = [0u8; 1];
     loop {
+        completion.sync(&draft);
+        if !completion_loaded && (draft.starts_with('/') || draft.contains('@')) {
+            completion_loaded = true;
+            let tx = completion_tx.clone();
+            let origin = live.as_ref().map(|snapshot| snapshot.origin.clone());
+            let auth = auth.map(str::to_owned);
+            let root = std::env::current_dir().unwrap_or_default();
+            completion_load = Some(tokio::task::spawn_blocking(move || {
+                let files = crate::native_completion::workspace_files(&root);
+                let catalogue = origin.and_then(|origin| http_request(&origin, "GET", "/api/commands", None, auth.as_deref()).ok())
+                    .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok());
+                let _ = tx.blocking_send((files, catalogue));
+            }));
+        }
+        if let Ok((files, catalogue)) = completion_rx.try_recv() {
+            completion_load.take();
+            completion.mentions = files;
+            if let Some(catalogue) = catalogue {
+                if let Ok(rows) = configured_command_rows(&catalogue) {
+                    for row in rows {
+                        if !completion.commands.iter().any(|item| item.value == row.label) {
+                            completion.commands.push(crate::native_completion::Item { value: row.label, description: row.detail.chars().take(256).collect() });
+                        }
+                    }
+                }
+                if let Some(agents) = catalogue.get("agents").and_then(serde_json::Value::as_array) {
+                    for agent in agents.iter().take(4096) {
+                        let Some(name) = agent.get("name").and_then(serde_json::Value::as_str) else { continue; };
+                        if name.is_empty() || name.len() > 128 || name.chars().any(|ch| ch.is_whitespace() || ch.is_control()) { continue; }
+                        completion.mentions.push(crate::native_completion::Item {
+                            value: format!("@{name}"), description: format!("agent · {}", agent.get("description").and_then(serde_json::Value::as_str).unwrap_or("").chars().take(256).collect::<String>()),
+                        });
+                    }
+                }
+            }
+            completion.mentions.sort_by(|a, b| {
+                b.description.starts_with("agent").cmp(&a.description.starts_with("agent")).then_with(|| a.value.cmp(&b.value))
+            });
+            needs_paint = true;
+        }
         if children_panel.open && children_refresh.elapsed() >= Duration::from_millis(750) {
             children_refresh = Instant::now();
             if let Some(snapshot) = live.as_ref() {
@@ -2244,6 +2343,9 @@ fn native_loop(
         if children_panel.open {
             overlay = children_panel.render(view.modal_presentation().content_width, view.modal_content_height());
         }
+        view.set_overlay_roles(crate::native_ui_style::overlay_roles(&overlay,
+            appearance.open || (children_panel.open && !children_panel.detail)
+                || matches!(dialog, native_setup::Dialog::Provider | native_setup::Dialog::Model)));
         view.set_box_appearance(appearance.style.clone());
         view.set_prompt_mode(draft.starts_with('!'));
         let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
@@ -2256,6 +2358,8 @@ fn native_loop(
         // facade renders the dialog center first, so the native_setup
         // credential overlay can never show behind it).
         let dialog_open = view.dialogs.is_open();
+        let mut help_regions = Vec::new();
+        let mut help_panel = None;
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {
@@ -2276,11 +2380,24 @@ fn native_loop(
             } else {
                 &NATIVE_HELP_LINES
             };
-            lines = help
-                .iter()
-                .take((renderer.rows() as usize).min(help.len()))
-                .map(|line| (*line).to_owned())
-                .collect();
+            let cols = renderer.cols().min(u32::from(u16::MAX)) as u16;
+            let rows = renderer.rows().min(u32::from(u16::MAX)) as u16;
+            let inset = if cols >= 24 { 4 } else { 0 };
+            let width = cols.saturating_sub(2 * inset).min(100);
+            let left = (cols - width) / 2;
+            let top = if rows >= 12 { 2 } else { 0 };
+            let capacity = rows.saturating_sub(2 * top);
+            let gap = u16::from(capacity >= 12);
+            lines = vec![String::new(); usize::from(rows)];
+            for (index, text) in help.iter().enumerate() {
+                let row = top + index as u16 + if index > 0 { gap } else { 0 };
+                if row >= rows.saturating_sub(top) { break; }
+                lines[usize::from(row)] = format!("{}{}", " ".repeat(usize::from(left)), crate::native_view_layout::fit(text, width));
+                help_regions.push(crate::native_ui_style::Region {
+                    x:left,y:row,width,role:if index == 0 {crate::native_ui_style::Role::Heading} else {crate::native_ui_style::Role::Item},detail_from:None,modal:false,
+                });
+            }
+            if inset > 0 && top > 0 { help_panel = Some((left - 2, top - 1, width + 4, capacity + 2)); }
         }
         if needs_paint {
             let paint_started = Instant::now();
@@ -2409,6 +2526,14 @@ fn native_loop(
                     } else {
                         view.composer_region(draft_echo)
                     },
+                    completion: if !help_open && modal_rows.is_none()
+                        && !children_panel.open && !appearance.open
+                        && matches!(dialog, native_setup::Dialog::None)
+                        && view.page() == crate::native_view_pages::Page::Chat {
+                        view.composer_region(draft_echo).and_then(|anchor| completion.panel(anchor))
+                    } else { None },
+                    ui_regions: if help_open { help_regions.clone() } else { view.ui_regions() },
+                    page_panel: if help_open { help_panel } else { view.page_panel() },
                     logo: if help_open {
                         None
                     } else {
@@ -2486,6 +2611,26 @@ fn native_loop(
         // inert, and the permission modal / Help gates above keep
         // precedence over both.
         let page_query_open = view.page().accepts_search();
+        // Completion owns navigation before composer/session shortcuts, but
+        // never before a credential, permission or other modal surface.
+        if !page_open && !help_open && !children_panel.open && !appearance.open
+            && !view.dialogs.intercepts_input() && !view.command_palette_open()
+            && matches!(dialog, native_setup::Dialog::None)
+            && view.composer_region(&draft).and_then(|anchor| completion.panel(anchor)).is_some()
+        {
+            match &event {
+                native_input_decoder::InputEvent::ArrowUp => { completion.navigate(false); continue; }
+                native_input_decoder::InputEvent::ArrowDown => { completion.navigate(true); continue; }
+                native_input_decoder::InputEvent::Escape => { completion.dismiss(); continue; }
+                native_input_decoder::InputEvent::Byte(key) => {
+                    if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
+                        utf8.reset();
+                        continue;
+                    }
+                }
+                _ => {}
+            }
+        }
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Mouse { x, y, kind } => {
@@ -2553,6 +2698,10 @@ fn native_loop(
                     } else {
                         view.dialogs.next();
                     }
+                    continue;
+                }
+                if appearance.open {
+                    appearance.move_target(direction == native_input_decoder::InputEvent::ArrowDown);
                     continue;
                 }
                 if children_panel.open {
@@ -3979,6 +4128,7 @@ fn native_loop(
             }
         }
     }
+    if let Some(load) = completion_load { load.abort(); }
     let _ = renderer.disable_kitty_keyboard();
     let _ = renderer.restore_terminal_modes();
     renderer.close();

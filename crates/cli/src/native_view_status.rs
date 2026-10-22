@@ -195,31 +195,36 @@ impl StatusView {
     /// page. Session identity comes only from the accepted binding; the MCP
     /// section is omitted for an empty registry (sidebar/mcp.tsx:30).
     pub fn render_sidebar(&self, width: usize, height: usize) -> Vec<String> {
-        let mut rows = vec![String::new()];
+        self.render_sidebar_styled(width, height).into_iter().map(|line| line.text).collect()
+    }
+
+    pub fn render_sidebar_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
+        use crate::native_ui_style::{Line, Role};
+        let mut rows = vec![(String::new(), Role::Description)];
         if let Some(title) = self.session_title() {
-            rows.push(title.to_owned());
+            rows.push((title.to_owned(), Role::Heading));
         }
         if let Some(id) = self.session_id() {
-            rows.push(id.to_owned());
+            rows.push((id.to_owned(), Role::Description));
         }
         if let Some((used, window)) = self.context {
-            rows.push(String::new());
-            rows.push("Context".to_owned());
-            rows.push(format!("{used} tokens"));
+            rows.push((String::new(), Role::Description));
+            rows.push(("Context".to_owned(), Role::Heading));
+            rows.push((format!("{used} tokens"), Role::Item));
             if window > 0 {
-                rows.push(format!("{}% used", used.saturating_mul(100) / window));
+                rows.push((format!("{}% used", used.saturating_mul(100) / window), Role::Description));
             }
         }
         if !self.mcp.is_empty() {
-            rows.push(String::new());
-            rows.push("MCP".to_owned());
+            rows.push((String::new(), Role::Description));
+            rows.push(("MCP".to_owned(), Role::Heading));
             for entry in &self.mcp {
-                rows.push(format!("• {} {}", entry.name, entry.status.as_str()));
+                rows.push((format!("• {} {}", entry.name, entry.status.as_str()), Role::Item));
             }
         }
         rows.into_iter()
             .take(height.min(MAX_ROWS))
-            .map(|row| fit(&row, width))
+            .map(|(text, role)| Line {text:fit(&text, width),role,detail_from:None})
             .collect()
     }
 
@@ -435,6 +440,33 @@ impl StatusView {
         let mcp_rows = self.mcp_rows();
         append_rows(&mut out, &mcp_rows, mcp_budget, width);
         out.truncate(MAX_ROWS.min(height));
+        out
+    }
+
+    pub fn render_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
+        use crate::native_ui_style::{Line, Role};
+        if width == 0 || height == 0 { return Vec::new(); }
+        let roomy = height >= 10;
+        let mut out = Vec::new();
+        let mut rows = Vec::new();
+        rows.push(("Status".to_owned(), Role::Heading));
+        if roomy { rows.push((String::new(), Role::Description)); }
+        let status_budget = height.saturating_sub(if roomy { 7 } else { 2 });
+        let mut status = Vec::new();
+        append_rows(&mut status, &self.status_rows(), status_budget, width);
+        rows.extend(status.into_iter().map(|text| (text, Role::Description)));
+        if roomy { rows.push((String::new(), Role::Description)); }
+        if rows.len() < height { rows.push(("MCP".to_owned(), Role::Heading)); }
+        let mut mcp = Vec::new();
+        append_rows(&mut mcp, &self.mcp_rows(), height.saturating_sub(rows.len() + if roomy { 2 } else { 0 }), width);
+        rows.extend(mcp.into_iter().map(|text| (text, Role::Description)));
+        for (text, role) in rows.into_iter().take(height) {
+            out.push(Line {text:fit(&text, width),role,detail_from:None});
+        }
+        if roomy {
+            while out.len() + 1 < height { out.push(Line {text:String::new(),role:Role::Description,detail_from:None}); }
+            out.push(Line {text:"Esc close · Tab next page".into(),role:Role::Hint,detail_from:None});
+        }
         out
     }
 
