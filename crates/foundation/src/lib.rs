@@ -26,6 +26,7 @@ pub mod rel_gate;
 pub mod repo_cache_store;
 pub mod repo_ref;
 pub mod repo_ref_ext;
+pub mod config_import;
 pub mod resource_ledger;
 pub mod runtime_report;
 pub mod stats_collect;
