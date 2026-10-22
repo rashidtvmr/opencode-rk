@@ -1804,13 +1804,45 @@ fn native_loop(
     ] {
         completion.commands.push(crate::native_completion::Item { value: value.into(), description: description.into() });
     }
-    let (completion_tx, mut completion_rx) = tokio::sync::mpsc::channel(1);
-    let mut completion_load = None;
+    let (completion_tx, mut completion_rx) = tokio::sync::mpsc::channel::<(Vec<crate::native_completion::Item>, Option<serde_json::Value>)>(1);
+    let mut completion_load: Option<tokio::task::JoinHandle<()>> = None;
     let mut completion_loaded = false;
     let mut byte = [0u8; 1];
     loop {
         completion.sync(&draft);
-        if !completion_loaded && (draft.starts_with('/') || draft.contains('@')) {
+        if !completion.triggered() { completion_loaded = false; }
+        if let Ok((files, catalogue)) = completion_rx.try_recv() {
+            completion_load.take();
+            let mut mentions = files;
+            if let Some(catalogue) = catalogue {
+                if let Ok(rows) = configured_command_rows(&catalogue) {
+                    for row in rows {
+                        if !completion.commands.iter().any(|item| item.value == row.label) {
+                            completion.commands.push(crate::native_completion::Item { value: row.label, description: crate::native_completion::description(&row.detail) });
+                        }
+                    }
+                }
+                if let Some(agents) = catalogue.get("agents").and_then(serde_json::Value::as_array) {
+                    for agent in agents.iter().take(4096) {
+                        let Some(name) = agent.get("name").and_then(serde_json::Value::as_str) else { continue; };
+                        if name.is_empty() || name.len() > 128 || name.chars().any(|ch| ch.is_whitespace() || ch.is_control()) { continue; }
+                        mentions.push(crate::native_completion::Item {
+                            value: format!("@{name}"), description: format!("agent · {}", crate::native_completion::description(agent.get("description").and_then(serde_json::Value::as_str).unwrap_or(""))),
+                        });
+                    }
+                }
+            }
+            mentions.sort_by(|a, b| {
+                b.description.starts_with("agent").cmp(&a.description.starts_with("agent")).then_with(|| a.value.cmp(&b.value))
+            });
+            completion.replace_mentions(mentions);
+            needs_paint = true;
+        } else if completion_load.as_ref().is_some_and(|load| load.is_finished()) {
+            // A failed worker may be retried on the next trigger, without an
+            // automatic retry loop or permanently retaining its dead handle.
+            completion_load.take();
+        }
+        if !completion_loaded && completion.triggered() && completion_load.is_none() {
             completion_loaded = true;
             let tx = completion_tx.clone();
             let origin = live.as_ref().map(|snapshot| snapshot.origin.clone());
@@ -1822,32 +1854,6 @@ fn native_loop(
                     .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).ok());
                 let _ = tx.blocking_send((files, catalogue));
             }));
-        }
-        if let Ok((files, catalogue)) = completion_rx.try_recv() {
-            completion_load.take();
-            completion.mentions = files;
-            if let Some(catalogue) = catalogue {
-                if let Ok(rows) = configured_command_rows(&catalogue) {
-                    for row in rows {
-                        if !completion.commands.iter().any(|item| item.value == row.label) {
-                            completion.commands.push(crate::native_completion::Item { value: row.label, description: row.detail.chars().take(256).collect() });
-                        }
-                    }
-                }
-                if let Some(agents) = catalogue.get("agents").and_then(serde_json::Value::as_array) {
-                    for agent in agents.iter().take(4096) {
-                        let Some(name) = agent.get("name").and_then(serde_json::Value::as_str) else { continue; };
-                        if name.is_empty() || name.len() > 128 || name.chars().any(|ch| ch.is_whitespace() || ch.is_control()) { continue; }
-                        completion.mentions.push(crate::native_completion::Item {
-                            value: format!("@{name}"), description: format!("agent · {}", agent.get("description").and_then(serde_json::Value::as_str).unwrap_or("").chars().take(256).collect::<String>()),
-                        });
-                    }
-                }
-            }
-            completion.mentions.sort_by(|a, b| {
-                b.description.starts_with("agent").cmp(&a.description.starts_with("agent")).then_with(|| a.value.cmp(&b.value))
-            });
-            needs_paint = true;
         }
         if children_panel.open && children_refresh.elapsed() >= Duration::from_millis(750) {
             children_refresh = Instant::now();
@@ -2385,7 +2391,7 @@ fn native_loop(
             let inset = if cols >= 24 { 4 } else { 0 };
             let width = cols.saturating_sub(2 * inset).min(100);
             let left = (cols - width) / 2;
-            let top = if rows >= 12 { 2 } else { 0 };
+            let top = crate::native_ui_style::help_top(rows, help.len());
             let capacity = rows.saturating_sub(2 * top);
             let gap = u16::from(capacity >= 12);
             lines = vec![String::new(); usize::from(rows)];
@@ -2619,12 +2625,13 @@ fn native_loop(
             && view.composer_region(&draft).and_then(|anchor| completion.panel(anchor)).is_some()
         {
             match &event {
-                native_input_decoder::InputEvent::ArrowUp => { completion.navigate(false); continue; }
-                native_input_decoder::InputEvent::ArrowDown => { completion.navigate(true); continue; }
-                native_input_decoder::InputEvent::Escape => { completion.dismiss(); continue; }
+                native_input_decoder::InputEvent::ArrowUp => { completion.navigate(false); needs_paint = true; continue; }
+                native_input_decoder::InputEvent::ArrowDown => { completion.navigate(true); needs_paint = true; continue; }
+                native_input_decoder::InputEvent::Escape => { completion.dismiss(); needs_paint = true; continue; }
                 native_input_decoder::InputEvent::Byte(key) => {
                     if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
                         utf8.reset();
+                        needs_paint = true;
                         continue;
                     }
                 }
@@ -2702,6 +2709,7 @@ fn native_loop(
                 }
                 if appearance.open {
                     appearance.move_target(direction == native_input_decoder::InputEvent::ArrowDown);
+                    needs_paint = true;
                     continue;
                 }
                 if children_panel.open {

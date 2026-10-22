@@ -54,6 +54,12 @@ pub fn overlay_roles(lines: &[String], selectable: bool) -> Vec<Role> {
     }).collect()
 }
 
+pub fn help_top(rows: u16, content_rows: usize) -> u16 {
+    if usize::from(rows) >= content_rows + 6 { 2 }
+    else if usize::from(rows) >= content_rows + 2 { 1 }
+    else { 0 }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -82,5 +88,12 @@ mod tests {
         let roles = overlay_roles(&rows, true);
         assert_eq!(roles, vec![Role::Heading, Role::Item, Role::Selected, Role::Hint]);
         assert!(!overlay_roles(&rows, false).contains(&Role::Selected));
+    }
+    #[test]
+    fn compact_help_reduces_margins_before_dropping_keybindings() {
+        assert_eq!(help_top(24, 10), 2);
+        assert_eq!(help_top(12, 10), 1);
+        assert_eq!(help_top(10, 10), 0);
+        for rows in 10..40 { assert!(usize::from(rows - 2 * help_top(rows, 10)) >= 10); }
     }
 }

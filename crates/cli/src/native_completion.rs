@@ -18,6 +18,15 @@ pub struct Completion {
 }
 
 impl Completion {
+    pub fn triggered(&self) -> bool { self.trigger().is_some() }
+    pub fn replace_mentions(&mut self, items: Vec<Item>) {
+        let active = self.trigger().is_some_and(|(_, marker, _)| marker == '@');
+        let previous = if active { self.visible().get(self.selected()).map(|item| item.value.clone()) } else { None };
+        self.mentions = items;
+        if active {
+            self.selected = previous.and_then(|value| self.visible().iter().position(|item| item.value == value)).unwrap_or(0);
+        }
+    }
     pub fn sync(&mut self, draft: &str) {
         if self.draft != draft {
             self.draft = draft.to_owned();
@@ -90,6 +99,10 @@ impl Completion {
     pub fn complete_key(&mut self, key: u8, draft: &mut String, limit: usize) -> bool {
         matches!(key, b'\t' | b'\r' | b'\n') && self.accept(draft, limit)
     }
+}
+
+pub fn description(text: &str) -> String {
+    crate::native_view_layout::fit(text, 256).trim_end().to_owned()
 }
 
 pub struct Panel {
@@ -207,6 +220,19 @@ mod tests {
         assert!(!c.complete_key(b'x', &mut draft, 4096));
         assert!(c.complete_key(b'\r', &mut draft, 4096));
         assert_eq!(draft, "/models ");
+    }
+    #[test]
+    fn metadata_is_sanitized_and_async_refresh_preserves_selected_identity() {
+        assert_eq!(description("safe\x1b[2J\x1b]0;title\x07 text\n"), "safe text");
+        let mut c = fixture();
+        c.sync("@");
+        c.navigate(true);
+        c.replace_mentions(vec![Item {value:"@added".into(),description:String::new()},
+            Item {value:"@extra".into(),description:String::new()},
+            Item {value:"@src/café.rs".into(),description:"file".into()}]);
+        let mut draft = "@".to_owned();
+        assert!(c.accept(&mut draft, 4096));
+        assert_eq!(draft, "@src/café.rs ");
     }
     #[test]
     fn panel_is_above_composer_and_selection_scrolls_on_short_viewport() {
