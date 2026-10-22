@@ -349,6 +349,15 @@ pub(crate) fn normalize_provider(entry: &Value, id: &str, origin: &str, out: &mu
             } else if entry.get("models").is_some_and(|v| !v.is_object() && !v.is_null()) {
                 out.unsupported_at(origin, &format!("providers.{id}.models"), "expected a model map");
             }
+            for key in entry.keys() {
+                if !matches!(key.as_str(), "name" | "npm" | "options" | "settings" | "models") {
+                    out.unsupported_at(
+                        origin,
+                        &format!("providers.{id}.{key}"),
+                        "provider option is outside our import schema; configure it natively",
+                    );
+                }
+            }
         }
         Value::Null => {}
         _ => out.unsupported_at(origin, &format!("providers.{id}"), "expected a provider object"),

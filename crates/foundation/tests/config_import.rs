@@ -714,3 +714,61 @@ fn normalize_provider_ids_match_the_native_import_consumer_contract() {
             && note.reason == expected_reason
     }));
 }
+
+#[test]
+fn opencode_provider_root_fields_are_reported_without_leaking_raw_credentials() {
+    let origin = "root-provider-fields.json";
+    let raw_credential = "sk-root-secret-sentinel-that-must-not-escape-123456789";
+    let source = normalize(
+        ConfigKind::OpenCodeJson,
+        &format!(
+            r#"{{
+              "providers": {{
+                "acme": {{
+                  "apiKey": "{raw_credential}",
+                  "baseURL": "https://root.example/v1",
+                  "unknownField": "not imported",
+                  "options": {{
+                    "baseURL": "https://options.example/v1",
+                    "apiKey": "{{env:ACME_API_KEY}}"
+                  }}
+                }}
+              }}
+            }}"#
+        ),
+        origin,
+    )
+    .unwrap();
+
+    for field in [
+        "providers.acme.apiKey",
+        "providers.acme.baseURL",
+        "providers.acme.unknownField",
+    ] {
+        let diagnostic = source
+            .unsupported
+            .iter()
+            .find(|note| note.origin == origin && note.field == field)
+            .unwrap_or_else(|| panic!("missing field-specific unsupported diagnostic for {field}"));
+        assert!(!diagnostic.reason.is_empty());
+        assert!(!diagnostic.reason.contains(raw_credential));
+    }
+    assert!(!source.unsupported.iter().any(|note| {
+        note.origin == origin && note.field == "providers.acme.options.apiKey"
+    }));
+
+    let provider = source.providers.get("acme").expect("provider imported");
+    assert_eq!(string_field(provider, "base_url"), "https://options.example/v1");
+    assert_eq!(string_field(provider, "api_key_env"), "ACME_API_KEY");
+    assert!(provider.get("api_key").is_none());
+
+    let plan = merge_plans(&[source.clone()]).unwrap();
+    let serialized_value = serde_json::to_string(&plan.value).unwrap();
+    let serialized_sources = serde_json::to_string(&plan.sources).unwrap();
+    let serialized_diagnostics = serde_json::to_string(&plan.unsupported).unwrap();
+    assert!(!serialized_value.contains(raw_credential));
+    assert!(!serialized_sources.contains(raw_credential));
+    assert!(!serialized_diagnostics.contains(raw_credential));
+    assert!(!format!("{source:?}").contains(raw_credential));
+    assert!(!serde_json::to_string(&plan).unwrap().contains(raw_credential));
+}
