@@ -4,6 +4,8 @@ pub mod acp_bridge;
 pub mod acp_files;
 pub mod acp_session;
 pub mod admission_bounds;
+
+pub mod builtin_agents;
 pub mod agent_loop;
 pub mod app_client;
 pub use agent_loop::{
@@ -19,7 +21,7 @@ pub mod auto_window;
 mod browser_resume;
 pub mod chat_composer;
 pub mod clients;
-mod configured_commands;
+pub mod configured_commands;
 pub mod context_accounting;
 pub mod context_report;
 pub mod control_decode;
@@ -35,6 +37,7 @@ pub mod event_bus;
 pub mod event_cursor;
 pub mod event_http;
 pub mod event_stream;
+pub mod permission_rules;
 pub mod loop_driver;
 pub mod mcp_http;
 pub mod origin_check;
@@ -172,6 +175,7 @@ pub fn router_with_events(
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
         .route("/api/commands", get(list_configured_commands))
+        .route("/api/permission-rules",get(list_permission_rules).post(save_permission_rule))
         .route("/api/models/{provider}/{model}", get(get_model))
         .route("/api/providers", get(list_custom_providers))
         .route("/api/providers/{id}", post(save_custom_provider))
@@ -543,7 +547,26 @@ async fn list_session_permissions(
 #[derive(Deserialize)]
 struct PermissionReplyBody {
     reply: String,
+    scope: Option<String>,
     message: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct PermissionRuleQuery {session_id:Option<String>}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PermissionRuleBody {tool:String,decision:String,scope:String,session_id:Option<String>}
+async fn list_permission_rules(State(state):State<AppState>,Query(query):Query<PermissionRuleQuery>)->Result<Json<Value>,ApiFailure> {
+    if let Some(id)=query.session_id.as_deref() {state.sessions.get(parse_session_id(id)?).await.map_err(ApiFailure::internal)?;}
+    let rules=tokio::task::spawn_blocking(move||permission_rules::list(query.session_id.as_deref())).await.map_err(ApiFailure::internal)?.map_err(ApiFailure::bad_request)?;
+    Ok(Json(json!({"rules":rules})))
+}
+async fn save_permission_rule(State(state):State<AppState>,Json(body):Json<PermissionRuleBody>)->Result<StatusCode,ApiFailure> {
+    if let Some(id)=body.session_id.as_deref() {state.sessions.get(parse_session_id(id)?).await.map_err(ApiFailure::internal)?;}
+    let rule=permission_rules::Rule {tool:body.tool,decision:body.decision,scope:body.scope.clone(),
+        session_id:if body.scope=="session" {body.session_id} else {None},resource:None,context:None};
+    tokio::task::spawn_blocking(move||permission_rules::upsert(rule)).await.map_err(ApiFailure::internal)?.map_err(ApiFailure::bad_request)?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn reply_session_permission(
@@ -570,29 +593,11 @@ async fn reply_session_permission(
     if pending.id != request_id || pending.session_id != owner.session_id.to_string() {
         return Err(ApiFailure::not_found("permission request not found"));
     }
-    match body.reply.as_str() {
-        "once" => {
-            if !owner.reply_once(&request_id) {
-                return Err(ApiFailure::not_found("permission request not found"));
-            }
-        }
-        "always" => {
-            if !owner.reply_always(&request_id, pending.action, pending.resources[0].clone()) {
-                return Err(ApiFailure::not_found("permission request not found"));
-            }
-        }
-        "reject" => {
-            let _ = body.message;
-            if !owner.reply_reject(&request_id) {
-                return Err(ApiFailure::not_found("permission request not found"));
-            }
-        }
-        _ => {
-            return Err(ApiFailure::bad_request(
-                "reply must be once, always, or reject",
-            ));
-        }
-    }
+    let allow=match body.reply.as_str() {"once"|"always"=>true,"reject"=>false,_=>return Err(ApiFailure::bad_request("invalid permission reply"))};
+    let scope=body.scope.as_deref().unwrap_or(if body.reply=="always" {"always"} else {"once"});
+    let scope=if scope=="turn" {"once"} else {scope};
+    if !matches!(scope,"once"|"session"|"always") || body.reply=="once"&&scope!="once" {return Err(ApiFailure::bad_request("invalid permission scope"));}
+    if !owner.reply_scoped(&request_id,allow,scope).map_err(ApiFailure::bad_request)? {return Err(ApiFailure::not_found("permission request not found"));}
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -1474,9 +1479,12 @@ async fn run_configured_command(
     let text = configured_commands::expand(&command.template, &body.arguments).map_err(ApiFailure::bad_request)?;
     let prompt = agent.and_then(|value| value.get("prompt")).and_then(Value::as_str).unwrap_or("");
     if prompt.len() > 32 * 1024 { return Err(ApiFailure::bad_request("agent prompt exceeds limit")); }
+    let read_only = agent_name == "plan"
+        || agent.and_then(|value| value.get("read_only")).and_then(Value::as_bool).unwrap_or(false)
+        || builtin_agents::resolve(agent_name).is_some_and(|role| role.read_only);
     let agent_prompt = Some(format!("Agent: {agent_name}\n{prompt}"));
     create_turn_stream(State(state), Path(raw_id), Extension(events), Extension(children), Json(CreateTurnBody {
-        text, model, reasoning_effort, workdir: None, agent_prompt, read_only: agent_name == "plan", replay_requires_no_tools:false,
+        text, model, reasoning_effort, workdir: None, agent_prompt, read_only, replay_requires_no_tools:false,
     })).await
 }
 
@@ -1617,6 +1625,9 @@ async fn execute_native_tool(
         Ok(resource) => resource,
         Err(_) => return failed("error: invalid tool intent".to_owned(), false),
     };
+    if permission_rules::denied(&call.name,&owner.session_id.to_string(),&intent,broker) {
+        return failed("error: denied by saved/session permission rule".into(),false);
+    }
     let approval = match broker.authorize(&intent) {
         Decision::Allow => None,
         Decision::Deny { reason } => {
@@ -1958,6 +1969,9 @@ async fn execute_write(
         action: opencode_rk_security::FileAction::Write,
         path: PathBuf::from(&resource),
     };
+    if permission_rules::denied("write",&owner.session_id.to_string(),&intent,broker) {
+        return outcome("error: write denied by permission rule".into(),false);
+    }
     let decision = broker.authorize(&intent);
     let approved = match decision {
         Decision::Allow => None,
@@ -2063,7 +2077,14 @@ fn create_turn_stream(
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, ApiFailure>> + Send>> {
     Box::pin(async move {
     let id = parse_session_id(&id)?;
-    let permit = TurnExecutionPermit::acquire(id).map_err(turn_admission_failure)?;
+    // Child-lane admission only for trusted child sessions (the child
+    // registry treats unknown/poisoned lookups as non-child); legacy create_turn
+    // and shell call sites stay on the root lane.
+    let permit = if children.is_child(id) {
+        TurnExecutionPermit::acquire_child(id).map_err(turn_admission_failure)?
+    } else {
+        TurnExecutionPermit::acquire(id).map_err(turn_admission_failure)?
+    };
     let owner = permit.owner();
     // Hold this session's exclusive permit across the durable replay check
     // and prompt admission; another client cannot insert an effect between.
@@ -2323,6 +2344,7 @@ fn create_turn_stream(
                                                 "type": "assistant_message",
                                                 "message": message,
                                                 "reasoning_summary": persisted_summary,
+                                                "usage": state.provider.usage(),
                                                 "stop_reason": stop_reason,
                                             }))),
                                             state,

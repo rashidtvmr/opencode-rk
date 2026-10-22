@@ -79,15 +79,29 @@ fn jsonc(text: &str) -> Result<String, String> {
 impl Inventory {
     pub fn mention_agents(&self) -> Vec<Value> {
         let mut agents = self.agents.clone();
-        for (name, description) in [("general", "General-purpose subagent"), ("explore", "Explore the codebase")] {
-            agents.entry(name.into()).or_insert_with(|| serde_json::json!({"description":description}));
+        // Bounded built-in roles are always suggested; a configured agent with
+        // the same name overrides the builtin entry, but the advertised
+        // read_only floor must match what the runtime enforces:
+        // configured || builtin. A read-only builtin role stays read-only
+        // even when configuration declares false; a full builtin only
+        // supplies the default when the field is absent; custom agents keep
+        // their declared policy untouched.
+        for (name, description, read_only) in crate::builtin_agents::catalogue() {
+            if !agents.contains_key(name) {
+                agents.insert(name.into(), serde_json::json!({"description":description,"read_only":read_only}));
+            } else if let Some(agent) = agents.get_mut(name) {
+                if read_only { agent["read_only"] = Value::from(true); }
+                else if agent.get("read_only").is_none() { agent["read_only"] = Value::from(false); }
+            }
         }
         agents.into_iter().filter_map(|(name, agent)| {
             if name.is_empty() || name.len() > 128 || name.chars().any(|ch| ch.is_whitespace() || ch.is_control())
                 || agent.get("hidden").and_then(Value::as_bool) == Some(true)
                 || agent.get("disable").and_then(Value::as_bool) == Some(true)
+                || agent.get("disabled").and_then(Value::as_bool) == Some(true)
                 || agent.get("mode").and_then(Value::as_str) == Some("primary") { return None; }
-            Some(serde_json::json!({"name":name,"description":agent.get("description").and_then(Value::as_str).unwrap_or("").chars().take(256).collect::<String>()}))
+            Some(serde_json::json!({"name":name,"description":agent.get("description").and_then(Value::as_str).unwrap_or("").chars().take(256).collect::<String>(),
+                "read_only":agent.get("read_only").and_then(Value::as_bool).unwrap_or(false)}))
         }).collect()
     }
     fn merge(&mut self, document: Value) -> Result<(), String> {
@@ -179,6 +193,41 @@ mod mention_catalogue_tests {
         }
         assert!(agents.iter().any(|a| a["name"] == "explore"));
     }
+
+    #[test]
+    fn configured_readonly_builtin_forces_enforced_policy_and_keeps_description() {
+        let mut inventory = Inventory::default();
+        inventory.agents.insert("explore".into(), serde_json::json!({"description":"Custom explore brief","read_only":false}));
+        inventory.agents.insert("general".into(), serde_json::json!({"read_only":true}));
+        let agents = inventory.mention_agents();
+        let explore = agents.iter().find(|a| a["name"] == "explore").unwrap();
+        assert_eq!(explore["read_only"], Value::Bool(true));
+        assert_eq!(explore["description"], "Custom explore brief");
+        // Full builtin: declared policy is kept; the builtin default applies only when absent.
+        assert_eq!(agents.iter().find(|a| a["name"] == "general").unwrap()["read_only"], Value::Bool(true));
+    }
+
+    #[test]
+    fn disabled_alias_and_disabled_entries_are_hidden() {
+        let mut inventory = Inventory::default();
+        inventory.agents.insert("general-purpose".into(), serde_json::json!({"disable":true}));
+        inventory.agents.insert("researcher".into(), serde_json::json!({"disabled":true}));
+        inventory.agents.insert("coder".into(), serde_json::json!({"description":"Coder alias"}));
+        let agents = inventory.mention_agents();
+        assert!(!agents.iter().any(|a| a["name"] == "general-purpose"));
+        assert!(!agents.iter().any(|a| a["name"] == "researcher"));
+        assert!(agents.iter().any(|a| a["name"] == "coder"));
+    }
+
+    #[test]
+    fn custom_agent_declared_readonly_policy_is_preserved() {
+        let mut inventory = Inventory::default();
+        inventory.agents.insert("auditor".into(), serde_json::json!({"description":"Audit changes","read_only":true}));
+        inventory.agents.insert("deployer".into(), serde_json::json!({"read_only":false}));
+        let agents = inventory.mention_agents();
+        assert_eq!(agents.iter().find(|a| a["name"] == "auditor").unwrap()["read_only"], Value::Bool(true));
+        assert_eq!(agents.iter().find(|a| a["name"] == "deployer").unwrap()["read_only"], Value::Bool(false));
+    }
 }
 
 fn markdown_command(content: &str) -> Result<Command, String> {
@@ -220,6 +269,15 @@ pub fn load(project: &Path) -> Result<Inventory, String> {
             if let Some(value) = read_config(&global.join(name), &mut budget)? { inventory.merge(value)?; }
         }
     }
+    // Native own config layer: `opencode.json` in the resolved own config dir.
+    // This sits above the legacy global config but below project configs,
+    // so project overrides still win. Malformed own config is an explicit error.
+    if let Some(own_dir) = opencode_rk_providers::imported_config::own_config_dir() {
+        let own_path = own_dir.join("opencode.json");
+        if let Some(value) = read_config(&own_path, &mut budget)? {
+            inventory.merge(value)?;
+        }
+    }
     let ancestors: Vec<_> = project.ancestors().take(65).collect();
     if ancestors.len() > 64 { return Err("command configuration ancestry exceeds limit".into()); }
     // All .opencode documents override all direct documents, matching V2.
@@ -246,6 +304,12 @@ pub fn load_agent(project: &Path, agent: &str) -> Result<Option<Value>, String> 
     let mut paths = Vec::new();
     if let Some(global) = global {
         for name in ["opencode.json", "opencode.jsonc"] { paths.push(global.join(name)); }
+    }
+    // Native own config layer: sits above legacy global, below project.
+    // Malformed own config is an explicit error (read_config returns Err for
+    // invalid JSON, absent file yields None).
+    if let Some(own_dir) = opencode_rk_providers::imported_config::own_config_dir() {
+        paths.push(own_dir.join("opencode.json"));
     }
     let ancestors: Vec<_> = project.ancestors().take(65).collect();
     if ancestors.len() > 64 { return Err("agent configuration ancestry exceeds limit".into()); }

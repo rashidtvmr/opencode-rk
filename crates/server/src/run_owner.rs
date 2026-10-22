@@ -10,12 +10,16 @@ use std::sync::{
 use tokio::sync::{Semaphore, SemaphorePermit, oneshot, watch};
 
 pub const MAX_ACTIVE_TURNS: usize = 2;
+/// Dedicated child-lane capacity so a saturated root lane cannot starve
+/// child turns (both lanes still share one active-registry bound).
+pub const MAX_ACTIVE_CHILD_TURNS: usize = MAX_ACTIVE_TURNS;
 const MAX_ALWAYS_GRANTS: usize = 128;
 const ALWAYS_GRANT_TTL: std::time::Duration = std::time::Duration::from_secs(30 * 60);
 
 static TURN_PERMITS: Semaphore = Semaphore::const_new(MAX_ACTIVE_TURNS);
-static ACTIVE_TURNS: Mutex<[Option<Arc<RunOwner>>; MAX_ACTIVE_TURNS]> =
-    Mutex::new([const { None }; MAX_ACTIVE_TURNS]);
+static CHILD_TURN_PERMITS: Semaphore = Semaphore::const_new(MAX_ACTIVE_CHILD_TURNS);
+static ACTIVE_TURNS: Mutex<[Option<Arc<RunOwner>>; MAX_ACTIVE_TURNS + MAX_ACTIVE_CHILD_TURNS]> =
+    Mutex::new([const { None }; MAX_ACTIVE_TURNS + MAX_ACTIVE_CHILD_TURNS]);
 static NEXT_RUN_ID: AtomicU64 = AtomicU64::new(1);
 static ALWAYS_GRANTS: Mutex<Vec<AlwaysGrant>> = Mutex::new(Vec::new());
 
@@ -146,6 +150,18 @@ impl RunOwner {
         if pending.is_some() || self.is_cancelled() {
             return Err(Box::new(request));
         }
+        let resource=crate::permission_rules::fingerprint(&serde_json::to_string(&intent).unwrap_or_default());
+        let context=crate::permission_rules::fingerprint(&format!("{:?}",broker.policy_context()));
+        match crate::permission_rules::decide(&request.action,&self.session_id.to_string(),&resource,&context) {
+            Ok(Some(allow))=>{
+                let capability=if allow {broker.approve_human(&intent,self.session_id.to_string(),self.run_id,request.source.call_id.clone())} else {None};
+                if allow&&capability.is_none() {return Err(Box::new(request));}
+                let _=reply.send(ApprovedPermission {reply:if allow {PermissionReply::Once} else {PermissionReply::Reject},capability});
+                return Ok(receiver);
+            }
+            Err(_)=>return Err(Box::new(request)),
+            Ok(None)=>{}
+        }
         *pending = Some(PendingPermission {
             request,
             intent,
@@ -158,6 +174,25 @@ impl RunOwner {
 
     pub fn complete_pending(&self, request_id: &str, decision: PermissionReply) -> bool {
         self.reply_pending(request_id, decision, None)
+    }
+
+    pub fn reply_scoped(&self,request_id:&str,allow:bool,scope:&str)->Result<bool,String> {
+        if !matches!(scope,"once"|"session"|"always") {return Err("invalid permission scope".into());}
+        let mut pending=self.pending.lock().map_err(|_|"permission unavailable")?;
+        let Some(entry)=pending.as_ref().filter(|entry|entry.request.id==request_id) else {return Ok(false);};
+        if self.is_cancelled()||entry.broker.policy_context()!=entry.policy_context {return Ok(false);}
+        let capability=if allow {entry.broker.approve_human(&entry.intent,self.session_id.to_string(),self.run_id,entry.request.source.call_id.clone())} else {None};
+        if allow&&capability.is_none() {return Ok(false);}
+        if scope!="once" {
+            crate::permission_rules::upsert(crate::permission_rules::Rule {
+                tool:entry.request.action.clone(),decision:if allow {"allow"} else {"deny"}.into(),scope:scope.into(),
+                session_id:if scope=="session" {Some(self.session_id.to_string())} else {None},
+                resource:Some(crate::permission_rules::fingerprint(&serde_json::to_string(&entry.intent).map_err(|_|"invalid intent")?)),
+                context:Some(crate::permission_rules::fingerprint(&format!("{:?}",entry.policy_context))),
+            })?;
+        }
+        let entry=pending.take().expect("checked pending");
+        Ok(entry.reply.send(ApprovedPermission {reply:if allow {PermissionReply::Once} else {PermissionReply::Reject},capability}).is_ok())
     }
 
     fn reply_pending(
@@ -334,7 +369,7 @@ impl Drop for PendingPermissionGuard {
     }
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum AdmissionError {
     Capacity,
     SessionActive,
@@ -348,7 +383,21 @@ pub struct TurnExecutionPermit {
 
 impl TurnExecutionPermit {
     pub fn acquire(session_id: SessionId) -> Result<Self, AdmissionError> {
-        let global = TURN_PERMITS
+        Self::acquire_lane(session_id, &TURN_PERMITS)
+    }
+
+    /// Child-lane admission: its own bounded permits, so a saturated root
+    /// lane cannot starve child turns. Shares the same session-exclusion
+    /// registry as roots, so one session can never run twice across lanes.
+    pub fn acquire_child(session_id: SessionId) -> Result<Self, AdmissionError> {
+        Self::acquire_lane(session_id, &CHILD_TURN_PERMITS)
+    }
+
+    fn acquire_lane(
+        session_id: SessionId,
+        lane_permits: &'static Semaphore,
+    ) -> Result<Self, AdmissionError> {
+        let global = lane_permits
             .try_acquire()
             .map_err(|_| AdmissionError::Capacity)?;
         let mut active = ACTIVE_TURNS
@@ -484,4 +533,108 @@ pub fn store_always(session_id: SessionId, action: String, resource: String) -> 
         ))
         .policy_context(),
     )
+}
+
+#[cfg(test)]
+mod admission_lane_tests {
+    use super::{
+        ACTIVE_TURNS, AdmissionError, MAX_ACTIVE_CHILD_TURNS, MAX_ACTIVE_TURNS,
+        TurnExecutionPermit,
+    };
+    use opencode_rk_contracts::SessionId;
+
+    fn fresh() -> SessionId {
+        SessionId::new()
+    }
+
+    fn hold_admission_test_lock() -> std::sync::MutexGuard<'static, ()> {
+        static ADMISSION_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        // Poison-tolerant: a panicked sibling test must not wedge the rest.
+        ADMISSION_TEST_LOCK
+            .lock()
+            .unwrap_or_else(|err| err.into_inner())
+    }
+
+    #[test]
+    fn root_lane_exhaustion_does_not_starve_child_lane() {
+        // These tests exhaust the process-global permit lanes and shared
+        // registry; serialize them so RUST_TEST_THREADS=2 cannot interleave.
+        let _admission_test_lock = hold_admission_test_lock();
+        let roots: Vec<_> = (0..MAX_ACTIVE_TURNS)
+            .map(|_| {
+                TurnExecutionPermit::acquire(fresh())
+                    .expect("root capacity initially available")
+            })
+            .collect();
+        assert!(
+            matches!(
+                TurnExecutionPermit::acquire(fresh()),
+                Err(AdmissionError::Capacity)
+            ),
+            "third root turn must exhaust the root lane"
+        );
+        let child = TurnExecutionPermit::acquire_child(fresh())
+            .expect("child lane must still admit while root lane is saturated");
+        drop(child);
+        drop(roots);
+    }
+
+    #[test]
+    fn duplicate_session_rejected_across_lanes() {
+        let _admission_test_lock = hold_admission_test_lock();
+        // An active root blocks the same session on the child lane.
+        let root = TurnExecutionPermit::acquire(fresh())
+            .expect("root capacity initially available");
+        assert!(
+            matches!(
+                TurnExecutionPermit::acquire_child(root.owner().session_id),
+                Err(AdmissionError::SessionActive)
+            ),
+            "acquire_child must keep same-session exclusion with roots"
+        );
+        // And duplicates inside the child lane itself are rejected too.
+        let child = TurnExecutionPermit::acquire_child(fresh())
+            .expect("child capacity initially available");
+        assert!(
+            matches!(
+                TurnExecutionPermit::acquire_child(child.owner().session_id),
+                Err(AdmissionError::SessionActive)
+            ),
+            "duplicate child session must be rejected"
+        );
+    }
+
+    #[test]
+    fn aggregate_registry_bounded_at_root_plus_child_capacity() {
+        let _admission_test_lock = hold_admission_test_lock();
+        let mut permits: Vec<_> = (0..MAX_ACTIVE_TURNS)
+            .map(|_| {
+                TurnExecutionPermit::acquire(fresh())
+                    .expect("root capacity initially available")
+            })
+            .collect();
+        permits.extend((0..MAX_ACTIVE_CHILD_TURNS).map(|_| {
+            TurnExecutionPermit::acquire_child(fresh())
+                .expect("child capacity initially available")
+        }));
+        assert_eq!(
+            ACTIVE_TURNS.lock().expect("active registry").iter().flatten().count(),
+            MAX_ACTIVE_TURNS + MAX_ACTIVE_CHILD_TURNS,
+            "shared registry must admit exactly root + child runs concurrently"
+        );
+        assert!(
+            matches!(
+                TurnExecutionPermit::acquire(fresh()),
+                Err(AdmissionError::Capacity)
+            ),
+            "aggregate bound must reject further roots"
+        );
+        assert!(
+            matches!(
+                TurnExecutionPermit::acquire_child(fresh()),
+                Err(AdmissionError::Capacity)
+            ),
+            "aggregate bound must reject further children"
+        );
+    }
 }

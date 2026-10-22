@@ -1,7 +1,7 @@
 //! Bounded agentic tool loop with real native execution and human approval.
 //!
-//! Contract (rewritten from verified product behavior — capability ids are the
-//! shipped registry ids bash/shell/read/write/edit/grep/glob):
+//! Contract (rewritten from verified product behavior — default turn schemas
+//! include the supported registry ids bash/shell/read/write/edit/grep/glob/task/webfetch/websearch):
 //! - E1 (default is enabled): with `OPENCODE_RK_TURN_TOOLS` unset the real
 //!   turn tools are advertised and executable. A provider response with
 //!   assistant text + one `bash` function call makes the tool park on a REAL
@@ -544,7 +544,10 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
     advertised.sort_unstable();
     assert_eq!(
         advertised,
-        vec!["bash", "edit", "glob", "grep", "read", "shell", "write"]
+        vec![
+            "bash", "edit", "glob", "grep", "read", "shell", "task", "webfetch",
+            "websearch", "write",
+        ]
     );
     // Round two fed the function call and its real output back.
     let round2_items = bodies[1]["input"].as_array().expect("round two input");
