@@ -25,7 +25,7 @@ impl Env { fn set(name: &'static str, value: impl AsRef<std::ffi::OsStr>) -> Sel
 } }
 impl Drop for Env { fn drop(&mut self) { if let Some(v) = &self.1 { env::set_var(self.0, v); } else { env::remove_var(self.0); } } }
 
-struct Fixture { outside: std::path::PathBuf, child_write_calls: AtomicUsize }
+struct Fixture { outside: std::path::PathBuf, child_write_calls: AtomicUsize, denied_child_results: AtomicUsize }
 
 async fn provider(State(fixture): State<Arc<Fixture>>, Json(body): Json<Value>) -> ([(&'static str, &'static str);1], String) {
     let items = body["input"].as_array().unwrap();
@@ -34,6 +34,11 @@ async fn provider(State(fixture): State<Arc<Fixture>>, Json(body): Json<Value>) 
     let parent = body["tools"].as_array().unwrap().iter().any(|tool| tool["name"] == "task");
     let last_user = items.iter().rposition(|item| item["role"] == "user").unwrap();
     let output = items[last_user+1..].iter().any(|item| item["type"] == "function_call_output");
+    if !parent && items[last_user+1..].iter().any(|item|
+        item["type"] == "function_call_output" && item["call_id"] == "child_write"
+            && item["output"].as_str().is_some_and(|text| text.contains("write rejected"))) {
+        fixture.denied_child_results.fetch_add(1, Ordering::SeqCst);
+    }
     let event = if parent && !output {
         json!({"type":"response.output_item.done","item":{"type":"function_call","id":"fc_task","call_id":"parent_task","name":"task","arguments":json!({"description":"child write probe","prompt":CHILD_PROBE,"subagent_type":"general","background":true}).to_string()}})
     } else if !parent && !output {
@@ -118,7 +123,7 @@ struct Harness {
 async fn harness() -> Harness {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir(dir.path().join("project")).unwrap();
-    let fixture = Arc::new(Fixture { outside: dir.path().join("outside.txt"), child_write_calls: AtomicUsize::new(0) });
+    let fixture = Arc::new(Fixture { outside: dir.path().join("outside.txt"), child_write_calls: AtomicUsize::new(0), denied_child_results: AtomicUsize::new(0) });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let base = format!("http://{}", listener.local_addr().unwrap());
     let provider_fixture = fixture.clone();
@@ -141,6 +146,26 @@ async fn harness() -> Harness {
     assert_eq!(response.status(), StatusCode::CREATED);
     let parent_body = tokio::spawn(async move { to_bytes(response.into_body(), 1024 * 1024).await.unwrap().to_vec() });
     Harness { dir, fixture, app, parent: parent.id.to_string(), foreign: foreign.id.to_string(), parent_body, mock, envs }
+}
+
+#[tokio::test(flavor="multi_thread", worker_threads=2)]
+async fn denied_child_write_returns_same_call_result_to_provider_without_effect_or_replay() {
+    let _test = TEST_LOCK.lock().await;
+    let h = harness().await;
+    approve_parent_task(&h.app, &h.parent).await;
+    let pending = wait_subagent_rows(&h.app, &h.parent).await;
+    let request_id = pending[0]["id"].as_str().unwrap().to_owned();
+    assert_eq!(reply(&h.app, &h.parent, &request_id, "reject").await, StatusCode::NO_CONTENT);
+    let terminal = poll(&h.app, format!("/api/sessions/{}/children", h.parent), |v|
+        v["children"][0]["state"] == "error").await;
+    assert_eq!(terminal["children"][0]["awaiting_permission"], false);
+    assert!(!h.fixture.outside.exists(), "denial must have no file effect");
+    assert_eq!(h.fixture.denied_child_results.load(Ordering::SeqCst), 1,
+        "provider must receive exactly one rejected output for child_write before the child settles");
+    assert_eq!(h.fixture.child_write_calls.load(Ordering::SeqCst), 1, "continuation must not replay the write");
+    assert_eq!(reply(&h.app, &h.parent, &request_id, "once").await, StatusCode::NOT_FOUND);
+    assert!(!h.fixture.outside.exists(), "a settled denial cannot be approved later");
+    finish(h).await;
 }
 
 #[tokio::test(flavor="multi_thread", worker_threads=2)]

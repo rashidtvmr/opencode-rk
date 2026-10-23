@@ -176,6 +176,12 @@ impl Child {
 }
 
 impl Children {
+    pub fn can_continue_after_write_rejection(&self, id: SessionId) -> bool {
+        // Unlike admission's conservative child-lane classification, this
+        // grants a behavior exception and therefore requires a known identity.
+        self.0.lock().is_ok_and(|rows| rows.contains_key(&id.to_string()))
+    }
+
     pub fn is_child(&self, id: SessionId) -> bool {
         self.0.lock().map_or(true, |rows| rows.contains_key(&id.to_string()))
     }
@@ -238,6 +244,25 @@ impl Children {
     pub fn permission_owner(&self, parent: SessionId, request: &str) -> Option<Arc<RunOwner>> {
         self.pending(parent).into_iter().find(|(_, pending)| pending.id == request)
             .and_then(|(id, _)| run_owner::active(id))
+    }
+}
+
+#[cfg(test)]
+mod rejection_continuation_tests {
+    use super::*;
+
+    #[test]
+    fn poisoned_registry_cannot_authorize_rejection_continuation() {
+        let children = Children::default();
+        let root = SessionId::new();
+        assert!(!children.can_continue_after_write_rejection(root));
+        let registry = children.0.clone();
+        assert!(std::panic::catch_unwind(move || {
+            let _guard = registry.lock().unwrap();
+            panic!("poison disposable fixture registry");
+        }).is_err());
+        assert!(!children.can_continue_after_write_rejection(root),
+            "unknown identity must retain rejection-stop behavior");
     }
 }
 

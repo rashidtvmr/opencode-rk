@@ -1956,6 +1956,7 @@ async fn execute_write(
     owner: &Arc<RunOwner>,
     message_id: MessageId,
     call_id: &str,
+    continue_on_rejection: bool,
 ) -> WriteOutcome {
     let outcome = |output: String, stop_after_outputs: bool| WriteOutcome {
         output,
@@ -2030,7 +2031,9 @@ async fn execute_write(
             };
             match approved.reply {
                 PermissionReply::Once | PermissionReply::Always => approved.capability,
-                PermissionReply::Reject => return outcome("write rejected".to_owned(), true),
+                // Child HITL must return the denied result to its provider;
+                // this never grants the effect. Cancellation still stops.
+                PermissionReply::Reject => return outcome("write rejected".to_owned(), !continue_on_rejection),
                 PermissionReply::Cancelled => return outcome("write cancelled".to_owned(), true),
             }
         }
@@ -2576,6 +2579,7 @@ pub(crate) fn create_turn_stream_with_message(
                                         &state.owner,
                                         state.turn_message_id,
                                         &call.call_id,
+                                        state.children.can_continue_after_write_rejection(state.session_id),
                                     )
                                     .await;
                                     stop_after_output = outcome.stop_after_outputs;
