@@ -57,9 +57,19 @@ pub struct ModalPresentation {
     pub x: u16,
     pub y: u16,
     pub width: u16,
+    pub content_x: u16,
     pub content_y: u16,
     pub content_width: u16,
+    pub bottom_padding: u16,
     pub backdrop_alpha: u8,
+}
+
+impl ModalPresentation {
+    pub fn content_point(self, x: u16, y: u16, height: usize) -> Option<(u16, usize)> {
+        let column = x.checked_sub(self.content_x)?;
+        let row = usize::from(y.checked_sub(self.content_y)?);
+        (column < self.content_width && row < height).then_some((column, row))
+    }
 }
 
 pub struct NativeView {
@@ -494,12 +504,22 @@ impl NativeView {
             .saturating_sub(2)
             .min(self.dialog_size.width());
         let y = (available_height as u16).div_ceil(4);
+        let box_id = if self.command_palette.is_open() {
+            crate::native_box_style::BoxId::Menu
+        } else {
+            crate::native_box_style::BoxId::Dialog
+        };
+        let padding = u16::from(self.box_appearance.effective(box_id).padding.min(crate::native_box_style::MAX_PADDING));
+        let x = (self.layout.cols - width) / 2;
+        let inset = 2u16.saturating_add(padding).min(width);
         ModalPresentation {
-            x: (self.layout.cols - width) / 2,
+            x,
             y,
             width,
-            content_y: y.saturating_add(1),
-            content_width: width.saturating_sub(4),
+            content_x: x.saturating_add(inset),
+            content_y: y.saturating_add(1).saturating_add(padding),
+            content_width: width.saturating_sub(2 * inset),
+            bottom_padding: padding,
             backdrop_alpha: 150,
         }
     }
@@ -514,8 +534,10 @@ impl NativeView {
 
     /// Window modal content below its top inset and above its bottom border.
     pub fn modal_content_height(&self) -> usize {
+        let modal = self.modal_presentation();
+        if modal.content_width == 0 { return 0; }
         self.render_height().saturating_sub(1)
-            .saturating_sub(usize::from(self.modal_presentation().content_y) + 1)
+            .saturating_sub(usize::from(modal.content_y) + 1 + usize::from(modal.bottom_padding))
     }
 
     fn composer_metadata(&self) -> String {
@@ -1526,7 +1548,7 @@ impl NativeView {
         let dialog_width = modal_geometry.width;
         let modal_lines = if self.dialogs.is_open() {
             self.dialogs
-                .render_styled(dialog_width.saturating_sub(4) as usize, self.modal_content_height())
+                .render_styled(modal_geometry.content_width as usize, self.modal_content_height())
         } else if self.command_palette.is_open() {
             self.command_palette.render_styled(modal_geometry.content_width, self.modal_content_height())
         } else if self.pages.page() == Page::Theme {
@@ -1547,7 +1569,7 @@ impl NativeView {
             let y = usize::from(modal_geometry.content_y).saturating_add(index);
             if y >= height.saturating_sub(1) { break; }
             self.ui_regions.push(crate::native_ui_style::Region {
-                x:modal_geometry.x.saturating_add(2), y:modal_geometry.content_y.saturating_add(index.min(u16::MAX as usize) as u16),
+                x:modal_geometry.content_x, y:modal_geometry.content_y.saturating_add(index.min(u16::MAX as usize) as u16),
                 width:modal_geometry.content_width, role:line.role, detail_from:line.detail_from,modal:true,
             });
         }
@@ -1567,7 +1589,7 @@ impl NativeView {
             // The panel's inner top padding is an empty panel row, not
             // transcript text behind the dialog.
             for row in usize::from(modal_geometry.y)
-                ..height.saturating_sub(1).min(top.saturating_add(content_rows).saturating_add(1))
+                ..height.saturating_sub(1).min(top.saturating_add(content_rows).saturating_add(1 + usize::from(modal_geometry.bottom_padding)))
             {
                 let line = row
                     .checked_sub(top)
@@ -1581,7 +1603,10 @@ impl NativeView {
                 frame[row] = format!(
                     "{}{}{}",
                     fit(&frame[row], left),
-                    padded(line.map_or("", String::as_str), dialog_width),
+                    format!("{}{}{}",
+                        " ".repeat(usize::from(modal_geometry.content_x.saturating_sub(left))),
+                        fit(line.map_or("", String::as_str), modal_geometry.content_width),
+                        " ".repeat(usize::from(dialog_width.saturating_sub(modal_geometry.content_x.saturating_sub(left)).saturating_sub(modal_geometry.content_width)))),
                     right
                 );
             }
@@ -2149,6 +2174,54 @@ mod framed_composer_tests {
 #[cfg(test)]
 mod footer_layout_tests {
     use super::*;
+
+    #[test]
+    fn configurable_menu_padding_moves_content_without_moving_outer_modal() {
+        let mut view = NativeView::new(100, 32);
+        view.open_command_palette(false);
+        let baseline = view.modal_presentation();
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.overrides.insert(crate::native_box_style::BoxId::Menu,
+            crate::native_box_style::BoxOverride { padding: Some(2), ..Default::default() });
+        view.set_box_appearance(appearance);
+        let padded = view.modal_presentation();
+        assert_eq!((padded.x, padded.y, padded.width), (baseline.x, baseline.y, baseline.width));
+        assert_eq!(padded.content_width, baseline.content_width.saturating_sub(4));
+        assert_eq!(padded.content_y, baseline.content_y + 2);
+        view.render_typed("", &[], false, &[]);
+        let regions: Vec<_> = view.ui_regions().into_iter().filter(|r| r.modal).collect();
+        assert!(!regions.is_empty());
+        assert_eq!(regions[0].x, baseline.x + 4);
+        assert_eq!(regions[0].y, baseline.content_y + 2);
+        assert_eq!(padded.content_point(regions[0].x, regions[0].y, view.modal_content_height()), Some((0, 0)));
+        assert_eq!(padded.content_point(padded.content_x - 1, padded.content_y, view.modal_content_height()), None);
+        assert!(regions.iter().all(|r| r.y < 31 && r.x + r.width <= padded.x + padded.width));
+        view.close_command_palette();
+        assert_eq!(view.modal_presentation().content_width, baseline.content_width,
+            "Menu override must not change Dialog padding");
+    }
+
+    #[test]
+    fn configurable_dialog_padding_bounds_permission_content_and_footer() {
+        let mut view = NativeView::new(80, 20);
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.overrides.insert(crate::native_box_style::BoxId::Dialog,
+            crate::native_box_style::BoxOverride { padding: Some(3), ..Default::default() });
+        view.set_box_appearance(appearance);
+        let modal = view.modal_presentation();
+        let content_height = view.modal_content_height();
+        assert_eq!(modal.content_x, modal.x + 5);
+        assert_eq!(modal.content_y, modal.y + 4);
+        assert_eq!(modal.content_point(modal.content_x + 2, modal.content_y + 1, content_height), Some((2, 1)));
+        assert_eq!(modal.content_point(modal.x + 1, modal.content_y + 1, content_height), None);
+        assert_eq!(modal.content_point(modal.content_x, 19, content_height), None);
+        for (cols, rows) in [(0, 0), (4, 3), (10, 5)] {
+            view.resize(cols, rows);
+            let modal = view.modal_presentation();
+            assert!(modal.content_x <= cols);
+            assert!(view.modal_content_height() == 0);
+        }
+    }
 
     #[test]
     fn modal_underlay_snapshot_preserves_composed_cells_and_clears_after_close() {

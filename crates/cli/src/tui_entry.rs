@@ -1162,7 +1162,9 @@ fn native_paint(
     // Resolve alpha in Rust. Every span supplies an opaque background;
     // native null-background/alpha behavior is not relied upon.
     let modal = ctx.modal_rows.and_then(|count| visible_modal_rect(cols, rows,
-        u32::from(ctx.modal.x), u32::from(ctx.modal.y), u32::from(ctx.modal.width), count));
+        u32::from(ctx.modal.x), u32::from(ctx.modal.y), u32::from(ctx.modal.width),
+        count.saturating_add(usize::from(ctx.modal.content_y.saturating_sub(ctx.modal.y).saturating_sub(1)))
+            .saturating_add(usize::from(ctx.modal.bottom_padding))));
     let base_alpha = if modal.is_some() {
         ctx.modal.backdrop_alpha
     } else {
@@ -1185,7 +1187,7 @@ fn native_paint(
         let y = row as u32;
         let modal_text = crate::native_view_layout::slice_cells(
             line,
-            ctx.modal.x.saturating_add(2),
+            ctx.modal.content_x,
             ctx.modal.content_width,
         );
         use crate::native_view_chat::ChatRowClass;
@@ -1257,8 +1259,8 @@ fn native_paint(
                 }
                 if in_modal && styled_region.is_none()
                     && modal_text.trim_start().starts_with("> ")
-                    && x >= u32::from(ctx.modal.x.saturating_add(2))
-                    && x < u32::from(ctx.modal.x.saturating_add(2))
+                    && x >= u32::from(ctx.modal.content_x)
+                    && x < u32::from(ctx.modal.content_x)
                         + u32::from(ctx.modal.content_width)
                 {
                     bg = accent;
@@ -3462,7 +3464,7 @@ fn native_loop(
                 PaintCtx {
                     palette: theme.palette,
                     presentation,
-                    modal_rows,
+                    modal_rows: modal_rows.map(|count| count.min(view.modal_content_height())).filter(|count| *count > 0),
                     modal: view.modal_presentation(),
                     sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
                     chat_row_classes: view.chat_row_classes().to_vec(),
@@ -3592,7 +3594,7 @@ fn native_loop(
                         if kind == 0 && modifiers == 0 {
                             let modal = view.modal_presentation();
                             if let Some(row) = y.checked_sub(modal.content_y).map(usize::from) {
-                                let Some(content_x) = modal.x.checked_add(2) else { continue };
+                                let content_x = modal.content_x;
                                 let Some(col) = x.checked_sub(content_x).map(usize::from) else { continue };
                                 if col < usize::from(modal.content_width) {
                                     if let Some(action) = import.action_at(usize::from(modal.content_width), view.modal_content_height(), row, col) {
@@ -3707,10 +3709,10 @@ fn native_loop(
                 if view.dialogs.intercepts_input() {
                     let modal = view.modal_presentation();
                     let row = y.checked_sub(modal.content_y).map(usize::from);
-                    if kind == 0 && modifiers == 0 && x >= modal.x.saturating_add(2)
-                        && x < modal.x.saturating_add(2).saturating_add(modal.content_width) {
+                    if kind == 0 && modifiers == 0 && x >= modal.content_x
+                        && x < modal.content_x.saturating_add(modal.content_width) {
                         if let Some(row) = row {
-                            let Some(content_x) = modal.x.checked_add(2) else { continue };
+                            let content_x = modal.content_x;
                             let Some(col) = x.checked_sub(content_x).map(usize::from) else { continue };
                             if col >= usize::from(modal.content_width) { continue; }
                             if let Some(index) = view.dialogs.choice_at_cell(usize::from(modal.content_width), view.modal_content_height(), row, col) {
@@ -3727,9 +3729,11 @@ fn native_loop(
                 }
                 if permission_editor.open {
                     let modal = view.modal_presentation();
-                    if kind == 0 && modifiers == 0 && x >= modal.x + 2 && x < modal.x + 2 + modal.content_width && y >= modal.content_y {
-                        if let Some(decision) = permission_editor.click_action(x - modal.x - 2,usize::from(y-modal.content_y),modal.content_width,view.modal_content_height()) {
-                            permission_editor_request(&mut permission_editor,live.as_ref(),auth,Some(decision));
+                    if kind == 0 && modifiers == 0 {
+                        if let Some((column, row)) = modal.content_point(x, y, view.modal_content_height()) {
+                            if let Some(decision) = permission_editor.click_action(column,row,modal.content_width,view.modal_content_height()) {
+                                permission_editor_request(&mut permission_editor,live.as_ref(),auth,Some(decision));
+                            }
                         }
                     }
                     needs_paint = true;
@@ -3741,7 +3745,7 @@ fn native_loop(
                         x,
                         y,
                         kind,
-                        modal.x.saturating_add(2),
+                        modal.content_x,
                         modal.content_y,
                         modal.content_width,
                         view.modal_content_height().min(u16::MAX as usize) as u16,
@@ -3762,8 +3766,8 @@ fn native_loop(
                 if children_panel.open {
                     let modal = view.modal_presentation();
                     if kind == 0 && modifiers == 0
-                        && x >= modal.x.saturating_add(2)
-                        && x < modal.x.saturating_add(2).saturating_add(modal.content_width)
+                        && x >= modal.content_x
+                        && x < modal.content_x.saturating_add(modal.content_width)
                         && y >= modal.content_y
                     {
                         // Child requests reuse the exact key-path dispatch:
@@ -3771,7 +3775,7 @@ fn native_loop(
                         // follow-up/send, all routed through one HTTP helper.
                         if let Some(action) = children_panel.mouse(
                             y - modal.content_y,
-                            x.saturating_sub(modal.x.saturating_add(2)),
+                            x.saturating_sub(modal.content_x),
                             modal.content_width,
                             view.modal_content_height(),
                         ) {
