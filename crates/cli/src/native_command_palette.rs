@@ -249,10 +249,10 @@ impl CommandPalette {
             return Vec::new();
         }
         let roomy = height >= 9;
-        let mut lines = vec![("Commands".to_owned(), Role::Heading)];
-        if roomy { lines.push((String::new(), Role::Description)); }
-        lines.push((format!("Search: {}", self.query), Role::Description));
-        if roomy { lines.push((String::new(), Role::Description)); }
+        let mut lines = vec![("Commands".to_owned(), Role::Heading, 2u16, 2u16)];
+        if roomy { lines.push((String::new(), Role::Description, 0, 0)); }
+        lines.push((format!("Search: {}", self.query), Role::Description, 2, 2));
+        if roomy { lines.push((String::new(), Role::Description, 0, 0)); }
         let visible = self.visible();
         let mut body = Vec::new();
         let mut selected_row = 0;
@@ -260,14 +260,16 @@ impl CommandPalette {
         let selected = self.selected_id;
         for item in visible {
             if last_category != Some(item.category) {
-                if roomy && last_category.is_some() { body.push((String::new(), Role::Description)); }
-                body.push((item.category.to_owned(), Role::Heading));
+                if roomy && last_category.is_some() {
+                    body.push((String::new(), Role::Description, 0, 0));
+                }
+                body.push((item.category.to_owned(), Role::Heading, 2, 0));
                 last_category = Some(item.category);
             }
             let marker = if selected == Some(item.id) {
-                "> "
+                ">    "
             } else {
-                "  "
+                "     "
             };
             if selected == Some(item.id) {
                 selected_row = body.len();
@@ -275,20 +277,40 @@ impl CommandPalette {
             let key = item
                 .key_label
                 .map_or(String::new(), |label| format!("  {label}"));
-            body.push((format!("{marker}{}{key}", item.title), if selected == Some(item.id) { Role::Selected } else { Role::Item }));
+            body.push((
+                format!("{marker}{}{key}", item.title),
+                if selected == Some(item.id) { Role::Selected } else { Role::Item },
+                0,
+                2,
+            ));
         }
         if self.visible().is_empty() {
-            body.push(("No results found".to_owned(), Role::Description));
+            body.push(("No results found".to_owned(), Role::Description, 2, 2));
         }
         let capacity = height.saturating_sub(lines.len() + 1 + usize::from(roomy));
         let start = selected_row.saturating_sub(capacity.saturating_sub(1));
         lines.extend(body.into_iter().skip(start).take(capacity));
-        if roomy { lines.push((String::new(), Role::Description)); }
-        lines.push(("↑/↓ move · Enter select · Esc close".to_owned(), Role::Hint));
+        if roomy { lines.push((String::new(), Role::Description, 0, 0)); }
+        lines.push(("↑/↓ move · Enter select · Esc close".to_owned(), Role::Hint, 2, 0));
         lines
             .into_iter()
             .take(height)
-            .map(|(text, role)| Line {text:fit(&text, width),role,detail_from:None})
+            .map(|(text, role, left, right)| {
+                let left = left.min(width);
+                let right = right.min(width.saturating_sub(left));
+                let inner = width.saturating_sub(left + right);
+                let content = fit(&text, inner);
+                let text = fit(
+                    &format!(
+                        "{}{}{}",
+                        " ".repeat(usize::from(left)),
+                        content,
+                        " ".repeat(usize::from(right)),
+                    ),
+                    width,
+                );
+                Line { text, role, detail_from: None }
+            })
             .collect()
     }
 
@@ -438,5 +460,31 @@ mod tests {
         }
         assert!(!palette.push_query('y'));
         assert_eq!(palette.query().chars().count(), MAX_QUERY_CHARS);
+    }
+
+    #[test]
+    fn styled_rows_use_insets_and_keep_selected_rows_bounded() {
+        let mut palette = CommandPalette::default();
+        palette.open(true);
+
+        let rows = palette.render_styled(12, 30);
+        assert!(rows.iter().all(|line| line.text.chars().count() <= 12));
+        assert_eq!(rows[0].text, "  Commands  ");
+        assert!(rows
+            .iter()
+            .any(|line| line.role == crate::native_ui_style::Role::Selected));
+
+        for _ in 0..12 {
+            palette.next();
+        }
+        let clipped = palette.render_styled(7, 7);
+        assert!(clipped.len() <= 7);
+        assert!(clipped.iter().all(|line| line.text.chars().count() <= 7));
+        assert!(clipped
+            .iter()
+            .any(|line| line.role == crate::native_ui_style::Role::Selected));
+
+        let narrow = palette.render_styled(1, 7);
+        assert!(narrow.iter().all(|line| line.text.chars().count() <= 1));
     }
 }
