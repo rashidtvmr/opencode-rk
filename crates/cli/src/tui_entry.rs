@@ -3168,7 +3168,16 @@ fn native_loop(
         } else {
             // Busy reflects only the worker that owns the CURRENT binding;
             // a stale (superseded) worker never shows busy here.
-            view.render_typed(draft_echo, &transcript.messages, binding_active, &overlay)
+            // Event draining above may settle and remove the worker during
+            // this same frame. Use the post-drain fact for the paint, rather
+            // than the loop-entry binding snapshot, otherwise the footer can
+            // retain Thinking until an unrelated input event repaints it.
+            view.render_typed(
+                draft_echo,
+                &transcript.messages,
+                binding_active && !worker_finished,
+                &overlay,
+            )
         };
         // Help owns the whole frame: heading at row 0 with static content
         // clipped to the terminal, so a short window still shows the page.
@@ -3313,7 +3322,7 @@ fn native_loop(
                     // only the current session turn. Model discovery/setup
                     // may animate its own dialog, but must not latch a
                     // conversation "Thinking" indicator.
-                    loading: binding_active.then(|| {
+                    loading: (binding_active && !worker_finished).then(|| {
                         (
                             crate::native_box_style::frame(
                                 animation_start.elapsed().as_millis().min(u64::MAX as u128) as u64,
