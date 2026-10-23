@@ -1313,7 +1313,19 @@ impl NativeView {
             // The upstream scrollbox starts with a spacer, rather than a
             // permanent workspace/header row. The composer stays at its foot.
             if body.len() > 1 {
-                body[0].clear();
+                // Keep the confirmed selected model/provider visible in the
+                // conversation at narrow widths too. The footer is reserved
+                // for directory and turn/status chrome, and the optional
+                // sidebar is unavailable at these widths. Only replace the
+                // upstream spacer when an actual model observation exists;
+                // unknown state remains an empty spacer.
+                body[0] = match &self.composer_model {
+                    Some(_) => padded(&self.composer_metadata(), width),
+                    None if self.status.model_label() != "Unavailable" => {
+                        padded(&self.composer_metadata(), width)
+                    }
+                    None => String::new(),
+                };
             }
             let mut body: Vec<_> = body.into_iter().map(|line| padded(&line, width)).collect();
             if height >= 4 {
@@ -2231,6 +2243,26 @@ mod footer_layout_tests {
         let busy = view.render_typed("", &[], true, &[]).pop().unwrap();
         assert_eq!(busy.chars().count(), 64);
         assert!(busy.ends_with("Thinking…  "));
+    }
+
+    #[test]
+    fn narrow_conversation_keeps_confirmed_model_and_provider_visible() {
+        let mut view = NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.set_model(Some("acme/two-client-fixture".to_owned()));
+        view.set_composer_model("Two-client fixture", "acme");
+        view.set_workspace("/selected/project".to_owned());
+        let messages = [crate::native_view_chat::ChatMessage::text(
+            crate::native_view_chat::ChatRole::Assistant,
+            "first reply",
+        )];
+        let rows = view.render_typed("draft", &messages, false, &[]);
+        let joined = rows.join("\n");
+        assert!(joined.contains("Two-client fixture"));
+        assert!(joined.contains("acme"));
+        assert!(joined.contains("first reply"));
+        assert!(rows.last().is_some_and(|row| row.contains("/selected/project")));
+        assert!(rows.iter().any(|row| row.contains("> draft")));
     }
 }
 
