@@ -57,6 +57,12 @@ impl Completion {
 
     pub fn selected(&self) -> usize { self.selected.min(self.visible().len().saturating_sub(1)) }
 
+    pub fn selected_command(&self) -> Option<&str> {
+        let (_, marker, _) = self.trigger()?;
+        if marker != '/' { return None; }
+        self.visible().get(self.selected()).map(|item| item.value.as_str())
+    }
+
     /// Overlay rows fit strictly above the composer, including a spacer and
     /// keyboard hint. The selected row stays visible as selection scrolls.
     pub fn panel(&self, anchor: (u16, u16, u16, u16)) -> Option<Panel> {
@@ -66,12 +72,15 @@ impl Completion {
         let capacity = usize::from(y.saturating_sub(2)).min(6);
         let selected = self.selected();
         let start = selected.saturating_sub(capacity - 1);
-        let mut rows = vec![(if self.trigger()?.1 == '/' { " Commands".into() } else { " Mentions".into() }, false)];
+        let command_mode = self.trigger()?.1 == '/';
+        let mut rows = vec![(if command_mode { " Commands".into() } else { " Mentions".into() }, false)];
+        let mut command_values = Vec::new();
         for (index, item) in items.iter().enumerate().skip(start).take(capacity) {
             rows.push((format!(" {} {}  {}", if index == selected { "›" } else { " " }, item.value, item.description), index == selected));
+            if command_mode { command_values.push(item.value.clone()); }
         }
         rows.push((" ↑/↓ select · Tab/Enter complete · Esc close".into(), false));
-        Some(Panel { x, y: y - rows.len() as u16, width, rows })
+        Some(Panel { x, y: y - rows.len() as u16, width, rows, command_values })
     }
 
     pub fn navigate(&mut self, down: bool) {
@@ -94,6 +103,16 @@ impl Completion {
         true
     }
 
+    pub fn accept_value(&mut self, draft: &mut String, value: &str, limit: usize) -> bool {
+        if draft != &self.draft || !value.starts_with('/') { return false; }
+        let Some((start, marker, _)) = self.trigger() else { return false };
+        if marker != '/' || !self.visible().iter().any(|item| item.value == value) { return false; }
+        if start + value.len() + 1 > limit { return false; }
+        draft.replace_range(start.., &format!("{value} "));
+        self.sync(draft);
+        true
+    }
+
     /// False means the ordinary composer key path retains ownership, including
     /// Enter when the bounded replacement cannot be inserted.
     pub fn complete_key(&mut self, key: u8, draft: &mut String, limit: usize) -> bool {
@@ -110,6 +129,19 @@ pub struct Panel {
     pub y: u16,
     pub width: u16,
     pub rows: Vec<(String, bool)>,
+    command_values: Vec<String>,
+}
+
+impl Panel {
+    /// Return the command under a left-button press. Coordinates are derived
+    /// from the actual rendered panel rectangle and rows, not a guessed popup
+    /// offset. Non-command panels never produce an executable value.
+    pub fn command_at(&self, x: u16, y: u16) -> Option<&str> {
+        if x < self.x || x >= self.x.saturating_add(self.width) || y < self.y { return None; }
+        let row = usize::from(y - self.y);
+        if row == 0 || row + 1 >= self.rows.len() { return None; }
+        self.command_values.get(row - 1).map(String::as_str)
+    }
 }
 
 /// Only relative file names are indexed; this never reads file contents.
@@ -219,6 +251,16 @@ mod tests {
         assert_eq!(draft, "/m");
         assert!(!c.complete_key(b'x', &mut draft, 4096));
         assert!(c.complete_key(b'\r', &mut draft, 4096));
+        assert_eq!(draft, "/models ");
+    }
+
+    #[test]
+    fn selected_executable_command_is_available_without_consuming_arguments() {
+        let mut c = fixture();
+        let mut draft = "/m".to_owned();
+        c.sync(&draft);
+        assert_eq!(c.selected_command(), Some("/models"));
+        assert!(c.accept(&mut draft, 4096));
         assert_eq!(draft, "/models ");
     }
     #[test]

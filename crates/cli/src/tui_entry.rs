@@ -310,6 +310,33 @@ struct LiveSnapshot {
     history_next_before: Option<String>,
     #[cfg(feature = "native")]
     parent_session: bool,
+    #[cfg(feature = "native")]
+    directory: Option<String>,
+}
+
+/// Identity of a Home -> conversation transition performed optimistically
+/// before the daemon acknowledges the first user message.  The route may be
+/// rolled back only for this exact current worker; a stale worker must never
+/// rewrite the route of a newer binding.
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct OptimisticFirstTurn {
+    session_id: String,
+    generation: u64,
+}
+
+#[cfg(feature = "native")]
+fn should_rollback_optimistic_route(
+    optimistic: Option<&OptimisticFirstTurn>,
+    current_session: Option<&str>,
+    current_generation: u64,
+    admission_acknowledged: bool,
+) -> bool {
+    !admission_acknowledged
+        && optimistic.is_some_and(|turn| {
+            current_session == Some(turn.session_id.as_str())
+                && current_generation == turn.generation
+        })
 }
 
 /// Minimal bounded HTTP/1.1 client for the daemon API (std-only, http
@@ -533,6 +560,8 @@ fn snapshot_from_listing(
         parent_session: target["parent_session_id"]
             .as_str()
             .is_some_and(|id| !id.is_empty()),
+        #[cfg(feature = "native")]
+        directory: target["directory"].as_str().map(str::to_owned),
     })
 }
 
@@ -1327,6 +1356,9 @@ fn bind_session(
     );
     transcript.reset(snapshot.history.clone(), snapshot.typed_history.clone());
     view.set_parent_session(snapshot.parent_session);
+    view.set_project_directory(
+        snapshot.directory.clone().unwrap_or_else(current_workspace_label),
+    );
     Ok((snapshot, draft))
 }
 
@@ -2028,6 +2060,7 @@ fn native_loop(
     // current busy flag, transcript or live snapshot.
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
     let mut pending_submission: Option<String> = None;
+    let mut optimistic_first_turn: Option<OptimisticFirstTurn> = None;
     let mut binding_generation: u64 = 0;
     // History pagination is deliberately separate from turn/completion
     // workers: one bounded request at a time, and every result carries the
@@ -2185,7 +2218,11 @@ fn native_loop(
         ),
         None => view.set_session(None),
     }
-    view.set_workspace(current_workspace_label());
+    view.set_project_directory(
+        live.as_ref()
+            .and_then(|snapshot| snapshot.directory.clone())
+            .unwrap_or_else(current_workspace_label),
+    );
     view.set_parent_session(
         live.as_ref()
             .is_some_and(|snapshot| snapshot.parent_session),
@@ -2253,6 +2290,7 @@ fn native_loop(
         ("/sidebar", "Toggle sidebar"), ("/appearance", "Adjust appearance"),
         ("/permissions", "Manage tool permissions"), ("/permission", "Manage tool permissions"),
         ("/subagents", "View subagents"), ("/exit", "Exit"),
+        ("/cd", "Change workspace directory (requires a path)"),
     ] {
         completion.commands.push(crate::native_completion::Item { value: value.into(), description: description.into() });
     }
@@ -2582,6 +2620,11 @@ fn native_loop(
                                 session_route = true;
                                 view.set_session_route(true);
                             }
+                            // Admission is the point at which the
+                            // optimistic Home transition becomes durable for
+                            // this client. Provider errors after this event
+                            // must leave the conversation route visible.
+                            optimistic_first_turn = None;
                         }
                         native_turn::Event::Delta(delta) => {
                             partial.push_str(&delta);
@@ -2648,6 +2691,16 @@ fn native_loop(
                             );
                         }
                         native_turn::Event::Error(error) => {
+                            if should_rollback_optimistic_route(
+                                optimistic_first_turn.as_ref(),
+                                live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                                binding_generation,
+                                false,
+                            ) {
+                                session_route = false;
+                                view.set_session_route(false);
+                            }
+                            optimistic_first_turn = None;
                             pending_submission = None;
                             partial.clear();
                             remove_partial(&mut transcript);
@@ -2674,6 +2727,16 @@ fn native_loop(
         }
         if worker_finished {
             worker = None;
+            if should_rollback_optimistic_route(
+                optimistic_first_turn.as_ref(),
+                live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                binding_generation,
+                false,
+            ) {
+                session_route = false;
+                view.set_session_route(false);
+            }
+            optimistic_first_turn = None;
             pending_submission = None;
             if binding_active {
                 if let Some(current) = live.as_ref() {
@@ -2685,6 +2748,9 @@ fn native_loop(
                                 Some(snapshot.message_count),
                             );
                             view.set_parent_session(snapshot.parent_session);
+                            view.set_project_directory(
+                                snapshot.directory.clone().unwrap_or_else(current_workspace_label),
+                            );
                             if turn_succeeded && !history_browsing {
                                 transcript.reset(
                                     snapshot.history.clone(),
@@ -3243,18 +3309,16 @@ fn native_loop(
                     } else {
                         crate::native_box_style::BoxId::Dialog
                     },
-                    loading: busy_animation.then(|| {
+                    // Footer loading is frame-authoritative and represents
+                    // only the current session turn. Model discovery/setup
+                    // may animate its own dialog, but must not latch a
+                    // conversation "Thinking" indicator.
+                    loading: binding_active.then(|| {
                         (
                             crate::native_box_style::frame(
                                 animation_start.elapsed().as_millis().min(u64::MAX as u128) as u64,
                             ),
-                            if dialog_open {
-                                "Waiting approval"
-                            } else if model_load.is_some() {
-                                "Loading models"
-                            } else {
-                                "Working"
-                            },
+                            if dialog_open { "Waiting approval" } else { "Thinking…" },
                         )
                     }),
                     home,
@@ -3322,7 +3386,7 @@ fn native_loop(
             }
             input.push(byte[0], Instant::now());
         }
-        let Some(event) = input.pop() else { continue };
+        let Some(mut event) = input.pop() else { continue };
         let (kind, size, control) = match &event {
             native_input_decoder::InputEvent::Byte(byte) if *byte < 32 || *byte == 127 => {
                 ("control", 1, Some(*byte))
@@ -3407,7 +3471,29 @@ fn native_loop(
                 native_input_decoder::InputEvent::ArrowDown => { completion.navigate(true); needs_paint = true; continue; }
                 native_input_decoder::InputEvent::Escape => { completion.dismiss(); needs_paint = true; continue; }
                 native_input_decoder::InputEvent::Byte(key) => {
-                    if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
+                    if matches!(*key, b'\r' | b'\n') {
+                        if let Some(route) = completion.selected_command().map(str::to_owned) {
+                            if route == "/exit" || route == "/quit" || route == ":q" || route == ":quit" {
+                                break;
+                            }
+                            // Executable commands are dispatched by this same
+                            // Enter event. Argument-bearing commands remain a
+                            // completion (for example `/cd` must still get a
+                            // directory before it can run).
+                            if route != "/cd" {
+                                draft = route;
+                                completion.sync(&draft);
+                            } else if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
+                                utf8.reset();
+                                needs_paint = true;
+                                continue;
+                            }
+                        } else if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
+                            utf8.reset();
+                            needs_paint = true;
+                            continue;
+                        }
+                    } else if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
                         utf8.reset();
                         needs_paint = true;
                         continue;
@@ -3415,6 +3501,40 @@ fn native_loop(
                 }
                 _ => {}
             }
+        }
+        // Completion mouse activation is normalized to the same Enter event
+        // used by keyboard dispatch. Modal precedence has already been
+        // handled above, so this cannot click through a decision surface.
+        // Keep this eligibility identical to the keyboard completion gate
+        // above. In particular, a stale/hidden panel must not remain a click
+        // target while a modal, setup dialog, help page, palette, or another
+        // interaction owner is active.
+        let completion_mouse_eligible = !page_open
+            && !help_open
+            && !children_panel.open
+            && !appearance.open
+            && !permission_editor.open
+            && !view.dialogs.intercepts_input()
+            && !view.command_palette_open()
+            && matches!(dialog, native_setup::Dialog::None)
+            && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+            && view.composer_region(&draft).and_then(|anchor| completion.panel(anchor)).is_some();
+        if completion_mouse_eligible {
+            if let native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } = event {
+            if let Some(panel) = view.composer_region(&draft).and_then(|anchor| completion.panel(anchor)) {
+                            if let Some(route) = panel.command_at(x, y).map(str::to_owned) {
+                    if route == "/cd" {
+                        let _ = completion.accept_value(&mut draft, &route, MAX_NATIVE_DRAFT_BYTES);
+                        needs_paint = true;
+                        continue;
+                    }
+                    if route == "/exit" || route == "/quit" { break; }
+                    draft = route;
+                    completion.sync(&draft);
+                    event = native_input_decoder::InputEvent::Byte(13);
+                }
+            }
+        }
         }
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
@@ -4958,6 +5078,73 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                if command == "/cd" || command.starts_with("/cd ") {
+                    let busy = worker.as_ref().is_some_and(|owned| {
+                        owned.owns(
+                            live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                            binding_generation,
+                        )
+                    }) || view.dialogs.is_open();
+                    if busy {
+                        append_transcript(&mut transcript, "busy: turn or permission decision in progress; /cd refused".to_owned());
+                        needs_paint = true;
+                        continue;
+                    }
+                    let Some(prospective) = crate::native_view::reserve_generation(binding_generation) else {
+                        append_transcript(&mut transcript, "error: binding generation exhausted; /cd refused".to_owned());
+                        needs_paint = true;
+                        continue;
+                    };
+                    let argument = match crate::native_workspace::cd_argument(command) {
+                        Ok(argument) => argument,
+                        Err(error) => {
+                            append_transcript(&mut transcript, format!("error: {error}"));
+                            needs_paint = true;
+                            continue;
+                        }
+                    };
+                    let base = std::env::current_dir()?;
+                    let directory = match crate::native_workspace::resolve_directory(&argument, &base) {
+                        Ok(directory) => directory,
+                        Err(error) => {
+                            append_transcript(&mut transcript, format!("error: {error}"));
+                            needs_paint = true;
+                            continue;
+                        }
+                    };
+                    let created = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|snapshot| {
+                        let body = serde_json::json!({"title":"Chat", "directory":directory}).to_string();
+                        http_request(&snapshot.origin, "POST", "/api/sessions", Some(&body), auth)
+                    });
+                    match created.and_then(|body| parse_created_session_id(&body)) {
+                        Ok(id) => {
+                            let working = command_transaction_draft(&draft, command, from_chat_composer);
+                            let bound = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|snapshot|
+                                bind_session(&mut view, &mut transcript, &working, &snapshot.origin, Some(&id), auth));
+                            match bound {
+                                Ok((snapshot, restored)) => {
+                                    live = Some(snapshot);
+                                    draft = restored;
+                                    session_route = true;
+                                    view.set_session_route(true);
+                                    history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
+                                    history_pending = false;
+                                    history_active = None;
+                                    history_navigation_request = None;
+                                    blocked_history_scroll = None;
+                                    history_tail_refresh_pending = false;
+                                    history_browsing = false;
+                                    binding_generation = prospective;
+                                    append_transcript(&mut transcript, format!("workspace: {}", directory.display()));
+                                }
+                                Err(error) => append_transcript(&mut transcript, format!("error: workspace switch: {error}")),
+                            }
+                        }
+                        Err(error) => append_transcript(&mut transcript, format!("error: workspace switch: {error}")),
+                    }
+                    needs_paint = true;
+                    continue;
+                }
                 if command == "/subagents" {
                     if let Some(snapshot) = live.as_ref() {
                         children_panel.show(&snapshot.session_id);
@@ -5062,7 +5249,21 @@ fn native_loop(
                         continue;
                     }
                     if let Some(snapshot) = live.as_ref() {
+                        // Commit the conversation shell before starting the
+                        // potentially delayed provider request.  The route is
+                        // rolled back if admission/worker creation fails, so
+                        // Home never flashes blank while the first response
+                        // is in flight.
+                        let route_was_home = !session_route;
+                        if route_was_home {
+                            session_route = true;
+                            view.set_session_route(true);
+                        }
                         if selected.is_none() && !text.starts_with('!') && configured_command_input(&text).is_none() {
+                            if route_was_home {
+                                session_route = false;
+                                view.set_session_route(false);
+                            }
                             if model_load.is_some() {
                                 append_transcript(&mut transcript, "error: models are still loading; prompt preserved. Press Enter when ready.".into());
                             } else {
@@ -5122,9 +5323,19 @@ fn native_loop(
                                     snapshot.session_id.clone(),
                                     binding_generation,
                                 ));
+                                if route_was_home {
+                                    optimistic_first_turn = Some(OptimisticFirstTurn {
+                                        session_id: snapshot.session_id.clone(),
+                                        generation: binding_generation,
+                                    });
+                                }
                                 partial.clear();
                             });
                             if let Err(error) = result {
+                                if route_was_home {
+                                    session_route = false;
+                                    view.set_session_route(false);
+                                }
                                 crate::native_debug::event(
                                     "turn.submit_rejected",
                                     serde_json::json!({"category":"worker_start_failed"}),
@@ -5137,11 +5348,11 @@ fn native_loop(
                             "turn.submit_rejected",
                             serde_json::json!({"category":"daemon_offline"}),
                         );
-                        append_transcript(
-                            &mut transcript,
-                            "offline: turn not executed".to_string(),
-                        );
-                    }
+                            append_transcript(
+                                &mut transcript,
+                                "offline: turn not executed".to_string(),
+                            );
+                        }
                 }
                 // Admission ACK consumes the captured draft. A transport,
                 // provider, offline or model-selection failure leaves it intact.

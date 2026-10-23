@@ -48,6 +48,8 @@ mod native_children;
 mod native_composer;
 #[cfg(feature = "native")]
 mod native_completion;
+#[cfg(feature = "native")]
+mod native_workspace;
 mod native_debug;
 mod native_layout;
 mod native_navigation;
