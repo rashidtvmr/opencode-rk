@@ -56,6 +56,26 @@ mod tests {
         panel.mouse(height as u16 - 1, (region.start + region.end) / 2, width, height)
     }
     #[test]
+    fn failed_child_detail_shows_its_error_and_clears_it_after_recovery() {
+        let mut panel = panel();
+        panel.update(&json!({"children":[{
+            "session_id": IDS[0], "agent":"explore", "model":"fixture/model",
+            "state":"error", "output_tail":"", "error":"permanent_child_failure"
+        }]})).unwrap();
+        panel.key(13);
+        let rows = panel.render(100, 20);
+        assert!(rows.iter().any(|line| line.contains("permanent_child_failure")),
+            "the selected child's failure must be visible before Retry");
+        assert!(rows.last().unwrap().contains("r retry"));
+        panel.update(&json!({"children":[{
+            "session_id": IDS[0], "agent":"explore", "model":"fixture/model",
+            "state":"completed", "output_tail":"recovered child output", "error":null
+        }]})).unwrap();
+        let recovered = panel.render(100, 20).join("\n");
+        assert!(recovered.contains("recovered child output"));
+        assert!(!recovered.contains("permanent_child_failure"));
+    }
+    #[test]
     fn detail_render_surfaces_snapshot_metrics_and_labels_missing_fields_unreported() {
         let mut panel = Panel::default();
         panel.show("parent");
@@ -486,6 +506,9 @@ impl Panel {
             if let Some(row) = self.rows.get(self.selected) {
                 lines.push(format!("{} · {} · {}", row["agent"].as_str().unwrap_or("?"), row["state"].as_str().unwrap_or("unknown"), row["model"].as_str().unwrap_or("?")));
                 lines.push(format!("Session: {}", row["session_id"].as_str().unwrap_or("?")));
+                if let Some(error) = row["error"].as_str().filter(|error| !error.trim().is_empty()) {
+                    lines.push(format!("Error: {error}"));
+                }
                 let metric = |key: &str| row.get(key).and_then(Value::as_u64)
                     .map_or_else(|| "unreported".to_owned(), |value| value.to_string());
                 let pending = row.get("pending_followups").and_then(Value::as_u64)
