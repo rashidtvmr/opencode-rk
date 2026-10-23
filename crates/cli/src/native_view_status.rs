@@ -349,12 +349,25 @@ impl StatusView {
         };
     }
 
+    /// Update only the observed model limit, retaining the provider usage
+    /// tuple when it arrived before model selection was reconciled.
+    pub fn set_context_window(&mut self, window: Option<u64>) {
+        self.context = match (self.usage, window) {
+            (Some((input, output, _, _)), Some(limit)) =>
+                Some((input.saturating_add(output), limit)),
+            _ => None,
+        };
+    }
+
     pub fn set_usage(&mut self,input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>,window:Option<u64>) {
         self.usage=Some((input,output,cached,reasoning));
         // Input/output are the authoritative totals; cached/reasoning are
         // subsets of input/output, not extra tokens (`None` = unreported,
         // never a fabricated zero), so neither enters the total here.
-        self.context=Some((input.saturating_add(output),window.unwrap_or(0)));
+        // A missing model limit is not a zero-sized context window.  Keep the
+        // authoritative turn totals visible in `usage`, but retract the
+        // percentage-bearing context projection until the limit is known.
+        self.context=window.map(|limit|(input.saturating_add(output),limit));
     }
     pub fn clear_usage(&mut self) {self.usage=None;self.context=None;}
 
@@ -863,14 +876,14 @@ mod tests {
             .iter()
             .any(|r| r.contains("Cached unreported · Reasoning unreported")));
         let rows = view.render(120, 30);
-        assert!(rows.iter().any(|r| *r == "context: used=14 window=0"));
+        assert!(rows.iter().any(|r| *r == "context: Unavailable"));
         // Explicit provider zero is a real report, distinct from missing.
         let mut view = StatusView::default();
         view.set_usage(10, 4, Some(0), Some(0), None);
         let rows = view.render_sidebar(120, 30);
         assert!(rows.iter().any(|r| r.contains("Cached 0 · Reasoning 0")));
         let rows = view.render(120, 30);
-        assert!(rows.iter().any(|r| *r == "context: used=14 window=0"));
+        assert!(rows.iter().any(|r| *r == "context: Unavailable"));
     }
 
     #[test]

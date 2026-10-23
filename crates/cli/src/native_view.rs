@@ -351,9 +351,29 @@ impl NativeView {
         self.status.set_model(model);
     }
 
-    pub fn set_context_window(&mut self,window:Option<u64>) {self.context_window=window;}
+    pub fn set_context_window(&mut self,window:Option<u64>) {
+        self.context_window=window;
+        self.status.set_context_window(window);
+    }
     pub fn set_usage(&mut self,input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>) {
         self.status.set_usage(input,output,cached,reasoning,self.context_window);
+    }
+
+    /// Compatibility shim for the first layout handoff.  Busy state is
+    /// deliberately frame-authoritative: callers must pass the current value
+    /// through `render`/`render_typed`; retaining this value would leave a
+    /// stale spinner after cancellation or error.
+    #[deprecated(note = "pass the authoritative busy value to render instead")]
+    pub fn set_loading(&mut self, loading: bool) {
+        let _ = loading;
+    }
+
+    /// The directory shown by the footer is the backend-selected project
+    /// directory supplied by the caller.  This explicit name is an alias for
+    /// the existing workspace setter so integrations need not infer it from
+    /// the process cwd.
+    pub fn set_project_directory(&mut self, directory: String) {
+        self.set_workspace(directory);
     }
 
     /// Catalogue display names are presentation only. The status retains the
@@ -451,12 +471,17 @@ impl NativeView {
     }
 
     pub fn modal_presentation(&self) -> ModalPresentation {
+        // The final row is the shared native footer.  Modal bounds must be
+        // calculated against the rows above it, otherwise modal compositing
+        // paints over the footer and leaves hit regions inconsistent with the
+        // visible action rows.
+        let available_height = self.render_height().saturating_sub(1);
         let width = self
             .layout
             .cols
             .saturating_sub(2)
             .min(self.dialog_size.width());
-        let y = (self.render_height() as u16).div_ceil(4);
+        let y = (available_height as u16).div_ceil(4);
         ModalPresentation {
             x: (self.layout.cols - width) / 2,
             y,
@@ -477,7 +502,7 @@ impl NativeView {
 
     /// Window modal content below its top inset and above its bottom border.
     pub fn modal_content_height(&self) -> usize {
-        self.render_height()
+        self.render_height().saturating_sub(1)
             .saturating_sub(usize::from(self.modal_presentation().content_y) + 1)
     }
 
@@ -1217,7 +1242,7 @@ impl NativeView {
         let width = presentation.main_width;
         let inner_width = width.saturating_sub(4);
         let is_chat = matches!(self.pages.page(), Page::Chat | Page::Theme);
-        let center = if !is_chat {
+        let mut center = if !is_chat {
             let (left, top, panel_width, panel_height) = self.page_panel().unwrap();
             let inset = if panel_width >= 8 { 2 } else { 0 };
             let content_width = panel_width.saturating_sub(2 * inset);
@@ -1292,9 +1317,7 @@ impl NativeView {
                 })
             });
             if height >= 2 {
-                if busy {
-                    home[height - 2] = padded("  Sending… waiting for provider", width);
-                } else if let Some(notice) = notice
+                if let Some(notice) = notice
                     .filter(|notice| notice.starts_with("error:") || notice.starts_with("offline:"))
                 {
                     home[height - 2] = padded(&crate::native_transcript::strip_ansi(notice), width);
@@ -1476,11 +1499,17 @@ impl NativeView {
             if let Some(first) = lines.first_mut() { first.text = "Themes".into(); }
             lines
         } else {
-            overlay.iter().take(height).enumerate().map(|(index, text)| crate::native_ui_style::Line {
+            // Generic overlays use the exact same content budget as native
+            // dialogs.  In particular, never let an untrusted/oversized
+            // overlay consume the reserved footer row.
+            overlay.iter().take(self.modal_content_height()).enumerate().map(|(index, text)| crate::native_ui_style::Line {
                 text:text.clone(),role:self.overlay_roles.get(index).copied().unwrap_or(if index == 0 {crate::native_ui_style::Role::Heading} else {crate::native_ui_style::Role::Description}),detail_from:None,
             }).collect()
         };
-        for (index, line) in modal_lines.iter().enumerate() {
+        let modal_content_height = self.modal_content_height();
+        for (index, line) in modal_lines.iter().enumerate().take(modal_content_height) {
+            let y = usize::from(modal_geometry.content_y).saturating_add(index);
+            if y >= height.saturating_sub(1) { break; }
             self.ui_regions.push(crate::native_ui_style::Region {
                 x:modal_geometry.x.saturating_add(2), y:modal_geometry.content_y.saturating_add(index.min(u16::MAX as usize) as u16),
                 width:modal_geometry.content_width, role:line.role, detail_from:line.detail_from,modal:true,
@@ -1489,15 +1518,17 @@ impl NativeView {
         let modal: Vec<String> = modal_lines.into_iter().map(|line| line.text).collect();
         let content_rows = modal
             .iter()
+            .take(modal_content_height)
             .rposition(|line| !line.trim().is_empty())
-            .map_or(0, |i| i + 1);
+            .map_or(0, |i| i + 1)
+            .min(modal_content_height);
         if content_rows > 0 {
             let left = self.layout.cols.saturating_sub(dialog_width) / 2;
             let top = usize::from(modal_geometry.content_y);
             // The panel's inner top padding is an empty panel row, not
             // transcript text behind the dialog.
             for row in usize::from(modal_geometry.y)
-                ..height.min(top.saturating_add(content_rows).saturating_add(1))
+                ..height.saturating_sub(1).min(top.saturating_add(content_rows).saturating_add(1))
             {
                 let line = row
                     .checked_sub(top)
@@ -1516,7 +1547,41 @@ impl NativeView {
                 );
             }
         }
+        // Paint the shared footer last, after modal composition.  The modal
+        // geometry reserves this row, so it is never part of modal content or
+        // hit regions.  Very short chat frames retain the composer instead of
+        // replacing the user's draft with chrome.
+        if self.session_route && height >= 4 {
+            // The footer is the shared shell row, not a main-column row.  In
+            // wide inline-sidebar mode `width` excludes the 42-cell sidebar;
+            // using it here leaves the final composed row short and breaks
+            // the cell-exact full-frame contract.  Paint the footer against
+            // the complete viewport width after sidebar/modal composition.
+            let footer = self.footer_line(self.layout.cols, busy);
+            frame[height - 1] = footer;
+        }
         frame
+    }
+
+    fn footer_line(&self, width: u16, loading: bool) -> String {
+        let inner = width.saturating_sub(4);
+        if inner == 0 { return padded("", width); }
+        let left = fit(&self.workspace, inner);
+        let mut right = if loading {
+            "Thinking…".to_owned()
+        } else {
+            env!("CARGO_PKG_VERSION").to_owned()
+        };
+        if !loading && self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
+            let connected = self.status.entries().iter().filter(|entry|
+                matches!(entry.status, crate::native_view_status::McpStatus::Connected)
+            ).count();
+            right = format!("⊙ {connected} MCP /status  {right}");
+        }
+        let right_width = right.chars().count().min(usize::from(inner));
+        let left_width = usize::from(inner).saturating_sub(right_width).saturating_sub(1);
+        let gap = usize::from(inner).saturating_sub(left_width + right_width);
+        padded(&format!("{}{}{}", fit(&self.workspace, left_width as u16), " ".repeat(gap), fit(&right, right_width as u16)), width)
     }
 
     // home.tsx: two flex-grow spacers, four fixed rows before the logo,
@@ -1985,6 +2050,61 @@ mod framed_composer_tests {
             assert!(usize::from(region.y) < frame_bottom);
             assert!(region.width > 0);
         }
+    }
+}
+
+#[cfg(test)]
+mod footer_layout_tests {
+    use super::*;
+
+    #[test]
+    fn project_directory_and_loader_share_only_the_footer_row() {
+        let mut view = NativeView::new(72, 20);
+        view.set_session_route(true);
+        view.set_project_directory("/tmp/工作🦀/project".to_owned());
+        view.set_loading(true); // deprecated no-op: frame argument is authority
+        let rows = view.render_typed("draft", &[], true, &[]);
+        assert_eq!(rows.len(), 20);
+        assert!(rows[19].contains("Thinking"));
+        assert!(rows[19].contains("/tmp/") || rows[19].contains("project"));
+        assert!(!rows[..19].iter().any(|row| row.contains("Thinking")));
+        let idle = view.render_typed("draft", &[], false, &[]);
+        assert!(!idle[19].contains("Thinking"));
+    }
+
+    #[test]
+    fn modal_bounds_reserve_footer_and_hit_regions_stay_above_it() {
+        let mut view = NativeView::new(80, 12);
+        view.set_session_route(true);
+        let frame = view.render_typed("", &[], true, &["Accept".to_owned(), "Cancel".to_owned()]);
+        assert_eq!(frame.len(), 12);
+        assert!(frame[11].contains("Thinking"));
+        let modal = view.modal_presentation();
+        assert!(modal.y.saturating_add(modal.content_y.saturating_sub(modal.y)) < 11);
+        assert!(view.ui_regions().iter().filter(|r| r.modal).all(|r| r.y < 11));
+    }
+
+    #[test]
+    fn oversized_generic_overlay_preserves_footer_and_has_no_footer_hit_region() {
+        let mut view = NativeView::new(48, 7);
+        view.set_session_route(true);
+        view.set_overlay_roles(vec![crate::native_ui_style::Role::Selected; 64]);
+        let overlay = (0..64).map(|index| format!("Choice {index}")).collect::<Vec<_>>();
+        let rows = view.render_typed("", &[], true, &overlay);
+        assert_eq!(rows.len(), 7);
+        assert!(rows[6].contains("Thinking"), "footer must remain visible");
+        assert!(view.ui_regions().iter().filter(|region| region.modal).all(|region| region.y < 6));
+    }
+
+    #[test]
+    fn unknown_context_limit_does_not_render_zero_percentage_capacity() {
+        let mut view = NativeView::new(140, 24);
+        view.set_context_window(None);
+        view.set_usage(10, 4, None, None);
+        view.set_session_route(true);
+        let rows = view.render_typed("", &[], false, &[]).join("\n");
+        assert!(!rows.contains("window=0"));
+        assert!(!rows.contains("0%"));
     }
 }
 
