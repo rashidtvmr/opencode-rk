@@ -183,6 +183,19 @@ mod macos_pty {
             state.1.saturating_add(state.0.len())
         }
 
+        fn snapshot_since(&self, offset: usize) -> (usize, Vec<u8>) {
+            let state = self.state.lock().expect("capture lock");
+            let retained_offset = offset
+                .checked_sub(state.1)
+                .expect("causal capture baseline evicted");
+            let bytes = state
+                .0
+                .get(retained_offset..)
+                .expect("capture baseline beyond output")
+                .to_vec();
+            (state.1.saturating_add(state.0.len()), bytes)
+        }
+
         fn text_since(&self, offset: usize) -> String {
             let state = self.state.lock().expect("capture lock");
             let retained_offset = offset
@@ -258,27 +271,131 @@ mod macos_pty {
         }
 
         fn wait_for_native_frame(&self) -> String {
-            self.wait_for_completed_frame(&["Ask anything", "ctrl+p commands"])
-        }
-
-        fn open_provider_dialog(&mut self) -> String {
-            let draft_start = self.out.byte_len();
-            self.send("/connect");
             let deadline = Instant::now() + WAIT;
             loop {
-                let output = self.out.text_since(draft_start);
-                if completed_frame_matching(&output, connect_draft_frame).is_some() {
-                    break;
+                // The initial wait has no action baseline: a completed Home
+                // frame anywhere in the retained capture is eligible. The
+                // snapshot still fails closed if capture eviction removed the
+                // causal beginning at offset zero.
+                let (_, bytes) = self.out.snapshot_since(0);
+                if initial_home_frame(&bytes)
+                    .expect("decode completed native Home frame")
+                    .is_some()
+                {
+                    return self.out.text();
                 }
                 assert!(
                     Instant::now() < deadline,
-                    "missing nonmodal /connect composer draft\n{output}"
+                    "missing completed native Home frame\n{}",
+                    self.out.text()
                 );
                 thread::sleep(Duration::from_millis(25));
             }
-            let submit_start = self.out.byte_len();
+        }
+
+        fn open_provider_dialog(&mut self) -> String {
+            let (draft_start, home_screen, home_generation) = self.terminal_baseline();
+            self.send("/connect");
+            let draft = self.wait_for_terminal_frame_after(
+                draft_start,
+                home_generation,
+                &home_screen,
+                "missing nonmodal /connect composer draft",
+                |screen| screen.has_connect_draft() && !screen.contains_text("Connect a provider"),
+            );
+            assert!(
+                draft.generation > home_generation,
+                "/connect draft reused an old completed frame"
+            );
+
+            // Use the latest completed screen immediately before Enter. This
+            // makes the next frame baseline causal, not a raw-substring match.
+            let (submit_start, suffix) = self.out.snapshot_since(draft_start);
+            let before_submit = scan_terminal_frames(
+                &suffix,
+                draft_start,
+                home_screen,
+                home_generation,
+                submit_start,
+                |_| false,
+            )
+            .expect("decode pre-submit terminal state");
+            assert!(
+                !before_submit.partial,
+                "cannot establish /connect baseline inside a partial frame"
+            );
+            assert!(
+                before_submit.screen.has_connect_draft(),
+                "composer draft changed before Enter\n{}",
+                before_submit.screen.text()
+            );
+            assert!(
+                !before_submit.screen.contains_text("Connect a provider"),
+                "provider dialog opened before Enter\n{}",
+                before_submit.screen.text()
+            );
+
             self.send("\r");
-            self.wait_for_completed_frame_after(&["Connect a provider"], submit_start)
+            let provider = self.wait_for_terminal_frame_after(
+                submit_start,
+                before_submit.generation,
+                &before_submit.screen,
+                "missing completed provider dialog after Enter",
+                |screen| screen.is_provider_dialog(),
+            );
+            assert!(
+                provider.generation > before_submit.generation,
+                "provider dialog reused a pre-Enter completed frame"
+            );
+            provider.screen.text()
+        }
+
+        fn terminal_baseline(&self) -> (usize, TerminalScreen, u64) {
+            let (offset, bytes) = self.out.snapshot_since(0);
+            let trace =
+                scan_terminal_frames(&bytes, 0, TerminalScreen::default(), 0, offset, |_| false)
+                    .expect("decode terminal baseline");
+            assert!(
+                !trace.partial,
+                "terminal baseline ends inside an incomplete synchronized frame"
+            );
+            assert!(
+                trace.generation > 0,
+                "terminal baseline has no completed frame"
+            );
+            (offset, trace.screen, trace.generation)
+        }
+
+        fn wait_for_terminal_frame_after(
+            &self,
+            byte_offset: usize,
+            generation: u64,
+            baseline: &TerminalScreen,
+            description: &str,
+            matches: impl Fn(&TerminalScreen) -> bool,
+        ) -> CompletedTerminalFrame {
+            let deadline = Instant::now() + WAIT;
+            loop {
+                let (_, suffix) = self.out.snapshot_since(byte_offset);
+                let trace = scan_terminal_frames(
+                    &suffix,
+                    byte_offset,
+                    baseline.clone(),
+                    generation,
+                    byte_offset,
+                    &matches,
+                )
+                .expect("decode completed terminal frames");
+                if let Some(frame) = trace.matched {
+                    return frame;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "{description}\n{}",
+                    self.out.text_since(byte_offset)
+                );
+                thread::sleep(Duration::from_millis(25));
+            }
         }
 
         fn wait_for_completed_frame(&self, needles: &[&str]) -> String {
@@ -496,15 +613,299 @@ mod macos_pty {
         })
     }
 
-    fn connect_draft_frame(frame: &str) -> bool {
-        let plain = strip_terminal_controls(frame);
-        !plain.contains("Connect a provider")
-            && plain.split(['┃', '│']).any(|after_rail| {
-                after_rail
-                    .trim_start()
-                    .strip_prefix("/connect")
-                    .is_some_and(|tail| tail.is_empty() || tail.starts_with(char::is_whitespace))
+    const MAX_TERMINAL_ROWS: usize = 40;
+    const MAX_TERMINAL_COLS: usize = 160;
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct TerminalScreen {
+        cells: Vec<Vec<char>>,
+    }
+
+    impl Default for TerminalScreen {
+        fn default() -> Self {
+            Self {
+                cells: vec![vec![' '; MAX_TERMINAL_COLS]; MAX_TERMINAL_ROWS],
+            }
+        }
+    }
+
+    impl TerminalScreen {
+        fn text(&self) -> String {
+            self.cells
+                .iter()
+                .map(|row| row.iter().collect::<String>().trim_end().to_owned())
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+
+        fn contains_text(&self, needle: &str) -> bool {
+            self.cells
+                .iter()
+                .any(|row| row.iter().collect::<String>().contains(needle))
+        }
+
+        fn has_home_frame(&self) -> bool {
+            self.contains_text("Ask anything") && self.contains_text("ctrl+p commands")
+        }
+
+        fn has_connect_draft(&self) -> bool {
+            self.cells.iter().any(|row| {
+                let row = row.iter().collect::<String>();
+                ['┃', '│'].iter().any(|rail| {
+                    row.split_once(*rail).is_some_and(|(_, tail)| {
+                        tail.trim_start()
+                            .strip_prefix("/connect")
+                            .is_some_and(|rest| rest.trim().is_empty())
+                    })
+                })
             })
+        }
+
+        fn is_provider_dialog(&self) -> bool {
+            self.contains_text("Connect a provider")
+        }
+
+        fn write(&mut self, row: usize, col: usize, text: &str) -> Result<usize, String> {
+            if row >= MAX_TERMINAL_ROWS || col >= MAX_TERMINAL_COLS {
+                return Err(format!(
+                    "terminal CUP outside bounded grid: {};{}",
+                    row + 1,
+                    col + 1
+                ));
+            }
+            let mut cursor = col;
+            for character in text.chars() {
+                if cursor >= MAX_TERMINAL_COLS {
+                    return Err("terminal paint exceeded bounded columns".to_owned());
+                }
+                self.cells[row][cursor] = character;
+                cursor += 1;
+            }
+            Ok(cursor)
+        }
+
+        fn erase_line(&mut self, row: usize, col: usize, mode: usize) {
+            let (start, end) = match mode {
+                1 => (0, col.saturating_add(1)),
+                2 => (0, MAX_TERMINAL_COLS),
+                _ => (col, MAX_TERMINAL_COLS),
+            };
+            if let Some(cells) = self.cells.get_mut(row) {
+                for cell in cells.iter_mut().take(end).skip(start) {
+                    *cell = ' ';
+                }
+            }
+        }
+
+        fn erase_display(&mut self, row: usize, col: usize, mode: usize) {
+            match mode {
+                1 => {
+                    for line in self.cells.iter_mut().take(row) {
+                        line.fill(' ');
+                    }
+                    self.erase_line(row, col, 1);
+                }
+                2 | 3 => self.cells.iter_mut().for_each(|line| line.fill(' ')),
+                _ => {
+                    self.erase_line(row, col, 0);
+                    for line in self.cells.iter_mut().skip(row.saturating_add(1)) {
+                        line.fill(' ');
+                    }
+                }
+            }
+        }
+    }
+
+    struct CompletedTerminalFrame {
+        generation: u64,
+        screen: TerminalScreen,
+    }
+
+    struct TerminalTrace {
+        generation: u64,
+        completed_end: usize,
+        screen: TerminalScreen,
+        partial: bool,
+        matched: Option<CompletedTerminalFrame>,
+    }
+
+    /// Test-only bounded CUP screen projection. Predicates rely on ASCII
+    /// command text and the single-cell `\xE2\x94\x83`/`│` rails only; no general Unicode
+    /// display-width claim is made. Only fully closed synchronized frames paint.
+    fn scan_terminal_frames(
+        bytes: &[u8],
+        absolute_offset: usize,
+        mut screen: TerminalScreen,
+        mut generation: u64,
+        after_offset: usize,
+        matches: impl Fn(&TerminalScreen) -> bool,
+    ) -> Result<TerminalTrace, String> {
+        const OPEN: &[u8] = b"\x1b[?2026h";
+        const CLOSE: &[u8] = b"\x1b[?2026l";
+        if bytes.len() > CAP {
+            return Err("terminal capture exceeded 64KiB".to_owned());
+        }
+        let mut cursor = 0;
+        let mut completed_end = absolute_offset;
+        let mut matched = None;
+        let mut partial = false;
+        while let Some(relative_start) = find_bytes(&bytes[cursor..], OPEN) {
+            let start = cursor + relative_start + OPEN.len();
+            let Some(relative_end) = find_bytes(&bytes[start..], CLOSE) else {
+                partial = true;
+                break;
+            };
+            let end = start + relative_end;
+            paint_terminal_frame(&mut screen, &bytes[start..end])?;
+            generation = generation.saturating_add(1);
+            completed_end = absolute_offset
+                .saturating_add(end)
+                .saturating_add(CLOSE.len());
+            if completed_end > after_offset && matches(&screen) && matched.is_none() {
+                matched = Some(CompletedTerminalFrame {
+                    generation,
+                    screen: screen.clone(),
+                });
+            }
+            cursor = end + CLOSE.len();
+        }
+        Ok(TerminalTrace {
+            generation,
+            completed_end,
+            screen,
+            partial,
+            matched,
+        })
+    }
+
+    fn find_bytes(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+        haystack
+            .windows(needle.len())
+            .position(|window| window == needle)
+    }
+
+    fn paint_terminal_frame(screen: &mut TerminalScreen, bytes: &[u8]) -> Result<(), String> {
+        let mut row = 0;
+        let mut col = 0;
+        let mut cursor = 0;
+        while cursor < bytes.len() {
+            match bytes[cursor] {
+                b'\x1b' if bytes.get(cursor + 1) == Some(&b'[') => {
+                    let start = cursor + 2;
+                    let Some(relative_end) = bytes[start..]
+                        .iter()
+                        .position(|byte| (0x40..=0x7e).contains(byte))
+                    else {
+                        return Err("incomplete CSI inside closed terminal frame".to_owned());
+                    };
+                    let end = start + relative_end;
+                    let parameters = std::str::from_utf8(&bytes[start..end])
+                        .map_err(|_| "non-ASCII CSI parameter")?;
+                    let final_byte = bytes[end];
+                    if matches!(final_byte, b'H' | b'f') {
+                        let mut parts = parameters.split(';');
+                        let parsed_row = parse_csi_position(parts.next())?;
+                        let parsed_col = parse_csi_position(parts.next())?;
+                        row = parsed_row.saturating_sub(1);
+                        col = parsed_col.saturating_sub(1);
+                        if row >= MAX_TERMINAL_ROWS || col >= MAX_TERMINAL_COLS {
+                            return Err(format!(
+                                "terminal CUP outside bounded grid: {parsed_row};{parsed_col}"
+                            ));
+                        }
+                    } else if final_byte == b'K' {
+                        screen.erase_line(row, col, parse_csi_mode(parameters)?);
+                    } else if final_byte == b'J' {
+                        screen.erase_display(row, col, parse_csi_mode(parameters)?);
+                    }
+                    // SGR and other CSI styling/control modes do not change text.
+                    cursor = end + 1;
+                }
+                b'\x1b' if bytes.get(cursor + 1) == Some(&b']') => {
+                    cursor += 2;
+                    while cursor < bytes.len() {
+                        if bytes[cursor] == 0x07 {
+                            cursor += 1;
+                            break;
+                        }
+                        if bytes[cursor] == b'\x1b' && bytes.get(cursor + 1) == Some(&b'\\') {
+                            cursor += 2;
+                            break;
+                        }
+                        cursor += 1;
+                    }
+                }
+                b'\x1b' => cursor = (cursor + 2).min(bytes.len()),
+                b'\r' => {
+                    col = 0;
+                    cursor += 1;
+                }
+                b'\n' => {
+                    row = row.saturating_add(1).min(MAX_TERMINAL_ROWS - 1);
+                    cursor += 1;
+                }
+                b'\t' => {
+                    col = ((col / 8) + 1) * 8;
+                    if col >= MAX_TERMINAL_COLS {
+                        return Err("terminal tab exceeded bounded columns".to_owned());
+                    }
+                    cursor += 1;
+                }
+                byte if byte >= 0x20 && byte != 0x7f => {
+                    let width = utf8_scalar_width(bytes, cursor)?;
+                    let text = std::str::from_utf8(&bytes[cursor..cursor + width])
+                        .map_err(|_| "invalid UTF-8 in terminal frame")?;
+                    col = screen.write(row, col, text)?;
+                    cursor += width;
+                }
+                _ => cursor += 1,
+            }
+        }
+        Ok(())
+    }
+
+    fn parse_csi_position(value: Option<&str>) -> Result<usize, String> {
+        match value.filter(|value| !value.is_empty()) {
+            Some(value) => value
+                .parse::<usize>()
+                .map(|value| value.max(1))
+                .map_err(|_| "invalid CUP coordinate".to_owned()),
+            None => Ok(1),
+        }
+    }
+
+    fn parse_csi_mode(parameters: &str) -> Result<usize, String> {
+        match parameters
+            .split(';')
+            .next()
+            .filter(|value| !value.is_empty())
+        {
+            Some(value) => value
+                .parse::<usize>()
+                .map_err(|_| "invalid erase mode".to_owned()),
+            None => Ok(0),
+        }
+    }
+
+    fn utf8_scalar_width(bytes: &[u8], offset: usize) -> Result<usize, String> {
+        let first = *bytes.get(offset).ok_or("missing UTF-8 scalar")?;
+        let width = if first < 0x80 {
+            1
+        } else if first & 0xe0 == 0xc0 {
+            2
+        } else if first & 0xf0 == 0xe0 {
+            3
+        } else if first & 0xf8 == 0xf0 {
+            4
+        } else {
+            return Err("invalid UTF-8 leading byte in terminal frame".to_owned());
+        };
+        if offset.saturating_add(width) > bytes.len() {
+            return Err("truncated UTF-8 scalar in closed terminal frame".to_owned());
+        }
+        std::str::from_utf8(&bytes[offset..offset + width])
+            .map_err(|_| "invalid UTF-8 scalar in terminal frame")?;
+        Ok(width)
     }
 
     fn completed_frame_matching(text: &str, matches: impl Fn(&str) -> bool) -> Option<&str> {
@@ -521,6 +922,21 @@ mod macos_pty {
             rest = &body[end + CLOSE.len()..];
         }
         None
+    }
+
+    /// Decode the initial retained PTY output with an action threshold of
+    /// zero. Unlike post-action waits, startup has no pre-action byte offset;
+    /// a closed Home frame in the retained capture is therefore eligible.
+    fn initial_home_frame(bytes: &[u8]) -> Result<Option<CompletedTerminalFrame>, String> {
+        Ok(scan_terminal_frames(
+            bytes,
+            0,
+            TerminalScreen::default(),
+            0,
+            0,
+            TerminalScreen::has_home_frame,
+        )?
+        .matched)
     }
 
     #[test]
@@ -545,6 +961,32 @@ mod macos_pty {
             completed_home_frame(&format!("\x1b[?2026hirrelevant\x1b[?2026l{frame}")),
             Some("Ask anything… ctrl+p commands")
         );
+    }
+
+    #[test]
+    fn initial_home_wait_uses_zero_threshold_and_rejects_partial_frame() {
+        let frame = b"\x1b[?2026h\x1b[2J\x1b[5;8HAsk anything\x1b[6;8Hctrl+p commands\x1b[?2026l";
+        let completed = initial_home_frame(frame)
+            .expect("decode initial Home fixture")
+            .expect("closed Home frame must match initial wait");
+        assert_eq!(completed.generation, 1);
+        assert!(completed.screen.has_home_frame());
+
+        let partial = b"\x1b[?2026h\x1b[2J\x1b[5;8HAsk anything\x1b[6;8Hctrl+p commands";
+        let trace = scan_terminal_frames(
+            partial,
+            0,
+            TerminalScreen::default(),
+            0,
+            0,
+            TerminalScreen::has_home_frame,
+        )
+        .expect("decode partial initial Home fixture");
+        assert!(trace.matched.is_none());
+        assert!(trace.partial);
+        assert!(initial_home_frame(partial)
+            .expect("initial wait must decode partial fixture")
+            .is_none());
     }
 
     #[test]
@@ -581,23 +1023,77 @@ mod macos_pty {
 
     #[test]
     fn connect_transition_requires_nonmodal_composer_before_enter() {
-        let stale_modal = "\x1b[?2026hConnect a provider\x1b[?2026l";
-        let draft = "\x1b[?2026h  ┃  /connect     \x1b[?2026l";
-        let output = format!("{stale_modal}{draft}");
-        let observed = completed_frame_matching(&output, connect_draft_frame).unwrap();
-        assert_eq!(observed, "  ┃  /connect     ");
-        assert!(!connect_draft_frame("Connect a provider ┃ /connect "));
-        assert!(!connect_draft_frame("Commands /connect Connect provider"));
-        assert!(!connect_draft_frame("┃ /connect-extra "));
-        let after_enter = "\x1b[?2026hConnect a provider";
-        assert!(completed_frame_with(after_enter, &["Connect a provider"]).is_none());
-        assert_eq!(
-            completed_frame_with(
-                &format!("{after_enter}\x1b[?2026l"),
-                &["Connect a provider"]
-            ),
-            Some("Connect a provider")
-        );
+        let stale_modal = b"\x1b[?2026h\x1b[2J\x1b[3;5HConnect a provider\x1b[?2026l";
+        let draft = b"\x1b[?2026h\x1b[2J\x1b[4;7H\xE2\x94\x83  /connect     \x1b[?2026l";
+        let output = [stale_modal.as_slice(), draft.as_slice()].concat();
+        let trace = scan_terminal_frames(&output, 0, TerminalScreen::default(), 0, 0, |screen| {
+            screen.has_connect_draft() && !screen.is_provider_dialog()
+        })
+        .expect("decode full rail/CUP composer fixture");
+        let observed = trace.matched.expect("decoded composer frame");
+        assert_eq!(observed.generation, 2);
+        assert!(observed.screen.has_connect_draft());
+        assert!(!observed.screen.is_provider_dialog());
+
+        let modal = scan_terminal_frames(
+            b"\x1b[?2026h\x1b[2J\x1b[3;5HConnect a provider\x1b[4;7H\xE2\x94\x83  /connect \x1b[?2026l",
+            0,
+            TerminalScreen::default(),
+            0,
+            0,
+            |screen| screen.has_connect_draft() && !screen.is_provider_dialog(),
+        )
+        .expect("decode modal negative fixture");
+        assert!(modal.matched.is_none());
+
+        let listing = scan_terminal_frames(
+            b"\x1b[?2026h\x1b[2J\x1b[3;5HCommands /connect Connect provider\x1b[?2026l",
+            0,
+            TerminalScreen::default(),
+            0,
+            0,
+            |screen| screen.has_connect_draft() && !screen.is_provider_dialog(),
+        )
+        .expect("decode command-listing negative fixture");
+        assert!(listing.matched.is_none());
+
+        let prefix = scan_terminal_frames(
+            b"\x1b[?2026h\x1b[2J\x1b[4;7H\xE2\x94\x83 /connect-extra \x1b[?2026l",
+            0,
+            TerminalScreen::default(),
+            0,
+            0,
+            |screen| screen.has_connect_draft() && !screen.is_provider_dialog(),
+        )
+        .expect("decode command-prefix negative fixture");
+        assert!(prefix.matched.is_none());
+
+        let provider_open = b"\x1b[?2026h\x1b[2J\x1b[3;5HConnect a provider";
+        let incomplete = scan_terminal_frames(
+            provider_open,
+            0,
+            observed.screen.clone(),
+            observed.generation,
+            output.len(),
+            TerminalScreen::is_provider_dialog,
+        )
+        .expect("decode incomplete post-Enter provider frame");
+        assert!(incomplete.matched.is_none());
+        assert!(incomplete.partial);
+
+        let provider = [provider_open.as_slice(), b"\x1b[?2026l"].concat();
+        let completed = scan_terminal_frames(
+            &provider,
+            output.len(),
+            observed.screen,
+            observed.generation,
+            output.len(),
+            TerminalScreen::is_provider_dialog,
+        )
+        .expect("decode completed post-Enter provider frame");
+        let provider_frame = completed.matched.expect("decoded provider dialog frame");
+        assert!(provider_frame.generation > observed.generation);
+        assert!(provider_frame.screen.is_provider_dialog());
     }
 
     fn strip_terminal_controls(text: &str) -> String {
