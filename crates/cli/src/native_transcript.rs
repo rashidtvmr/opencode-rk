@@ -443,7 +443,7 @@ impl TranscriptPage {
     }
 }
 
-/// Render transcript lines to wrapped rows, at most `width` chars per row.
+/// Render transcript lines to wrapped rows, at most `width` display cells per row.
 ///
 /// Splits on `\n`, word-wraps (oversize words chunked), `width == 0`
 /// disables wrapping (one row per source line). Pure/bounded: input capped
@@ -454,7 +454,8 @@ pub fn render_lines(lines: &[TranscriptLine], width: usize) -> Vec<String> {
         if out.len() >= MAX_WINDOW {
             return;
         }
-        if paragraph.chars().count() <= width {
+        let cells = crate::native_view_layout::visit_unpadded_cells(paragraph, MAX_SANITIZED_BYTES, |_, _| {});
+        if paragraph.len() <= MAX_SANITIZED_BYTES && cells <= width {
             out.push(paragraph.to_owned());
             return;
         }
@@ -464,7 +465,10 @@ pub fn render_lines(lines: &[TranscriptLine], width: usize) -> Vec<String> {
             if out.len() >= MAX_WINDOW {
                 return;
             }
-            let wlen = word.chars().count();
+            let mut clusters = Vec::new();
+            let wlen = crate::native_view_layout::visit_unpadded_cells(word, MAX_SANITIZED_BYTES, |glyph, cells| {
+                clusters.push((glyph.to_owned(), cells));
+            });
             if wlen > width {
                 if !line.is_empty() {
                     out.push(std::mem::take(&mut line));
@@ -473,13 +477,21 @@ pub fn render_lines(lines: &[TranscriptLine], width: usize) -> Vec<String> {
                         return;
                     }
                 }
-                let chars: Vec<char> = word.chars().collect();
-                for chunk in chars.chunks(width) {
-                    out.push(chunk.iter().collect());
-                    if out.len() >= MAX_WINDOW {
-                        return;
+                let mut chunk = String::new();
+                let mut used = 0;
+                for (glyph, cells) in clusters {
+                    // A two-cell glyph cannot fit a one-cell pane. Show a
+                    // replacement rather than losing the rest of the word.
+                    let (glyph, cells) = if cells > width { ("�", 1) } else { (glyph.as_str(), cells) };
+                    if used + cells > width {
+                        out.push(std::mem::take(&mut chunk));
+                        if out.len() >= MAX_WINDOW { return; }
+                        used = 0;
                     }
+                    chunk.push_str(glyph);
+                    used += cells;
                 }
+                if !chunk.is_empty() && out.len() < MAX_WINDOW { out.push(chunk); }
                 continue;
             }
             if line.is_empty() {
@@ -728,5 +740,27 @@ mod tests {
         for r in &rows {
             assert!(r.chars().count() <= 5, "row overflow: {r:?}");
         }
+    }
+
+    #[test]
+    fn unicode_cell_width_mixed_wrap_preserves_tail() {
+        for (text, width, expected) in [
+            ("界界界TAIL", 6, vec!["界界界", "TAIL"]),
+            ("界🦀e\u{0301}tail", 5, vec!["界🦀e\u{0301}", "tail"]),
+        ] {
+            assert_eq!(render_lines(&[TranscriptLine { id: 0, text: text.into() }], width), expected);
+        }
+        let text = "界🦀e\u{0301}tail";
+        assert_eq!(render_lines(&[TranscriptLine { id: 0, text: text.into() }], 0), vec![text]);
+    }
+
+    #[test]
+    fn unicode_cell_width_one_keeps_following_ascii_and_original_history() {
+        let line = TranscriptLine { id: 0, text: "界a🦀b".into() };
+        assert_eq!(render_lines(std::slice::from_ref(&line), 1), vec!["�", "a", "�", "b"]);
+        assert_eq!(line.text, "界a🦀b");
+        let fitting = "e\u{0301}  ";
+        assert_eq!(render_lines(&[TranscriptLine { id: 1, text: fitting.into() }], 3), vec![fitting]);
+        assert!(render_lines(&[TranscriptLine { id: 2, text: "界a".repeat(MAX_WINDOW) }], 1).len() <= MAX_WINDOW);
     }
 }

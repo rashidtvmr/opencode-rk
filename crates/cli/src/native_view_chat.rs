@@ -388,10 +388,12 @@ fn sanitize(text: &str) -> String {
 
 /// Char-boundary safe row truncation; `width == 0` disables it.
 fn truncate_row(text: &str, width: usize) -> String {
-    if width == 0 || text.chars().count() <= width {
+    if width == 0 {
         return text.to_owned();
     }
-    text.chars().take(width).collect()
+    let mut row = String::new();
+    crate::native_view_layout::visit_unpadded_cells(text, width, |glyph, _| row.push_str(glyph));
+    row
 }
 
 fn plural(n: usize) -> &'static str {
@@ -1337,6 +1339,13 @@ impl ChatView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unicode_cell_width_truncate_row_respects_cells_and_tail() {
+        let fitting = "界e\u{0301}🦀";
+        assert_eq!(truncate_row(fitting, 5), fitting);
+        assert_eq!(truncate_row("界界界tail", 6), "界界界");
+    }
 
     #[test]
     fn styled_message_boxes_keep_real_text_bounds_separate_from_decoration() {

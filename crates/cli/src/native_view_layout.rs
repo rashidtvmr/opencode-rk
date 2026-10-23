@@ -176,12 +176,19 @@ fn scan_budget(width: usize) -> usize {
 /// `width * MAX_CLUSTER_BYTES + width` (clusters plus padding); the scan
 /// itself stops at [`scan_budget`].
 pub(crate) fn fit(line: &str, width: u16) -> String {
-    let budget = usize::from(width);
+    let mut out = String::with_capacity(usize::from(width));
+    let used = visit_unpadded_cells(line, usize::from(width), |glyph, _| out.push_str(glyph));
+    out.extend(std::iter::repeat_n(' ', usize::from(width) - used));
+    out
+}
+
+/// Visit bounded sanitized clusters without adding padding. Shares fit's exact
+/// segmentation so measurement and wrapping cannot split a displayed cluster.
+pub(crate) fn visit_unpadded_cells(line: &str, budget: usize, mut visit: impl FnMut(&str, usize)) -> usize {
     if budget == 0 {
-        return String::new();
+        return 0;
     }
     let scan_limit = scan_budget(budget);
-    let mut out = String::with_capacity(budget);
     let mut used = 0usize;
     let mut cluster = Cluster::default();
     let mut state = Escape::Normal;
@@ -267,7 +274,7 @@ pub(crate) fn fit(line: &str, width: u16) -> String {
             if used + cell_width > budget {
                 break;
             }
-            out.push_str(&text);
+            visit(&text, cell_width);
             used += cell_width;
             if used >= budget {
                 break;
@@ -283,15 +290,11 @@ pub(crate) fn fit(line: &str, width: u16) -> String {
     // when it still fits.
     if let Some((text, cell_width)) = cluster.finish() {
         if used + cell_width <= budget {
-            out.push_str(&text);
+            visit(&text, cell_width);
             used += cell_width;
         }
     }
-    while used < budget {
-        out.push(' ');
-        used += 1;
-    }
-    out
+    used
 }
 
 /// Visit sanitized display clusters, preserving the same bounded segmentation
