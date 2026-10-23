@@ -16,13 +16,12 @@
 //! is deliberately absent from the current layout. The assertions retain the
 //! frame, auth, singleton, setup, and alternate-screen contracts.
 //!
-//! Authority supersession (mechanical only): pinned upstream
-//! `packages/tui/src/app.tsx:540-548` opens the provider dialog on an empty
-//! provider transition, and `packages/tui/src/component/dialog-provider.tsx:228-230`
-//! titles it `Connect a provider`; therefore the historical `provider setup`
-//! needle is not retained.  Native `/connect` is the corresponding current
-//! route (`crates/cli/src/tui_entry.rs:699-713`).  No auth, singleton,
-//! history, terminal, or secret assertion is relaxed.
+//! Approved native Home workflow: unlike upstream's automatic empty-provider
+//! overlay, launch renders Home and explicit `/connect` opens the real dialog.
+//! The independent contract decision is recorded in
+//! `docs/worklogs/ui-parity-003/missing-provider-startup-contract-review.json`.
+//! Setup availability, auth, terminal and secret assertions remain required;
+//! the earlier automatic-overlay failures remain preserved.
 //! - `crates/cli/tests/app001_repair_e2e.rs:18-124` - bounded macOS PTY
 //!   capture, disposable roots, loopback selection, and descriptor helpers.
 
@@ -142,7 +141,7 @@ mod macos_pty {
     }
 
     #[derive(Default)]
-    struct Bytes(Vec<u8>);
+    struct Bytes(Vec<u8>, usize);
 
     struct Capture {
         state: Arc<Mutex<Bytes>>,
@@ -164,6 +163,7 @@ mod macos_pty {
                     if output.0.len() + count > CAP {
                         let remove = (output.0.len() + count - CAP).min(output.0.len());
                         output.0.drain(..remove);
+                        output.1 = output.1.saturating_add(remove);
                     }
                     output.0.extend_from_slice(&buffer[..count]);
                 }
@@ -176,6 +176,25 @@ mod macos_pty {
 
         fn text(&self) -> String {
             String::from_utf8_lossy(&self.state.lock().expect("capture lock").0).into_owned()
+        }
+
+        fn byte_len(&self) -> usize {
+            let state = self.state.lock().expect("capture lock");
+            state.1.saturating_add(state.0.len())
+        }
+
+        fn text_since(&self, offset: usize) -> String {
+            let state = self.state.lock().expect("capture lock");
+            let retained_offset = offset
+                .checked_sub(state.1)
+                .expect("causal capture baseline evicted");
+            String::from_utf8_lossy(
+                state
+                    .0
+                    .get(retained_offset..)
+                    .expect("capture baseline beyond output"),
+            )
+            .into_owned()
         }
 
         fn join(&mut self) {
@@ -239,15 +258,45 @@ mod macos_pty {
         }
 
         fn wait_for_native_frame(&self) -> String {
+            self.wait_for_completed_frame(&["Ask anything", "ctrl+p commands"])
+        }
+
+        fn open_provider_dialog(&mut self) -> String {
+            let draft_start = self.out.byte_len();
+            self.send("/connect");
+            let deadline = Instant::now() + WAIT;
+            loop {
+                let output = self.out.text_since(draft_start);
+                if completed_frame_matching(&output, connect_draft_frame).is_some() {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "missing nonmodal /connect composer draft\n{output}"
+                );
+                thread::sleep(Duration::from_millis(25));
+            }
+            let submit_start = self.out.byte_len();
+            self.send("\r");
+            self.wait_for_completed_frame_after(&["Connect a provider"], submit_start)
+        }
+
+        fn wait_for_completed_frame(&self, needles: &[&str]) -> String {
+            self.wait_for_completed_frame_after(needles, 0)
+        }
+
+        fn wait_for_completed_frame_after(&self, needles: &[&str], byte_offset: usize) -> String {
             let deadline = Instant::now() + WAIT;
             while Instant::now() < deadline {
-                if let Some(frame) = completed_home_frame(&self.out.text()) {
+                if let Some(frame) =
+                    completed_frame_with(&self.out.text_since(byte_offset), needles)
+                {
                     return frame.to_owned();
                 }
                 thread::sleep(Duration::from_millis(25));
             }
             panic!(
-                "missing completed native Home frame\nstdout={}\nstderr={}",
+                "missing completed native frame containing {needles:?}\nstdout={}\nstderr={}",
                 self.out.text(),
                 self.err.text()
             );
@@ -438,6 +487,27 @@ mod macos_pty {
     /// Ignore partial output and setup/title text outside synchronized frames.
     /// Return one complete frame, never a concatenation of different renders.
     fn completed_home_frame(text: &str) -> Option<&str> {
+        completed_frame_with(text, &["Ask anything", "ctrl+p commands"])
+    }
+
+    fn completed_frame_with<'a>(text: &'a str, needles: &[&str]) -> Option<&'a str> {
+        completed_frame_matching(text, |frame| {
+            needles.iter().all(|needle| frame.contains(needle))
+        })
+    }
+
+    fn connect_draft_frame(frame: &str) -> bool {
+        let plain = strip_terminal_controls(frame);
+        !plain.contains("Connect a provider")
+            && plain.split(['┃', '│']).any(|after_rail| {
+                after_rail
+                    .trim_start()
+                    .strip_prefix("/connect")
+                    .is_some_and(|tail| tail.is_empty() || tail.starts_with(char::is_whitespace))
+            })
+    }
+
+    fn completed_frame_matching(text: &str, matches: impl Fn(&str) -> bool) -> Option<&str> {
         const OPEN: &str = "\x1b[?2026h";
         const CLOSE: &str = "\x1b[?2026l";
         let mut rest = text;
@@ -445,7 +515,7 @@ mod macos_pty {
             let body = &rest[start + OPEN.len()..];
             let end = body.find(CLOSE)?;
             let frame = &body[..end];
-            if frame.contains("Ask anything") && frame.contains("ctrl+p commands") {
+            if matches(frame) {
                 return Some(frame);
             }
             rest = &body[end + CLOSE.len()..];
@@ -474,6 +544,59 @@ mod macos_pty {
         assert_eq!(
             completed_home_frame(&format!("\x1b[?2026hirrelevant\x1b[?2026l{frame}")),
             Some("Ask anything… ctrl+p commands")
+        );
+    }
+
+    #[test]
+    fn connect_frame_wait_excludes_output_before_each_action() {
+        let old = "\x1b[?2026h/connect Connect a provider\x1b[?2026l";
+        let capture = Capture {
+            state: Arc::new(Mutex::new(Bytes(old.as_bytes().to_vec(), 0))),
+            join: None,
+        };
+        let baseline = capture.byte_len();
+        assert!(
+            completed_frame_with(&capture.text_since(baseline), &["Connect a provider"]).is_none()
+        );
+        capture
+            .state
+            .lock()
+            .unwrap()
+            .0
+            .extend_from_slice(b"\x1b[?2026hConnect a provider");
+        assert!(
+            completed_frame_with(&capture.text_since(baseline), &["Connect a provider"]).is_none()
+        );
+        capture
+            .state
+            .lock()
+            .unwrap()
+            .0
+            .extend_from_slice(b"\x1b[?2026l");
+        assert_eq!(
+            completed_frame_with(&capture.text_since(baseline), &["Connect a provider"]),
+            Some("Connect a provider")
+        );
+    }
+
+    #[test]
+    fn connect_transition_requires_nonmodal_composer_before_enter() {
+        let stale_modal = "\x1b[?2026hConnect a provider\x1b[?2026l";
+        let draft = "\x1b[?2026h  ┃  /connect     \x1b[?2026l";
+        let output = format!("{stale_modal}{draft}");
+        let observed = completed_frame_matching(&output, connect_draft_frame).unwrap();
+        assert_eq!(observed, "  ┃  /connect     ");
+        assert!(!connect_draft_frame("Connect a provider ┃ /connect "));
+        assert!(!connect_draft_frame("Commands /connect Connect provider"));
+        assert!(!connect_draft_frame("┃ /connect-extra "));
+        let after_enter = "\x1b[?2026hConnect a provider";
+        assert!(completed_frame_with(after_enter, &["Connect a provider"]).is_none());
+        assert_eq!(
+            completed_frame_with(
+                &format!("{after_enter}\x1b[?2026l"),
+                &["Connect a provider"]
+            ),
+            Some("Connect a provider")
         );
     }
 
@@ -518,8 +641,9 @@ mod macos_pty {
         let mut pty = Pty::spawn(&binary(), &root, &addr, None);
         pty.wait_for_native_frame();
         let initial = pty.text();
+        let provider_frame = pty.open_provider_dialog();
         assert!(
-            initial.contains("Connect a provider"),
+            provider_frame.contains("Connect a provider"),
             "provider dialog missing\n{initial}"
         );
         assert!(
@@ -598,12 +722,13 @@ mod macos_pty {
         let addr = address();
         let mut pty = Pty::spawn(&binary(), &root, &addr, None);
         pty.wait_for_native_frame();
+        let provider_frame = pty.open_provider_dialog();
         pty.send("\x1b:q\n");
         let status = pty.exit();
         let text = pty.text();
         assert!(status.success(), "setup exit: {status}\n{text}");
         assert!(
-            text.contains("Connect a provider"),
+            provider_frame.contains("Connect a provider"),
             "provider dialog missing\n{text}"
         );
         assert!(!text.contains("offline"), "offline path exposed\n{text}");
