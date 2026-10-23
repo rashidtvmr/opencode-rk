@@ -2665,18 +2665,38 @@ fn create_turn_stream(
                             history_items.insert(0, ResponsesItem::Text { role: ResponsesRole::System, content: prompt.clone() });
                         }
                         state.history_items = history_items;
-                        match state
-                            .client
-                            .stream_with_tools(
+                        // A disconnected child response is still drained by the
+                        // owned producer, but explicit cancellation must also
+                        // interrupt a provider request between tool rounds.
+                        // Otherwise task_children::stop waits forever for this
+                        // producer to release its TurnExecutionPermit.
+                        // Create the receiver BEFORE the is_cancelled check: a
+                        // new watch receiver sees only subsequent changes, so
+                        // a cancellation arriving in the TOCTOU gap between a
+                        // separate is_cancelled() call and receiver creation
+                        // would otherwise start stream_with_tools unguarded.
+                        let mut cancelled = state.owner.cancellation_receiver();
+                        if *cancelled.borrow_and_update() {
+                            state.stage = TurnStreamStage::Done;
+                            return None;
+                        }
+                        let next_provider = tokio::select! {
+                            biased;
+                            _ = cancelled.changed() => None,
+                            result = state.client.stream_with_tools(
                                 &state.model,
                                 &state.reasoning_effort,
                                 &state.history_items,
                                 &state.tools,
-                            )
-                            .await
-                        {
+                            ) => Some(result),
+                        };
+                        let Some(next_provider) = next_provider else {
+                            state.stage = TurnStreamStage::Done;
+                            return None;
+                        };
+                        match next_provider {
                             Ok(next_stream) => {
-                                if state.owner.is_cancelled() {
+                                if *cancelled.borrow_and_update() {
                                     return None;
                                 }
                                 state.provider = next_stream;
