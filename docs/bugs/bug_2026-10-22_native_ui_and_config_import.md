@@ -14,6 +14,22 @@ Working tree contains unreleased changes; earlier unit-test passes do not establ
 
 ## Issues and acceptance
 
+### New user-requested native parity package — 2026-10-23
+
+The six additional requirements are tracked in
+[`tasks/NATIVE-OPENCODE-PARITY-002.md`](../../tasks/NATIVE-OPENCODE-PARITY-002.md):
+
+- [ ] NP-01: native directory-change command with real backend/tool context.
+- [ ] NP-02: context and token information in the right panel.
+- [ ] NP-03: current-folder footer with the loading indicator moved there.
+- [ ] NP-04: immediate conversation/bottom-composer layout on first Enter.
+- [ ] NP-05: build, install and verify all six through this PC's actual `oc2`.
+- [ ] NP-06: one-action execution of selected executable command hints.
+
+Status: IN_PROGRESS; none of these new requirements is yet accepted as installed.
+Two non-overlapping implementation owners are assigned for interaction and layout;
+main owns installed verification, with one incremental integration writer.
+
 | ID | Issue / requirement | Status | Owner / evidence |
 | --- | --- | --- | --- |
 | M1 | Conversation wheel scrolling jumps out of range or shows blank content. Preserve viewport bounds through streaming, resize, sidebar changes and history loading. | OBSERVED_FAIL — native scroll ceiling | Real61-message PTY stops at021–027 through500up events; delayeddown. Repair in progress; unit passes insufficient. |
