@@ -44,6 +44,7 @@
 //! auto-resending are integrator responsibilities, not view state.
 
 use crate::native_transcript::{TranscriptLine, render_lines, strip_ansi};
+use std::cell::Cell;
 
 /// Max rows a single view will scroll up from the tail. Bounds both the
 /// stored scroll state and the per-render wrap walk, so a hostile or
@@ -76,6 +77,14 @@ pub const MAX_DRAFT_BYTES: usize = 32 * 1024;
 /// clipped for display, never silently forged or erased from state.
 pub const MAX_INPUT_ROW_BYTES: usize = 32 * 1024;
 
+/// Rendered height of one plain transcript entry at the supplied pane width.
+/// Kept public for pagination anchor preservation; callers must use the same
+/// bounded input and wrapping rules as the chat renderer.
+pub fn transcript_entry_rows(width: usize, text: &str) -> usize {
+    let clean = strip_ansi(clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES)).replace('\t', " ");
+    render_lines(&[TranscriptLine { id: 0, text: clean }], width).len().max(1)
+}
+
 /// Bounded UTF-8 prefix: first `max` bytes, backed off to a char
 /// boundary (≤ 3 bytes) so no scalar is ever split. Render display only;
 /// returns a borrowed slice — the source is never mutated or copied
@@ -97,7 +106,7 @@ fn clip_utf8_prefix_bytes(text: &str, max: usize) -> &str {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct ChatView {
     /// Rows above the tail; clamped to [`MAX_SCROLL_ROWS`].
-    scroll: usize,
+    scroll: Cell<usize>,
 }
 
 impl ChatView {
@@ -107,23 +116,42 @@ impl ChatView {
     }
 
     /// Scroll up (away from the tail) by `lines`, capped at
-    /// [`MAX_SCROLL_ROWS`]. No history length is needed: the window is
-    /// derived at render time, and an overscroll renders an empty
-    /// transcript region rather than panicking or borrowing stale rows.
+    /// [`MAX_SCROLL_ROWS`]. The render path synchronizes this bounded value
+    /// to the current history viewport, so an overscroll cannot leave the
+    /// view stuck at a stale offset after a subsequent wheel-down.
     pub fn scroll_up(&mut self, lines: usize) {
-        self.scroll = self.scroll.saturating_add(lines).min(MAX_SCROLL_ROWS);
+        self.scroll.set(self.scroll.get().saturating_add(lines).min(MAX_SCROLL_ROWS));
     }
 
     /// Scroll down (toward the tail) by `lines`. Reaching `0` re-pins the
     /// view to the newest history.
     pub fn scroll_down(&mut self, lines: usize) {
-        self.scroll = self.scroll.saturating_sub(lines);
+        self.scroll.set(self.scroll.get().saturating_sub(lines));
     }
+
+    /// Whether the bounded scroll offset is at the local ceiling.  The
+    /// integrator uses this as the fetch trigger; it never changes the view
+    /// itself and therefore keeps pagination separate from rendering.
+    #[must_use]
+    pub fn at_scroll_ceiling(&self) -> bool {
+        self.scroll.get() >= MAX_SCROLL_ROWS
+    }
+
+    #[must_use]
+    pub fn at_tail(&self) -> bool { self.scroll.get() == 0 }
+
 
     /// Re-pin to the tail: the next [`ChatView::render`] shows the newest
     /// transcript rows.
     pub fn follow_tail(&mut self) {
-        self.scroll = 0;
+        self.scroll.set(0);
+    }
+
+    /// Set the tail-relative offset after a history projection has changed.
+    /// Callers must derive this from the same rendered projection; this is not
+    /// a second scrolling policy.
+    pub(crate) fn set_scroll(&mut self, rows: usize) {
+        self.scroll.set(rows.min(MAX_SCROLL_ROWS));
     }
 
     /// Render one center pane as exactly `height` rows (0 renders nothing)
@@ -177,9 +205,6 @@ impl ChatView {
         let transcript_h = height - composer_h - header_h;
 
         let mut rows: Vec<String> = Vec::with_capacity(height);
-        if header_h == 1 {
-            rows.push(render_header(width, workspace, busy, self.scroll));
-        }
         // Bottom-anchored viewport: fill the allocated transcript region
         // with bounded EMPTY rows when the scroll window is short (empty
         // history, short history or overscroll), so the composer always
@@ -188,6 +213,9 @@ impl ChatView {
         // transcript content — and the window's content and scroll offset
         // selection below are untouched.
         let window = self.transcript_window(width, transcript_h, transcript);
+        if header_h == 1 {
+            rows.push(render_header(width, workspace, busy, self.scroll.get()));
+        }
         for _ in 0..transcript_h.saturating_sub(window.len()) {
             rows.push(String::new());
         }
@@ -212,14 +240,13 @@ impl ChatView {
     /// each touched entry with `native_transcript::render_lines`, and
     /// stops as soon as `scroll + height` rows exist — following the tail
     /// touches only a viewport's worth of entries, and the whole history
-    /// is never cloned. Scrolling past the end of history renders no
-    /// transcript rows; the state stays intact so scrolling back down
-    /// restores the window.
+    /// is never cloned. The requested offset is then clamped to the oldest
+    /// reachable viewport, so resize/append cannot leave a blank pane.
     fn transcript_window(&self, width: usize, height: usize, transcript: &[String]) -> Vec<String> {
         if height == 0 || transcript.is_empty() {
             return Vec::new();
         }
-        let target = self.scroll.saturating_add(height);
+        let target = self.scroll.get().saturating_add(height);
         let mut rev: Vec<String> = Vec::with_capacity(target.min(4096));
         'walk: for entry in transcript.iter().rev() {
             // Per-row input bound BEFORE strip_ansi/wrap: only the O
@@ -244,12 +271,17 @@ impl ChatView {
         // visible window is the first `height` of them once `scroll` tail
         // rows are skipped.
         let total = rev.len();
-        if self.scroll >= total {
+        if total == 0 {
             return Vec::new();
         }
-        let end = (total - self.scroll).min(height);
-        rev.truncate(end);
-        rev
+        // Clamp to the oldest reachable viewport, not merely to the fixed
+        // MAX_SCROLL_ROWS ceiling. This keeps short histories and resized
+        // viewports visible instead of producing a blank overscrolled pane.
+        let effective_scroll = self.scroll.get().min(total.saturating_sub(height));
+        self.scroll.set(effective_scroll);
+        let end = total - effective_scroll;
+        let start = end.saturating_sub(height);
+        rev[start..end].to_vec()
     }
 }
 
@@ -518,6 +550,23 @@ pub enum ChatRowClass {
 /// padding are never recovered by parsing the rendered glyphs.
 pub type StyledChatRow = (String, ChatRowClass, Option<(u16, u16)>);
 
+/// Identity of a rendered message row. `row` is relative to that message's
+/// actual styled output (not its body text), so cards, tool parts and group
+/// separators cannot be lost during bounded-window replacement.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RenderedChatAnchor {
+    pub id: String,
+    pub index: usize,
+    pub row: usize,
+}
+
+/// Upstream user-card left rail, pinned from `packages/tui/src/ui/border.ts`
+/// (`SplitBorder.customBorderChars`): one heavy vertical stroke with EMPTY
+/// caps — no top/bottom runs, no right rail, no corner glyphs. Radius
+/// choices therefore have NO glyph effect on message surfaces at all; they
+/// change only corners of surfaces that already draw them (composer frame).
+const USER_RAIL: char = '┃';
+
 fn boxed_message_rows(
     width: usize,
     message: &ChatMessage,
@@ -545,75 +594,170 @@ fn boxed_message_rows(
         }
     };
     let style = appearance.effective(id);
-    let pad = usize::from(style.padding);
-    let overhead = 2 + pad * 2;
-    if width <= overhead || appearance == &crate::native_box_style::BoxAppearance::default() {
-        return typed_message_rows(width, message, separator)
+    // Comfortable defaults for conversation cards; an explicit per-component
+    // zero still opts into compact rendering. Radius never controls spacing.
+    let pad = if style.padding == 0 && appearance.overrides.get(&id).and_then(|value|value.padding).is_none()
+        && matches!(id,BoxId::User|BoxId::Assistant) {1} else {usize::from(style.padding)};
+    // Unstyled fallback: caller facts at the caller's wrap width, carrying
+    // their full-row text interval (selected template, never decoration).
+    let plain = |wrap: usize| -> Vec<StyledChatRow> {
+        typed_message_rows(wrap.min(width), message, separator)
             .into_iter()
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
-            .collect();
-    }
-    let inner = width - overhead;
-    let corners = style.corner_glyphs();
-    let (h, v) = match style.border_style {
-        crate::native_box_style::BorderStyle::Single => ('─', '│'),
-        crate::native_box_style::BorderStyle::Double => ('═', '║'),
-        crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
+            .collect()
     };
-    let mut output = Vec::new();
-    if separator {
-        output.push((String::new(), ChatRowClass::Separator, None));
-    }
-    output.push((
-        format!(
-            "{}{}{}",
-            corners.top_left,
-            h.to_string().repeat(width - 2),
-            corners.top_right
-        ),
-        ChatRowClass::Separator,
-        None,
-    ));
-    let empty = format!("{v}{}{v}", " ".repeat(width - 2));
-    for _ in 0..pad {
-        output.push((empty.clone(), ChatRowClass::Blank, None));
-    }
-    for (text, class) in typed_message_rows(inner, message, false)
-        .into_iter()
-        .take(MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad))
-    {
-        let text =
-            crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
-        let mut cells = 0;
-        crate::native_view_layout::visit_cells(
-            &text,
-            inner.min(u16::MAX as usize) as u16,
-            |x, _, w| cells = usize::from(x + w),
-        );
+    // A full drawn frame exists ONLY through an explicit Double/Heavy line
+    // weight (kept explicit). A radius preset or a Custom radius must never
+    // create or widen a frame — changing radius affects existing corners,
+    // never activates framing.
+    if style.explicit_line_frame() {
+        let overhead = 2 + pad * 2;
+        if width <= overhead {
+            return plain(width);
+        }
+        let inner = width - overhead;
+        let corners = style.corner_glyphs();
+        let (h, v) = match style.border_style {
+            crate::native_box_style::BorderStyle::Single => ('─', '│'),
+            crate::native_box_style::BorderStyle::Double => ('═', '║'),
+            crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
+        };
+        let mut output = Vec::new();
+        if separator {
+            output.push((String::new(), ChatRowClass::Separator, None));
+        }
         output.push((
             format!(
-                "{v}{}{text}{}{v}",
-                " ".repeat(pad),
-                " ".repeat(inner.saturating_sub(cells) + pad)
+                "{}{}{}",
+                corners.top_left,
+                h.to_string().repeat(width - 2),
+                corners.top_right
             ),
-            class,
-            Some(((1 + pad) as u16, inner as u16)),
+            ChatRowClass::Separator,
+            None,
         ));
+        let empty = format!("{v}{}{v}", " ".repeat(width - 2));
+        for _ in 0..pad {
+            output.push((empty.clone(), ChatRowClass::Blank, None));
+        }
+        for (text, class) in typed_message_rows(inner, message, false)
+            .into_iter()
+            .take(MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad))
+        {
+            let text =
+                crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
+            let mut cells = 0;
+            crate::native_view_layout::visit_cells(
+                &text,
+                inner.min(u16::MAX as usize) as u16,
+                |x, _, w| cells = usize::from(x + w),
+            );
+            output.push((
+                format!(
+                    "{v}{}{text}{}{v}",
+                    " ".repeat(pad),
+                    " ".repeat(inner.saturating_sub(cells) + pad)
+                ),
+                class,
+                Some(((1 + pad) as u16, inner as u16)),
+            ));
+        }
+        for _ in 0..pad {
+            output.push((empty.clone(), ChatRowClass::Blank, None));
+        }
+        output.push((
+            format!(
+                "{}{}{}",
+                corners.bottom_left,
+                h.to_string().repeat(width - 2),
+                corners.bottom_right
+            ),
+            ChatRowClass::Separator,
+            None,
+        ));
+        return output;
     }
-    for _ in 0..pad {
-        output.push((empty.clone(), ChatRowClass::Blank, None));
+    // Radius-independent per-role native identity (upstream session
+    // transcript surfaces; no full rectangles anywhere):
+    // * user card: upstream left rail `┃` + inset — never a frame;
+    // * assistant/system: unbordered spaced prose (appearance padding act
+    //   as margin rows/left margin, spacing only);
+    // * tool: compact, unchanged beyond the optional margin.
+    if id == BoxId::User {
+        let rail = 1;
+        let overhead = rail + pad;
+        if width <= overhead + 1 {
+            return plain(width);
+        }
+        let inner = width - overhead;
+        let mut output = Vec::new();
+        if separator {
+            output.push((String::new(), ChatRowClass::Separator, None));
+        }
+        let rail_pad = format!("{USER_RAIL}{}", " ".repeat(inner));
+        for _ in 0..pad {
+            output.push((rail_pad.clone(), ChatRowClass::Blank, None));
+        }
+        for (text, class) in typed_message_rows(inner, message, false)
+            .into_iter()
+            .take(MAX_MESSAGE_ROWS.saturating_sub(2 * pad))
+        {
+            let text =
+                crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
+            let mut cells = 0;
+            crate::native_view_layout::visit_cells(
+                &text,
+                inner.min(u16::MAX as usize) as u16,
+                |x, _, w| cells = usize::from(x + w),
+            );
+            output.push((
+                format!("{USER_RAIL}{}{text}", " ".repeat(pad)),
+                class,
+                Some(((1 + pad) as u16, inner as u16)),
+            ));
+        }
+        for _ in 0..pad {
+            output.push((rail_pad.clone(), ChatRowClass::Blank, None));
+        }
+        return output;
     }
-    output.push((
-        format!(
-            "{}{}{}",
-            corners.bottom_left,
-            h.to_string().repeat(width - 2),
-            corners.bottom_right
-        ),
-        ChatRowClass::Separator,
-        None,
-    ));
-    output
+    if pad > 0 {
+        if width <= pad.max(1) {
+            return plain(width);
+        }
+        let inner = width - pad;
+        let mut output = Vec::new();
+        if separator {
+            output.push((String::new(), ChatRowClass::Separator, None));
+        }
+        for _ in 0..pad {
+            output.push((String::new(), ChatRowClass::Blank, None));
+        }
+        for (text, class) in typed_message_rows(inner, message, false)
+            .into_iter()
+            .take(MAX_MESSAGE_ROWS.saturating_sub(2 * pad))
+        {
+            let text =
+                crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
+            let mut cells = 0;
+            crate::native_view_layout::visit_cells(
+                &text,
+                inner.min(u16::MAX as usize) as u16,
+                |x, _, w| cells = usize::from(x + w),
+            );
+            output.push((
+                format!("{}{text}", " ".repeat(pad)),
+                class,
+                Some((pad as u16, inner as u16)),
+            ));
+        }
+        for _ in 0..pad {
+            output.push((String::new(), ChatRowClass::Blank, None));
+        }
+        output
+    } else {
+        plain(width)
+    }
 }
 
 /// Bounded inline label: clipped, then every control scalar (newline, ESC,
@@ -903,13 +1047,13 @@ impl ChatView {
         let transcript_h = height - composer_h - header_h;
 
         let mut rows: Vec<(String, ChatRowClass)> = Vec::with_capacity(height);
+        let window = self.typed_window(width, transcript_h, messages);
         if header_h == 1 {
             rows.push((
-                render_header(width, workspace, busy, self.scroll),
+                render_header(width, workspace, busy, self.scroll.get()),
                 ChatRowClass::Header,
             ));
         }
-        let window = self.typed_window(width, transcript_h, messages);
         for _ in 0..transcript_h.saturating_sub(window.len()) {
             rows.push((String::new(), ChatRowClass::Blank));
         }
@@ -961,16 +1105,16 @@ impl ChatView {
         let header_h = usize::from(body_h > 0);
         let window = self.typed_window(width, body_h - header_h, messages);
         let mut rows = Vec::with_capacity(height);
-        if header_h > 0 {
-            rows.push((
-                render_header(width, workspace, busy, self.scroll),
-                ChatRowClass::Header,
-            ));
-        }
         while rows.len() < body_h.saturating_sub(window.len()) {
             rows.push((String::new(), ChatRowClass::Blank));
         }
         rows.extend(window);
+        if header_h > 0 {
+            rows.insert(
+                0,
+                (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header),
+            );
+        }
         let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
         let composer = bounded_composer_rows(draft, content_h + 1);
         let mut text_rows =
@@ -1025,7 +1169,7 @@ impl ChatView {
         if height == 0 || messages.is_empty() {
             return Vec::new();
         }
-        let target = self.scroll.saturating_add(height);
+        let target = self.scroll.get().saturating_add(height);
         let mut rev: Vec<(String, ChatRowClass)> = Vec::with_capacity(target.min(4096));
         'walk: for (index, message) in messages.iter().enumerate().rev() {
             let rows = typed_message_rows(width, message, starts_new_group(index, messages));
@@ -1038,12 +1182,14 @@ impl ChatView {
         }
         rev.reverse();
         let total = rev.len();
-        if self.scroll >= total {
+        if total == 0 {
             return Vec::new();
         }
-        let end = (total - self.scroll).min(height);
-        rev.truncate(end);
-        rev
+        let effective_scroll = self.scroll.get().min(total.saturating_sub(height));
+        self.scroll.set(effective_scroll);
+        let end = total - effective_scroll;
+        let start = end.saturating_sub(height);
+        rev[start..end].to_vec()
     }
 
     pub fn render_styled(
@@ -1056,21 +1202,30 @@ impl ChatView {
         busy: bool,
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
+        let requested_scroll = self.scroll.get();
         let mut rows = self.render_typed_classified_framed(
             width,
             height,
             workspace,
+            // Establish the frame using the same message set as the styled
+            // transcript.  This keeps the body/composer split identical while
+            // the boxed-row pass below remains the source of truth for scroll
+            // bounds and visible content.
             &[],
             draft,
             busy,
             appearance.effective(crate::native_box_style::BoxId::ChatComposer),
         );
+        // The first pass is only the shared frame/composer layout. Restore
+        // the caller's scroll request before calculating the actual boxed
+        // transcript window; typed and boxed rows can have different heights.
+        self.scroll.set(requested_scroll);
         let body_h = rows
             .iter()
             .position(|(_, class)| *class == ChatRowClass::Composer)
             .unwrap_or(rows.len());
         let transcript_h = body_h.saturating_sub(1);
-        let target = self.scroll.saturating_add(transcript_h);
+        let target = self.scroll.get().saturating_add(transcript_h);
         let mut reversed = Vec::new();
         if transcript_h > 0 {
             'messages: for (index, message) in messages.iter().enumerate().rev() {
@@ -1091,11 +1246,17 @@ impl ChatView {
             }
         }
         reversed.reverse();
-        let keep = reversed.len().saturating_sub(self.scroll).min(transcript_h);
-        reversed.truncate(keep);
-        let first = body_h.saturating_sub(reversed.len());
+        let effective_scroll = self.scroll.get().min(reversed.len().saturating_sub(transcript_h));
+        // Synchronize the stored offset with the current rendered content.
+        // Without this, an overscroll remains at MAX_SCROLL_ROWS and every
+        // later wheel-down must pay thousands of steps before moving.
+        self.scroll.set(effective_scroll);
+        let end = reversed.len().saturating_sub(effective_scroll);
+        let start = end.saturating_sub(transcript_h);
+        let visible = reversed[start..end].to_vec();
+        let first = body_h.saturating_sub(visible.len());
         let mut bounds = vec![None; rows.len()];
-        for (index, (text, class, range)) in reversed.into_iter().enumerate() {
+        for (index, (text, class, range)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
             bounds[first + index] = range;
         }
@@ -1103,6 +1264,73 @@ impl ChatView {
             .zip(bounds)
             .map(|((text, class), bounds)| (text, class, bounds))
             .collect()
+    }
+
+    pub fn styled_message_rows(
+        &self,
+        width: usize,
+        messages: &[ChatMessage],
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) -> usize {
+        messages.iter().enumerate().map(|(index, message)|
+            boxed_message_rows(width, message, starts_new_group(index, messages), appearance).len()
+        ).sum()
+    }
+
+    /// Anchor the last currently visible transcript row to a message and an
+    /// intra-message rendered-row offset. The caller supplies the same full
+    /// projection that is painted, preserving group-boundary semantics.
+    pub fn rendered_anchor(
+        &self,
+        width: usize,
+        messages: &[ChatMessage],
+        ids: &[String],
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) -> Option<RenderedChatAnchor> {
+        let mut total = 0usize;
+        let mut spans = Vec::with_capacity(messages.len());
+        for (index, message) in messages.iter().enumerate() {
+            let rows = boxed_message_rows(width, message, starts_new_group(index, messages), appearance).len();
+            spans.push((total, rows));
+            total = total.saturating_add(rows);
+        }
+        let target = total.checked_sub(self.scroll.get().saturating_add(1))?;
+        spans.iter().enumerate().find_map(|(index, (start, rows))| {
+            (target >= *start && target < start.saturating_add(*rows))
+                .then_some(RenderedChatAnchor {
+                    id: ids.get(index)?.clone(), index, row: target - *start,
+                })
+        })
+    }
+
+    /// Return the tail-relative scroll needed to keep an anchor at the same
+    /// screen row after the complete rendered projection changes.
+    pub fn scroll_for_anchor(
+        &self,
+        width: usize,
+        messages: &[ChatMessage],
+        ids: &[String],
+        appearance: &crate::native_box_style::BoxAppearance,
+        anchor: &RenderedChatAnchor,
+        screen_row_from_bottom: usize,
+    ) -> Option<usize> {
+        let mut total = 0usize;
+        let mut anchor_start = None;
+        for (index, message) in messages.iter().enumerate() {
+            let rows = boxed_message_rows(width, message, starts_new_group(index, messages), appearance).len();
+            if ids.get(index).map(String::as_str) == Some(anchor.id.as_str()) {
+                anchor_start = Some((total, rows));
+            }
+            total = total.saturating_add(rows);
+        }
+        let (start, rows) = anchor_start?;
+        if anchor.row >= rows { return None; }
+        // The captured row was the bottom visible transcript row. Locate the
+        // same identity in the new projection, then derive its exact
+        // tail-relative offset. This handles eviction changing indices and
+        // separators changing the preceding row count.
+        let absolute = start + anchor.row;
+        Some(total.saturating_sub(absolute.saturating_add(1)).saturating_add(screen_row_from_bottom))
     }
 }
 
@@ -1112,27 +1340,35 @@ mod tests {
 
     #[test]
     fn styled_message_boxes_keep_real_text_bounds_separate_from_decoration() {
-        use crate::native_box_style::{BoxAppearance, BoxId, BoxOverride, RadiusPreset};
+        use crate::native_box_style::{BoxAppearance, RadiusPreset};
         let mut style = BoxAppearance::default();
         style.preset = RadiusPreset::IosSquircle;
         style.padding = 1;
-        style.overrides.insert(
-            BoxId::User,
-            BoxOverride {
-                preset: Some(RadiusPreset::Sharp),
-                ..Default::default()
-            },
-        );
-        for (role, expected) in [
-            (ChatRole::User, '┌'),
-            (ChatRole::Assistant, '╭'),
-            (ChatRole::System, '╭'),
-            (ChatRole::Tool, '╭'),
+        // Per-role native identity: only the user card carries the upstream
+        // left rail; other roles are unbordered prose — a radius preset can
+        // never frame ANY role.
+        for (role, railed) in [
+            (ChatRole::User, true),
+            (ChatRole::Assistant, false),
+            (ChatRole::System, false),
+            (ChatRole::Tool, false),
         ] {
             let message = ChatMessage::text(role, "ACTUAL_TEXT");
             let rows = boxed_message_rows(40, &message, false, &style);
-            assert!(rows[0].0.starts_with(expected));
-            assert_eq!(rows[0].2, None);
+            if railed {
+                assert!(
+                    rows.iter().all(|(text, _, _)| text.starts_with(USER_RAIL)),
+                    "user card keeps the upstream left rail: {rows:?}"
+                );
+            } else {
+                assert!(
+                    rows
+                        .iter()
+                        .all(|(text, _, _)| !text.contains('╭') && !text.contains('┌')),
+                    "radius preset must not frame an unbordered role: {role:?} {rows:?}"
+                );
+            }
+            assert_eq!(rows[0].2, None, "decoration rows carry no text bounds");
             let (text, _, bounds) = rows
                 .iter()
                 .find(|(text, _, _)| text.contains("ACTUAL_TEXT"))
@@ -1144,8 +1380,642 @@ mod tests {
         }
     }
 
+    /// Radius is decoupled from chat framing: for every role, every logical
+    /// radius renders IDENTICAL message rows (same margin/padding at 0 and
+    /// 50, no rails added, no top/bottom borders appear), while the
+    /// composer — a surface that already paints corners — keeps changing
+    /// exactly its corner glyphs.
+    #[test]
+    fn radius_change_never_frames_messages_or_alters_padding() {
+        use crate::native_box_style::{BoxAppearance, RadiusPreset};
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "user note"),
+            ChatMessage::text(ChatRole::Assistant, "assistant prose"),
+            ChatMessage {
+                role: ChatRole::Assistant,
+                parts: vec![ChatPart::ToolCall {
+                    name: "bash".to_owned(),
+                    id: "call-1".to_owned(),
+                }],
+                agent: None,
+                model: None,
+            },
+        ];
+        let appearance = |radius: u8| {
+            let mut style = BoxAppearance::default();
+            style.preset = RadiusPreset::Custom;
+            style.radius = radius;
+            style
+        };
+        for radius in [0u8, 1, 17, 50] {
+            for message in &messages {
+                let rows = boxed_message_rows(60, message, false, &appearance(radius));
+                assert!(
+                    !rows
+                        .iter()
+                        .any(|(text, _, _)| text.contains('╔')
+                            || text.contains('╭')
+                            || text.contains('┏')),
+                    "radius {radius} must not create frame rows: {rows:?}"
+                );
+                assert_eq!(
+                    rows,
+                    boxed_message_rows(60, message, false, &appearance(0)),
+                    "message rows identical at radius {radius} and 0"
+                );
+            }
+        }
+        // Styled path: transcript rows identical at radius 0/50 (padding
+        // unchanged), composer corners DO change (existing surface).
+        let mut view = ChatView::new();
+        for radius in [0u8, 50] {
+            let rows = view.render_styled(
+                60,
+                20,
+                "ws",
+                &messages,
+                "draft",
+                false,
+                &appearance(radius),
+            );
+            let body: Vec<_> = rows
+                .split(|(_, class, _)| *class == ChatRowClass::Composer)
+                .next()
+                .unwrap()
+                .to_vec();
+            if radius == 0 {
+                assert_eq!(
+                    body,
+                    view.render_styled(60, 20, "ws", &messages, "draft", false, &appearance(50))
+                        .split(|(_, class, _)| *class == ChatRowClass::Composer)
+                        .next()
+                        .unwrap()
+                        .to_vec(),
+                    "padding/margins identical at radius 0 and 50"
+                );
+            }
+        }
+        // Radius changes the EXISTING composer corners only.
+        let composer_top = |radius: u8| {
+            view.render_styled(60, 20, "ws", &messages, "draft", false, &appearance(radius))
+                .iter()
+                .find(|(_, class, _)| *class == ChatRowClass::Composer)
+                .map(|(text, _, _)| text.as_str())
+                .unwrap_or_default()
+                .to_owned()
+        };
+        assert!(composer_top(0).starts_with('┌'));
+        assert!(composer_top(50).starts_with('╭'));
+    }
+
+    /// Default user card = upstream left rail + inset (distinct treatment,
+    /// never a full rectangle): rail rows start with the rail glyph, no
+    /// message row carries a right rail or a bottom/top full border, and
+    /// assistant prose stays unbordered beside it.
+    #[test]
+    fn user_card_is_a_left_rail_and_never_a_full_frame() {
+        use crate::native_box_style::BoxAppearance;
+        let mut view = ChatView::new();
+        let messages = vec![
+            ChatMessage::text(ChatRole::User, "hello rail"),
+            ChatMessage::text(ChatRole::Assistant, "prose body"),
+        ];
+        let rows = view.render_styled(
+            60,
+            18,
+            "ws",
+            &messages,
+            "",
+            false,
+            &BoxAppearance::default(),
+        );
+        let painted: Vec<_> = rows
+            .split(|(_, class, _)| *class == ChatRowClass::Composer)
+            .next()
+            .unwrap()
+            .to_vec();
+        let user_rows: Vec<_> = painted
+            .iter()
+            .filter(|(row, class, _)| {
+                *class == ChatRowClass::UserCard && row.contains("hello rail")
+            })
+            .collect();
+        assert!(!user_rows.is_empty(), "user text rendered");
+        for (row, _, _) in &user_rows {
+            assert!(row.starts_with(USER_RAIL), "left rail first cell: {row:?}");
+            assert_ne!(
+                row.chars().last(),
+                Some(USER_RAIL),
+                "no right rail: {row:?}"
+            );
+            for (ch_l, ch_r) in row.chars().zip(row.chars().skip(1)) {
+                assert!(
+                    !matches!((ch_l, ch_r), ('┌', '─') | ('╭', '─') | ('╔', '═') | ('┏', '━')),
+                    "no top border run: {row:?}"
+                );
+            }
+        }
+        let prose: Vec<_> = painted
+            .iter()
+            .filter(|(row, class, _)| {
+                *class == ChatRowClass::AssistantCard && row.contains("prose body")
+            })
+            .collect();
+        assert!(!prose.is_empty(), "assistant prose rendered");
+        for (row, _, _) in &prose {
+            assert!(
+                !row.chars().any(|c| matches!(c, '╭' | '┌' | '╔' | '┏' | '┃')),
+                "assistant prose stays unbordered: {row:?}"
+            );
+        }
+    }
+
+    /// Existing explicit heavy/double border preferences remain full frames
+    /// (never silently downgraded by the radius decoupling).
+    #[test]
+    fn explicit_heavy_and_double_line_weights_still_frame_messages() {
+        use crate::native_box_style::{
+            BorderStyle, BoxAppearance, BoxId, BoxOverride,
+        };
+        let mut style = BoxAppearance::default();
+        style.overrides.insert(
+            BoxId::User,
+            BoxOverride {
+                border_style: Some(BorderStyle::Double),
+                ..BoxOverride::default()
+            },
+        );
+        let mut heavy = BoxAppearance::default();
+        heavy.border_style = BorderStyle::Heavy;
+        for (name, appearance) in [("double", &style), ("heavy", &heavy)] {
+            let rows = boxed_message_rows(
+                40,
+                &ChatMessage::text(ChatRole::User, "kept"),
+                false,
+                appearance,
+            );
+            assert!(
+                rows.iter()
+                    .any(|(text, _, _)| text.starts_with(['╔', '┏'])),
+                "{name}: full frame kept: {rows:?}"
+            );
+            assert!(
+                rows.iter()
+                    .any(|(text, _, _)| text.trim_end().ends_with(['╗', '┛'])),
+                "{name}: right rail kept: {rows:?}"
+            );
+        }
+        // radius edits on top of these styles do not change the frame.
+        let mut rounded = style.clone();
+        rounded.preset = crate::native_box_style::RadiusPreset::Rounded;
+        assert_eq!(
+            boxed_message_rows(40, &ChatMessage::text(ChatRole::User, "kept"), false, &style)
+                .iter()
+                .map(|(t, _, _)| t.clone())
+                .collect::<Vec<_>>(),
+            boxed_message_rows(40, &ChatMessage::text(ChatRole::User, "kept"), false, &rounded)
+                .iter()
+                .map(|(t, _, _)| t.clone())
+                .collect::<Vec<_>>(),
+        );
+    }
+
     fn history(n: usize) -> Vec<String> {
         (0..n).map(|i| format!("entry {i}")).collect()
+    }
+
+    fn history_message_id(id: usize) -> String {
+        format!("00000000-0000-4000-8000-{id:012}")
+    }
+
+    fn retained_history_user_record(id: usize) -> serde_json::Value {
+        serde_json::json!({
+            "id": history_message_id(id),
+            "role": "user",
+            "body": {"storage": "inline", "text": format!("shared-row-{id:03}")}
+        })
+    }
+
+    fn projected_anchor_record(id: usize) -> serde_json::Value {
+        let message_id = format!("msg-{id:03}");
+        match id % 5 {
+            0 => {
+                let text = if id == 115 {
+                    format!(
+                        "opening prose for message {message_id} deliberately wraps across a narrow user card\nanchor-row-{message_id}\nclosing prose for {message_id} anchor-115"
+                    )
+                } else {
+                    format!("user message {message_id} with a multiline card\nsecond line")
+                };
+                serde_json::json!({
+                    "id": message_id,
+                    "role": "user",
+                    "body": {"storage": "inline", "text": text}
+                })
+            }
+            1 | 4 => serde_json::json!({
+                "id": message_id,
+                "role": "assistant",
+                "body": {"storage": "inline", "text": format!("assistant message {message_id}")}
+            }),
+            2 => serde_json::json!({
+                "id": message_id,
+                "role": "assistant",
+                "parts": [
+                    {"type": "text", "text": format!("tool request from {message_id}")},
+                    {"type": "tool_call", "name": "bash", "call_id": format!("call-{id}"), "arguments": {"cmd": "true"}}
+                ],
+                "tool_output": {
+                    "name": "bash",
+                    "call_id": format!("call-{id}"),
+                    "output": format!("tool output {id}"),
+                    "is_error": false
+                }
+            }),
+            _ => serde_json::json!({
+                "id": message_id,
+                "role": "tool",
+                "body": {"storage": "inline", "text": format!("tool message {message_id}")}
+            }),
+        }
+    }
+
+    fn projected_anchor_history(
+        start: usize,
+        end: usize,
+    ) -> Vec<(String, ChatMessage)> {
+        let records: Vec<_> = (start..end).map(projected_anchor_record).collect();
+        crate::native_chat_projection::project_history_entries(&records)
+    }
+
+    fn anchor_for_marker(
+        entries: &[(String, ChatMessage)],
+        id: &str,
+        marker: &str,
+        width: usize,
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) -> RenderedChatAnchor {
+        let messages: Vec<_> = entries.iter().map(|(_, message)| message.clone()).collect();
+        let (index, (entry_id, message)) = entries
+            .iter()
+            .enumerate()
+            .find(|(_, (entry_id, _))| entry_id.as_str() == id)
+            .expect("anchor message is in projected history");
+        let rows = boxed_message_rows(
+            width,
+            message,
+            starts_new_group(index, &messages),
+            appearance,
+        );
+        assert!(
+            index > 0 && starts_new_group(index, &messages),
+            "anchor is at an actual group boundary"
+        );
+        assert_eq!(rows.first().map(|(_, class, _)| *class), Some(ChatRowClass::Separator));
+        assert!(
+            rows.iter()
+                .filter(|(_, class, _)| *class == ChatRowClass::UserCard)
+                .count()
+                >= 3,
+            "anchor user card is multiline and wrapped: {rows:?}"
+        );
+        let row = rows
+            .iter()
+            .position(|(text, class, _)| *class == ChatRowClass::UserCard && text.contains(marker))
+            .expect("anchor marker has a rendered user-card row");
+        RenderedChatAnchor {
+            id: entry_id.clone(),
+            index,
+            row,
+        }
+    }
+
+    fn place_at_anchor(
+        view: &mut ChatView,
+        entries: &[(String, ChatMessage)],
+        width: usize,
+        appearance: &crate::native_box_style::BoxAppearance,
+        anchor: &RenderedChatAnchor,
+    ) -> usize {
+        let ids: Vec<_> = entries.iter().map(|(id, _)| id.clone()).collect();
+        let messages: Vec<_> = entries.iter().map(|(_, message)| message.clone()).collect();
+        let scroll = view
+            .scroll_for_anchor(width, &messages, &ids, appearance, anchor, 0)
+            .expect("anchor identity and rendered row exist");
+        view.set_scroll(scroll);
+        let captured = view
+            .rendered_anchor(width, &messages, &ids, appearance)
+            .expect("positioned view captures a rendered anchor");
+        assert_eq!(captured.id, anchor.id);
+        assert_eq!(captured.row, anchor.row);
+        scroll
+    }
+
+    fn visible_rows_at_anchor(
+        view: &mut ChatView,
+        entries: &[(String, ChatMessage)],
+        width: usize,
+        height: usize,
+        appearance: &crate::native_box_style::BoxAppearance,
+        anchor: &RenderedChatAnchor,
+        marker: &str,
+    ) -> Vec<(String, ChatRowClass)> {
+        let ids: Vec<_> = entries.iter().map(|(id, _)| id.clone()).collect();
+        let messages: Vec<_> = entries.iter().map(|(_, message)| message.clone()).collect();
+        let captured = view
+            .rendered_anchor(width, &messages, &ids, appearance)
+            .expect("visible view has a rendered anchor");
+        assert_eq!(captured.id, anchor.id);
+        assert_eq!(captured.row, anchor.row);
+
+        let frame = view.render_styled(width, height, "anchor-test", &messages, "", false, appearance);
+        assert!(frame.iter().all(|(row, _, _)| row.chars().count() <= width));
+        let composer = frame
+            .iter()
+            .position(|(_, class, _)| *class == ChatRowClass::Composer)
+            .expect("styled frame contains composer");
+        let visible: Vec<_> = frame[..composer]
+            .iter()
+            .filter(|(_, class, _)| *class != ChatRowClass::Header)
+            .map(|(row, class, _)| (row.clone(), *class))
+            .collect();
+        let bottom = visible.last().expect("transcript viewport is populated");
+        assert_eq!(bottom.1, ChatRowClass::UserCard);
+        assert!(bottom.0.contains(marker), "bottom transcript row: {bottom:?}");
+        let after_render = view
+            .rendered_anchor(width, &messages, &ids, appearance)
+            .expect("render leaves the same anchor visible");
+        assert_eq!(after_render.id, anchor.id);
+        assert_eq!(after_render.row, anchor.row);
+        visible
+    }
+
+    fn assert_boxed_projection_uses_parts_width_and_appearance(
+        entries: &[(String, ChatMessage)],
+        anchor_id: &str,
+        width: usize,
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) {
+        let messages: Vec<_> = entries.iter().map(|(_, message)| message.clone()).collect();
+        let mut has_tool_call = false;
+        let mut has_tool_result = false;
+        for (index, message) in messages.iter().enumerate() {
+            let rows = boxed_message_rows(
+                width,
+                message,
+                starts_new_group(index, &messages),
+                appearance,
+            );
+            assert!(rows.iter().all(|(row, _, _)| row.chars().count() <= width));
+            has_tool_call |= rows.iter().any(|(_, class, _)| *class == ChatRowClass::ToolCall);
+            has_tool_result |= rows.iter().any(|(_, class, _)| *class == ChatRowClass::ToolResult);
+        }
+        assert!(has_tool_call, "projected tool-call parts render as tool cards");
+        assert!(has_tool_result, "projected tool-output parts render as tool cards");
+
+        let index = entries.iter().position(|(id, _)| id == anchor_id).unwrap();
+        let user = boxed_message_rows(
+            width,
+            &messages[index],
+            starts_new_group(index, &messages),
+            appearance,
+        );
+        let default = boxed_message_rows(
+            width,
+            &messages[index],
+            starts_new_group(index, &messages),
+            &crate::native_box_style::BoxAppearance::default(),
+        );
+        assert!(user.len() > default.len(), "per-card appearance padding affects rows");
+        let narrower = boxed_message_rows(
+            width.saturating_sub(8),
+            &messages[index],
+            starts_new_group(index, &messages),
+            appearance,
+        );
+        assert!(
+            narrower.iter().filter(|(_, class, _)| *class == ChatRowClass::UserCard).count()
+                > user.iter().filter(|(_, class, _)| *class == ChatRowClass::UserCard).count(),
+            "narrower width wraps the actual user-card projection"
+        );
+    }
+
+    #[test]
+    fn rendered_anchor_survives_prepend_and_newer_history_eviction() {
+        use crate::native_box_style::{BoxAppearance, BoxId, BoxOverride};
+
+        let width = 30;
+        let height = 16;
+        let mut appearance = BoxAppearance::default();
+        appearance.overrides.insert(
+            BoxId::User,
+            BoxOverride { padding: Some(2), ..BoxOverride::default() },
+        );
+        appearance.overrides.insert(
+            BoxId::Tool,
+            BoxOverride { padding: Some(1), ..BoxOverride::default() },
+        );
+        let before = projected_anchor_history(100, 140);
+        let marker = "anchor-115";
+        let seed = anchor_for_marker(&before, "msg-115", marker, width, &appearance);
+        assert_boxed_projection_uses_parts_width_and_appearance(
+            &before,
+            "msg-115",
+            width,
+            &appearance,
+        );
+
+        let mut view = ChatView::new();
+        let before_scroll = place_at_anchor(&mut view, &before, width, &appearance, &seed);
+        let captured = view
+            .rendered_anchor(
+                width,
+                &before.iter().map(|(_, message)| message.clone()).collect::<Vec<_>>(),
+                &before.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+                &appearance,
+            )
+            .expect("before-page anchor captured");
+        let before_visible = visible_rows_at_anchor(
+            &mut view, &before, width, height, &appearance, &captured, marker,
+        );
+
+        let after = projected_anchor_history(90, 130);
+        let after_index = after.iter().position(|(id, _)| id == "msg-115").unwrap();
+        assert_eq!(after_index, seed.index + 10, "older page was prepended");
+        let after_scroll = place_at_anchor(&mut view, &after, width, &appearance, &captured);
+        assert_ne!(after_scroll, before_scroll, "newer eviction moves tail-relative window");
+        let after_visible = visible_rows_at_anchor(
+            &mut view, &after, width, height, &appearance, &captured, marker,
+        );
+        assert_eq!(before_visible, after_visible, "same rendered transcript stays anchored");
+        let restored = view
+            .rendered_anchor(
+                width,
+                &after.iter().map(|(_, message)| message.clone()).collect::<Vec<_>>(),
+                &after.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>(),
+                &appearance,
+            )
+            .expect("after-page anchor restored");
+        assert_eq!(restored.id, captured.id);
+        assert_eq!(restored.row, captured.row);
+        assert_eq!(restored.index, after_index);
+    }
+
+    #[test]
+    fn retained_boundary_cached_newer_page_restores_anchor_before_three_row_gesture() {
+        use crate::native_box_style::BoxAppearance;
+
+        let backend_history: Vec<_> = (0..=500).map(retained_history_user_record).collect();
+        let initial = &backend_history[401..501];
+        let mut window = crate::native_chat_projection::NativeHistoryWindow::new(
+            initial,
+            Some(history_message_id(400)),
+        );
+        for (start, end, next_before) in [
+            (301, 401, 300),
+            (201, 301, 200),
+            (101, 201, 100),
+            (1, 101, 0),
+        ] {
+            let page = &backend_history[start..end];
+            let next_before = history_message_id(next_before);
+            assert!(window.load_older(|_, _| Ok(serde_json::json!({
+                "messages": page,
+                "next_before": next_before,
+            }))).unwrap());
+        }
+        assert_eq!(window.messages().len(), crate::native_chat_projection::NativeHistoryWindow::MAX_MESSAGES);
+        assert_eq!(window.messages().first().unwrap()["id"], history_message_id(1));
+        assert_eq!(window.messages().last().unwrap()["id"], history_message_id(200));
+        assert!(window.has_adjacent_newer(), "older-page eviction retains exactly the next newer page");
+
+        let appearance = BoxAppearance::default();
+        let before = crate::native_chat_projection::project_history_entries(window.messages());
+        let anchor_id = history_message_id(200);
+        let before_index = before.iter().position(|(id, _)| id == &anchor_id).unwrap();
+        let before_messages: Vec<_> = before.iter().map(|(_, message)| message.clone()).collect();
+        let target_rows = boxed_message_rows(
+            40,
+            &before_messages[before_index],
+            starts_new_group(before_index, &before_messages),
+            &appearance,
+        );
+        let anchor_row = target_rows.len() - 1;
+
+        let mut view = crate::native_view::NativeView::new(44, 38);
+        view.set_session_route(true);
+        view.set_box_appearance(appearance);
+        let width = view.presentation().main_width.saturating_sub(4) as usize;
+        assert_eq!(width, 40, "anchor uses native view's actual transcript width");
+        assert!(view.chat_at_tail(), "the cached-page input branch starts at the retained tail");
+        let captured = view.chat_rendered_anchor(&before).expect("actual native view captures anchor");
+        assert_eq!(captured.id, anchor_id);
+        assert_eq!(captured.index, before_index);
+        assert_eq!(captured.row, anchor_row, "bottom padding is part of rendered message anchor");
+        let before_frame = view.render_typed("", &before_messages, false, &[]);
+        let shared_markers: Vec<_> = (194..=199)
+            .map(|id| format!("shared-row-{id:03}"))
+            .collect();
+        let before_y: Vec<_> = shared_markers
+            .iter()
+            .map(|marker| {
+                before_frame
+                    .iter()
+                    .position(|row| row.contains(marker))
+                    .unwrap_or_else(|| panic!("shared content {marker} appears in actual native frame"))
+            })
+            .collect();
+        assert!(
+            before_y.windows(2).all(|ys| ys[1] > ys[0]),
+            "shared message rows follow actual boxed cards: {before_y:?}"
+        );
+
+        // Match the production boundary sequence: capture anchor, wheel-down,
+        // admit cached page, restore anchor, re-apply the gesture exactly once.
+        view.scroll_down(3);
+        assert!(window.advance_newer());
+        assert_eq!(window.messages().len(), crate::native_chat_projection::NativeHistoryWindow::MAX_MESSAGES);
+        assert_eq!(window.messages().first().unwrap()["id"], history_message_id(101));
+        assert_eq!(window.messages().last().unwrap()["id"], history_message_id(300));
+
+        let after = crate::native_chat_projection::project_history_entries(window.messages());
+        let after_index = after.iter().position(|(id, _)| id == &anchor_id).unwrap();
+        assert_eq!(after_index, 99, "100 oldest records evicted from retained window");
+        assert!(view.restore_chat_rendered_anchor(&after, &captured));
+        let restored = view.chat_rendered_anchor(&after).expect("same backend id remains visible after cache advance");
+        assert_eq!(restored.id, captured.id);
+        assert_eq!(restored.row, captured.row);
+        assert_eq!(restored.index, after_index);
+        let restored_messages: Vec<_> = after.iter().map(|(_, message)| message.clone()).collect();
+        let restored_frame = view.render_typed("", &restored_messages, false, &[]);
+        let restored_y: Vec<_> = shared_markers
+            .iter()
+            .map(|marker| {
+                restored_frame
+                    .iter()
+                    .position(|row| row.contains(marker))
+                    .unwrap_or_else(|| panic!("shared content {marker} remains after cache advance"))
+            })
+            .collect();
+        assert_eq!(restored_y, before_y, "cache advance restores shared content at its exact screen rows");
+
+        view.scroll_down(3);
+        let after_frame = view.render_typed("", &restored_messages, false, &[]);
+        let after_y: Vec<_> = shared_markers
+            .iter()
+            .map(|marker| {
+                after_frame
+                    .iter()
+                    .position(|row| row.contains(marker))
+                    .unwrap_or_else(|| panic!("shared content {marker} remains after wheel movement"))
+            })
+            .collect();
+        for ((before_y, after_y), marker) in before_y.iter().zip(after_y.iter()).zip(shared_markers.iter()) {
+            assert_eq!(*after_y, *before_y - 3, "three-row gesture moves {marker} by exactly three rows");
+        }
+        let post_gesture = view.chat_rendered_anchor(&after).expect("post-gesture anchor captured");
+        assert_eq!(post_gesture.id, history_message_id(201));
+        assert_eq!(post_gesture.row, 2, "three rows into next card's separator, padding, and text");
+    }
+
+    #[test]
+    fn rendered_anchor_survives_newer_append_and_oldest_history_eviction() {
+        use crate::native_box_style::BoxAppearance;
+
+        let width = 21;
+        let height = 16;
+        let appearance = BoxAppearance::default();
+        let before = projected_anchor_history(90, 130);
+        let marker = "anchor-115";
+        let seed = anchor_for_marker(&before, "msg-115", marker, width, &appearance);
+        let mut view = ChatView::new();
+        let before_scroll = place_at_anchor(&mut view, &before, width, &appearance, &seed);
+        let ids: Vec<_> = before.iter().map(|(id, _)| id.clone()).collect();
+        let messages: Vec<_> = before.iter().map(|(_, message)| message.clone()).collect();
+        let captured = view
+            .rendered_anchor(width, &messages, &ids, &appearance)
+            .expect("before-page anchor captured");
+        let before_visible = visible_rows_at_anchor(
+            &mut view, &before, width, height, &appearance, &captured, marker,
+        );
+
+        let after = projected_anchor_history(100, 140);
+        let after_index = after.iter().position(|(id, _)| id == "msg-115").unwrap();
+        assert_eq!(after_index + 10, seed.index, "oldest page was evicted");
+        let after_scroll = place_at_anchor(&mut view, &after, width, &appearance, &captured);
+        assert_ne!(after_scroll, before_scroll, "newer append moves tail-relative window");
+        let after_visible = visible_rows_at_anchor(
+            &mut view, &after, width, height, &appearance, &captured, marker,
+        );
+        assert_eq!(before_visible, after_visible, "same rendered transcript stays anchored");
+        let ids: Vec<_> = after.iter().map(|(id, _)| id.clone()).collect();
+        let messages: Vec<_> = after.iter().map(|(_, message)| message.clone()).collect();
+        let restored = view
+            .rendered_anchor(width, &messages, &ids, &appearance)
+            .expect("after-page anchor restored");
+        assert_eq!(restored.id, captured.id);
+        assert_eq!(restored.row, captured.row);
+        assert_eq!(restored.index, after_index);
     }
 
     // --- typed roles/parts: caller facts, never inferred from text -------
@@ -1156,7 +2026,7 @@ mod tests {
     /// row. A second user message is the only new group.
     #[test]
     fn typed_roles_are_enums_never_text_prefixes() {
-        let view = ChatView::new();
+        let mut view = ChatView::new();
         let messages = vec![
             ChatMessage::text(ChatRole::User, "assistant: not the assistant role"),
             ChatMessage::text(ChatRole::Assistant, "user: not a user block"),
@@ -1239,7 +2109,7 @@ mod tests {
 
     #[test]
     fn typed_tool_thinking_and_metadata_rows_are_labeled_from_facts() {
-        let view = ChatView::new();
+        let mut view = ChatView::new();
         let messages = vec![
             ChatMessage {
                 role: ChatRole::User,
@@ -1330,7 +2200,7 @@ mod tests {
     /// part is read only as a bounded UTF-8 prefix.
     #[test]
     fn typed_parts_rows_and_inputs_are_bounded_and_sanitized() {
-        let view = ChatView::new();
+        let mut view = ChatView::new();
         let hostile = format!("\x1b[31mred\x07{}", "x".repeat(1024 * 1024));
         let mut parts: Vec<ChatPart> = vec![ChatPart::Text(hostile)];
         parts.extend((0..MAX_PARTS_PER_MESSAGE * 8).map(|i| ChatPart::Text(format!("part {i}"))));
@@ -1379,10 +2249,7 @@ mod tests {
         );
         view.scroll_up(MAX_SCROLL_ROWS);
         let rows = view.render_typed(40, 10, "ws", &messages, "", false);
-        assert!(
-            !rows.iter().any(|row| row.contains("entry ")),
-            "overscroll renders an empty transcript region"
-        );
+        assert!(rows.iter().any(|row| row.contains("entry 0")));
         view.follow_tail();
         let rows = view.render_typed(40, 10, "ws", &messages, "first\nsecond\nthird", false);
         assert_eq!(rows.last().map(String::as_str), Some("  third"));
@@ -1392,7 +2259,7 @@ mod tests {
     /// Zero/one-row viewports and huge hostile drafts stay safe.
     #[test]
     fn typed_tiny_viewports_and_hostile_drafts_stay_safe() {
-        let view = ChatView::new();
+        let mut view = ChatView::new();
         let messages = vec![ChatMessage::text(ChatRole::User, "hi")];
         assert!(
             view.render_typed(80, 0, "ws", &messages, "", false)
@@ -1409,7 +2276,7 @@ mod tests {
     /// overscroll stays in bounds, follow_tail re-pins.
     #[test]
     fn scroll_5000_entry_history_stays_bounded() {
-        let view = ChatView::new();
+        let mut view = ChatView::new();
         let h = history(5000);
         // Layout at height 10: header, 8 transcript rows, prompt row.
         let rows = view.render(40, 10, "ws", &h, "", false);
@@ -1425,18 +2292,80 @@ mod tests {
         assert_eq!(rows[8], "entry 4994", "5 rows above tail");
         assert!(rows[0].contains("[+5 up]"), "scroll offset visible");
 
-        // Overscroll past the end: empty transcript, bounded pane.
+        // Overscroll past the end clamps to the oldest reachable pane.
         let mut overs = ChatView::new();
         overs.scroll_up(usize::MAX);
         let rows = overs.render(40, 10, "ws", &h, "", false);
         assert!(rows.len() <= 10, "overscroll never exceeds height");
-        assert!(rows.iter().all(|r| !r.starts_with("entry ")));
+        assert!(rows.iter().any(|r| r == "entry 0"));
         assert_eq!(rows[rows.len() - 1], "> ", "composer survives overscroll");
 
         // Re-pin restores the tail without touching history.
         overs.follow_tail();
         let rows = overs.render(40, 10, "ws", &h, "", false);
         assert_eq!(rows[8], "entry 4999");
+    }
+
+    #[test]
+    fn overscroll_render_synchronizes_offset_for_immediate_wheel_down() {
+        let history: Vec<String> = (0..20).map(|i| format!("entry {i}")).collect();
+        let mut flat = ChatView::new();
+        flat.scroll_up(usize::MAX);
+        let oldest = flat.render(40, 10, "ws", &history, "", false);
+        flat.scroll_down(1);
+        let next = flat.render(40, 10, "ws", &history, "", false);
+        assert!(oldest.iter().any(|row| row == "entry 0"));
+        assert!(next.iter().any(|row| row == "entry 1"));
+        flat.scroll_up(usize::MAX);
+        let _ = flat.render(40, 10, "ws", &history, "", false);
+        let resized_oldest = flat.render(40, 5, "ws", &history, "", false);
+        flat.scroll_down(1);
+        let resized_next = flat.render(40, 5, "ws", &history, "", false);
+        assert!(resized_oldest.iter().any(|row| row == "entry 5"));
+        assert!(resized_next.iter().any(|row| row == "entry 6"));
+
+        let messages: Vec<ChatMessage> = (0..20)
+            .map(|i| ChatMessage::text(ChatRole::Assistant, format!("entry {i}")))
+            .collect();
+        let mut typed = ChatView::new();
+        typed.scroll_up(usize::MAX);
+        let oldest = typed.render_typed(40, 10, "ws", &messages, "", false);
+        typed.scroll_down(1);
+        let next = typed.render_typed(40, 10, "ws", &messages, "", false);
+        assert!(oldest.iter().any(|row| row.contains("entry 0")));
+        assert!(next.iter().any(|row| row.contains("entry 1")));
+
+        let mut styled = ChatView::new();
+        styled.scroll_up(usize::MAX);
+        let oldest = styled.render_styled(
+            40, 10, "ws", &messages, "", false,
+            &crate::native_box_style::BoxAppearance::default(),
+        );
+        styled.scroll_down(1);
+        let next = styled.render_styled(
+            40, 10, "ws", &messages, "", false,
+            &crate::native_box_style::BoxAppearance::default(),
+        );
+        assert!(oldest.iter().any(|(row, _class, _)| row.contains("entry 0")));
+        assert!(next.iter().any(|(row, _class, _)| row.contains("entry 1")));
+    }
+
+    #[test]
+    fn styled_sixty_one_messages_reaches_oldest_and_moves_down_one_row() {
+        let messages: Vec<ChatMessage> = (0..61)
+            .map(|i| ChatMessage::text(ChatRole::Assistant, format!("entry {i:03}")))
+            .collect();
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let mut view = ChatView::new();
+        for _ in 0..40 {
+            view.scroll_up(5);
+            let _ = view.render_styled(80, 10, "ws", &messages, "", false, &appearance);
+        }
+        let oldest = view.render_styled(80, 10, "ws", &messages, "", false, &appearance);
+        assert!(oldest.iter().any(|(row, _, _)| row.contains("entry 000")), "oldest styled viewport: {oldest:?}");
+        view.scroll_down(1);
+        let next = view.render_styled(80, 10, "ws", &messages, "", false, &appearance);
+        assert!(next.iter().any(|(row, _, _)| row.contains("entry 001")), "one row down: {next:?}");
     }
 
     /// Appending history while scrolled does not clear scroll state;
@@ -1473,7 +2402,7 @@ mod tests {
     #[test]
     fn multiline_draft_prompt_and_overflow() {
         let h = history(3);
-        let view = ChatView::new();
+        let mut view = ChatView::new();
         let rows = view.render(40, 10, "ws", &h, "line one\nline two\nline three", false);
         let prompt = rows
             .iter()
@@ -1601,7 +2530,8 @@ mod tests {
         // width == 0: full header preserved, suffix included, no panic.
         let mut view = ChatView::new();
         view.scroll_up(3);
-        let rows = view.render(0, 6, workspace, &h, "", true);
+        let long_h = history(10);
+        let rows = view.render(0, 6, workspace, &long_h, "", true);
         assert!(rows[0].contains(workspace), "width 0 keeps workspace");
         assert!(
             rows[0].contains("[turn in flight]"),

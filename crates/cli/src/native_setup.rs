@@ -4,18 +4,21 @@ use std::{
     env, fs,
     fs::OpenOptions,
     io::{Read, Write},
-    path::PathBuf,
+    path::{Path, PathBuf},
 };
 
 const MAX_MODELS: usize = 5000;
 const MAX_STATE_BYTES: usize = 64 * 1024;
 const MAX_RECENT: usize = 32;
+// Keep aligned with the private own-config limit in providers::imported_config.
+const MAX_OWN_CONFIG_BYTES: usize = 4 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct Model {
     pub id: String,
     pub name: String,
     pub provider_id: String,
+    pub context_window: Option<u64>,
 }
 
 impl Model {
@@ -82,6 +85,7 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
                 id: id.to_owned(),
                 name: name.to_owned(),
                 provider_id: provider.to_owned(),
+                context_window:entry.get("context_window").and_then(Value::as_u64).filter(|value|*value>0),
             });
         }
     }
@@ -90,26 +94,107 @@ pub(super) fn catalogue(body: &str) -> Result<Vec<Model>, String> {
 }
 
 pub(super) fn selected(models: &[Model]) -> Option<Model> {
-    if let Some(path) = state_path() {
-        if let Ok(value) = read_state(&path) {
-            if let Some(recent) = value["recent"].as_array() {
-                for entry in recent.iter().take(MAX_RECENT) {
-                    if let Some(provider) = entry["providerID"].as_str() {
-                        if let Some(model) = models
-                            .iter()
-                            .find(|model| entry["modelID"].as_str() == Some(&model.id) && model.provider_id == provider)
-                        {
-                            return Some(model.clone());
-                        }
-                    }
-                }
-            }
+    selected_with_sources(
+        models,
+        state_path().as_deref(),
+        opencode_rk_providers::imported_config::own_config_path().as_deref(),
+    )
+}
+
+/// Pure selection core; production `selected()` resolves the canonical own
+/// state/config paths, tests pass explicit fixture paths (no env access).
+///
+/// Precedence: explicit recent state first, then the canonical own config
+/// root `model` (exact catalogued `provider/model` identity; malformed,
+/// missing, over-limit or unavailable identities are skipped honestly), then
+/// the plain catalogue fallback (gpt-5.6, else first row).
+pub(super) fn selected_with_sources(
+    models: &[Model],
+    state: Option<&Path>,
+    config: Option<&Path>,
+) -> Option<Model> {
+    if let Some(path) = state {
+        if let Some(model) = recent_selected(models, path) {
+            return Some(model);
+        }
+    }
+    if let Some(path) = config {
+        if let Some(model) = imported_selected(models, path) {
+            return Some(model);
         }
     }
     models
         .iter()
         .find(|model| model.id == "gpt-5.6")
         .or_else(|| models.first())
+        .cloned()
+}
+
+/// Select the provider to initialize before its model catalogue is loaded.
+///
+/// Provider ids are deliberately validated against the daemon's provider
+/// registry first: a recent entry or an imported model must not turn into an
+/// arbitrary network request.  The configured model is only used for its
+/// qualified provider portion; model identity itself is checked later against
+/// the catalogue returned by that provider.
+pub(super) fn startup_provider(
+    recent: Option<&str>,
+    configured_model: Option<&str>,
+    known_providers: &[&str],
+) -> String {
+    let known = |provider: &str| provider == "openai" || known_providers.iter().any(|id| *id == provider);
+    if let Some(provider) = recent.filter(|provider| known(provider)) {
+        return provider.to_owned();
+    }
+    if let Some((provider, _model)) = configured_model.and_then(|model| model.trim().split_once('/')) {
+        if known(provider) {
+            return provider.to_owned();
+        }
+    }
+    "openai".to_owned()
+}
+
+/// Read only the root qualified model identity from the bounded own config.
+/// Keeping this reader shared by provider bootstrap and catalogue selection
+/// avoids a second unbounded/config-semantic JSON parser.
+pub(super) fn configured_model_identity(path: &Path) -> Option<String> {
+    let value = read_bounded_json(path, MAX_OWN_CONFIG_BYTES).ok()?;
+    let configured = value.get("model")?.as_str()?.trim();
+    if configured.is_empty() || configured.len() > 512 || !configured.contains('/') {
+        return None;
+    }
+    Some(configured.to_owned())
+}
+
+fn recent_selected(models: &[Model], path: &Path) -> Option<Model> {
+    let Ok(value) = read_state(&PathBuf::from(path)) else { return None };
+    let recent = value["recent"].as_array()?;
+    for entry in recent.iter().take(MAX_RECENT) {
+        if let Some(provider) = entry["providerID"].as_str() {
+            if let Some(model) = models
+                .iter()
+                .find(|model| entry["modelID"].as_str() == Some(&model.id) && model.provider_id == provider)
+            {
+                return Some(model.clone());
+            }
+        }
+    }
+    None
+}
+
+/// Canonical own config root `model` (`opencode.json`), bounded by its own
+/// config limit; only the root `model` key is read, never credential fields.
+/// Exact provider/model identity is required; invalid identities fall through.
+fn imported_selected(models: &[Model], path: &Path) -> Option<Model> {
+    let configured = configured_model_identity(path)?;
+    models
+        .iter()
+        .find(|model| {
+            model.qualified() == configured
+                || configured
+                    .split_once('/')
+                    .is_some_and(|(provider, id)| model.provider_id == provider && model.id == id)
+        })
         .cloned()
 }
 
@@ -244,18 +329,22 @@ fn state_path() -> Option<PathBuf> {
         .map(|path| path.join("opencode/model.json"))
 }
 
-fn read_state(path: &PathBuf) -> Result<Value, String> {
+fn read_state(path: &Path) -> Result<Value, String> {
+    read_bounded_json(path, MAX_STATE_BYTES)
+}
+
+fn read_bounded_json(path: &Path, max_bytes: usize) -> Result<Value, String> {
     match fs::symlink_metadata(path) {
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(json!({})),
-        Ok(metadata) if metadata.is_file() && metadata.len() <= MAX_STATE_BYTES as u64 => {}
+        Ok(metadata) if metadata.is_file() && metadata.len() <= max_bytes as u64 => {}
         _ => return Err("model state is not a bounded regular file".to_owned()),
     }
     let file = fs::File::open(path).map_err(|_| "unable to read model state")?;
     let mut bytes = Vec::new();
-    file.take(MAX_STATE_BYTES as u64 + 1)
+    file.take(max_bytes as u64 + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "unable to read model state")?;
-    if bytes.len() > MAX_STATE_BYTES {
+    if bytes.len() > max_bytes {
         return Err("model state exceeds size limit".to_owned());
     }
     let value: Value = serde_json::from_slice(&bytes).map_err(|_| "invalid model state")?;
@@ -269,6 +358,141 @@ fn read_state(path: &PathBuf) -> Result<Value, String> {
 mod picker_tests {
     use super::*;
 
+    struct TempDir {
+        root: PathBuf,
+    }
+
+    impl TempDir {
+        fn new(tag: &str) -> Self {
+            let root = std::env::temp_dir().join(format!("native-setup-import-{tag}"));
+            let _ = std::fs::remove_dir_all(&root);
+            std::fs::create_dir_all(&root).expect("fixture dir");
+            Self { root }
+        }
+        fn write(&self, name: &str, body: &str) -> PathBuf {
+            let path = self.root.join(name);
+            std::fs::write(&path, body).expect("fixture file");
+            path
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn fixture_models() -> Vec<Model> {
+        vec![
+            Model { id: "x".into(), name: "Acme X".into(), provider_id: "acme".into(), context_window: None },
+            Model { id: "gpt-5.6".into(), name: "Fallback".into(), provider_id: "openai".into(), context_window: None },
+        ]
+    }
+
+    #[test]
+    fn imported_catalogued_model_is_default_without_recent_selection() {
+        let dir = TempDir::new("default");
+        let config = dir.write("opencode.json", r#"{"model":"acme/x"}"#);
+        let picked = selected_with_sources(&fixture_models(), None, Some(&config));
+        assert_eq!(picked.map(|m| m.qualified()), Some("acme/x".into()));
+    }
+
+    #[test]
+    fn explicit_recent_selection_beats_imported_config_model() {
+        let dir = TempDir::new("recent-beats-import");
+        let state = dir.write("model.json", r#"{"recent":[{"providerID":"openai","modelID":"gpt-5.6"}]}"#);
+        let config = dir.write("opencode.json", r#"{"model":"acme/x"}"#);
+        let picked = selected_with_sources(&fixture_models(), Some(&state), Some(&config));
+        assert_eq!(picked.map(|m| m.qualified()), Some("openai/gpt-5.6".into()));
+    }
+
+    #[test]
+    fn imported_model_survives_large_agent_prompt_within_own_config_limit() {
+        let dir = TempDir::new("large-own-config");
+        let body = json!({
+            "model": "acme/x",
+            "agent": { "large_prompt": "p".repeat(MAX_STATE_BYTES + 1) }
+        })
+        .to_string();
+        assert!(body.len() > MAX_STATE_BYTES);
+        assert!(body.len() <= MAX_OWN_CONFIG_BYTES);
+        let config = dir.write("opencode.json", &body);
+
+        let picked = selected_with_sources(&fixture_models(), None, Some(&config));
+        assert_eq!(picked.map(|model| model.qualified()), Some("acme/x".into()));
+    }
+
+    #[test]
+    fn imported_model_over_own_config_limit_falls_back() {
+        let dir = TempDir::new("oversized-own-config");
+        let body = json!({
+            "model": "acme/x",
+            "agent": { "large_prompt": "p".repeat(MAX_OWN_CONFIG_BYTES) }
+        })
+        .to_string();
+        assert!(body.len() > MAX_OWN_CONFIG_BYTES);
+        let config = dir.write("opencode.json", &body);
+
+        let picked = selected_with_sources(&fixture_models(), None, Some(&config));
+        assert_eq!(picked.map(|model| model.qualified()), Some("openai/gpt-5.6".into()));
+    }
+
+    #[test]
+    fn unknown_or_malformed_imported_model_falls_back_without_panic() {
+        let dir = TempDir::new("import-fallbacks");
+        let models = fixture_models();
+        let malformed = dir.write("malformed.opencode.json", "{");
+        let numeric = dir.write("numeric.opencode.json", r#"{"model":123}"#);
+        let empty = dir.write("empty.opencode.json", r#"{"model":""}"#);
+        let unknown = dir.write("unknown.opencode.json", r#"{"model":"acme/nonexistent"}"#);
+        for path in [&malformed, &numeric, &empty, &unknown] {
+            let picked = selected_with_sources(&models, None, Some(path));
+            assert_eq!(picked.map(|m| m.qualified()), Some("openai/gpt-5.6".into()));
+        }
+        let picked = selected_with_sources(&models, None, Some(&dir.root.join("absent.opencode.json")));
+        assert_eq!(picked.map(|m| m.qualified()), Some("openai/gpt-5.6".into()));
+        // No gpt-5.6 row in the catalogue: the unknown import must never
+        // conjure an entry; selection falls through to the fallback honestly.
+        let fallback = vec![fixture_models()[0].clone()];
+        let picked = selected_with_sources(&fallback, None, Some(&unknown));
+        assert_eq!(picked.map(|m| m.qualified()), Some("acme/x".into()));
+    }
+
+    #[test]
+    fn imported_model_requires_exact_provider_identity() {
+        let dir = TempDir::new("import-identity");
+        // Same catalog id, different provider: provider/model identity only.
+        let config = dir.write("opencode.json", r#"{"model":"other/gpt-5.6"}"#);
+        let picked = selected_with_sources(&fixture_models(), None, Some(&config));
+        assert_eq!(picked.map(|m| m.qualified()), Some("openai/gpt-5.6".into()));
+        // A bare model id without provider qualification is never auto-matched.
+        let config = dir.write("bare.opencode.json", r#"{"model":"x"}"#);
+        let picked = selected_with_sources(&fixture_models(), None, Some(&config));
+        assert_eq!(picked.map(|m| m.qualified()), Some("openai/gpt-5.6".into()));
+    }
+
+    #[test]
+    fn startup_provider_prefers_recent_then_imported_then_openai_and_validates_registry() {
+        let known = ["acme", "9router"];
+        assert_eq!(startup_provider(Some("9router"), Some("acme/x"), &known), "9router");
+        assert_eq!(startup_provider(Some("missing"), Some("acme/x"), &known), "acme");
+        assert_eq!(startup_provider(None, Some("missing/x"), &known), "openai");
+        assert_eq!(startup_provider(Some("custom"), Some("acme/x"), &known), "acme");
+    }
+
+    #[test]
+    fn imported_model_identity_drives_actual_startup_provider_before_catalogue() {
+        let dir = TempDir::new("startup-import");
+        let config = dir.write("opencode.json", r#"{"model":"acme/x"}"#);
+        let identity = configured_model_identity(&config);
+        assert_eq!(identity.as_deref(), Some("acme/x"));
+        // The model is intentionally absent until the provider request
+        // completes; only its validated provider is selected at bootstrap.
+        assert_eq!(startup_provider(None, identity.as_deref(), &["acme"]), "acme");
+        let loaded = catalogue(r#"{"models":[{"provider_id":"acme","id":"x","name":"Acme X"}]}"#).unwrap();
+        assert_eq!(selected_with_sources(&loaded, None, Some(&config)).unwrap().qualified(), "acme/x");
+    }
+
     #[test]
     fn custom_catalogue_preserves_router_identity_and_complete_list() {
         let rows: Vec<_> = (0..1159).map(|i| json!({"id":format!("route/model-{i}"),"provider_id":"9router","name":format!("Model {i}")})).collect();
@@ -278,7 +502,7 @@ mod picker_tests {
         assert_eq!(models[index].qualified(), "9router/route/model-1158");
         assert_eq!(visible_rows(&models, "9router/route/model-1158"), vec![index]);
     }
-    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into() }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into() }] }
+    fn models() -> Vec<Model> { vec![Model { id: "j-model".into(), name: "Jöhn 🚀".into(), provider_id: "openai".into(),context_window:None }, Model { id: "k-model".into(), name: "Kappa".into(), provider_id: "openai".into(),context_window:None }] }
     #[test] fn query_is_utf8_and_jk_are_search_text() {
         let m = models();
         assert_eq!(visible_rows(&m, "öhn"), vec![0]);

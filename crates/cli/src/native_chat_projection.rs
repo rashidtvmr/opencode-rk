@@ -24,8 +24,9 @@
 //! - Live tool events (`crates/cli/src/native_turn.rs:150-151`) are
 //!   `{"type":"tool_call","name":..}` / `{"type":"tool_output","name":..,
 //!   "output":..}`; a caller may attach those exact objects to a message.
-//! - `crates/cli/src/tui_entry.rs:399` renders the live snapshot as
-//!   `messages.iter().rev().take(40)`: the tail-40 cap preserved here.
+//! - `crates/cli/src/tui_entry.rs` fetches a bounded startup page (`limit=200`)
+//!   and passes that page to this projection. The projection preserves that
+//!   bounded page; it does not claim to provide whole-conversation pagination.
 //!
 //! Honesty rules: the role comes ONLY from the explicit `role` enum string;
 //! an unknown/missing role is `None` — never a fabricated `System`. Tool
@@ -46,10 +47,11 @@ use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
 pub const MAX_PART_TEXT_BYTES: usize = 32 * 1024;
 /// Max bytes retained across all parts of one projected message.
 pub const MAX_MESSAGE_BYTES: usize = 32 * 1024;
-/// Max projected messages returned by [`project_history`] (the live snapshot
-/// renders the last 40 history rows).
-pub const MAX_HISTORY_MESSAGES: usize = 40;
-/// Max raw entries examined from the tail of the history slice.
+/// Max projected messages returned by [`project_history`]. This matches the
+/// current bounded startup fetch (`limit=200`); it is not whole-conversation
+/// pagination. Older history requires the paged loader once startup wires it.
+pub const MAX_HISTORY_MESSAGES: usize = 200;
+/// Max raw entries examined from the tail of the bounded API response.
 pub const MAX_HISTORY_SCAN: usize = 200;
 
 /// Max bytes retained for the non-part metadata fields (`agent`, `model`).
@@ -349,10 +351,10 @@ pub fn project_message(message: &Value) -> Option<ChatMessage> {
     })
 }
 
-/// Project the tail of a daemon history array: at most [`MAX_HISTORY_SCAN`]
-/// raw entries are examined and at most [`MAX_HISTORY_MESSAGES`] messages are
-/// returned, in original order. Malformed entries are skipped, never
-/// replaced by a fabricated message.
+/// Project a bounded daemon history array: at most [`MAX_HISTORY_SCAN`] raw
+/// entries are examined and at most [`MAX_HISTORY_MESSAGES`] messages are
+/// returned, in original order. Malformed entries are skipped, never replaced
+/// by a fabricated message. This is not whole-conversation pagination.
 #[must_use]
 pub fn project_history(messages: &[Value]) -> Vec<ChatMessage> {
     let from = messages.len().saturating_sub(MAX_HISTORY_SCAN);
@@ -367,6 +369,475 @@ pub fn project_history(messages: &[Value]) -> Vec<ChatMessage> {
         projected.drain(..overflow);
     }
     projected
+}
+
+/// Project the same bounded history while retaining the backend message id
+/// beside each display message.  The id is an anchor identity only; all
+/// rendering still uses the exact typed projection returned by
+/// `project_history`.
+#[must_use]
+pub fn project_history_entries(messages: &[Value]) -> Vec<(String, ChatMessage)> {
+    let from = messages.len().saturating_sub(MAX_HISTORY_SCAN);
+    let mut projected = Vec::new();
+    for message in &messages[from..] {
+        let Some(id) = message.get("id").and_then(Value::as_str) else { continue; };
+        let Some(message) = project_message(message) else { continue; };
+        projected.push((id.to_owned(), message));
+    }
+    let overflow = projected.len().saturating_sub(MAX_HISTORY_MESSAGES);
+    if overflow > 0 { projected.drain(..overflow); }
+    projected
+}
+
+#[cfg(test)]
+mod history_window_tests {
+    use super::*;
+    use serde_json::json;
+    fn row(id: usize) -> Value { json!({"id": format!("{id:03}"), "role":"user", "body":{"storage":"inline","text":format!("entry{id:03}")}}) }
+    #[test]
+    fn rejects_malformed_page_without_losing_visible_messages() {
+        let initial = vec![row(200), row(201)];
+        let cursor = "11111111-1111-4111-8111-111111111111";
+        let mut window = NativeHistoryWindow::new(&initial, Some(cursor.to_owned()));
+        let before = window.messages().to_vec();
+        let error = window.load_older(|_, _| Ok(json!({"next_before": "199"}))).unwrap_err();
+        assert!(error.contains("missing messages"));
+        assert_eq!(window.messages(), before.as_slice());
+        assert_eq!(window.next_before(), Some(cursor));
+    }
+
+    #[test]
+    fn retains_bounded_window_without_lifetime_traversal_cutoff() {
+        let initial: Vec<_> = (300..500).map(row).collect();
+        let cursor = "22222222-2222-4222-8222-222222222222";
+        let mut window = NativeHistoryWindow::new(&initial, Some(cursor.to_owned()));
+        let changed = window.load_older(|_, _| {
+            Ok(json!({"messages": [row(100), row(200)], "next_before": null}))
+        }).unwrap();
+        assert!(changed);
+        assert_eq!(window.messages().len(), NativeHistoryWindow::MAX_MESSAGES);
+        assert_eq!(window.messages().first().and_then(|v| v["id"].as_str()), Some("100"));
+        assert_eq!(window.messages().last().and_then(|v| v["id"].as_str()), Some("497"));
+        assert!(!window.has_older());
+    }
+
+    #[test]
+    fn latest_recovery_replaces_evicted_window() {
+        let initial: Vec<_> = (300..500).map(row).collect();
+        let mut window = NativeHistoryWindow::new(&initial, Some("77777777-7777-4777-8777-777777777777".into()));
+        window.load_older(|_, _| Ok(json!({"messages": [row(0)], "next_before": null}))).unwrap();
+        assert_eq!(window.messages().first().and_then(|v| v["id"].as_str()), Some("000"));
+        assert!(window.replace_latest(&json!({"messages": (500..600).map(row).collect::<Vec<_>>(), "next_before": null})).unwrap());
+        assert_eq!(window.messages().first().and_then(|v| v["id"].as_str()), Some("500"));
+        assert_eq!(window.messages().last().and_then(|v| v["id"].as_str()), Some("599"));
+    }
+
+    #[test]
+    fn traverses_beyond_any_retained_window_and_restores_newest_page() {
+        let initial: Vec<_> = (400..500).map(row).collect();
+        let cursors = [
+            "33333333-3333-4333-8333-333333333333",
+            "44444444-4444-4444-8444-444444444444",
+            "55555555-5555-4555-8555-555555555555",
+            "66666666-6666-4666-8666-666666666666",
+        ];
+        let mut window = NativeHistoryWindow::new(&initial, Some(cursors[0].to_owned()));
+        for page in 0..4 {
+            let cursor = &cursors[page];
+            let start = 300usize.saturating_sub(page * 100);
+            let next = if page == 3 { None } else { Some(cursors[page + 1].to_owned()) };
+            window.load_older(|_, _| Ok(json!({
+                "messages": (start..start + 100).map(row).collect::<Vec<_>>(),
+                "next_before": next,
+            }))).unwrap();
+        }
+        assert_eq!(window.messages().len(), NativeHistoryWindow::MAX_MESSAGES);
+        assert_eq!(window.messages().first().and_then(|v| v["id"].as_str()), Some("000"));
+        assert!(!window.has_older());
+        assert!(window.restore_newest());
+        assert_eq!(window.messages().last().and_then(|v| v["id"].as_str()), Some("499"));
+    }
+
+    #[test]
+    fn resumable_newer_walk_finds_adjacent_page_across_four_boundaries() {
+        let initial: Vec<_> = (401..501).map(row).collect();
+        let mut window = NativeHistoryWindow::new(&initial, Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into()));
+        for (start, next) in [(301, "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"),
+            (201, "cccccccc-cccc-4ccc-8ccc-cccccccccccc"),
+            (101, "dddddddd-dddd-4ddd-8ddd-dddddddddddd")] {
+            window.load_older(|_, _| Ok(json!({
+                "messages": (start..start + 100).map(row).collect::<Vec<_>>(),
+                "next_before": next,
+            }))).unwrap();
+        }
+        assert_eq!(window.messages().first().and_then(|v| v["id"].as_str()), Some("101"));
+        // Exhaust the retained window to the oldest records.
+        window.load_older(|_, _| Ok(json!({
+            "messages": (1..101).map(row).collect::<Vec<_>>(),
+            "next_before": null,
+        }))).unwrap();
+        assert_eq!(window.messages().first().and_then(|v| v["id"].as_str()), Some("001"));
+        window.begin_newer_recovery().unwrap();
+        assert!(!window.advance_newer_recovery(&json!({"messages": (301..401).map(row).collect::<Vec<_>>(), "next_before": "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee"})).unwrap());
+        assert!(!window.advance_newer_recovery(&json!({"messages": (201..301).map(row).collect::<Vec<_>>(), "next_before": "ffffffff-ffff-4fff-8fff-ffffffffffff"})).unwrap());
+        assert!(window.advance_newer_recovery(&json!({"messages": (101..201).map(row).collect::<Vec<_>>(), "next_before": "99999999-9999-4999-8999-999999999999"})).unwrap());
+        assert_eq!(window.newer_page.as_ref().unwrap().first().and_then(|v| v["id"].as_str()), Some("201"));
+    }
+
+    fn uuid_row(index: usize) -> Value {
+        json!({
+            "id": format!("00000000-0000-4000-8000-{index:012x}"),
+            "role": "user",
+            "body": {"storage": "inline", "text": format!("entry{index:03}")}
+        })
+    }
+
+    #[test]
+    fn newer_eviction_retains_before_cursor_for_recoverable_older_history() {
+        let initial: Vec<_> = (0..200).map(uuid_row).collect();
+        let mut window = NativeHistoryWindow::new(&initial, None);
+        window.set_adjacent_newer(&json!({
+            "messages": (200..300).map(uuid_row).collect::<Vec<_>>()
+        })).unwrap();
+        assert!(window.advance_newer());
+        assert!(window.has_older(), "eviction must expose the dropped older page");
+        assert_eq!(window.next_before(), Some("00000000-0000-4000-8000-000000000064"));
+
+        let mut requested = None;
+        assert!(window.load_older(|before, _| {
+            requested = Some(before.to_owned());
+            Ok(json!({
+                "messages": (0..100).map(uuid_row).collect::<Vec<_>>(),
+                "next_before": null
+            }))
+        }).unwrap());
+        assert_eq!(requested.as_deref(), Some("00000000-0000-4000-8000-000000000064"));
+        assert_eq!(window.messages().len(), NativeHistoryWindow::MAX_MESSAGES);
+        assert_eq!(window.messages().first().expect("recovered history")["id"], uuid_row(0)["id"]);
+        assert_eq!(window.messages().last().expect("recovered tail")["id"], uuid_row(199)["id"]);
+        assert!(!window.has_older());
+    }
+
+    #[test]
+    fn newer_walk_keeps_immediate_candidate_when_first_page_overlaps_tail() {
+        let initial: Vec<_> = (201..401).map(row).collect();
+        let mut window = NativeHistoryWindow::new(
+            &initial,
+            Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".into()),
+        );
+        window.tail_page = (401..501).map(row).collect();
+        window.tail_before = Some("bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb".into());
+        window.begin_newer_recovery().unwrap();
+        assert!(window.advance_newer_recovery(&json!({
+            "messages": (301..401).map(row).collect::<Vec<_>>(),
+            "next_before": "cccccccc-cccc-4ccc-8ccc-cccccccccccc"
+        })).unwrap());
+        assert_eq!(window.newer_page.as_ref().unwrap().first().expect("adjacent page")["id"], "401");
+        assert_eq!(window.newer_page.as_ref().unwrap().last().expect("adjacent tail")["id"], "500");
+        assert!(window.advance_newer());
+        assert_eq!(window.messages().len(), NativeHistoryWindow::MAX_MESSAGES);
+        assert_eq!(window.messages().first().expect("bounded first")["id"], "301");
+        assert_eq!(window.messages().last().expect("newest last")["id"], "500");
+        let ids: Vec<_> = window.messages().iter().map(|entry| entry["id"].as_str().unwrap()).collect();
+        assert!(ids.windows(2).all(|pair| pair[0] != pair[1]));
+        assert!(window.at_newest_page());
+    }
+}
+
+pub const HISTORY_PAGE_SIZE: usize = 100;
+
+/// A bounded, cursor-addressed history window.  The daemon exposes an older
+/// cursor only (`before`), so this type deliberately keeps the raw records and
+/// cursor metadata together; callers can replace the presentation atomically
+/// after a successful page fetch.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NativeHistoryWindow {
+    messages: Vec<Value>,
+    next_before: Option<String>,
+    exhausted: bool,
+    /// The newest server page is retained as cursor metadata, not added to
+    /// the browsing window.  This is the bounded recovery anchor used when
+    /// older-page eviction drops the newest adjacent page.
+    tail_page: Vec<Value>,
+    tail_before: Option<String>,
+    newer_page: Option<Vec<Value>>,
+    newer_before: Option<String>,
+    newer_candidate: Option<Vec<Value>>,
+}
+
+impl NativeHistoryWindow {
+    pub const MAX_MESSAGES: usize = 200;
+
+    pub fn new(initial: &[Value], next_before: Option<String>) -> Self {
+        let mut messages = initial.to_vec();
+        if messages.len() > Self::MAX_MESSAGES {
+            messages.drain(..messages.len() - Self::MAX_MESSAGES);
+        }
+        Self {
+            exhausted: next_before.is_none() || messages.is_empty(),
+            tail_page: messages.clone(),
+            tail_before: next_before.clone(),
+            newer_page: None,
+            newer_before: None,
+            newer_candidate: None,
+            messages,
+            next_before,
+        }
+    }
+
+    pub fn messages(&self) -> &[Value] { &self.messages }
+    pub fn next_before(&self) -> Option<&str> { self.next_before.as_deref() }
+    pub fn has_older(&self) -> bool { !self.exhausted && self.next_before.is_some() }
+    pub fn has_newer_recovery(&self) -> bool { !self.tail_page.is_empty() && self.tail_before.is_some() }
+
+    pub fn has_adjacent_newer(&self) -> bool { self.newer_page.as_ref().is_some_and(|page| !page.is_empty()) }
+    /// Render-row budget occupied by the pending adjacent page.  This mirrors
+    /// the flat transcript projection used by the native loop and lets the
+    /// caller preserve the old visible tail when that page is admitted.
+    pub fn adjacent_newer_rendered_rows(&self, width: usize) -> usize {
+        self.newer_page.as_ref().map_or(0, |rows| {
+            rows.iter().filter_map(|row| {
+                row.get("body").and_then(|body| body.get("text")).and_then(Value::as_str)
+            }).map(|text| crate::native_view_chat::transcript_entry_rows(width, text)).sum()
+        })
+    }
+    pub fn adjacent_newer_messages(&self) -> Option<Vec<crate::native_view_chat::ChatMessage>> {
+        self.newer_page.as_ref().map(|rows| project_history(rows))
+    }
+    pub fn at_newest_page(&self) -> bool {
+        self.messages.last().and_then(|row| row.get("id").and_then(Value::as_str))
+            == self.tail_page.last().and_then(|row| row.get("id").and_then(Value::as_str))
+    }
+
+    pub fn newer_recovery_cursor(&self) -> Option<&str> { self.newer_before.as_deref() }
+    pub fn oldest_id(&self) -> Option<&str> { self.messages.first()?.get("id").and_then(Value::as_str) }
+
+    pub fn newer_recovery_pending(&self) -> bool { self.newer_before.is_some() }
+
+    /// Start a resumable before-cursor walk.  Only the cursor and one
+    /// candidate page are retained; unlike the old helper this is not capped
+    /// by an arbitrary page-count lifetime limit.
+    pub fn begin_newer_recovery(&mut self) -> Result<(), String> {
+        let before = self.tail_before.clone().ok_or_else(|| "newer history exhausted".to_owned())?;
+        self.newer_before = Some(before);
+        self.newer_candidate = if self.at_newest_page() {
+            None
+        } else if self.tail_page.is_empty() {
+            None
+        } else {
+            Some(self.tail_page.clone())
+        };
+        self.newer_page = None;
+        Ok(())
+    }
+
+    /// Consume one response from the resumable walk.  Pages are traversed
+    /// newest-to-oldest until one overlaps the retained edge; the immediately
+    /// preceding page is then the sole adjacent-newer page.
+    pub fn advance_newer_recovery(&mut self, value: &Value) -> Result<bool, String> {
+        let before = self.newer_before.clone().ok_or_else(|| "newer recovery is not pending".to_owned())?;
+        let rows = value.get("messages").and_then(Value::as_array)
+            .ok_or_else(|| "history page is missing messages".to_owned())?;
+        if rows.len() > HISTORY_PAGE_SIZE { return Err("history page exceeds requested limit".to_owned()); }
+        let next = value.get("next_before").and_then(Value::as_str).map(str::to_owned);
+        if let Some(cursor) = &next {
+            if cursor.parse::<opencode_rk_contracts::MessageId>().is_err() || cursor == &before {
+                return Err("history page has an invalid cursor".to_owned());
+            }
+        }
+        if rows.is_empty() { self.newer_before = None; self.newer_candidate = None; return Ok(false); }
+        let overlaps = rows.iter().any(|row| {
+            let id = row.get("id").and_then(Value::as_str);
+            id.is_some() && self.messages.iter().any(|old| old.get("id").and_then(Value::as_str) == id)
+        });
+        if overlaps {
+            self.newer_page = self.newer_candidate.take();
+            self.newer_before = None;
+            return Ok(self.has_adjacent_newer());
+        }
+        self.newer_candidate = Some(rows.to_vec());
+        self.newer_before = next;
+        if self.newer_before.is_none() { self.newer_candidate = None; }
+        Ok(false)
+    }
+
+    /// Advance by the retained adjacent page. Only one neighboring page is
+    /// kept, so this operation cannot grow the browsing cache.
+    pub fn advance_newer(&mut self) -> bool {
+        let Some(page) = self.newer_page.take() else { return false; };
+        let mut merged = self.messages.clone();
+        merged.extend(page);
+        let evicted = merged.len().saturating_sub(Self::MAX_MESSAGES);
+        if evicted > 0 {
+            let first = merged[evicted]
+                .get("id")
+                .and_then(Value::as_str)
+                .ok_or_else(|| "evicted history page has no message id".to_owned());
+            let Ok(first) = first else { return false; };
+            self.next_before = Some(first.to_owned());
+            self.exhausted = false;
+            merged.drain(..evicted);
+        }
+        self.messages = merged;
+        true
+    }
+
+    pub fn set_adjacent_newer(&mut self, value: &Value) -> Result<(), String> {
+        let rows = value.get("messages").and_then(Value::as_array)
+            .ok_or_else(|| "history page is missing messages".to_owned())?;
+        if rows.len() > HISTORY_PAGE_SIZE { return Err("history page exceeds requested limit".to_owned()); }
+        self.newer_page = Some(rows.to_vec());
+        Ok(())
+    }
+
+    /// Walk from the newest cursor until the current oldest id is found. The
+    /// immediately preceding page is retained as the sole adjacent-newer
+    /// page. The callback is invoked one page at a time by the async worker;
+    /// the walk itself stores only two bounded pages.
+    pub fn recover_adjacent_newer<F>(&mut self, oldest_id: &str, mut fetch: F) -> Result<bool, String>
+    where
+        F: FnMut(&str, usize) -> Result<Value, String>,
+    {
+        let mut before = self.tail_before.clone().ok_or_else(|| "newer history exhausted".to_owned())?;
+        let mut candidate: Option<Vec<Value>> = None;
+        loop {
+            let value = fetch(&before, HISTORY_PAGE_SIZE)?;
+            let rows = value.get("messages").and_then(Value::as_array)
+                .ok_or_else(|| "history page is missing messages".to_owned())?;
+            if rows.len() > HISTORY_PAGE_SIZE { return Err("history page exceeds requested limit".to_owned()); }
+            if rows.iter().any(|row| row.get("id").and_then(Value::as_str) == Some(oldest_id)) {
+                self.newer_page = candidate;
+                return Ok(self.has_adjacent_newer());
+            }
+            if rows.is_empty() { return Ok(false); }
+            candidate = Some(rows.to_vec());
+            before = value.get("next_before").and_then(Value::as_str)
+                .ok_or_else(|| "history page ended before current window".to_owned())?.to_owned();
+            if before.parse::<opencode_rk_contracts::MessageId>().is_err() { return Err("history page has an invalid cursor".to_owned()); }
+        }
+    }
+
+    /// Commit a fresh newest page obtained without a cursor. This is the
+    /// before-only API's bounded recovery operation after older traversal has
+    /// evicted the original tail page.
+    pub fn replace_latest(&mut self, value: &Value) -> Result<bool, String> {
+        let rows = value.get("messages").and_then(Value::as_array)
+            .ok_or_else(|| "history page is missing messages".to_owned())?;
+        if rows.len() > HISTORY_PAGE_SIZE { return Err("history page exceeds requested limit".to_owned()); }
+        let next = value.get("next_before").and_then(Value::as_str).map(str::to_owned);
+        if let Some(cursor) = &next {
+            if cursor.parse::<opencode_rk_contracts::MessageId>().is_err() { return Err("history page has an invalid cursor".to_owned()); }
+        }
+        if rows.is_empty() { return Ok(false); }
+        let changed = self.messages != *rows;
+        self.messages = rows.clone();
+        self.tail_page = rows.clone();
+        self.tail_before = next.clone();
+        self.next_before = next;
+        self.exhausted = self.next_before.is_none();
+        Ok(changed)
+    }
+
+    /// Refresh only the newest-page anchor.  This is used by same-session
+    /// external-turn polling while the user is browsing older records: the
+    /// browsed window and its cursor remain untouched.
+    pub fn refresh_tail(&mut self, value: &Value) -> Result<bool, String> {
+        let rows = value.get("messages").and_then(Value::as_array)
+            .ok_or_else(|| "history page is missing messages".to_owned())?;
+        if rows.len() > HISTORY_PAGE_SIZE { return Err("history page exceeds requested limit".to_owned()); }
+        let next = value.get("next_before").and_then(Value::as_str).map(str::to_owned);
+        if let Some(cursor) = &next {
+            if cursor.parse::<opencode_rk_contracts::MessageId>().is_err() {
+                return Err("history page has an invalid cursor".to_owned());
+            }
+        }
+        if rows.is_empty() { return Ok(false); }
+        let changed = self.tail_page != *rows;
+        self.tail_page = rows.to_vec();
+        self.tail_before = next;
+        Ok(changed)
+    }
+
+    /// Restore the newest retained page after older-page prepending evicted
+    /// it. The overlap is intentionally deduplicated by message id and the
+    /// result remains bounded to one window.
+    pub fn restore_newest(&mut self) -> bool {
+        if self.tail_page.is_empty() { return false; }
+        let mut merged = self.messages.clone();
+        for row in &self.tail_page {
+            let id = row.get("id").and_then(Value::as_str);
+            if id.is_none() || !merged.iter().any(|existing| existing.get("id").and_then(Value::as_str) == id) {
+                merged.push(row.clone());
+            }
+        }
+        if merged == self.messages { return false; }
+        if merged.len() > Self::MAX_MESSAGES { merged.drain(..merged.len() - Self::MAX_MESSAGES); }
+        self.messages = merged;
+        true
+    }
+
+    /// Recover the page immediately newer than the retained window.  The
+    /// server is before-only, so recovery starts at the newest retained tail
+    /// cursor and walks one bounded page per invocation.  No message or
+    /// cursor lifetime limit is applied.
+    pub fn load_newer<F>(&mut self, fetch: F) -> Result<bool, String>
+    where
+        F: FnOnce(&str, usize) -> Result<Value, String>,
+    {
+        let before = self.tail_before.clone().ok_or_else(|| "newer history exhausted".to_owned())?;
+        let value = fetch(&before, HISTORY_PAGE_SIZE)?;
+        let rows = value.get("messages").and_then(Value::as_array)
+            .ok_or_else(|| "history page is missing messages".to_owned())?;
+        if rows.len() > HISTORY_PAGE_SIZE { return Err("history page exceeds requested limit".to_owned()); }
+        let next = value.get("next_before").and_then(Value::as_str).map(str::to_owned);
+        if let Some(cursor) = &next {
+            if cursor.parse::<opencode_rk_contracts::MessageId>().is_err() || cursor == &before {
+                return Err("history page has an invalid cursor".to_owned());
+            }
+        }
+        if rows.is_empty() { self.tail_before = None; return Ok(false); }
+        self.tail_page = rows.to_vec();
+        self.tail_before = next;
+        Ok(true)
+    }
+
+    /// Fetch and prepend one page.  The response is committed only after its
+    /// shape/cursor is checked, so malformed pages leave the visible window
+    /// untouched.  The retained window is bounded; cursor metadata remains
+    /// valid even when newer records are evicted.
+    pub fn load_older<F>(&mut self, fetch: F) -> Result<bool, String>
+    where
+        F: FnOnce(&str, usize) -> Result<Value, String>,
+    {
+        let before = self.next_before.clone().ok_or_else(|| "history exhausted".to_owned())?;
+        if before.parse::<opencode_rk_contracts::MessageId>().is_err() {
+            return Err("history cursor is not a canonical message id".to_owned());
+        }
+        let value = fetch(&before, HISTORY_PAGE_SIZE)?;
+        let rows = value.get("messages").and_then(Value::as_array)
+            .ok_or_else(|| "history page is missing messages".to_owned())?;
+        if rows.len() > HISTORY_PAGE_SIZE { return Err("history page exceeds requested limit".to_owned()); }
+        let next = value.get("next_before").and_then(Value::as_str).map(str::to_owned);
+        if let Some(cursor) = &next {
+            if cursor.parse::<opencode_rk_contracts::MessageId>().is_err() || cursor == &before {
+                return Err("history page has an invalid cursor".to_owned());
+            }
+        }
+        let mut committed = rows.to_vec();
+        committed.extend(self.messages.iter().cloned());
+        let evicted = committed.len().saturating_sub(Self::MAX_MESSAGES);
+        if evicted > 0 {
+            self.newer_page = Some(committed[Self::MAX_MESSAGES..].to_vec());
+        }
+        if committed.len() > Self::MAX_MESSAGES {
+            committed.truncate(Self::MAX_MESSAGES);
+        }
+        let changed = !rows.is_empty();
+        self.messages = committed;
+        self.next_before = next;
+        self.exhausted = rows.is_empty() || self.next_before.is_none();
+        Ok(changed)
+    }
 }
 
 #[cfg(test)]
@@ -668,28 +1139,77 @@ mod tests {
     }
 
     #[test]
-    fn history_returns_the_bounded_tail_and_skips_malformed_entries() {
+    fn history_returns_the_bounded_fetch_and_skips_malformed_entries() {
         let mut messages: Vec<Value> = Vec::new();
-        for index in 0..100 {
+        for index in 0..240 {
             let role = if index % 2 == 0 { "user" } else { "assistant" };
             messages.push(inline(role, &format!("entry {index}")));
         }
         messages.push(json!({"role": "wizard", "body": {"storage": "inline", "text": "no"}}));
         messages.push(json!("not a message"));
         let projected = project_history(&messages);
-        assert_eq!(projected.len(), MAX_HISTORY_MESSAGES, "tail 40 cap");
+        // The raw scan contains 200 entries: 198 valid records plus the two
+        // malformed records at its end. Projection skips malformed input; it
+        // must not synthesize two messages merely to fill the output cap.
+        assert_eq!(projected.len(), 198, "bounded raw scan with malformed entries");
         assert_eq!(
             projected.first().map(|m| m.parts.clone()),
-            Some(vec![ChatPart::Text("entry 60".to_owned())]),
-            "oldest of the tail-40 window (entries 60..=99) first"
+            Some(vec![ChatPart::Text("entry 42".to_owned())]),
+            "oldest valid record in the bounded raw window"
         );
         assert_eq!(
             projected.last().map(|m| m.parts.clone()),
-            Some(vec![ChatPart::Text("entry 99".to_owned())]),
+            Some(vec![ChatPart::Text("entry 239".to_owned())]),
             "malformed entries are skipped, not replaced"
         );
         // Restart-stable: the same input projects to an equal message list.
         assert_eq!(project_history(&messages), projected);
+    }
+
+    #[test]
+    fn public_projection_of_sixty_one_records_retains_the_oldest_record() {
+        let messages: Vec<Value> = (0..61)
+            .map(|index| inline("user", &format!("entry{index:03}")))
+            .collect();
+        let projected = project_history(&messages);
+        assert_eq!(projected.len(), 61);
+        assert_eq!(projected[0].parts, vec![ChatPart::Text("entry000".to_owned())]);
+        assert_eq!(projected[60].parts, vec![ChatPart::Text("entry060".to_owned())]);
+    }
+
+    #[test]
+    fn projection_cases_63_201_and_501_preserve_bounded_page_semantics() {
+        for count in [63, 201, 501] {
+            let messages: Vec<Value> = (0..count)
+                .map(|index| inline("user", &format!("entry{index:03}")))
+                .collect();
+            let projected = project_history(&messages);
+            assert_eq!(projected.len(), count.min(MAX_HISTORY_MESSAGES));
+            let expected_first = count.saturating_sub(MAX_HISTORY_MESSAGES);
+            assert_eq!(
+                projected.first().unwrap().parts,
+                vec![ChatPart::Text(format!("entry{expected_first:03}"))]
+            );
+            assert_eq!(
+                projected.last().unwrap().parts,
+                vec![ChatPart::Text(format!("entry{:03}", count - 1))]
+            );
+        }
+    }
+
+    #[test]
+    fn projected_sixty_one_records_reach_oldest_after_repeated_native_scroll() {
+        let messages: Vec<Value> = (0..61)
+            .map(|index| inline("user", &format!("entry{index:03}")))
+            .collect();
+        let projected = project_history(&messages);
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        for _ in 0..80 {
+            view.scroll_up(3);
+        }
+        let frame = view.render_typed("", &projected, false, &[]).join("\n");
+        assert!(frame.contains("entry000"), "oldest projected record must be reachable");
+        assert!(frame.contains("entry006"), "oldest viewport must contain adjacent records");
     }
 
     #[test]

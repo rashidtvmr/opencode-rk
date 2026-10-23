@@ -28,6 +28,32 @@ struct Pos {
     cell: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MouseCopyEvent {
+    LeftRelease,
+    RightPress,
+    RightRelease,
+    Other,
+}
+
+impl MouseCopyEvent {
+    pub fn from_input_kind(kind: u8) -> Self {
+        match kind {
+            2 => Self::LeftRelease,
+            5 => Self::RightPress,
+            6 => Self::RightRelease,
+            _ => Self::Other,
+        }
+    }
+}
+
+/// Upstream flag uses truthy `true`/`1`; default disables copy only on Windows.
+pub fn copy_on_select_disabled(value: Option<&str>, windows_default: bool) -> bool {
+    value.map_or(windows_default, |value| {
+        matches!(value.to_ascii_lowercase().as_str(), "true" | "1")
+    })
+}
+
 /// Selection state over the real, rendered cells in a bounded view.
 #[derive(Clone, Debug, Default)]
 pub struct TextSelection {
@@ -42,6 +68,26 @@ pub struct TextSelection {
 }
 
 impl TextSelection {
+    /// Apply platform-sensitive mouse copy policy and return clipboard text.
+    pub fn copy_for_input_kind(&mut self, kind: u8, disable_copy_on_select: bool) -> Option<String> {
+        let event = MouseCopyEvent::from_input_kind(kind);
+        if event == MouseCopyEvent::LeftRelease {
+            self.release();
+        }
+        let should_copy = match event {
+            MouseCopyEvent::LeftRelease => !disable_copy_on_select,
+            MouseCopyEvent::RightPress => disable_copy_on_select,
+            MouseCopyEvent::RightRelease => !disable_copy_on_select,
+            MouseCopyEvent::Other => false,
+        };
+        if !should_copy {
+            return None;
+        }
+        let text = self.selected_text()?;
+        self.clear();
+        Some(text)
+    }
+
     /// Replace the rendered view and discard any selection tied to the old view.
     pub fn set_rows(&mut self, lines: &[String], origin_x: u32, origin_y: u32, cols: u32) {
         let mut bounded = Vec::new();
@@ -283,7 +329,7 @@ fn floor_char_boundary(s: &str, max: usize) -> usize {
 
 #[cfg(test)]
 mod tests {
-    use super::TextSelection;
+    use super::{copy_on_select_disabled, MouseCopyEvent, TextSelection};
 
     fn rows(items: &[&str]) -> Vec<String> {
         items.iter().map(|s| (*s).to_owned()).collect()
@@ -335,5 +381,105 @@ mod tests {
         s.set_rows(&rows(&["", "x"]), 0, 0, 4);
         assert!(!s.press(0, 0));
         assert!(s.spans().is_empty());
+    }
+
+    fn selected() -> TextSelection {
+        let mut selection = TextSelection::default();
+        selection.set_rows(&rows(&["a界e\u{301}"]), 0, 0, 8);
+        assert!(selection.press(1, 0));
+        selection.drag(3, 0);
+        selection.release();
+        selection
+    }
+
+    #[test]
+    fn default_left_release_copies_bounded_utf8_selection_and_clears_it() {
+        let mut selection = selected();
+        assert_eq!(
+            selection.copy_for_input_kind(2, false).as_deref(),
+            Some("界e\u{301}")
+        );
+        assert_eq!(selection.selected_text(), None);
+    }
+
+    #[test]
+    fn disabled_copy_on_select_uses_right_press_only() {
+        let mut selection = selected();
+        assert_eq!(
+            selection.copy_for_input_kind(5, true).as_deref(),
+            Some("界e\u{301}")
+        );
+        assert_eq!(selection.selected_text(), None);
+
+        let mut selection = selected();
+        assert_eq!(selection.copy_for_input_kind(2, true), None);
+        assert_eq!(selection.selected_text().as_deref(), Some("界e\u{301}"));
+
+        let mut selection = selected();
+        assert_eq!(selection.copy_for_input_kind(5, false), None);
+        assert_eq!(selection.selected_text().as_deref(), Some("界e\u{301}"));
+    }
+
+    #[test]
+    fn right_release_inert_when_copy_on_select_disabled() {
+        let mut selection = selected();
+        assert_eq!(selection.copy_for_input_kind(6, true), None);
+        assert_eq!(selection.selected_text().as_deref(), Some("界e\u{301}"));
+    }
+
+    #[test]
+    fn right_release_copies_when_copy_on_select_enabled() {
+        let mut selection = selected();
+        assert_eq!(
+            selection.copy_for_input_kind(6, false).as_deref(),
+            Some("界e\u{301}"),
+        );
+        assert_eq!(selection.selected_text(), None);
+
+        let mut selection = selected();
+        assert_eq!(
+            selection.copy_for_input_kind(6, false).as_deref(),
+            Some("界e\u{301}"),
+        );
+        assert_eq!(selection.copy_for_input_kind(6, false), None);
+    }
+
+    #[test]
+    fn left_release_ends_drag_even_when_copy_is_disabled() {
+        let mut selection = TextSelection::default();
+        selection.set_rows(&rows(&["abc"]), 0, 0, 8);
+        assert!(selection.press(0, 0));
+        selection.drag(1, 0);
+        assert_eq!(selection.copy_for_input_kind(2, true), None);
+        selection.drag(2, 0);
+        assert_eq!(selection.selected_text().as_deref(), Some("ab"));
+    }
+
+    #[test]
+    fn mouse_kind_and_upstream_flag_are_explicit() {
+        assert_eq!(MouseCopyEvent::from_input_kind(2), MouseCopyEvent::LeftRelease);
+        assert_eq!(MouseCopyEvent::from_input_kind(5), MouseCopyEvent::RightPress);
+        assert_eq!(MouseCopyEvent::from_input_kind(6), MouseCopyEvent::RightRelease);
+        assert_eq!(MouseCopyEvent::from_input_kind(0), MouseCopyEvent::Other);
+        assert!(!copy_on_select_disabled(None, false));
+        assert!(copy_on_select_disabled(None, true));
+        assert!(copy_on_select_disabled(Some("TRUE"), false));
+        assert!(copy_on_select_disabled(Some("1"), false));
+        assert!(!copy_on_select_disabled(Some("false"), true));
+        assert!(!copy_on_select_disabled(Some("0"), true));
+    }
+
+    #[test]
+    fn copy_gesture_with_no_real_selection_is_inert() {
+        let mut selection = TextSelection::default();
+        selection.set_rows(&rows(&["  "]), 0, 0, 8);
+        assert_eq!(selection.copy_for_input_kind(2, false), None);
+        assert_eq!(selection.copy_for_input_kind(5, true), None);
+        assert_eq!(selection.spans(), Vec::new());
+
+        let mut outside = selected();
+        outside.set_rows(&rows(&["changed"]), 0, 0, 8);
+        assert_eq!(outside.copy_for_input_kind(2, false), None);
+        assert_eq!(outside.selected_text(), None);
     }
 }

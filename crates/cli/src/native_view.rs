@@ -111,6 +111,7 @@ pub struct NativeView {
     /// Persisted global + per-box appearance; the framed composer reads the
     /// `BoxId::ChatComposer` effective values (default = upstream sharp).
     box_appearance: crate::native_box_style::BoxAppearance,
+    context_window: Option<u64>,
     ui_regions: Vec<crate::native_ui_style::Region>,
     overlay_roles: Vec<crate::native_ui_style::Role>,
 }
@@ -332,6 +333,7 @@ impl NativeView {
             chat_row_classes: Vec::new(),
             chat_text_bounds: Vec::new(),
             box_appearance: crate::native_box_style::BoxAppearance::default(),
+            context_window: None,
             ui_regions: Vec::new(),
             overlay_roles: Vec::new(),
         }
@@ -347,6 +349,11 @@ impl NativeView {
     pub fn set_model(&mut self, model: Option<String>) {
         self.composer_model = None;
         self.status.set_model(model);
+    }
+
+    pub fn set_context_window(&mut self,window:Option<u64>) {self.context_window=window;}
+    pub fn set_usage(&mut self,input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>) {
+        self.status.set_usage(input,output,cached,reasoning,self.context_window);
     }
 
     /// Catalogue display names are presentation only. The status retains the
@@ -593,7 +600,14 @@ impl NativeView {
             };
             Some((
                 2,
-                body_height.saturating_sub(composer_height) as u16,
+                // `render_typed_classified_framed` first budgets `body_height`
+                // rows and then inserts its one-row header. The returned
+                // vector therefore places the composer one row below the
+                // nominal pre-insertion anchor. Keep the hit/paint region on
+                // that actual rendered frame row.
+                body_height
+                    .saturating_sub(composer_height)
+                    .saturating_add(usize::from(body_height > composer_height)) as u16,
                 width - 4,
                 (composer_height + usize::from(height >= 4)) as u16,
             ))
@@ -664,6 +678,7 @@ impl NativeView {
         title: Option<String>,
         message_count: Option<usize>,
     ) {
+        if self.status.session_id() != session.as_deref() { self.status.clear_usage(); }
         self.status
             .set_session_binding(session, title, message_count);
     }
@@ -896,6 +911,13 @@ impl NativeView {
     pub fn scroll_down(&mut self, lines: usize) {
         self.chat.scroll_down(lines);
     }
+
+    pub fn chat_at_scroll_ceiling(&self) -> bool {
+        self.chat.at_scroll_ceiling()
+    }
+
+    pub fn chat_at_tail(&self) -> bool { self.chat.at_tail() }
+
 
     pub fn follow_tail(&mut self) {
         self.chat.follow_tail();
@@ -1144,6 +1166,38 @@ impl NativeView {
         self.render_content(draft, &[], Some(messages), busy, overlay)
     }
 
+    /// Exact styled transcript height for a bounded message batch. Used by
+    /// history pagination to preserve a rendered-row anchor across eviction.
+    pub fn chat_message_rows(&self, messages: &[crate::native_view_chat::ChatMessage]) -> usize {
+        let width = self.presentation().main_width.saturating_sub(4) as usize;
+        self.chat.styled_message_rows(width, messages, &self.box_appearance)
+    }
+
+    pub fn chat_rendered_anchor(
+        &self,
+        entries: &[(String, crate::native_view_chat::ChatMessage)],
+    ) -> Option<crate::native_view_chat::RenderedChatAnchor> {
+        let width = self.presentation().main_width.saturating_sub(4) as usize;
+        let ids = entries.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+        let messages = entries.iter().map(|(_, message)| message.clone()).collect::<Vec<_>>();
+        self.chat.rendered_anchor(width, &messages, &ids, &self.box_appearance)
+    }
+
+    pub fn restore_chat_rendered_anchor(
+        &mut self,
+        entries: &[(String, crate::native_view_chat::ChatMessage)],
+        anchor: &crate::native_view_chat::RenderedChatAnchor,
+    ) -> bool {
+        let width = self.presentation().main_width.saturating_sub(4) as usize;
+        let ids = entries.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+        let messages = entries.iter().map(|(_, message)| message.clone()).collect::<Vec<_>>();
+        let Some(scroll) = self.chat.scroll_for_anchor(
+            width, &messages, &ids, &self.box_appearance, anchor, 0,
+        ) else { return false; };
+        self.chat.set_scroll(scroll);
+        true
+    }
+
     fn render_content(
         &mut self,
         draft: &str,
@@ -1259,50 +1313,124 @@ impl NativeView {
         let mut sidebar: Vec<String> = sidebar_styled.iter().map(|line| padded(&line.text, presentation.sidebar_width)).collect();
         let mut sidebar_inset = 2;
         let mut sidebar_top = 0;
+        let mut sidebar_text_width = presentation.sidebar_width.saturating_sub(3);
+        let mut sidebar_frame_painted = false;
         if presentation.sidebar_width >= 4
             && height >= 3
-            && self.box_appearance != crate::native_box_style::BoxAppearance::default()
+            && (self.box_appearance.effective(crate::native_box_style::BoxId::Sidebar).border_style
+                != crate::native_box_style::BorderStyle::Single
+                || self.box_appearance.effective(crate::native_box_style::BoxId::Sidebar).thickness > 1)
         {
             let style = self
                 .box_appearance
                 .effective(crate::native_box_style::BoxId::Sidebar);
-            let corners = style.corner_glyphs();
-            let (h, v) = match style.border_style {
-                crate::native_box_style::BorderStyle::Single => ('─', '│'),
-                crate::native_box_style::BorderStyle::Double => ('═', '║'),
-                crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
-            };
-            let inside = usize::from(presentation.sidebar_width - 2);
-            let pad = usize::from(style.padding).min(inside.saturating_sub(1) / 2);
-            sidebar_inset += 1 + pad as u16;
-            sidebar_top = 1;
-            let mut framed = vec![format!(
-                "{}{}{}",
-                corners.top_left,
-                h.to_string().repeat(inside),
-                corners.top_right
-            )];
-            for row in sidebar.iter().take(height - 2) {
-                let content = crate::native_view_layout::fit(row, (inside - 2 * pad) as u16);
-                framed.push(format!(
-                    "{v}{}{content}{}{v}",
-                    " ".repeat(pad),
-                    " ".repeat(pad)
-                ));
+            // The sidebar's fill, border and text clipping must all be
+            // derived from one live component rectangle.  In particular,
+            // do not compute the border from `sidebar_width` and clip text
+            // independently: that was the source of one-cell overflow at
+            // the viewport edge (R1).  `BoxGeometry` is intentionally used
+            // here at the production render call site, not only in helper
+            // tests.
+            // `sidebar` is passed to `compose_frame` as a local pane: its
+            // origin is (0, 0), and compose_frame supplies the absolute
+            // x-offset by concatenating it after the main column. Keep the
+            // geometry in that same local coordinate system; absolute
+            // coordinates are derived only when publishing ui_regions.
+            let geometry = crate::native_box_style::BoxGeometry::framed(
+                0,
+                0,
+                presentation.sidebar_width,
+                // The shell reserves its final row for the shared footer
+                // composition.  The sidebar status source is likewise
+                // requested at `height - 1`; use that same actual painted
+                // component height instead of allowing a border row to be
+                // clipped/replaced during final frame composition.
+                height.saturating_sub(1).min(u16::MAX as usize) as u16,
+                style.padding,
+            )
+            .and_then(|box_geometry| {
+                box_geometry.clipped(presentation.sidebar_width, height as u16)
+            });
+            if let Some(geometry) = geometry {
+                let corners = style.corner_glyphs();
+                let (h, v) = style.border_glyphs();
+                let inside = usize::from(geometry.width.saturating_sub(2));
+                let pad = usize::from(geometry.pad)
+                    .min(inside.saturating_sub(1) / 2);
+                sidebar_inset = geometry.x.saturating_add(1 + pad as u16);
+                sidebar_top = geometry.y;
+                let text_width = geometry
+                    .text_area()
+                    .map(|(_, _, width, _)| width)
+                    .unwrap_or(0);
+                sidebar_text_width = text_width;
+                sidebar_frame_painted = true;
+                let mut framed = vec![format!(
+                    "{}{}{}",
+                    corners.top_left,
+                    h.to_string().repeat(inside),
+                    corners.top_right
+                )];
+                // The box owns the full component height, even when the
+                // status renderer returns fewer rows.  Always materialize
+                // the complete interior so the bottom border stays on the
+                // geometry's bottom edge rather than immediately following
+                // the last non-empty status line.
+                for index in 0..usize::from(geometry.height.saturating_sub(2)) {
+                    let row = sidebar.get(index).map_or("", String::as_str);
+                    let content = crate::native_view_layout::fit(row, text_width);
+                    framed.push(format!(
+                        "{v}{}{content}{}{v}",
+                        " ".repeat(pad),
+                        " ".repeat(pad)
+                    ));
+                }
+                if geometry.height >= 2 {
+                    framed.push(format!(
+                        "{}{}{}",
+                        corners.bottom_left,
+                        h.to_string().repeat(inside),
+                        corners.bottom_right
+                    ));
+                }
+                sidebar = framed;
+            } else {
+                // A clipped/tiny sidebar is not frameable; fail closed
+                // rather than inventing a partial border or background.
+                sidebar.clear();
             }
-            framed.push(format!(
-                "{}{}{}",
-                corners.bottom_left,
-                h.to_string().repeat(inside),
-                corners.bottom_right
-            ));
-            sidebar = framed;
         }
         if let Some(left) = presentation.sidebar_offset {
-            for (index, line) in sidebar_styled.iter().enumerate().take(height.saturating_sub(sidebar_top)) {
+            // Do not publish regions for a frame that failed closed. For a
+            // normal unframed pane, the existing local content inset is the
+            // two-cell status-panel inset; framed panes use text_area() from
+            // the same BoxGeometry that generated their rows.
+            let region_count = if sidebar_frame_painted {
+                // `BoxGeometry::framed` uses height - 1 because the shell's
+                // last row is the shared footer. Exclude both sidebar
+                // border rows when publishing text regions.
+                sidebar_styled.len().min(height.saturating_sub(3))
+            } else if sidebar.is_empty() {
+                0
+            } else {
+                sidebar_styled.len().min(height)
+            };
+            for (index, line) in sidebar_styled
+                .iter()
+                .enumerate()
+                .take(region_count)
+            {
                 self.ui_regions.push(crate::native_ui_style::Region {
-                    x:left.saturating_add(sidebar_inset),y:(index + sidebar_top) as u16,
-                    width:presentation.sidebar_width.saturating_sub(sidebar_inset + 1),
+                    // `sidebar_inset` is local to the right pane; add the
+                    // pane origin exactly once. Text starts after the top
+                    // border row, not at the pane's row zero corner.
+                    x:left.saturating_add(sidebar_inset),
+                    y:if sidebar_frame_painted {
+                        sidebar_top.saturating_add(1).saturating_add(index as u16)
+                    } else {
+                        index as u16
+                    },
+                    width:sidebar_text_width,
                     role:line.role,detail_from:None,modal:false,
                 });
             }
@@ -1626,7 +1754,11 @@ mod framed_composer_tests {
         let (left, top, width) = (left as usize, top as usize, width as usize);
         let frame_h = 3usize; // one draft row + two borders (default padding 0)
         assert_eq!(width, view.presentation().main_width as usize - 4);
-        assert_eq!(top, view.render_height() - 2 - frame_h);
+        assert_eq!(
+            top,
+            view.render_height() - 2 - frame_h + 1,
+            "composer_region follows the actual framed chat row after header insertion"
+        );
         assert_eq!(region_h as usize, frame_h + 1);
         let row = |index: usize| rows[index].chars().collect::<Vec<_>>();
         assert_eq!(row(top)[left], '┌');
@@ -1640,6 +1772,66 @@ mod framed_composer_tests {
     }
 
     #[test]
+    fn native_typed_scroll_reaches_oldest_after_repeated_wheels_and_moves_down() {
+        let mut view = NativeView::new(80, 24);
+        view.set_session_route(true);
+        let messages: Vec<crate::native_view_chat::ChatMessage> = (0..61)
+            .map(|i| crate::native_view_chat::ChatMessage::text(
+                crate::native_view_chat::ChatRole::Assistant,
+                format!("entry {i:03}"),
+            ))
+            .collect();
+        for _ in 0..40 {
+            view.scroll_up(5);
+            let _ = view.render_typed("", &messages, false, &[]);
+        }
+        let oldest = view.render_typed("", &messages, false, &[]);
+        assert!(oldest.iter().any(|row| row.contains("entry 000")), "oldest native frame: {oldest:?}");
+        view.scroll_down(1);
+        let next = view.render_typed("", &messages, false, &[]);
+        assert!(next.iter().any(|row| row.contains("entry 001")), "one-row native frame: {next:?}");
+    }
+
+    #[test]
+    /// Production entrypoint replay: wheel-up/down through the ACTUAL
+    /// `NativeView::render` legacy-chat pipeline that `render_content`
+    /// paints in the live loop (`ChatView::render`, raw transcript strings),
+    /// NOT the `render_typed` messages pipeline. 61-entry history, 55 wheel-up
+    /// ticks of 3 (sixth-scroll present), then one wheel-down, then
+    /// `follow_tail`, asserting the full history stays reachable and the
+    /// window never freezes short of the true oldest viewport.
+    fn production_render_pipeline_reaches_true_oldest_and_moves_one_step_down() {
+        let mut view = NativeView::new(100, 30);
+        view.set_session_route(true);
+        let transcript: Vec<String> = (0..61)
+            .map(|i| format!("entry {:03}: {}", i, "x".repeat(96)))
+            .collect();
+        // Sanity: capture the tail frame first (must show the newest entry).
+        let tail = view.render("ty", &transcript, false, &[]).join("\n");
+        assert!(tail.contains("entry 060"), "newest row visible at tail");
+        for _ in 0..55 {
+            view.scroll_up(3);
+            let frame = view.render("ty", &transcript, false, &[]);
+            assert_eq!(frame.len(), 30, "every render stays exactly 30 rows");
+        }
+        let oldest = view.render("ty", &transcript, false, &[]);
+        let joined = oldest.join("\n");
+        assert!(
+            joined.contains("entry 000"),
+            "oldest viewport after 55*3-row scroll must show entry 000, got first rows: {:?}",
+            oldest.iter().take(8).collect::<Vec<_>>()
+        );
+        view.scroll_down(3);
+        let one_down = view.render("ty", &transcript, false, &[]).join("\n");
+        assert!(
+            !one_down.contains("entry 000"),
+            "one wheel-down from the oldest viewport must move content (repaint away from frozen entry 000)"
+        );
+        view.follow_tail();
+        let back = view.render("ty", &transcript, false, &[]).join("\n");
+        assert!(back.contains("entry 060"), "re-pin restores the true tail");
+    }
+
     fn configured_preset_applies_rounded_corners_and_inner_padding() {
         let mut view = NativeView::new(60, 24);
         view.set_session_route(true);
@@ -1653,8 +1845,9 @@ mod framed_composer_tests {
         let row = |index: usize| rows[index].chars().collect::<Vec<_>>();
         assert_eq!(row(top)[left], '╭');
         assert_eq!(row(top)[left + width - 1], '╮');
-        assert_eq!(row(top + 6)[left], '╰');
-        assert_eq!(row(top + 6)[left + width - 1], '╯');
+        let frame_h = 2 + 2 * 2 + 1;
+        assert_eq!(row(top + frame_h - 1)[left], '╰');
+        assert_eq!(row(top + frame_h - 1)[left + width - 1], '╯');
         let pad_row: String = rows[top + 1]
             .chars()
             .skip(left + 1)
@@ -1686,6 +1879,112 @@ mod framed_composer_tests {
         assert!(rounded_rows.iter().any(|row| row.contains('╭')));
         assert!(rounded_rows.iter().any(|row| row.contains('╰')));
         assert!(!rounded_rows.iter().any(|row| row.contains('┃')));
+    }
+
+    /// The sidebar is a local pane for `compose_frame`, while its published
+    /// regions are screen-absolute. This exercises the real NativeView render
+    /// path at a wide terminal and catches both coordinate conventions:
+    /// regions must begin in the painted text cell, never at the pane origin,
+    /// and must remain contained by the viewport.
+    #[test]
+    fn wide_sidebar_frame_and_regions_share_bounds_for_each_padding() {
+        for padding in 0..=4u8 {
+            let mut view = NativeView::new(148, 20);
+            view.set_session_route(true);
+            let mut appearance = crate::native_box_style::BoxAppearance::default();
+            appearance.overrides.insert(
+                crate::native_box_style::BoxId::Sidebar,
+                crate::native_box_style::BoxOverride {
+                    border_style: Some(crate::native_box_style::BorderStyle::Heavy),
+                    padding: Some(padding),
+                    ..Default::default()
+                },
+            );
+            view.set_box_appearance(appearance);
+            let rows = view.render_typed("draft", &[], false, &[]);
+            let presentation = view.presentation();
+            let left = presentation.sidebar_offset.expect("wide sidebar");
+            let width = presentation.sidebar_width;
+            assert_eq!(width, 42);
+            let chars: Vec<Vec<char>> = rows.iter().map(|row| row.chars().collect()).collect();
+            assert_eq!(chars.len(), 20);
+            assert_eq!(chars[0][usize::from(left)], '┏', "padding {padding}: top-left");
+            assert_eq!(
+                chars[0][usize::from(left + width - 1)],
+                '┓',
+                "padding {padding}: top-right"
+            );
+            // The shell's final row is reserved for the shared footer; the
+            // actual sidebar component therefore ends at render_height - 2.
+            let frame_bottom = chars.len() - 2;
+            assert_eq!(
+                chars[frame_bottom][usize::from(left)],
+                '┗',
+                "padding {padding}: bottom-left"
+            );
+            assert_eq!(
+                chars[frame_bottom][usize::from(left + width - 1)],
+                '┛',
+                "padding {padding}: bottom-right"
+            );
+
+            let regions: Vec<_> = view
+                .ui_regions()
+                .into_iter()
+                .filter(|region| region.x >= left)
+                .collect();
+            assert!(!regions.is_empty(), "padding {padding}: sidebar regions");
+            let expected_x = left + 1 + u16::from(padding);
+            let expected_width = width - 2 - 2 * u16::from(padding);
+            for (index, region) in regions.into_iter().enumerate() {
+                assert_eq!(region.x, expected_x, "padding {padding}: region x");
+                assert_eq!(region.y, 1 + index as u16, "padding {padding}: region y");
+                assert_eq!(region.width, expected_width, "padding {padding}: region width");
+                assert!(region.x < 148);
+                assert!(u32::from(region.x) + u32::from(region.width) <= 148);
+                assert!(
+                    region.y > 0 && usize::from(region.y) < frame_bottom,
+                    "padding {padding}: region avoids border rows"
+                );
+            }
+        }
+    }
+
+    /// The manually toggled sidebar uses the same absolute placement when
+    /// the pane is overlaid on a sub-wide terminal (no inline layout slot).
+    /// This catches regressions where the local pane geometry is accidentally
+    /// treated as a full-screen rectangle.
+    #[test]
+    fn toggled_sidebar_at_subwide_width_stays_contained() {
+        let mut view = NativeView::new(100, 12);
+        view.set_session_route(true);
+        view.toggle_sidebar();
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.overrides.insert(
+            crate::native_box_style::BoxId::Sidebar,
+            crate::native_box_style::BoxOverride {
+                border_style: Some(crate::native_box_style::BorderStyle::Double),
+                padding: Some(4),
+                ..Default::default()
+            },
+        );
+        view.set_box_appearance(appearance);
+        let rows = view.render_typed("draft", &[], false, &[]);
+        let left = view.presentation().sidebar_offset.expect("toggled sidebar");
+        let width = view.presentation().sidebar_width;
+        let first: Vec<char> = rows[0].chars().collect();
+        assert_eq!(first[usize::from(left)], '╔');
+        assert_eq!(first[usize::from(left + width - 1)], '╗');
+        let frame_bottom = rows.len() - 2;
+        let bottom: Vec<char> = rows[frame_bottom].chars().collect();
+        assert_eq!(bottom[usize::from(left)], '╚');
+        assert_eq!(bottom[usize::from(left + width - 1)], '╝');
+        assert_eq!(rows.len(), 12);
+        for region in view.ui_regions().into_iter().filter(|region| region.x >= left) {
+            assert!(u32::from(region.x) + u32::from(region.width) <= 100);
+            assert!(usize::from(region.y) < frame_bottom);
+            assert!(region.width > 0);
+        }
     }
 }
 

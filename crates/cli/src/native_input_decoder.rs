@@ -25,7 +25,7 @@ pub(crate) enum InputEvent {
     ArrowUp,
     ArrowDown,
     Paste(String),
-    Mouse { x: u16, y: u16, kind: u8 },
+    Mouse { x: u16, y: u16, kind: u8, modifiers: u8 },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -470,15 +470,18 @@ fn decode_mouse(sequence: &[u8], end: u8) -> Option<InputEvent> {
     if fields.next().is_some() {
         return None;
     }
+    let modifiers = (button & 28) as u8;
     let kind = match (button & !28, end) {
         (0, b'M') => 0,
         (32, b'M') => 1,
         (0 | 3, b'm') => 2,
         (64, b'M') => 3,
         (65, b'M') => 4,
+        (2, b'M') => 5,
+        (2, b'm') => 6,
         _ => return None,
     };
-    Some(InputEvent::Mouse { x, y, kind })
+    Some(InputEvent::Mouse { x, y, kind, modifiers })
 }
 
 fn parse_number(bytes: &[u8]) -> Option<u32> {
@@ -512,7 +515,8 @@ mod mouse_protocol_tests {
             Some(InputEvent::Mouse {
                 x: 2,
                 y: 4,
-                kind: 0
+                kind: 0,
+                modifiers: 0
             })
         );
         assert_eq!(
@@ -520,7 +524,8 @@ mod mouse_protocol_tests {
             Some(InputEvent::Mouse {
                 x: 8,
                 y: 4,
-                kind: 1
+                kind: 1,
+                modifiers: 0
             })
         );
         assert_eq!(
@@ -528,7 +533,8 @@ mod mouse_protocol_tests {
             Some(InputEvent::Mouse {
                 x: 8,
                 y: 4,
-                kind: 2
+                kind: 2,
+                modifiers: 0
             })
         );
         assert_eq!(decoder.pop(), None);
@@ -549,5 +555,26 @@ mod mouse_protocol_tests {
         assert_eq!(decoder.pop(), None);
         decoder.push(b'a', now);
         assert_eq!(decoder.pop(), Some(InputEvent::Byte(b'a')));
+    }
+
+    #[test]
+    fn sgr_mouse_preserves_modifier_bits_and_never_maps_right_click_to_left() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[<10;4;2M\x1b[<2;4;2M\x1b[<2;4;2m" {
+            decoder.push(*byte, now);
+        }
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse { x: 3, y: 1, kind: 5, modifiers: 8 })
+        );
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse { x: 3, y: 1, kind: 5, modifiers: 0 })
+        );
+        assert_eq!(
+            decoder.pop(),
+            Some(InputEvent::Mouse { x: 3, y: 1, kind: 6, modifiers: 0 })
+        );
     }
 }

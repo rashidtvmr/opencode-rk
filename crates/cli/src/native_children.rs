@@ -23,11 +23,68 @@ pub struct Panel {
 mod tests {
     use super::*;
     use serde_json::json;
+    const IDS: [&str; 5] = [
+        "11111111-1111-1111-1111-111111111111",
+        "22222222-2222-2222-2222-222222222222",
+        "33333333-3333-3333-3333-333333333333",
+        "44444444-4444-4444-4444-444444444444",
+        "55555555-5555-5555-5555-555555555555",
+    ];
     fn panel() -> Panel {
         let mut panel = Panel::default();
         panel.show("parent");
         panel.update(&json!({"children":[{"session_id":"11111111-1111-1111-1111-111111111111","agent":"explore","state":"running","description":"inspect"}]})).unwrap();
         panel
+    }
+    fn roster(mut count: usize) -> Panel {
+        count = count.min(IDS.len());
+        let mut panel = Panel::default();
+        panel.show("parent");
+        let children: Vec<_> = IDS[..count].iter().enumerate().map(|(index, id)| json!({
+            "session_id": id,
+            "agent": format!("agent-{index}"),
+            "state": "running",
+            "description": format!("task {index}")
+        })).collect();
+        panel.update(&json!({ "children": children })).unwrap();
+        panel
+    }
+    /// Clicks one footer region at the given geometry and reports the action.
+    fn click_footer(panel: &mut Panel, hit: Hit, width: u16, height: usize) -> Option<Action> {
+        let map = panel.hit_map(width, height);
+        let region = map[height - 1].iter().find(|r| r.hit == hit).copied()?;
+        panel.mouse(height as u16 - 1, (region.start + region.end) / 2, width, height)
+    }
+    #[test]
+    fn detail_render_surfaces_snapshot_metrics_and_labels_missing_fields_unreported() {
+        let mut panel = Panel::default();
+        panel.show("parent");
+        panel.update(&json!({"children":[{
+            "session_id": IDS[0], "agent":"build", "state":"running", "description":"work",
+            "generation": 3, "auto_retry_attempts": 1, "manual_retries": 2,
+            "pending_followups": 2, "read_only": true
+        }]})).unwrap();
+        assert!(panel.key(13).is_none());
+        assert!(panel.detail);
+        let rendered = panel.render(120, 20);
+        assert_eq!(rendered.len(), 20);
+        let text = rendered.join("\n");
+        assert!(text.contains("generation 3"));
+        assert!(text.contains("auto-retry 1"));
+        assert!(text.contains("manual retries 2"));
+        assert!(text.contains("pending 2/4"));
+        assert!(text.contains("read-only yes"));
+        assert!(!text.contains("unreported"));
+        // Older daemons omit the snapshot fields; render unreported, never 0.
+        panel.update(&json!({"children":[{
+            "session_id": IDS[0], "agent":"build", "state":"running", "description":"work"
+        }]})).unwrap();
+        let text = panel.render(120, 20).join("\n");
+        assert!(text.contains("generation unreported"));
+        assert!(text.contains("auto-retry unreported"));
+        assert!(text.contains("manual retries unreported"));
+        assert!(text.contains("pending unreported"));
+        assert!(text.contains("read-only unreported"));
     }
     #[test]
     fn child_panel_navigation_never_submits_and_controls_use_selected_identity() {
@@ -59,8 +116,222 @@ mod tests {
             assert!(rows.iter().all(|line| !line.chars().any(char::is_control)));
         }
     }
+    #[test]
+    fn numeric_keys_select_visible_children_without_submitting() {
+        let mut panel = roster(2);
+        assert!(panel.key(b'2').is_none());
+        assert_eq!(panel.selected_id().as_deref(), Some(IDS[1]));
+        assert!(!panel.detail);
+        // Out-of-range digits keep the current selection; digits are inert
+        // while the typed-history view is open.
+        assert!(panel.key(b'9').is_none());
+        assert_eq!(panel.selected_id().as_deref(), Some(IDS[1]));
+        panel.key(13);
+        assert!(panel.detail);
+        assert!(panel.key(b'1').is_none());
+        assert_eq!(panel.selected_id().as_deref(), Some(IDS[1]));
+    }
+    #[test]
+    fn mouse_clicks_select_children_and_footer_buttons_reuse_key_actions() {
+        let (width, height) = (64u16, 20usize);
+        let mut panel = roster(2);
+        // Header occupies rows 0-1; children render from row 2. Clicking the
+        // already-selected row opens the detail view (Enter parity).
+        assert!(panel.mouse(2, 0, width, height).is_none());
+        assert!(panel.detail);
+        assert_eq!(panel.selected_id().as_deref(), Some(IDS[0]));
+        panel.key(27);
+        assert!(!panel.detail);
+        // Clicking another row selects it; clicking it again opens detail.
+        assert!(panel.mouse(3, 0, width, height).is_none());
+        assert_eq!(panel.selected_id().as_deref(), Some(IDS[1]));
+        assert!(panel.mouse(3, 7, width, height).is_none());
+        assert!(panel.detail);
+        panel.key(27);
+        // List footer buttons dispatch the same actions as their keys.
+        let action = click_footer(&mut panel, Hit::Stop, width, height);
+        assert!(matches!(action, Some(Action::Stop(id)) if id == IDS[1]));
+        let action = click_footer(&mut panel, Hit::Retry, width, height);
+        assert!(matches!(action, Some(Action::Retry(id)) if id == IDS[1]));
+        assert!(click_footer(&mut panel, Hit::Close, width, height).is_none());
+        assert!(!panel.open);
+    }
+    #[test]
+    fn footer_followup_and_send_buttons_reuse_the_composer() {
+        let (width, height) = (64u16, 20usize);
+        let mut panel = roster(2);
+        panel.key(13); // open detail for the selected child
+        assert!(click_footer(&mut panel, Hit::Followup, width, height).is_none());
+        assert!(panel.composing);
+        for ch in "ship it".chars() { panel.text(ch); }
+        let action = click_footer(&mut panel, Hit::Send, width, height);
+        assert!(matches!(action, Some(Action::Followup(id, text)) if id == IDS[0] && text == "ship it"));
+        assert!(!panel.composing);
+    }
+    #[test]
+    fn hit_map_matches_rendered_rows_in_short_viewports() {
+        for count in [5usize, 1] {
+            for height in 0..=8usize {
+                let mut panel = roster(count);
+                let map = panel.hit_map(64, height);
+                assert_eq!(map.len(), height);
+                let rendered = panel.render(64, height);
+                assert!(rendered.len() <= height);
+                let body_limit = height.saturating_sub(2).max(1);
+                for (row, regions) in map.iter().enumerate() {
+                    for region in regions {
+                        match region.hit {
+                            Hit::Child(index) => {
+                                assert!(index < count, "hit row {row} references absent child");
+                                assert!(row >= 2 && row < body_limit, "child hit at unexpected row {row}");
+                                let action = panel.mouse(row as u16, region.start, 64, height);
+                                if panel.detail { panel.key(27); }
+                                assert!(action.is_none(), "child click must not submit");
+                                assert_eq!(panel.selected_id().as_deref(), Some(IDS[index]));
+                            }
+                            Hit::Stop | Hit::Retry | Hit::Followup | Hit::Send | Hit::Back | Hit::Close => {
+                                assert!(row == height - 1 && height > 1, "footer hit off the footer row {row}");
+                                assert!(rendered[row].contains("stop")
+                                    || rendered[row].contains("Esc")
+                                    || rendered[row].contains("Enter"));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /// The footer must occupy the viewport's last row even when the child list
+    /// is shorter than the available space; blank rows pad the gap instead of
+    /// letting the footer drift upward.
+    #[test]
+    fn short_lists_pad_to_the_bottom_and_footer_hits_follow_rendered_rows() {
+        for count in [0usize, 1, 2, 5] {
+            for height in 0..=8usize {
+                let mut panel = roster(count);
+                let rendered = panel.render(64, height);
+                let map = panel.hit_map(64, height);
+                assert_eq!(map.len(), height);
+                assert_eq!(rendered.len(), height);
+                if height == 1 {
+                    assert!(rendered[0].contains("Subagents"));
+                }
+                if height > 1 {
+                    assert!(rendered[height - 1].contains("stop") || rendered[height - 1].contains("Esc"),
+                        "footer must be the last row at height {height}");
+                    for (row, regions) in map.iter().enumerate() {
+                        for region in regions {
+                            match region.hit {
+                                Hit::Child(index) => {
+                                    assert!(row < height - 1, "child hit on the footer row");
+                                    assert!(rendered[row].contains(&format!("task {index}")),
+                                        "hit row {row} does not render child {index}");
+                                    let action = panel.mouse(row as u16, region.start, 64, height);
+                                    if panel.detail { panel.key(27); }
+                                    assert!(action.is_none());
+                                    assert_eq!(panel.selected_id().as_deref(), Some(IDS[index]));
+                                }
+                                _ => assert_eq!(row, height - 1, "footer hit off the footer row"),
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /// Hits never extend past the viewport and out-of-bounds columns are
+    /// rejected, so a footer label clipped by a narrow terminal cannot fire.
+    #[test]
+    fn narrow_viewports_never_expose_or_dispatch_off_screen_hits() {
+        for width in 0..=40u16 {
+            for height in 0..=8usize {
+                let mut panel = roster(5);
+                let map = panel.hit_map(width, height);
+                let rendered = panel.render(width, height);
+                assert_eq!(map.len(), height);
+                assert_eq!(rendered.len(), height);
+                for (row, regions) in map.iter().enumerate() {
+                    for region in regions {
+                        assert!(region.start <= region.end);
+                        assert!(region.end < width, "{region:?} escapes width {width}");
+                        assert!(panel.mouse(row as u16, width.saturating_add(2), width, height).is_none());
+                    }
+                }
+                assert!(panel.mouse(height as u16, 0, width, height).is_none());
+            }
+        }
+    }
+    /// A partially visible footer label is not a target; only fully visible
+    /// labels dispatch, while earlier fully visible labels still work.
+    #[test]
+    fn clipped_footer_labels_cannot_execute() {
+        let height = 8usize;
+        let mut panel = roster(2);
+        // Width 40 shows "s stop" but clips "r retry" and "Esc close".
+        let footer = panel.hit_map(40, height);
+        let footer = &footer[height - 1];
+        assert!(footer.iter().any(|r| r.hit == Hit::Stop));
+        assert!(!footer.iter().any(|r| r.hit == Hit::Retry));
+        assert!(!footer.iter().any(|r| r.hit == Hit::Close));
+        // Column 39 lies inside "r retry" as laid out, but that label is clipped.
+        assert!(panel.mouse(height as u16 - 1, 39, 40, height).is_none());
+        assert!(panel.open);
+        assert_eq!(panel.selected_id().as_deref(), Some(IDS[0]));
+        // Width 30 clips "s stop" too, so the footer offers no targets at all.
+        assert!(panel.hit_map(30, height)[height - 1].is_empty());
+        assert!(panel.mouse(height as u16 - 1, 27, 30, height).is_none());
+        assert!(panel.open);
+        // The fully visible Stop label still dispatches.
+        let stop = panel.hit_map(40, height)[height - 1].iter()
+            .find(|r| r.hit == Hit::Stop).copied().expect("visible stop");
+        assert!(matches!(panel.mouse(height as u16 - 1, stop.start, 40, height), Some(Action::Stop(_))));
+    }
+    #[test]
+    fn untrusted_daemon_text_cannot_shift_child_hit_rows() {
+        let mut panel = Panel::default();
+        panel.show("parent");
+        panel.update(&json!({"children":[{
+            "session_id":"11111111-1111-1111-1111-111111111111",
+            "agent":"evil\x1b[2;1H","state":"running","description":"click\nattack"
+        }]})).unwrap();
+        panel.error = Some("\x1b[31mboom\nboom".into());
+        let map = panel.hit_map(40, 20);
+        // The error consumes header row 2; the child stays on row 3 no matter
+        // what control sequences or newlines the daemon supplied.
+        assert!(map[2].is_empty());
+        assert!(map[3].iter().any(|r| r.hit == Hit::Child(0)));
+        let rendered = panel.render(40, 20);
+        assert!(rendered.iter().all(|line| !line.chars().any(char::is_control)));
+    }
 }
+
+#[derive(Debug)]
 pub enum Action { Stop(String), Retry(String), Followup(String, String) }
+
+/// Visible screen targets the pointer can land on. Row clicks are addressed
+/// by rendered child index; footer labels reuse their keyboard equivalents.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Hit { Child(usize), Stop, Retry, Followup, Send, Back, Close }
+
+/// One clickable column range on one rendered row (row = hit-map index).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct HitRegion { pub hit: Hit, pub start: u16, pub end: u16 }
+
+/// Adds column ranges for each `label` found in the footer text. Footer
+/// segments are ASCII and every prefix glyph (arrows, dots) is one cell wide,
+/// so the display column of a segment equals its char count.
+fn footer_buttons(map: &mut Vec<HitRegion>, footer: &str, labels: &[(&str, Hit)]) {
+    for (label, hit) in labels {
+        if let Some(byte) = footer.find(label) {
+            let start = footer[..byte].chars().count() as u16;
+            map.push(HitRegion {
+                hit: *hit,
+                start: start.saturating_sub(1),
+                end: start.saturating_add(label.chars().count() as u16).saturating_add(1),
+            });
+        }
+    }
+}
 
 impl Panel {
     pub fn show(&mut self, parent: &str) {
@@ -115,9 +386,94 @@ impl Panel {
             b's' => return self.selected_id().map(Action::Stop),
             b'r' => return self.selected_id().map(Action::Retry),
             b'c' if !self.rows.is_empty() => { self.detail = true; self.composing = true; }
+            b'1'..=b'9' => {
+                // Numeric child selection mirrors the pointer row click; the
+                // detail view keeps its own scroll keys, so digits are inert there.
+                if !self.detail {
+                    let index = usize::from(byte - b'1');
+                    if index < self.rows.len() { self.selected = index; }
+                }
+            }
             _ => {}
         }
         None
+    }
+    /// Interactive target per rendered row, indexed by the local offset from
+    /// the modal content origin. Computed with the same layout arithmetic as
+    /// [`Self::render`] so hits always follow the visible rows, including
+    /// short viewports where the list window is clipped.
+    pub fn hit_map(&self, width: u16, height: usize) -> Vec<Vec<HitRegion>> {
+        let mut map: Vec<Vec<HitRegion>> = vec![Vec::new(); height];
+        if width == 0 || height == 0 { return map; }
+        if height > 1 {
+            let footer = if self.composing { "Enter send follow-up · Esc cancel" }
+                else if self.detail { "↑/↓ scroll · s stop · r retry · c follow-up · Esc back" }
+                else { "↑/↓ select · Enter detail · s stop · r retry · Esc close" };
+            let labels: &[(&str, Hit)] = if self.composing {
+                &[("Enter send follow-up", Hit::Send), ("Esc cancel", Hit::Back)]
+            } else if self.detail {
+                &[("s stop", Hit::Stop), ("r retry", Hit::Retry), ("c follow-up", Hit::Followup), ("Esc back", Hit::Back)]
+            } else {
+                &[("s stop", Hit::Stop), ("r retry", Hit::Retry), ("Esc close", Hit::Close)]
+            };
+            let mut buttons = Vec::new();
+            footer_buttons(&mut buttons, footer, labels);
+            // Only fully visible labels are clickable; a label clipped by the
+            // right edge must not fire from its visible prefix.
+            buttons.retain(|region| region.end < width);
+            map[height - 1] = buttons;
+        }
+        if !self.detail && !self.composing && !self.rows.is_empty() {
+            // Mirror the list branch of render: two header rows, an optional
+            // error row, and the bottom footer row stay unclickable.
+            let top = 2 + usize::from(self.error.is_some() || self.action_error.is_some());
+            let capacity = height.saturating_sub(top + 2);
+            if capacity > 0 {
+                let start = self.selected.saturating_sub(capacity.saturating_sub(1));
+                let limit = height.saturating_sub(2).max(1);
+                for (index, _) in self.rows.iter().enumerate().skip(start).take(capacity) {
+                    let line = top + index - start;
+                    if line < limit {
+                        if let Some(row) = map.get_mut(line) {
+                            row.push(HitRegion { hit: Hit::Child(index), start: 0, end: width.saturating_sub(1) });
+                        }
+                    }
+                }
+            }
+        }
+        map
+    }
+    /// Mouse press inside the children modal. `row` is the local row offset
+    /// from the modal content origin and `column` the local column offset.
+    /// Row clicks mirror arrow selection (a second click on the selected row
+    /// opens the detail view); footer clicks mirror their keyboard actions.
+    pub fn mouse(&mut self, row: u16, column: u16, width: u16, height: usize) -> Option<Action> {
+        // Reject coordinates outside the viewport before consulting the map.
+        if column >= width { return None; }
+        let hit_map = self.hit_map(width, height);
+        let regions = hit_map.get(usize::from(row))?;
+        let hit = regions.iter().find(|r| column >= r.start && column <= r.end).map(|r| r.hit)?;
+        self.mouse_from_hit(hit)
+    }
+    fn mouse_from_hit(&mut self, hit: Hit) -> Option<Action> {
+        match hit {
+            Hit::Child(index) => {
+                if self.selected == index {
+                    if !self.detail {
+                        self.detail = true;
+                        self.chat = ChatView::default();
+                    }
+                } else if index < self.rows.len() {
+                    self.selected = index;
+                }
+                None
+            }
+            Hit::Stop => self.key(b's'),
+            Hit::Retry => self.key(b'r'),
+            Hit::Followup => { self.key(b'c'); None }
+            Hit::Send => self.key(13),
+            Hit::Back | Hit::Close => self.key(27),
+        }
     }
     pub fn render(&self, width: u16, height: usize) -> Vec<String> {
         if height == 0 { return Vec::new(); }
@@ -130,6 +486,14 @@ impl Panel {
             if let Some(row) = self.rows.get(self.selected) {
                 lines.push(format!("{} · {} · {}", row["agent"].as_str().unwrap_or("?"), row["state"].as_str().unwrap_or("unknown"), row["model"].as_str().unwrap_or("?")));
                 lines.push(format!("Session: {}", row["session_id"].as_str().unwrap_or("?")));
+                let metric = |key: &str| row.get(key).and_then(Value::as_u64)
+                    .map_or_else(|| "unreported".to_owned(), |value| value.to_string());
+                let pending = row.get("pending_followups").and_then(Value::as_u64)
+                    .map_or_else(|| "unreported".to_owned(), |value| format!("{value}/4"));
+                let read_only = row.get("read_only").and_then(Value::as_bool)
+                    .map_or("unreported", |value| if value { "yes" } else { "no" });
+                lines.push(format!("generation {} · auto-retry {} · manual retries {} · pending {} · read-only {}",
+                    metric("generation"), metric("auto_retry_attempts"), metric("manual_retries"), pending, read_only));
                 lines.push(String::new());
                 let budget = height.saturating_sub(lines.len() + 3);
                 if self.history.is_empty() {
@@ -152,8 +516,12 @@ impl Panel {
             }
         }
         lines.truncate(height.saturating_sub(2).max(1));
-        if height > 2 { lines.push(String::new()); }
-        if height > 1 { lines.push(footer.into()); }
+        if height > 1 {
+            // Reserve the viewport's last row for the footer. Short lists pad
+            // with blank rows instead of letting the footer float upward.
+            lines.resize(height - 1, String::new());
+            lines.push(footer.into());
+        }
         // fit strips ANSI/control sequences with a bounded scan and clips by
         // terminal cells; daemon text never goes to the renderer unfiltered.
         lines.into_iter().take(height).map(|line| fit(&line, width)).collect()

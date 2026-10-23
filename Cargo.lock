@@ -926,6 +926,7 @@ dependencies = [
  "clap",
  "opencode-rk-catalog",
  "opencode-rk-contracts",
+ "opencode-rk-foundation",
  "opencode-rk-opentui-bridge",
  "opencode-rk-providers",
  "opencode-rk-server",

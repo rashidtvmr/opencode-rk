@@ -69,6 +69,14 @@ mod native_ui_budget;
 mod native_ui_preferences;
 #[cfg(feature = "native")]
 mod native_ui_style;
+#[cfg(feature = "native")]
+mod native_config_import;
+#[cfg(feature = "native")]
+mod native_import_dialog;
+#[cfg(feature = "native")]
+mod native_import_sources;
+#[cfg(feature = "native")]
+mod native_permissions;
 #[cfg(all(test, feature = "native"))]
 #[path = "../tests/support/security_preferences.rs"]
 mod security_preferences;
@@ -718,6 +726,7 @@ async fn serve(
     open_browser: bool,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let daemon_paths = DaemonPaths::for_data_dir(&data);
+    std::env::set_var("OPENCODE_RK_HOME",&data);
     let daemon = match SingletonDaemon::bind(&daemon_paths.socket, &daemon_paths.pid) {
         Ok(daemon) => Arc::new(daemon),
         Err(DaemonError::AlreadyRunning(_)) => {

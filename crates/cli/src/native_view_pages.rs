@@ -127,7 +127,7 @@ use std::collections::HashSet;
 
 /// Static local command routes (user-requested local routes). The integrator
 /// binds each route to real navigation; nothing here fetches or mutates.
-pub const COMMAND_ROUTES: [(&str, &str); 11] = [
+pub const COMMAND_ROUTES: [(&str, &str); 12] = [
     ("/sessions", "Sessions"),
     ("/models", "Models"),
     ("/connect", "Providers"),
@@ -139,6 +139,7 @@ pub const COMMAND_ROUTES: [(&str, &str); 11] = [
     ("/diff", "Diff"),
     ("/workspace", "Workspaces"),
     ("/agents", "Agents"),
+    ("/import", "Import settings"),
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────
@@ -367,8 +368,8 @@ pub fn command_rows() -> Vec<PageRow> {
         .iter()
         .map(|(route, page)| PageRow {
             id: (*route).to_owned(),
-            label: (*route).to_owned(),
-            detail: format!("open the {page} page"),
+            label: if *route == "/import" { "Import settings".to_owned() } else { (*route).to_owned() },
+            detail: if *route == "/import" { "rediscover and import settings".to_owned() } else { format!("open the {page} page") },
             enabled: true,
         })
         .collect()
@@ -679,6 +680,7 @@ impl PageState {
         let action = match page {
             Page::Commands => match Page::from_route(&row.id).and_then(Page::route) {
                 Some(route) => PageAction::Route(route),
+                None if row.id == "/import" => PageAction::Route("/import"),
                 None => PageAction::Unsupported {
                     page,
                     id: row.id,
@@ -1214,12 +1216,13 @@ mod tests {
 
     #[test]
     fn commands_page_yields_static_local_routes() {
-        assert_eq!(COMMAND_ROUTES.len(), 11);
-        assert_eq!(command_rows().len(), 11);
+        assert_eq!(COMMAND_ROUTES.len(), 12);
+        assert_eq!(command_rows().len(), 12);
         assert_eq!(Page::from_route("/sessions"), Some(Page::Sessions));
         assert_eq!(Page::from_route("/models"), Some(Page::Models));
         assert_eq!(Page::from_route("/connect"), Some(Page::Providers));
         assert_eq!(Page::from_route("/agents"), Some(Page::Agents));
+        assert_eq!(Page::from_route("/import"), None);
         assert_eq!(Page::from_route("/workspace"), Some(Page::Workspaces));
         assert_eq!(Page::from_route("/commands"), None);
         // v4: /sessions belongs to Page::Sessions; Chat is the routeless home.
@@ -1231,6 +1234,9 @@ mod tests {
             .expect("/sessions command exists");
         assert!(sessions.enabled, "/sessions is an enabled command");
         assert_eq!(sessions.detail, "open the Sessions page");
+        let import = command_rows().into_iter().find(|row| row.id == "/import").expect("import command exists");
+        assert!(import.enabled);
+        assert_eq!(import.label, "Import settings");
 
         let mut state = PageState::new();
         state.open(Page::Commands);
@@ -1238,6 +1244,8 @@ mod tests {
         assert_eq!(state.activate(), PageAction::Route("/sessions"),);
         state.search("/theme");
         assert_eq!(state.activate(), PageAction::Route("/theme"));
+        state.search("Import settings");
+        assert_eq!(state.activate(), PageAction::Route("/import"));
         assert!(state.pending().is_none(), "routes need no backend ACK");
     }
 

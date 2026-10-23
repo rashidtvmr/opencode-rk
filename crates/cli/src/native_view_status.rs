@@ -168,6 +168,12 @@ pub struct StatusView {
     session_message_count: Option<usize>,
     /// `(used, window)` from the caller's context snapshot.
     context: Option<(u64, u64)>,
+    /// Provider-reported usage of the current turn: `(input, output)`
+    /// authoritative totals plus optional cached/reasoning subsets.
+    /// `None` subsets mean "provider did not report" — rendered as
+    /// `unreported`, never a fabricated zero; an explicit provider zero
+    /// stays `Some(0)`.
+    usage: Option<(u64,u64,Option<u64>,Option<u64>)>,
     /// Last good MCP map (retained across a rejected snapshot).
     mcp: Vec<McpEntry>,
     /// True once at least one snapshot was accepted (ACK).
@@ -207,14 +213,21 @@ impl StatusView {
         if let Some(id) = self.session_id() {
             rows.push((id.to_owned(), Role::Description));
         }
+        rows.push((String::new(), Role::Description));
+        rows.push(("Context".to_owned(), Role::Heading));
         if let Some((used, window)) = self.context {
-            rows.push((String::new(), Role::Description));
-            rows.push(("Context".to_owned(), Role::Heading));
-            rows.push((format!("{used} tokens"), Role::Item));
-            if window > 0 {
-                rows.push((format!("{}% used", used.saturating_mul(100) / window), Role::Description));
-            }
+            rows.push((format!("{used} tokens · last request"), Role::Item));
+            if window > 0 { rows.push((format!("{} / {} tokens · {}%",used,window,used.saturating_mul(100)/window),Role::Description)); }
+            else {rows.push(("Model capacity not reported".into(),Role::Description));}
+        } else {
+            rows.push(("Provider usage not reported yet".into(),Role::Description));
         }
+        if let Some((input,output,cached,reasoning))=self.usage {
+            let subset=|tokens:Option<u64>| tokens.map(|n|n.to_string()).unwrap_or_else(||"unreported".into());
+            rows.push((format!("Input {input} · Output {output}"),Role::Item));
+            rows.push((format!("Cached {} · Reasoning {}",subset(cached),subset(reasoning)),Role::Description));
+        }
+        rows.push((format!("{} messages",self.session_message_count.map(|n|n.to_string()).unwrap_or_else(||"?".into())),Role::Description));
         if !self.mcp.is_empty() {
             rows.push((String::new(), Role::Description));
             rows.push(("MCP".to_owned(), Role::Heading));
@@ -335,6 +348,15 @@ impl StatusView {
             _ => None,
         };
     }
+
+    pub fn set_usage(&mut self,input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>,window:Option<u64>) {
+        self.usage=Some((input,output,cached,reasoning));
+        // Input/output are the authoritative totals; cached/reasoning are
+        // subsets of input/output, not extra tokens (`None` = unreported,
+        // never a fabricated zero), so neither enters the total here.
+        self.context=Some((input.saturating_add(output),window.unwrap_or(0)));
+    }
+    pub fn clear_usage(&mut self) {self.usage=None;self.context=None;}
 
     /// Confirmed connection observation, if any.
     #[must_use]
@@ -814,6 +836,41 @@ mod tests {
             "alpha": {"status": "disabled"},
             "beta": {"status": "failed", "error": "not_connected"}
         })
+    }
+
+    /// Usage subsets are display-only facts: an unreported subset renders
+    /// `unreported` (never a fabricated zero), an explicit provider zero
+    /// stays `0`, and the context total is exactly input+output — cached
+    /// and reasoning are subsets of those totals and are never
+    /// double-counted into the context row.
+    #[test]
+    fn usage_subsets_unreported_vs_zero_and_never_double_counted() {
+        // Reported subsets render verbatim; the context total is
+        // input+output only (120+30=150, NOT 120+30+40+10=200).
+        let mut view = StatusView::default();
+        view.set_usage(120, 30, Some(40), Some(10), Some(200000));
+        let rows = view.render_sidebar(120, 30);
+        assert!(rows.iter().any(|r| r.contains("Input 120 · Output 30")));
+        assert!(rows.iter().any(|r| r.contains("Cached 40 · Reasoning 10")));
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|r| *r == "context: used=150 window=200000"));
+        // Unreported subsets: honest `unreported`, never 0; the same total
+        // contract holds with no subset material at all.
+        let mut view = StatusView::default();
+        view.set_usage(10, 4, None, None, None);
+        let rows = view.render_sidebar(120, 30);
+        assert!(rows
+            .iter()
+            .any(|r| r.contains("Cached unreported · Reasoning unreported")));
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|r| *r == "context: used=14 window=0"));
+        // Explicit provider zero is a real report, distinct from missing.
+        let mut view = StatusView::default();
+        view.set_usage(10, 4, Some(0), Some(0), None);
+        let rows = view.render_sidebar(120, 30);
+        assert!(rows.iter().any(|r| r.contains("Cached 0 · Reasoning 0")));
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|r| *r == "context: used=14 window=0"));
     }
 
     #[test]

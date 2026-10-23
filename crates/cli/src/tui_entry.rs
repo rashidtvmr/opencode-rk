@@ -33,6 +33,53 @@ use crate::native_chat_history::NativeChatHistory;
 #[cfg(feature = "native")]
 use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
 use clap::{Args, ValueEnum};
+
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum HistoryRequestKind { Older, Newer, Tail, Refresh }
+
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct HistoryRequestMeta { id: u64, generation: u64, revision: u64, kind: HistoryRequestKind }
+
+#[cfg(feature = "native")]
+#[derive(Clone, Copy, Debug)]
+struct BlockedHistoryScroll { revision: u64, rows: usize }
+
+#[cfg(feature = "native")]
+fn history_trace(
+    event: &str,
+    view: &crate::native_view::NativeView,
+    window: Option<&crate::native_chat_projection::NativeHistoryWindow>,
+    active: Option<HistoryRequestMeta>,
+    queued: Option<HistoryRequestKind>,
+    pending: bool,
+    revision: u64,
+    outcome: Option<&str>,
+) {
+    let (first, last, adjacent, cursor, newest) = window.map_or((None, None, false, None, false), |window| (
+        window.messages().first().and_then(|row| row.get("id")).and_then(serde_json::Value::as_str),
+        window.messages().last().and_then(|row| row.get("id")).and_then(serde_json::Value::as_str),
+        window.has_adjacent_newer(),
+        window.newer_recovery_cursor(),
+        window.at_newest_page(),
+    ));
+    crate::native_debug::event(event, serde_json::json!({
+        "kind": active.map(|request| format!("{:?}", request.kind)),
+        "id": active.map(|request| request.id),
+        "generation": active.map(|request| request.generation),
+        "nav_revision": revision,
+        "was_tail": view.chat_at_tail(),
+        "queued_kind": queued.map(|kind| format!("{kind:?}")),
+        "pending": pending,
+        "window_first_id": first,
+        "window_last_id": last,
+        "has_adjacent": adjacent,
+        "newer_cursor": cursor,
+        "at_newest": newest,
+        "outcome": outcome,
+    }));
+}
 #[cfg(feature = "native")]
 use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use opencode_rk_sessions::tui_state::{
@@ -47,8 +94,40 @@ use std::{
     time::{Duration, Instant},
 };
 
+#[cfg(feature = "native")]
+struct NativeImportPolicy {
+    explicitly_confirmed: bool,
+}
+
+#[cfg(feature = "native")]
+fn import_modal_visible(
+    permission_open: bool,
+    permission_editor_open: bool,
+    setup_dialog_open: bool,
+    import_open: bool,
+) -> bool {
+    !permission_open && !permission_editor_open && !setup_dialog_open && import_open
+}
+
+#[cfg(feature = "native")]
+impl crate::native_config_import::ConfigWritePolicy for NativeImportPolicy {
+    fn authorize_config_import(
+        &self,
+        _dest: &Path,
+        _sources: &[crate::native_config_import::SourceMeta],
+    ) -> Result<(), crate::native_config_import::ImportError> {
+        if self.explicitly_confirmed {
+            Ok(())
+        } else {
+            Err(crate::native_config_import::ImportError::PolicyDenied(
+                "config import requires explicit confirmation".to_owned(),
+            ))
+        }
+    }
+}
+
 /// Bounded body cap for daemon responses (1 MiB).
-const LIVE_MAX_BODY_BYTES: u64 = 1_048_576;
+const LIVE_MAX_BODY_BYTES: u64 = 8 * 1024 * 1024;
 /// Connect/read timeout for live snapshot calls.
 const LIVE_TIMEOUT: Duration = Duration::from_secs(2);
 /// Max characters shown from the last message preview.
@@ -225,6 +304,10 @@ struct LiveSnapshot {
     history: Vec<String>,
     #[cfg(feature = "native")]
     typed_history: Vec<ChatMessage>,
+    #[cfg(feature = "native")]
+    raw_history: Vec<serde_json::Value>,
+    #[cfg(feature = "native")]
+    history_next_before: Option<String>,
     #[cfg(feature = "native")]
     parent_session: bool,
 }
@@ -405,7 +488,7 @@ fn snapshot_from_listing(
     let messages_body = http_request(
         origin,
         "GET",
-        &format!("/api/sessions/{id}/messages?limit=200"),
+        &format!("/api/sessions/{id}/history?limit=100"),
         None,
         auth,
     )?;
@@ -443,6 +526,10 @@ fn snapshot_from_listing(
         #[cfg(feature = "native")]
         typed_history: crate::native_chat_projection::project_history(&messages),
         #[cfg(feature = "native")]
+        raw_history: messages.clone(),
+        #[cfg(feature = "native")]
+        history_next_before: messages_value["next_before"].as_str().map(str::to_owned),
+        #[cfg(feature = "native")]
         parent_session: target["parent_session_id"]
             .as_str()
             .is_some_and(|id| !id.is_empty()),
@@ -452,6 +539,18 @@ fn snapshot_from_listing(
 fn message_text_bounded(message: &serde_json::Value) -> Option<String> {
     let text = message["body"]["text"].as_str()?;
     Some(text.chars().take(MAX_NATIVE_LINE_CHARS).collect())
+}
+
+#[cfg(feature = "native")]
+fn apply_history_window(window: &crate::native_chat_projection::NativeHistoryWindow, transcript: &mut NativeChatHistory) {
+    let mut lines = Vec::new();
+    for message in window.messages() {
+        let role = message.get("role").and_then(serde_json::Value::as_str).unwrap_or("message");
+        if let Some(text) = message_text_bounded(message) {
+            lines.push(format!("{role}: {text}"));
+        }
+    }
+    transcript.reset(lines, crate::native_chat_projection::project_history(window.messages()));
 }
 
 fn preview(text: &str) -> String {
@@ -781,6 +880,34 @@ fn paint_color(
     Rgba::new(r, g, b, a)
 }
 
+#[cfg(feature = "native")]
+fn sidebar_cell(presentation: crate::native_view::ViewPresentation, x: u32, y: u32) -> bool {
+    presentation.sidebar_offset.is_some_and(|left| {
+        x >= u32::from(left)
+            && x < u32::from(left) + u32::from(presentation.sidebar_width)
+            && y < u32::from(presentation.rows.saturating_sub(1))
+            && x < u32::from(presentation.cols)
+    })
+}
+
+#[cfg(all(test, feature = "native"))]
+mod sidebar_paint_geometry_tests {
+    #[test]
+    fn sidebar_membership_excludes_footer_and_hidden_or_narrow_sidebar() {
+        use crate::native_view::ViewPresentation;
+        let wide = ViewPresentation { cols: 148, rows: 30, main_offset: 0, main_width: 106, main_padding: 2, sidebar_offset: Some(106), sidebar_width: 42 };
+        let narrow = ViewPresentation { cols: 100, rows: 30, main_offset: 0, main_width: 100, main_padding: 2, sidebar_offset: Some(58), sidebar_width: 42 };
+        let hidden = ViewPresentation { sidebar_offset: None, sidebar_width: 0, ..narrow };
+        assert!(super::sidebar_cell(wide, 110, 0));
+        assert!(super::sidebar_cell(wide, 110, 28));
+        assert!(!super::sidebar_cell(wide, 110, 29));
+        assert!(!super::sidebar_cell(hidden, 99, 10));
+        assert!(super::sidebar_cell(narrow, 99, 10));
+        assert!(!super::sidebar_cell(narrow, 100, 10));
+        assert!(!super::sidebar_cell(wide, 105, 10));
+    }
+}
+
 /// Native styled paint with cell-aligned semantic spans and explicit opaque
 /// backgrounds. Modal/sidebar source-over dimming is resolved in Rust before
 /// FFI; native alpha or null-background preservation is not assumed.
@@ -813,6 +940,30 @@ fn native_paint(
             crate::native_theme_runtime::dim([color.r, color.g, color.b, color.a], alpha);
         Rgba::new(r, g, b, a)
     }
+    // Paint only the intersection with the actual renderer viewport. Region
+    // descriptors come from the shared layout pass, but a resize can make a
+    // previously computed bottom edge stale; clipping here prevents panel or
+    // composer fills from leaking below the footer/terminal bounds.
+    fn fill_clipped(
+        renderer: &mut NativeRenderer,
+        cols: u32,
+        rows: u32,
+        rect: (u16, u16, u16, u16),
+        color: Rgba,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let (x, y, width, height) = rect;
+        let x = u32::from(x);
+        let y = u32::from(y);
+        if x >= cols || y >= rows || width == 0 || height == 0 {
+            return Ok(());
+        }
+        let width = u32::from(width).min(cols - x);
+        let height = u32::from(height).min(rows - y);
+        if width > 0 && height > 0 {
+            renderer.fill_rect(x, y, width, height, color)?;
+        }
+        Ok(())
+    }
     // Resolve alpha in Rust. Every span supplies an opaque background;
     // native null-background/alpha behavior is not relied upon.
     let modal = ctx.modal_rows.and_then(|count| {
@@ -833,16 +984,10 @@ fn native_paint(
     };
     renderer.fill_rect(0, 0, cols, rows, dim(background, base_alpha))?;
     if let Some((x, y, width, height)) = ctx.page_panel {
-        renderer.fill_rect(u32::from(x), u32::from(y), u32::from(width), u32::from(height), dim(panel, base_alpha))?;
+        fill_clipped(renderer, cols, rows, (x, y, width, height), dim(panel, base_alpha))?;
     }
     if let Some((left, top, width, height)) = ctx.composer {
-        renderer.fill_rect(
-            u32::from(left),
-            u32::from(top),
-            u32::from(width),
-            u32::from(height),
-            dim(element, base_alpha),
-        )?;
+        fill_clipped(renderer, cols, rows, (left, top, width, height), dim(element, base_alpha))?;
     }
     for (row, line) in lines.iter().enumerate().take(rows as usize) {
         let y = row as u32;
@@ -875,10 +1020,7 @@ fn native_paint(
             cols.min(u16::MAX as u32) as u16,
             |x, glyph, _| {
                 let x = u32::from(x);
-                let sidebar = presentation.sidebar_offset.is_some_and(|left| {
-                    x >= u32::from(left)
-                        && x < u32::from(left) + u32::from(presentation.sidebar_width)
-                });
+                let sidebar = sidebar_cell(presentation, x, y);
                 let in_modal = modal.is_some_and(|(left, top, width, height)| {
                     x >= left && x < left + width && y >= top && y < top + height
                 });
@@ -1222,6 +1364,195 @@ fn session_page_rows(
 }
 
 #[cfg(feature = "native")]
+/// Real `/api/commands` catalogue → Agents-page [`crate::native_view_pages::PageRow`]s.
+///
+/// Truthful metadata only: name/description/`read_only` and — when the
+/// catalogue actually carries them — optional `aliases` are rendered from
+/// the authenticated listing; unknown extra fields are ignored. Rows are
+/// selectable metadata (activation stays the framework's
+/// [`crate::native_view_pages::PageAction::Unsupported`]; no launch command
+/// exists, so no pretend action is wired). One malformed entry atomically
+/// rejects the WHOLE catalogue: the caller keeps the page's previous rows
+/// and reports the error honestly instead of rendering a partial list.
+/// Duplicate ids are equally rejected (single source of truth per name).
+fn agent_catalogue_rows(value: &serde_json::Value) -> Result<Vec<crate::native_view_pages::PageRow>, String> {
+    // Bounded like the @mention loader, which also caps the agents array.
+    const MAX_AGENTS: usize = 4096;
+    const MAX_ALIASES: usize = 16;
+    const MAX_TEXT: usize = 256;
+
+    let valid_token = |token: &str| {
+        !token.is_empty() && token.chars().count() <= 128
+            && token.chars().all(|ch| !ch.is_control()) && token.chars().all(|ch| !ch.is_whitespace())
+    };
+    let agents = value
+        .get("agents")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "agents listing missing".to_owned())?;
+    if agents.len() > MAX_AGENTS {
+        return Err(format!("agents listing exceeds {} entries", MAX_AGENTS));
+    }
+    let mut rows = Vec::with_capacity(agents.len());
+    let mut seen = std::collections::HashSet::new();
+    for agent in agents {
+        let name = agent
+            .get("name")
+            .and_then(serde_json::Value::as_str)
+            .ok_or_else(|| "agent entry missing a string name".to_owned())?;
+        if !valid_token(name) {
+            return Err(format!("agent name rejected: {name:?}"));
+        }
+        if !seen.insert(name.to_owned()) {
+            return Err(format!("duplicate agent name: {name}"));
+        }
+        let description = match agent.get("description") {
+            None | Some(serde_json::Value::Null) => "",
+            Some(serde_json::Value::String(text)) => {
+                if text.chars().count() > MAX_TEXT {
+                    return Err(format!("agent {name}: description exceeds {} chars", MAX_TEXT));
+                }
+                text.as_str()
+            }
+            Some(_) => return Err(format!("agent {name}: description must be a string")),
+        };
+        let read_only = match agent.get("read_only") {
+            None | Some(serde_json::Value::Null) => false,
+            Some(serde_json::Value::Bool(flag)) => *flag,
+            Some(_) => return Err(format!("agent {name}: read_only must be boolean")),
+        };
+        let mut aliases: Vec<&str> = Vec::new();
+        match agent.get("aliases") {
+            None | Some(serde_json::Value::Null) => {}
+            Some(serde_json::Value::Array(items)) => {
+                if items.len() > MAX_ALIASES {
+                    return Err(format!("agent {name}: aliases exceed {} entries", MAX_ALIASES));
+                }
+                for item in items {
+                    let alias = item
+                        .as_str()
+                        .ok_or_else(|| format!("agent {name}: aliases must be strings"))?;
+                    if !valid_token(alias) {
+                        return Err(format!("agent {name}: alias rejected: {alias:?}"));
+                    }
+                    aliases.push(alias);
+                }
+            }
+            Some(_) => return Err(format!("agent {name}: aliases must be a string array")),
+        }
+        let mut detail: String = description.to_owned();
+        if read_only {
+            if !detail.is_empty() {
+                detail.push_str(" · ");
+            }
+            detail.push_str("read-only");
+        }
+        if !aliases.is_empty() {
+            if !detail.is_empty() {
+                detail.push_str(" · ");
+            }
+            detail.push_str("aliases: ");
+            detail.push_str(&aliases.join(", "));
+        }
+        rows.push(crate::native_view_pages::PageRow {
+            id: name.to_owned(),
+            label: name.to_owned(),
+            detail,
+            enabled: true,
+        });
+    }
+    Ok(rows)
+}
+
+#[cfg(test)]
+mod agent_catalogue_rows_tests {
+    use super::agent_catalogue_rows;
+
+    #[test]
+    fn parses_ten_roles_with_read_only_names_and_custom_aliases() {
+        let agents: Vec<serde_json::Value> = (0..10)
+            .map(|index| {
+                serde_json::json!({
+                    "name": format!("role-{index}"),
+                    "description": format!("Role {index} brief"),
+                    "read_only": index % 2 == 0,
+                    "aliases": [format!("role-alias-{index}")],
+                })
+            })
+            .collect();
+        let catalogue = serde_json::json!({"agents": agents, "commands": {}});
+
+        let rows = agent_catalogue_rows(&catalogue).expect("ten truthful roles");
+
+        assert_eq!(rows.len(), 10);
+        for (index, row) in rows.iter().enumerate() {
+            assert_eq!(row.id, format!("role-{index}"));
+            assert_eq!(row.label, format!("role-{index}"));
+            assert_eq!(row.label, row.id);
+            assert!(row.detail.starts_with(&format!("Role {index} brief")));
+            assert!(row.detail.contains(&format!("aliases: role-alias-{index}")));
+            assert_eq!(row.detail.contains("read-only"), index % 2 == 0);
+            assert!(row.enabled);
+        }
+    }
+
+    #[test]
+    fn malformed_rows_reject_the_whole_catalogue_atomically() {
+        let ok = serde_json::json!({"name": "build", "description": "Builds", "read_only": false});
+        let too_long_name: String = "a".repeat(129);
+        let too_long_desc: String = "d".repeat(257);
+        for malformed in [
+            serde_json::json!({"description": "no name"}),
+            serde_json::json!({"name": "", "description": "empty name"}),
+            serde_json::json!({"name": "bad\nname", "description": "control name"}),
+            serde_json::json!({"name": "bad name", "description": "whitespace name"}),
+            serde_json::json!({"name": too_long_name}),
+            serde_json::json!({"name": ["array"], "description": "name type"}),
+            serde_json::json!({"name": "x", "description": 7}),
+            serde_json::json!({"name": "x", "description": too_long_desc}),
+            serde_json::json!({"name": "x", "read_only": "yes"}),
+            serde_json::json!({"name": "x", "aliases": "build"}),
+            serde_json::json!({"name": "x", "aliases": [7]}),
+            serde_json::json!({"name": "x", "aliases": ["a\nb"]}),
+            serde_json::json!({"name": "x", "aliases": (0..17).map(|i| format!("a{i}")).collect::<Vec<_>>()}),
+        ] {
+            let catalogue = serde_json::json!({"agents": [ok.clone(), malformed]});
+            let error = agent_catalogue_rows(&catalogue)
+                .expect_err("affirmed atomic rejection");
+            assert!(!error.is_empty());
+        }
+        // Duplicate ids reject the full catalogue, valid-prefix or not.
+        let duplicates = serde_json::json!({"agents": [ok.clone(), ok]});
+        assert!(agent_catalogue_rows(&duplicates).is_err());
+        // Hard bound: exactly 4096 entries still parse; one more rejects.
+        let at_bound: Vec<serde_json::Value> = (0..4096)
+            .map(|index| serde_json::json!({"name": format!("agent-{index}"), "read_only": false}))
+            .collect();
+        assert_eq!(
+            agent_catalogue_rows(&serde_json::json!({"agents": at_bound}))
+                .expect("bound is inclusive")
+                .len(),
+            4096
+        );
+        let over_bound: Vec<serde_json::Value> = (0..4097)
+            .map(|index| serde_json::json!({"name": format!("agent-{index}"), "read_only": false}))
+            .collect();
+        assert!(agent_catalogue_rows(&serde_json::json!({"agents": over_bound})).is_err());
+    }
+
+    #[test]
+    fn results_never_partially_leak_rows_and_drafts_stay_out_of_parse() {
+        // A parse failure yields Err — not a partial Vec — so no caller can
+        // feed the page half a catalogue; the function itself never touches
+        // any composer draft (draft handling lives in the dispatch loop).
+        let catalogue = serde_json::json!({"agents": [
+            {"name": "build", "read_only": false},
+            {"read_only": true}
+        ]});
+        assert!(agent_catalogue_rows(&catalogue).is_err());
+    }
+}
+
+#[cfg(feature = "native")]
 fn configured_command_rows(value: &serde_json::Value) -> Result<Vec<crate::native_view_pages::PageRow>, String> {
     let commands = value.get("commands").and_then(serde_json::Value::as_array)
         .ok_or("command listing is not an array")?;
@@ -1324,9 +1655,11 @@ fn dispatch_permission_reply(
     intent: crate::native_view_dialogs::DecisionIntent,
 ) {
     use crate::native_view_dialogs::{DecisionIntent, DialogAck};
-    let reply = match &intent {
-        DecisionIntent::Approve { .. } => "once",
-        DecisionIntent::Reject { .. } => "reject",
+    let (reply, scope) = match &intent {
+        DecisionIntent::Approve { .. } => ("once", "once"),
+        DecisionIntent::Reject { .. } => ("reject", "once"),
+        DecisionIntent::ScopedPermission {allow,persistent,..} => (
+            if *allow {"always"} else {"reject"}, if *persistent {"always"} else {"session"}),
         DecisionIntent::Answer { .. } | DecisionIntent::Cancel { .. } => {
             append_transcript(
                 transcript,
@@ -1342,7 +1675,7 @@ fn dispatch_permission_reply(
         .ok_or_else(|| "daemon unavailable".to_owned())
         .and_then(|origin| {
             let path = format!("/api/session/{session_id}/permission/{request_id}/reply");
-            let payload = serde_json::json!({ "reply": reply }).to_string();
+            let payload = serde_json::json!({ "reply": reply, "scope": scope }).to_string();
             http_request_with_status(origin, "POST", &path, Some(&payload), auth).and_then(
                 |(reply_body, status)| {
                     if permission_reply_accepted(status, &reply_body) {
@@ -1385,6 +1718,41 @@ fn dispatch_permission_reply(
             format!("error: permission ack: {}", error.code()),
         );
     }
+}
+
+#[cfg(feature = "native")]
+/// Runs one Stop/Retry/Follow-up control against the existing children HTTP
+/// mapping (stop/retry/continue) and records the transport error on the panel.
+/// Shared by the keyboard path and the child-panel mouse path.
+fn children_action_http(
+    panel: &mut crate::native_children::Panel,
+    action: crate::native_children::Action,
+    live: Option<&LiveSnapshot>,
+    auth: Option<&str>,
+) {
+    use crate::native_children::Action;
+    if let Some(snapshot) = live {
+        let (id, operation, body) = match action {
+            Action::Stop(id) => (id, "stop", serde_json::json!({})),
+            Action::Retry(id) => (id, "retry", serde_json::json!({})),
+            Action::Followup(id, text) => (id, "continue", serde_json::json!({"text":text})),
+        };
+        panel.action_error = http_request(&snapshot.origin, "POST", &format!("/api/sessions/{}/children/{id}/{operation}", panel.parent), Some(&body.to_string()), auth).err();
+    }
+}
+
+#[cfg(feature = "native")]
+fn permission_editor_request(editor:&mut crate::native_permissions::Editor, live:Option<&LiveSnapshot>, auth:Option<&str>, decision:Option<&str>) {
+    let result = (|| {
+        let snapshot = live.ok_or_else(|| "Daemon unavailable".to_owned())?;
+        if let Some(decision) = decision {
+            let payload = editor.payload(decision,&snapshot.session_id).to_string();
+            http_request(&snapshot.origin,"POST","/api/permission-rules",Some(&payload),auth)?;
+        }
+        let body = http_request(&snapshot.origin,"GET",&format!("/api/permission-rules?session_id={}",snapshot.session_id),None,auth)?;
+        serde_json::from_str(&body).map_err(|_| "Invalid permission rules response".to_owned())
+    })();
+    match result {Ok(rules)=>editor.apply(rules),Err(_)=>editor.error=Some("Could not save/load rules. Changes were not confirmed.".into())}
 }
 
 /// Exact broker contract for acknowledging a permission reply: ONLY
@@ -1563,7 +1931,11 @@ fn native_loop(
     let models_loaded = models_fetch.is_some();
     let mut models = models_fetch.unwrap_or_default();
     let mut selected = native_setup::selected(&models);
-    let mut provider_id = native_setup::recent_provider().unwrap_or_else(|| "openai".into());
+    let recent_provider = native_setup::recent_provider();
+    let configured_model = opencode_rk_providers::imported_config::own_config_path()
+        .as_deref()
+        .and_then(native_setup::configured_model_identity);
+    let mut provider_id = "openai".to_owned();
     let mut provider_url = "http://localhost:20128/v1".to_owned();
     let mut providers = vec![
         ("openai".to_owned(), "OpenAI".to_owned(), String::new()),
@@ -1573,6 +1945,20 @@ fn native_loop(
             provider_url.clone(),
         ),
     ];
+    // The own config is an authoritative local provider registry layer.  Do
+    // not wait for the optional daemon listing to expose it: startup model
+    // selection must be able to initialize an imported provider before any
+    // model catalogue exists.  This reads normalized provider metadata only;
+    // credential resolution remains exclusively in the existing daemon path.
+    if let Ok(imported) = opencode_rk_providers::imported_config::load_imported_providers() {
+        for provider in imported {
+            if let Some(existing) = providers.iter_mut().find(|row| row.0 == provider.id) {
+                *existing = (provider.id, provider.name, provider.base_url);
+            } else {
+                providers.push((provider.id, provider.name, provider.base_url));
+            }
+        }
+    }
     if let Some(snapshot) = live.as_ref() {
         if let Ok(body) = http_request(&snapshot.origin, "GET", "/api/providers", None, auth) {
             if let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) {
@@ -1612,9 +1998,24 @@ fn native_loop(
         "Other — custom OpenAI-compatible provider".into(),
         String::new(),
     ));
+    // `custom` is the picker sentinel, not a configured provider and must
+    // never be allowed to become a discovery route.
+    let known_provider_ids: Vec<&str> = providers
+        .iter()
+        .filter(|row| row.0 != "custom")
+        .map(|row| row.0.as_str())
+        .collect();
+    provider_id = native_setup::startup_provider(
+        recent_provider.as_deref(),
+        configured_model.as_deref(),
+        &known_provider_ids,
+    );
     let mut model_load = None;
     let mut setup_error: Option<String> = None;
-    if provider_id != "openai" && providers.iter().any(|row| row.0 == provider_id) {
+    if provider_id != "openai"
+        && providers.iter().any(|row| row.0 == provider_id)
+        && provider_id != "custom"
+    {
         selected = None;
         if let Some(snapshot) = live.as_ref() {
             model_load = native_setup::ModelLoad::start(&snapshot.origin, auth, &provider_id).ok();
@@ -1628,6 +2029,28 @@ fn native_loop(
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
     let mut pending_submission: Option<String> = None;
     let mut binding_generation: u64 = 0;
+    // History pagination is deliberately separate from turn/completion
+    // workers: one bounded request at a time, and every result carries the
+    // binding generation that authorized it.
+    let mut history_window = live.as_ref().map(|snapshot| {
+        crate::native_chat_projection::NativeHistoryWindow::new(
+            &snapshot.raw_history,
+            snapshot.history_next_before.clone(),
+        )
+    });
+    let (history_tx, mut history_rx) = tokio::sync::mpsc::channel::<(
+        HistoryRequestMeta,
+        Result<serde_json::Value, String>,
+    )>(1);
+    let mut history_pending = false;
+    let mut history_request_id = 0u64;
+    let mut history_active: Option<HistoryRequestMeta> = None;
+    let mut blocked_history_scroll: Option<BlockedHistoryScroll> = None;
+    let mut history_navigation_request: Option<HistoryRequestKind> = None;
+    let mut history_navigation_revision: u64 = 0;
+    let mut history_browsing = false;
+    let mut history_tail_refresh_pending = false;
+    let mut last_history_refresh = Instant::now();
     // Segregated API-key dialog buffer: never stored as (or merged into)
     // the chat composer draft, never saved by any draft transaction.
     let mut key_input = String::new();
@@ -1658,11 +2081,39 @@ fn native_loop(
     // authenticated client; the facade itself never performs IO.
     let mut view = crate::native_view::NativeView::new(cols as u16, rows as u16);
     let state_path = data_dir.join("state/kv.json");
+    // First-run import discovery is bounded filesystem work and runs once
+    // before the native loop starts. No source is written or executed here;
+    // the dialog owns the later human offer/preview/apply decisions.
+    let mut import_dialog: Option<crate::native_import_dialog::ImportDialog> = None;
+    if let Some(dest) = opencode_rk_providers::imported_config::own_config_path() {
+        let env_snapshot = crate::native_import_sources::EnvSnapshot::capture();
+        if let Ok(Some(offer)) = crate::native_import_sources::discover_import(
+            &std::env::current_dir()?,
+            &env_snapshot,
+            &dest,
+        ) {
+            let mut details = Vec::new();
+            for warning in offer.warnings.iter().take(16) {
+                details.push(format!("warning: {} — {}", warning.source, warning.message));
+            }
+            for unsupported in offer.plan.unsupported.iter().take(16) {
+                details.push(format!("unsupported: {} ({})", unsupported.field, unsupported.reason));
+            }
+            for (path, origin) in offer.plan.provenance.iter().take(16) {
+                details.push(format!("source: {path} ← {origin}"));
+            }
+            if let Some(mut dialog) = crate::native_import_sources::offer_dialog(offer, data_dir)? {
+                dialog.set_details(details);
+                import_dialog = Some(dialog);
+            }
+        }
+    }
     let mut children_panel = crate::native_children::Panel::default();
     let mut children_refresh = Instant::now();
     let mut appearance = crate::native_appearance::AppearanceEditor::new(
         crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
     );
+    let mut permission_editor = crate::native_permissions::Editor::default();
     let animation_start = Instant::now();
     let mut animation_tick = 0u128;
     let config_paths = native_tui_config_paths().unwrap_or_else(|error| {
@@ -1800,6 +2251,7 @@ fn native_loop(
     for (value, description) in [
         ("/commands", "Browse commands"), ("/new", "New session"),
         ("/sidebar", "Toggle sidebar"), ("/appearance", "Adjust appearance"),
+        ("/permissions", "Manage tool permissions"), ("/permission", "Manage tool permissions"),
         ("/subagents", "View subagents"), ("/exit", "Exit"),
     ] {
         completion.commands.push(crate::native_completion::Item { value: value.into(), description: description.into() });
@@ -1841,6 +2293,156 @@ fn native_loop(
             // A failed worker may be retried on the next trigger, without an
             // automatic retry loop or permanently retaining its dead handle.
             completion_load.take();
+        }
+        if let Ok((request, result)) = history_rx.try_recv() {
+            history_trace("history.response.received", &view, history_window.as_ref(), Some(request), history_navigation_request, history_pending, history_navigation_revision, None);
+            if history_active == Some(request) && request.generation == binding_generation {
+                history_pending = false;
+                history_active = None;
+                history_trace("history.response.accepted", &view, history_window.as_ref(), Some(request), history_navigation_request, history_pending, history_navigation_revision, Some("accepted"));
+                let request_revision = Some(request.revision);
+                let request_tail = request.kind == HistoryRequestKind::Tail;
+                let request_newer = request.kind == HistoryRequestKind::Newer;
+                let request_refresh = request.kind == HistoryRequestKind::Refresh;
+                match (history_window.as_mut(), result) {
+                    (Some(window), Ok(value)) => {
+                        let previous_window = window.clone();
+                        // `chat_at_tail` is only the local viewport offset.  A
+                        // bounded window can be locally at its tail while
+                        // older-page traversal has evicted the server tail.
+                        // Capture the actual window/anchor identity before
+                        // refreshing so external-turn refresh cannot teleport
+                        // an old browse window to the newest page.
+                        let was_global_tail = window.at_newest_page();
+                        // A navigation response is valid only for the input
+                        // revision that issued it.  Reject before invoking a
+                        // window mutator: resumable newer walks also mutate
+                        // their private cursor/candidate state on a page
+                        // that does not yet overlap the retained window.
+                        if request_revision.is_some()
+                            && request_revision != Some(history_navigation_revision)
+                        {
+                            *window = previous_window;
+                            continue;
+                        }
+                        // Capture the displayed identity before any window
+                        // mutator.  In particular, load_older may truncate
+                        // the bounded window before the replacement can be
+                        // judged safe.
+                        let before_entries = crate::native_chat_projection::project_history_entries(previous_window.messages());
+                        let before_anchor = view.chat_rendered_anchor(&before_entries);
+                        let loaded = if request_refresh {
+                            window.refresh_tail(&value)
+                        } else if request_newer {
+                            window.advance_newer_recovery(&value)
+                        } else if request_tail {
+                            window.replace_latest(&value)
+                        } else {
+                            window.load_older(|_, _| Ok(value.clone()))
+                        };
+                        match loaded {
+                            Ok(true) => {
+                                // Never move a user who navigated while the
+                                // request was in flight.  Only the unchanged
+                                // browsing position may be advanced to keep
+                                // its old-message anchor visible.
+                                if request_newer {
+                                    if request_revision != Some(history_navigation_revision) {
+                                        *window = previous_window;
+                                        continue;
+                                    }
+                                    // The recovery response is the adjacent
+                                    // page, not merely metadata. Admit it now
+                                    // so the triggering down action cannot stall
+                                    // at the retained-window boundary. Since
+                                    // appending evicts the oldest page, move
+                                    // the rendered-row offset up by the exact
+                                    // inserted-page height to preserve the
+                                    // currently visible message anchor.
+                                    if window.advance_newer() {
+                                        let after = crate::native_chat_projection::project_history_entries(window.messages());
+                                        let Some(anchor) = before_anchor.as_ref() else {
+                                            *window = previous_window;
+                                            continue;
+                                        };
+                                        if !view.restore_chat_rendered_anchor(&after, anchor) {
+                                            *window = previous_window;
+                                            continue;
+                                        }
+                                         apply_history_window(window, &mut transcript);
+                                          if let Some(blocked) = blocked_history_scroll {
+                                              if request_revision == Some(blocked.revision) {
+                                                  view.scroll_down(blocked.rows);
+                                                  blocked_history_scroll = None;
+                                              }
+                                         }
+                                         history_browsing = !window.at_newest_page();
+                                        history_tail_refresh_pending = window.at_newest_page();
+                                    }
+                                } else if request_tail {
+                                    if request_revision != Some(history_navigation_revision) {
+                                        *window = previous_window;
+                                        continue;
+                                    }
+                                    apply_history_window(window, &mut transcript);
+                                    view.follow_tail();
+                                    history_browsing = false;
+                                    history_tail_refresh_pending = false;
+                                } else if request_refresh {
+                                    if request_revision == Some(history_navigation_revision)
+                                        && view.chat_at_tail() && was_global_tail {
+                                        window.replace_latest(&value).ok();
+                                        apply_history_window(window, &mut transcript);
+                                    }
+                                } else if request_revision == Some(history_navigation_revision) {
+                                    // Prepending a page changes the tail-relative
+                                    // coordinate system. Preserve the visible
+                                    // message anchor by compensating for the
+                                    // whole inserted page, not the triggering
+                                    // wheel delta.
+                                    // Measure the complete before/after typed
+                                    // projection with the production styled
+                                    // renderer.  A page is not an independent
+                                    // display unit: its first entry may gain a
+                                    // group separator from the preceding page,
+                                    // and tools/cards contribute rows which do
+                                    // not exist in body.text.
+                                     let after = crate::native_chat_projection::project_history_entries(window.messages());
+                                     let Some(anchor) = before_anchor.as_ref() else {
+                                         *window = previous_window;
+                                         continue;
+                                     };
+                                     if !view.restore_chat_rendered_anchor(&after, anchor) {
+                                         *window = previous_window;
+                                         continue;
+                                     }
+                                     apply_history_window(window, &mut transcript);
+                                } else {
+                                    // Navigation changed while the request
+                                    // was pending: discard the page entirely
+                                    // rather than replacing the visible
+                                    // window under the user's cursor.
+                                    *window = previous_window;
+                                    continue;
+                                }
+                                needs_paint = true;
+                            }
+                            Ok(false) => {
+                                if request_newer && window.newer_recovery_pending()
+                                    && request_revision == Some(history_navigation_revision)
+                                {
+                                    history_navigation_request = Some(HistoryRequestKind::Newer);
+                                    history_browsing = true;
+                                    history_tail_refresh_pending = false;
+                                }
+                            }
+                            Err(error) => append_transcript(&mut transcript, format!("error: history pagination: {error}")),
+                        }
+                    }
+                    (_, Err(error)) => append_transcript(&mut transcript, format!("error: history pagination: {error}")),
+                    _ => {}
+                }
+            }
         }
         if !completion_loaded && completion.triggered() && completion_load.is_none() {
             completion_loaded = true;
@@ -1953,7 +2555,9 @@ fn native_loop(
                 let mut settled = false;
                 while let Some(event) = owned.worker.try_next() {
                     needs_paint = true;
-                    view.follow_tail();
+                    if !history_browsing {
+                        view.follow_tail();
+                    }
                     match event {
                         // Backend user-message ACK: the accepted first user
                         // turn moves the main column to the session route
@@ -1985,6 +2589,7 @@ fn native_loop(
                         }
                         native_turn::Event::ReasoningDelta(delta) => transcript.reasoning_event(&delta,false),
                         native_turn::Event::ReasoningFinal(summary) => transcript.reasoning_event(&summary,true),
+                        native_turn::Event::Usage {input,output,cached,reasoning} => view.set_usage(input,output,cached,reasoning),
                         native_turn::Event::ToolCall {
                             call_id,
                             name,
@@ -2080,11 +2685,15 @@ fn native_loop(
                                 Some(snapshot.message_count),
                             );
                             view.set_parent_session(snapshot.parent_session);
-                            if turn_succeeded {
+                            if turn_succeeded && !history_browsing {
                                 transcript.reset(
                                     snapshot.history.clone(),
                                     snapshot.typed_history.clone(),
                                 );
+                            }
+                            if turn_succeeded && !history_browsing {
+                                history_window = Some(crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
+                                transcript.reset(snapshot.history.clone(), snapshot.typed_history.clone());
                             }
                             live = Some(snapshot);
                             needs_paint = true;
@@ -2097,6 +2706,111 @@ fn native_loop(
                             );
                         }
                     }
+                }
+            }
+        }
+        // Older pages are fetched off the input loop.  The visible window is
+        // unchanged until the complete, cursor-validated response arrives.
+        if !history_pending && history_navigation_request == Some(HistoryRequestKind::Older) {
+            if let (Some(snapshot), Some(window)) = (live.as_ref(), history_window.as_ref()) {
+                if let Some(before) = window.next_before() {
+                    history_navigation_request = None;
+                    history_pending = true;
+                    history_request_id = history_request_id.wrapping_add(1);
+                    let request = HistoryRequestMeta { id: history_request_id, generation: binding_generation, revision: history_navigation_revision, kind: HistoryRequestKind::Older };
+                    history_active = Some(request);
+                    let origin = snapshot.origin.clone();
+                    let session = snapshot.session_id.clone();
+                    let before = before.to_owned();
+                    let auth = auth.map(str::to_owned);
+                    let generation = binding_generation;
+                    let tx = history_tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let result = http_request(
+                            &origin,
+                            "GET",
+                            &format!("/api/sessions/{session}/history?limit=100&before={before}"),
+                            None,
+                            auth.as_deref(),
+                        ).and_then(|body| serde_json::from_str(&body).map_err(|e| format!("history page is not valid JSON: {e}")));
+                        let _ = tx.blocking_send((request, result));
+                    });
+                }
+            }
+        }
+        if !history_pending && history_navigation_request == Some(HistoryRequestKind::Newer) {
+            if let (Some(snapshot), Some(window)) = (live.as_ref(), history_window.as_ref()) {
+                if let Some(before) = window.newer_recovery_cursor().map(str::to_owned) {
+                    history_pending = true;
+                    history_request_id = history_request_id.wrapping_add(1);
+                    let request = HistoryRequestMeta { id: history_request_id, generation: binding_generation, revision: history_navigation_revision, kind: HistoryRequestKind::Newer };
+                    history_active = Some(request);
+                    history_trace("history.request.newer", &view, Some(window), history_active, history_navigation_request, history_pending, history_navigation_revision, Some("admitted"));
+                    let origin = snapshot.origin.clone();
+                    let session = snapshot.session_id.clone();
+                    let auth = auth.map(str::to_owned);
+                    let generation = binding_generation;
+                    let tx = history_tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let result = http_request(&origin, "GET", &format!("/api/sessions/{session}/history?limit=100&before={before}"), None, auth.as_deref())
+                            .and_then(|body| serde_json::from_str(&body).map_err(|e| format!("history page is not valid JSON: {e}")));
+                        let _ = tx.blocking_send((request, result));
+                    });
+                    history_navigation_request = None;
+                } else {
+                    history_navigation_request = None;
+                }
+            }
+        }
+        // Same-session external turns are observed through the bounded
+        // history endpoint, never replayed through the provider.  A refresh
+        // updates the tail anchor while browsing, and replaces the visible
+        // window only when already following the tail.
+        if !history_pending && last_history_refresh.elapsed() >= Duration::from_millis(750) {
+            if let Some(snapshot) = live.as_ref() {
+                last_history_refresh = Instant::now();
+                history_pending = true;
+                history_request_id = history_request_id.wrapping_add(1);
+                let request = HistoryRequestMeta { id: history_request_id, generation: binding_generation, revision: history_navigation_revision, kind: HistoryRequestKind::Refresh };
+                history_active = Some(request);
+                let origin = snapshot.origin.clone();
+                let session = snapshot.session_id.clone();
+                let auth = auth.map(str::to_owned);
+                let generation = binding_generation;
+                let tx = history_tx.clone();
+                tokio::task::spawn_blocking(move || {
+                    let result = http_request(&origin, "GET", &format!("/api/sessions/{session}/history?limit=100"), None, auth.as_deref())
+                        .and_then(|body| serde_json::from_str(&body).map_err(|e| format!("history refresh JSON: {e}")));
+                    let _ = tx.blocking_send((request, result));
+                });
+            }
+        }
+        // Returning to the tail requests a fresh bounded newest page. This
+        // is the real recovery path when older traversal evicted the newest
+        // records; it is not an unbounded cursor walk.
+        if !history_pending && history_tail_refresh_pending && view.chat_at_tail() {
+            if let (Some(snapshot), Some(window)) = (live.as_ref(), history_window.as_ref()) {
+                if window.at_newest_page() {
+                    history_pending = true;
+                    history_tail_refresh_pending = false;
+                    history_request_id = history_request_id.wrapping_add(1);
+                    let request = HistoryRequestMeta { id: history_request_id, generation: binding_generation, revision: history_navigation_revision, kind: HistoryRequestKind::Tail };
+                    history_active = Some(request);
+                    let origin = snapshot.origin.clone();
+                    let session = snapshot.session_id.clone();
+                    let auth = auth.map(str::to_owned);
+                    let generation = binding_generation;
+                    let tx = history_tx.clone();
+                    tokio::task::spawn_blocking(move || {
+                        let result = http_request(&origin, "GET", &format!("/api/sessions/{session}/history?limit=100"), None, auth.as_deref())
+                            .and_then(|body| serde_json::from_str(&body).map_err(|e| format!("history page is not valid JSON: {e}")));
+                        let _ = tx.blocking_send((request, result));
+                    });
+                } else {
+                    // A local tail is not the global tail; consume the flag so
+                    // it cannot stall the loop while the user keeps typing or
+                    // navigating the retained history.
+                    history_tail_refresh_pending = false;
                 }
             }
         }
@@ -2349,10 +3063,27 @@ fn native_loop(
         if children_panel.open {
             overlay = children_panel.render(view.modal_presentation().content_width, view.modal_content_height());
         }
+        if permission_editor.open {
+            let (rows, roles, _) = permission_editor.rows(view.modal_presentation().content_width,view.modal_content_height());
+            overlay = rows;
+            view.set_overlay_roles(roles);
+        }
         view.set_overlay_roles(crate::native_ui_style::overlay_roles(&overlay,
             appearance.open || (children_panel.open && !children_panel.detail)
                 || matches!(dialog, native_setup::Dialog::Provider | native_setup::Dialog::Model)));
+        if permission_editor.open {
+            view.set_overlay_roles(permission_editor.rows(view.modal_presentation().content_width,view.modal_content_height()).1);
+        }
+        if import_modal_visible(view.dialogs.is_open(), permission_editor.open, !matches!(dialog, native_setup::Dialog::None), import_dialog.as_ref().is_some_and(|import| import.is_open())) {
+            if let Some(import) = import_dialog.as_ref().filter(|dialog| dialog.is_open()) {
+                overlay = import.render(
+                    usize::from(view.modal_presentation().content_width),
+                    view.modal_content_height(),
+                );
+            }
+        }
         view.set_box_appearance(appearance.style.clone());
+        view.set_context_window(selected.as_ref().and_then(|model|model.context_window));
         view.set_prompt_mode(draft.starts_with('!'));
         let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
             ""
@@ -2533,7 +3264,7 @@ fn native_loop(
                         view.composer_region(draft_echo)
                     },
                     completion: if !help_open && modal_rows.is_none()
-                        && !children_panel.open && !appearance.open
+                        && !children_panel.open && !appearance.open && !permission_editor.open
                         && matches!(dialog, native_setup::Dialog::None)
                         && view.page() == crate::native_view_pages::Page::Chat {
                         view.composer_region(draft_echo).and_then(|anchor| completion.panel(anchor))
@@ -2617,11 +3348,58 @@ fn native_loop(
         // inert, and the permission modal / Help gates above keep
         // precedence over both.
         let page_query_open = view.page().accepts_search();
+        // Import owns navigation before completion and composer shortcuts,
+        // except when a permission HITL is active (that branch below remains
+        // the highest-priority human decision surface).
+        if import_modal_visible(view.dialogs.is_open(), permission_editor.open, !matches!(dialog, native_setup::Dialog::None), import_dialog.as_ref().is_some_and(|import| import.is_open())) {
+            if let Some(import) = import_dialog.as_mut().filter(|dialog| dialog.is_open()) {
+                match event {
+                    native_input_decoder::InputEvent::Escape => {
+                        let Some(action) = import.dismiss_action() else { continue };
+                        let policy = NativeImportPolicy { explicitly_confirmed: false };
+                        import.action(action, &policy);
+                    }
+                    native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
+                        if kind == 0 && modifiers == 0 {
+                            let modal = view.modal_presentation();
+                            if let Some(row) = y.checked_sub(modal.content_y).map(usize::from) {
+                                let Some(content_x) = modal.x.checked_add(2) else { continue };
+                                let Some(col) = x.checked_sub(content_x).map(usize::from) else { continue };
+                                if col < usize::from(modal.content_width) {
+                                    if let Some(action) = import.action_at(usize::from(modal.content_width), view.modal_content_height(), row, col) {
+                                        let policy = NativeImportPolicy { explicitly_confirmed: action == crate::native_import_dialog::ImportAction::Apply };
+                                        import.action(action, &policy);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    native_input_decoder::InputEvent::ArrowUp => import.move_selection(false),
+                    native_input_decoder::InputEvent::ArrowDown => import.move_selection(true),
+                    native_input_decoder::InputEvent::Byte(byte) => match byte {
+                        27 => {
+                            let Some(action) = import.dismiss_action() else { continue };
+                            import.action(action, &NativeImportPolicy { explicitly_confirmed: false });
+                        }
+                        13 | 10 => {
+                            let policy = NativeImportPolicy { explicitly_confirmed: import.selected_action() == Some(crate::native_import_dialog::ImportAction::Apply) };
+                            import.activate_selected(&policy);
+                        }
+                        2 => import.move_selection(false),
+                        14 => import.move_selection(true),
+                        _ => {}
+                    },
+                    _ => {}
+                }
+                continue;
+            }
+        }
         // Completion owns navigation before composer/session shortcuts, but
         // never before a credential, permission or other modal surface.
-        if !page_open && !help_open && !children_panel.open && !appearance.open
+        if !page_open && !help_open && !children_panel.open && !appearance.open && !permission_editor.open
             && !view.dialogs.intercepts_input() && !view.command_palette_open()
             && matches!(dialog, native_setup::Dialog::None)
+            && import_dialog.as_ref().is_none_or(|import| !import.is_open())
             && view.composer_region(&draft).and_then(|anchor| completion.panel(anchor)).is_some()
         {
             match &event {
@@ -2640,17 +3418,49 @@ fn native_loop(
         }
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
-            native_input_decoder::InputEvent::Mouse { x, y, kind } => {
+            native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
+                if view.dialogs.intercepts_input() {
+                    let modal = view.modal_presentation();
+                    let row = y.checked_sub(modal.content_y).map(usize::from);
+                    if kind == 0 && modifiers == 0 && x >= modal.x.saturating_add(2)
+                        && x < modal.x.saturating_add(2).saturating_add(modal.content_width) {
+                        if let Some(row) = row {
+                            let Some(content_x) = modal.x.checked_add(2) else { continue };
+                            let Some(col) = x.checked_sub(content_x).map(usize::from) else { continue };
+                            if col >= usize::from(modal.content_width) { continue; }
+                            if let Some(index) = view.dialogs.choice_at_cell(usize::from(modal.content_width), view.modal_content_height(), row, col) {
+                                view.dialogs.select(index);
+                            } else if view.dialogs.confirm_at_cell(usize::from(modal.content_width), view.modal_content_height(), row, col) {
+                                if let Ok(intent) = view.dialogs.answer() {
+                                    dispatch_permission_reply(&mut view, &mut transcript, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, intent);
+                                }
+                            }
+                        }
+                    }
+                    needs_paint = true;
+                    continue;
+                }
+                if permission_editor.open {
+                    let modal = view.modal_presentation();
+                    if kind == 0 && modifiers == 0 && x >= modal.x + 2 && x < modal.x + 2 + modal.content_width && y >= modal.content_y {
+                        if let Some(decision) = permission_editor.click_action(x - modal.x - 2,usize::from(y-modal.content_y),modal.content_width,view.modal_content_height()) {
+                            permission_editor_request(&mut permission_editor,live.as_ref(),auth,Some(decision));
+                        }
+                    }
+                    needs_paint = true;
+                    continue;
+                }
                 if appearance.open {
                     let modal = view.modal_presentation();
-                    if appearance.pointer(
+                    if appearance.pointer_hit(
                         x,
                         y,
                         kind,
                         modal.x.saturating_add(2),
                         modal.content_y,
                         modal.content_width,
-                    ) && kind == 2
+                        view.modal_content_height().min(u16::MAX as usize) as u16,
+                    )
                     {
                         if let Err(error) =
                             crate::native_ui_preferences::UiPreferences::persist_appearance(
@@ -2660,6 +3470,48 @@ fn native_loop(
                         {
                             append_transcript(&mut transcript, format!("error: {error}"));
                         }
+                    }
+                    needs_paint = true;
+                    continue;
+                }
+                if children_panel.open {
+                    let modal = view.modal_presentation();
+                    if kind == 0 && modifiers == 0
+                        && x >= modal.x.saturating_add(2)
+                        && x < modal.x.saturating_add(2).saturating_add(modal.content_width)
+                        && y >= modal.content_y
+                    {
+                        // Child requests reuse the exact key-path dispatch:
+                        // row clicks select/enter, footer clicks stop/retry/
+                        // follow-up/send, all routed through one HTTP helper.
+                        if let Some(action) = children_panel.mouse(
+                            y - modal.content_y,
+                            x.saturating_sub(modal.x.saturating_add(2)),
+                            modal.content_width,
+                            view.modal_content_height(),
+                        ) {
+                            children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref());
+                            children_refresh = Instant::now() - Duration::from_secs(1);
+                        }
+                    }
+                    if !children_panel.open {
+                        view.set_dialog_size(crate::native_view::DialogSize::Medium);
+                    }
+                    needs_paint = true;
+                    continue;
+                }
+                if matches!(kind, 2 | 5 | 6) {
+                    let disable_copy = crate::native_text_selection::copy_on_select_disabled(
+                        env::var("OPENCODE_EXPERIMENTAL_DISABLE_COPY_ON_SELECT")
+                            .ok()
+                            .as_deref(),
+                        cfg!(windows),
+                    );
+                    if let Some(text) = selection.copy_for_input_kind(kind, disable_copy) {
+                        let frame = selection_clipboard_frame(&text);
+                        let mut stdout = std::io::stdout().lock();
+                        stdout.write_all(frame.as_bytes())?;
+                        stdout.flush()?;
                     }
                     needs_paint = true;
                     continue;
@@ -2674,17 +3526,84 @@ fn native_loop(
                         && !view.command_palette_open()
                         && matches!(dialog, native_setup::Dialog::None)
                         && !help_open =>
-                    {
-                        selection.clear();
-                        view.scroll_up(3);
+                     {
+                         selection.clear();
+                         view.scroll_up(3);
+                         history_browsing = true;
+                         history_navigation_revision = history_navigation_revision.wrapping_add(1);
+                         blocked_history_scroll = None;
+                         history_navigation_request = Some(HistoryRequestKind::Older);
                     }
                     4 if !view.dialogs.is_open()
                         && !view.command_palette_open()
                         && matches!(dialog, native_setup::Dialog::None)
                         && !help_open =>
                     {
-                        selection.clear();
-                        view.scroll_down(3);
+                         selection.clear();
+                 history_navigation_revision = history_navigation_revision.wrapping_add(1);
+                 history_navigation_request = None;
+                 let gesture_blocked = view.chat_at_tail();
+                         let gesture_blocked = view.chat_at_tail();
+                         // A cached page changes the tail-relative coordinate
+                         // system. Capture the pre-gesture rendered identity,
+                         // commit the page, restore it, then apply this wheel
+                         // delta exactly once.
+                         let before_anchor = history_window.as_ref().and_then(|window| {
+                             let entries = crate::native_chat_projection::project_history_entries(window.messages());
+                             view.chat_rendered_anchor(&entries)
+                         });
+                         let mut cached_advance = false;
+                         view.scroll_down(3);
+                         if view.chat_at_tail() {
+                             if let Some(window) = history_window.as_mut() {
+                                 let previous_window = window.clone();
+                                 if before_anchor.is_none() {
+                                     // No rendered identity means this frame
+                                     // cannot be atomically rebased; leave the
+                                     // bounded window untouched and let the
+                                     // ordinary scroll path proceed.
+                                     continue;
+                                 }
+                                 if window.advance_newer() {
+                                     apply_history_window(window, &mut transcript);
+                                     if let Some(anchor) = before_anchor {
+                                         let entries = crate::native_chat_projection::project_history_entries(window.messages());
+                                         if !view.restore_chat_rendered_anchor(&entries, &anchor) {
+                                             *window = previous_window;
+                                             apply_history_window(window, &mut transcript);
+                                             let old_entries = crate::native_chat_projection::project_history_entries(window.messages());
+                                             let _ = view.restore_chat_rendered_anchor(&old_entries, &anchor);
+                                             continue;
+                                         }
+                                     } else {
+                                         *window = previous_window;
+                                         apply_history_window(window, &mut transcript);
+                                         continue;
+                                     }
+                                     // Re-apply the user's gesture after the
+                                     // coordinate-preserving page transition.
+                                     view.scroll_down(3);
+                                     cached_advance = true;
+                                  } else if history_browsing && window.begin_newer_recovery().is_ok() {
+                                       history_navigation_request = Some(HistoryRequestKind::Newer);
+                                       if gesture_blocked {
+                                           blocked_history_scroll = Some(BlockedHistoryScroll { revision: history_navigation_revision, rows: 3 });
+                                       }
+                                 }
+                             }
+                         }
+                          if view.chat_at_tail() {
+                               if history_window.as_ref().is_some_and(|w| w.at_newest_page()) {
+                                   history_tail_refresh_pending = true;
+                                   history_browsing = false;
+                              } else {
+                                   history_browsing = true;
+                                   history_tail_refresh_pending = false;
+                               }
+                         }
+                         if cached_advance {
+                              history_navigation_request = None;
+                         }
                     }
                     _ => {
                         selection.clear();
@@ -2699,12 +3618,17 @@ fn native_loop(
                 // A decision dialog owns focus before every other overlay.
                 // Route the documented arrow keys to the same selection state
                 // as Ctrl-N/Ctrl-B; navigation never submits a decision.
-                if view.dialogs.intercepts_input() {
+        if view.dialogs.intercepts_input() {
                     if direction == native_input_decoder::InputEvent::ArrowUp {
                         view.dialogs.prev();
                     } else {
                         view.dialogs.next();
                     }
+                    continue;
+                }
+                if permission_editor.open {
+                    permission_editor.navigate(direction == native_input_decoder::InputEvent::ArrowDown);
+                    needs_paint = true;
                     continue;
                 }
                 if appearance.open {
@@ -2840,19 +3764,22 @@ fn native_loop(
                 children_panel.key(byte)
             };
             if let Some(action) = action {
-                if let Some(snapshot) = live.as_ref() {
-                    use crate::native_children::Action;
-                    let (id, operation, body) = match action {
-                        Action::Stop(id) => (id, "stop", serde_json::json!({})),
-                        Action::Retry(id) => (id, "retry", serde_json::json!({})),
-                        Action::Followup(id, text) => (id, "continue", serde_json::json!({"text":text})),
-                    };
-                    children_panel.action_error = http_request(&snapshot.origin, "POST", &format!("/api/sessions/{}/children/{id}/{operation}", children_panel.parent), Some(&body.to_string()), auth).err();
-                }
+                children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref());
                 children_refresh = Instant::now() - Duration::from_secs(1);
             }
             if !children_panel.open { view.set_dialog_size(crate::native_view::DialogSize::Medium); }
             needs_paint = true;
+            continue;
+        }
+        if permission_editor.open && !matches!(byte,3|4) {
+            match byte {
+                27 => permission_editor.open=false,
+                9 => permission_editor.persistent = !permission_editor.persistent,
+                b'1'|b'2'|b'3' => permission_editor_request(&mut permission_editor,live.as_ref(),auth,
+                    Some(if byte == b'1' {"allow"} else if byte == b'2' {"ask"} else {"deny"})),
+                _=>{}
+            }
+            needs_paint=true;
             continue;
         }
         if appearance.open && !matches!(byte, 3 | 4) {
@@ -2896,6 +3823,7 @@ fn native_loop(
             match byte {
                 14 => view.dialogs.next(),
                 2 => view.dialogs.prev(),
+                b'1'..=b'9' => { view.dialogs.select(usize::from(byte - b'1')); }
                 13 | 10 => match view.dialogs.answer() {
                     Ok(intent) => dispatch_permission_reply(
                         &mut view,
@@ -3048,11 +3976,71 @@ fn native_loop(
             // only; no history, dialog or turn side effect. Ctrl-T (0x14)
             // is not mapped here and stays inert by fall-through.
             6 if !page_open && matches!(dialog, native_setup::Dialog::None) => {
+                history_navigation_revision = history_navigation_revision.wrapping_add(1);
+                history_navigation_request = None;
+                blocked_history_scroll = None;
+                history_trace("history.ctrl_f.before", &view, history_window.as_ref(), history_active, history_navigation_request, history_pending, history_navigation_revision, None);
+                let gesture_blocked = view.chat_at_tail();
+                let before_anchor = history_window.as_ref().and_then(|window| {
+                    let entries = crate::native_chat_projection::project_history_entries(window.messages());
+                    view.chat_rendered_anchor(&entries)
+                });
                 view.scroll_down(8);
+                history_trace("history.ctrl_f.after_scroll", &view, history_window.as_ref(), history_active, history_navigation_request, history_pending, history_navigation_revision, None);
+                let mut cached_advance = false;
+                if view.chat_at_tail() {
+                    if let Some(window) = history_window.as_mut() {
+                        let previous_window = window.clone();
+                        if before_anchor.is_none() {
+                            continue;
+                        }
+                        if window.advance_newer() {
+                            history_trace("history.ctrl_f.cached_advance", &view, Some(window), history_active, history_navigation_request, history_pending, history_navigation_revision, Some("success"));
+                            apply_history_window(window, &mut transcript);
+                            if let Some(anchor) = before_anchor {
+                                let entries = crate::native_chat_projection::project_history_entries(window.messages());
+                                if !view.restore_chat_rendered_anchor(&entries, &anchor) {
+                                    *window = previous_window;
+                                    apply_history_window(window, &mut transcript);
+                                    let old_entries = crate::native_chat_projection::project_history_entries(window.messages());
+                                    let _ = view.restore_chat_rendered_anchor(&old_entries, &anchor);
+                                    continue;
+                                }
+                            } else {
+                                *window = previous_window;
+                                apply_history_window(window, &mut transcript);
+                                continue;
+                            }
+                            view.scroll_down(8);
+                             cached_advance = true;
+                        } else if history_browsing && !window.at_newest_page()
+                            && window.begin_newer_recovery().is_ok()
+                        {
+                            history_navigation_request = Some(HistoryRequestKind::Newer);
+                             if gesture_blocked {
+                                 blocked_history_scroll = Some(BlockedHistoryScroll { revision: history_navigation_revision, rows: 8 });
+                             }
+                            history_trace("history.ctrl_f.begin_newer", &view, Some(window), history_active, history_navigation_request, history_pending, history_navigation_revision, Some("queued"));
+                        }
+                    }
+                    if history_window.as_ref().is_some_and(|window| window.at_newest_page()) {
+                        history_tail_refresh_pending = true;
+                        history_browsing = false;
+                    } else {
+                        history_browsing = true;
+                        history_tail_refresh_pending = false;
+                    }
+                } else if cached_advance {
+                    history_browsing = !history_window.as_ref().is_some_and(|window| window.at_newest_page());
+                    history_tail_refresh_pending = !history_browsing;
+                }
                 utf8.reset();
             }
             2 if !page_open && matches!(dialog, native_setup::Dialog::None) => {
                 view.scroll_up(8);
+                history_browsing = true;
+                history_navigation_revision = history_navigation_revision.wrapping_add(1);
+                 history_navigation_request = Some(HistoryRequestKind::Older);
                 utf8.reset();
             }
             // Session picker in Chat: Ctrl-N / Ctrl-O move the highlight
@@ -3123,6 +4111,13 @@ fn native_loop(
                             session_route = true;
                             view.set_session_route(session_route);
                             live = Some(snapshot);
+                            history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
+                            history_pending = false;
+                            history_active = None;
+                         history_navigation_request = None;
+                         blocked_history_scroll = None;
+                            history_tail_refresh_pending = false;
+                            history_browsing = false;
                             draft = restored_draft;
                             // Committed ONLY on a successful bind.
                             binding_generation = prospective;
@@ -3257,6 +4252,12 @@ fn native_loop(
                                         session_route = true;
                                         view.set_session_route(session_route);
                                         live = Some(snapshot);
+                                        history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
+                                        history_pending = false;
+                                        history_active = None;
+                                         history_navigation_request = None;
+                                        history_tail_refresh_pending = false;
+                                        history_browsing = false;
                                         draft = restored_draft;
                                         // Committed ONLY on a real bind
                                         // success.
@@ -3675,11 +4676,51 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                if command == "/import" || command == "/settings-import" {
+                    let (import_dest, import_result) = if let Some(dest) = opencode_rk_providers::imported_config::own_config_path() {
+                        let result = crate::native_import_sources::discover_import(
+                            &std::env::current_dir()?,
+                            &crate::native_import_sources::EnvSnapshot::capture(),
+                            &dest,
+                        );
+                        (Some(dest), result)
+                    } else {
+                        (None, Err("cannot resolve own config destination".to_owned()))
+                    };
+                    match import_result {
+                        Ok(Some(offer)) => {
+                            let crate::native_import_sources::ImportOffer { plan, sources, warnings } = offer;
+                            let value = plan.value;
+                            let unsupported = plan.unsupported;
+                            let mut reopened = crate::native_import_dialog::ImportDialog::from_settings_parts(
+                                &data_dir.join("import-offer.json"),
+                                import_dest.as_deref().expect("offer requires destination"),
+                                sources,
+                                value,
+                            )?;
+                            let mut details = warnings.into_iter().take(16)
+                                .map(|warning| format!("warning: {} — {}", warning.source, warning.message))
+                                .collect::<Vec<_>>();
+                            details.extend(unsupported.into_iter().take(16)
+                                .map(|unsupported| format!("unsupported: {} ({})", unsupported.field, unsupported.reason)));
+                            reopened.set_details(details);
+                            import_dialog = Some(reopened);
+                        }
+                        Ok(None) => append_transcript(&mut transcript, "Import settings: no supported sources found".to_owned()),
+                        Err(error) => append_transcript(&mut transcript, format!("Import settings unavailable: {error}")),
+                    }
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    needs_paint = true;
+                    continue;
+                }
                 // Local page routes, same contract as /help above: pure
-                // state, never a transcript append or provider turn. A
+                // state, never a provider turn. A
                 // chat-composer typed command is consumed at dispatch so
                 // Esc restores the pre-command blank composer; a
                 // segregated source (Ctrl-K query) keeps its draft intact.
+                // Real-backend pages (/sessions, /agents) additionally
+                // report one honest error line when their fetch/parse
+                // fails — that is state reporting, not a transcript turn.
                 let local_page = native_local_page_route(command);
                 if let Some(page) = local_page {
                     if matches!(page, crate::native_view_pages::Page::Commands) {
@@ -3688,7 +4729,37 @@ fn native_loop(
                         view.open_commands_page();
                     } else {
                         view.open_page(page);
-                        if page == crate::native_view_pages::Page::Theme {
+                        if page == crate::native_view_pages::Page::Agents {
+                            // Real metadata rows from the same authenticated
+                            // `GET /api/commands` catalogue the @mention
+                            // loader consumes. Fetch/parse failure keeps the
+                            // page's previous rows and reports honestly
+                            // (same contract as /sessions above); rows are
+                            // metadata — activation stays the framework's
+                            // Unsupported because no launch command exists.
+                            needs_paint = true;
+                            match live.as_ref() {
+                                Some(snapshot) => {
+                                    let result = http_request(&snapshot.origin, "GET", "/api/commands", None, auth)
+                                        .and_then(|body| {
+                                            serde_json::from_str::<serde_json::Value>(&body)
+                                                .map_err(|_| "invalid command listing JSON".to_owned())
+                                        })
+                                        .and_then(|value| agent_catalogue_rows(&value));
+                                    match result {
+                                        Ok(rows) => view.set_page_rows(rows),
+                                        Err(error) => append_transcript(
+                                            &mut transcript,
+                                            format!("error: agents page: {error}"),
+                                        ),
+                                    }
+                                }
+                                None => append_transcript(
+                                    &mut transcript,
+                                    "error: agents page: daemon unavailable".to_owned(),
+                                ),
+                            }
+                        } else if page == crate::native_view_pages::Page::Theme {
                             let mut rows: Vec<_> = crate::native_theme_assets::ASSETS
                                 .iter()
                                 .map(|(name, _)| crate::native_view_pages::PageRow {
@@ -3905,9 +4976,19 @@ fn native_loop(
                     continue;
                 }
                 if command == "/appearance" {
-                    appearance.open = true;
+                    appearance.show();
+                    view.set_dialog_size(crate::native_view::DialogSize::Large);
                     consume_local_command(&mut draft, command, from_chat_composer);
                     needs_paint = true;
+                    continue;
+                }
+                if matches!(command,"/permission"|"/permissions") {
+                    view.close_page();view.close_command_palette();help_open=false;appearance.open=false;children_panel.open=false;
+                    dialog=native_setup::Dialog::None;
+                    permission_editor.open=true;
+                    permission_editor_request(&mut permission_editor,live.as_ref(),auth,None);
+                    consume_local_command(&mut draft,command,from_chat_composer);
+                    needs_paint=true;
                     continue;
                 }
                 if command == "/connect" {
@@ -4162,9 +5243,10 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 /// `/exit`/`/quit` exit before dispatch, so their draft never renders
 /// again and needs no consumption.)
 #[cfg(feature = "native")]
+#[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new" | "/sidebar" | "/appearance" | "/subagents")
+        || matches!(command, "/commands" | "/new" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
@@ -4187,6 +5269,7 @@ fn consume_local_command(draft: &mut String, command: &str, from_chat_composer: 
 }
 
 #[cfg(feature = "native")]
+#[cfg(feature = "native")]
 fn native_exit_route(command: &str) -> bool {
     matches!(command, ":q" | ":quit" | "/exit" | "/quit")
 }
@@ -4203,6 +5286,7 @@ fn native_local_page_route(command: &str) -> Option<crate::native_view_pages::Pa
         "/context" => Some(Page::Context),
         "/diff" => Some(Page::Diff),
         "/commands" => Some(Page::Commands),
+        "/import" | "/settings-import" => Some(Page::Chat),
         _ => None,
     }
 }
@@ -4524,6 +5608,14 @@ fn print_native_or_legacy(frame: &str) -> String {
 #[cfg(all(test, feature = "native"))]
 mod command_consumption_tests {
     #[test]
+    fn import_modal_visibility_keeps_permission_human_input_higher_priority() {
+        assert!(super::import_modal_visible(false, false, false, true));
+        assert!(!super::import_modal_visible(true, false, false, true));
+        assert!(!super::import_modal_visible(false, true, false, true));
+        assert!(!super::import_modal_visible(false, false, true, true));
+        assert!(!super::import_modal_visible(false, false, false, false));
+    }
+    #[test]
     fn configured_discovery_keeps_metadata_and_local_routes() {
         let rows = super::configured_command_rows(&serde_json::json!({"commands":[
             {"name":"team/review","description":"Review a package"},
@@ -4566,7 +5658,7 @@ mod command_consumption_tests {
                     || super::native_local_page_route(route).is_some()
                     || matches!(
                         route,
-                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance" | "/subagents"
+                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance" | "/subagents" | "/import" | "/settings-import"
                     ),
                 "palette action has no local handler: {route}"
             );

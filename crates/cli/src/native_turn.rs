@@ -11,8 +11,9 @@ const MAX_FRAME: usize = 1024 * 1024;
 const MAX_TEXT: usize = 64 * 1024;
 const MAX_TOTAL: usize = 256 * 1024;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum Event {
+    Usage {input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>},
     User { text: Option<String> },
     Delta(String),
     ReasoningDelta(String),
@@ -170,6 +171,12 @@ impl TurnWorker {
                             .map_err(|e| format!("invalid turn event: {e}"))?;
                         crate::native_debug::event("turn.frame", serde_json::json!({"type":journal_frame_type(&value),"bytes":line.len()}));
                         if value["type"]=="assistant_message" {
+                            if let Some(usage)=value.get("usage") {
+                                if let (Some(input),Some(output))=(usage["input_tokens"].as_u64(),usage["output_tokens"].as_u64()) {
+                                    tx.send(Event::Usage {input,output,cached:usage["cached_tokens"].as_u64(),reasoning:usage["reasoning_tokens"].as_u64()})
+                                        .await.map_err(|_|"UI closed".to_owned())?;
+                                }
+                            }
                             if let Some(summary)=value.get("reasoning_summary").and_then(Value::as_str).filter(|summary|!summary.is_empty()) {
                                 retained=retained.saturating_add(summary.len());
                                 if retained>MAX_TEXT {return Err("retained text limit exceeded".into());}
@@ -463,6 +470,42 @@ mod native_error_tests {
                     .any(|event| matches!(event, Event::Assistant(_)))
             );
         }
+    }
+
+    /// Decoder regression for the `assistant_message` usage path: the
+    /// provider-reported `input_tokens`/`output_tokens` stay authoritative,
+    /// null/absent subset counts arrive as unreported (`None`) instead of a
+    /// fabricated zero, and an explicit provider zero survives as `Some(0)`.
+    #[tokio::test]
+    async fn native_usage_event_keeps_null_subsets_none_and_explicit_zero() {
+        let null_surface = mock_turn(
+            201,
+            concat!(
+                r#"{"type":"assistant_message","usage":{"input_tokens":10,"output_tokens":4,"cached_tokens":null,"reasoning_tokens":null},"message":{"body":{"text":"done"}}}"#,
+                "\n",
+            ),
+        )
+        .await;
+        assert_eq!(
+            null_surface[0],
+            Event::Usage { input: 10, output: 4, cached: None, reasoning: None }
+        );
+        assert!(
+            matches!(null_surface.last(), Some(Event::Assistant(_))),
+            "usage frame still decodes to its terminal assistant event"
+        );
+        let explicit_zero = mock_turn(
+            201,
+            concat!(
+                r#"{"type":"assistant_message","usage":{"input_tokens":7,"output_tokens":2,"cached_tokens":0,"reasoning_tokens":0},"message":{"body":{"text":"done"}}}"#,
+                "\n",
+            ),
+        )
+        .await;
+        assert_eq!(
+            explicit_zero[0],
+            Event::Usage { input: 7, output: 2, cached: Some(0), reasoning: Some(0) }
+        );
     }
 
     #[tokio::test]

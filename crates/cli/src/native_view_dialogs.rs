@@ -225,6 +225,13 @@ impl DialogError {
 /// reply; denial is a real broker denial.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum DecisionIntent {
+    ScopedPermission {
+        request_id: String,
+        session_id: String,
+        attempt: u64,
+        allow: bool,
+        persistent: bool,
+    },
     /// Permission: explicit single-shot approval (`once`).
     Approve {
         request_id: String,
@@ -261,6 +268,7 @@ impl DecisionIntent {
     #[must_use]
     pub fn request_id(&self) -> &str {
         match self {
+            Self::ScopedPermission { request_id, .. } => request_id,
             Self::Approve { request_id, .. }
             | Self::Reject { request_id, .. }
             | Self::Answer { request_id, .. }
@@ -272,6 +280,7 @@ impl DecisionIntent {
     #[must_use]
     pub fn session_id(&self) -> &str {
         match self {
+            Self::ScopedPermission { session_id, .. } => session_id,
             Self::Approve { session_id, .. }
             | Self::Reject { session_id, .. }
             | Self::Answer { session_id, .. }
@@ -283,6 +292,7 @@ impl DecisionIntent {
     #[must_use]
     pub fn attempt(&self) -> u64 {
         match self {
+            Self::ScopedPermission { attempt, .. } => *attempt,
             Self::Approve { attempt, .. }
             | Self::Reject { attempt, .. }
             | Self::Answer { attempt, .. }
@@ -393,6 +403,7 @@ fn wildcard_choice(choice: &str) -> bool {
 enum PermissionChoice {
     ApproveOnce,
     Reject,
+    Scoped { allow: bool, persistent: bool },
 }
 
 /// Exact allow-list of Permission choice aliases, matched against the
@@ -406,6 +417,12 @@ fn permission_alias(label: &str) -> Option<PermissionChoice> {
             Some(PermissionChoice::ApproveOnce)
         }
         "deny" | "reject" => Some(PermissionChoice::Reject),
+        "Allow for this session" => Some(PermissionChoice::Scoped {allow:true,persistent:false}),
+        "Always allow" => Some(PermissionChoice::Scoped {allow:true,persistent:true}),
+        "Deny for this session" => Some(PermissionChoice::Scoped {allow:false,persistent:false}),
+        "Always deny" => Some(PermissionChoice::Scoped {allow:false,persistent:true}),
+        "Allow once" => Some(PermissionChoice::ApproveOnce),
+        "Deny once" => Some(PermissionChoice::Reject),
         _ => None,
     }
 }
@@ -572,7 +589,7 @@ impl DialogView {
             session_id: session_id.into(),
             kind: DialogKind::Permission,
             title: title.into(),
-            choices: vec!["approve once".to_string(), "deny".to_string()],
+            choices: vec!["Allow once", "Deny once", "Allow for this session", "Always allow", "Deny for this session", "Always deny"].into_iter().map(str::to_owned).collect(),
             message: None,
             disabled: Vec::new(),
             error: None,
@@ -584,6 +601,14 @@ impl DialogView {
     /// no choice is enabled (selection stays unset).
     pub fn next(&mut self) {
         self.step(true);
+    }
+
+    pub fn select(&mut self, index: usize) -> bool {
+        if self.phase != Phase::Open { return false; }
+        let Some(dialog) = self.dialog.as_ref() else { return false; };
+        if index >= dialog.choices.len() || dialog.disabled[index] { return false; }
+        self.selection = Some(index);
+        true
     }
 
     /// Move the selection backward, wrapping and skipping disabled choices.
@@ -623,6 +648,9 @@ impl DialogView {
         let attempt = self.next_attempt()?;
         let intent = match kind {
             DialogKind::Permission => match permission {
+                Some(PermissionChoice::Scoped { allow, persistent }) => DecisionIntent::ScopedPermission {
+                    request_id,session_id,attempt,allow,persistent,
+                },
                 Some(PermissionChoice::ApproveOnce) => DecisionIntent::Approve {
                     request_id,
                     session_id,
@@ -745,16 +773,61 @@ impl DialogView {
     }
 
     pub fn render_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
+        self.layout(width, height).0
+    }
+
+    pub fn choice_at_row(&self, width: usize, height: usize, row: usize) -> Option<usize> {
+        self.layout(width, height).1.get(row).copied().flatten()
+    }
+
+    /// Click-confirm affordance derived from the same layout that renders
+    /// the dialog: true only for the actual rendered footer row. Never the
+    /// blank padding below it, never a hidden/clipped footer (no footer
+    /// line exists for errors), and never a pending decision.
+    #[must_use]
+    pub fn confirm_at_row(&self, width: usize, height: usize, row: usize) -> bool {
+        self.layout(width, height).2 == Some(row)
+    }
+
+    #[must_use]
+    pub fn choice_at_cell(&self, width: usize, height: usize, row: usize, col: usize) -> Option<usize> {
+        let (lines, hits, _) = self.layout(width, height);
+        let index = hits.get(row).copied().flatten()?;
+        let text = lines.get(row)?.text.as_str();
+        let dialog = self.dialog.as_ref()?;
+        let label = dialog.choices.get(index)?;
+        let start = 3 + (index + 1).to_string().chars().count() + 2;
+        let end = start + label.chars().count();
+        (col >= start && col < end && col < text.chars().count()).then_some(index)
+    }
+
+    #[must_use]
+    pub fn confirm_at_cell(&self, width: usize, height: usize, row: usize, col: usize) -> bool {
+        let (lines, _, footer) = self.layout(width, height);
+        if footer != Some(row) { return false; }
+        let text = lines.get(row).map(|line| line.text.as_str()).unwrap_or("");
+        let Some(start) = text
+            .match_indices("click here confirm")
+            .next()
+            .map(|(byte, _)| text[..byte].chars().count())
+        else { return false };
+        let end = start + "click here confirm".chars().count();
+        col >= start && col < end
+    }
+
+    fn layout(&self, width: usize, height: usize) -> (Vec<crate::native_ui_style::Line>, Vec<Option<usize>>, Option<usize>) {
         use crate::native_ui_style::{Line, Role};
         if height == 0 {
-            return Vec::new();
+            return (Vec::new(), Vec::new(), None);
         }
+        let mut hits = vec![None; height];
+        let mut footer_row: Option<usize> = None;
         let mut lines = Vec::new();
         let line = |text, role| Line {text,role,detail_from:None};
         if let Some(dialog) = self.dialog.as_ref() {
             // Heading first: prioritized on short terminals.
             lines.push(line(dialog.title.clone(), Role::Heading));
-            let roomy = height >= 9;
+            let roomy = height >= dialog.choices.len() + 7;
             if roomy {
                 lines.push(line(String::new(), Role::Description));
             }
@@ -790,6 +863,9 @@ impl DialogView {
             let capacity = height.saturating_sub(lines.len() + footer_rows + usize::from(roomy));
             let start = self.selection.unwrap_or(0).saturating_sub(capacity.saturating_sub(1));
             for (index, choice) in dialog.choices.iter().enumerate().skip(start).take(capacity) {
+                if lines.len() < height && !dialog.disabled[index] && self.phase == Phase::Open {
+                    hits[lines.len()] = Some(index);
+                }
                 let marker = if self.selection == Some(index) {
                     " > "
                 } else {
@@ -811,14 +887,16 @@ impl DialogView {
             } else if self.rejected {
                 "Decision rejected — ↑/↓ choose · Enter retry · Esc deny"
             } else {
-                "↑/↓ choose · Enter submit · Esc deny/cancel"
+                "1–9 / ↑↓ choose · Enter / click here confirm · Esc deny"
             };
             match dialog.kind {
                 DialogKind::Question if !self.question_capable => {}
                 DialogKind::Error => {}
                 _ if height > 1 => {
                     lines.truncate(height - 1);
+                    hits[height - 1] = None;
                     lines.push(line(footer.to_owned(), if self.rejected { Role::Error } else { Role::Hint }));
+                    footer_row = (self.phase == Phase::Open).then(|| lines.len() - 1);
                 }
                 _ => {}
             }
@@ -828,7 +906,7 @@ impl DialogView {
         while lines.len() < height {
             lines.push(line(String::new(), Role::Description));
         }
-        lines.into_iter().map(|mut line| { line.text = clip(&line.text, width); line }).collect()
+        (lines.into_iter().map(|mut line| { line.text = clip(&line.text, width); line }).collect(), hits, footer_row)
     }
 
     fn require_interactive(&self) -> Result<(), DialogError> {
@@ -872,6 +950,108 @@ impl DialogView {
         self.dialog = None;
         self.selection = None;
         self.rejected = false;
+    }
+}
+
+#[cfg(test)]
+mod scoped_input_tests {
+    use super::*;
+    #[test]
+    fn six_choices_have_exact_scopes_and_no_implicit_approval() {
+        for index in 0..6 {
+            let mut dialog = DialogView::new();
+            dialog.open_permission("request", "session", "Tool permission").unwrap();
+            assert!(dialog.answer().is_err());
+            assert!(dialog.select(index));
+            let intent = dialog.answer().unwrap();
+            match index {
+                0 => assert!(matches!(intent, DecisionIntent::Approve {..})),
+                1 => assert!(matches!(intent, DecisionIntent::Reject {..})),
+                2..=5 => assert!(matches!(intent, DecisionIntent::ScopedPermission {allow,persistent,..}
+                    if allow == (index < 4) && persistent == (index == 3 || index == 5))),
+                _ => unreachable!(),
+            }
+            assert!(!dialog.select(0));
+        }
+    }
+    #[test]
+    fn mouse_rows_match_rendered_choices_at_compact_and_large_sizes() {
+        let mut dialog = DialogView::new();
+        dialog.open_permission("r","s","permission").unwrap();
+        for height in [9, 12, 24] {
+            let rows = dialog.render(60, height);
+            let mut hits = 0;
+            for row in 0..height {
+                if let Some(index) = dialog.choice_at_row(60,height,row) {
+                    assert!(rows[row].contains(&format!("{}. ",index + 1)));
+                    hits += 1;
+                }
+            }
+            assert_eq!(hits,6);
+            assert!(dialog.choice_at_row(60,height,0).is_none());
+        }
+        dialog.select(5);
+        dialog.answer().unwrap();
+        assert!((0..24).all(|row| dialog.choice_at_row(60,24,row).is_none()));
+    }
+    #[test]
+    fn click_footer_row_from_render_confirms_blank_padding_inert() {
+        let mut dialog = DialogView::new();
+        dialog.open_permission("r","s","permission").unwrap();
+        let height = 24;
+        let rows = dialog.render(60, height);
+        let footer = rows.iter().position(|row| row.contains("click here confirm")).expect("footer row rendered");
+        assert_ne!(footer + 1, height, "regression: rendered footer sits above blank padding");
+        for row in 0..height {
+            assert_eq!(dialog.confirm_at_row(60, height, row), rows[row].contains("click here confirm"), "row {row}");
+        }
+        assert!(dialog.choice_at_row(60, height, footer).is_none());
+        assert!(dialog.answer().is_err(), "unselected footer confirm stays inert");
+        dialog.select(5);
+        assert!(dialog.confirm_at_row(60, height, footer));
+        let intent = dialog.answer().unwrap();
+        assert!(matches!(intent, DecisionIntent::ScopedPermission { allow: false, persistent: true, .. }));
+        assert!(!dialog.confirm_at_row(60, height, footer), "pending phase footer never re-activates");
+    }
+    #[test]
+    fn compact_heights_and_low_widths_keep_confirm_rows_safe() {
+        let mut dialog = DialogView::new();
+        dialog.open_permission("r","s","permission").unwrap();
+        for height in 0..=8 {
+            for width in [0usize, 1, 4, 60] {
+                let mut confirm_rows = 0;
+                for row in 0..height {
+                    if dialog.confirm_at_row(width, height, row) {
+                        confirm_rows += 1;
+                        assert!(dialog.choice_at_row(width, height, row).is_none(), "row {row}");
+                    }
+                }
+                assert!(confirm_rows <= 1, "width {width} height {height}");
+            }
+        }
+    }
+
+    #[test]
+    fn clipped_choice_and_footer_columns_are_inert() {
+        let mut dialog = DialogView::new();
+        dialog.open_permission("r", "s", "permission").unwrap();
+        let height = 24;
+        let rows = dialog.render(60, height);
+        let choice_row = (0..height)
+            .find(|&row| dialog.choice_at_row(60, height, row) == Some(0))
+            .unwrap();
+        assert_eq!(dialog.choice_at_cell(60, height, choice_row, 0), None);
+        assert_eq!(dialog.choice_at_cell(60, height, choice_row, 6), Some(0));
+        let footer = rows.iter().position(|row| row.contains("click here confirm")).unwrap();
+        assert!(!dialog.confirm_at_cell(60, height, footer, 0));
+        let confirm_column = rows[footer]
+            .match_indices("click here confirm")
+            .next()
+            .map(|(byte, _)| rows[footer][..byte].chars().count())
+            .unwrap();
+        assert!(dialog.confirm_at_cell(60, height, footer, confirm_column));
+        assert!(!dialog.confirm_at_cell(4, height, footer, 3));
+        assert!(dialog.choice_at_cell(0, height, choice_row, 0).is_none());
     }
 }
 
