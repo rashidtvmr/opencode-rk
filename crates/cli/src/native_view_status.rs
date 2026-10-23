@@ -219,6 +219,8 @@ impl StatusView {
             rows.push((format!("{used} tokens · last request"), Role::Item));
             if window > 0 { rows.push((format!("{} / {} tokens · {}%",used,window,used.saturating_mul(100)/window),Role::Description)); }
             else {rows.push(("Model capacity not reported".into(),Role::Description));}
+        } else if self.usage.is_some() {
+            rows.push(("Context limit unavailable".into(),Role::Description));
         } else {
             rows.push(("Provider usage not reported yet".into(),Role::Description));
         }
@@ -884,6 +886,24 @@ mod tests {
         assert!(rows.iter().any(|r| r.contains("Cached 0 · Reasoning 0")));
         let rows = view.render(120, 30);
         assert!(rows.iter().any(|r| *r == "context: Unavailable"));
+    }
+
+    #[test]
+    fn known_usage_with_unknown_context_limit_has_explicit_capacity_caption() {
+        let mut view = StatusView::default();
+        view.set_usage(120, 30, None, None, None);
+        let rows = view.render_sidebar(120, 30);
+        assert!(rows.iter().any(|row| row.contains("Context limit unavailable")));
+        assert!(rows.iter().any(|row| row.contains("Input 120 · Output 30")));
+        assert!(!rows.iter().any(|row| row.contains("window=0") || row.contains("0%")));
+    }
+
+    #[test]
+    fn absent_usage_and_context_limit_remains_unreported() {
+        let view = StatusView::default();
+        let rows = view.render_sidebar(120, 30);
+        assert!(rows.iter().any(|row| row.contains("Provider usage not reported yet")));
+        assert!(!rows.iter().any(|row| row.contains("Input 0") || row.contains("Output 0")));
     }
 
     #[test]

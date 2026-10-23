@@ -114,6 +114,11 @@ pub struct NativeView {
     context_window: Option<u64>,
     ui_regions: Vec<crate::native_ui_style::Region>,
     overlay_roles: Vec<crate::native_ui_style::Role>,
+    /// Busy state of the most recently rendered frame.  Native painting uses
+    /// `composer_region` for its optional center loader overlay; while a turn
+    /// is busy the footer is the sole loader surface, so that overlay must be
+    /// suppressed without changing the composer rows themselves.
+    frame_busy: bool,
 }
 
 #[cfg(test)]
@@ -336,6 +341,7 @@ impl NativeView {
             context_window: None,
             ui_regions: Vec::new(),
             overlay_roles: Vec::new(),
+            frame_busy: false,
         }
     }
 
@@ -599,6 +605,9 @@ impl NativeView {
     /// Composer box coordinates shared with the painter. The box is derived
     /// from route and bounded draft rows, never from visible text matching.
     pub fn composer_region(&self, draft: &str) -> Option<(u16, u16, u16, u16)> {
+        if self.frame_busy {
+            return None;
+        }
         let height = self.render_height();
         let width = self.presentation().main_width;
         if height == 0 || width <= 4 || !matches!(self.pages.page(), Page::Chat | Page::Theme) {
@@ -1231,6 +1240,14 @@ impl NativeView {
         busy: bool,
         overlay: &[String],
     ) -> Vec<String> {
+        // A provider turn owns the footer loader.  Approval/setup overlays
+        // retain their existing center loader semantics and must not be
+        // relabeled as a conversation spinner.
+        self.frame_busy = busy
+            && self.session_route
+            && self.render_height() >= 4
+            && overlay.is_empty()
+            && !self.dialogs.is_open();
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
         self.ui_regions.clear();
@@ -1557,6 +1574,9 @@ impl NativeView {
             // using it here leaves the final composed row short and breaks
             // the cell-exact full-frame contract.  Paint the footer against
             // the complete viewport width after sidebar/modal composition.
+            // `busy` is the authoritative provider-turn fact.  Keep it on
+            // the footer even when a modal/overlay is present; `frame_busy`
+            // is only the separate center-composer suppression projection.
             let footer = self.footer_line(self.layout.cols, busy);
             frame[height - 1] = footer;
         }
@@ -1566,7 +1586,6 @@ impl NativeView {
     fn footer_line(&self, width: u16, loading: bool) -> String {
         let inner = width.saturating_sub(4);
         if inner == 0 { return padded("", width); }
-        let left = fit(&self.workspace, inner);
         let mut right = if loading {
             "Thinking…".to_owned()
         } else {
@@ -1581,7 +1600,8 @@ impl NativeView {
         let right_width = right.chars().count().min(usize::from(inner));
         let left_width = usize::from(inner).saturating_sub(right_width).saturating_sub(1);
         let gap = usize::from(inner).saturating_sub(left_width + right_width);
-        padded(&format!("{}{}{}", fit(&self.workspace, left_width as u16), " ".repeat(gap), fit(&right, right_width as u16)), width)
+        let directory = fit(&footer_directory(&self.workspace, left_width as u16), left_width as u16);
+        padded(&format!("{}{}{}", directory, " ".repeat(gap), fit(&right, right_width as u16)), width)
     }
 
     // home.tsx: two flex-grow spacers, four fixed rows before the logo,
@@ -1803,6 +1823,57 @@ impl NativeView {
         rows[height - 1] = padded(&footer, width);
         rows
     }
+}
+
+/// Footer directory projection keeps the selected project's basename visible.
+/// Unlike the general leading `fit`, this drops the oldest path clusters and
+/// prefixes an ellipsis when the backend-confirmed directory exceeds the
+/// reserved left segment. Clusters are collected through the same cell-aware
+/// native layout scanner, so Unicode and combining sequences are never split.
+fn footer_directory(path: &str, width: u16) -> String {
+    if width == 0 { return String::new(); }
+    let bounded: String = crate::native_transcript::strip_ansi(path)
+        .chars()
+        .filter(|c| !c.is_control())
+        .take(MAX_RENDER_DRAFT_CHARS)
+        .collect();
+    let mut clusters: Vec<(String, u16)> = Vec::new();
+    // `visit_cells` uses its width argument as the bounded `fit` budget and
+    // pads to that many cells.  Do not pass `u16::MAX`: that would materialize
+    // tens of thousands of padding cells and make the reverse walk discard
+    // the actual path. Two cells per scalar is a safe upper bound for this
+    // renderer's width model, while keeping the scan bounded by the already
+    // capped path.
+    let scan_width = bounded
+        .chars()
+        .count()
+        .saturating_mul(2)
+        .min(usize::from(u16::MAX)) as u16;
+    crate::native_view_layout::visit_cells(&bounded, scan_width, |_, glyph, cells| {
+        clusters.push((glyph.to_owned(), cells));
+    });
+    // Remove only the scanner's synthetic suffix, while retaining genuine
+    // trailing spaces from the backend-confirmed path.
+    let trailing_spaces = bounded.chars().rev().take_while(|c| *c == ' ').count();
+    while clusters.last().is_some_and(|(glyph, _)| glyph == " ") {
+        clusters.pop();
+    }
+    for _ in 0..trailing_spaces {
+        clusters.push((" ".to_owned(), 1));
+    }
+    let total: u16 = clusters.iter().fold(0, |sum, (_, cells)| sum.saturating_add(*cells));
+    if total <= width {
+        return clusters.into_iter().map(|(glyph, _)| glyph).collect();
+    }
+    let mut used = 1u16;
+    let mut tail = Vec::new();
+    for (glyph, cells) in clusters.into_iter().rev() {
+        if used.saturating_add(cells) > width { break; }
+        used = used.saturating_add(cells);
+        tail.push(glyph);
+    }
+    tail.reverse();
+    format!("…{}", tail.concat())
 }
 
 #[cfg(test)]
@@ -2105,6 +2176,61 @@ mod footer_layout_tests {
         let rows = view.render_typed("", &[], false, &[]).join("\n");
         assert!(!rows.contains("window=0"));
         assert!(!rows.contains("0%"));
+    }
+
+    #[test]
+    fn active_busy_frame_has_footer_loader_only_not_composer_loader_region() {
+        let mut view = NativeView::new(80, 20);
+        view.set_session_route(true);
+        let rows = view.render_typed("draft", &[], true, &[]);
+        assert_eq!(rows.iter().filter(|row| row.contains("Thinking")).count(), 1);
+        assert!(rows[19].contains("Thinking"));
+        assert!(view.composer_region("draft").is_none());
+        let idle = view.render_typed("draft", &[], false, &[]);
+        assert!(idle.iter().all(|row| !row.contains("Thinking")));
+        assert!(view.composer_region("draft").is_some());
+    }
+
+    #[test]
+    fn compact_busy_frames_keep_composer_region_for_loader_fallback() {
+        for height in [1_u16, 2, 3] {
+            let mut view = NativeView::new(80, height);
+            view.set_session_route(true);
+            let rows = view.render_typed("draft", &[], true, &[]);
+            assert_eq!(rows.len(), usize::from(height));
+            assert!(!rows.iter().any(|row| row.contains("Thinking")));
+            assert!(view.composer_region("draft").is_some(), "height {height}");
+        }
+    }
+
+    #[test]
+    fn footer_directory_tail_keeps_selected_project_name_visible() {
+        let mut first = NativeView::new(64, 20);
+        first.set_workspace("/very/long/root/selected-alpha".to_owned());
+        let alpha = first.render_typed("", &[], false, &[]).pop().unwrap();
+        let mut second = NativeView::new(64, 20);
+        second.set_workspace("/very/long/root/selected-beta".to_owned());
+        let beta = second.render_typed("", &[], false, &[]).pop().unwrap();
+        assert!(alpha.contains("selected-alpha"));
+        assert!(beta.contains("selected-beta"));
+        assert_ne!(alpha, beta);
+        assert_eq!(alpha.chars().count(), 64);
+        let mut narrow = NativeView::new(18, 20);
+        narrow.set_workspace("/長い/プロジェクト🦀/名前".to_owned());
+        let row = narrow.render_typed("", &[], false, &[]).pop().unwrap();
+        assert_eq!(row.chars().count(), 18);
+    }
+
+    #[test]
+    fn footer_short_directory_keeps_status_at_the_right_edge() {
+        let mut view = NativeView::new(64, 20);
+        view.set_workspace("/x".to_owned());
+        let idle = view.render_typed("", &[], false, &[]).pop().unwrap();
+        assert_eq!(idle.chars().count(), 64);
+        assert!(idle.ends_with(&format!("{}  ", env!("CARGO_PKG_VERSION"))));
+        let busy = view.render_typed("", &[], true, &[]).pop().unwrap();
+        assert_eq!(busy.chars().count(), 64);
+        assert!(busy.ends_with("Thinking…  "));
     }
 }
 
