@@ -23,8 +23,29 @@ File.binwrite(source_path, source_bytes)
 source_hash = Digest::SHA256.hexdigest(source_bytes)
 
 binary = File.expand_path(ARGV.fetch(0, File.expand_path('../../../target/debug/oc2', __dir__)))
-native_lib = ENV['DYLD_LIBRARY_PATH'].to_s
-native_lib = File.expand_path('../ui-native/lib', File.dirname(binary)) unless File.directory?(native_lib)
+raise "binary missing: #{binary}" unless File.file?(binary)
+
+def resolve_native_library(binary)
+  binary_dir = File.dirname(File.expand_path(binary))
+  explicit_dirs = ENV.fetch('DYLD_LIBRARY_PATH', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+  candidates = explicit_dirs.map do |directory|
+    [File.expand_path('libopentui.dylib', directory), 'explicit_dyld_library_path']
+  end
+  candidates << [File.expand_path('../lib/libopentui.dylib', binary_dir), 'installed_sibling']
+  candidates << [File.expand_path('../ui-native/lib/libopentui.dylib', binary_dir), 'build_relative']
+  selected = candidates.find { |path, _source| File.file?(path) }
+  unless selected
+    checked = candidates.map(&:first).uniq.join(', ')
+    raise "native library unresolved: libopentui.dylib; checked=#{checked}"
+  end
+
+  path, source = selected
+  resolved = File.realpath(path)
+  [path, resolved, Digest::SHA256.file(resolved).hexdigest, source]
+end
+
+native_library_file, native_library_file_resolved, native_library_file_sha256, native_library_resolution_source = resolve_native_library(binary)
+native_lib = File.dirname(native_library_file_resolved)
 env = {
   'HOME'=>HOME, 'XDG_CONFIG_HOME'=>XDG, 'XDG_DATA_HOME'=>File.join(XDG,'data'),
   'XDG_STATE_HOME'=>File.join(XDG,'state'), 'OPENCODE_CONFIG_DIR'=>SRC,
@@ -138,6 +159,11 @@ end
 results['source_hash_before'] = source_hash
 results['source_hash_after'] = Digest::SHA256.file(source_path).hexdigest
 results['binary_sha256'] = Digest::SHA256.file(binary).hexdigest
+results['native_library_file'] = native_library_file
+results['native_library_file_resolved'] = native_library_file_resolved
+results['native_library_file_sha256'] = native_library_file_sha256
+results['native_library_resolution_source'] = native_library_resolution_source
+results['dyld_library_path_used'] = env.fetch('DYLD_LIBRARY_PATH')
 results['root'] = ROOT
 File.write(File.join(ROOT,'summary.json'), JSON.pretty_generate(results))
 puts JSON.pretty_generate(results)

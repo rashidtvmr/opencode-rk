@@ -13,10 +13,32 @@ RUN_DIR = File.join(ARTIFACT_DIR, "run-#{Time.now.strftime('%Y%m%d-%H%M%S')}-#{P
 BINARY = File.expand_path(ARGV.fetch(0, File.expand_path('../../../target/debug/oc2', __dir__)))
 ROWS = Integer(ENV.fetch('PHASE1_ROWS', '32'))
 COLS = Integer(ENV.fetch('PHASE1_COLS', '100'))
-NATIVE_LIBRARY = File.expand_path('../ui-native/lib', File.dirname(BINARY))
-NATIVE_LIBRARY_FILE = File.join(NATIVE_LIBRARY, 'libopentui.dylib')
 FileUtils.mkdir_p(RUN_DIR)
 raise "binary missing: #{BINARY}" unless File.file?(BINARY)
+
+def resolve_native_library(binary)
+  binary_dir = File.dirname(File.expand_path(binary))
+  explicit_dirs = ENV.fetch('DYLD_LIBRARY_PATH', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+  candidates = explicit_dirs.map do |directory|
+    [File.expand_path('libopentui.dylib', directory), 'explicit_dyld_library_path']
+  end
+  candidates << [File.expand_path('../lib/libopentui.dylib', binary_dir), 'installed_sibling']
+  candidates << [File.expand_path('../ui-native/lib/libopentui.dylib', binary_dir), 'build_relative']
+  selected = candidates.find { |path, _source| File.file?(path) }
+  unless selected
+    checked = candidates.map(&:first).uniq.join(', ')
+    raise "native library unresolved: libopentui.dylib; checked=#{checked}"
+  end
+
+  path, source = selected
+  resolved = File.realpath(path)
+  sha256 = Digest::SHA256.file(resolved).hexdigest
+  [path, resolved, sha256, source]
+end
+
+NATIVE_LIBRARY_FILE, NATIVE_LIBRARY_FILE_RESOLVED, NATIVE_LIBRARY_FILE_SHA256, NATIVE_LIBRARY_RESOLUTION_SOURCE = resolve_native_library(BINARY)
+DYLD_LIBRARY_PATH_USED = File.dirname(NATIVE_LIBRARY_FILE_RESOLVED)
+NATIVE_LIBRARY = DYLD_LIBRARY_PATH_USED
 
 def now
   Process.clock_gettime(Process::CLOCK_MONOTONIC)
@@ -111,7 +133,6 @@ end
 
 def isolated_env(root, data)
   xdg = File.join(root, 'xdg')
-  native_lib = File.expand_path('../ui-native/lib', File.dirname(BINARY))
   {
     'HOME' => File.join(root, 'home'),
     'XDG_CONFIG_HOME' => File.join(xdg, 'config'),
@@ -369,14 +390,11 @@ ensure
   nil
   end
   results['native_library_file'] = NATIVE_LIBRARY_FILE
-  results['native_library_file_resolved'] = if File.file?(NATIVE_LIBRARY_FILE)
-    File.realpath(NATIVE_LIBRARY_FILE)
-  else
-    NATIVE_LIBRARY_FILE
-  end
-  results['native_library_file_sha256'] = if File.file?(NATIVE_LIBRARY_FILE)
-    Digest::SHA256.file(NATIVE_LIBRARY_FILE).hexdigest
-  end
+  results['native_library_file_resolved'] = NATIVE_LIBRARY_FILE_RESOLVED
+  results['native_library_file_sha256'] = NATIVE_LIBRARY_FILE_SHA256
+  results['native_library_resolution_source'] = NATIVE_LIBRARY_RESOLUTION_SOURCE
+  results['dyld_library_path_used'] = DYLD_LIBRARY_PATH_USED
+  results['ld_library_path_used'] = DYLD_LIBRARY_PATH_USED
   begin
     results['predicates'] = {
       'normal_exit' => %w[client_exited daemon_ready termios_restored owned_daemon_cleanup owned_daemon_alive_after_cleanup],

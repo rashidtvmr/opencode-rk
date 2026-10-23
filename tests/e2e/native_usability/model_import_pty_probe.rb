@@ -26,6 +26,28 @@ raise "binary missing: #{BINARY}" unless File.file?(BINARY)
 BINARY_SHA = Digest::SHA256.file(BINARY).hexdigest
 raise "binary SHA mismatch expected=#{EXPECTED_SHA} actual=#{BINARY_SHA}" if EXPECTED_SHA && BINARY_SHA != EXPECTED_SHA
 
+def resolve_native_library(binary)
+  binary_dir = File.dirname(File.expand_path(binary))
+  explicit_dirs = ENV.fetch('DYLD_LIBRARY_PATH', '').split(File::PATH_SEPARATOR).reject(&:empty?)
+  candidates = explicit_dirs.map do |directory|
+    [File.expand_path('libopentui.dylib', directory), 'explicit_dyld_library_path']
+  end
+  candidates << [File.expand_path('../lib/libopentui.dylib', binary_dir), 'installed_sibling']
+  candidates << [File.expand_path('../ui-native/lib/libopentui.dylib', binary_dir), 'build_relative']
+  selected = candidates.find { |path, _source| File.file?(path) }
+  unless selected
+    checked = candidates.map(&:first).uniq.join(', ')
+    raise "native library unresolved: libopentui.dylib; checked=#{checked}"
+  end
+
+  path, source = selected
+  resolved = File.realpath(path)
+  [path, resolved, Digest::SHA256.file(resolved).hexdigest, source]
+end
+
+NATIVE_LIBRARY_FILE, NATIVE_LIBRARY_FILE_RESOLVED, NATIVE_LIBRARY_FILE_SHA256, NATIVE_LIBRARY_RESOLUTION_SOURCE = resolve_native_library(BINARY)
+NATIVE_LIBRARY_DIR = File.dirname(NATIVE_LIBRARY_FILE_RESOLVED)
+
 class FakeProvider
   attr_reader :port
 
@@ -270,6 +292,11 @@ end
 results = {
   'binary' => BINARY,
   'binary_sha256' => BINARY_SHA,
+  'native_library_file' => NATIVE_LIBRARY_FILE,
+  'native_library_file_resolved' => NATIVE_LIBRARY_FILE_RESOLVED,
+  'native_library_file_sha256' => NATIVE_LIBRARY_FILE_SHA256,
+  'native_library_resolution_source' => NATIVE_LIBRARY_RESOLUTION_SOURCE,
+  'dyld_library_path_used' => NATIVE_LIBRARY_DIR,
   'own_config_file' => File.join(CONFIG_DIR, 'opencode.json'),
   'recent_state_absent_before' => !File.exist?(STATE_FILE),
   'manual_provider_selection' => false,
@@ -311,12 +338,10 @@ begin
     'TERM' => 'xterm-256color',
     'COLUMNS' => '100',
     'LINES' => '32',
-    'DYLD_LIBRARY_PATH' => ENV.fetch('DYLD_LIBRARY_PATH') { File.expand_path('../../../target/ui-native/lib', __dir__) },
+    'DYLD_LIBRARY_PATH' => NATIVE_LIBRARY_DIR,
     'PATH' => '/usr/bin:/bin'
   }
   FileUtils.mkdir_p(env['OPENCODE_CONFIG_DIR'])
-  native_lib = env['DYLD_LIBRARY_PATH']
-  raise "native library directory missing: #{native_lib}" unless File.directory?(native_lib)
 
   screen = Screen.new
   PTY.spawn(env, BINARY, '--native', '--data-dir', DATA_DIR,
