@@ -322,6 +322,33 @@ pub fn to_normalized_value(config: &ImportedProviderConfig) -> Value {
     Value::Object(provider)
 }
 
+pub fn configured_models_for(provider_id: &str) -> Result<Vec<(String, String)>, ImportedConfigError> {
+    let Some(config) = load_imported_providers()?.into_iter().find(|p| p.id == provider_id) else { return Ok(Vec::new()); };
+    let Some(models) = config.models.as_object() else {
+        return if config.models.is_array() { configured_model_array(&config.models) } else { Ok(Vec::new()) };
+    };
+    let mut result = Vec::new();
+    for (id, definition) in models.iter().take(MAX_MODELS_PER_PROVIDER) {
+        if id.is_empty() || id.len() > 256 || id.chars().any(|c| c.is_control()) { continue; }
+        let name = definition.as_object().and_then(|obj| obj.get("name")).and_then(Value::as_str).unwrap_or(id);
+        if name.is_empty() || name.len() > 256 || name.chars().any(|c| c.is_control()) { continue; }
+        if result.iter().any(|(existing, _)| existing == id) { continue; }
+        result.push((id.clone(), name.to_owned()));
+    }
+    Ok(result)
+}
+
+fn configured_model_array(models: &Value) -> Result<Vec<(String, String)>, ImportedConfigError> {
+    let mut result = Vec::new();
+    for value in models.as_array().into_iter().flatten().take(MAX_MODELS_PER_PROVIDER) {
+        let Some(id) = value.as_str() else { continue; };
+        if id.is_empty() || id.len() > 256 || id.chars().any(|c| c.is_control()) { continue; }
+        if result.iter().any(|(existing, _)| existing == id) { continue; }
+        result.push((id.to_owned(), id.to_owned()));
+    }
+    Ok(result)
+}
+
 /// Resolve the API key for an imported provider.
 ///
 /// Resolution order (same as `custom_provider::load`):

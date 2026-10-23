@@ -11,11 +11,12 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
+use tokio::io::AsyncWriteExt;
 
 use opencode_rk_providers::imported_config::{
-    load_imported_providers, own_config_dir, own_config_path,
+    load_imported_providers, own_config_dir, own_config_path, to_normalized_value,
 };
-use opencode_rk_providers::custom_provider::{list, load};
+use opencode_rk_providers::custom_provider::{discover_models, list, load};
 /// RAII guard that serializes environment access, then restores changed vars.
 struct EnvGuard {
     _env_lock: MutexGuard<'static, ()>,
@@ -211,6 +212,98 @@ async fn custom_provider_load_resolves_imported_base_url() {
     let config = load("imported-llm").await.expect("should load").unwrap();
     assert_eq!(config.id, "imported-llm");
     assert_eq!(config.base_url, "https://imported.example/v1");
+}
+
+#[tokio::test]
+async fn imported_configured_models_survive_load_list_and_failed_discovery() {
+    let guard = EnvGuard::new();
+    guard.set_as_rk_config_dir();
+    write_own_config(
+        &guard.config_dir(),
+        r#"{
+            "providers": {
+                "offline-llm": {
+                    "name": "Offline LLM",
+                    "base_url": "http://127.0.0.1:9/v1",
+                    "models": {
+                        "vendor/model-a": {"name": "Model A"},
+                        "vendor/model-b": {"id": "vendor/model-b", "name": "Model B"}
+                    }
+                }
+            }
+        }"#,
+    );
+
+    let listed = list().await.expect("imported provider should list");
+    let listed_provider = listed.iter().find(|provider| provider.id == "offline-llm").unwrap();
+    assert_eq!(listed_provider.configured_models(), vec![
+        ("vendor/model-a".to_owned(), "Model A".to_owned()),
+        ("vendor/model-b".to_owned(), "Model B".to_owned()),
+    ]);
+
+    let loaded = load("offline-llm").await.expect("provider should load").unwrap();
+    assert_eq!(loaded.configured_models(), listed_provider.configured_models());
+    let models = discover_models(&loaded).await.expect("configured models are usable offline");
+    assert_eq!(models, loaded.configured_models());
+}
+
+#[tokio::test]
+async fn foundation_normalized_model_array_is_consumed_by_runtime_catalogue() {
+    let guard = EnvGuard::new();
+    guard.set_as_rk_config_dir();
+    write_own_config(&guard.config_dir(), r#"{
+        "providers": {"array-llm": {
+            "base_url": "http://127.0.0.1:9/v1",
+            "models": ["vendor/array-a", "vendor/array-a", "vendor/array-b"]
+        }}
+    }"#);
+    let config = load("array-llm").await.unwrap().unwrap();
+    let imported = load_imported_providers().unwrap().pop().unwrap();
+    assert!(to_normalized_value(&imported)["models"].is_array(), "foundation normalization contract is an ID array");
+    assert_eq!(config.configured_models(), vec![
+        ("vendor/array-a".into(), "vendor/array-a".into()),
+        ("vendor/array-b".into(), "vendor/array-b".into()),
+    ]);
+    assert_eq!(discover_models(&config).await.unwrap(), config.configured_models());
+}
+
+#[tokio::test]
+async fn configured_models_fallback_when_models_endpoint_returns_malformed_json() {
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        let (mut stream, _) = listener.accept().await.unwrap();
+        let mut request = [0_u8; 1024];
+        let _ = tokio::io::AsyncReadExt::read(&mut stream, &mut request).await;
+        stream.write_all(b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 17\r\nConnection: close\r\n\r\n{\"not_models\":true}").await.unwrap();
+    });
+    let guard = EnvGuard::new();
+    guard.set_as_rk_config_dir();
+    write_own_config(&guard.config_dir(), &format!(r#"{{"providers":{{"malformed-llm":{{"base_url":"http://127.0.0.1:{port}/v1","models":["vendor/offline"]}}}}}}"#));
+    let config = load("malformed-llm").await.unwrap().unwrap();
+    assert_eq!(discover_models(&config).await.unwrap(), vec![("vendor/offline".into(), "vendor/offline".into())]);
+    server.await.unwrap();
+}
+
+#[tokio::test]
+async fn empty_configured_models_still_report_discovery_error() {
+    let guard = EnvGuard::new();
+    guard.set_as_rk_config_dir();
+    write_own_config(&guard.config_dir(), r#"{"providers":{"empty-llm":{"base_url":"http://127.0.0.1:9/v1"}}}"#);
+    let config = load("empty-llm").await.unwrap().unwrap();
+    assert!(discover_models(&config).await.is_err());
+}
+
+#[tokio::test]
+async fn legacy_collision_does_not_attach_imported_models_to_legacy_provider() {
+    let guard = EnvGuard::new();
+    guard.set_as_rk_config_dir();
+    write_custom_providers(&guard.config_dir(), r#"{"providers":{"shared-llm":{"name":"Legacy","base_url":"http://127.0.0.1:9/v1"}}}"#);
+    write_own_config(&guard.config_dir(), r#"{"providers":{"shared-llm":{"name":"Imported","base_url":"https://imported.example/v1","models":["wrong/model"]}}}"#);
+    let config = load("shared-llm").await.unwrap().unwrap();
+    assert_eq!(config.base_url, "http://127.0.0.1:9/v1");
+    assert!(config.configured_models().is_empty());
+    assert!(discover_models(&config).await.is_err());
 }
 
 #[tokio::test]

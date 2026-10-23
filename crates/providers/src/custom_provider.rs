@@ -20,6 +20,26 @@ pub struct CustomProviderConfig {
     pub api_key: Option<String>,
 }
 
+impl CustomProviderConfig {
+    pub fn configured_models(&self) -> Vec<(String, String)> {
+        // A legacy custom-providers entry owns this ID, including its endpoint
+        // and credentials. Never attach the imported model map from the
+        // shadowed entry to that different runtime provider.
+        if legacy_provider_exists(&self.id) {
+            return Vec::new();
+        }
+        crate::imported_config::configured_models_for(&self.id).unwrap_or_default()
+    }
+}
+
+fn legacy_provider_exists(id: &str) -> bool {
+    let Some(path) = config_path() else { return false; };
+    read_root(&path)
+        .ok()
+        .and_then(|root| root["providers"].as_object().map(|providers| providers.contains_key(id)))
+        .unwrap_or(false)
+}
+
 #[derive(Debug, Error)]
 pub enum CustomProviderError {
     #[error("invalid provider configuration: {0}")] Invalid(String),
@@ -221,19 +241,33 @@ fn parse_models(bytes: &[u8]) -> Result<Vec<(String, String)>, CustomProviderErr
 }
 
 pub async fn discover_models(config: &CustomProviderConfig) -> Result<Vec<(String,String)>, CustomProviderError> {
-    let base = validate_base_url(&config.base_url)?;
-    let client = reqwest::Client::builder().timeout(Duration::from_secs(12)).redirect(Policy::none()).no_proxy().build().map_err(|_| CustomProviderError::Request("unable to initialize HTTP client".into()))?;
-    let mut request = client.get(format!("{}/models", base.as_str().trim_end_matches('/')));
-    if config.id == "9router" { request = request.header("x-9r-internal-models-fetch", "1"); }
-    if let Some(key) = config.api_key.as_deref().filter(|key| !key.trim().is_empty()) { request = request.bearer_auth(key); }
-    let mut response = request.send().await.map_err(|_| CustomProviderError::Request("connection failed or timed out".into()))?;
-    if !response.status().is_success() { return Err(CustomProviderError::Http(response.status().as_u16())); }
-    let mut bytes = Vec::new();
-    while let Some(chunk) = response.chunk().await.map_err(|_| CustomProviderError::Request("response interrupted".into()))? {
-        if bytes.len() + chunk.len() > MAX_MODELS_BODY_BYTES { return Err(CustomProviderError::TooLarge(MAX_MODELS_BODY_BYTES)); }
-        bytes.extend_from_slice(&chunk);
+    let configured = config.configured_models();
+    let discovered = async {
+        let base = validate_base_url(&config.base_url)?;
+        let client = reqwest::Client::builder().timeout(Duration::from_secs(12)).redirect(Policy::none()).no_proxy().build().map_err(|_| CustomProviderError::Request("unable to initialize HTTP client".into()))?;
+        let mut request = client.get(format!("{}/models", base.as_str().trim_end_matches('/')));
+        if config.id == "9router" { request = request.header("x-9r-internal-models-fetch", "1"); }
+        if let Some(key) = config.api_key.as_deref().filter(|key| !key.trim().is_empty()) { request = request.bearer_auth(key); }
+        let mut response = request.send().await.map_err(|_| CustomProviderError::Request("connection failed or timed out".into()))?;
+        if !response.status().is_success() { return Err(CustomProviderError::Http(response.status().as_u16())); }
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(|_| CustomProviderError::Request("response interrupted".into()))? {
+            if bytes.len() + chunk.len() > MAX_MODELS_BODY_BYTES { return Err(CustomProviderError::TooLarge(MAX_MODELS_BODY_BYTES)); }
+            bytes.extend_from_slice(&chunk);
+        }
+        parse_models(&bytes)
+    }.await;
+    let discovered = match discovered {
+        Ok(models) => models,
+        Err(_error) if !configured.is_empty() => return Ok(configured),
+        Err(error) => return Err(error),
+    };
+    if configured.is_empty() { return Ok(discovered); }
+    let mut merged = configured;
+    for row in discovered {
+        if !merged.iter().any(|(id, _)| id == &row.0) { merged.push(row); }
     }
-    parse_models(&bytes)
+    Ok(merged)
 }
 
 #[cfg(test)]
