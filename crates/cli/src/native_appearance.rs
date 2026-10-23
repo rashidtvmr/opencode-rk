@@ -210,6 +210,21 @@ impl AppearanceEditor {
         if wide && col < OPTION_COL {
             return false; // separator gutter between label and option columns
         }
+        if wide {
+            // Wide rows paint the option text at OPTION_COL, but do not paint
+            // an actionable control across the rest of the dialog width.  Use
+            // the actual rendered row (rather than a fixed control width) so
+            // every action row has exactly its visible text span as its hit
+            // target; trailing cells remain inert.
+            let option_cells = rendered
+                .get(usize::from(row))
+                .and_then(|line| line.chars().count().checked_sub(usize::from(OPTION_COL)))
+                .and_then(|width| u16::try_from(width).ok())
+                .unwrap_or(0);
+            if col >= OPTION_COL.saturating_add(option_cells) {
+                return false;
+            }
+        }
         if !wide && col >= self.compact_option_cells(content_width, row) {
             return false; // only the RENDERED compact option text is clickable
         }
@@ -535,5 +550,91 @@ mod tests {
             user.as_ref(),
             "User override untouched"
         );
+    }
+
+    /// Wide rows must expose only the painted reset label as a reset target.
+    /// In particular, the blank cells to its right are still inside the dialog
+    /// rect but are not part of the rendered control.
+    #[test]
+    fn wide_reset_hit_uses_exact_rendered_option_span() {
+        const CONTENT_X: u16 = 3;
+        const CONTENT_Y: u16 = 4;
+        const WIDTH: u16 = 80;
+        const RESET: &str = "Reset this component (r)";
+
+        let configured = || {
+            let mut editor = AppearanceEditor::new(BoxAppearance::default());
+            editor.show(); // Composer is the selected target.
+            editor.key(b'2');
+            editor
+        };
+
+        let mut probe = configured();
+        let rows = probe.rows(WIDTH);
+        let reset_row = rows
+            .iter()
+            .position(|row| row.contains(RESET))
+            .expect("wide rendering contains the reset label");
+        let reset_start = rows[reset_row]
+            .find(RESET)
+            .expect("reset label has a rendered start");
+        let reset_end = reset_start + RESET.chars().count();
+        assert_eq!(reset_start, usize::from(OPTION_COL));
+        assert!(reset_end <= rows[reset_row].chars().count());
+
+        // The first and last painted cells of the reset label are controls.
+        let first_col = u16::try_from(reset_start).unwrap();
+        let last_col = u16::try_from(reset_end - 1).unwrap();
+        assert!(probe.pointer_hit(
+            CONTENT_X + first_col,
+            CONTENT_Y + u16::try_from(reset_row).unwrap(),
+            0,
+            CONTENT_X,
+            CONTENT_Y,
+            WIDTH,
+            u16::MAX,
+        ));
+        assert!(probe.style.overrides.is_empty());
+
+        let mut last = configured();
+        assert!(last.pointer_hit(
+            CONTENT_X + last_col,
+            CONTENT_Y + u16::try_from(reset_row).unwrap(),
+            0,
+            CONTENT_X,
+            CONTENT_Y,
+            WIDTH,
+            u16::MAX,
+        ));
+        assert!(last.style.overrides.is_empty());
+
+        // Reconstruct the exact pre-reset state and prove the cell immediately
+        // after the painted label is inert, despite being inside the wide rect.
+        let mut blank = configured();
+        let before_blank = blank.style.clone();
+        assert!(!blank.pointer_hit(
+            CONTENT_X + u16::try_from(reset_end).unwrap(),
+            CONTENT_Y + u16::try_from(reset_row).unwrap(),
+            0,
+            CONTENT_X,
+            CONTENT_Y,
+            WIDTH,
+            u16::MAX,
+        ));
+        assert_eq!(blank.style, before_blank);
+
+        // The cell immediately before the rendered option is the separator
+        // gutter and must not become a reset hit either.
+        let mut before = configured();
+        assert!(!before.pointer_hit(
+            CONTENT_X + first_col - 1,
+            CONTENT_Y + u16::try_from(reset_row).unwrap(),
+            0,
+            CONTENT_X,
+            CONTENT_Y,
+            WIDTH,
+            u16::MAX,
+        ));
+        assert_eq!(before.style, before_blank);
     }
 }
