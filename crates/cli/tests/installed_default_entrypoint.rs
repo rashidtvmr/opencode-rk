@@ -11,10 +11,10 @@
 //!   loopback, and PID validation.
 //! - `crates/cli/src/tui_entry.rs:615-739` - native frame and provider dialog.
 //!
-//! The old `OpenCode RK TUI`/`Ctrl+P` needles were superseded by the pinned
-//! native route's observable `OpenCode RK (native)`/`ctrl-p` output.  The
-//! assertions below intentionally retain the frame, auth, singleton, setup,
-//! and alternate-screen contracts rather than accepting generic output.
+//! Native readiness requires a closed synchronized frame containing the Home
+//! composer and command hint. The obsolete `OpenCode RK (native)` body banner
+//! is deliberately absent from the current layout. The assertions retain the
+//! frame, auth, singleton, setup, and alternate-screen contracts.
 //!
 //! Authority supersession (mechanical only): pinned upstream
 //! `packages/tui/src/app.tsx:540-548` opens the provider dialog on an empty
@@ -238,16 +238,16 @@ mod macos_pty {
             self.input.flush().expect("PTY flush");
         }
 
-        fn wait_for(&self, needle: &str) {
+        fn wait_for_native_frame(&self) -> String {
             let deadline = Instant::now() + WAIT;
             while Instant::now() < deadline {
-                if self.out.text().contains(needle) {
-                    return;
+                if let Some(frame) = completed_home_frame(&self.out.text()) {
+                    return frame.to_owned();
                 }
                 thread::sleep(Duration::from_millis(25));
             }
             panic!(
-                "missing {needle:?}\nstdout={}\nstderr={}",
+                "missing completed native Home frame\nstdout={}\nstderr={}",
                 self.out.text(),
                 self.err.text()
             );
@@ -435,6 +435,48 @@ mod macos_pty {
             .or_else(|| option_env!("GIT_COMMIT").map(str::to_owned))
     }
 
+    /// Ignore partial output and setup/title text outside synchronized frames.
+    /// Return one complete frame, never a concatenation of different renders.
+    fn completed_home_frame(text: &str) -> Option<&str> {
+        const OPEN: &str = "\x1b[?2026h";
+        const CLOSE: &str = "\x1b[?2026l";
+        let mut rest = text;
+        while let Some(start) = rest.find(OPEN) {
+            let body = &rest[start + OPEN.len()..];
+            let end = body.find(CLOSE)?;
+            let frame = &body[..end];
+            if frame.contains("Ask anything") && frame.contains("ctrl+p commands") {
+                return Some(frame);
+            }
+            rest = &body[end + CLOSE.len()..];
+        }
+        None
+    }
+
+    #[test]
+    fn native_readiness_requires_both_markers_in_one_completed_frame() {
+        let frame = "\x1b[?2026hAsk anything… ctrl+p commands\x1b[?2026l";
+        assert_eq!(
+            completed_home_frame(frame),
+            Some("Ask anything… ctrl+p commands")
+        );
+        assert_eq!(completed_home_frame("Ask anything ctrl+p commands"), None);
+        assert_eq!(
+            completed_home_frame("\x1b[?2026hAsk anything ctrl+p commands"),
+            None
+        );
+        assert_eq!(
+            completed_home_frame(
+                "\x1b[?2026hAsk anything\x1b[?2026l\x1b[?2026hctrl+p commands\x1b[?2026l"
+            ),
+            None
+        );
+        assert_eq!(
+            completed_home_frame(&format!("\x1b[?2026hirrelevant\x1b[?2026l{frame}")),
+            Some("Ask anything… ctrl+p commands")
+        );
+    }
+
     fn strip_terminal_controls(text: &str) -> String {
         let mut output = String::with_capacity(text.len());
         let mut chars = text.chars();
@@ -474,15 +516,15 @@ mod macos_pty {
         let root = Root::new();
         let addr = address();
         let mut pty = Pty::spawn(&binary(), &root, &addr, None);
-        pty.wait_for("OpenCode RK (native)");
+        pty.wait_for_native_frame();
         let initial = pty.text();
         assert!(
             initial.contains("Connect a provider"),
             "provider dialog missing\n{initial}"
         );
         assert!(
-            initial.contains("OpenCode RK (native)"),
-            "native route marker missing\n{initial}"
+            completed_home_frame(&initial).is_some(),
+            "completed native Home frame missing\n{initial}"
         );
         assert!(
             !initial.contains("type /help for commands"),
@@ -507,7 +549,7 @@ mod macos_pty {
         let addr = address();
         let bin = binary();
         let mut first = Pty::spawn(&bin, &root, &addr, Some("fixture-secret"));
-        first.wait_for("OpenCode RK (native)");
+        first.wait_for_native_frame();
         let first_desc = wait_for_descriptor(&root, &addr);
         let token = field(&first_desc, "auth_token").expect("bearer descriptor token");
         assert!(token.len() == 64 && token.bytes().all(|byte| byte.is_ascii_hexdigit()));
@@ -533,7 +575,7 @@ mod macos_pty {
         assert!(health(&addr), "first client exit killed shared daemon");
 
         let mut second = Pty::spawn(&bin, &root, &addr, Some("fixture-secret"));
-        second.wait_for("OpenCode RK (native)");
+        second.wait_for_native_frame();
         let second_desc = wait_for_descriptor(&root, &addr);
         assert_eq!(
             descriptor_pid(&second_desc).expect("second daemon PID"),
@@ -555,7 +597,7 @@ mod macos_pty {
         let root = Root::new();
         let addr = address();
         let mut pty = Pty::spawn(&binary(), &root, &addr, None);
-        pty.wait_for("OpenCode RK (native)");
+        pty.wait_for_native_frame();
         pty.send("\x1b:q\n");
         let status = pty.exit();
         let text = pty.text();
@@ -584,11 +626,11 @@ mod macos_pty {
         let root = Root::new();
         let addr = address();
         let mut pty = Pty::spawn(&binary(), &root, &addr, Some("fixture-secret"));
-        pty.wait_for("OpenCode RK (native)");
+        pty.wait_for_native_frame();
         let frame = pty.text();
         assert!(
-            frame.contains("OpenCode RK (native)"),
-            "native frame missing title\n{frame}"
+            completed_home_frame(&frame).is_some(),
+            "completed native Home frame missing\n{frame}"
         );
         assert!(
             strip_terminal_controls(&frame)
@@ -633,8 +675,8 @@ mod macos_pty {
         let first_root = Root::new();
         let first_addr = address();
         let mut first = Pty::spawn(&bin, &first_root, &first_addr, None);
-        first.wait_for("OpenCode RK (native)");
-        let first_frame = normalize_dynamic_frame(&strip_terminal_controls(&first.text()));
+        let first_frame =
+            normalize_dynamic_frame(&strip_terminal_controls(&first.wait_for_native_frame()));
         first.send("\x1b:q\n");
         assert!(
             first.exit().success(),
@@ -645,8 +687,8 @@ mod macos_pty {
         let second_root = Root::new();
         let second_addr = address();
         let mut second = Pty::spawn(&bin, &second_root, &second_addr, None);
-        second.wait_for("OpenCode RK (native)");
-        let second_frame = normalize_dynamic_frame(&strip_terminal_controls(&second.text()));
+        let second_frame =
+            normalize_dynamic_frame(&strip_terminal_controls(&second.wait_for_native_frame()));
         second.send("\x1b:q\n");
         assert!(
             second.exit().success(),
