@@ -1671,7 +1671,7 @@ fn agent_catalogue_rows(value: &serde_json::Value) -> Result<Vec<crate::native_v
     Ok(rows)
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "native"))]
 mod agent_catalogue_rows_tests {
     use super::agent_catalogue_rows;
 
