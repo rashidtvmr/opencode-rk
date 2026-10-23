@@ -1404,6 +1404,16 @@ struct CreateTurnBody {
     replay_requires_no_tools: bool,
 }
 
+/// Internal-only context for a provider retry. This is never deserialized from
+/// HTTP: a retry reuses the already durable user message instead of appending
+/// another copy of the prompt.
+#[derive(Clone, Copy)]
+struct RetryTurnContext {
+    user_message_id: MessageId,
+    child_id: SessionId,
+    generation: u32,
+}
+
 async fn command_inventory(root: PathBuf) -> Result<configured_commands::Inventory, ApiFailure> {
     static SCANS: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(4);
     let permit = SCANS.try_acquire().map_err(|_| ApiFailure::too_many_requests("command inventory is busy"))?;
@@ -1802,7 +1812,7 @@ async fn create_turn(
         },
     };
     if owner.is_cancelled() {
-        return Err(ApiFailure::bad_gateway("turn cancelled"));
+        return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() });
     }
     let assistant_message = state
         .sessions
@@ -2076,6 +2086,48 @@ fn create_turn_stream(
     Json(body): Json<CreateTurnBody>,
 ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Response, ApiFailure>> + Send>> {
     Box::pin(async move {
+        let (response, _, _) = create_turn_stream_with_message(State(state), Path(id), Extension(events), Extension(children), Json(body), None, None).await?;
+        Ok(response)
+    })
+}
+
+pub(crate) fn create_turn_stream_retry(
+    state: AppState,
+    id: SessionId,
+    events: event_bus::EventBus,
+    children: task_children::Children,
+    body: CreateTurnBody,
+    user_message_id: MessageId,
+    generation: u32,
+    stopped: tokio::sync::watch::Receiver<bool>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(Response, MessageId, Arc<RunOwner>), ApiFailure>> + Send>> {
+    Box::pin(async move {
+        children.validate_retry_context(id, generation, user_message_id)?;
+        create_turn_stream_with_message(State(state), Path(id.to_string()), Extension(events), Extension(children), Json(body), Some(RetryTurnContext { user_message_id, child_id: id, generation }), Some(stopped)).await
+    })
+}
+
+pub(crate) fn create_turn_stream_initial(
+    state: AppState,
+    id: SessionId,
+    events: event_bus::EventBus,
+    children: task_children::Children,
+    body: CreateTurnBody,
+    stopped: tokio::sync::watch::Receiver<bool>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(Response, MessageId, Arc<RunOwner>), ApiFailure>> + Send>> {
+    create_turn_stream_with_message(State(state), Path(id.to_string()), Extension(events), Extension(children), Json(body), None, Some(stopped))
+}
+
+pub(crate) fn create_turn_stream_with_message(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Extension(events): Extension<event_bus::EventBus>,
+    Extension(children): Extension<task_children::Children>,
+    Json(body): Json<CreateTurnBody>,
+    retry: Option<RetryTurnContext>,
+    child_stop: Option<tokio::sync::watch::Receiver<bool>>,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(Response, MessageId, Arc<RunOwner>), ApiFailure>> + Send>> {
+    Box::pin(async move {
     let id = parse_session_id(&id)?;
     // Child-lane admission only for trusted child sessions (the child
     // registry treats unknown/poisoned lookups as non-child); legacy create_turn
@@ -2117,15 +2169,30 @@ fn create_turn_stream(
     let client = responses_client(provider_id)
         .await
         .map_err(provider_failure)?;
-    let user_message = state
-        .sessions
-        .append_text(id, MessageRole::User, body.text)
-        .await
-        .map_err(ApiFailure::internal)?;
-    let _ = events.publish(event_bus::ServerEvent::MessageStored {
-        session: id,
-        message_id: user_message.id,
-    });
+    let user_message = if let Some(retry) = retry {
+        if retry.child_id != id || retry.generation == 0 || state.sessions.has_tool_admissions(id).await.map_err(ApiFailure::internal)? {
+            return Err(ApiFailure::bad_request("retry refused: child session has tool admissions"));
+        }
+        let message = state.sessions.messages(id, MAX_RESPONSES_INPUT_MESSAGES).await
+            .map_err(ApiFailure::internal)?
+            .into_iter()
+            .find(|message| message.id == retry.user_message_id)
+            .ok_or_else(|| ApiFailure::bad_request("retry message is not a durable session message"))?;
+        if message.role != MessageRole::User {
+            return Err(ApiFailure::bad_request("retry message is not a user message"));
+        }
+        let PayloadRef::Inline { text } = &message.body else {
+            return Err(ApiFailure::bad_request("retry message payload is not inline"));
+        };
+        if text.as_str() != body.text.as_str() {
+            return Err(ApiFailure::bad_request("retry prompt does not match durable user message"));
+        }
+        message
+    } else {
+        let message = state.sessions.append_text(id, MessageRole::User, body.text).await.map_err(ApiFailure::internal)?;
+        let _ = events.publish(event_bus::ServerEvent::MessageStored { session: id, message_id: message.id });
+        message
+    };
     let user_message_id = user_message.id;
     let mut input = bounded_typed_history(
         &state.sessions,
@@ -2168,11 +2235,21 @@ fn create_turn_stream(
         .unwrap_or(MAX_TURN_STEPS);
     let history_items = input;
 
-    let provider = client
-        .clone()
-        .stream_with_tools(model_id, &body.reasoning_effort, &history_items, &tools)
-        .await
-        .map_err(provider_failure)?;
+    let mut child_stop = child_stop;
+    let mut owner_cancelled = owner.cancellation_receiver();
+    if child_stop.as_mut().is_some_and(|stop| *stop.borrow_and_update())
+        || *owner_cancelled.borrow_and_update()
+    {
+        return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() });
+    }
+    let provider_client = client.clone();
+    let provider_result = tokio::select! {
+        biased;
+        _ = async { if let Some(stop) = child_stop.as_mut() { let _ = stop.changed().await; } else { std::future::pending::<()>().await; } } => return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() }),
+        _ = owner_cancelled.changed() => return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() }),
+        result = provider_client.stream_with_tools(model_id, &body.reasoning_effort, &history_items, &tools) => result,
+    };
+    let provider = provider_result.map_err(provider_failure)?;
 
     let stream = stream::unfold(
         TurnStreamState {
@@ -2189,7 +2266,7 @@ fn create_turn_stream(
             reasoning_summary: String::new(),
             stage: TurnStreamStage::User,
             _permit: permit,
-            owner,
+            owner: Arc::clone(&owner),
             events,
             tools,
             enabled_tools: turn_tools,
@@ -2373,11 +2450,12 @@ fn create_turn_stream(
                                 ));
                             }
                             Err(error) => {
-                                let failure = provider_failure(error);
+                                    let code = provider_stream_code(&error);
+                                    let failure = provider_failure(error);
                                 state.stage = TurnStreamStage::Done;
                                 return Some((
                                     Ok::<Bytes, Infallible>(stream_error(
-                                        failure.code,
+                                        code,
                                         failure.message,
                                     )),
                                     state,
@@ -2705,10 +2783,11 @@ fn create_turn_stream(
                             }
                             Err(error) => {
                                 state.stage = TurnStreamStage::Done;
+                                let code = provider_stream_code(&error);
                                 let failure = provider_failure(error);
                                 return Some((
                                     Ok::<Bytes, Infallible>(stream_error(
-                                        failure.code,
+                                        code,
                                         failure.message,
                                     )),
                                     state,
@@ -2741,7 +2820,7 @@ fn create_turn_stream(
         receiver.recv().await.map(|event| (event, receiver))
     });
 
-    Ok((
+    let response = (
         StatusCode::CREATED,
         [
             (header::CONTENT_TYPE, "application/x-ndjson"),
@@ -2749,7 +2828,8 @@ fn create_turn_stream(
         ],
         Body::from_stream(response_stream),
     )
-        .into_response())
+        .into_response();
+    Ok((response, user_message_id, owner))
     })
 }
 
@@ -2845,8 +2925,20 @@ fn provider_failure(error: ResponsesError) -> ApiFailure {
         | ResponsesError::OutputTooLarge { .. }
         | ResponsesError::ReasoningSummaryTooLarge { .. }
         | ResponsesError::UnsupportedStreamEvent(_)
-        | ResponsesError::StreamFailed(_)
+        | ResponsesError::StreamFailed { .. }
         | ResponsesError::UnexpectedStreamEnd => ApiFailure::bad_gateway(error.to_string()),
+    }
+}
+
+fn provider_stream_code(error: &ResponsesError) -> &'static str {
+    match error {
+        ResponsesError::StreamFailed { code, .. } if code == "bad_gateway" => "bad_gateway",
+        ResponsesError::StreamFailed { code, .. } if code == "service_unavailable" => "service_unavailable",
+        ResponsesError::StreamFailed { code, .. } if code == "timeout" => "timeout",
+        ResponsesError::StreamFailed { code, .. } if code == "rate_limit" || code == "rate_limited" => "rate_limited",
+        ResponsesError::StreamFailed { .. } => "provider_stream_failed",
+        ResponsesError::UnexpectedStreamEnd => "bad_gateway",
+        _ => "bad_gateway",
     }
 }
 fn parse_session_id(value: &str) -> Result<SessionId, ApiFailure> {

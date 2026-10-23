@@ -78,6 +78,7 @@ pub struct RunOwner {
     pub session_id: SessionId,
     pub run_id: u64,
     cancellation: watch::Sender<bool>,
+    explicit_cancel: watch::Sender<bool>,
     finished: watch::Sender<bool>,
     pending: Mutex<Option<PendingPermission>>,
     effect_gate: Mutex<()>,
@@ -86,11 +87,13 @@ pub struct RunOwner {
 impl RunOwner {
     fn new(session_id: SessionId) -> Arc<Self> {
         let (cancellation, _) = watch::channel(false);
+        let (explicit_cancel, _) = watch::channel(false);
         let (finished, _) = watch::channel(false);
         Arc::new(Self {
             session_id,
             run_id: NEXT_RUN_ID.fetch_add(1, Ordering::Relaxed),
             cancellation,
+            explicit_cancel,
             finished,
             pending: Mutex::new(None),
             effect_gate: Mutex::new(()),
@@ -99,6 +102,13 @@ impl RunOwner {
 
     pub fn cancellation_receiver(&self) -> watch::Receiver<bool> {
         self.cancellation.subscribe()
+    }
+
+    pub(crate) fn explicit_cancellation_receiver(&self) -> watch::Receiver<bool> {
+        self.explicit_cancel.subscribe()
+    }
+    pub(crate) fn is_explicitly_cancelled(&self) -> bool {
+        *self.explicit_cancel.borrow()
     }
 
     pub fn begin_effect(&self) -> Option<std::sync::MutexGuard<'_, ()>> {
@@ -117,6 +127,11 @@ impl RunOwner {
         // explicit cancellation acknowledgements await wait_finished below.
         self.cancellation.send_replace(true);
         self.clear_pending();
+    }
+
+    pub(crate) fn cancel_explicit(&self) {
+        self.explicit_cancel.send_replace(true);
+        self.cancel();
     }
 
     pub async fn wait_finished(&self) {
@@ -457,7 +472,7 @@ pub async fn cancel_and_wait(session_id: SessionId) {
     let Some(owner) = active(session_id) else {
         return;
     };
-    owner.cancel();
+    owner.cancel_explicit();
     owner.wait_finished().await;
 }
 
@@ -636,5 +651,21 @@ mod admission_lane_tests {
             ),
             "aggregate bound must reject further children"
         );
+    }
+
+    #[test]
+    fn normal_finish_does_not_mark_explicit_cancellation() {
+        let owner = TurnExecutionPermit::acquire(fresh()).unwrap().owner();
+        let mut cancelled = owner.explicit_cancellation_receiver();
+        owner.finish();
+        assert!(!*cancelled.borrow_and_update());
+    }
+
+    #[test]
+    fn explicit_cancel_marks_private_cancellation_signal() {
+        let owner = TurnExecutionPermit::acquire(fresh()).unwrap().owner();
+        let mut cancelled = owner.explicit_cancellation_receiver();
+        owner.cancel_explicit();
+        assert!(*cancelled.borrow_and_update());
     }
 }

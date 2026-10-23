@@ -236,8 +236,8 @@ pub enum ResponsesError {
     ReasoningSummaryTooLarge { max: usize },
     #[error("unsupported provider stream event: {0}")]
     UnsupportedStreamEvent(String),
-    #[error("provider stream failed: {0}")]
-    StreamFailed(String),
+    #[error("provider stream failed ({code}): {message}")]
+    StreamFailed { code: String, message: String },
     #[error("provider stream ended before a completion event")]
     UnexpectedStreamEnd,
 }
@@ -500,14 +500,25 @@ impl ResponsesStreamParser {
                 }))
             }
             Some("response.failed") | Some("error") => {
+                let code = value
+                    .pointer("/response/error/code")
+                    .or_else(|| value.pointer("/error/code"))
+                    .or_else(|| value.get("code"))
+                    .and_then(Value::as_str)
+                    .map(|code| code.chars().filter(|ch| !ch.is_control()).take(256).collect::<String>())
+                    .filter(|code| !code.is_empty())
+                    .unwrap_or_else(|| "unknown".to_owned());
                 let message = value
                     .pointer("/response/error/message")
                     .or_else(|| value.pointer("/error/message"))
                     .or_else(|| value.get("message"))
                     .and_then(Value::as_str)
                     .unwrap_or("provider stream failed")
-                    .to_owned();
-                Err(ResponsesError::StreamFailed(message))
+                    .chars()
+                    .filter(|ch| !ch.is_control())
+                    .take(1024)
+                    .collect();
+                Err(ResponsesError::StreamFailed { code, message })
             }
             Some(
                 "response.created"
@@ -560,7 +571,10 @@ impl BufferedResponsesBody {
         let mut parser = ResponsesStreamParser::new();
         let invalid = || ResponsesError::InvalidJson("invalid buffered Responses output".into());
         if value.get("error").is_some_and(|error| !error.is_null()) || kind == "response.failed" {
-            return Err(ResponsesError::StreamFailed(value.pointer("/error/message").and_then(Value::as_str).unwrap_or("provider response failed").chars().take(1024).collect()));
+            let code = value.pointer("/error/code").and_then(Value::as_str)
+                .map(|code| code.chars().filter(|ch| !ch.is_control()).take(256).collect::<String>())
+                .filter(|code| !code.is_empty()).unwrap_or_else(|| "unknown".to_owned());
+            return Err(ResponsesError::StreamFailed { code, message: value.pointer("/error/message").and_then(Value::as_str).unwrap_or("provider response failed").chars().filter(|ch| !ch.is_control()).take(1024).collect() });
         }
         let output = value["output"].as_array().ok_or_else(invalid)?;
         if output.len() > 128 { return Err(invalid()); }

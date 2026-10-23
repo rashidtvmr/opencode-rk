@@ -129,9 +129,9 @@ fn b6_oversize_text_rejected() {
 
 #[test]
 fn b7_failed_event_yields_stream_error_no_tools() {
-    let body = r#"{"status":"failed","error":{"message":"bad request"}}"#;
+    let body = r#"{"status":"failed","error":{"code":"bad_request","message":"bad request"}}"#;
     let result = BufferedResponsesBody::parse(body);
-    assert!(matches!(result, Err(ResponsesError::StreamFailed(msg)) if msg == "bad request"));
+    assert!(matches!(result, Err(ResponsesError::StreamFailed { code, message }) if code == "bad_request" && message == "bad request"));
 }
 
 #[test]

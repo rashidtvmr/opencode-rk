@@ -316,8 +316,8 @@ async fn failure_after_2xx_headers_is_a_stream_error_never_retried() {
     assert!(
         matches!(
             &error,
-            opencode_rk_providers::responses::ResponsesError::StreamFailed(message)
-                if message == "stream aborted"
+            opencode_rk_providers::responses::ResponsesError::StreamFailed { code, message }
+                if code == "unknown" && message == "stream aborted"
         ),
         "expected typed stream failure, got {error:?}"
     );
