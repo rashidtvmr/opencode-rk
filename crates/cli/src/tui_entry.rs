@@ -2831,11 +2831,16 @@ fn native_loop(
             }
         }
         // Bounded permission poll (existing authenticated client, 500ms
-        // cadence): only while a turn owns this binding, or while an open
-        // decision still needs backend-resolution detection. No queues, no
-        // new threads, existing 2s/1MiB http_request limits.
+        // cadence): while a turn owns this binding, while an open decision
+        // still needs backend-resolution detection, while the child panel is
+        // open, or while a settled conversation remains bound so child-only
+        // pending work can be discovered. No queues or new threads; retain
+        // the existing bounded request/body limits.
         if !view.dialogs.pending()
-            && (binding_active || view.dialogs.is_open() || children_panel.open)
+            && (binding_active
+                || view.dialogs.is_open()
+                || children_panel.open
+                || (session_route && live.is_some()))
             && last_permission_poll.elapsed() >= Duration::from_millis(500)
         {
             last_permission_poll = Instant::now();
