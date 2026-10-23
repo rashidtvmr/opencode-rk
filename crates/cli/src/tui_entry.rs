@@ -314,30 +314,6 @@ struct LiveSnapshot {
     directory: Option<String>,
 }
 
-/// Identity of a Home -> conversation transition performed optimistically
-/// before the daemon acknowledges the first user message.  The route may be
-/// rolled back only for this exact current worker; a stale worker must never
-/// rewrite the route of a newer binding.
-#[cfg(feature = "native")]
-#[derive(Clone, Debug, PartialEq, Eq)]
-struct OptimisticFirstTurn {
-    session_id: String,
-    generation: u64,
-}
-
-#[cfg(feature = "native")]
-fn should_rollback_optimistic_route(
-    optimistic: Option<&OptimisticFirstTurn>,
-    current_session: Option<&str>,
-    current_generation: u64,
-    admission_acknowledged: bool,
-) -> bool {
-    !admission_acknowledged
-        && optimistic.is_some_and(|turn| {
-            current_session == Some(turn.session_id.as_str())
-                && current_generation == turn.generation
-        })
-}
 
 /// Minimal bounded HTTP/1.1 client for the daemon API (std-only, http
 /// scheme), returning the response body AND its parsed status code so a
@@ -2060,7 +2036,6 @@ fn native_loop(
     // current busy flag, transcript or live snapshot.
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
     let mut pending_submission: Option<String> = None;
-    let mut optimistic_first_turn: Option<OptimisticFirstTurn> = None;
     let mut binding_generation: u64 = 0;
     // History pagination is deliberately separate from turn/completion
     // workers: one bounded request at a time, and every result carries the
@@ -2620,11 +2595,6 @@ fn native_loop(
                                 session_route = true;
                                 view.set_session_route(true);
                             }
-                            // Admission is the point at which the
-                            // optimistic Home transition becomes durable for
-                            // this client. Provider errors after this event
-                            // must leave the conversation route visible.
-                            optimistic_first_turn = None;
                         }
                         native_turn::Event::Delta(delta) => {
                             partial.push_str(&delta);
@@ -2691,16 +2661,6 @@ fn native_loop(
                             );
                         }
                         native_turn::Event::Error(error) => {
-                            if should_rollback_optimistic_route(
-                                optimistic_first_turn.as_ref(),
-                                live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
-                                binding_generation,
-                                false,
-                            ) {
-                                session_route = false;
-                                view.set_session_route(false);
-                            }
-                            optimistic_first_turn = None;
                             pending_submission = None;
                             partial.clear();
                             remove_partial(&mut transcript);
@@ -2727,16 +2687,6 @@ fn native_loop(
         }
         if worker_finished {
             worker = None;
-            if should_rollback_optimistic_route(
-                optimistic_first_turn.as_ref(),
-                live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
-                binding_generation,
-                false,
-            ) {
-                session_route = false;
-                view.set_session_route(false);
-            }
-            optimistic_first_turn = None;
             pending_submission = None;
             if binding_active {
                 if let Some(current) = live.as_ref() {
@@ -5332,12 +5282,6 @@ fn native_loop(
                                     snapshot.session_id.clone(),
                                     binding_generation,
                                 ));
-                                if route_was_home {
-                                    optimistic_first_turn = Some(OptimisticFirstTurn {
-                                        session_id: snapshot.session_id.clone(),
-                                        generation: binding_generation,
-                                    });
-                                }
                                 partial.clear();
                             });
                             if let Err(error) = result {
