@@ -1271,6 +1271,12 @@ mod macos_pty {
         let status = pty.exit();
         let final_text = pty.text();
         assert!(
+            !final_text.contains("fixture-secret")
+                && !final_text.contains("Bearer ")
+                && !final_text.contains("OPENAI_API_KEY"),
+            "native renderer exposed injected credentials"
+        );
+        assert!(
             status.success(),
             "native renderer exit: {status}\n{final_text}"
         );
