@@ -780,6 +780,7 @@ struct PaintCtx {
     composer: Option<(u16, u16, u16, u16)>,
     completion: Option<crate::native_completion::Panel>,
     ui_regions: Vec<crate::native_ui_style::Region>,
+    modal_underlay_rows: Vec<String>,
     page_panel: Option<(u16, u16, u16, u16)>,
     logo: Option<(u16, u16)>,
 }
@@ -793,6 +794,195 @@ fn modal_content_rows(lines: &[String]) -> usize {
         .iter()
         .rposition(|line| !line.trim().is_empty())
         .map_or(0, |index| index + 1)
+}
+
+#[cfg(feature = "native")]
+fn rounded_surface_background(
+    style: crate::native_box_style::EffectiveBox,
+    rect: (u16, u16, u16, u16),
+    x: u32,
+    y: u32,
+    glyph: &str,
+    enclosing: Rgba,
+) -> Option<Rgba> {
+    style.rounded_corner_cell(rect, x as u16, y as u16, glyph.chars().next()?)
+        .then_some(enclosing)
+}
+
+#[cfg(feature = "native")]
+fn finish_surface_background(raw: Rgba, rounded: Option<Rgba>, alpha: u8) -> Rgba {
+    let c = rounded.unwrap_or(raw);
+    let [r, g, b, a] = crate::native_theme_runtime::dim([c.r, c.g, c.b, c.a], alpha);
+    Rgba::new(r, g, b, a)
+}
+
+#[cfg(feature = "native")]
+fn modal_surface_background(style: crate::native_box_style::EffectiveBox, rect: (u16,u16,u16,u16), x:u32,y:u32,glyph:&str, underlay:Rgba, panel:Rgba, alpha:u8) -> Rgba {
+    match rounded_surface_background(style, rect, x, y, glyph, underlay) {
+        Some(enclosing) => finish_surface_background(enclosing, None, alpha),
+        None => panel,
+    }
+}
+
+#[cfg(feature = "native")]
+fn resolve_surface_corner_background(fill: Rgba, root: Rgba, surfaces: &[(crate::native_box_style::EffectiveBox, Option<(u16,u16,u16,u16)>)], x: u32, y: u32, glyph: &str) -> Rgba {
+    surfaces.iter().rev().find_map(|(style, rect)|
+        rect.and_then(|rect| rounded_surface_background(*style, rect, x, y, glyph, root)))
+        .unwrap_or(fill)
+}
+
+#[cfg(feature = "native")]
+fn surface_underlay_background(in_panel: bool, role: Option<Rgba>, in_composer: bool, home_root: bool, root: Rgba, panel: Rgba, element: Rgba) -> Rgba {
+    if home_root { root } else if in_panel { panel } else { role.unwrap_or(if in_composer { element } else { root }) }
+}
+
+#[cfg(feature = "native")]
+fn home_composer_root_cell(style: crate::native_box_style::EffectiveBox, framed: bool, rect: (u16, u16, u16, u16), x: u32, y: u32) -> bool {
+    x == u32::from(rect.0) || y + 1 == u32::from(rect.1) + u32::from(rect.3)
+        || (framed && style.rounded_corner_cell(rect, x as u16, y as u16, style.corner_glyphs().top_right))
+}
+
+#[cfg(feature = "native")]
+fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, root: Rgba, panel: Rgba, element: Rgba) -> Option<Rgba> {
+    use crate::native_view_chat::ChatRowClass;
+    match class {
+        Some(ChatRowClass::UserCard) => Some(panel),
+        Some(ChatRowClass::AssistantCard) => Some(root),
+        Some(ChatRowClass::SystemCard) => Some(element),
+        Some(ChatRowClass::DiffAdded) => Some(Rgba::new(20, 70, 35, 255)),
+        Some(ChatRowClass::DiffRemoved) => Some(Rgba::new(80, 25, 30, 255)),
+        _ => None,
+    }
+}
+
+#[cfg(feature = "native")]
+fn visible_modal_rect(cols:u32, rows:u32, x:u32,y:u32,width:u32,content:usize)->Option<(u32,u32,u32,u32)> {
+    let width=width.min(cols.saturating_sub(x));
+    if x>=cols || y>=rows || width==0 || content==0 { return None; }
+    Some((x,y,width,u32::try_from(content).unwrap_or(u32::MAX).saturating_add(2).min(rows-y)))
+}
+
+#[cfg(all(test, feature = "native"))]
+mod rounded_surface_color_tests {
+    use super::{finish_surface_background, home_composer_root_cell, modal_surface_background, resolve_surface_corner_background, rounded_surface_background, surface_underlay_background, visible_modal_rect};
+    use crate::native_box_style::{BorderStyle, EffectiveBox, RadiusPreset};
+    use opencode_rk_opentui_bridge::Rgba;
+
+    #[test]
+    fn rounded_corner_uses_supplied_root_and_square_styles_keep_panel() {
+        let rect = (10, 4, 8, 5);
+        let root = Rgba::new(1, 2, 3, 255);
+        let panel = Rgba::new(9, 9, 9, 255);
+        let rounded = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
+        assert_eq!(rounded_surface_background(rounded, rect, 10, 4, "╭", root), Some(root));
+        assert_eq!(rounded_surface_background(rounded, rect, 11, 4, "╭", root), None);
+        for border in [BorderStyle::Double, BorderStyle::Heavy] {
+            let style = EffectiveBox { border_style: border, ..rounded };
+            assert_eq!(rounded_surface_background(style, rect, 10, 4, "╔", root), None);
+        }
+    }
+
+    #[test]
+    fn rounded_corner_clips_outside_and_degenerate_rects() {
+        let style = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
+        let root = Rgba::new(1, 2, 3, 255);
+        assert_eq!(rounded_surface_background(style, (5, 2, 8, 4), 13, 2, "╮", root), None);
+        assert_eq!(rounded_surface_background(style, (5, 2, 1, 1), 5, 2, "╭", root), None);
+    }
+
+    #[test]
+    fn modal_square_and_weighted_corners_keep_opaque_panel() {
+        let panel = Rgba::new(20, 20, 20, 255);
+        let underlay = Rgba::new(30, 40, 50, 255);
+        for (preset, border_style) in [
+            (RadiusPreset::Sharp, BorderStyle::Single),
+            (RadiusPreset::Rounded, BorderStyle::Double),
+            (RadiusPreset::Rounded, BorderStyle::Heavy),
+        ] {
+            let style = EffectiveBox { preset, radius: 0, border_style, thickness: 1, padding: 0 };
+            let glyph = style.corner_glyphs().top_left.to_string();
+            assert_eq!(modal_surface_background(style, (5, 2, 8, 4), 5, 2, &glyph, underlay, panel, 150), panel);
+        }
+    }
+
+    #[test]
+    fn final_background_preserves_noncorner_and_dims_corner_once() {
+        let style = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
+        let fill = Rgba::new(90, 100, 110, 255);
+        let enclosing = Rgba::new(30, 40, 50, 255);
+        let alpha = 150;
+        for (x, y, glyph) in [(1, 1, "╭"), (6, 2, "─"), (5, 3, "│")] {
+            let corner = rounded_surface_background(style, (5, 2, 8, 4), x, y, glyph, enclosing);
+            assert_eq!(corner, None);
+            assert_eq!(finish_surface_background(fill, corner, alpha), finish_surface_background(fill, None, alpha));
+        }
+        let corner = rounded_surface_background(style, (5, 2, 8, 4), 5, 2, "╭", enclosing);
+        let once = finish_surface_background(enclosing, None, alpha);
+        assert_eq!(finish_surface_background(fill, corner, alpha), once);
+        assert_ne!(once, finish_surface_background(once, None, alpha));
+        assert_eq!(modal_surface_background(style, (5, 2, 8, 4), 5, 2, "╭", enclosing, fill, alpha), once);
+    }
+
+    #[test]
+    fn modal_geometry_keeps_rightmost_border_inside_viewport() {
+        assert_eq!(visible_modal_rect(100, 32, 90, 5, 30, 4), Some((90, 5, 10, 6)));
+        let (x, _, width, _) = visible_modal_rect(100, 32, 90, 5, 30, 4).unwrap();
+        assert_eq!(x + width - 1, 99);
+        assert_eq!(visible_modal_rect(100, 32, 100, 5, 30, 4), None);
+        assert_eq!(visible_modal_rect(100, 32, 5, 32, 30, 4), None);
+    }
+
+    #[test]
+    fn modal_underlay_preserves_surface_precedence_and_home_bottom() {
+        let root = Rgba::new(10, 10, 10, 255);
+        let panel = Rgba::new(20, 20, 20, 255);
+        let element = Rgba::new(30, 30, 30, 255);
+        let role = Rgba::new(20, 70, 35, 255);
+        assert_eq!(surface_underlay_background(false, None, false, false, root, panel, element), root);
+        assert_eq!(surface_underlay_background(false, None, true, false, root, panel, element), element);
+        assert_eq!(surface_underlay_background(false, Some(role), true, false, root, panel, element), role);
+        assert_eq!(surface_underlay_background(true, Some(role), true, false, root, panel, element), panel);
+        assert_eq!(surface_underlay_background(false, None, true, true, root, panel, element), root);
+        let rounded = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
+        let underlay = surface_underlay_background(false, None, true, false, root, panel, element);
+        assert_eq!(modal_surface_background(rounded, (5, 2, 8, 4), 5, 2, "╭", underlay, panel, 150), finish_surface_background(element, None, 150));
+        assert_ne!(finish_surface_background(element, None, 150), finish_surface_background(root, None, 150));
+    }
+
+    #[test]
+    fn modal_underlay_matches_rounded_home_top_right_corner() {
+        let rounded = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
+        let rect = (5, 2, 8, 4);
+        assert!(home_composer_root_cell(rounded, true, rect, 12, 2));
+        assert!(!home_composer_root_cell(rounded, false, rect, 12, 2));
+        assert!(!home_composer_root_cell(EffectiveBox { preset: RadiusPreset::Sharp, ..rounded }, true, rect, 12, 2));
+        assert!(!home_composer_root_cell(rounded, true, rect, 11, 2));
+        assert!(home_composer_root_cell(rounded, true, rect, 5, 3));
+        assert!(home_composer_root_cell(rounded, true, rect, 10, 5));
+        let root = Rgba::new(10, 10, 10, 255);
+        let element = Rgba::new(30, 30, 30, 255);
+        let panel = Rgba::new(20, 20, 20, 255);
+        let underlay = surface_underlay_background(false, None, true,
+            home_composer_root_cell(rounded, true, rect, 12, 2), root, panel, element);
+        assert_eq!(modal_surface_background(rounded, (12, 2, 8, 4), 12, 2, "╭", underlay, panel, 150), finish_surface_background(root, None, 150));
+    }
+
+    #[test]
+    fn modal_underlay_uses_actual_glyph_for_each_overlapping_surface() {
+        let rounded = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
+        let root = Rgba::new(10, 10, 10, 255);
+        let panel = Rgba::new(20, 20, 20, 255);
+        for surface_index in 0..3 {
+            let mut surfaces = [(rounded, None); 3];
+            surfaces[surface_index].1 = Some((5, 2, 8, 4));
+            let actual = resolve_surface_corner_background(panel, root, &surfaces, 12, 2, "╮");
+            assert_eq!(actual, root, "underlying surface {surface_index}");
+            assert_eq!(modal_surface_background(rounded, (12, 2, 8, 4), 12, 2, "╭", actual, panel, 150), finish_surface_background(root, None, 150));
+            assert_eq!(resolve_surface_corner_background(panel, root, &surfaces, 12, 2, " "), panel);
+            surfaces[surface_index].0.preset = RadiusPreset::Sharp;
+            assert_eq!(resolve_surface_corner_background(panel, root, &surfaces, 12, 2, "┐"), panel);
+        }
+    }
 }
 
 #[cfg(feature = "native")]
@@ -971,22 +1161,19 @@ fn native_paint(
     }
     // Resolve alpha in Rust. Every span supplies an opaque background;
     // native null-background/alpha behavior is not relied upon.
-    let modal = ctx.modal_rows.and_then(|count| {
-        let width = u32::from(ctx.modal.width).min(cols);
-        let x = u32::from(ctx.modal.x);
-        let y = u32::from(ctx.modal.y);
-        if y >= rows || count == 0 || width == 0 {
-            None
-        } else {
-            let height = (count.saturating_add(2) as u32).min(rows - y);
-            Some((x, y, width, height))
-        }
-    });
+    let modal = ctx.modal_rows.and_then(|count| visible_modal_rect(cols, rows,
+        u32::from(ctx.modal.x), u32::from(ctx.modal.y), u32::from(ctx.modal.width), count));
     let base_alpha = if modal.is_some() {
         ctx.modal.backdrop_alpha
     } else {
         ctx.sidebar_backdrop_alpha
     };
+    let corner_surfaces = [
+        (ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer), ctx.composer),
+        (ctx.appearance.effective(crate::native_box_style::BoxId::Menu), ctx.page_panel),
+        (ctx.appearance.effective(crate::native_box_style::BoxId::Sidebar), presentation.sidebar_offset.map(|left|
+            (left, 0, presentation.sidebar_width, rows.saturating_sub(1) as u16))),
+    ];
     renderer.fill_rect(0, 0, cols, rows, dim(background, base_alpha))?;
     if let Some((x, y, width, height)) = ctx.page_panel {
         fill_clipped(renderer, cols, rows, (x, y, width, height), dim(panel, base_alpha))?;
@@ -1035,27 +1222,12 @@ fn native_paint(
                         && y >= u32::from(top)
                         && y < u32::from(top) + u32::from(height)
                 });
-                let role_bg = match ctx.chat_row_classes.get(row) {
-                    Some(ChatRowClass::UserCard) => Some(panel),
-                    Some(ChatRowClass::AssistantCard) => Some(background),
-                    Some(ChatRowClass::SystemCard) => Some(element),
-                    Some(ChatRowClass::DiffAdded) => Some(Rgba::new(20, 70, 35, 255)),
-                    Some(ChatRowClass::DiffRemoved) => Some(Rgba::new(80, 25, 30, 255)),
-                    _ => None,
-                };
+                let role_bg = chat_row_background(ctx.chat_row_classes.get(row), background, panel, element);
                 let in_page = ctx.page_panel.is_some_and(|(left, top, width, height)| {
                     x >= u32::from(left) && x < u32::from(left + width)
                         && y >= u32::from(top) && y < u32::from(top + height)
                 });
-                let mut bg = if sidebar || in_modal || in_page {
-                    panel
-                } else if let Some(role_bg) = role_bg {
-                    role_bg
-                } else if composer {
-                    element
-                } else {
-                    background
-                };
+                let mut bg = surface_underlay_background(sidebar || in_modal || in_page, role_bg, composer, false, background, panel, element);
                 let mut fg = if in_modal {
                     modal_row_fg(
                         modal_text.trim_start(),
@@ -1119,7 +1291,8 @@ fn native_paint(
                     } else {
                         0
                     };
-                    bg = dim(bg, alpha);
+                    bg = finish_surface_background(resolve_surface_corner_background(bg, background,
+                        &corner_surfaces, x, y, glyph), None, alpha);
                     fg = dim(fg, alpha);
                 }
                 if selected_cells.contains(&(y, x)) {
@@ -1208,22 +1381,49 @@ fn native_paint(
             let edge = horizontal
                 .to_string()
                 .repeat(width.saturating_sub(2).min(512) as usize);
-            renderer.draw_text_styled(
-                left,
-                top,
-                &format!("{}{edge}{}", corners.top_left, corners.top_right),
-                accent,
-                Some(panel),
-                0,
-            )?;
-            renderer.draw_text_styled(
-                left,
-                bottom,
-                &format!("{}{edge}{}", corners.bottom_left, corners.bottom_right),
-                accent,
-                Some(panel),
-                0,
-            )?;
+            let modal_rect = (left as u16, top as u16, width as u16, height as u16);
+            let underlay_at = |x: u32, y: u32| {
+                let contains = |rect: (u16, u16, u16, u16)| {
+                    x >= u32::from(rect.0) && x < u32::from(rect.0) + u32::from(rect.2)
+                        && y >= u32::from(rect.1) && y < u32::from(rect.1) + u32::from(rect.3)
+                };
+                let composer = ctx.composer.filter(|rect| contains(*rect));
+                let home_root = ctx.home && composer.is_some_and(|rect|
+                    home_composer_root_cell(ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer),
+                        ctx.appearance != crate::native_box_style::BoxAppearance::default(), rect, x, y));
+                let role = chat_row_background(ctx.chat_row_classes.get(y as usize), background, panel, element);
+                let mut color = surface_underlay_background(
+                    sidebar_cell(presentation, x, y) || ctx.page_panel.is_some_and(contains),
+                    role, composer.is_some(), home_root, background, panel, element,
+                );
+                if let Some(region) = ctx.ui_regions.iter().rev().find(|region| !region.modal
+                    && u32::from(region.y) == y && x >= u32::from(region.x)
+                    && x < u32::from(region.x) + u32::from(region.width)) {
+                    if let Some(slot) = crate::native_ui_style::style(region.role).background {
+                        color = paint_color(ctx.palette, slot);
+                    }
+                }
+                if home_root { color = background; }
+                let underlying_glyph = ctx.modal_underlay_rows.get(y as usize)
+                    .map(|row| crate::native_view_layout::slice_cells(row, x as u16, 1));
+                if let Some(glyph) = underlying_glyph {
+                    color = resolve_surface_corner_background(color, background, &corner_surfaces, x, y, &glyph);
+                }
+                if selected_cells.contains(&(y, x)) { color = accent; }
+                color
+            };
+            let tl = modal_surface_background(style, modal_rect, left, top, &corners.top_left.to_string(), underlay_at(left, top), panel, ctx.modal.backdrop_alpha);
+            let tr = modal_surface_background(style, modal_rect, left + width - 1, top, &corners.top_right.to_string(), underlay_at(left + width - 1, top), panel, ctx.modal.backdrop_alpha);
+            let bl = modal_surface_background(style, modal_rect, left, bottom, &corners.bottom_left.to_string(), underlay_at(left, bottom), panel, ctx.modal.backdrop_alpha);
+            let br = modal_surface_background(style, modal_rect, left + width - 1, bottom, &corners.bottom_right.to_string(), underlay_at(left + width - 1, bottom), panel, ctx.modal.backdrop_alpha);
+            renderer.draw_text_styled(left, top, &corners.top_left.to_string(), accent, Some(tl), 0)?;
+            renderer.draw_text_styled(left + width - 1, top, &corners.top_right.to_string(), accent, Some(tr), 0)?;
+            renderer.draw_text_styled(left, bottom, &corners.bottom_left.to_string(), accent, Some(bl), 0)?;
+            renderer.draw_text_styled(left + width - 1, bottom, &corners.bottom_right.to_string(), accent, Some(br), 0)?;
+            if width > 2 {
+                renderer.draw_text_styled(left + 1, top, &edge, accent, Some(panel), 0)?;
+                renderer.draw_text_styled(left + 1, bottom, &edge, accent, Some(panel), 0)?;
+            }
             for y in top + 1..bottom {
                 renderer.draw_text_styled(left, y, vertical, accent, Some(panel), 0)?;
                 renderer.draw_text_styled(left + width - 1, y, vertical, accent, Some(panel), 0)?;
@@ -3298,6 +3498,7 @@ fn native_loop(
                         view.composer_region(draft_echo).and_then(|anchor| completion.panel(anchor))
                     } else { None },
                     ui_regions: if help_open { help_regions.clone() } else { view.ui_regions() },
+                    modal_underlay_rows: view.modal_underlay_rows(),
                     page_panel: if help_open { help_panel } else { view.page_panel() },
                     logo: if help_open {
                         None

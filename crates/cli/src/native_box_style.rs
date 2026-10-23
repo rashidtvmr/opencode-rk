@@ -241,6 +241,42 @@ pub struct EffectiveBox {
 }
 
 impl EffectiveBox {
+    /// Returns true only for rounded single-line corner cells of this exact
+    /// surface. Fill paint uses this to restore the enclosing backdrop.
+    pub fn rounded_corner_cell(
+        self,
+        rect: (u16, u16, u16, u16),
+        x: u16,
+        y: u16,
+        glyph: char,
+    ) -> bool {
+        if self.border_style != BorderStyle::Single
+            || rect.2 < 2
+            || rect.3 < 2
+            || x < rect.0
+            || y < rect.1
+            || x >= rect.0.saturating_add(rect.2)
+            || y >= rect.1.saturating_add(rect.3)
+        {
+            return false;
+        }
+        let corners = self.corner_glyphs();
+        let expected = match (
+            x == rect.0,
+            x.saturating_add(1) == rect.0.saturating_add(rect.2),
+            y == rect.1,
+            y.saturating_add(1) == rect.1.saturating_add(rect.3),
+        ) {
+            (true, _, true, _) => corners.top_left,
+            (_, true, true, _) => corners.top_right,
+            (true, _, _, true) => corners.bottom_left,
+            (_, true, _, true) => corners.bottom_right,
+            _ => return false,
+        };
+        glyph == expected
+            && (matches!(self.preset, RadiusPreset::Rounded | RadiusPreset::IosSquircle)
+                || (self.preset == RadiusPreset::Custom && self.radius > 0))
+    }
     /// Corner cells for this effective appearance.
     ///
     /// `Sharp` always yields sharp cells. `Rounded` yields rounded elbows,
@@ -597,6 +633,24 @@ fn overrides_empty(overrides: &BTreeMap<BoxId, BoxOverride>) -> bool {
 #[cfg(test)]
 mod radius_never_frames_policy {
     use super::*;
+
+    #[test]
+    fn rounded_corner_predicate_is_style_and_cell_local() {
+        let rect = (10, 4, 8, 5);
+        let rounded = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
+        assert!(rounded.rounded_corner_cell(rect, 10, 4, rounded.corner_glyphs().top_left));
+        assert!(!rounded.rounded_corner_cell(rect, 11, 4, rounded.corner_glyphs().top_left));
+        assert!(!rounded.rounded_corner_cell(rect, 17, 8, 'x'));
+        assert!(!rounded.rounded_corner_cell((10, 4, 1, 1), 10, 4, rounded.corner_glyphs().top_left));
+        let sharp = EffectiveBox { preset: RadiusPreset::Sharp, ..rounded };
+        assert!(!sharp.rounded_corner_cell(rect, 10, 4, sharp.corner_glyphs().top_left));
+        let double = EffectiveBox { border_style: BorderStyle::Double, ..rounded };
+        assert!(!double.rounded_corner_cell(rect, 10, 4, double.corner_glyphs().top_left));
+        let custom_zero = EffectiveBox { preset: RadiusPreset::Custom, radius: 0, ..rounded };
+        assert!(!custom_zero.rounded_corner_cell(rect, 10, 4, custom_zero.corner_glyphs().top_left));
+        let custom = EffectiveBox { preset: RadiusPreset::Custom, radius: 1, ..rounded };
+        assert!(custom.rounded_corner_cell(rect, 10, 4, custom.corner_glyphs().top_left));
+    }
 
     /// A radius choice (any preset, any logical radius) can never produce
     /// a full drawn frame: only an explicit `Double`/`Heavy` line weight

@@ -113,6 +113,7 @@ pub struct NativeView {
     box_appearance: crate::native_box_style::BoxAppearance,
     context_window: Option<u64>,
     ui_regions: Vec<crate::native_ui_style::Region>,
+    modal_underlay_rows: Vec<String>,
     overlay_roles: Vec<crate::native_ui_style::Role>,
     /// Busy state of the most recently rendered frame.  Native painting uses
     /// `composer_region` for its optional center loader overlay; while a turn
@@ -340,6 +341,7 @@ impl NativeView {
             box_appearance: crate::native_box_style::BoxAppearance::default(),
             context_window: None,
             ui_regions: Vec::new(),
+            modal_underlay_rows: Vec::new(),
             overlay_roles: Vec::new(),
             frame_busy: false,
         }
@@ -403,6 +405,10 @@ impl NativeView {
 
     pub fn set_connection(&mut self, connected: bool) {
         self.status.set_connection(connected);
+    }
+
+    pub fn modal_underlay_rows(&self) -> Vec<String> {
+        self.modal_underlay_rows.clone()
     }
 
     /// Connection never observed (failed fetch): `Unavailable`, not a
@@ -1251,6 +1257,7 @@ impl NativeView {
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
         self.ui_regions.clear();
+        self.modal_underlay_rows.clear();
         let height = self.render_height();
         if self.layout.cols == 0 || height == 0 {
             return Vec::new();
@@ -1552,6 +1559,9 @@ impl NativeView {
             .map_or(0, |i| i + 1)
             .min(modal_content_height);
         if content_rows > 0 {
+            // Preserve the bounded composed viewport before modal text replaces
+            // its cells. The painter needs actual underlying corner glyphs.
+            self.modal_underlay_rows = frame.clone();
             let left = self.layout.cols.saturating_sub(dialog_width) / 2;
             let top = usize::from(modal_geometry.content_y);
             // The panel's inner top padding is an empty panel row, not
@@ -2139,6 +2149,22 @@ mod framed_composer_tests {
 #[cfg(test)]
 mod footer_layout_tests {
     use super::*;
+
+    #[test]
+    fn modal_underlay_snapshot_preserves_composed_cells_and_clears_after_close() {
+        let mut view = NativeView::new(80, 20);
+        view.set_session_route(true);
+        let baseline = view.render_typed("draft", &[], false, &[]);
+        assert!(view.modal_underlay_rows().is_empty());
+        let overlay = vec!["Visible modal".to_owned(), "Modal action".to_owned()];
+        let painted = view.render_typed("draft", &[], false, &overlay);
+        let underlay = view.modal_underlay_rows();
+        assert_eq!(underlay.len(), baseline.len());
+        assert_eq!(underlay[..baseline.len() - 1], baseline[..baseline.len() - 1]);
+        assert_ne!(painted, underlay);
+        view.render_typed("draft", &[], false, &[]);
+        assert!(view.modal_underlay_rows().is_empty());
+    }
 
     #[test]
     fn project_directory_and_loader_share_only_the_footer_row() {
