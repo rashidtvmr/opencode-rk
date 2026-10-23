@@ -9,6 +9,17 @@ pub const MAX_MODELS_BODY_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_MODELS: usize = 5000;
 const MAX_CONFIG_BYTES: usize = 1024 * 1024;
 
+/// The native session accounting domain is `u32`; metadata outside that
+/// domain is not a usable context window and is therefore treated as unknown.
+const MAX_CONTEXT_WINDOW: u64 = u32::MAX as u64;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ModelMetadata {
+    pub id: String,
+    pub name: String,
+    pub context_window: Option<u64>,
+}
+
 #[derive(Clone, Deserialize, Serialize)]
 pub struct CustomProviderConfig {
     pub id: String,
@@ -227,7 +238,15 @@ fn validate_buffered_models(models: &[String]) -> Result<(), CustomProviderError
     Ok(())
 }
 
-fn parse_models(bytes: &[u8]) -> Result<Vec<(String, String)>, CustomProviderError> {
+fn context_window(value: &Value) -> Option<u64> {
+    value.get("limit")
+        .and_then(Value::as_object)
+        .and_then(|limit| limit.get("context"))
+        .and_then(Value::as_u64)
+        .filter(|value| (1..=MAX_CONTEXT_WINDOW).contains(value))
+}
+
+fn parse_model_details(bytes: &[u8]) -> Result<Vec<ModelMetadata>, CustomProviderError> {
     let value: Value = serde_json::from_slice(bytes).map_err(|_| CustomProviderError::Json)?;
     let rows = value["data"].as_array().ok_or(CustomProviderError::Json)?;
     if rows.len() > MAX_MODELS { return Err(CustomProviderError::Invalid("model list exceeds 5000 models".into())); }
@@ -236,12 +255,17 @@ fn parse_models(bytes: &[u8]) -> Result<Vec<(String, String)>, CustomProviderErr
         let id = row["id"].as_str().ok_or(CustomProviderError::Json)?;
         let name = row["name"].as_str().unwrap_or(id);
         if id.is_empty() || id.len() > 256 || name.len() > 256 || id.chars().chain(name.chars()).any(char::is_control) { return Err(CustomProviderError::Invalid("invalid model identifier or name".into())); }
-        Ok((id.to_owned(), name.to_owned()))
-    }).filter(|row: &Result<(String,String), CustomProviderError>| match row { Ok((id,_)) => seen.insert(id.clone()), Err(_) => true }).collect()
+        Ok(ModelMetadata { id: id.to_owned(), name: name.to_owned(), context_window: context_window(row) })
+    }).filter(|row: &Result<ModelMetadata, CustomProviderError>| match row { Ok(row) => seen.insert(row.id.clone()), Err(_) => true }).collect()
 }
 
-pub async fn discover_models(config: &CustomProviderConfig) -> Result<Vec<(String,String)>, CustomProviderError> {
-    let configured = config.configured_models();
+pub async fn discover_models_detailed(config: &CustomProviderConfig) -> Result<Vec<ModelMetadata>, CustomProviderError> {
+    let configured = if legacy_provider_exists(&config.id) {
+        Vec::new()
+    } else {
+        crate::imported_config::configured_model_details_for(&config.id)
+            .map_err(|error| CustomProviderError::Invalid(error.to_string()))?
+    };
     let discovered = async {
         let base = validate_base_url(&config.base_url)?;
         let client = reqwest::Client::builder().timeout(Duration::from_secs(12)).redirect(Policy::none()).no_proxy().build().map_err(|_| CustomProviderError::Request("unable to initialize HTTP client".into()))?;
@@ -255,7 +279,7 @@ pub async fn discover_models(config: &CustomProviderConfig) -> Result<Vec<(Strin
             if bytes.len() + chunk.len() > MAX_MODELS_BODY_BYTES { return Err(CustomProviderError::TooLarge(MAX_MODELS_BODY_BYTES)); }
             bytes.extend_from_slice(&chunk);
         }
-        parse_models(&bytes)
+        parse_model_details(&bytes)
     }.await;
     let discovered = match discovered {
         Ok(models) => models,
@@ -265,9 +289,20 @@ pub async fn discover_models(config: &CustomProviderConfig) -> Result<Vec<(Strin
     if configured.is_empty() { return Ok(discovered); }
     let mut merged = configured;
     for row in discovered {
-        if !merged.iter().any(|(id, _)| id == &row.0) { merged.push(row); }
+        if let Some(existing) = merged.iter_mut().find(|existing| existing.id == row.id) {
+            if existing.context_window.is_none() {
+                existing.context_window = row.context_window;
+            }
+        } else {
+            merged.push(row);
+        }
     }
     Ok(merged)
+}
+
+/// Compatibility projection retained for existing provider callers.
+pub async fn discover_models(config: &CustomProviderConfig) -> Result<Vec<(String,String)>, CustomProviderError> {
+    Ok(discover_models_detailed(config).await?.into_iter().map(|row| (row.id, row.name)).collect())
 }
 
 #[cfg(test)]
@@ -279,10 +314,10 @@ mod tests {
     }
     #[test] fn full_router_catalogue_and_slash_ids_are_preserved() {
         let data: Vec<_> = (0..1159).map(|index| json!({"id":format!("route/model-{index}")})).collect();
-        let models = parse_models(&serde_json::to_vec(&json!({"data":data})).unwrap()).unwrap();
-        assert_eq!(models.len(), 1159); assert_eq!(models[1158].0, "route/model-1158");
+        let models = parse_model_details(&serde_json::to_vec(&json!({"data":data})).unwrap()).unwrap();
+        assert_eq!(models.len(), 1159); assert_eq!(models[1158].id, "route/model-1158");
     }
-    #[test] fn malformed_model_catalogue_is_not_empty_success() { assert!(parse_models(b"{\"error\":\"unauthorized\"}").is_err()); }
+    #[test] fn malformed_model_catalogue_is_not_empty_success() { assert!(parse_model_details(b"{\"error\":\"unauthorized\"}").is_err()); }
     #[test] fn persistence_preserves_settings_and_excludes_credentials() {
         let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("custom.json");
         std::fs::write(&path, br#"{"other":true,"providers":{"keep":{"name":"Keep","base_url":"https://example.org/v1"},"9router":{"extra":true}}}"#).unwrap();

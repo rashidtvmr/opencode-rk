@@ -494,11 +494,11 @@ async fn discover_custom_provider_models(
         .await
         .map_err(ApiFailure::internal)?
         .ok_or_else(|| ApiFailure::not_found("provider not found"))?;
-    let models = custom_provider::discover_models(&config)
+    let models = custom_provider::discover_models_detailed(&config)
         .await
         .map_err(|error| ApiFailure::bad_gateway(error.to_string()))?;
     Ok(Json(
-        json!({"models": models.into_iter().map(|(model,name)| json!({"id":model,"name":name,"provider_id":id})).collect::<Vec<_>>() }),
+        json!({"models": models.into_iter().map(|model| json!({"id":model.id,"name":model.name,"provider_id":id,"context_window":model.context_window})).collect::<Vec<_>>() }),
     ))
 }
 async fn interrupt_session(

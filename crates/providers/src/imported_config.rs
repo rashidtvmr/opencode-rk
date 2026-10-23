@@ -338,6 +338,35 @@ pub fn configured_models_for(provider_id: &str) -> Result<Vec<(String, String)>,
     Ok(result)
 }
 
+pub fn configured_model_details_for(
+    provider_id: &str,
+) -> Result<Vec<crate::custom_provider::ModelMetadata>, ImportedConfigError> {
+    let Some(config) = load_imported_providers()?.into_iter().find(|p| p.id == provider_id) else {
+        return Ok(Vec::new());
+    };
+    let Some(models) = config.models.as_object() else {
+        let mut result = Vec::new();
+        for value in config.models.as_array().into_iter().flatten() {
+            let Some(id) = value.as_str().map(str::to_owned) else { continue; };
+            if id.len() > 256 || id.is_empty() || id.chars().any(|c| c.is_control()) || result.iter().any(|row: &crate::custom_provider::ModelMetadata| row.id == id) { continue; }
+            result.push(crate::custom_provider::ModelMetadata { name: id.clone(), id, context_window: None });
+            if result.len() == MAX_MODELS_PER_PROVIDER { break; }
+        }
+        return Ok(result);
+    };
+    let mut result = Vec::new();
+    for (id, definition) in models.iter().take(MAX_MODELS_PER_PROVIDER) {
+        if id.is_empty() || id.len() > 256 || id.chars().any(|c| c.is_control()) { continue; }
+        let definition_object = definition.as_object();
+        let name = definition_object.and_then(|object| object.get("name")).and_then(Value::as_str).unwrap_or(id);
+        if name.is_empty() || name.len() > 256 || name.chars().any(|c| c.is_control()) { continue; }
+        let context_window = definition_object.and_then(|object| object.get("limit")).and_then(Value::as_object).and_then(|limit| limit.get("context")).and_then(Value::as_u64).filter(|value| (1..=u32::MAX as u64).contains(value));
+        if result.iter().any(|row: &crate::custom_provider::ModelMetadata| row.id == *id) { continue; }
+        result.push(crate::custom_provider::ModelMetadata { id: id.clone(), name: name.to_owned(), context_window });
+    }
+    Ok(result)
+}
+
 fn configured_model_array(models: &Value) -> Result<Vec<(String, String)>, ImportedConfigError> {
     let mut result = Vec::new();
     for value in models.as_array().into_iter().flatten().take(MAX_MODELS_PER_PROVIDER) {
