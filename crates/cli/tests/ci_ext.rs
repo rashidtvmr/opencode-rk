@@ -10,6 +10,7 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::mpsc;
 use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -54,6 +55,13 @@ impl Drop for TestHome {
 const FIXTURE_DEADLINE: Duration = Duration::from_secs(20);
 const FIXTURE_MODEL: &str = "openai/gpt-5.6";
 const MAX_FIXTURE_BYTES: usize = 256 * 1024;
+
+fn carry_native_runtime(command: &mut Command) {
+    #[cfg(target_os = "macos")]
+    if let Some(path) = std::env::var_os("DYLD_LIBRARY_PATH") {
+        command.env("DYLD_LIBRARY_PATH", path);
+    }
+}
 
 struct FixtureResources {
     stopping: Arc<AtomicBool>,
@@ -125,7 +133,10 @@ impl Drop for CiChildOwner<'_> {
     }
 }
 
-fn drain_capped(mut pipe: impl Read) -> std::io::Result<(Vec<u8>, bool)> {
+fn drain_capped(
+    mut pipe: impl Read,
+    mut observe: impl FnMut(&[u8]),
+) -> std::io::Result<(Vec<u8>, bool)> {
     let mut kept = Vec::with_capacity(4096);
     let mut overflow = false;
     let mut buffer = [0_u8; 4096];
@@ -134,6 +145,7 @@ fn drain_capped(mut pipe: impl Read) -> std::io::Result<(Vec<u8>, bool)> {
         if read == 0 {
             return Ok((kept, overflow));
         }
+        observe(&buffer[..read]);
         let retained = read.min(MAX_FIXTURE_BYTES.saturating_sub(kept.len()));
         kept.extend_from_slice(&buffer[..retained]);
         overflow |= retained < read;
@@ -144,22 +156,78 @@ fn wait_for(child: &mut Child, pattern: &str, timeout: Duration) -> Vec<String> 
     let owner = CiChildOwner { child };
     let stdout = owner.child.stdout.take().expect("piped stdout");
     let stderr = owner.child.stderr.take().expect("piped stderr");
-    let stdout_reader = thread::spawn(move || drain_capped(stdout));
-    let stderr_reader = thread::spawn(move || drain_capped(stderr));
+    let (stdout_tx, stdout_rx) = mpsc::sync_channel::<Vec<u8>>(64);
+    let stdout_reader = thread::spawn(move || {
+        drain_capped(stdout, |chunk| {
+            let _ = stdout_tx.send(chunk.to_vec());
+        })
+    });
+    let stderr_reader = thread::spawn(move || drain_capped(stderr, |_| {}));
     let deadline = Instant::now() + timeout;
     let mut timed_out = false;
+    let found = std::cell::Cell::new(pattern.is_empty());
+    let pattern_bytes = pattern.as_bytes();
+    let mut scan_tail = Vec::new();
+    let mut observed_overflow = false;
+    let mut observed = Vec::with_capacity(MAX_FIXTURE_BYTES.min(4096));
+    let mut inspect = |chunk: Vec<u8>| {
+        if observed.len() < MAX_FIXTURE_BYTES {
+            let retained = chunk.len().min(MAX_FIXTURE_BYTES - observed.len());
+            observed.extend_from_slice(&chunk[..retained]);
+            observed_overflow |= retained < chunk.len();
+        } else {
+            observed_overflow = true;
+        }
+        if !found.get() {
+            let mut candidate = Vec::with_capacity(scan_tail.len() + chunk.len());
+            candidate.extend_from_slice(&scan_tail);
+            candidate.extend_from_slice(&chunk);
+            found.set(candidate.windows(pattern_bytes.len()).any(|window| window == pattern_bytes));
+            let keep = pattern_bytes.len().saturating_sub(1);
+            scan_tail = candidate[candidate.len().saturating_sub(keep)..].to_vec();
+        }
+    };
     while owner.child.try_wait().expect("poll CI child").is_none() {
+        // Return to the deadline check even if a noisy child continuously
+        // fills the bounded channel faster than it can be drained.
+        for _ in 0..64 {
+            let Ok(chunk) = stdout_rx.try_recv() else { break; };
+            inspect(chunk);
+        }
+        if found.get() {
+            let grace_deadline = Instant::now() + Duration::from_millis(250);
+            while owner.child.try_wait().expect("poll matched CI child").is_none()
+                && Instant::now() < grace_deadline
+            {
+                for _ in 0..64 {
+                    let Ok(chunk) = stdout_rx.try_recv() else { break; };
+                    inspect(chunk);
+                }
+                thread::sleep(Duration::from_millis(10));
+            }
+            if owner.child.try_wait().expect("recheck matched CI child").is_none() {
+                stop_child(owner.child).expect("reclaim matched CI child");
+            }
+            break;
+        }
         if Instant::now() >= deadline {
             timed_out = true;
             stop_child(owner.child).expect("reclaim timed-out CI child");
             break;
         }
-        thread::sleep(Duration::from_millis(10));
+        if let Ok(chunk) = stdout_rx.recv_timeout(Duration::from_millis(10)) {
+            inspect(chunk);
+        }
     }
     let drain_deadline = Instant::now() + Duration::from_secs(2);
     while !stdout_reader.is_finished() || !stderr_reader.is_finished() {
         assert!(Instant::now() < drain_deadline, "CI pipe drain deadline");
-        thread::sleep(Duration::from_millis(10));
+        if let Ok(chunk) = stdout_rx.recv_timeout(Duration::from_millis(10)) {
+            inspect(chunk);
+        }
+    }
+    while let Ok(chunk) = stdout_rx.try_recv() {
+        inspect(chunk);
     }
     let (stdout, stdout_overflow) = stdout_reader
         .join()
@@ -173,6 +241,7 @@ fn wait_for(child: &mut Child, pattern: &str, timeout: Duration) -> Vec<String> 
         !stdout_overflow && !stderr_overflow,
         "CI output exceeded bound"
     );
+    assert!(!observed_overflow, "CI output observer exceeded bound");
     let stdout = String::from_utf8(stdout).expect("CI stdout UTF-8");
     assert!(
         !timed_out,
@@ -182,7 +251,7 @@ fn wait_for(child: &mut Child, pattern: &str, timeout: Duration) -> Vec<String> 
     let collected: Vec<String> = stdout.lines().take(1025).map(str::to_owned).collect();
     assert!(collected.len() <= 1024, "CI stdout line-count bound");
     assert!(
-        collected.iter().any(|line| line.contains(pattern)),
+        found.get() && collected.iter().any(|line| line.contains(pattern)),
         "expected {pattern:?} in bounded CI output: {collected:?}"
     );
     collected
@@ -209,6 +278,9 @@ fn spawn_openai_fixture(home: &TestHome, extra_args: Vec<String>) -> Child {
                 }
                 Err(error) => panic!("provider accept failed: {error}"),
             };
+            stream
+                .set_nonblocking(false)
+                .expect("provider blocking stream");
             stream
                 .set_read_timeout(Some(Duration::from_secs(1)))
                 .expect("provider read timeout");
@@ -361,6 +433,7 @@ fn spawn_openai_fixture(home: &TestHome, extra_args: Vec<String>) -> Child {
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .stdin(Stdio::null());
+    carry_native_runtime(&mut daemon);
     let daemon = daemon.spawn().expect("failed to spawn fixture daemon");
     let daemon_id = daemon.id();
     home.fixture
@@ -471,6 +544,7 @@ fn spawn_openai_fixture(home: &TestHome, extra_args: Vec<String>) -> Child {
         .env("OPENCODE_RK_CI_MODEL", FIXTURE_MODEL)
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    carry_native_runtime(&mut cmd);
 
     cmd.spawn().expect("failed to spawn opencode-rk")
 }
@@ -500,6 +574,7 @@ fn ci_command(home: &TestHome, prompt: &str) -> Child {
         .env("OPENCODE_RK_DAEMON_ADDR", addr.to_string())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    carry_native_runtime(&mut cmd);
 
     cmd.spawn().expect("failed to spawn opencode-rk")
 }
@@ -511,12 +586,16 @@ fn ci_command(home: &TestHome, prompt: &str) -> Child {
 #[test]
 fn ci_ext_t01_max_steps_zero_is_usage_error() {
     let home = TestHome::new();
-    let status = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
+    command
         .args(["run", "--ci", "--max-steps", "0"])
         .env_clear()
         .env("OPENCODE_RK_HOME", home.path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        ;
+    carry_native_runtime(&mut command);
+    let status = command
         .status()
         .expect("failed to spawn");
 
@@ -530,12 +609,16 @@ fn ci_ext_t01_max_steps_zero_is_usage_error() {
 #[test]
 fn ci_ext_t02_timeout_zero_is_usage_error() {
     let home = TestHome::new();
-    let status = Command::new(env!("CARGO_BIN_EXE_opencode-rk"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_opencode-rk"));
+    command
         .args(["run", "--ci", "--timeout", "0"])
         .env_clear()
         .env("OPENCODE_RK_HOME", home.path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
+        ;
+    carry_native_runtime(&mut command);
+    let status = command
         .status()
         .expect("failed to spawn");
 
@@ -697,4 +780,28 @@ fn ci_ext_t06_doctor_is_single_jsonl_line() {
     let parsed: serde_json::Value =
         serde_json::from_str(doctor_lines[0]).expect("Doctor line is not valid JSON");
     assert!(parsed.is_object(), "Doctor line must be a JSON object");
+}
+
+#[test]
+fn ci_ext_wait_for_returns_when_pattern_precedes_long_lived_child() {
+    // This is a static, trusted fixture command.  It models interactive CI
+    // output that reports completion while the process remains alive.
+    let mut child = Command::new("/bin/sh")
+        .args(["-c", "printf '{\"event\":\"TurnFinished\"}\\n'; exec sleep 30"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("failed to spawn long-lived wait_for fixture");
+    let started = Instant::now();
+    let lines = wait_for(&mut child, "TurnFinished", Duration::from_secs(3));
+
+    assert!(
+        started.elapsed() < Duration::from_secs(2),
+        "wait_for should return after observing the marker, got {:?}",
+        started.elapsed()
+    );
+    assert!(
+        lines.iter().any(|line| line.contains("TurnFinished")),
+        "expected the fixture completion marker: {lines:?}"
+    );
 }
