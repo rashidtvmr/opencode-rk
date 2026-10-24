@@ -40,6 +40,8 @@ pub mod event_stream;
 pub mod permission_rules;
 pub mod loop_driver;
 pub mod mcp_http;
+pub mod mcp_context;
+mod mcp_context_http;
 pub mod origin_check;
 pub mod protocol_api;
 pub mod rel_stamp;
@@ -58,6 +60,9 @@ pub mod repo_ops;
 pub mod route_table;
 pub mod rules_globs;
 pub mod rules_loader;
+mod todo_http;
+mod todo_tool;
+mod memory_http;
 pub mod run_owner;
 pub mod runtime_wiring;
 pub mod sdk_client;
@@ -101,12 +106,12 @@ use opencode_rk_contracts::{
 use opencode_rk_providers::custom_provider::{self, CustomProviderConfig};
 use opencode_rk_providers::responses::{
     MAX_RESPONSES_INPUT_BYTES, MAX_RESPONSES_INPUT_MESSAGES, OpenAiResponsesClient,
-    OpenAiResponsesStream, ResponsesError, ResponsesItem, ResponsesRole, ResponsesStopReason,
+    OpenAiResponsesStream, ResponsesCompactionWindow, ResponsesError, ResponsesItem, ResponsesRole, ResponsesStopReason,
     ResponsesStreamEvent, ResponsesTool,
 };
 use opencode_rk_security::{Decision, OperationIntent, PermissionBroker, SecurityPolicy};
 use opencode_rk_sessions::{
-    HistoryItem, SessionError, SessionService, ToolCallAdmission, ToolRound,
+    CompactionCheckpoint, HistoryItem, SessionError, SessionService, ToolCallAdmission, ToolRound,
 };
 use opencode_rk_tools::executor::ToolExecutor;
 use opencode_rk_tools::file_ops::{FileOperation, FileTool};
@@ -160,7 +165,7 @@ pub fn router_with_events(
     // injected as an `Extension`, so two routers never share entries and
     // there is no static global. Fresh router ⇒ empty registry ⇒ `{}`.
     let mcp_registry = mcp_http::McpStatusRegistry::new();
-    let children = task_children::Children::default();
+    let children = task_children::Children::with_mcp(mcp_registry.clone());
     let app = Router::new()
         .route("/health", get(health))
         .route(
@@ -203,11 +208,17 @@ pub fn router_with_events(
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
         .route("/api/sessions/{id}/archive", post(archive_session))
+        .route("/api/sessions/{id}/compact", post(compact_session))
         .route(
             "/api/sessions/{id}/messages",
             get(list_messages).post(append_message),
         )
         .route("/api/sessions/{id}/history", get(list_history_page))
+        .route("/api/sessions/{id}/memory", get(memory_http::get))
+        .route("/api/sessions/{id}/memory/exclude", post(memory_http::exclude).layer(DefaultBodyLimit::max(8192)))
+        .route("/api/sessions/{id}/memory/include", post(memory_http::include).layer(DefaultBodyLimit::max(8192)))
+        .route("/api/sessions/{id}/todo", get(todo_http::get).put(todo_http::replace)
+            .layer(DefaultBodyLimit::max(512 * 1024)))
         .route("/api/sessions/{id}/command", post(run_configured_command))
         .route(
             "/api/sessions/{id}/attachments",
@@ -244,6 +255,8 @@ pub fn router_with_events(
         .route("/api/sessions/{id}/fork", get(get_fork_provenance))
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
+        .route("/api/sessions/{id}/mcp", get(mcp_context_http::get))
+        .route("/api/sessions/{id}/mcp/{name}", axum::routing::put(mcp_context_http::put))
         .route("/api/sessions/{id}/children", get(task_children::list))
         .route("/api/sessions/{id}/children/{child}/stop", post(task_children::stop))
         .route("/api/sessions/{id}/children/{child}/retry", post(task_children::retry))
@@ -1404,6 +1417,112 @@ struct CreateTurnBody {
     replay_requires_no_tools: bool,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CompactBody {
+    model: String,
+    strategy: String,
+}
+
+async fn compact_session(
+    State(state): State<AppState>,
+    Path(raw_id): Path<String>,
+    Json(body): Json<CompactBody>,
+) -> Result<Json<Value>, ApiFailure> {
+    let id = parse_session_id(&raw_id)?;
+    let permit = TurnExecutionPermit::acquire(id).map_err(turn_admission_failure)?;
+    let owner = permit.owner();
+    state.sessions.get(id).await.map_err(|error| {
+        if error.to_string().contains("session not found") { ApiFailure::not_found(error.to_string()) } else { ApiFailure::internal(error) }
+    })?;
+    if body.strategy != "native" { return Err(ApiFailure::bad_request("compact strategy must be native")); }
+    let (provider_id, model_id) = body.model.split_once('/').filter(|(p,m)| !p.is_empty() && !m.is_empty())
+        .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
+    if state.sessions.compaction_checkpoint(id).await.map_err(ApiFailure::internal)?.is_some() {
+        return Err(ApiFailure::unprocessable("native recompaction is not supported"));
+    }
+    let history = bounded_typed_history(&state.sessions, id, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES)
+        .await.map_err(ApiFailure::internal)?;
+    let boundary = state.sessions.messages(id, MAX_RESPONSES_INPUT_MESSAGES).await
+        .map_err(ApiFailure::internal)?.into_iter().last()
+        .ok_or_else(|| ApiFailure::unprocessable("cannot compact an empty session"))?;
+    let client = responses_client(provider_id).await.map_err(provider_failure)?;
+    let mut cancelled = owner.cancellation_receiver();
+    let window = tokio::select! {
+        biased;
+        _ = cancelled.changed() => return Err(ApiFailure::bad_gateway("compaction cancelled")),
+        result = client.compact(model_id, &history) => result.map_err(provider_failure)?,
+    };
+    if owner.is_cancelled() { return Err(ApiFailure::bad_gateway("compaction cancelled")); }
+    let window_json = serde_json::to_string(&json!({"id": window.id.clone(), "object":"response.compaction", "created_at":window.created_at, "usage":window.usage.clone(), "output":window.output.clone()}))
+        .map_err(ApiFailure::internal)?;
+    commit_compaction_checkpoint(state.sessions.clone(), owner.clone(), CompactionCheckpoint {
+        boundary_message_id: boundary.id, provider_id: provider_id.to_owned(), model_id: model_id.to_owned(), window_json: window_json.clone(),
+    }).await?;
+    Ok(Json(json!({"compacted":true,"strategy":"native"})))
+}
+
+async fn commit_compaction_checkpoint(
+    sessions: SessionService,
+    owner: Arc<run_owner::RunOwner>,
+    checkpoint: CompactionCheckpoint,
+) -> Result<(), ApiFailure> {
+    tokio::task::spawn_blocking(move || {
+        let Some(_effect) = owner.begin_effect() else {
+            return Err(ApiFailure::bad_gateway("compaction cancelled"));
+        };
+        sessions.save_compaction_checkpoint_blocking(owner.session_id, &checkpoint).map_err(ApiFailure::internal)
+    }).await.map_err(|_| ApiFailure::internal("compaction commit worker failed"))?
+}
+
+#[cfg(test)]
+mod compaction_commit_tests {
+    use super::*;
+    use std::{future::Future, task::Poll};
+
+    struct Release(Option<std::sync::mpsc::Sender<()>>);
+    impl Drop for Release {
+        fn drop(&mut self) { if let Some(sender) = self.0.take() { let _ = sender.send(()); } }
+    }
+
+    #[test]
+    fn cancelled_queued_checkpoint_does_not_change_effective_context() {
+        let runtime = tokio::runtime::Builder::new_current_thread().enable_all()
+            .max_blocking_threads(1).build().unwrap();
+        runtime.block_on(async {
+            let directory = tempfile::tempdir().unwrap();
+            let sessions = SessionService::new(Arc::new(opencode_rk_storage::Storage::open_in_memory(directory.path().join("blobs")).unwrap()));
+            let session = sessions.create("Cancelled compaction").await.unwrap();
+            let boundary = sessions.append_text(session.id, MessageRole::Assistant, "preserved history").await.unwrap();
+            let permit = TurnExecutionPermit::acquire(session.id).unwrap();
+            let owner = permit.owner();
+            let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let release = Release(Some(release_tx));
+            let blocker = tokio::task::spawn_blocking(move || {
+                let _ = started_tx.send(());
+                let _ = release_rx.recv();
+            });
+            started_rx.await.unwrap();
+            let work = commit_compaction_checkpoint(sessions.clone(), owner.clone(), CompactionCheckpoint {
+                boundary_message_id: boundary.id, provider_id:"openai".into(), model_id:"fixture".into(),
+                window_json:r#"{"id":"must-not-commit"}"#.into(),
+            });
+            tokio::pin!(work);
+            std::future::poll_fn(|cx| {
+                assert!(work.as_mut().poll(cx).is_pending());
+                Poll::Ready(())
+            }).await;
+            owner.cancel();
+            drop(release);
+            blocker.await.unwrap();
+            assert!(work.await.is_err(), "cancellation must prevent queued checkpoint mutation");
+            assert!(sessions.compaction_checkpoint(session.id).await.unwrap().is_none());
+            assert_eq!(sessions.messages(session.id, 10).await.unwrap().len(), 1);
+        });
+    }
+}
+
 /// Internal-only context for a provider retry. This is never deserialized from
 /// HTTP: a retry reuses the already durable user message instead of appending
 /// another copy of the prompt.
@@ -1795,19 +1914,38 @@ async fn create_turn(
         session: id,
         message_id: user_message.id,
     });
-    let input = bounded_typed_history(
-        &state.sessions,
-        id,
-        MAX_RESPONSES_INPUT_MESSAGES,
-        MAX_RESPONSES_INPUT_BYTES,
-    )
-    .await
-    .map_err(ApiFailure::internal)?;
+    let checkpoint = state.sessions.compaction_checkpoint(id).await.map_err(ApiFailure::internal)?;
+    if checkpoint.as_ref().is_some_and(|cp| cp.provider_id != provider_id || cp.model_id != model_id) {
+        return Err(ApiFailure::unprocessable("compaction checkpoint belongs to a different provider/model"));
+    }
+    let mut input = match checkpoint.as_ref() {
+        Some(cp) => state.sessions.bounded_history_after(
+            id, cp.boundary_message_id, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES,
+        ).await.map_err(ApiFailure::internal)?.into_iter()
+            .map(history_item_to_responses_item).collect::<Result<Vec<_>, _>>().map_err(ApiFailure::internal)?,
+        None => bounded_typed_history(&state.sessions, id, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES)
+            .await.map_err(ApiFailure::internal)?,
+    };
+    let checkpoint = checkpoint.map(|cp| {
+            let value: Value = serde_json::from_str(&cp.window_json).map_err(ApiFailure::internal)?;
+            Ok(ResponsesCompactionWindow {
+                id: value["id"].as_str().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?.to_owned(),
+                created_at: value["created_at"].as_u64().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?,
+                usage: match value.get("usage") { Some(Value::Null) | None => None, Some(v) => Some(v.clone()) },
+                output: value["output"].as_array().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?.clone(),
+            })
+        }).transpose()?;
+    memory_http::prepend(&state, id, model_id, &mut input).await?;
     let mut cancelled = owner.cancellation_receiver();
     let assistant_text = tokio::select! {
         biased;
         _ = cancelled.changed() => return Err(ApiFailure::bad_gateway("turn cancelled")),
-        result = provider.create_with_items(model_id, &body.reasoning_effort, &input) => {
+        result = async {
+            match checkpoint.as_ref() {
+                Some(window) => provider.create_with_compaction_window(model_id, &body.reasoning_effort, window, &input).await,
+                None => provider.create_with_items(model_id, &body.reasoning_effort, &input).await,
+            }
+        } => {
             result.map_err(provider_failure)?
         },
     };
@@ -1859,6 +1997,7 @@ struct TurnStreamState {
     /// File capability rooted at the turn's captured project directory.
     file_tool: FileTool,
     history_items: Vec<ResponsesItem>,
+    compaction_window: Option<ResponsesCompactionWindow>,
     agent_prompt: Option<String>,
     loop_control: LoopController,
     pending_calls: Vec<RequestedCall>,
@@ -1875,6 +2014,8 @@ struct TurnStreamState {
     _agent_plan: AgentExecutor,
     /// Ordinal of the current tool round within this turn.
     round_ordinal: u32,
+    mcp_registry: mcp_http::McpStatusRegistry,
+    read_only: bool,
 }
 
 /// Turn-tool allowlist from OPENCODE_RK_TURN_TOOLS (comma-separated tool ids).
@@ -1883,14 +2024,14 @@ struct TurnStreamState {
 /// the available tool set but never grants permissions.
 fn turn_tool_config() -> Vec<String> {
     std::env::var("OPENCODE_RK_TURN_TOOLS")
-        .unwrap_or_else(|_| "bash,shell,read,write,edit,grep,glob,websearch,webfetch,task".to_owned())
+        .unwrap_or_else(|_| "bash,shell,read,write,edit,grep,glob,websearch,webfetch,task,todowrite".to_owned())
         .split(',')
         .map(str::trim)
         .filter(|name| !name.is_empty())
         .filter(|name| {
             matches!(
                 *name,
-                "bash" | "shell" | "read" | "write" | "edit" | "grep" | "glob" | "websearch" | "webfetch" | "task"
+                "bash" | "shell" | "read" | "write" | "edit" | "grep" | "glob" | "websearch" | "webfetch" | "task" | "todowrite"
             )
         })
         .map(str::to_owned)
@@ -2197,17 +2338,19 @@ pub(crate) fn create_turn_stream_with_message(
         message
     };
     let user_message_id = user_message.id;
-    let mut input = bounded_typed_history(
+    let (mut input, compaction_window) = checkpoint_provider_history(
         &state.sessions,
         id,
+        &body.model,
         MAX_RESPONSES_INPUT_MESSAGES - usize::from(body.agent_prompt.is_some()),
         MAX_RESPONSES_INPUT_BYTES.saturating_sub(body.agent_prompt.as_ref().map_or(0, String::len)),
     )
     .await
-    .map_err(ApiFailure::internal)?;
+    ?;
     if let Some(prompt) = body.agent_prompt.as_ref() {
         input.insert(0, ResponsesItem::Text { role: ResponsesRole::System, content: prompt.clone() });
     }
+    memory_http::prepend(&state, id, model_id, &mut input).await?;
 
     // Agentic loop setup: advertise tools only when turn-tool execution is
     // explicitly enabled (OPENCODE_RK_TURN_TOOLS). The list is deny-by-default:
@@ -2217,6 +2360,10 @@ pub(crate) fn create_turn_stream_with_message(
     if body.read_only {
         turn_tools.retain(|name| matches!(name.as_str(), "read" | "grep" | "glob" | "websearch" | "webfetch"));
     }
+    let mcp_registry = children.mcp_registry();
+    let mcp_defs = if body.read_only { Vec::new() } else {
+        mcp_context::effective_tools(&mcp_registry, id, &state.sessions).await.map_err(ApiFailure::internal)?
+    };
     let registry = ToolRegistry::new();
     let mut tools: Vec<ResponsesTool> = registry
         .list()
@@ -2231,6 +2378,11 @@ pub(crate) fn create_turn_stream_with_message(
         })
         .collect();
     if turn_tools.iter().any(|name| name == "task") { tools.push(task_children::schema()); }
+    if turn_tools.iter().any(|name| name == "todowrite") { tools.push(todo_tool::schema()); }
+    for tool in &mcp_defs {
+        tools.push(ResponsesTool::function(tool.name.clone(), tool.description.clone(), tool.input_schema.clone()));
+        turn_tools.push(tool.name.clone());
+    }
     let max_steps = std::env::var("OPENCODE_RK_TURN_MAX_STEPS")
         .ok()
         .and_then(|value| value.parse::<u32>().ok())
@@ -2250,7 +2402,12 @@ pub(crate) fn create_turn_stream_with_message(
         biased;
         _ = async { if let Some(stop) = child_stop.as_mut() { let _ = stop.changed().await; } else { std::future::pending::<()>().await; } } => return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() }),
         _ = owner_cancelled.changed() => return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() }),
-        result = provider_client.stream_with_tools(model_id, &body.reasoning_effort, &history_items, &tools) => result,
+        result = async {
+            match compaction_window.as_ref() {
+                Some(window) => provider_client.stream_with_compaction_window(model_id, &body.reasoning_effort, window, &history_items, &tools).await,
+                None => provider_client.stream_with_tools(model_id, &body.reasoning_effort, &history_items, &tools).await,
+            }
+        } => result,
     };
     let provider = provider_result.map_err(provider_failure)?;
 
@@ -2276,6 +2433,7 @@ pub(crate) fn create_turn_stream_with_message(
             broker,
             file_tool,
             history_items,
+            compaction_window,
             agent_prompt: body.agent_prompt,
             loop_control: LoopController::with_cap(max_steps),
             pending_calls: Vec::new(),
@@ -2293,6 +2451,8 @@ pub(crate) fn create_turn_stream_with_message(
             ])
             .expect("fixed 4-step turn plan fits agent executor capacity"),
             round_ordinal: 0,
+            mcp_registry,
+            read_only: body.read_only,
         },
         |mut state| async move {
             loop {
@@ -2561,13 +2721,27 @@ pub(crate) fn create_turn_stream_with_message(
                                     "error: step budget per round exceeded (max {MAX_CALLS_PER_ROUND} calls); call not executed"
                                 )
                             } else if permitted {
-                                if call.name == "task" {
+                                if call.name.starts_with("mcp_") {
+                                    match serde_json::from_str::<Value>(&call.arguments) {
+                                        Ok(arguments) => match mcp_context::execute(&state.mcp_registry, &state.sessions, state.session_id, &state.owner, &state.broker, state.turn_message_id, &call.call_id, &call.name, arguments).await {
+                                            Ok((output, success)) => { explicit_success = Some(success); output }
+                                            Err(_) => { explicit_success = Some(false); "error: MCP call unavailable".to_owned() }
+                                        },
+                                        Err(_) => { explicit_success = Some(false); "error: invalid tool JSON arguments".to_owned() }
+                                    }
+                                } else if call.name == "task" {
                                     let outcome = task_children::execute(
                                         state.app.clone(), state.children.clone(), state.events.clone(),
                                         &state.owner, &state.broker, state.turn_message_id, &call,
                                         &state.qualified_model,
                                         state.file_tool.project_root_path().expect("turn file capability is rooted"),
                                     ).await;
+                                    stop_after_output = outcome.stop_after_outputs;
+                                    explicit_success = Some(outcome.success);
+                                    outcome.output
+                                } else if call.name == "todowrite" {
+                                    let outcome = todo_tool::execute(&state.app, &state.events, &state.owner,
+                                        &state.broker, state.turn_message_id, &call.call_id, &call.arguments).await;
                                     stop_after_output = outcome.stop_after_outputs;
                                     explicit_success = Some(outcome.success);
                                     outcome.output
@@ -2723,9 +2897,10 @@ pub(crate) fn create_turn_stream_with_message(
                         }
                         // Next provider round: reload typed history from storage
                         // to ensure accurate replay across restarts.
-                        let mut history_items = match bounded_typed_history(
+                        let (mut history_items, compaction_window) = match checkpoint_provider_history(
                             &state.sessions,
                             state.session_id,
+                            &state.qualified_model,
                             MAX_RESPONSES_INPUT_MESSAGES - usize::from(state.agent_prompt.is_some()),
                             MAX_RESPONSES_INPUT_BYTES.saturating_sub(state.agent_prompt.as_ref().map_or(0, String::len)),
                         )
@@ -2736,8 +2911,8 @@ pub(crate) fn create_turn_stream_with_message(
                                 state.stage = TurnStreamStage::Done;
                                 return Some((
                                     Ok::<Bytes, Infallible>(stream_error(
-                                        "internal_error",
-                                        format!("failed to reload typed history: {error}"),
+                                        error.code,
+                                        format!("failed to reload typed history: {}", error.message),
                                     )),
                                     state,
                                 ));
@@ -2746,7 +2921,28 @@ pub(crate) fn create_turn_stream_with_message(
                         if let Some(prompt) = state.agent_prompt.as_ref() {
                             history_items.insert(0, ResponsesItem::Text { role: ResponsesRole::System, content: prompt.clone() });
                         }
+                        if let Err(error) = memory_http::prepend(&state.app, state.session_id, &state.model, &mut history_items).await {
+                            state.stage = TurnStreamStage::Done;
+                            return Some((Ok::<Bytes, Infallible>(stream_error(error.code, error.message)), state));
+                        }
                         state.history_items = history_items;
+                        state.compaction_window = compaction_window;
+                        // Re-project session-scoped MCP selection on every continuation;
+                        // never retain definitions after a user toggle.
+                        if !state.read_only {
+                            let defs = match mcp_context::effective_tools(&state.mcp_registry, state.session_id, &state.sessions).await {
+                                Ok(defs) => defs,
+                                Err(_) => { state.stage = TurnStreamStage::Done; return None; }
+                            };
+                            state.tools.retain(|tool| !tool.name.starts_with("mcp_") || defs.iter().any(|def| def.name == tool.name));
+                            state.enabled_tools.retain(|name| !name.starts_with("mcp_") || defs.iter().any(|def| def.name == *name));
+                            for def in defs {
+                                if !state.tools.iter().any(|tool| tool.name == def.name) {
+                                    state.tools.push(ResponsesTool::function(def.name.clone(), def.description, def.input_schema));
+                                }
+                                if !state.enabled_tools.iter().any(|name| name == &def.name) { state.enabled_tools.push(def.name); }
+                            }
+                        }
                         // A disconnected child response is still drained by the
                         // owned producer, but explicit cancellation must also
                         // interrupt a provider request between tool rounds.
@@ -2765,12 +2961,16 @@ pub(crate) fn create_turn_stream_with_message(
                         let next_provider = tokio::select! {
                             biased;
                             _ = cancelled.changed() => None,
-                            result = state.client.stream_with_tools(
-                                &state.model,
-                                &state.reasoning_effort,
-                                &state.history_items,
-                                &state.tools,
-                            ) => Some(result),
+                            result = async {
+                                match state.compaction_window.as_ref() {
+                                    Some(window) => state.client.stream_with_compaction_window(
+                                        &state.model, &state.reasoning_effort, window, &state.history_items, &state.tools,
+                                    ).await,
+                                    None => state.client.stream_with_tools(
+                                        &state.model, &state.reasoning_effort, &state.history_items, &state.tools,
+                                    ).await,
+                                }
+                            } => Some(result),
                         };
                         let Some(next_provider) = next_provider else {
                             state.stage = TurnStreamStage::Done;
@@ -2897,6 +3097,36 @@ fn history_item_to_responses_item(item: HistoryItem) -> Result<ResponsesItem, Se
 /// Load bounded typed history from storage for provider continuation/restart.
 /// Returns `ResponsesItem` entries reconstructed from both regular messages
 /// and typed tool records, ordered by insertion order.
+async fn checkpoint_provider_history(
+    sessions: &SessionService,
+    session_id: SessionId,
+    qualified_model: &str,
+    max_items: usize,
+    max_bytes: usize,
+) -> Result<(Vec<ResponsesItem>, Option<ResponsesCompactionWindow>), ApiFailure> {
+    let checkpoint = sessions.compaction_checkpoint(session_id).await.map_err(ApiFailure::internal)?;
+    let Some(checkpoint) = checkpoint else {
+        return bounded_typed_history(sessions, session_id, max_items, max_bytes).await
+            .map(|items| (items, None)).map_err(ApiFailure::internal);
+    };
+    let (provider, model) = qualified_model.split_once('/')
+        .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
+    if checkpoint.provider_id != provider || checkpoint.model_id != model {
+        return Err(ApiFailure::unprocessable("compaction checkpoint belongs to a different provider/model"));
+    }
+    let input = sessions.bounded_history_after(session_id, checkpoint.boundary_message_id, max_items, max_bytes)
+        .await.map_err(ApiFailure::internal)?.into_iter().map(history_item_to_responses_item)
+        .collect::<Result<Vec<_>, _>>().map_err(ApiFailure::internal)?;
+    let value: Value = serde_json::from_str(&checkpoint.window_json).map_err(ApiFailure::internal)?;
+    let window = ResponsesCompactionWindow {
+        id: value["id"].as_str().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?.to_owned(),
+        created_at: value["created_at"].as_u64().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?,
+        usage: value.get("usage").filter(|v| !v.is_null()).cloned(),
+        output: value["output"].as_array().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?.clone(),
+    };
+    Ok((input, Some(window)))
+}
+
 async fn bounded_typed_history(
     sessions: &SessionService,
     session_id: SessionId,

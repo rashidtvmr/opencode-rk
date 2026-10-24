@@ -108,6 +108,8 @@ pub enum LifecycleError {
     PersistedTooLarge,
     #[error("invalid persisted MCP state")]
     InvalidPersisted,
+    #[error("MCP runtime cleanup failed")]
+    CleanupFailed,
 }
 
 fn validate_id(id: &str) -> Result<(), LifecycleError> {

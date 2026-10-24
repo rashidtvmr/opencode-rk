@@ -17,8 +17,13 @@ const MAX_ADMISSION_ATTEMPTS: u32 = 5;
 const ADMISSION_BACKOFF_BASE_MS: u64 = 100;
 const MAX_PROVIDER_RETRIES: u32 = 3;
 
-#[derive(Clone, Default)]
-pub(crate) struct Children(Arc<Mutex<BTreeMap<String, Arc<Child>>>>);
+#[derive(Clone)]
+pub(crate) struct Children(Arc<Mutex<BTreeMap<String, Arc<Child>>>>, mcp_http::McpStatusRegistry);
+impl Default for Children { fn default() -> Self { Self(Arc::new(Mutex::new(BTreeMap::new())), mcp_http::McpStatusRegistry::new()) } }
+impl Children {
+    pub(crate) fn with_mcp(registry: mcp_http::McpStatusRegistry) -> Self { Self(Arc::new(Mutex::new(BTreeMap::new())), registry) }
+    pub(crate) fn mcp_registry(&self) -> mcp_http::McpStatusRegistry { self.1.clone() }
+}
 
 struct Child {
     parent: SessionId,
@@ -859,7 +864,15 @@ async fn execute_inner(state: AppState, children: Children, events: event_bus::E
     } else {
         // Serialize registration with a short reservation before any child turn.
         if children.0.lock().map_err(|_| ApiFailure::internal("child registry unavailable"))?.len() >= MAX_CHILDREN { return Err(ApiFailure::too_many_requests("child registry is full; durable child histories are preserved")); }
+        // A new child inherits the parent's session-effective MCP selection.
+        // Persist it before registering or spawning the child so discovery on
+        // its first provider request cannot restore parent-excluded tools.
+        let mcp_exclusions = state.sessions.mcp_exclusions(parent.session_id).await.map_err(ApiFailure::internal)?;
         let summary = state.sessions.create_in_directory(format!("{description} (@{canonical} subagent)"), Some(workdir.to_owned())).await.map_err(ApiFailure::internal)?;
+        for server in mcp_exclusions {
+            state.sessions.set_mcp_included(summary.id, server, false).await.map_err(ApiFailure::internal)?;
+        }
+        if parent.is_cancelled() { return Err(ApiFailure::bad_request("task cancelled")); }
         // A configured prompt/model override wins, but a built-in role never
         // loses its enforced read-only policy through configuration.
         let configured_prompt = config.and_then(|v| v["prompt"].as_str()).map(str::to_owned);

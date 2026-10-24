@@ -1,6 +1,7 @@
 //! Session lifecycle over the format-2 workspace schema (primary) plus the
 //! legacy format-1 [`SessionService`] kept for the server/CLI boundary.
 #![forbid(unsafe_code)]
+pub use opencode_rk_storage::session_todos::{Todo, TodoPriority, TodoStatus, validate as validate_todos};
 pub mod app_history;
 pub mod auto_compact;
 pub mod auto_lease;
@@ -69,6 +70,7 @@ use thiserror::Error;
 pub type SessionRecord = SessionSummary;
 pub use opencode_rk_contracts::MessageRole as Role;
 pub use opencode_rk_storage::{HistoryItem, ToolCallAdmission, ToolRound};
+pub use opencode_rk_storage::session_compaction::CompactionCheckpoint;
 const ACTIVE: i64 = 0;
 const ARCHIVED: i64 = 1;
 const PAGE_MAX: usize = 500;
@@ -341,6 +343,13 @@ pub struct SessionService {
     workspace_catalog_path: Option<Arc<PathBuf>>,
 }
 
+fn todo_error(error: SessionError) -> SessionError {
+    match error {
+        SessionError::Storage(StorageError::SessionNotFound(id)) => SessionError::NotFound(id),
+        other => other,
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct WorkspaceSummary {
     pub id: [u8; 16],
@@ -351,6 +360,39 @@ pub struct WorkspaceSummary {
 }
 
 impl SessionService {
+    pub async fn memory_exclusions(&self, id: SessionId) -> Result<Vec<String>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.memory_exclusions(id)).await.map_err(todo_error)
+    }
+
+    pub async fn set_memory_included(&self, id: SessionId, path: String, included: bool) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.set_memory_included(id, &path, included)).await.map_err(todo_error)
+    }
+    pub async fn mcp_exclusions(&self, id: SessionId) -> Result<Vec<String>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.mcp_exclusions(id)).await.map_err(todo_error)
+    }
+    pub async fn set_mcp_included(&self, id: SessionId, server: String, included: bool) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.set_mcp_included(id, &server, included)).await.map_err(todo_error)
+    }
+    pub async fn todos(&self, id: SessionId) -> Result<Vec<opencode_rk_storage::session_todos::Todo>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.session_todos(id)).await.map_err(todo_error)
+    }
+
+    pub async fn replace_todos(&self, id: SessionId, todos: Vec<opencode_rk_storage::session_todos::Todo>) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.replace_session_todos(id, &todos)).await.map_err(todo_error)
+    }
+
+    /// Perform the complete replacement in an already-owned blocking worker.
+    /// Callers can hold a synchronous effect gate around the transaction; this
+    /// method must never be called on a Tokio runtime thread.
+    pub fn replace_todos_blocking(&self, id: SessionId, todos: &[opencode_rk_storage::session_todos::Todo]) -> Result<(), SessionError> {
+        self.storage.replace_session_todos(id, todos).map_err(|error| todo_error(SessionError::from(error)))
+    }
     #[must_use]
     pub fn new(storage: Arc<Storage>) -> Self {
         Self {
@@ -570,6 +612,38 @@ impl SessionService {
             Ok(items)
         })
         .await
+    }
+
+    pub async fn compaction_checkpoint(&self, session_id: SessionId) -> Result<Option<CompactionCheckpoint>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.compaction_checkpoint(session_id)).await
+    }
+
+    pub async fn bounded_history_after(&self, session_id: SessionId, boundary: MessageId, max_provider_items: usize, max_provider_bytes: usize) -> Result<Vec<HistoryItem>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || {
+            let mut items = storage.bounded_history_after(session_id, boundary, max_provider_items, max_provider_bytes)?;
+            for item in &mut items {
+                if let HistoryItem::Message(message) = item {
+                    if let PayloadRef::Blob { hash, .. } = &message.body {
+                        let bytes = storage.blob_store().get_bounded(hash, max_provider_bytes)?;
+                        message.body = PayloadRef::Inline { text: String::from_utf8(bytes).map_err(|_| StorageError::TypedHistoryIdentity)? };
+                    }
+                }
+            }
+            Ok(items)
+        }).await
+    }
+
+    pub async fn save_compaction_checkpoint(&self, session_id: SessionId, checkpoint: CompactionCheckpoint) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.save_compaction_checkpoint(session_id, &checkpoint)).await
+    }
+
+    /// Commit inside an already-owned blocking worker so the caller can hold
+    /// its synchronous cancellation/effect gate through the transaction.
+    pub fn save_compaction_checkpoint_blocking(&self, session_id: SessionId, checkpoint: &CompactionCheckpoint) -> Result<(), SessionError> {
+        self.storage.save_compaction_checkpoint(session_id, checkpoint).map_err(SessionError::from)
     }
     pub async fn append_assistant_with_reasoning(
         &self,

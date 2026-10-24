@@ -31,6 +31,7 @@ pub enum ServerEvent {
         duration_ms: u64,
     },
     PermissionRequested(String),
+    TodoUpdated { session: SessionId, todos: Vec<opencode_rk_sessions::Todo> },
     Shutdown,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -39,6 +40,7 @@ pub enum EventKind {
     MessageAppended,
     ToolExecuted,
     PermissionRequested,
+    TodoUpdated,
     Shutdown,
 }
 impl ServerEvent {
@@ -49,6 +51,7 @@ impl ServerEvent {
             Self::MessageAppended { .. } | Self::MessageStored { .. } => EventKind::MessageAppended,
             Self::ToolExecuted { .. } => EventKind::ToolExecuted,
             Self::PermissionRequested(_) => EventKind::PermissionRequested,
+            Self::TodoUpdated { .. } => EventKind::TodoUpdated,
             Self::Shutdown => EventKind::Shutdown,
         }
     }
@@ -57,12 +60,14 @@ impl ServerEvent {
 pub enum BusError {
     Full,
     Closed,
+    InvalidPayload,
 }
 impl fmt::Display for BusError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Full => write!(f, "event bus full"),
             Self::Closed => write!(f, "subscriber closed"),
+            Self::InvalidPayload => write!(f, "event payload exceeds its supported bounds"),
         }
     }
 }
@@ -141,6 +146,11 @@ impl EventBus {
         self.inner.seq.fetch_add(1, Ordering::Relaxed) + 1
     }
     pub fn publish(&self, event: ServerEvent) -> Result<(), BusError> {
+        // Internal publishers must obey the same collection bound as HTTP
+        // callers, before cloning a potentially large payload for subscribers.
+        if let ServerEvent::TodoUpdated { todos, .. } = &event {
+            opencode_rk_sessions::validate_todos(todos).map_err(|_| BusError::InvalidPayload)?;
+        }
         let mut guard = self.inner.subs.lock().unwrap();
         // Allocate the stable publication identity ONCE, before fanout: every
         // subscriber receives this same `id`/payload (the HTTP wire layer

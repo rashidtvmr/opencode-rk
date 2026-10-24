@@ -103,6 +103,7 @@ pub fn wire_event(published: &Published) -> (String, String) {
         // No credentials/request text in event bodies: permission requests are
         // surfaced by type only, keeping the stream free of secret echo.
         ServerEvent::PermissionRequested(_) => ("permission.requested", json!({})),
+        ServerEvent::TodoUpdated { session, todos } => ("todo.updated", json!({"session":session,"todos":todos})),
         ServerEvent::Shutdown => ("server.instance.disposed", json!({})),
     };
     let id = format!("ev-{}", published.id);

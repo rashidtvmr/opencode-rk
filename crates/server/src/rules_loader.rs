@@ -7,7 +7,7 @@
 #![forbid(unsafe_code)]
 
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 
 /// Maximum number of rule files to load.
@@ -167,7 +167,12 @@ pub fn load_rules(workspace_root: &Path) -> Result<RulesSnapshot, RulesError> {
 
     for path in &candidates {
         let canon = canonicalize_reject_escape(workspace_root, path)?;
-        let raw = fs::read(&canon)?;
+        // Enforce the byte limit while reading, before allocating file-sized
+        // memory. The extra byte distinguishes a full valid file from oversize.
+        let mut raw = Vec::new();
+        fs::File::open(&canon)?
+            .take((MAX_FILE_BYTES + 1) as u64)
+            .read_to_end(&mut raw)?;
         if raw.len() > MAX_FILE_BYTES {
             // Skip oversized files — still count toward file limit but not budget.
             continue;
@@ -183,7 +188,7 @@ pub fn load_rules(workspace_root: &Path) -> Result<RulesSnapshot, RulesError> {
         total_bytes += body.len();
 
         entries.push(RuleEntry {
-            path: path.clone(),
+            path: canon,
             glob,
             bytes: body,
         });

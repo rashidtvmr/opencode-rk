@@ -115,6 +115,8 @@ pub enum StorageError {
     ArtifactLimitExceeded,
     #[error("artifact metadata is invalid")]
     InvalidArtifact,
+    #[error("todo collection is invalid or exceeds its supported bounds")]
+    InvalidTodo,
     #[error("payload exceeds inline limit and must be stored as a blob")]
     InlinePayloadTooLarge,
     #[error("event payload exceeds {MAX_EVENT_PAYLOAD_BYTES} bytes")]
@@ -177,6 +179,10 @@ pub struct Storage {
     blobs: BlobStore,
     max_events_per_session: usize,
 }
+pub mod session_todos;
+mod session_memory;
+pub mod session_mcp;
+pub mod session_compaction;
 impl Storage {
     pub fn open(paths: StoragePaths) -> Result<Self, StorageError> {
         fs::create_dir_all(&paths.root)?;
@@ -445,11 +451,44 @@ impl Storage {
         max_provider_items: usize,
         max_provider_bytes: usize,
     ) -> Result<Vec<HistoryItem>, StorageError> {
+        self.bounded_history_from(session_id, None, max_provider_items, max_provider_bytes)
+    }
+
+    fn bounded_history_from(
+        &self,
+        session_id: SessionId,
+        boundary: Option<MessageId>,
+        max_provider_items: usize,
+        max_provider_bytes: usize,
+    ) -> Result<Vec<HistoryItem>, StorageError> {
         if max_provider_items == 0 || max_provider_bytes == 0 {
             return Ok(Vec::new());
         }
         let mut connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let tx = connection.transaction_with_behavior(TransactionBehavior::Deferred)?;
+        let boundary_rowid = match boundary {
+            Some(id) => tx.query_row(
+                "SELECT rowid FROM messages WHERE session_id=?1 AND id=?2",
+                params![session_id.to_string(), id.to_string()], |row| row.get::<_, i64>(0),
+            ).optional()?.ok_or(StorageError::MessageNotFound(id))?,
+            None => 0,
+        };
+        if boundary.is_some() {
+            // A checkpoint cannot divide a typed round. A tool display row in
+            // the tail must have its owning turn and every paired row there too.
+            let crosses: bool = tx.query_row(
+                "SELECT EXISTS(SELECT 1 FROM tool_rounds r
+                 JOIN messages turn ON turn.id=r.turn_message_id
+                 JOIN typed_tool_records t ON t.round_id=r.round_id
+                 LEFT JOIN messages display ON display.id=t.message_id
+                 WHERE r.session_id=?1 AND
+                   (turn.session_id!=r.session_id OR display.session_id IS NULL OR display.session_id!=r.session_id
+                    OR (turn.rowid<=?2 AND display.rowid>?2)
+                    OR (turn.rowid>?2 AND display.rowid<=?2)))",
+                params![session_id.to_string(), boundary_rowid], |row| row.get(0),
+            )?;
+            if crosses { return Err(StorageError::TypedHistoryIncomplete); }
+        }
         let header_limit = i64::try_from(
             max_provider_items
                 .checked_add(1)
@@ -457,10 +496,10 @@ impl Storage {
         )
         .map_err(|_| StorageError::TypedHistoryLimit)?;
         let mut headers = tx.prepare(
-            "SELECT rowid,length(CAST(round_id AS BLOB)),expected_pairs FROM tool_rounds WHERE session_id=?1 ORDER BY created_at,round_id LIMIT ?2",
+            "SELECT rowid,length(CAST(round_id AS BLOB)),expected_pairs FROM tool_rounds WHERE session_id=?1 AND (?3=0 OR turn_message_id IN (SELECT id FROM messages WHERE session_id=?1 AND rowid>?3)) ORDER BY created_at,round_id LIMIT ?2",
         )?;
         let header_rows =
-            headers.query_map(params![session_id.to_string(), header_limit], |row| {
+            headers.query_map(params![session_id.to_string(), header_limit, boundary_rowid], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
@@ -530,7 +569,7 @@ impl Storage {
         drop(headers);
         let mut messages = tx.prepare(
             "SELECT rowid,length(CAST(id AS BLOB)),length(CAST(role AS BLOB)),length(CAST(inline_text AS BLOB)),blob_hash IS NOT NULL,byte_len
-             FROM messages WHERE session_id=?1 ORDER BY rowid LIMIT ?2",
+             FROM messages WHERE session_id=?1 AND rowid>?3 ORDER BY rowid LIMIT ?2",
         )?;
         let lim = i64::try_from(
             max_provider_items
@@ -538,7 +577,7 @@ impl Storage {
                 .ok_or(StorageError::TypedHistoryLimit)?,
         )
         .map_err(|_| StorageError::TypedHistoryLimit)?;
-        let rows = messages.query_map(params![session_id.to_string(), lim], |row| {
+        let rows = messages.query_map(params![session_id.to_string(), lim, boundary_rowid], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, i64>(1)?,
@@ -764,6 +803,13 @@ impl Storage {
         drop(messages);
         tx.commit()?;
         Ok(result)
+    }
+
+    /// Apply the original typed-history validator to rows strictly after a
+    /// same-session checkpoint, filtering both round headers and messages
+    /// before their admission limits are applied.
+    pub fn bounded_history_after(&self, session_id: SessionId, boundary: MessageId, max_provider_items: usize, max_provider_bytes: usize) -> Result<Vec<HistoryItem>, StorageError> {
+        self.bounded_history_from(session_id, Some(boundary), max_provider_items, max_provider_bytes)
     }
 
     pub fn create_session(&self, session: &SessionSummary) -> Result<(), StorageError> {
@@ -1412,6 +1458,12 @@ impl Storage {
         })
     }
     fn migrate(connection: &Connection) -> Result<(), StorageError> {
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS session_todos(
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            ordinal INTEGER NOT NULL CHECK(ordinal BETWEEN 0 AND 99),
+            payload TEXT NOT NULL CHECK(length(CAST(payload AS BLOB)) BETWEEN 1 AND 8192),
+            PRIMARY KEY(session_id,ordinal)
+        );")?;
         connection.execute_batch("CREATE TABLE IF NOT EXISTS schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); CREATE TABLE IF NOT EXISTS sessions(id TEXT PRIMARY KEY,title TEXT NOT NULL,state TEXT NOT NULL CHECK(state IN ('active','archived')),created_at TEXT NOT NULL,updated_at TEXT NOT NULL,archived_at TEXT); CREATE INDEX IF NOT EXISTS sessions_updated_idx ON sessions(updated_at DESC); CREATE TABLE IF NOT EXISTS messages(id TEXT PRIMARY KEY,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,role TEXT NOT NULL,inline_text TEXT,blob_hash TEXT,byte_len INTEGER NOT NULL CHECK(byte_len>=0),created_at TEXT NOT NULL,CHECK((inline_text IS NULL)!=(blob_hash IS NULL))); CREATE INDEX IF NOT EXISTS messages_session_idx ON messages(session_id,created_at,id); CREATE TABLE IF NOT EXISTS message_activity(message_id TEXT PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,reasoning_summary TEXT NOT NULL CHECK(length(CAST(reasoning_summary AS BLOB))<=8192)); CREATE TABLE IF NOT EXISTS recent_events(seq INTEGER PRIMARY KEY AUTOINCREMENT,session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,kind TEXT NOT NULL,payload_json TEXT NOT NULL,created_at TEXT NOT NULL); CREATE INDEX IF NOT EXISTS recent_events_session_idx ON recent_events(session_id,seq); INSERT INTO schema_meta(key,value) VALUES('schema_version','1') ON CONFLICT(key) DO UPDATE SET value=excluded.value;")?;
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS draft_attachments(
@@ -1456,6 +1508,25 @@ impl Storage {
         );",
         )?;
         Self::migrate_typed_history(connection)?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS session_memory_exclusions(
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            path TEXT NOT NULL CHECK(length(CAST(path AS BLOB)) BETWEEN 1 AND 4096),
+            PRIMARY KEY(session_id,path)
+        );")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS session_mcp_exclusions(
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            server_name TEXT NOT NULL CHECK(length(CAST(server_name AS BLOB)) BETWEEN 1 AND 64),
+            PRIMARY KEY(session_id,server_name)
+        );")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS session_compaction_checkpoints(
+            session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+            boundary_message_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+            provider_id TEXT NOT NULL CHECK(length(CAST(provider_id AS BLOB)) BETWEEN 1 AND 128),
+            model_id TEXT NOT NULL CHECK(length(CAST(model_id AS BLOB)) BETWEEN 1 AND 512),
+            window_json TEXT NOT NULL CHECK(length(CAST(window_json AS BLOB)) BETWEEN 1 AND 1048576),
+            window_bytes INTEGER NOT NULL CHECK(window_bytes BETWEEN 1 AND 1048576),
+            created_at TEXT NOT NULL
+        );")?;
         Ok(())
     }
 

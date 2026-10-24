@@ -46,6 +46,9 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 
 use crate::ApiFailure;
+#[path = "mcp_runtime.rs"]
+pub mod mcp_runtime;
+use self::mcp_runtime::{LocalConfig, McpRuntime};
 
 /// Hard cap on one `POST /api/mcp` request body, in bytes.
 pub(crate) const MAX_ADD_BODY_BYTES: usize = 16 * 1024;
@@ -72,10 +75,12 @@ const CONFIG_BOUNDS: ConfigBounds = ConfigBounds {
 /// MCP config. Never serialized: `status_map` projects lifecycle state only,
 /// so `command`, `args` and `env` never leave this struct — no response,
 /// event, or file can contain them.
+#[derive(Clone)]
 struct StoredLocalConfig {
     command: String,
     args: Vec<String>,
     env: HashMap<String, String>,
+    enabled: bool,
 }
 
 /// Stable, secret-free error code emitted when a stored lifecycle code is
@@ -95,9 +100,6 @@ const ALLOWED_PAYLOAD_FIELDS: [&str; 2] = ["name", "config"];
 /// Stable 501 detail: upstream `type:"remote"` config.
 const UNSUPPORTED_REMOTE: &str =
     "type \"remote\" is not supported; only explicitly disabled local configs can be registered";
-/// Stable 501 detail: explicit `enabled: true`.
-const UNSUPPORTED_ENABLED_TRUE: &str =
-    "enabled must be false; \"enabled\":true is not supported by this daemon build";
 /// Stable 501 detail: omitted `enabled` (upstream default = enabled).
 const UNSUPPORTED_ENABLED_DEFAULT: &str =
     "enabled is required and must be false; omitting it means enabled upstream and is not accepted";
@@ -109,6 +111,8 @@ struct RegistryState {
     /// response, event, or file. Contains `env`/`command`, so it must never
     /// leave this struct.
     configs: HashMap<String, StoredLocalConfig>,
+    runtimes: HashMap<String, McpRuntime>,
+    epochs: HashMap<String, u64>,
 }
 
 /// Daemon-owned bounded MCP status registry for one router/instance.
@@ -138,15 +142,83 @@ impl McpStatusRegistry {
     async fn add(&self, name: &str, config: StoredLocalConfig) -> Result<(), LifecycleError> {
         let mut guard = self.inner.lock().await;
         guard.lifecycle.add(name)?;
+        if config.enabled {
+            guard.lifecycle.set_enabled(name, true)?;
+        }
         guard.configs.insert(name.to_owned(), config);
+        guard.epochs.insert(name.to_owned(), 0);
         Ok(())
+    }
+
+    async fn connect(&self, name: &str) -> Result<(), String> {
+        let (config, epoch) = {
+            let mut guard = self.inner.lock().await;
+            let config = guard.configs.get(name).cloned().ok_or_else(|| "unknown MCP server".to_owned())?;
+            let epoch = guard.epochs.get(name).copied().unwrap_or(0).saturating_add(1);
+            guard.epochs.insert(name.to_owned(), epoch);
+            (config, epoch)
+        };
+        let runtime = McpRuntime::connect(LocalConfig { command: config.command, args: config.args, environment: config.env }, std::env::current_dir().map_err(|e| e.to_string())?).await.map_err(|e| e.to_string())?;
+        let mut guard = self.inner.lock().await;
+        if guard.epochs.get(name).copied() != Some(epoch) { drop(guard); let _ = runtime.disconnect().await; return Err("MCP connection superseded".into()); }
+        guard.lifecycle.set_enabled(name, true).map_err(|e| e.to_string())?;
+        guard.lifecycle.mark_ready(name).map_err(|e| e.to_string())?;
+        guard.runtimes.insert(name.to_owned(), runtime);
+        Ok(())
+    }
+
+    async fn disconnect(&self, name: &str) -> Result<(), String> {
+        let runtime = {
+            let mut guard = self.inner.lock().await;
+            if guard.lifecycle.get(name).is_none() {
+                return Err("unknown MCP server".into());
+            }
+            let next = guard.epochs.get(name).copied().unwrap_or(0).saturating_add(1);
+            guard.epochs.insert(name.to_owned(), next);
+            guard.runtimes.remove(name)
+        };
+        if let Some(runtime) = runtime { runtime.disconnect().await.map_err(|e| e.to_string())?; }
+        let mut guard = self.inner.lock().await;
+        guard.lifecycle.set_enabled(name, false).map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub(crate) async fn effective_tools(&self, name: &str) -> Vec<self::mcp_runtime::DiscoveredTool> {
+        let guard = self.inner.lock().await;
+        guard.runtimes.get(name).map(|runtime| runtime.tools().to_vec()).unwrap_or_default()
+    }
+
+    pub(crate) async fn connected_names(&self) -> Vec<String> {
+        let guard = self.inner.lock().await;
+        guard.runtimes.keys().cloned().collect()
+    }
+
+    pub(crate) async fn call_tool_checked(&self, server: &str, tool: &str, arguments: Value) -> Result<Value, String> {
+        self.call_tool(server, tool, arguments).await
+    }
+
+    pub(crate) async fn call_tool(&self, name: &str, tool: &str, arguments: Value) -> Result<Value, String> {
+        let runtime = { self.inner.lock().await.runtimes.get(name).cloned() };
+        let Some(runtime) = runtime else { return Err("MCP server is not connected".into()); };
+        runtime.call_tool(tool, arguments).await.map_err(|error| error.to_string())
     }
 
     /// Disable one entry (the only disconnect owned by this package).
     /// Unknown or invalid ids return [`LifecycleError::Unknown`] unchanged.
     pub async fn disable(&self, name: &str) -> Result<(), LifecycleError> {
-        let mut guard = self.inner.lock().await;
-        guard.lifecycle.set_enabled(name, false)?;
+        let runtime = {
+            let mut guard = self.inner.lock().await;
+            if guard.lifecycle.get(name).is_none() {
+                return Err(LifecycleError::Unknown);
+            }
+            let next_epoch = guard.epochs.get(name).copied().unwrap_or(0).saturating_add(1);
+            guard.epochs.insert(name.to_owned(), next_epoch);
+            guard.lifecycle.set_enabled(name, false)?;
+            guard.runtimes.remove(name)
+        };
+        if let Some(runtime) = runtime {
+            runtime.disconnect().await.map_err(|_| LifecycleError::CleanupFailed)?;
+        }
         Ok(())
     }
 
@@ -165,22 +237,27 @@ impl McpStatusRegistry {
             .lifecycle
             .list()
             .into_iter()
-            .map(|entry| (entry.id, project(&entry.state)))
+            .map(|entry| {
+                let enabled = !matches!(entry.state, LifecycleState::Disabled);
+                let tools = guard.runtimes.get(&entry.id).map(|runtime| runtime.tools().iter().map(|tool| json!({"name":tool.name,"description":tool.description,"inputSchema":tool.input_schema})).collect::<Vec<_>>()).unwrap_or_default();
+                let connected = guard.runtimes.contains_key(&entry.id);
+                (entry.id, project(&entry.state, enabled, connected, tools))
+            })
             .collect()
     }
 }
 
 /// Map one lifecycle state to the upstream typed status union.
 ///
-/// `connected` is intentionally absent: it is reported only for a validated
-/// live transport handle, and no such handle source exists in this package.
-/// A `Ready` helper flag alone is never a connection.
-fn project(state: &LifecycleState) -> Value {
+/// Only a successful handshake's owned runtime can establish `connected`;
+/// the lifecycle helper's `Ready` flag alone remains insufficient.
+fn project(state: &LifecycleState, enabled: bool, connected: bool, tools: Vec<Value>) -> Value {
     match state {
-        LifecycleState::Disabled => json!({"status": "disabled"}),
+        LifecycleState::Disabled => json!({"status": "disabled", "enabled": false, "tools": []}),
         LifecycleState::Error { code } => json!({"status": "failed", "error": safe_code(code)}),
+        LifecycleState::Ready if connected => json!({"status": "connected", "enabled": enabled, "tools": tools}),
         LifecycleState::Enabled | LifecycleState::Starting | LifecycleState::Ready => {
-            json!({"status": "failed", "error": NOT_CONNECTED_CODE})
+            json!({"status": "failed", "error": NOT_CONNECTED_CODE, "enabled": enabled, "tools": tools})
         }
     }
 }
@@ -253,7 +330,7 @@ fn config_unsupported(detail: &'static str) -> ApiFailure {
 enum ConfigVerdict {
     /// Explicitly disabled local config, converted to private daemon
     /// storage.
-    DisabledLocal(StoredLocalConfig),
+    Local(StoredLocalConfig),
     /// Upstream-valid but unsupported here → 501, never registered.
     Unsupported(&'static str),
 }
@@ -294,7 +371,7 @@ fn classify_config(raw: &Value) -> Result<ConfigVerdict, ApiFailure> {
     }
     match config.get("enabled") {
         Some(Value::Bool(false)) => {}
-        Some(Value::Bool(true)) => return Ok(ConfigVerdict::Unsupported(UNSUPPORTED_ENABLED_TRUE)),
+        Some(Value::Bool(true)) => {}
         Some(_) => return Err(config_invalid("config.enabled: must be a boolean")),
         None => return Ok(ConfigVerdict::Unsupported(UNSUPPORTED_ENABLED_DEFAULT)),
     }
@@ -349,10 +426,11 @@ fn classify_config(raw: &Value) -> Result<ConfigVerdict, ApiFailure> {
         }
     }
     // Remote/`url` transport is not part of the accepted subset.
-    Ok(ConfigVerdict::DisabledLocal(StoredLocalConfig {
+    Ok(ConfigVerdict::Local(StoredLocalConfig {
         command: executable.to_owned(),
         args,
         env,
+        enabled: config.get("enabled").and_then(Value::as_bool).unwrap_or(false),
     }))
 }
 
@@ -434,7 +512,7 @@ pub(crate) async fn add(
     // Validate the whole boundary before touching the registry: any error
     // above or below leaves the registry byte-for-byte unchanged.
     let config = match classify_config(raw_config)? {
-        ConfigVerdict::DisabledLocal(config) => config,
+        ConfigVerdict::Local(config) => config,
         ConfigVerdict::Unsupported(detail) => return Err(config_unsupported(detail)),
     };
     registry
@@ -467,35 +545,86 @@ pub(crate) async fn disconnect(
     Path(name): Path<String>,
 ) -> Result<Json<Value>, ApiFailure> {
     let name = validate_name(&name)?;
-    registry.disable(name).await.map_err(|error| match error {
-        LifecycleError::Unknown => not_found(),
-        LifecycleError::IdTooLong | LifecycleError::EmptyId => ApiFailure {
-            status: StatusCode::BAD_REQUEST,
-            code: "mcp_name_invalid",
-            message: "name: invalid".to_owned(),
-        },
-        other => ApiFailure {
-            status: StatusCode::CONFLICT,
-            code: "mcp_disconnect_failed",
-            message: format!("disconnect rejected: {other}"),
-        },
-    })?;
+    if !registry.contains(name).await { return Err(not_found()); }
+    registry.disconnect(name).await.map_err(|message| ApiFailure { status: StatusCode::CONFLICT, code: "mcp_disconnect_failed", message })?;
     Ok(Json(json!(true)))
 }
 
-/// `POST /api/mcp/{name}/connect` — explicit unsupported, never a fake
-/// acknowledgement and never a fake `connected` status.
+/// `POST /api/mcp/{name}/connect` — real argv-direct initialize/tools/list.
 pub(crate) async fn connect(
     Extension(registry): Extension<McpStatusRegistry>,
     Path(name): Path<String>,
 ) -> Result<Json<Value>, ApiFailure> {
     let name = validate_name(&name)?;
-    if !registry.contains(name).await {
-        return Err(not_found());
+    if !registry.contains(name).await { return Err(not_found()); }
+    registry.connect(name).await.map_err(|message| ApiFailure { status: StatusCode::BAD_GATEWAY, code: "mcp_connect_failed", message })?;
+    Ok(Json(json!(registry.status_map().await)))
+}
+
+#[cfg(test)]
+mod runtime_disable_red_tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    fn newline_fixture(dir: &std::path::Path) -> String {
+        let path = dir.join("mcp-disable-fixture.sh");
+        let source = r###"#!/bin/sh
+set -eu
+while IFS= read -r request; do
+  id=$(printf '%s' "$request" | sed -n 's/.*"id"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p')
+  case "$request" in
+    *'"method":"initialize"'*)
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"disable-red\",\"version\":\"1\"}}}"
+      ;;
+    *'"method":"tools/list"'*)
+      printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"tools\":[{\"name\":\"disable_probe\",\"description\":\"disable probe\",\"inputSchema\":{\"type\":\"object\"}}]}}"
+      ;;
+  esac
+done
+"###;
+        std::fs::write(&path, source).expect("write disposable MCP fixture");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mut permissions = std::fs::metadata(&path).expect("fixture metadata").permissions();
+            permissions.set_mode(0o700);
+            std::fs::set_permissions(&path, permissions).expect("fixture permissions");
+        }
+        path.to_str().expect("fixture path").to_owned()
     }
-    Err(ApiFailure {
-        status: StatusCode::NOT_IMPLEMENTED,
-        code: "mcp_connect_unsupported",
-        message: "mcp connect is not implemented by this daemon build".to_owned(),
-    })
+
+    #[tokio::test]
+    async fn disable_detaches_runtime_and_rejects_tool_calls() {
+        let directory = tempdir().expect("fixture directory");
+        let command = newline_fixture(directory.path());
+        let registry = McpStatusRegistry::new();
+        registry
+            .add(
+                "disable-red",
+                StoredLocalConfig {
+                    command: "/bin/sh".to_owned(),
+                    args: vec![command],
+                    env: HashMap::new(),
+                    enabled: true,
+                },
+            )
+            .await
+            .expect("register configured fixture");
+        registry.connect("disable-red").await.expect("real MCP handshake");
+        assert_eq!(registry.effective_tools("disable-red").await.len(), 1);
+
+        // RED security contract: disabling must atomically remove the owned
+        // runtime, not merely change the lifecycle projection. A later model
+        // call must fail closed and the child must be detached/reaped.
+        registry
+            .disable("disable-red")
+            .await
+            .expect("disable configured fixture");
+        assert!(registry.effective_tools("disable-red").await.is_empty());
+        assert!(registry
+            .call_tool("disable-red", "disable_probe", json!({}))
+            .await
+            .is_err());
+        assert_eq!(registry.status_map().await["disable-red"]["status"], "disabled");
+    }
 }

@@ -28,4 +28,5 @@ tracing.workspace = true
 [dev-dependencies]
 opencode-rk-storage = { path = "../storage" }
 tempfile.workspace = true
+tokio-util = { workspace = true, features = ["rt"] }
 tower = { version = "0.5", features = ["util"] }

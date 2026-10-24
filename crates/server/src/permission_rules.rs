@@ -26,7 +26,9 @@ pub fn path()->PathBuf {
 }
 pub fn fingerprint(text:&str)->String {blake3::hash(text.as_bytes()).to_hex().to_string()}
 fn valid(rule:&Rule)->bool {
-    matches!(rule.tool.as_str(),"bash"|"shell"|"read"|"write"|"edit"|"glob"|"grep"|"webfetch"|"websearch"|"task")
+    (matches!(rule.tool.as_str(),"bash"|"shell"|"read"|"write"|"edit"|"glob"|"grep"|"webfetch"|"websearch"|"task"|"todowrite")
+        || (rule.tool.starts_with("mcp_") && (5..=64).contains(&rule.tool.len())
+            && rule.tool.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_')))
         && matches!(rule.decision.as_str(),"allow"|"deny"|"ask")
         && matches!(rule.scope.as_str(),"session"|"always")
         && (rule.scope!="session" || rule.session_id.as_deref().is_some_and(|id|id.parse::<opencode_rk_contracts::SessionId>().is_ok()))
