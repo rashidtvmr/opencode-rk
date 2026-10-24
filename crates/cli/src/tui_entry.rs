@@ -4539,13 +4539,11 @@ fn native_loop(
             }
             match byte {
                 6 => {
-                    let width = usize::from(view.presentation().main_width.saturating_sub(4));
-                    view.memory_mut().scroll_content(8, width, renderer.rows() as usize);
+                    view.scroll_memory_content(8);
                     continue;
                 }
                 2 => {
-                    let width = usize::from(view.presentation().main_width.saturating_sub(4));
-                    view.memory_mut().scroll_content(-8, width, renderer.rows() as usize);
+                    view.scroll_memory_content(-8);
                     continue;
                 }
                 13 | 10 => {

@@ -137,6 +137,20 @@ pub struct NativeView {
 mod page_spacing_tests {
     use super::*;
     #[test]
+    fn memory_scroll_uses_the_rendered_panel_viewport_at_normal_and_wide_widths() {
+        for width in [100, 180] {
+            let mut view = NativeView::new(width, 30);
+            view.open_page(Page::Memory);
+            let content = format!("{}\nFINAL_MEMORY_LINE", "instruction line\n".repeat(100));
+            view.load_memory(&serde_json::json!({"sources":[{
+                "path":"/fixture/AGENTS.md","content":content,"included":true,"reason":null
+            }]}).to_string()).unwrap();
+            view.scroll_memory_content(isize::MAX);
+            let frame = view.render("preserved draft", &[], false, &[]).join("\n");
+            assert!(frame.contains("FINAL_MEMORY_LINE"), "last source line is unreachable at width {width}");
+        }
+    }
+    #[test]
     fn every_page_has_outer_space_heading_hierarchy_and_selected_row_roles() {
         for page in [Page::Sessions, Page::Help, Page::Models, Page::Providers, Page::Agents,
             Page::Workspaces, Page::Status, Page::Mcp, Page::Diff, Page::Context, Page::Commands, Page::Memory] {
@@ -753,6 +767,14 @@ impl NativeView {
     pub fn set_memory_error(&mut self, error: &str) { self.memory.set_error(error); }
     pub fn memory_mut(&mut self) -> &mut crate::native_memory::Memory { &mut self.memory }
     pub fn memory(&self) -> &crate::native_memory::Memory { &self.memory }
+    pub fn scroll_memory_content(&mut self, lines: isize) {
+        let Some((_, _, width, height)) = self.page_panel() else { return; };
+        let inset = if width >= 8 { 2 } else { 0 };
+        let vertical = u16::from(height >= 4);
+        self.memory.scroll_content(lines,
+            usize::from(width.saturating_sub(2 * inset)),
+            usize::from(height.saturating_sub(2 * vertical)));
+    }
 
     /// Backend MCP snapshot (`GET /api/mcp`) projected into the right pane.
     pub fn apply_mcp(&mut self, value: &Value) -> Result<(), String> {
