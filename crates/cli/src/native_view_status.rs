@@ -38,6 +38,7 @@ use crate::native_transcript::strip_ansi;
 use crate::native_view_chat::MAX_INPUT_ROW_BYTES;
 use opencode_rk_contracts::SessionId;
 use serde_json::Value;
+use opencode_rk_sessions::{validate_todos, Todo};
 
 /// Maximum MCP entries accepted from one snapshot (daemon registry cap).
 pub const MAX_MCP_ENTRIES: usize = 64;
@@ -49,6 +50,8 @@ pub const MAX_ERROR_CODE_BYTES: usize = 64;
 pub const MAX_FIELD_CHARS: usize = 128;
 /// Hard cap on rows produced by one render.
 pub const MAX_ROWS: usize = 256;
+pub const MAX_TODOS: usize = 100;
+const MAX_TODO_COLLECTION_BYTES: usize = 60 * 1024;
 /// Stable code shown when raw error material is not a safe bounded code.
 const INTERNAL_CODE: &str = "internal";
 /// Honest default while no MCP snapshot has been acknowledged.
@@ -183,6 +186,10 @@ pub struct StatusView {
     mcp_ack: bool,
     /// Bounded reason the newest snapshot was rejected; last good retained.
     mcp_stale: Option<String>,
+    /// Last authenticated persisted todo observation. None is deliberately
+    /// different from Some(empty): an unobserved session must not claim no work.
+    todos: Option<Vec<Todo>>,
+    todos_stale: Option<String>,
     sidebar_offset: usize,
 }
 
@@ -263,6 +270,32 @@ impl StatusView {
                 rows.push((format!("• {} {}{inclusion}", entry.name, entry.status.as_str()), Role::Item, Some(index)));
             }
         }
+        rows.push((String::new(), Role::Description, None));
+        rows.push(("Todos".to_owned(), Role::Heading, None));
+        match &self.todos {
+            None => rows.push(("Loading/Unavailable".to_owned(), Role::Description, None)),
+            Some(todos) if todos.is_empty() => rows.push(("No todos".to_owned(), Role::Description, None)),
+            Some(todos) => {
+                for todo in todos {
+                    let status = match &todo.status {
+                        opencode_rk_sessions::TodoStatus::Pending => "pending",
+                        opencode_rk_sessions::TodoStatus::InProgress => "in progress",
+                        opencode_rk_sessions::TodoStatus::Completed => "done",
+                        opencode_rk_sessions::TodoStatus::Cancelled => "cancelled",
+                    };
+                    let priority = match &todo.priority {
+                        opencode_rk_sessions::TodoPriority::High => "high",
+                        opencode_rk_sessions::TodoPriority::Medium => "medium",
+                        opencode_rk_sessions::TodoPriority::Low => "low",
+                    };
+                    let content = display(Some(&todo.content));
+                    rows.push((format!("[{status}] [{priority}] {content}"), Role::Item, None));
+                }
+            }
+        }
+        if let Some(reason) = &self.todos_stale {
+            rows.push((format!("snapshot stale ({reason})"), Role::Description, None));
+        }
         let maximum = rows.len().min(MAX_ROWS).saturating_sub(height);
         rows.into_iter()
             .take(MAX_ROWS)
@@ -322,6 +355,8 @@ impl StatusView {
     /// row and `messages: Unavailable`.
     pub fn set_session(&mut self, id: Option<String>) {
         self.clear_mcp_inclusion();
+        self.todos = None;
+        self.todos_stale = None;
         self.session = non_empty(id);
         self.session_title = None;
         self.session_message_count = None;
@@ -351,6 +386,8 @@ impl StatusView {
         let session = canonical_session_id(id);
         if self.session != session {
             self.clear_mcp_inclusion();
+            self.todos = None;
+            self.todos_stale = None;
         }
         self.session = session;
         self.session_title = self
@@ -378,6 +415,56 @@ impl StatusView {
             entry.included = None;
         }
     }
+
+    /// Install an authenticated `/todo` response atomically. The envelope and
+    /// collection are bounded before deserialization, then the shared storage
+    /// validator enforces the exact backend model and ordering.
+    pub fn apply_todos(&mut self, value: &Value) -> Result<(), String> {
+        let object = value.as_object().ok_or_else(|| "todo response: root must be object".to_owned());
+        let object = match object { Ok(value) => value, Err(error) => { self.todos_stale = Some(error.clone()); return Err(error); } };
+        if object.len() != 1 || !object.contains_key("todos") {
+            let error = "todo response: unknown or missing field".to_owned();
+            self.todos_stale = Some(error.clone());
+            return Err(error);
+        }
+        let array = match object["todos"].as_array() {
+            Some(array) if array.len() <= MAX_TODOS => array,
+            _ => { let error = "todo response: invalid collection".to_owned(); self.todos_stale = Some(error.clone()); return Err(error); }
+        };
+        // Bound every string before cloning/deserializing or encoding. The
+        // backend's collection budget excludes the transport envelope.
+        if array.iter().any(|item| {
+            let Some(fields) = item.as_object() else { return true; };
+            fields.len() != 4 || [("id",128), ("content",4096), ("status",16), ("priority",8)]
+                .iter().any(|(key, maximum)| fields.get(*key).and_then(Value::as_str)
+                    .is_none_or(|text| text.len() > *maximum))
+        }) {
+            let error = "todo response: invalid bounded fields".to_owned();
+            self.todos_stale = Some(error.clone());
+            return Err(error);
+        }
+        let encoded = serde_json::to_vec(array).map_err(|_| "todo response: invalid JSON".to_owned());
+        let encoded = match encoded { Ok(bytes) if bytes.len() <= MAX_TODO_COLLECTION_BYTES => bytes, _ => { let error = "todo response: exceeds byte budget".to_owned(); self.todos_stale = Some(error.clone()); return Err(error); } };
+        let _ = encoded;
+        let parsed: Result<Vec<Todo>, _> = serde_json::from_value(Value::Array(array.clone()));
+        let todos = match parsed {
+            Ok(todos) if validate_todos(&todos).is_ok() => todos,
+            _ => {
+                let error = "todo response: invalid todo".to_owned();
+                self.todos_stale = Some(error.clone());
+                return Err(error);
+            }
+        };
+        self.todos = Some(todos);
+        self.todos_stale = None;
+        Ok(())
+    }
+
+    pub fn set_todos_error(&mut self, reason: &str) {
+        self.todos_stale = Some(display(Some(reason)));
+    }
+
+    pub fn todos(&self) -> Option<&[Todo]> { self.todos.as_deref() }
 
     pub fn mcp_included(&self, name: &str) -> Option<bool> {
         self.mcp.iter().find(|entry| entry.name == name).and_then(|entry| entry.included)
@@ -847,7 +934,8 @@ fn display(raw: Option<&str>) -> String {
     let Some(raw) = raw else {
         return UNAVAILABLE.to_owned();
     };
-    let cleaned: String = raw
+    let cleaned_source = strip_ansi(raw);
+    let cleaned: String = cleaned_source
         .chars()
         .filter(|c| !c.is_control())
         .take(MAX_FIELD_CHARS)
@@ -1139,6 +1227,66 @@ mod tests {
         let final_rows = view.render_sidebar(38, 8);
         view.scroll_sidebar(3, 8);
         assert_eq!(view.render_sidebar(38, 8), final_rows);
+    }
+
+    #[test]
+    fn todo_projection_matches_the_backend_collection_budget_at_its_exact_limit() {
+        let mut todos = (0..20).map(|index| serde_json::json!({
+            "id":format!("todo-{index}"), "content":"x".repeat(2900),
+            "status":"pending", "priority":"medium"
+        })).collect::<Vec<_>>();
+        let used = serde_json::to_vec(&todos).unwrap().len();
+        let mut remaining = MAX_TODO_COLLECTION_BYTES - used;
+        for todo in &mut todos {
+            let content = todo["content"].as_str().unwrap();
+            let add = remaining.min(4096 - content.len());
+            todo["content"] = Value::String(format!("{content}{}", "x".repeat(add)));
+            remaining -= add;
+        }
+        assert_eq!(remaining, 0);
+        assert_eq!(serde_json::to_vec(&todos).unwrap().len(), MAX_TODO_COLLECTION_BYTES);
+        let typed: Vec<Todo> = serde_json::from_value(Value::Array(todos.clone())).unwrap();
+        validate_todos(&typed).expect("the exact collection bound is accepted by storage");
+        let mut view = StatusView::default();
+        view.apply_todos(&json!({"todos":todos})).expect("the UI must accept every backend-valid collection, including envelope overhead");
+        assert_eq!(view.todos(), Some(typed.as_slice()));
+    }
+
+    #[test]
+    fn persisted_todos_preserve_order_statuses_and_atomic_invalid_refreshes() {
+        let mut view = StatusView::default();
+        let expected = json!({"todos":[
+            {"id":"z","content":"Inspect persisted payload","status":"in_progress","priority":"high"},
+            {"id":"a","content":"Keep declared order","status":"completed","priority":"low"}
+        ]});
+        view.apply_todos(&expected).unwrap();
+        let rows = view.render_sidebar(120, 40);
+        let z = rows.iter().position(|row| row.contains("Inspect persisted payload")).unwrap();
+        let a = rows.iter().position(|row| row.contains("Keep declared order")).unwrap();
+        assert!(z < a);
+        assert!(rows[z].contains("progress") && rows[z].contains("high"));
+        assert!(rows[a].contains("completed") || rows[a].contains("done"));
+        let previous = view.todos().unwrap().to_vec();
+        for invalid in [json!({"todos":null}), json!({"todos":[],"extra":true}),
+            json!({"todos":[{"id":"x","content":"Bad status","status":"invented","priority":"low"}]})] {
+            assert!(view.apply_todos(&invalid).is_err());
+            assert_eq!(view.todos(), Some(previous.as_slice()));
+        }
+        view.set_session_binding(Some(SessionId::new().to_string()), Some("Another session".into()), Some(0));
+        assert!(view.todos().is_none());
+        view.apply_todos(&json!({"todos":[]})).unwrap();
+        assert!(view.render_sidebar(38, 30).join("\n").contains("No todos"));
+    }
+
+    #[test]
+    fn todo_identifiers_do_not_push_the_task_and_status_out_of_the_sidebar() {
+        let mut view = StatusView::default();
+        view.apply_todos(&json!({"todos":[{
+            "id":"i".repeat(128), "content":"Readable task", "status":"pending", "priority":"low"
+        }]})).unwrap();
+        let rows = view.render_sidebar(38, 30);
+        let line = rows.iter().find(|row| row.contains("Readable task")).expect("task content must remain visible regardless of ID length");
+        assert!(line.contains("pending"));
     }
 
     #[test]
@@ -1600,3 +1748,11 @@ mod tests {
         assert!(rows.contains(&"session: Chat (live)".to_owned()));
     }
 }
+    #[test]
+    fn sidebar_reports_unobserved_todos_without_claiming_an_empty_collection() {
+        let view = StatusView::default();
+        let rows = view.render_sidebar(38, 30);
+        let heading = rows.iter().position(|row| row == "Todos").expect("session sidebar must expose persisted todos");
+        assert!(rows[heading + 1].contains("Unavailable"));
+        assert!(!rows[heading + 1].contains("No todos"));
+    }

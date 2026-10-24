@@ -1839,6 +1839,9 @@ fn bind_session(
     if let Err(error) = refresh_session_mcp(view, &snapshot, auth) {
         append_transcript(transcript, format!("error: session mcp unavailable: {error}"));
     }
+    if let Err(error) = refresh_session_todos(view, &snapshot, auth) {
+        append_transcript(transcript, format!("error: session todos unavailable: {error}"));
+    }
     Ok((snapshot, draft))
 }
 
@@ -1852,6 +1855,19 @@ fn refresh_session_mcp(
     let body = http_request(&snapshot.origin, "GET", &path, None, auth)?;
     let value = serde_json::from_str(&body).map_err(|error| format!("invalid MCP response: {error}"))?;
     view.apply_mcp(&value)
+}
+
+#[cfg(feature = "native")]
+fn refresh_session_todos(
+    view: &mut crate::native_view::NativeView,
+    snapshot: &LiveSnapshot,
+    auth: Option<&str>,
+) -> Result<(), String> {
+    let path = format!("/api/sessions/{}/todo", snapshot.session_id);
+    let body = http_request(&snapshot.origin, "GET", &path, None, auth)?;
+    let value: serde_json::Value = serde_json::from_str(&body)
+        .map_err(|error| format!("invalid todo response: {error}"))?;
+    view.apply_todos(&value)
 }
 
 /// Authenticated `GET /api/sessions` → `PageRow`s for the open Sessions
@@ -2634,6 +2650,7 @@ fn native_loop(
     }
     let mut children_panel = crate::native_children::Panel::default();
     let mut children_refresh = Instant::now();
+    let mut todos_refresh = Instant::now();
     let mut appearance = crate::native_appearance::AppearanceEditor::new(
         crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
     );
@@ -2739,6 +2756,9 @@ fn native_loop(
         // session the global registry remains a status-only fallback.
         if let Err(error) = refresh_session_mcp(&mut view, snapshot, auth) {
             append_transcript(&mut transcript, format!("error: session mcp unavailable: {error}"));
+        }
+        if let Err(error) = refresh_session_todos(&mut view, snapshot, auth) {
+            view.set_todos_error(&error);
         }
     }
     view.set_page_rows(crate::native_view::initial_page_rows(live.is_some()));
@@ -2987,6 +3007,17 @@ fn native_loop(
                 let _ = tx.blocking_send((files, catalogue));
             }));
         }
+        if todos_refresh.elapsed() >= Duration::from_millis(500)
+            && view.presentation().sidebar_offset.is_some()
+        {
+            todos_refresh = Instant::now();
+            if let Some(snapshot) = live.as_ref() {
+                if let Err(error) = refresh_session_todos(&mut view, snapshot, auth) {
+                    view.set_todos_error(&error);
+                }
+                needs_paint = true;
+            }
+        }
         if children_panel.open && children_refresh.elapsed() >= Duration::from_millis(750) {
             children_refresh = Instant::now();
             if let Some(snapshot) = live.as_ref() {
@@ -3166,6 +3197,13 @@ fn native_loop(
                                     model: None,
                                 },
                             );
+                            if name == "todowrite" {
+                                if let Some(snapshot) = live.as_ref() {
+                                    if let Err(error) = refresh_session_todos(&mut view, snapshot, auth) {
+                                        append_transcript(&mut transcript, format!("error: session todos unavailable: {error}"));
+                                    }
+                                }
+                            }
                         }
                         native_turn::Event::Assistant(text) => {
                             turn_succeeded = true;
@@ -3220,6 +3258,9 @@ fn native_loop(
                             );
                             if let Err(error) = refresh_session_mcp(&mut view, &snapshot, auth) {
                                 append_transcript(&mut transcript, format!("error: session mcp unavailable: {error}"));
+                            }
+                            if let Err(error) = refresh_session_todos(&mut view, &snapshot, auth) {
+                                append_transcript(&mut transcript, format!("error: session todos unavailable: {error}"));
                             }
                             if turn_succeeded && !history_browsing {
                                 transcript.reset(

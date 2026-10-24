@@ -879,6 +879,17 @@ impl NativeView {
         Ok(())
     }
 
+    pub fn apply_todos(&mut self, value: &Value) -> Result<(), String> {
+        let result = self.status.apply_todos(value);
+        self.mcp_hit.clear();
+        result
+    }
+
+    pub fn set_todos_error(&mut self, reason: &str) {
+        self.status.set_todos_error(reason);
+        self.mcp_hit.clear();
+    }
+
     pub fn mcp_sidebar_action(&self, x: u16, y: u16) -> Option<(String, bool)> {
         if self.presentation().sidebar_offset.is_none()
             || self.dialogs.intercepts_input() || self.command_palette_open() {
@@ -2487,13 +2498,16 @@ mod footer_layout_tests {
         let mut view = NativeView::new(120, 20);
         view.set_session_route(true);
         view.toggle_sidebar();
+        let idle = view.render_typed("draft", &[], false, &[]);
         let rows = view.render_typed("draft", &[], true, &[]);
         let right_start = usize::from(view.presentation().sidebar_offset.expect("toggled sidebar"));
         assert!(
-            rows.iter().all(|row| {
-                !row.chars().enumerate().any(|(x, ch)| x >= right_start && ch == 'T')
-            }),
-            "Thinking must not paint behind/inside the narrow right overlay"
+            rows.iter()
+                .zip(idle.iter())
+                .all(|(busy_row, idle_row)| {
+                    busy_row.chars().skip(right_start).eq(idle_row.chars().skip(right_start))
+                }),
+            "busy Thinking must not paint or alter any cell in the narrow right overlay"
         );
         assert!(
             rows.iter().any(|row| {
