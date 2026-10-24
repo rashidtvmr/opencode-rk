@@ -16,6 +16,8 @@ pub const MAX_RESPONSES_INPUT_MESSAGES: usize = 100;
 pub const MAX_RESPONSES_INPUT_BYTES: usize = 512 * 1024;
 /// Hard cap on one upstream HTTP response body.
 pub const MAX_RESPONSES_BODY_BYTES: usize = 1024 * 1024;
+/// Hard cap on returned items in a standalone compacted context window.
+pub const MAX_RESPONSES_COMPACT_OUTPUT_ITEMS: usize = 128;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -61,6 +63,13 @@ pub enum ResponsesItem {
         call_id: String,
         output: String,
     },
+    /// Opaque provider-owned state returned by native Responses compaction.
+    ///
+    /// The encrypted content is intentionally never interpreted locally.
+    Compaction {
+        id: String,
+        encrypted_content: String,
+    },
 }
 
 impl From<ResponsesInput> for ResponsesItem {
@@ -99,6 +108,16 @@ impl Serialize for ResponsesItem {
                 map.serialize_entry("type", "function_call_output")?;
                 map.serialize_entry("call_id", call_id)?;
                 map.serialize_entry("output", output)?;
+                map.end()
+            }
+            ResponsesItem::Compaction {
+                id,
+                encrypted_content,
+            } => {
+                let mut map = serializer.serialize_map(Some(3))?;
+                map.serialize_entry("type", "compaction")?;
+                map.serialize_entry("id", id)?;
+                map.serialize_entry("encrypted_content", encrypted_content)?;
                 map.end()
             }
         }
@@ -552,11 +571,123 @@ pub struct OpenAiResponsesStream {
     buffered_loaded: bool,
 }
 
-/// Validated complete Responses result, adapted to the same typed event
-/// protocol used by streaming providers. No events escape before validation.
+/// Validated, canonical context window returned by standalone compaction.
+/// Output items stay opaque so message IDs, multimodal content, tool metadata,
+/// future fields, and provider-owned encrypted state survive unchanged.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ResponsesCompactionWindow {
+    /// Compact response ID, as returned by the API.
+    pub id: String,
+    /// Unix creation timestamp reported by the compact endpoint.
+    pub created_at: u64,
+    /// Provider-reported usage metadata, unchanged when present.
+    pub usage: Option<Value>,
+    /// Canonical compacted input window. Preserve every item and its order.
+    pub output: Vec<Value>,
+}
+
+impl ResponsesCompactionWindow {
+    /// Consume the response into the canonical next input window.
+    pub fn into_output(self) -> Vec<Value> {
+        self.output
+    }
+}
+
+fn compaction_continuation_payload(
+    model: &str,
+    reasoning_effort: &str,
+    window: &ResponsesCompactionWindow,
+    tail: &[ResponsesItem],
+    tools: &[ResponsesTool],
+    stream: bool,
+) -> Result<Value, ResponsesError> {
+    let envelope = json!({
+        "id": &window.id,
+        "object": "response.compaction",
+        "created_at": window.created_at,
+        "usage": &window.usage,
+        "output": &window.output,
+    });
+    let encoded = serde_json::to_vec(&envelope)
+        .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+    parse_compaction_window(&encoded)?;
+
+    let mut input = window.output.clone();
+    input.extend(
+        tail.iter()
+            .map(serde_json::to_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?,
+    );
+    responses_request_payload(model, reasoning_effort, &input, tools, stream)
+}
+
+fn parse_compaction_window(body: &[u8]) -> Result<ResponsesCompactionWindow, ResponsesError> {
+    if body.len() > MAX_RESPONSES_BODY_BYTES {
+        return Err(ResponsesError::ResponseTooLarge {
+            max: MAX_RESPONSES_BODY_BYTES,
+        });
+    }
+    let value: Value = serde_json::from_slice(body)
+        .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+    let invalid = || ResponsesError::InvalidJson("invalid Responses compaction object".into());
+    if value.get("object").and_then(Value::as_str) != Some("response.compaction") {
+        return Err(invalid());
+    }
+    let id = value.get("id").and_then(Value::as_str).ok_or_else(invalid)?;
+    if id.is_empty() || id.len() > 256 || id.chars().any(char::is_control) {
+        return Err(invalid());
+    }
+    let created_at = value
+        .get("created_at")
+        .and_then(Value::as_u64)
+        .ok_or_else(invalid)?;
+    let output = value.get("output").and_then(Value::as_array).ok_or_else(invalid)?;
+    if output.len() > MAX_RESPONSES_COMPACT_OUTPUT_ITEMS {
+        return Err(invalid());
+    }
+    let mut saw_compaction = false;
+    for item in output {
+        if !item.is_object() || item.get("type").and_then(Value::as_str).is_none() {
+            return Err(invalid());
+        }
+        if item.get("type").and_then(Value::as_str) == Some("compaction") {
+            saw_compaction = true;
+            let item_id = item.get("id").and_then(Value::as_str).ok_or_else(invalid)?;
+            let encrypted_content = item
+                .get("encrypted_content")
+                .and_then(Value::as_str)
+                .ok_or_else(invalid)?;
+            if item_id.is_empty()
+                || item_id.len() > 256
+                || item_id.chars().any(char::is_control)
+                || encrypted_content.is_empty()
+                || encrypted_content.len() > MAX_INLINE_PAYLOAD_BYTES
+            {
+                return Err(invalid());
+            }
+        }
+    }
+    if !saw_compaction {
+        return Err(invalid());
+    }
+    let usage = match value.get("usage") {
+        None | Some(Value::Null) => None,
+        Some(usage) if usage.is_object() => Some(usage.clone()),
+        Some(_) => return Err(invalid()),
+    };
+    Ok(ResponsesCompactionWindow {
+        id: id.to_owned(),
+        created_at,
+        usage,
+        output: output.clone(),
+    })
+}
+
 pub struct BufferedResponsesBody {
     events: Vec<ResponsesStreamEvent>,
     usage: Option<ReportedUsage>,
+    output_items: Vec<Value>,
 }
 impl BufferedResponsesBody {
     pub fn parse(body: &str) -> Result<Self, ResponsesError> {
@@ -621,6 +752,22 @@ impl BufferedResponsesBody {
                     // those into executable work; terminal semantics survive.
                     events.push(ResponsesStreamEvent::FunctionCall { call_id:call_id.into(), name:name.into(), arguments:arguments.into() });
                 }
+                Some("compaction") => {
+                    let id = item["id"].as_str().ok_or_else(invalid)?;
+                    let encrypted_content = item["encrypted_content"].as_str().ok_or_else(invalid)?;
+                    if id.is_empty()
+                        || id.len() > 256
+                        || id.chars().any(char::is_control)
+                        || encrypted_content.is_empty()
+                        || encrypted_content.len() > MAX_INLINE_PAYLOAD_BYTES
+                        || encrypted_content.chars().any(char::is_control)
+                    {
+                        return Err(invalid());
+                    }
+                    // Compaction is provider-owned opaque state. Retain the
+                    // complete item, including future fields, but never turn
+                    // it into executable work or an event.
+                }
                 _ => return Err(invalid()),
             }
         }
@@ -630,6 +777,7 @@ impl BufferedResponsesBody {
         Ok(Self {
             events,
             usage: parser.usage,
+            output_items: output.to_vec(),
         })
     }
 
@@ -640,6 +788,15 @@ impl BufferedResponsesBody {
 
     pub fn into_events(self) -> Vec<ResponsesStreamEvent> {
         self.events
+    }
+
+    /// Complete output items exactly as returned by the Responses API.
+    ///
+    /// This is the continuation seam for provider-owned opaque items such as
+    /// native compaction. Callers must preserve ordering and pass the items
+    /// back unchanged; compaction items are never exposed as tool events.
+    pub fn output_items(&self) -> &[Value] {
+        &self.output_items
     }
 }
 
@@ -745,11 +902,19 @@ impl OpenAiResponsesClient {
         &self,
         payload: &Value,
     ) -> Result<reqwest::Response, ResponsesError> {
+        self.send_with_retry_path("responses", payload).await
+    }
+
+    async fn send_with_retry_path(
+        &self,
+        path: &str,
+        payload: &Value,
+    ) -> Result<reqwest::Response, ResponsesError> {
         const MAX_ATTEMPTS: u32 = 3;
         let mut attempt = 0;
         loop {
             attempt += 1;
-            let mut request = self.http.post(format!("{}/responses", self.base_url)).json(payload);
+            let mut request = self.http.post(format!("{}/{path}", self.base_url)).json(payload);
             if let Some(key) = self.api_key.as_deref() { request = request.bearer_auth(key); }
             let response = request.send()
                 .await
@@ -783,6 +948,36 @@ impl OpenAiResponsesClient {
         }
     }
 
+    /// Compact a complete native Responses input window through OpenAI's
+    /// stateless `POST /responses/compact` endpoint. Callers must select this
+    /// capability explicitly; this method does not infer provider support.
+    pub async fn compact(
+        &self,
+        model: &str,
+        input: &[ResponsesItem],
+    ) -> Result<ResponsesCompactionWindow, ResponsesError> {
+        if model.len() > MAX_RESPONSES_INPUT_BYTES {
+            return Err(ResponsesError::InputTooLarge {
+                max: MAX_RESPONSES_INPUT_BYTES,
+                actual: model.len(),
+            });
+        }
+        let payload = responses_request_payload(model, "", input, &[], false)?;
+        let request_bytes = serde_json::to_vec(&payload)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        if request_bytes.len() > MAX_RESPONSES_INPUT_BYTES {
+            return Err(ResponsesError::InputTooLarge {
+                max: MAX_RESPONSES_INPUT_BYTES,
+                actual: request_bytes.len(),
+            });
+        }
+        let mut response = self
+            .send_with_retry_path("responses/compact", &payload)
+            .await?;
+        let body = read_bounded_body(&mut response).await?;
+        parse_compaction_window(&body)
+    }
+
     pub async fn create(
         &self,
         model: &str,
@@ -803,9 +998,27 @@ impl OpenAiResponsesClient {
     ) -> Result<String, ResponsesError> {
         let mut payload = responses_request_payload(model, reasoning_effort, items, &[], false)?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
-        let mut response = self.send_with_retry(&payload).await?;
-        let body = read_bounded_body(&mut response).await?;
+        self.create_with_payload(&payload).await
+    }
 
+    /// Continue from standalone compaction output without converting opaque
+    /// provider-owned items into the narrower local transcript enum.
+    pub async fn create_with_compaction_window(
+        &self,
+        model: &str,
+        reasoning_effort: &str,
+        window: &ResponsesCompactionWindow,
+        tail: &[ResponsesItem],
+    ) -> Result<String, ResponsesError> {
+        let mut payload =
+            compaction_continuation_payload(model, reasoning_effort, window, tail, &[], false)?;
+        payload["max_output_tokens"] = json!(self.max_output_tokens);
+        self.create_with_payload(&payload).await
+    }
+
+    async fn create_with_payload(&self, payload: &Value) -> Result<String, ResponsesError> {
+        let mut response = self.send_with_retry(payload).await?;
+        let body = read_bounded_body(&mut response).await?;
         let value: Value = serde_json::from_slice(&body)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
         extract_output_text(&value)
@@ -832,8 +1045,41 @@ impl OpenAiResponsesClient {
         tools: &[ResponsesTool],
     ) -> Result<OpenAiResponsesStream, ResponsesError> {
         let buffered = self.buffered_model_ids.iter().any(|id| id == model);
-        let mut payload = responses_request_payload(model, reasoning_effort, items, tools, !buffered)?;
-        if buffered { payload["stream"] = json!(false); }
+        let payload = responses_request_payload(model, reasoning_effort, items, tools, !buffered)?;
+        self.stream_with_payload(model, buffered, payload).await
+    }
+
+    /// Stream from a standalone compacted window while retaining each opaque
+    /// provider output item exactly as returned.
+    pub async fn stream_with_compaction_window(
+        &self,
+        model: &str,
+        reasoning_effort: &str,
+        window: &ResponsesCompactionWindow,
+        tail: &[ResponsesItem],
+        tools: &[ResponsesTool],
+    ) -> Result<OpenAiResponsesStream, ResponsesError> {
+        let buffered = self.buffered_model_ids.iter().any(|id| id == model);
+        let payload = compaction_continuation_payload(
+            model,
+            reasoning_effort,
+            window,
+            tail,
+            tools,
+            !buffered,
+        )?;
+        self.stream_with_payload(model, buffered, payload).await
+    }
+
+    async fn stream_with_payload(
+        &self,
+        model: &str,
+        buffered: bool,
+        mut payload: Value,
+    ) -> Result<OpenAiResponsesStream, ResponsesError> {
+        if buffered {
+            payload["stream"] = json!(false);
+        }
         payload["max_output_tokens"] = json!(self.max_output_tokens);
         payload["reasoning"]["summary"] = json!("auto");
         let response = self.send_with_retry(&payload).await?;

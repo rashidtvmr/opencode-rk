@@ -412,7 +412,7 @@ mod tests {
         assert!(!valid_imported_id("OpenAI"));
         assert!(!valid_imported_id("openai"));
         assert!(!valid_imported_id(" provider"));
-        assert!(!valid_imported_id("a".repeat(129)));
+        assert!(!valid_imported_id(&"a".repeat(129)));
     }
 
     #[test]
