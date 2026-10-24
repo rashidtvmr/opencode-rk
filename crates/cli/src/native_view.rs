@@ -131,11 +131,95 @@ pub struct NativeView {
     /// is busy the footer is the sole loader surface, so that overlay must be
     /// suppressed without changing the composer rows themselves.
     frame_busy: bool,
+    mcp_hit: Vec<(String, bool, u16, u16, u16)>,
+    sidebar_content_height: usize,
 }
 
 #[cfg(test)]
 mod page_spacing_tests {
     use super::*;
+    #[test]
+    fn sidebar_click_authority_is_retracted_before_hidden_or_rebound_frames() {
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({
+            "status": {"alpha": {"status": "connected"}},
+            "included": {"alpha": true}
+        })).unwrap();
+        let frame = view.render("draft", &[], false, &[]);
+        let y = frame.iter().position(|line| line.contains("• alpha")).unwrap() as u16;
+        let x = view.presentation().sidebar_offset.unwrap() + 3;
+        assert_eq!(view.mcp_sidebar_action(x, y), Some(("alpha".into(), true)));
+        view.set_sidebar_hidden(true);
+        assert!(view.mcp_sidebar_action(x, y).is_none(), "a hidden pane must not retain clickable rows");
+        view.set_sidebar_hidden(false);
+        view.set_session_binding(Some(opencode_rk_contracts::SessionId::new().to_string()), Some("New session".into()), Some(0));
+        assert!(view.mcp_sidebar_action(x, y).is_none(), "old-session inclusion cannot authorize a new-session click");
+    }
+
+    #[test]
+    fn sidebar_scrolling_keeps_the_last_server_visible_and_clickable() {
+        for (cols, framed) in [(148, false), (100, false), (148, true)] {
+            let mut view = NativeView::new(cols, 30);
+            view.set_session_route(true);
+            if view.presentation().sidebar_offset.is_none() { view.toggle_sidebar(); }
+            if framed {
+                view.set_box_appearance(crate::native_box_style::BoxAppearance {
+                    preset: crate::native_box_style::RadiusPreset::IosSquircle,
+                    ..Default::default()
+                });
+            }
+            let status: serde_json::Map<String, Value> = (0..64)
+                .map(|index| (format!("server-{index:02}"), serde_json::json!({"status":"connected"}))).collect();
+            let included: serde_json::Map<String, Value> = status.keys()
+                .map(|name| (name.clone(), serde_json::json!(false))).collect();
+            view.apply_mcp(&serde_json::json!({"status":status,"included":included})).unwrap();
+            view.render("unchanged draft", &[], false, &[]);
+            let x = view.presentation().sidebar_offset.unwrap() + 3;
+            assert!(!view.scroll_sidebar_at(x, 29, isize::MAX), "footer is not sidebar content");
+            assert!(view.scroll_sidebar_at(x, 2, isize::MAX));
+            let frame = view.render("unchanged draft", &[], false, &[]);
+            let y = frame.iter().position(|line| line.contains("server-63")).expect("last server must remain reachable") as u16;
+            assert!(y < 29);
+            assert_eq!(view.mcp_sidebar_action(x, y), Some(("server-63".into(), false)));
+        }
+    }
+
+    #[test]
+    fn accepted_projection_invalidates_old_sidebar_coordinates_until_repaint() {
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({"status":{"beta":{"status":"connected"}},"included":{"beta":true}})).unwrap();
+        let frame = view.render("draft", &[], false, &[]);
+        let y = frame.iter().position(|line| line.contains("• beta")).unwrap() as u16;
+        let x = view.presentation().sidebar_offset.unwrap() + 3;
+        assert_eq!(view.mcp_sidebar_action(x, y), Some(("beta".into(), true)));
+        view.apply_mcp(&serde_json::json!({
+            "status":{"alpha":{"status":"connected"},"beta":{"status":"connected"}},
+            "included":{"alpha":true,"beta":true}
+        })).unwrap();
+        assert!(view.mcp_sidebar_action(x, y).is_none(), "a new projection cannot authorize stale coordinates");
+        view.render("draft", &[], false, &[]);
+        assert_eq!(view.mcp_sidebar_action(x, y), Some(("alpha".into(), true)));
+    }
+
+    #[test]
+    fn hiding_and_reshowing_sidebar_requires_fresh_painted_hit_geometry() {
+        let mut view = NativeView::new(148, 30);
+        view.set_session_route(true);
+        view.apply_mcp(&serde_json::json!({"status":{"alpha":{"status":"connected"}},"included":{"alpha":true}})).unwrap();
+        let frame = view.render("draft", &[], false, &[]);
+        let y = frame.iter().position(|line| line.contains("• alpha")).unwrap() as u16;
+        let x = view.presentation().sidebar_offset.unwrap() + 3;
+        assert!(view.mcp_sidebar_action(x, y).is_some());
+        view.set_sidebar_hidden(true);
+        view.set_sidebar_hidden(false);
+        assert!(view.mcp_sidebar_action(x, y).is_none(), "visibility changes invalidate the painted hit generation");
+        view.render("draft", &[], false, &[]);
+        view.toggle_sidebar();
+        view.toggle_sidebar();
+        assert!(view.mcp_sidebar_action(x, y).is_none());
+    }
     #[test]
     fn memory_scroll_uses_the_rendered_panel_viewport_at_normal_and_wide_widths() {
         for width in [100, 180] {
@@ -373,11 +457,15 @@ impl NativeView {
             modal_underlay_rows: Vec::new(),
             overlay_roles: Vec::new(),
             frame_busy: false,
+            mcp_hit: Vec::new(),
+            sidebar_content_height: 0,
         }
     }
 
     /// Kernel geometry changed: rebuild layout, keep scroll/page state.
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.mcp_hit.clear();
+        self.sidebar_content_height = 0;
         self.layout = Layout::new(cols, rows);
     }
 
@@ -587,15 +675,18 @@ impl NativeView {
     /// Install the persisted global + per-box appearance. The native
     /// composer frame resolves `BoxId::ChatComposer` from this value.
     pub fn set_box_appearance(&mut self, appearance: crate::native_box_style::BoxAppearance) {
+        if self.box_appearance != appearance { self.mcp_hit.clear(); }
         self.box_appearance = appearance;
     }
 
     pub fn set_session_route(&mut self, session_route: bool) {
+        if self.session_route != session_route { self.mcp_hit.clear(); }
         self.session_route = session_route;
     }
 
     /// Toggle the optional wide sidebar (`session.sidebar.toggle`).
     pub fn toggle_sidebar(&mut self) {
+        self.mcp_hit.clear();
         let visible = self.sidebar_visible();
         self.sidebar_hidden = visible;
         self.sidebar_open = !visible;
@@ -603,6 +694,7 @@ impl NativeView {
 
     /// Force the sidebar hidden/shown. Hidden wins over the wide auto rule.
     pub fn set_sidebar_hidden(&mut self, hidden: bool) {
+        self.mcp_hit.clear();
         self.sidebar_hidden = hidden;
         self.sidebar_open = false;
     }
@@ -614,6 +706,7 @@ impl NativeView {
     /// Mark the active session as a child (`parentID` present): upstream
     /// suppresses the sidebar regardless of width or toggle.
     pub fn set_parent_session(&mut self, parent_session: bool) {
+        if self.parent_session != parent_session { self.mcp_hit.clear(); }
         self.parent_session = parent_session;
     }
 
@@ -746,7 +839,10 @@ impl NativeView {
         title: Option<String>,
         message_count: Option<usize>,
     ) {
-        if self.status.session_id() != session.as_deref() { self.status.clear_usage(); }
+        if self.status.session_id() != session.as_deref() {
+            self.status.clear_usage();
+            self.status.clear_mcp_inclusion();
+        }
         self.status
             .set_session_binding(session, title, message_count);
     }
@@ -778,7 +874,34 @@ impl NativeView {
 
     /// Backend MCP snapshot (`GET /api/mcp`) projected into the right pane.
     pub fn apply_mcp(&mut self, value: &Value) -> Result<(), String> {
-        self.status.apply_mcp(value)
+        self.status.apply_mcp(value)?;
+        self.mcp_hit.clear();
+        Ok(())
+    }
+
+    pub fn mcp_sidebar_action(&self, x: u16, y: u16) -> Option<(String, bool)> {
+        if self.presentation().sidebar_offset.is_none()
+            || self.dialogs.intercepts_input() || self.command_palette_open() {
+            return None;
+        }
+        self.mcp_hit.iter().find(|(_, _, left, top, width)|
+            x >= *left && x < left.saturating_add(*width) && y == *top
+        ).filter(|(name, included, _, _, _)| self.status.mcp_included(name) == Some(*included))
+            .map(|(name, included, _, _, _)| (name.clone(), *included))
+    }
+
+    pub fn scroll_sidebar_at(&mut self, x: u16, y: u16, lines: isize) -> bool {
+        let presentation = self.presentation();
+        let Some(left) = presentation.sidebar_offset else { return false; };
+        if x < left || x >= left.saturating_add(presentation.sidebar_width)
+            || usize::from(y) >= self.render_height().saturating_sub(1)
+            || self.sidebar_content_height == 0
+            || self.dialogs.intercepts_input() || self.command_palette_open() {
+            return false;
+        }
+        self.status.scroll_sidebar(lines, self.sidebar_content_height);
+        self.mcp_hit.clear();
+        true
     }
 
     // ---------- page action intents (pure state; HTTP stays outside) ----
@@ -1424,14 +1547,23 @@ impl NativeView {
             }
             home
         };
+        self.sidebar_content_height = if presentation.sidebar_width == 0 {
+            0
+        } else if presentation.sidebar_width >= 4 && height >= 3
+            && self.box_appearance.full_outline(crate::native_box_style::BoxId::Sidebar) {
+            height.saturating_sub(3)
+        } else {
+            height.saturating_sub(1)
+        };
         let sidebar_styled = if presentation.sidebar_width > 0 {
             // Backend facts remain available in the optional session sidebar;
             // the all-sessions picker is a separate page, never sidebar chrome.
             self.status
-                .render_sidebar_styled(38, height.saturating_sub(1))
+                .render_sidebar_styled(38, self.sidebar_content_height)
         } else {
             Vec::new()
         };
+        self.mcp_hit.clear();
         let mut sidebar: Vec<String> = sidebar_styled.iter().map(|line| padded(&line.text, presentation.sidebar_width)).collect();
         let mut sidebar_inset = 2;
         let mut sidebar_top = 0;
@@ -1504,6 +1636,7 @@ impl NativeView {
                 // A clipped/tiny sidebar is not frameable; fail closed
                 // rather than inventing a partial border or background.
                 sidebar.clear();
+                self.sidebar_content_height = 0;
             }
         }
         if let Some(left) = presentation.sidebar_offset {
@@ -1539,6 +1672,9 @@ impl NativeView {
                     width:sidebar_text_width,
                     role:line.role,detail_from:None,modal:false,
                 });
+                if let Some((name, included)) = self.status.mcp_sidebar_hit(38, self.sidebar_content_height, index) {
+                    self.mcp_hit.push((name.to_owned(), included, left.saturating_add(sidebar_inset), if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 }, sidebar_text_width));
+                }
             }
         }
         let inline = presentation.sidebar_width > 0 && self.layout.cols > 120;
@@ -2657,6 +2793,26 @@ mod tests {
         assert_eq!(view.sessions.active_id(), Some("a"));
         assert_eq!(view.sessions.draft("a"), Some("unsent"));
         assert_eq!(transcript, vec!["old: line".to_owned()]);
+    }
+
+    #[test]
+    fn native_view_applies_authenticated_session_mcp_projection_to_sidebar() {
+        let mut view = NativeView::new(160, 30);
+        view.set_session_route(true);
+        view.set_session(Some("aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa".to_owned()));
+        let session_projection = serde_json::json!({
+            "status": {
+                "alpha": {"status": "connected"},
+                "beta": {"status": "connected"}
+            },
+            "included": {"alpha": false, "beta": true}
+        });
+        view.apply_mcp(&session_projection)
+            .expect("authenticated session MCP response should reach the sidebar");
+        let frame = view.render("draft", &[], false, &[]).join("\n");
+        assert!(frame.contains("alpha"));
+        assert!(frame.to_ascii_lowercase().contains("excluded"));
+        assert!(frame.contains("beta"));
     }
 
     #[test]

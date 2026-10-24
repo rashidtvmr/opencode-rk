@@ -1836,7 +1836,22 @@ fn bind_session(
     view.set_project_directory(
         snapshot.directory.clone().unwrap_or_else(current_workspace_label),
     );
+    if let Err(error) = refresh_session_mcp(view, &snapshot, auth) {
+        append_transcript(transcript, format!("error: session mcp unavailable: {error}"));
+    }
     Ok((snapshot, draft))
+}
+
+#[cfg(feature = "native")]
+fn refresh_session_mcp(
+    view: &mut crate::native_view::NativeView,
+    snapshot: &LiveSnapshot,
+    auth: Option<&str>,
+) -> Result<(), String> {
+    let path = format!("/api/sessions/{}/mcp", snapshot.session_id);
+    let body = http_request(&snapshot.origin, "GET", &path, None, auth)?;
+    let value = serde_json::from_str(&body).map_err(|error| format!("invalid MCP response: {error}"))?;
+    view.apply_mcp(&value)
 }
 
 /// Authenticated `GET /api/sessions` → `PageRow`s for the open Sessions
@@ -2720,21 +2735,10 @@ fn native_loop(
                 format!("error: sessions unavailable: {error}"),
             ),
         }
-        // Right pane: MCP snapshot (GET /api/mcp).
-        match http_request(&snapshot.origin, "GET", "/api/mcp", None, auth).and_then(|body| {
-            serde_json::from_str::<serde_json::Value>(&body).map_err(|error| error.to_string())
-        }) {
-            Ok(value) => {
-                if let Err(error) = view.apply_mcp(&value) {
-                    append_transcript(
-                        &mut transcript,
-                        format!("error: mcp snapshot rejected: {error}"),
-                    );
-                }
-            }
-            Err(error) => {
-                append_transcript(&mut transcript, format!("error: mcp unavailable: {error}"))
-            }
+        // Right pane: authenticated session MCP projection. Without a bound
+        // session the global registry remains a status-only fallback.
+        if let Err(error) = refresh_session_mcp(&mut view, snapshot, auth) {
+            append_transcript(&mut transcript, format!("error: session mcp unavailable: {error}"));
         }
     }
     view.set_page_rows(crate::native_view::initial_page_rows(live.is_some()));
@@ -3214,6 +3218,9 @@ fn native_loop(
                             view.set_project_directory(
                                 snapshot.directory.clone().unwrap_or_else(current_workspace_label),
                             );
+                            if let Err(error) = refresh_session_mcp(&mut view, &snapshot, auth) {
+                                append_transcript(&mut transcript, format!("error: session mcp unavailable: {error}"));
+                            }
                             if turn_succeeded && !history_browsing {
                                 transcript.reset(
                                     snapshot.history.clone(),
@@ -4108,6 +4115,47 @@ fn native_loop(
                     }
                     needs_paint = true;
                     continue;
+                }
+                if matches!(kind, 3 | 4) && modifiers == 0 && !help_open
+                    && !view.command_palette_open()
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+                    && view.scroll_sidebar_at(x, y, if kind == 3 { -3 } else { 3 })
+                {
+                    selection.clear();
+                    needs_paint = true;
+                    continue;
+                }
+                if kind == 0 && modifiers == 0 && !help_open
+                    && !view.command_palette_open()
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+                {
+                    if let Some((name, included)) = view.mcp_sidebar_action(x, y) {
+                        if let Some(snapshot) = live.as_ref() {
+                            let encoded: String = name.bytes().flat_map(|byte| {
+                                if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~') {
+                                    vec![byte as char]
+                                } else {
+                                    format!("%{byte:02X}").chars().collect()
+                                }
+                            }).collect();
+                            let path = format!("/api/sessions/{}/mcp/{}", snapshot.session_id, encoded);
+                            let body = serde_json::json!({"included": !included});
+                            match http_request(&snapshot.origin, "PUT", &path, Some(&body.to_string()), auth)
+                                .and_then(|body| serde_json::from_str::<serde_json::Value>(&body).map_err(|error| error.to_string()))
+                            {
+                                Ok(value) => {
+                                    if let Err(error) = view.apply_mcp(&value) {
+                                        append_transcript(&mut transcript, format!("error: mcp toggle rejected: {error}"));
+                                    }
+                                }
+                                Err(error) => append_transcript(&mut transcript, format!("error: mcp toggle failed: {error}")),
+                            }
+                        }
+                        needs_paint = true;
+                        continue;
+                    }
                 }
                 if matches!(kind, 2 | 5 | 6) {
                     let disable_copy = crate::native_text_selection::copy_on_select_disabled(

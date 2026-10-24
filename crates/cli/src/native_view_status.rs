@@ -65,6 +65,9 @@ pub const CONNECT_SUPPORTED: bool = false;
 pub struct McpEntry {
     pub name: String,
     pub status: McpStatus,
+    /// `Some` only for an authenticated session projection. `None` means
+    /// this entry came from the global registry and has no toggle authority.
+    pub included: Option<bool>,
 }
 
 /// Typed upstream status union (`packages/opencode/src/mcp/index.ts`).
@@ -180,6 +183,12 @@ pub struct StatusView {
     mcp_ack: bool,
     /// Bounded reason the newest snapshot was rejected; last good retained.
     mcp_stale: Option<String>,
+    sidebar_offset: usize,
+}
+
+struct SidebarRow {
+    line: crate::native_ui_style::Line,
+    mcp_index: Option<usize>,
 }
 
 impl StatusView {
@@ -205,41 +214,61 @@ impl StatusView {
     }
 
     pub fn render_sidebar_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
+        self.sidebar_rows(width, height).into_iter().map(|row| row.line).collect()
+    }
+
+    pub fn scroll_sidebar(&mut self, lines: isize, height: usize) {
+        if height == 0 { return; }
+        let count = self.sidebar_rows(1, MAX_ROWS).len();
+        let maximum = count.saturating_sub(height);
+        self.sidebar_offset = self.sidebar_offset.min(maximum)
+            .saturating_add_signed(lines).min(maximum);
+    }
+
+    fn sidebar_rows(&self, width: usize, height: usize) -> Vec<SidebarRow> {
         use crate::native_ui_style::{Line, Role};
-        let mut rows = vec![(String::new(), Role::Description)];
+        let mut rows = vec![(String::new(), Role::Description, None)];
         if let Some(title) = self.session_title() {
-            rows.push((title.to_owned(), Role::Heading));
+            rows.push((title.to_owned(), Role::Heading, None));
         }
         if let Some(id) = self.session_id() {
-            rows.push((id.to_owned(), Role::Description));
+            rows.push((id.to_owned(), Role::Description, None));
         }
-        rows.push((String::new(), Role::Description));
-        rows.push(("Context".to_owned(), Role::Heading));
+        rows.push((String::new(), Role::Description, None));
+        rows.push(("Context".to_owned(), Role::Heading, None));
         if let Some((used, window)) = self.context {
-            rows.push((format!("{used} tokens · last request"), Role::Item));
-            if window > 0 { rows.push((format!("{} / {} tokens · {}%",used,window,used.saturating_mul(100)/window),Role::Description)); }
-            else {rows.push(("Model capacity not reported".into(),Role::Description));}
+            rows.push((format!("{used} tokens · last request"), Role::Item, None));
+            if window > 0 { rows.push((format!("{} / {} tokens · {}%",used,window,used.saturating_mul(100)/window),Role::Description, None)); }
+            else {rows.push(("Model capacity not reported".into(),Role::Description, None));}
         } else if self.usage.is_some() {
-            rows.push(("Context limit unavailable".into(),Role::Description));
+            rows.push(("Context limit unavailable".into(),Role::Description, None));
         } else {
-            rows.push(("Provider usage not reported yet".into(),Role::Description));
+            rows.push(("Provider usage not reported yet".into(),Role::Description, None));
         }
         if let Some((input,output,cached,reasoning))=self.usage {
             let subset=|tokens:Option<u64>| tokens.map(|n|n.to_string()).unwrap_or_else(||"unreported".into());
-            rows.push((format!("Input {input} · Output {output}"),Role::Item));
-            rows.push((format!("Cached {} · Reasoning {}",subset(cached),subset(reasoning)),Role::Description));
+            rows.push((format!("Input {input} · Output {output}"),Role::Item, None));
+            rows.push((format!("Cached {} · Reasoning {}",subset(cached),subset(reasoning)),Role::Description, None));
         }
-        rows.push((format!("{} messages",self.session_message_count.map(|n|n.to_string()).unwrap_or_else(||"?".into())),Role::Description));
+        rows.push((format!("{} messages",self.session_message_count.map(|n|n.to_string()).unwrap_or_else(||"?".into())),Role::Description, None));
         if !self.mcp.is_empty() {
-            rows.push((String::new(), Role::Description));
-            rows.push(("MCP".to_owned(), Role::Heading));
-            for entry in &self.mcp {
-                rows.push((format!("• {} {}", entry.name, entry.status.as_str()), Role::Item));
+            rows.push((String::new(), Role::Description, None));
+            rows.push(("MCP".to_owned(), Role::Heading, None));
+            for (index, entry) in self.mcp.iter().enumerate() {
+                let inclusion = match entry.included {
+                    Some(true) => "",
+                    Some(false) => " (excluded)",
+                    None => "",
+                };
+                rows.push((format!("• {} {}{inclusion}", entry.name, entry.status.as_str()), Role::Item, Some(index)));
             }
         }
+        let maximum = rows.len().min(MAX_ROWS).saturating_sub(height);
         rows.into_iter()
+            .take(MAX_ROWS)
+            .skip(self.sidebar_offset.min(maximum))
             .take(height.min(MAX_ROWS))
-            .map(|(text, role)| Line {text:fit(&text, width),role,detail_from:None})
+            .map(|(text, role, mcp_index)| SidebarRow {line:Line {text:fit(&text, width),role,detail_from:None},mcp_index})
             .collect()
     }
 
@@ -292,6 +321,7 @@ impl StatusView {
     /// `session: Unavailable` plus the separate `session id:` identity
     /// row and `messages: Unavailable`.
     pub fn set_session(&mut self, id: Option<String>) {
+        self.clear_mcp_inclusion();
         self.session = non_empty(id);
         self.session_title = None;
         self.session_message_count = None;
@@ -318,7 +348,11 @@ impl StatusView {
         title: Option<String>,
         message_count: Option<usize>,
     ) {
-        self.session = canonical_session_id(id);
+        let session = canonical_session_id(id);
+        if self.session != session {
+            self.clear_mcp_inclusion();
+        }
+        self.session = session;
         self.session_title = self
             .session
             .as_deref()
@@ -333,6 +367,32 @@ impl StatusView {
             None
         };
         self.session_live = self.session.is_some() && self.session_title.is_some();
+    }
+
+    /// Retract session-specific MCP inclusion authority when the bound
+    /// session changes. The global status observation remains useful, but it
+    /// must never authorize toggling the previous session's membership.
+    pub fn clear_mcp_inclusion(&mut self) {
+        self.sidebar_offset = 0;
+        for entry in &mut self.mcp {
+            entry.included = None;
+        }
+    }
+
+    pub fn mcp_included(&self, name: &str) -> Option<bool> {
+        self.mcp.iter().find(|entry| entry.name == name).and_then(|entry| entry.included)
+    }
+
+    /// Resolve clicks against the rendered sidebar, never a guessed row
+    /// layout. Only authenticated session rows have toggle authority.
+    pub fn mcp_sidebar_hit(&self, width: usize, height: usize, row: usize) -> Option<(&str, bool)> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let rows = self.sidebar_rows(width, height);
+        let index = rows.get(row)?.mcp_index?;
+        let entry = self.mcp.get(index)?;
+        Some((entry.name.as_str(), entry.included?))
     }
 
     /// Optional context setters (confirmed values only, `None` => Unavailable).
@@ -586,15 +646,19 @@ impl StatusView {
             return rows;
         }
         for entry in &self.mcp {
+            let inclusion = match entry.included {
+                Some(false) => " (excluded)",
+                _ => "",
+            };
             let line = match entry.status.error_code() {
                 Some(code) => format!(
-                    "  {} {} error={}",
+                    "  {} {}{inclusion} error={}",
                     display(Some(entry.name.as_str())),
                     entry.status.as_str(),
                     code
                 ),
                 None => format!(
-                    "  {} {}",
+                    "  {} {}{inclusion}",
                     display(Some(entry.name.as_str())),
                     entry.status.as_str()
                 ),
@@ -624,11 +688,55 @@ fn parse_mcp(value: &Value) -> Result<Vec<McpEntry>, String> {
     if map.len() > MAX_MCP_ENTRIES {
         return Err(format!("entries: exceeds {MAX_MCP_ENTRIES}"));
     }
+    // Try the legacy raw registry first. This is important because `status`
+    // and `included` are both legal server names; wrapper detection cannot be
+    // based on top-level key presence.
     let mut entries = Vec::with_capacity(map.len());
+    let mut raw_ok = true;
     for (name, raw) in map {
-        entries.push(parse_entry(name, raw)?);
+        match parse_entry(name, raw) {
+            Ok(mut entry) => {
+                entry.included = None;
+                entries.push(entry);
+            }
+            Err(_) => {
+                raw_ok = false;
+                break;
+            }
+        }
     }
-    entries.sort_by(|a, b| a.name.cmp(&b.name));
+    if raw_ok {
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        return Ok(entries);
+    }
+
+    let status = map
+        .get("status")
+        .ok_or_else(|| "wrapper.status: required object".to_owned())?;
+    let included = map
+        .get("included")
+        .ok_or_else(|| "wrapper.included: required object".to_owned())?;
+    if map.keys().any(|key| key != "status" && key != "included") {
+        return Err("wrapper: unknown field".to_owned());
+    }
+    let mut entries = parse_mcp(status)?;
+    let included = included
+        .as_object()
+        .ok_or_else(|| "wrapper.included: must be an object".to_owned())?;
+    if included.len() != entries.len()
+        || entries.iter().any(|entry| !included.contains_key(&entry.name))
+        || included.keys().any(|name| !entries.iter().any(|entry| &entry.name == name))
+    {
+        return Err("wrapper.included: keys must exactly match status".to_owned());
+    }
+    for entry in &mut entries {
+        entry.included = Some(
+            included
+                .get(&entry.name)
+                .and_then(Value::as_bool)
+                .ok_or_else(|| "wrapper.included: values must be boolean".to_owned())?,
+        );
+    }
     Ok(entries)
 }
 
@@ -672,6 +780,7 @@ fn parse_entry(name: &str, raw: &Value) -> Result<McpEntry, String> {
     Ok(McpEntry {
         name: name.to_owned(),
         status,
+        included: None,
     })
 }
 
@@ -950,6 +1059,86 @@ mod tests {
         assert!(view.mcp_stale().is_some());
         let rows = view.render(120, 30);
         assert!(rows.iter().any(|r| r.contains("stale")));
+    }
+
+    #[test]
+    fn authenticated_session_projection_renders_connected_but_excluded_servers() {
+        let mut view = StatusView::default();
+        // This is the authenticated GET /api/sessions/{id}/mcp response,
+        // rather than the legacy global GET /api/mcp status map.  The two
+        // connected servers deliberately differ only in session inclusion.
+        let session_projection = json!({
+            "status": {
+                "alpha": {"status": "connected"},
+                "beta": {"status": "connected"}
+            },
+            "included": {"alpha": false, "beta": true}
+        });
+        view.apply_mcp(&session_projection)
+            .expect("session MCP projection should be accepted");
+        let rows = view.render_sidebar(38, 30);
+        let alpha = rows.iter().position(|row| row.contains("alpha")).expect("alpha row");
+        let beta = rows.iter().position(|row| row.contains("beta")).expect("beta row");
+        assert!(rows[alpha].contains("connected"));
+        assert!(rows[alpha].to_ascii_lowercase().contains("excluded"));
+        assert!(rows[beta].contains("connected"));
+        assert!(!rows[beta].to_ascii_lowercase().contains("excluded"));
+    }
+
+    #[test]
+    fn malformed_session_inclusion_is_rejected_atomically() {
+        let mut view = StatusView::default();
+        view.apply_mcp(&json!({"alpha": {"status": "connected"}})).unwrap();
+        let before = view.render_sidebar(38, 30);
+        let malformed = json!({
+            "status": {"alpha": {"status": "connected"}},
+            "included": {"alpha": "not-a-boolean", "missing": true}
+        });
+        assert!(view.apply_mcp(&malformed).is_err());
+        assert_eq!(view.render_sidebar(38, 30), before);
+    }
+
+    #[test]
+    fn every_configured_server_is_reachable_with_matching_scrolled_hit_rows() {
+        let status: serde_json::Map<String, Value> = (0..MAX_MCP_ENTRIES)
+            .map(|index| (format!("server-{index:02}"), json!({"status":"connected"}))).collect();
+        let included: serde_json::Map<String, Value> = status.keys().enumerate()
+            .map(|(index, name)| (name.clone(), json!(index + 1 != MAX_MCP_ENTRIES))).collect();
+        let mut view = StatusView::default();
+        view.apply_mcp(&json!({"status":status,"included":included})).unwrap();
+        let last = format!("server-{:02}", MAX_MCP_ENTRIES - 1);
+        assert!(!view.render_sidebar(38, 8).join("\n").contains(&last));
+        view.scroll_sidebar(isize::MAX, 8);
+        let visible = view.render_sidebar(38, 8);
+        let row = visible.iter().position(|line| line.contains(&last)).expect("last MCP server must be reachable");
+        assert_eq!(view.mcp_sidebar_hit(38, 8, row), Some((last.as_str(), false)));
+        view.scroll_sidebar(isize::MIN, 8);
+        assert!(view.render_sidebar(38, 8).join("\n").contains("Context"));
+    }
+
+    #[test]
+    fn direct_binding_commit_retracts_previous_session_mcp_authority() {
+        let mut view = StatusView::default();
+        view.set_session_binding(Some(opencode_rk_contracts::SessionId::new().to_string()), Some("First".into()), Some(0));
+        view.apply_mcp(&json!({"status":{"alpha":{"status":"connected"}},"included":{"alpha":true}})).unwrap();
+        assert_eq!(view.mcp_included("alpha"), Some(true));
+        view.set_session_binding(Some(opencode_rk_contracts::SessionId::new().to_string()), Some("Second".into()), Some(0));
+        assert_eq!(view.mcp_included("alpha"), None, "the binding transaction must invalidate old-session authority before a new fetch");
+    }
+
+    #[test]
+    fn repeated_small_wheel_steps_reach_the_end_without_resetting_offset() {
+        let status: serde_json::Map<String, Value> = (0..MAX_MCP_ENTRIES)
+            .map(|index| (format!("server-{index:02}"), json!({"status":"connected"}))).collect();
+        let included: serde_json::Map<String, Value> = status.keys()
+            .map(|name| (name.clone(), json!(true))).collect();
+        let mut view = StatusView::default();
+        view.apply_mcp(&json!({"status":status,"included":included})).unwrap();
+        for _ in 0..100 { view.scroll_sidebar(3, 8); }
+        assert!(view.render_sidebar(38, 8).join("\n").contains("server-63"));
+        let final_rows = view.render_sidebar(38, 8);
+        view.scroll_sidebar(3, 8);
+        assert_eq!(view.render_sidebar(38, 8), final_rows);
     }
 
     #[test]
