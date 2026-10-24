@@ -5,14 +5,13 @@
 //! [`BoxAppearance`] plus per-box overrides into [`EffectiveBox`] values and
 //! maps them to the only corner geometry a terminal cell grid can display.
 //!
-//! Radius NEVER creates framing: a preset or logical radius only changes
-//! the corner glyphs of surfaces that already draw corners. A full drawn
-//! frame exists only through an explicit `Double`/`Heavy` line weight
-//! ([`EffectiveBox::explicit_line_frame`]).
+//! The default sharp/rounded views preserve upstream rails and prose; an
+//! explicit full-outline preference or squircle preset draws all four edges
+//! of every border-enabled box. A borderless style always remains borderless.
 //!
 //! Radii are logical steps in `0..=50`, not terminal pixels. Sharp and Rounded
-//! have exact glyph mappings; `IosSquircle` is a distinct quarter-arc
-//! cell-grid approximation (R2) and never claims continuous curvature. The
+//! have exact glyph mappings; `IosSquircle` uses a connected rounded-cell
+//! fallback and does not claim mathematically accurate curvature. The
 //! bridge renderer is a glyph grid (`bufferDrawText`/`bufferFillRect`; the
 //! only pixel API is `queryPixelResolution`, which is image display, not box
 //! chrome), so shapes are corner glyphs and [`BoxGeometry`] is the ONE
@@ -38,17 +37,26 @@ pub const MIN_THICKNESS: u8 = 1;
 pub const MAX_THICKNESS: u8 = 2;
 /// Honest description of what a terminal can and cannot draw.
 pub const IOS_SQUIRCLE_APPROXIMATION: &str =
-    "cell-grid approximation: quarter-arc corner glyphs only; no continuous curvature";
+    "cell-grid approximation: connected elbows; pixel-perfect squircle requires graphics support";
 
 /// Rounded elbow corner cells for `Single` borders, reading order
 /// (top-left, top-right, bottom-left, bottom-right).
 pub const ROUNDED_CORNER_GLYPHS: [char; 4] = ['╭', '╮', '╰', '╯'];
-/// Quarter-arc corner cells approximating an iOS squircle, reading order.
-///
-/// R2: a distinct selected-shape rendering, NOT a rename of
-/// [`RadiusPreset::Rounded`]; rendered only where a surface already paints
-/// corners, per the radius-never-frames rule.
-pub const SQUIRCLE_CORNER_GLYPHS: [char; 4] = ['◜', '◝', '◟', '◞'];
+/// Connected rounded corner cells used as the cell-grid squircle fallback.
+/// A real continuous superellipse needs a supported graphical renderer.
+// The portable fallback must JOIN the adjacent strokes. A true superellipse
+// requires a terminal graphics protocol, not isolated arc glyphs.
+pub const SQUIRCLE_CORNER_GLYPHS: [char; 4] = ROUNDED_CORNER_GLYPHS;
+
+/// Full-outline policy, independent from radius and border weight.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum FrameMode {
+    #[default]
+    Auto,
+    Outline,
+    Native,
+}
 
 /// Global roundedness preset.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -59,7 +67,7 @@ pub enum RadiusPreset {
     Sharp,
     /// Terminal rounded corners: `╭ ╮ ╰ ╯`.
     Rounded,
-    /// Quarter-arc corner cells approximating an iOS squircle.
+    /// Squircle intent, rendered as connected Unicode elbows in cell mode.
     IosSquircle,
     /// Radius-driven approximation; see [`BoxAppearance::radius`].
     Custom,
@@ -113,6 +121,10 @@ pub enum BorderStyle {
     Double,
     /// Heavy line.
     Heavy,
+    /// No outline. This is distinct from thickness and corner presets: the
+    /// surface is painted as a fill-only rectangle and does not reserve frame
+    /// rows or columns.
+    None,
 }
 
 /// The four corner glyphs in reading order.
@@ -144,6 +156,9 @@ impl CornerGlyphs {
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct BoxOverride {
+    /// Full-frame setting for this component (inherits when absent).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub frame_mode: Option<FrameMode>,
     /// Per-box preset override.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub preset: Option<RadiusPreset>,
@@ -180,6 +195,9 @@ pub struct BoxOverride {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct BoxAppearance {
+    /// Default outline policy for all components.
+    #[serde(skip_serializing_if = "FrameMode::is_auto")]
+    pub frame_mode: FrameMode,
     /// Global preset.
     #[serde(skip_serializing_if = "RadiusPreset::is_sharp")]
     pub preset: RadiusPreset,
@@ -215,6 +233,7 @@ pub struct BoxAppearance {
 impl Default for BoxAppearance {
     fn default() -> Self {
         Self {
+            frame_mode: FrameMode::Auto,
             preset: RadiusPreset::Sharp,
             radius: 0,
             border_style: BorderStyle::Single,
@@ -241,6 +260,38 @@ pub struct EffectiveBox {
 }
 
 impl EffectiveBox {
+    /// Cell-grid fill mask shared by rectangle painting and text backgrounds.
+    /// Borderless surfaces retain rounded fills without acquiring an outline.
+    pub fn rounded_fill_corner(self, rect: (u16, u16, u16, u16), x: u16, y: u16) -> bool {
+        let rounded = matches!(self.preset, RadiusPreset::Rounded | RadiusPreset::IosSquircle)
+            || (self.preset == RadiusPreset::Custom && self.radius > 0);
+        rounded
+            && matches!(self.border_style, BorderStyle::Single | BorderStyle::None)
+            && rect.2 >= 3 && rect.3 >= 3
+            && (x == rect.0 || u32::from(x) + 1 == u32::from(rect.0) + u32::from(rect.2))
+            && (y == rect.1 || u32::from(y) + 1 == u32::from(rect.1) + u32::from(rect.3))
+    }
+
+    /// Opaque fill spans, before viewport clipping. Omitting the four corner
+    /// cells at this stage prevents a rectangular underpaint surviving behind
+    /// a rounded outline or an empty borderless corner.
+    pub fn fill_rectangles(self, rect: (u16, u16, u16, u16)) -> Vec<(u16, u16, u16, u16)> {
+        let (x, y, width, height) = rect;
+        if width == 0 || height == 0 { return Vec::new(); }
+        if !self.rounded_fill_corner(rect, x, y) { return vec![rect]; }
+        vec![
+            (x.saturating_add(1), y, width - 2, 1),
+            (x, y.saturating_add(1), width, height - 2),
+            (x.saturating_add(1), y.saturating_add(height - 1), width - 2, 1),
+        ]
+    }
+
+    /// Whether this surface has a visible outline.
+    #[must_use]
+    pub const fn has_border(self) -> bool {
+        !matches!(self.border_style, BorderStyle::None)
+    }
+
     /// Returns true only for rounded single-line corner cells of this exact
     /// surface. Fill paint uses this to restore the enclosing backdrop.
     pub fn rounded_corner_cell(
@@ -250,7 +301,8 @@ impl EffectiveBox {
         y: u16,
         glyph: char,
     ) -> bool {
-        if self.border_style != BorderStyle::Single
+        if !self.has_border()
+            || self.border_style != BorderStyle::Single
             || rect.2 < 2
             || rect.3 < 2
             || x < rect.0
@@ -280,7 +332,7 @@ impl EffectiveBox {
     /// Corner cells for this effective appearance.
     ///
     /// `Sharp` always yields sharp cells. `Rounded` yields rounded elbows,
-    /// `IosSquircle` yields distinct quarter-arc cells. `Custom` yields
+    /// `IosSquircle` yields connected rounded fallback cells. `Custom` yields
     /// rounded cells only when radius is positive. Double/heavy borders have
     /// no rounded Unicode corners, so they keep their native sharp corners.
     pub fn corner_glyphs(self) -> CornerGlyphs {
@@ -290,17 +342,25 @@ impl EffectiveBox {
             RadiusPreset::Custom => self.radius > 0,
         };
         let (top_left, top_right, bottom_left, bottom_right) = match self.border_style {
+            // Cell-grid squircle fallback favors continuity over line weight:
+            // there are no matching thick/double rounded corner glyphs.
+            // Using heavy edges with thin corners would leave visible seams.
+            BorderStyle::Single | BorderStyle::Double | BorderStyle::Heavy
+                if self.preset == RadiusPreset::IosSquircle =>
+            {
+                let [tl, tr, bl, br] = SQUIRCLE_CORNER_GLYPHS;
+                (tl, tr, bl, br)
+            }
             BorderStyle::Single if rounded => {
-                let [tl, tr, bl, br] = if self.preset == RadiusPreset::IosSquircle {
-                    SQUIRCLE_CORNER_GLYPHS
-                } else {
-                    ROUNDED_CORNER_GLYPHS
-                };
+                let [tl, tr, bl, br] = ROUNDED_CORNER_GLYPHS;
                 (tl, tr, bl, br)
             }
             BorderStyle::Single => ('┌', '┐', '└', '┘'),
             BorderStyle::Double => ('╔', '╗', '╚', '╝'),
             BorderStyle::Heavy => ('┏', '┓', '┗', '┛'),
+            // Callers must gate border painting with `has_border`; these
+            // values are never a representation of a borderless frame.
+            BorderStyle::None => (' ', ' ', ' ', ' '),
         };
         CornerGlyphs {
             top_left,
@@ -313,10 +373,14 @@ impl EffectiveBox {
     /// Horizontal and vertical weight glyphs for this border style.
     #[must_use]
     pub fn border_glyphs(self) -> (char, char) {
+        if self.has_border() && self.preset == RadiusPreset::IosSquircle {
+            return ('─', '│');
+        }
         match self.border_style {
             BorderStyle::Single => ('─', '│'),
             BorderStyle::Double => ('═', '║'),
             BorderStyle::Heavy => ('━', '┃'),
+            BorderStyle::None => (' ', ' '),
         }
     }
 
@@ -336,7 +400,140 @@ impl EffectiveBox {
     /// this gate so independent radius edits can never convert them into
     /// uniform bordered rectangles.
     pub fn explicit_line_frame(self) -> bool {
-        !matches!(self.border_style, BorderStyle::Single)
+        matches!(self.border_style, BorderStyle::Double | BorderStyle::Heavy)
+    }
+}
+
+/// Shared text border painter. Every row is exactly `width` display cells;
+/// all components must use this instead of manually counting Unicode chars.
+#[derive(Clone, Copy, Debug)]
+pub struct TextFrame {
+    pub style: EffectiveBox,
+    pub width: u16,
+    pub padding: u8,
+}
+
+impl TextFrame {
+    pub fn new(style: EffectiveBox, width: usize, padding: usize) -> Option<Self> {
+        let width = u16::try_from(width).ok()?;
+        let padding = u8::try_from(padding).ok()?;
+        if !style.has_border() || usize::from(width) < padding as usize * 2 + 3 { return None; }
+        Some(Self { style, width, padding })
+    }
+    pub fn content_width(self) -> u16 { self.width - 2 - 2 * u16::from(self.padding) }
+    pub fn edge(self, bottom: bool) -> String {
+        let corners = self.style.corner_glyphs();
+        let (horizontal, _) = self.style.border_glyphs();
+        let (left, right) = if bottom { (corners.bottom_left, corners.bottom_right) }
+            else { (corners.top_left, corners.top_right) };
+        format!("{left}{}{right}", horizontal.to_string().repeat(self.width as usize - 2))
+    }
+    pub fn row(self, text: &str) -> String {
+        let (_, vertical) = self.style.border_glyphs();
+        let pad = " ".repeat(usize::from(self.padding));
+        let content = crate::native_view_layout::fit(text, self.content_width());
+        format!("{vertical}{pad}{content}{pad}{vertical}")
+    }
+    pub fn blank(self) -> String { self.row("") }
+}
+
+#[cfg(test)]
+mod complete_outlines {
+    use super::*;
+
+    #[test]
+    fn squircle_auto_and_explicit_outline_cover_every_box_but_borderless() {
+        let mut appearance = BoxAppearance::default();
+        appearance.preset = RadiusPreset::IosSquircle;
+        for id in BoxId::ALL {
+            assert!(appearance.full_outline(id), "{id:?} should have a complete outline");
+        }
+        appearance.overrides.entry(BoxId::Tool).or_default().border_style = Some(BorderStyle::None);
+        assert!(!appearance.full_outline(BoxId::Tool), "no border must stay no border");
+        appearance.frame_mode = FrameMode::Native;
+        assert!(!appearance.full_outline(BoxId::User), "native rail opt-out");
+        appearance.overrides.entry(BoxId::User).or_default().frame_mode = Some(FrameMode::Outline);
+        assert!(appearance.full_outline(BoxId::User), "per-role explicit outline wins");
+        appearance.preset = RadiusPreset::Sharp;
+        assert!(appearance.full_outline(BoxId::User));
+        let json = serde_json::to_string(&appearance).unwrap();
+        assert_eq!(serde_json::from_str::<BoxAppearance>(&json).unwrap(), appearance);
+        assert_eq!(BoxAppearance::default().frame_mode, FrameMode::Auto);
+    }
+
+    #[test]
+    fn all_frame_styles_have_exact_cell_width_and_visible_right_border() {
+        for preset in [RadiusPreset::Sharp, RadiusPreset::Rounded, RadiusPreset::IosSquircle] {
+            for border_style in [BorderStyle::Single, BorderStyle::Double, BorderStyle::Heavy] {
+                let style = BoxAppearance { preset, border_style, ..Default::default() }
+                    .effective(BoxId::User);
+                for padding in 0..=4 {
+                    for width in [1usize, 2, 3, 5, 10, 20, 120, 513] {
+                        let Some(frame) = TextFrame::new(style, width, padding) else {
+                            assert!(width < 3 + 2 * padding);
+                            continue;
+                        };
+                        let rows = [
+                            frame.edge(false),
+                            frame.blank(),
+                            frame.row("Hello 🦀 文字 e\u{0301} 👩‍💻 \x1b[31mRED\x1b[0m and a very long line to clip"),
+                            frame.edge(true),
+                        ];
+                        for line in rows {
+                            let mut right = 0u16;
+                            crate::native_view_layout::visit_cells(&line, frame.width, |x, _, w| {
+                                right = x.saturating_add(w);
+                            });
+                            assert_eq!(right, frame.width, "{preset:?}/{border_style:?}/{width}/{padding}: {line:?}");
+                        }
+                        let (_, vertical) = style.border_glyphs();
+                        assert_eq!(frame.row("🦀").chars().next(), Some(vertical));
+                        assert_eq!(frame.row("🦀").chars().last(), Some(vertical));
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod fill_mask_regressions {
+    use super::*;
+
+    #[test]
+    fn rounded_fill_and_text_cell_masks_agree_for_framed_and_borderless_surfaces() {
+        let rect = (7, 3, 11, 5);
+        for border_style in [BorderStyle::Single, BorderStyle::None] {
+            let style = BoxAppearance { preset: RadiusPreset::Rounded, border_style, ..Default::default() }
+                .effective(BoxId::ChatComposer);
+            let spans = style.fill_rectangles(rect);
+            assert_eq!(spans.len(), 3, "rounded underpaint cannot be one full rectangle");
+            for y in rect.1..rect.1 + rect.3 {
+                for x in rect.0..rect.0 + rect.2 {
+                    let covered = spans.iter().filter(|&&(left, top, width, height)|
+                        x >= left && x < left + width && y >= top && y < top + height).count();
+                    let corner = (x == rect.0 || x == rect.0 + rect.2 - 1)
+                        && (y == rect.1 || y == rect.1 + rect.3 - 1);
+                    assert_eq!(covered, usize::from(!corner), "fill coverage at {x},{y}");
+                    assert_eq!(style.rounded_fill_corner(rect, x, y), corner);
+                }
+            }
+            assert_eq!(style.has_border(), border_style != BorderStyle::None);
+        }
+    }
+
+    #[test]
+    fn sharp_heavy_double_and_small_surfaces_keep_their_exact_rectangular_fill() {
+        for (preset, border_style) in [(RadiusPreset::Sharp, BorderStyle::Single),
+            (RadiusPreset::Rounded, BorderStyle::Heavy), (RadiusPreset::Rounded, BorderStyle::Double)] {
+            let style = BoxAppearance { preset, border_style, ..Default::default() }.effective(BoxId::Menu);
+            assert_eq!(style.fill_rectangles((0, 0, 10, 4)), vec![(0, 0, 10, 4)]);
+        }
+        let rounded = BoxAppearance { preset: RadiusPreset::Rounded, ..Default::default() }.effective(BoxId::Menu);
+        for rect in [(0, 0, 1, 1), (0, 0, 2, 4), (0, 0, 4, 2)] {
+            assert_eq!(rounded.fill_rectangles(rect), vec![rect]);
+        }
+        assert!(rounded.fill_rectangles((0, 0, 0, 4)).is_empty());
     }
 }
 
@@ -363,9 +560,30 @@ pub struct BoxGeometry {
     pub height: u16,
     /// Interior padding inset, `0..=[MAX_PADDING]`.
     pub pad: u8,
+    /// Whether this geometry reserves a visible one-cell outline.
+    pub has_border: bool,
 }
 
 impl BoxGeometry {
+    /// Construct the shared paint geometry for a styled surface. Borderless
+    /// surfaces reclaim the complete fill/content rectangle rather than
+    /// reserving blank border rows or columns.
+    #[must_use]
+    pub fn for_border(
+        style: BorderStyle,
+        x: u16,
+        y: u16,
+        width: u16,
+        height: u16,
+        pad: u8,
+    ) -> Option<Self> {
+        if matches!(style, BorderStyle::None) {
+            Self::filled_with_padding(x, y, width, height, pad)
+        } else {
+            Self::framed(x, y, width, height, pad)
+        }
+    }
+
     /// Minimum outer cells of any drawn frame with that padding: two border
     /// lines plus padding both sides plus one text column/row.
     #[must_use]
@@ -390,6 +608,7 @@ impl BoxGeometry {
             width,
             height,
             pad,
+            has_border: true,
         })
     }
 
@@ -406,7 +625,18 @@ impl BoxGeometry {
             width,
             height,
             pad: 0,
+            has_border: false,
         })
+    }
+
+    /// Fill-only geometry retaining the configured content padding. Unlike a
+    /// frame, this never reserves an outline row or column.
+    #[must_use]
+    pub fn filled_with_padding(x: u16, y: u16, width: u16, height: u16, pad: u8) -> Option<Self> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        Some(Self { x, y, width, height, pad, has_border: false })
     }
 
     /// Clip against the viewport (`cols` x `rows`); `None` when nothing
@@ -428,6 +658,7 @@ impl BoxGeometry {
             width: (right - left) as u16,
             height: (bottom - top) as u16,
             pad: self.pad,
+            has_border: self.has_border,
         })
     }
 
@@ -444,7 +675,7 @@ impl BoxGeometry {
     /// fill-only/degenerate shape that cannot hold two border rows.
     #[must_use]
     pub fn frame_rows(self) -> Option<(u16, u16)> {
-        if self.height < 2 {
+        if !self.has_border || self.height < 2 {
             return None;
         }
         Some((self.y, self.y + self.height - 1))
@@ -453,7 +684,7 @@ impl BoxGeometry {
     /// Interior inside the one-cell border; `None` when nothing remains.
     #[must_use]
     pub fn interior(&self) -> Option<(u16, u16, u16, u16)> {
-        if (self.width < 3) || (self.height < 3) {
+        if !self.has_border || (self.width < 3) || (self.height < 3) {
             return None;
         }
         Some((self.x + 1, self.y + 1, self.width - 2, self.height - 2))
@@ -463,19 +694,57 @@ impl BoxGeometry {
     #[must_use]
     pub fn text_area(&self) -> Option<(u16, u16, u16, u16)> {
         let inset = u16::from(self.pad);
-        if self.width < 2 * inset + 3 || self.height < 2 * inset + 3 {
+        let border_inset = u16::from(self.has_border);
+        if self.width < 2 * (inset + border_inset) + 1
+            || self.height < 2 * (inset + border_inset) + 1
+        {
             return None;
         }
         Some((
-            self.x + 1 + inset,
-            self.y + 1 + inset,
-            self.width - 2 - 2 * inset,
-            self.height - 2 - 2 * inset,
+            self.x + border_inset + inset,
+            self.y + border_inset + inset,
+            self.width - 2 * (border_inset + inset),
+            self.height - 2 * (border_inset + inset),
         ))
     }
 }
 
 impl BoxAppearance {
+    #[must_use]
+    pub fn effective_frame_mode(&self, id: BoxId) -> FrameMode {
+        self.overrides.get(&id)
+            .and_then(|over| over.frame_mode)
+            .unwrap_or(self.frame_mode)
+    }
+
+    /// Whether every side of the selected component is drawn. Borderless
+    /// always wins. The squircle preset opts in automatically so it appears
+    /// consistently on messages, dialogs, and sidebars.
+    #[must_use]
+    pub fn full_outline(&self, id: BoxId) -> bool {
+        let style = self.effective(id);
+        if !style.has_border() { return false; }
+        let mode = self.effective_frame_mode(id);
+        match mode {
+            FrameMode::Outline => true,
+            FrameMode::Native => style.explicit_line_frame(),
+            FrameMode::Auto => style.explicit_line_frame() || style.preset == RadiusPreset::IosSquircle,
+        }
+    }
+
+    /// Home's composer has a historic left-rail presentation when sharp.
+    /// Share its true outline decision between text construction and the
+    /// native background painter to avoid leaving square paint behind curves.
+    #[must_use]
+    pub fn home_composer_outline(&self) -> bool {
+        let id = BoxId::ChatComposer;
+        let style = self.effective(id);
+        self.full_outline(id)
+            || (style.has_border()
+                && self.effective_frame_mode(id) != FrameMode::Native
+                && matches!(style.preset, RadiusPreset::Rounded | RadiusPreset::Custom))
+    }
+
     /// Resolve one box against the global values.
     pub fn effective(&self, id: BoxId) -> EffectiveBox {
         let over = self.overrides.get(&id);
@@ -603,6 +872,10 @@ where
     de_optional_bounded(deserializer, MIN_THICKNESS, MAX_THICKNESS, "thickness")
 }
 
+impl FrameMode {
+    fn is_auto(&self) -> bool { *self == Self::Auto }
+}
+
 impl RadiusPreset {
     fn is_sharp(&self) -> bool {
         *self == Self::Sharp
@@ -709,6 +982,43 @@ mod radius_never_frames_policy {
 }
 
 #[cfg(test)]
+mod usability_borderless_schema {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn usability_borderless_style_is_accepted_and_sparse_overrides_are_retained() {
+        let value = json!({
+            "border_style": "none",
+            "overrides": {
+                "sidebar": { "border_style": "double", "padding": 2 }
+            }
+        });
+        let appearance = serde_json::from_value::<BoxAppearance>(value)
+            .expect("user can select borderless");
+        assert_eq!(appearance.overrides[&BoxId::Sidebar].border_style, Some(BorderStyle::Double));
+        assert_eq!(appearance.overrides[&BoxId::Sidebar].padding, Some(2));
+    }
+
+    #[test]
+    fn usability_borderless_geometry_reclaims_frame_space() {
+        let geometry = BoxGeometry::for_border(BorderStyle::None, 2, 3, 12, 6, 2)
+            .expect("positive borderless surface");
+        assert!(!EffectiveBox {
+            preset: RadiusPreset::Rounded,
+            radius: 8,
+            border_style: BorderStyle::None,
+            thickness: 2,
+            padding: 2,
+        }
+        .has_border());
+        assert_eq!(geometry.frame_rows(), None, "borderless geometry has no border rows");
+        assert_eq!(geometry.text_area(), Some((4, 5, 8, 2)));
+        assert_eq!(geometry.fill(), geometry);
+    }
+}
+
+#[cfg(test)]
 mod shared_box_geometry {
     use super::*;
 
@@ -800,9 +1110,8 @@ mod shared_box_geometry {
 mod corner_glyph_shapes {
     use super::*;
 
-    /// R2: IosSquircle must render its OWN shape — quarter arcs, distinct
-    /// from Rounded elbows — wherever a surface already paints corners, and
-    /// only there. Radius never activates corners on frameless surfaces.
+    /// Cell-mode squircle corners must JOIN both edges rather than drawing
+    /// a disconnected quarter-circle symbol; explicit borderless stays off.
     #[test]
     fn squircle_is_distinct_from_rounded_and_radius_never_frames() {
         let squircle = EffectiveBox {
@@ -812,37 +1121,30 @@ mod corner_glyph_shapes {
             thickness: MIN_THICKNESS,
             padding: 0,
         };
-        assert_ne!(
+        assert_eq!(
             squircle.corner_glyphs().to_array(),
-            EffectiveBox {
-                preset: RadiusPreset::Rounded,
-                ..squircle
-            }
-            .corner_glyphs()
-            .to_array(),
-            "squircle may not be a silent rename of Rounded"
+            EffectiveBox { preset: RadiusPreset::Rounded, ..squircle }
+                .corner_glyphs().to_array(),
+            "plain-cell fallback must connect adjoining strokes"
         );
         assert_eq!(
             squircle.corner_glyphs().to_array(),
             SQUIRCLE_CORNER_GLYPHS,
-            "quarter-arc set, reading order"
+            "connected fallback glyphs, reading order"
         );
         assert_eq!(
             squircle.border_glyphs(),
             ('─', '│'),
-            "squircle only changes corners, never weights"
+            "squircle cell fallback always uses connected single strokes"
         );
         for style in [BorderStyle::Double, BorderStyle::Heavy] {
-            assert_ne!(
-                EffectiveBox {
-                    border_style: style,
-                    ..squircle
-                }
-                .corner_glyphs()
-                .to_array(),
+            let candidate = EffectiveBox { border_style: style, ..squircle };
+            assert_eq!(
+                candidate.corner_glyphs().to_array(),
                 SQUIRCLE_CORNER_GLYPHS,
-                "heavier weights keep their native sharp corners"
+                "connected corners take precedence over unsupported heavy arcs"
             );
+            assert_eq!(candidate.border_glyphs(), ('─', '│'));
         }
         // Custom radius stays the rounded elbows, never squircle arcs.
         let custom = EffectiveBox {

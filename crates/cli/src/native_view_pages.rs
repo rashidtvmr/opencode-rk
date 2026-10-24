@@ -127,7 +127,7 @@ use std::collections::HashSet;
 
 /// Static local command routes (user-requested local routes). The integrator
 /// binds each route to real navigation; nothing here fetches or mutates.
-pub const COMMAND_ROUTES: [(&str, &str); 12] = [
+pub const COMMAND_ROUTES: [(&str, &str); 13] = [
     ("/sessions", "Sessions"),
     ("/models", "Models"),
     ("/connect", "Providers"),
@@ -140,6 +140,7 @@ pub const COMMAND_ROUTES: [(&str, &str); 12] = [
     ("/workspace", "Workspaces"),
     ("/agents", "Agents"),
     ("/import", "Import settings"),
+    ("/memory", "Memory"),
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────
@@ -162,11 +163,12 @@ pub enum Page {
     Diff,
     Context,
     Commands,
+    Memory,
 }
 
 impl Page {
     /// Tab/page cycling order.
-    pub const ORDER: [Page; 13] = [
+    pub const ORDER: [Page; 14] = [
         Page::Chat,
         Page::Sessions,
         Page::Help,
@@ -180,6 +182,7 @@ impl Page {
         Page::Diff,
         Page::Context,
         Page::Commands,
+        Page::Memory,
     ];
 
     /// Page title (a page always renders rows too — a heading alone never
@@ -200,6 +203,7 @@ impl Page {
             Page::Diff => "Diff",
             Page::Context => "Context",
             Page::Commands => "Commands",
+            Page::Memory => "Memory",
         }
     }
 
@@ -226,6 +230,7 @@ impl Page {
             Page::Diff => Some("/diff"),
             Page::Context => Some("/context"),
             Page::Commands => None,
+            Page::Memory => Some("/memory"),
         }
     }
 
@@ -253,7 +258,8 @@ impl Page {
             Page::Mcp => Page::Diff,
             Page::Diff => Page::Context,
             Page::Context => Page::Commands,
-            Page::Commands => Page::Chat,
+            Page::Commands => Page::Memory,
+            Page::Memory => Page::Chat,
         }
     }
 
@@ -261,7 +267,7 @@ impl Page {
     #[must_use]
     pub const fn prev(self) -> Page {
         match self {
-            Page::Chat => Page::Commands,
+            Page::Chat => Page::Memory,
             Page::Sessions => Page::Chat,
             Page::Help => Page::Sessions,
             Page::Models => Page::Help,
@@ -274,6 +280,7 @@ impl Page {
             Page::Diff => Page::Mcp,
             Page::Context => Page::Diff,
             Page::Commands => Page::Context,
+            Page::Memory => Page::Commands,
         }
     }
 }
@@ -1216,8 +1223,8 @@ mod tests {
 
     #[test]
     fn commands_page_yields_static_local_routes() {
-        assert_eq!(COMMAND_ROUTES.len(), 12);
-        assert_eq!(command_rows().len(), 12);
+        assert_eq!(COMMAND_ROUTES.len(), 13);
+        assert_eq!(command_rows().len(), 13);
         assert_eq!(Page::from_route("/sessions"), Some(Page::Sessions));
         assert_eq!(Page::from_route("/models"), Some(Page::Models));
         assert_eq!(Page::from_route("/connect"), Some(Page::Providers));
@@ -1225,6 +1232,7 @@ mod tests {
         assert_eq!(Page::from_route("/import"), None);
         assert_eq!(Page::from_route("/workspace"), Some(Page::Workspaces));
         assert_eq!(Page::from_route("/commands"), None);
+        assert_eq!(Page::from_route("/memory"), Some(Page::Memory));
         // v4: /sessions belongs to Page::Sessions; Chat is the routeless home.
         assert_eq!(Page::Sessions.route(), Some("/sessions"));
         assert_eq!(Page::Chat.route(), None);

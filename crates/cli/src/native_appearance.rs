@@ -1,6 +1,6 @@
 //! Native appearance editor: real keyboard and pointer inputs, no IO.
 use crate::native_box_style::{
-    BorderStyle, BoxAppearance, BoxId, BoxOverride, RadiusPreset, radius_from_pointer,
+    BorderStyle, BoxAppearance, BoxId, BoxOverride, FrameMode, RadiusPreset, radius_from_pointer,
 };
 
 /// Hit-time cell spans mirrored from the `rows()` renderer: the component
@@ -13,18 +13,25 @@ const OPTION_COL: u16 = 22;
 pub struct AppearanceEditor {
     pub style: BoxAppearance,
     pub open: bool,
+    original: BoxAppearance,
     target: usize,
     dragging: bool,
 }
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AppearanceOutcome { Ignored, Preview, Apply, Cancel }
 impl AppearanceEditor {
-    pub fn show(&mut self) { self.open=true; self.target=1; self.dragging=false; }
+    pub fn show(&mut self) { self.original=self.style.clone(); self.open=true; self.target=0; self.dragging=false; }
+    pub fn apply(&mut self) -> AppearanceOutcome { if !self.open { return AppearanceOutcome::Ignored; } self.original=self.style.clone(); self.open=false; self.dragging=false; AppearanceOutcome::Apply }
+    pub fn cancel(&mut self) -> AppearanceOutcome { if !self.open { return AppearanceOutcome::Ignored; } self.style=self.original.clone(); self.open=false; self.dragging=false; AppearanceOutcome::Cancel }
     fn label(id:BoxId)->&'static str {
         match id {BoxId::ChatComposer=>"Composer",BoxId::User=>"Your messages",BoxId::Assistant=>"AI responses",BoxId::System=>"System notes",BoxId::Tool=>"Tool results",BoxId::Dialog=>"Dialogs",BoxId::Sidebar=>"Sidebar",BoxId::Menu=>"Menus"}
     }
     pub fn new(style: BoxAppearance) -> Self {
+        let original = style.clone();
         Self {
             style,
             open: false,
+            original,
             target: 0,
             dragging: false,
         }
@@ -57,48 +64,48 @@ impl AppearanceEditor {
         }
     }
     pub fn key(&mut self, byte: u8) -> bool {
+        !matches!(self.key_outcome(byte), AppearanceOutcome::Ignored)
+    }
+    pub fn key_outcome(&mut self, byte: u8) -> AppearanceOutcome {
         match byte {
-            27 => {
-                self.open = false;
-                self.dragging = false;
-                false
-            }
+            27 => self.cancel(),
+            13 => self.apply(),
             9 => {
                 self.target = (self.target + 1) % (BoxId::ALL.len() + 1);
-                false
+                AppearanceOutcome::Preview
             }
             b'1' => {
                 self.preset(RadiusPreset::Sharp);
-                true
+                AppearanceOutcome::Preview
             }
             b'2' => {
                 self.preset(RadiusPreset::Rounded);
-                true
+                AppearanceOutcome::Preview
             }
             b'3' => {
                 self.preset(RadiusPreset::IosSquircle);
-                true
+                AppearanceOutcome::Preview
             }
             b'4' => {
                 self.set_radius(50);
-                true
+                AppearanceOutcome::Preview
             }
-            b'r' => { if let Some(id)=self.target() {self.style.overrides.remove(&id);} true }
+            b'r' => { if let Some(id)=self.target() {self.style.overrides.remove(&id); AppearanceOutcome::Preview} else {AppearanceOutcome::Ignored} }
             b'-' => {
                 self.set_radius(self.radius().saturating_sub(1));
-                true
+                AppearanceOutcome::Preview
             }
             b'+' | b'=' => {
                 self.set_radius(self.radius().saturating_add(1).min(50));
-                true
+                AppearanceOutcome::Preview
             }
             b'0' => {
                 self.set_radius(0);
-                true
+                AppearanceOutcome::Preview
             }
             b'5' => {
                 self.set_radius(50);
-                true
+                AppearanceOutcome::Preview
             }
             b'p' => {
                 if let Some(id) = self.target() {
@@ -107,7 +114,7 @@ impl AppearanceEditor {
                 } else {
                     self.style.padding = (self.style.padding + 1) % 5;
                 }
-                true
+                AppearanceOutcome::Preview
             }
             b'b' => {
                 let current = self
@@ -117,7 +124,8 @@ impl AppearanceEditor {
                 let next = match current {
                     BorderStyle::Single => BorderStyle::Double,
                     BorderStyle::Double => BorderStyle::Heavy,
-                    BorderStyle::Heavy => BorderStyle::Single,
+                    BorderStyle::Heavy => BorderStyle::None,
+                    BorderStyle::None => BorderStyle::Single,
                 };
                 if let Some(id) = self.target() {
                     self.style
@@ -128,9 +136,28 @@ impl AppearanceEditor {
                 } else {
                     self.style.border_style = next;
                 }
-                true
+                AppearanceOutcome::Preview
             }
-            _ => false,
+            b'o' => {
+                let mode = self.target()
+                    .and_then(|id| self.style.overrides.get(&id).and_then(|over| over.frame_mode))
+                    .unwrap_or(self.style.frame_mode);
+                let next = match mode {
+                    FrameMode::Auto => FrameMode::Outline,
+                    FrameMode::Outline => FrameMode::Native,
+                    FrameMode::Native => FrameMode::Auto,
+                };
+                if let Some(id) = self.target() {
+                    self.style.overrides.entry(id).or_default().frame_mode = Some(next);
+                } else { self.style.frame_mode = next; }
+                AppearanceOutcome::Preview
+            }
+            b'n' => {
+                if let Some(id)=self.target() { self.style.overrides.entry(id).or_default().border_style=Some(BorderStyle::None); }
+                else { self.style.border_style=BorderStyle::None; }
+                AppearanceOutcome::Preview
+            }
+            _ => AppearanceOutcome::Ignored,
         }
     }
     pub fn move_target(&mut self, down: bool) {
@@ -148,6 +175,34 @@ impl AppearanceEditor {
             .get(usize::from(row))
             .map(|line| u16::try_from(line.chars().count()).unwrap_or(u16::MAX))
             .unwrap_or(0)
+    }
+    /// Exact control span in the rendered option text.  Wide rows append
+    /// inheritance/effective metadata for readability, but that metadata is
+    /// never an actionable control.  Returning a cell count here keeps hit
+    /// testing tied to the same rendered strings without making the metadata
+    /// clickable.
+    fn option_control_span(&self, width: u16, row: u16, option_row: u16) -> Option<(u16, u16)> {
+        let rendered = self.rows(width);
+        let text = rendered.get(usize::from(row)).map(String::as_str).unwrap_or("");
+        let option = if width >= 44 {
+            text.get(usize::from(OPTION_COL)..).unwrap_or("")
+        } else {
+            text
+        };
+        let control = match option_row {
+            0 => "1  Sharp corners",
+            1 => "2  Rounded corners",
+            2 => "3  Soft corners (cell approximation)",
+            4 => "0    1    2    3    4",
+            5 => option.split(" (effective").next().unwrap_or(option),
+            6 => "Reset this component (r)",
+            7 => "n  Borderless",
+            _ => "",
+        };
+        let start = option.find(control)?;
+        let start = u16::try_from(start).ok()?;
+        let end = start.saturating_add(u16::try_from(control.chars().count()).ok()?);
+        Some((start, end))
     }
     /// Press dispatch over the RENDERED dialog (R3).
     ///
@@ -169,18 +224,31 @@ impl AppearanceEditor {
         content_width: u16,
         visible_rows: u16,
     ) -> bool {
+        self.pointer_outcome(x, y, kind, content_x, content_y, content_width, visible_rows)
+            .is_some_and(|outcome| outcome != AppearanceOutcome::Ignored)
+    }
+    pub fn pointer_outcome(
+        &mut self,
+        x: u16,
+        y: u16,
+        kind: u8,
+        content_x: u16,
+        content_y: u16,
+        content_width: u16,
+        visible_rows: u16,
+    ) -> Option<AppearanceOutcome> {
         if kind != 0 {
-            return false;
+            return None;
         }
         // Screen-absolute pointer mapped strictly into the painted content
         // rect: presses outside its bounds (left/above/below or past the
         // right edge) are INERT — they can never act on an option row (R3).
         let (col, row) = match (x.checked_sub(content_x), y.checked_sub(content_y)) {
             (Some(col), Some(row)) => (col, row),
-            _ => return false,
+            _ => return None,
         };
         if col >= content_width {
-            return false; // outside the painted rect horizontally
+            return None; // outside the painted rect horizontally
         }
         // Derive every bound from the rendered output: only rows visibly
         // painted here provide targets, plus the exact footer boundary.
@@ -188,15 +256,28 @@ impl AppearanceEditor {
         // Keep this fail-closed even if the renderer is later reduced to a
         // title-only/empty layout: a hit tester must never turn a malformed
         // row count into an underflowed actionable range.
-        let content_rows = (rendered.len() as u16).saturating_sub(2); // trailing hint rows are inert
-        if row >= content_rows || row >= visible_rows {
-            return false;
+        if row >= rendered.len() as u16 || row >= visible_rows {
+            return None;
+        }
+        let footer_start = (rendered.len() as u16).saturating_sub(2);
+        if row >= footer_start {
+            let text = rendered.get(usize::from(row))?;
+            let chars: Vec<char> = text.chars().collect();
+            let control_at = |label: &str| {
+                let needle: Vec<char> = label.chars().collect();
+                chars.windows(needle.len()).position(|window| window == needle)
+                    .filter(|start| usize::from(col) >= *start && usize::from(col) < *start + needle.len())
+            };
+            let target = if control_at("Enter Apply").is_some() { "Enter Apply" }
+                else if control_at("Esc Cancel").is_some() { "Esc Cancel" }
+                else { return Some(AppearanceOutcome::Ignored); };
+            return Some(if target == "Enter Apply" { self.apply() } else { self.cancel() });
         }
         match row {
-            0 => return false, // title row consumes the press, changes nothing
+            0 => return Some(AppearanceOutcome::Ignored), // title row consumes the press
             1 => {
                 self.move_target(true);
-                return false;
+                return Some(AppearanceOutcome::Ignored);
             }
             _ => {}
         }
@@ -205,10 +286,10 @@ impl AppearanceEditor {
         if wide && col < LABEL_SPAN_END {
             // One target per rendered component label line (rows 2..=9).
             self.target = usize::from(row - 1);
-            return false;
+            return Some(AppearanceOutcome::Ignored);
         }
         if wide && col < OPTION_COL {
-            return false; // separator gutter between label and option columns
+            return Some(AppearanceOutcome::Ignored); // separator gutter
         }
         if wide {
             // Wide rows paint the option text at OPTION_COL, but do not paint
@@ -216,22 +297,26 @@ impl AppearanceEditor {
             // the actual rendered row (rather than a fixed control width) so
             // every action row has exactly its visible text span as its hit
             // target; trailing cells remain inert.
-            let option_cells = rendered
-                .get(usize::from(row))
-                .and_then(|line| line.chars().count().checked_sub(usize::from(OPTION_COL)))
-                .and_then(|width| u16::try_from(width).ok())
-                .unwrap_or(0);
-            if col >= OPTION_COL.saturating_add(option_cells) {
-                return false;
+            let Some((start, end)) = self.option_control_span(content_width, row, option_row) else {
+                return Some(AppearanceOutcome::Ignored);
+            };
+            let relative = col.saturating_sub(OPTION_COL);
+            if relative < start || relative >= end {
+                return Some(AppearanceOutcome::Ignored);
             }
         }
-        if !wide && col >= self.compact_option_cells(content_width, row) {
-            return false; // only the RENDERED compact option text is clickable
+        if !wide {
+            let Some((start, end)) = self.option_control_span(content_width, row, option_row) else {
+                return Some(AppearanceOutcome::Ignored);
+            };
+            if col < start || col >= end {
+            return Some(AppearanceOutcome::Ignored); // only rendered text clickable
+            }
         }
         match option_row {
-            0 => self.key(b'1'),
-            1 => self.key(b'2'),
-            2 => self.key(b'3'),
+            0 => Some(self.key_outcome(b'1')),
+            1 => Some(self.key_outcome(b'2')),
+            2 => Some(self.key_outcome(b'3')),
             4 => {
                 let relative = col.saturating_sub(if wide { OPTION_COL } else { 0 });
                 let value = (relative / 5).min(4) as u8;
@@ -240,18 +325,31 @@ impl AppearanceEditor {
                 } else {
                     self.style.padding = value;
                 }
-                true
+                Some(AppearanceOutcome::Preview)
             }
-            5 => self.key(b'b'),
+            5 => {
+                // The border and full-frame selectors share one displayed
+                // row. Dispatch by the actual painted character span rather
+                // than interpreting a click on 'o Frame' as 'b Border'.
+                let text = rendered.get(usize::from(row)).map(String::as_str).unwrap_or("");
+                let option = if wide { text.get(usize::from(OPTION_COL)..).unwrap_or("") } else { text };
+                let relative = if wide { col.saturating_sub(OPTION_COL) } else { col };
+                let choice = option.find("o  Frame:")
+                    .is_some_and(|start| usize::from(relative) >= start);
+                Some(self.key_outcome(if choice { b'o' } else { b'b' }))
+            }
             6 => {
                 if let Some(id) = self.target() {
                     self.style.overrides.remove(&id);
+                    Some(AppearanceOutcome::Preview)
+                } else {
+                    Some(AppearanceOutcome::Ignored)
                 }
-                true
             }
+            7 => Some(self.key_outcome(b'n')),
             // Rendered status/hint option lines (3="Shape:", 7=hint) are
             // inert: they are labels, not controls.
-            _ => false,
+            _ => Some(AppearanceOutcome::Ignored),
         }
     }
 
@@ -287,26 +385,51 @@ impl AppearanceEditor {
         };
         let radius = self.radius();
         let current=self.target().map(Self::label).unwrap_or("All components");
+        let inherited = self.target().is_some_and(|id| !self.style.overrides.contains_key(&id));
         let options=vec![
             "1  Sharp corners".to_owned(),
             "2  Rounded corners".into(),
             "3  Soft corners (cell approximation)".into(),
             format!("Shape: {}",if radius == 0 {"Sharp"} else {"Rounded"}),
             format!("0    1    2    3    4   padding [{}]",effective.padding),
-            format!("b  Border weight: {:?}",effective.border_style),
+            format!("b  Border: {:?} · o  Frame: {:?} (effective{})",effective.border_style,
+                self.target().and_then(|id| self.style.overrides.get(&id).and_then(|over| over.frame_mode))
+                    .unwrap_or(self.style.frame_mode),
+                if inherited {", inherits"} else {""}),
             "Reset this component (r)".into(),
-            "+ / - corner setting · p padding".into(),
+            "n  Borderless · + / - corner setting · p padding".into(),
         ];
         let mut rows=vec!["Box appearance".into(),format!("> Target: {current} · ↑↓ / Tab choose")];
         if width >= 44 {
             for (index,id) in BoxId::ALL.iter().enumerate() {
-                rows.push(format!("{} {:<18}  {}",if self.target==index+1 {">"} else {" "},Self::label(*id),options[index]));
+                let effective = self.style.effective(*id);
+                let inherited = !self.style.overrides.contains_key(id);
+                let state = if inherited { " · inherits" } else { " · override" };
+                let component_option = match index {
+                    0 => format!("1  Sharp corners · effective {:?}{state}", effective.preset),
+                    1 => format!("2  Rounded corners · effective {:?}{state}", effective.preset),
+                    2 => format!("3  Soft corners (cell approximation) · effective {:?}{state}", effective.preset),
+                    3 => format!("Shape: {} · effective {:?}{state}", if effective.radius == 0 { "Sharp" } else { "Rounded" }, effective.preset),
+                    4 => format!("0    1    2    3    4   padding [{}] · effective{state}", effective.padding),
+                    5 => format!("b  Border: {:?} · o  Frame: {:?} (effective{state})",
+                        effective.border_style, self.style.overrides.get(id)
+                            .and_then(|over| over.frame_mode).unwrap_or(self.style.frame_mode)),
+                    6 => format!("Reset this component (r){state}"),
+                    _ => format!("n  Borderless · + / - corner setting · p padding{state}"),
+                };
+                // The left marker is intentionally compact and stays inside
+                // the painted label span: `*` means this component has an
+                // override, `~` means it inherits global values.  The option
+                // text remains the selected target's control, while the
+                // component's effective value is reported after that control.
+                let marker = if self.target == index + 1 { ">" } else if inherited { "~" } else { "*" };
+                rows.push(format!("{} {:<18}  {}", marker, Self::label(*id), component_option));
             }
         } else {
             rows.extend(options);
         }
-        rows.push("Click a component or setting · Esc close".into());
-        rows.push("Corners preserve each component's own surface.".into());
+        rows.push("Enter Apply   Esc Cancel".into());
+        rows.push("Preview only: changes are not stored until Apply · ~ inherits · * override".into());
         rows
     }
 }
@@ -314,6 +437,186 @@ impl AppearanceEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn usability_open_starts_at_global_target_and_renders_apply_cancel() {
+        let mut editor = AppearanceEditor::new(BoxAppearance::default());
+        editor.show();
+        let rows = editor.rows(30);
+
+        assert!(
+            rows.iter().any(|row| row.contains("Target: All components")),
+            "opening appearance must visibly select the global target: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("Apply")),
+            "rendered appearance controls need an explicit Apply action: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("Cancel")),
+            "rendered appearance controls need an explicit Cancel action: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn usability_rendered_controls_expose_borderless_effective_and_inherited_state() {
+        let mut style = BoxAppearance::default();
+        style.preset = RadiusPreset::Rounded;
+        style.overrides.insert(
+            BoxId::User,
+            BoxOverride {
+                preset: Some(RadiusPreset::Sharp),
+                ..BoxOverride::default()
+            },
+        );
+        let editor = AppearanceEditor::new(style);
+        let rows = editor.rows(60);
+
+        assert!(
+            rows.iter().any(|row| row.contains("Borderless")),
+            "borderless must be a visible user-facing choice: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("effective")),
+            "appearance rows must identify the effective value being previewed: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("inherits")),
+            "components without overrides must visibly indicate inheritance: {rows:?}"
+        );
+        assert!(
+            rows.iter().any(|row| row.contains("Sharp")),
+            "rendered rows must expose the configured/effective shape value: {rows:?}"
+        );
+    }
+
+    #[test]
+    fn usability_global_reset_is_a_noop_and_reports_no_change() {
+        let mut editor = AppearanceEditor::new(BoxAppearance::default());
+        let rows = editor.rows(30);
+        let reset_row = rows
+            .iter()
+            .position(|row| row.contains("Reset"))
+            .expect("rendered editor must expose reset control");
+        let reset_col = rows[reset_row]
+            .find("Reset")
+            .expect("reset control must have a rendered start");
+        let before = editor.style.clone();
+
+        assert!(
+            !editor.pointer_hit(
+                u16::try_from(reset_col).unwrap(),
+                u16::try_from(reset_row).unwrap(),
+                0,
+                0,
+                0,
+                30,
+                u16::MAX,
+            ),
+            "resetting the global target must report no component reset"
+        );
+        assert_eq!(
+            editor.style, before,
+            "global reset must not mutate the global style in the component-reset action"
+        );
+    }
+
+    #[test]
+    fn usability_global_target_is_visible_in_compact_and_wide_renderings() {
+        let mut editor = AppearanceEditor::new(BoxAppearance::default());
+        editor.show();
+
+        for width in [30, 60] {
+            let rows = editor.rows(width);
+            assert_eq!(
+                rows.get(1).map(String::as_str),
+                Some("> Target: All components · ↑↓ / Tab choose"),
+                "global target must be explicit at every supported editor width: {rows:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn usability_effective_value_follows_selected_component_after_rendered_target_hit() {
+        let mut style = BoxAppearance::default();
+        style.preset = RadiusPreset::Rounded;
+        style.overrides.insert(
+            BoxId::User,
+            BoxOverride {
+                preset: Some(RadiusPreset::Sharp),
+                ..BoxOverride::default()
+            },
+        );
+        let mut editor = AppearanceEditor::new(style);
+        editor.show();
+        let rows = editor.rows(60);
+        let user_row = rows
+            .iter()
+            .position(|row| row.contains("Your messages"))
+            .expect("user component must be rendered");
+        let user_col = rows[user_row]
+            .find("Your messages")
+            .expect("user target must have a rendered label");
+
+        assert!(!editor.pointer_hit(
+            u16::try_from(user_col).unwrap(),
+            u16::try_from(user_row).unwrap(),
+            0,
+            0,
+            0,
+            60,
+            u16::MAX,
+        ), "label click selects a target but does not itself mutate preferences");
+        let selected = editor.rows(60);
+        assert_eq!(
+            selected[1],
+            "> Target: Your messages · ↑↓ / Tab choose",
+            "rendered target indicator must follow the clicked component label: {selected:?}"
+        );
+        assert!(
+            selected[user_row].contains("Sharp"),
+            "selected component row must show its effective configured value: {selected:?}"
+        );
+        assert!(
+            selected[user_row].contains("inherited") || selected[user_row].contains("override"),
+            "selected component row must identify why its effective value differs: {selected:?}"
+        );
+    }
+
+    #[test]
+    fn usability_footer_pointer_actions_are_distinct_and_trailing_hint_is_inert() {
+        let mut cancel = AppearanceEditor::new(BoxAppearance::default());
+        cancel.show();
+        assert_eq!(cancel.key_outcome(b'2'), AppearanceOutcome::Preview);
+        let cancel_rows = cancel.rows(30);
+        let cancel_row = cancel_rows.iter().position(|row| row.contains("Esc Cancel")).expect("Cancel footer");
+        let cancel_col = cancel_rows[cancel_row].find("Esc Cancel").unwrap();
+        assert!(cancel.pointer_hit(cancel_col as u16, cancel_row as u16, 0, 0, 0, 30, u16::MAX));
+        assert_eq!(cancel.style, BoxAppearance::default(), "Cancel restores the draft snapshot");
+        assert!(!cancel.open, "Cancel closes the editor");
+
+        let mut cancel_last = AppearanceEditor::new(BoxAppearance::default());
+        cancel_last.show();
+        assert_eq!(cancel_last.key_outcome(b'2'), AppearanceOutcome::Preview);
+        let rows = cancel_last.rows(30);
+        let row = rows.iter().position(|line| line.contains("Esc Cancel")).unwrap();
+        let start = rows[row].find("Esc Cancel").unwrap();
+        let last = start + "Esc Cancel".chars().count() - 1;
+        assert!(cancel_last.pointer_hit(last as u16, row as u16, 0, 0, 0, 30, u16::MAX));
+        assert_eq!(cancel_last.style, BoxAppearance::default(), "last Cancel cell rolls back");
+
+        let mut apply = AppearanceEditor::new(BoxAppearance::default());
+        apply.show();
+        assert_eq!(apply.key_outcome(b'2'), AppearanceOutcome::Preview);
+        let apply_rows = apply.rows(30);
+        let apply_row = apply_rows.iter().position(|row| row.contains("Enter Apply")).expect("Apply footer");
+        let apply_start = apply_rows[apply_row].find("Enter Apply").unwrap();
+        assert!(!apply.pointer_hit((apply_start + "Enter Apply".len()) as u16, apply_row as u16, 0, 0, 0, 30, u16::MAX));
+        assert!(apply.open, "trailing preview hint remains inert");
+        assert!(apply.pointer_hit(apply_start as u16, apply_row as u16, 0, 0, 0, 30, u16::MAX));
+        assert!(!apply.open, "Apply closes after clicking the first cell");
+        assert_eq!(apply.style.preset, RadiusPreset::Rounded, "Apply commits the live preview");
+    }
     #[test]
     fn arrows_change_highlighted_target_without_changing_preferences() {
         let mut editor = AppearanceEditor::new(BoxAppearance::default());
@@ -398,15 +701,25 @@ mod tests {
             crate::native_box_style::RadiusPreset::Sharp,
             "global preference untouched by a component-scoped click"
         );
-        // Status line (row 5 = options[3] "Shape: …"), rendered help row 9
-        // and both footer hint rows (10, 11) are labels, not controls.
+        // Status and non-control footer cells remain inert.
         let keep = editor.style.clone();
         let keep_target = editor.target;
         assert!(!editor.pointer_hit(2 + OPTION_COL + 2, 7, 0, 2, 2, 60, u16::MAX), "Shape status row inert");
-        assert!(!editor.pointer_hit(2 + OPTION_COL + 2, 11, 0, 2, 2, 60, u16::MAX), "help option row inert");
         assert!(!editor.pointer_hit(2 + OPTION_COL + 2, 12, 0, 2, 2, 60, u16::MAX), "footer row inert");
         assert!(!editor.pointer_hit(2 + OPTION_COL + 2, 13, 0, 2, 2, 60, u16::MAX), "footer row inert");
         assert_eq!(editor.style, keep);
+        assert_eq!(editor.target, keep_target);
+        let borderless_row = rendered.iter().position(|row| row.contains("n  Borderless")).unwrap();
+        let borderless_col = rendered[borderless_row].find("n  Borderless").unwrap();
+        let borderless_y = 2 + borderless_row as u16;
+        assert!(editor.pointer_hit((2 + borderless_col) as u16, borderless_y, 0, 2, 2, 60, u16::MAX));
+        assert_eq!(editor.style.effective(BoxId::ChatComposer).border_style, BorderStyle::None);
+        assert_eq!(editor.style.border_style, keep.border_style, "global border remains unchanged");
+        assert_eq!(editor.target, keep_target);
+        let after_borderless = editor.style.clone();
+        let hint_col = borderless_col + "n  Borderless".len();
+        assert!(!editor.pointer_hit((2 + hint_col) as u16, borderless_y, 0, 2, 2, 60, u16::MAX), "borderless hint suffix inert");
+        assert_eq!(editor.style, after_borderless);
         assert_eq!(editor.target, keep_target);
     }
 
@@ -425,6 +738,7 @@ mod tests {
         let keep = editor.style.clone();
         // Compact layout: only the rendered option TEXT is clickable.
         let mut compact = AppearanceEditor::new(BoxAppearance::default());
+        compact.show();
         let rendered = compact.rows(30);
         assert_eq!(rendered.len(), 12);
         assert!(compact.pointer_hit(2, 4, 0, 2, 2, 30, u16::MAX), "compact option row acts at col 0");
@@ -436,10 +750,7 @@ mod tests {
         assert!(!compact.pointer_hit(22, 4, 0, 2, 2, 30, u16::MAX), "past rendered text in compact inert");
         let compact_before = compact.style.clone();
         // Reset option rows[6] renders on content row 8 (y=10).
-        assert!(
-            compact.pointer_hit(19, 10, 0, 2, 2, 30, u16::MAX),
-            "reset line still clickable inside its rendered span"
-        );
+        assert!(!compact.pointer_hit(19, 10, 0, 2, 2, 30, u16::MAX), "global reset is a no-op");
         assert_eq!(
             compact.style,
             compact_before,
@@ -456,6 +767,8 @@ mod tests {
         let mut visible = AppearanceEditor::new(before.clone());
         clipped.show();
         visible.show();
+        clipped.move_target(true); // Composer
+        visible.move_target(true); // Composer
         let (x, y, content_x, content_y, width) =
             (2 + OPTION_COL + 4, 5, 2, 2, 60);
 
@@ -564,7 +877,8 @@ mod tests {
 
         let configured = || {
             let mut editor = AppearanceEditor::new(BoxAppearance::default());
-            editor.show(); // Composer is the selected target.
+            editor.show();
+            editor.move_target(true); // Composer is the selected target.
             editor.key(b'2');
             editor
         };

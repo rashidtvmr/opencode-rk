@@ -51,6 +51,8 @@ mod native_completion;
 #[cfg(feature = "native")]
 mod native_workspace;
 mod native_debug;
+#[cfg(feature = "native")]
+mod native_memory;
 mod native_layout;
 mod native_navigation;
 mod native_palette;

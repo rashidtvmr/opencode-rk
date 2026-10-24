@@ -285,24 +285,25 @@ impl ChatView {
     }
 }
 
-/// Workspace header row: workspace plus caller/view-fact suffixes (the
-/// busy flag the integrator observed, this view's own scroll offset),
+    /// Workspace header row: workspace plus caller/view-fact suffixes (the
+    /// busy flag the integrator observed, this view's own scroll offset),
 /// composed first and then clipped as one row by the char-safe
 /// [`truncate_row`] helper so the full row — suffix included — never
 /// exceeds `width` in chars, including `width` 1 or 2. `width == 0`
 /// disables clipping (no truncation, no underflow).
 fn render_header(width: usize, workspace: &str, busy: bool, scroll: usize) -> String {
     let mut suffix = String::new();
-    if busy {
-        suffix.push_str(" [turn in flight]");
-    }
     if scroll > 0 {
         suffix.push_str(&format!(" [+{scroll} up]"));
     }
-    let row = format!(
-        "{}{suffix}",
-        strip_ansi(clip_utf8_prefix_bytes(workspace, MAX_INPUT_ROW_BYTES)).replace('\t', " ")
-    );
+    let workspace = strip_ansi(clip_utf8_prefix_bytes(workspace, MAX_INPUT_ROW_BYTES)).replace('\t', " ");
+    let row = if busy {
+        // Put the live status at the bounded pane origin so it cannot be
+        // truncated by a long workspace label before becoming visible.
+        format!("Thinking… {workspace}{suffix}")
+    } else {
+        format!("{workspace}{suffix}")
+    };
     truncate_row(&row, width)
 }
 
@@ -552,6 +553,39 @@ pub enum ChatRowClass {
 /// padding are never recovered by parsing the rendered glyphs.
 pub type StyledChatRow = (String, ChatRowClass, Option<(u16, u16)>);
 
+/// The shared ChatComposer allocation decision used by both the painter and
+/// NativeView's hit-region projection. Home's legacy rail does not use this
+/// helper; this is specifically the session ChatComposer path.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ComposerLayout {
+    pub framed: bool,
+    pub height: usize,
+}
+
+#[must_use]
+pub(crate) fn composer_layout(
+    width: usize,
+    height: usize,
+    draft: &str,
+    frame: crate::native_box_style::EffectiveBox,
+) -> ComposerLayout {
+    let height = height.min(MAX_VIEW_ROWS);
+    let pad = usize::from(frame.padding);
+    let framed = frame.has_border()
+        && width > 2 + 2 * pad
+        && height > 3 + 2 * pad;
+    let height = if framed {
+        framed_composer_height(draft, height, frame.padding)
+    } else {
+        draft
+            .split('\n')
+            .take(129)
+            .count()
+            .clamp(1, (height / 2).max(1))
+    };
+    ComposerLayout { framed, height }
+}
+
 /// Identity of a rendered message row. `row` is relative to that message's
 /// actual styled output (not its body text), so cards, tool parts and group
 /// separators cannot be lost during bounded-window replacement.
@@ -608,75 +642,29 @@ fn boxed_message_rows(
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
             .collect()
     };
+    // Borderless is an explicit fill/content choice. Do not enter the frame
+    // path (which would reserve outline rows) and do not synthesize blank
+    // border glyphs; retain the ordinary typed message classes and bounds.
+    if !style.has_border() {
+        return plain(width);
+    }
     // A full drawn frame exists ONLY through an explicit Double/Heavy line
     // weight (kept explicit). A radius preset or a Custom radius must never
     // create or widen a frame — changing radius affects existing corners,
     // never activates framing.
-    if style.explicit_line_frame() {
-        let overhead = 2 + pad * 2;
-        if width <= overhead {
-            return plain(width);
-        }
-        let inner = width - overhead;
-        let corners = style.corner_glyphs();
-        let (h, v) = match style.border_style {
-            crate::native_box_style::BorderStyle::Single => ('─', '│'),
-            crate::native_box_style::BorderStyle::Double => ('═', '║'),
-            crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
-        };
+    if appearance.full_outline(id) {
+        let Some(frame) = crate::native_box_style::TextFrame::new(style, width, pad) else { return plain(width); };
+        let inner = usize::from(frame.content_width());
         let mut output = Vec::new();
-        if separator {
-            output.push((String::new(), ChatRowClass::Separator, None));
-        }
-        output.push((
-            format!(
-                "{}{}{}",
-                corners.top_left,
-                h.to_string().repeat(width - 2),
-                corners.top_right
-            ),
-            ChatRowClass::Separator,
-            None,
-        ));
-        let empty = format!("{v}{}{v}", " ".repeat(width - 2));
-        for _ in 0..pad {
-            output.push((empty.clone(), ChatRowClass::Blank, None));
-        }
+        if separator { output.push((String::new(), ChatRowClass::Separator, None)); }
+        output.push((frame.edge(false), ChatRowClass::Separator, None));
+        for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
         for (text, class) in typed_message_rows(inner, message, false)
-            .into_iter()
-            .take(MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad))
-        {
-            let text =
-                crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
-            let mut cells = 0;
-            crate::native_view_layout::visit_cells(
-                &text,
-                inner.min(u16::MAX as usize) as u16,
-                |x, _, w| cells = usize::from(x + w),
-            );
-            output.push((
-                format!(
-                    "{v}{}{text}{}{v}",
-                    " ".repeat(pad),
-                    " ".repeat(inner.saturating_sub(cells) + pad)
-                ),
-                class,
-                Some(((1 + pad) as u16, inner as u16)),
-            ));
+            .into_iter().take(MAX_MESSAGE_ROWS.saturating_sub(2 + 2 * pad)) {
+            output.push((frame.row(&text), class, Some(((1 + pad) as u16, inner as u16))));
         }
-        for _ in 0..pad {
-            output.push((empty.clone(), ChatRowClass::Blank, None));
-        }
-        output.push((
-            format!(
-                "{}{}{}",
-                corners.bottom_left,
-                h.to_string().repeat(width - 2),
-                corners.bottom_right
-            ),
-            ChatRowClass::Separator,
-            None,
-        ));
+        for _ in 0..pad { output.push((frame.blank(), ChatRowClass::Blank, None)); }
+        output.push((frame.edge(true), ChatRowClass::Separator, None));
         return output;
     }
     // Radius-independent per-role native identity (upstream session
@@ -1091,23 +1079,29 @@ impl ChatView {
         busy: bool,
         frame: crate::native_box_style::EffectiveBox,
     ) -> Vec<(String, ChatRowClass)> {
+        // Bound the direct framed API before any layout decision or capacity
+        // allocation. The ordinary renderer has the same public-input bound.
         let height = height.min(MAX_VIEW_ROWS);
+        // Borderless is a fill/content surface, not a degenerate framed
+        // surface. Reuse the ordinary bounded composer layout so no outline
+        // rows, corner glyphs, or reserved frame space are fabricated.
+        if !frame.has_border() {
+            return self.render_typed_classified(width, height, workspace, messages, draft, busy);
+        }
+        let layout = composer_layout(width, height, draft, frame);
+        if !layout.framed {
+            return self.render_typed_classified(width, height, workspace, messages, draft, busy);
+        }
         let pad = usize::from(frame.padding);
         let overhead = 2 + 2 * pad;
-        if height <= overhead + 1 || width < 3 + 2 * pad {
-            return self.render_typed_classified(width, height, workspace, messages, draft, busy);
-        }
-        let frame_h = framed_composer_height(draft, height, frame.padding);
-        if frame_h <= overhead {
-            return self.render_typed_classified(width, height, workspace, messages, draft, busy);
-        }
+        let frame_h = layout.height;
         let body_h = height - frame_h;
         let content_h = frame_h - overhead;
         let content_w = width - 2 - 2 * pad;
         let header_h = usize::from(body_h > 0);
         let window = self.typed_window(width, body_h - header_h, messages);
         let mut rows = Vec::with_capacity(height);
-        while rows.len() < body_h.saturating_sub(window.len()) {
+        while rows.len() < body_h.saturating_sub(header_h).saturating_sub(window.len()) {
             rows.push((String::new(), ChatRowClass::Blank));
         }
         rows.extend(window);
@@ -1121,44 +1115,23 @@ impl ChatView {
         let composer = bounded_composer_rows(draft, content_h + 1);
         let mut text_rows =
             render_composer(content_w, content_h, &composer.rows, composer.total_lines);
+        // `render_composer` can retain the overflow witness in addition to the
+        // requested content budget. The outer framed allocation owns exactly
+        // `frame_h` rows, so discard excess content rows before adding the
+        // bottom padding/border; this preserves the closing border and keeps
+        // the public frame bounded at the clamped height.
+        text_rows.truncate(content_h);
         while text_rows.len() < content_h {
             text_rows.push(String::new());
         }
-        let corners = frame.corner_glyphs();
-        let (horizontal, vertical) = match frame.border_style {
-            crate::native_box_style::BorderStyle::Single => ('─', '│'),
-            crate::native_box_style::BorderStyle::Double => ('═', '║'),
-            crate::native_box_style::BorderStyle::Heavy => ('━', '┃'),
+        let Some(border) = crate::native_box_style::TextFrame::new(frame, width, pad) else {
+            return self.render_typed_classified(width, height, workspace, messages, draft, busy);
         };
-        let inside = width - 2;
-        let line = horizontal.to_string().repeat(inside);
-        let pad_row = format!("{vertical}{}{vertical}", " ".repeat(inside));
-        rows.push((
-            format!("{}{line}{}", corners.top_left, corners.top_right),
-            ChatRowClass::Composer,
-        ));
-        for _ in 0..pad {
-            rows.push((pad_row.clone(), ChatRowClass::Composer));
-        }
-        for row in text_rows {
-            let clipped =
-                crate::native_view_layout::fit(&row, content_w.min(u16::MAX as usize) as u16);
-            rows.push((
-                format!(
-                    "{vertical}{}{clipped}{}{vertical}",
-                    " ".repeat(pad),
-                    " ".repeat(pad)
-                ),
-                ChatRowClass::Composer,
-            ));
-        }
-        for _ in 0..pad {
-            rows.push((pad_row.clone(), ChatRowClass::Composer));
-        }
-        rows.push((
-            format!("{}{line}{}", corners.bottom_left, corners.bottom_right),
-            ChatRowClass::Composer,
-        ));
+        rows.push((border.edge(false), ChatRowClass::Composer));
+        for _ in 0..pad { rows.push((border.blank(), ChatRowClass::Composer)); }
+        for row in text_rows { rows.push((border.row(&row), ChatRowClass::Composer)); }
+        for _ in 0..pad { rows.push((border.blank(), ChatRowClass::Composer)); }
+        rows.push((border.edge(true), ChatRowClass::Composer));
         rows
     }
 
@@ -1353,30 +1326,16 @@ mod tests {
         let mut style = BoxAppearance::default();
         style.preset = RadiusPreset::IosSquircle;
         style.padding = 1;
-        // Per-role native identity: only the user card carries the upstream
-        // left rail; other roles are unbordered prose — a radius preset can
-        // never frame ANY role.
-        for (role, railed) in [
-            (ChatRole::User, true),
-            (ChatRole::Assistant, false),
-            (ChatRole::System, false),
-            (ChatRole::Tool, false),
-        ] {
+        // Squircle mode explicitly requests a closed outline for every
+        // bordered message type, regardless of the upstream rail default.
+        for role in [ChatRole::User, ChatRole::Assistant, ChatRole::System, ChatRole::Tool] {
             let message = ChatMessage::text(role, "ACTUAL_TEXT");
             let rows = boxed_message_rows(40, &message, false, &style);
-            if railed {
-                assert!(
-                    rows.iter().all(|(text, _, _)| text.starts_with(USER_RAIL)),
-                    "user card keeps the upstream left rail: {rows:?}"
-                );
-            } else {
-                assert!(
-                    rows
-                        .iter()
-                        .all(|(text, _, _)| !text.contains('╭') && !text.contains('┌')),
-                    "radius preset must not frame an unbordered role: {role:?} {rows:?}"
-                );
-            }
+            assert_eq!(rows.first().unwrap().0, format!("╭{}╮", "─".repeat(38)));
+            assert_eq!(rows.last().unwrap().0, format!("╰{}╯", "─".repeat(38)));
+            assert!(rows.iter().all(|(line, _, _)|
+                crate::native_view_layout::fit(line, 40) == *line),
+                "every painted squircle row must fit its box: {rows:?}");
             assert_eq!(rows[0].2, None, "decoration rows carry no text bounds");
             let (text, _, bounds) = rows
                 .iter()
@@ -2444,13 +2403,89 @@ mod tests {
         let h = history(2);
         let busy_rows = ChatView::new().render(40, 6, "my workspace", &h, "hi", true);
         assert!(busy_rows[0].contains("my workspace"));
-        assert!(busy_rows[0].contains("[turn in flight]"));
+        assert!(busy_rows[0].contains("Thinking…"));
         let idle_rows = ChatView::new().render(40, 6, "my workspace", &h, "hi", false);
-        assert!(!idle_rows[0].contains("[turn in flight]"));
+        assert!(!idle_rows[0].contains("Thinking…"));
         for row in &idle_rows {
             assert!(!row.contains("provider"), "no fake provider status");
             assert!(!row.contains("connected"), "no fake connection status");
         }
+    }
+
+    #[test]
+    fn borderless_composer_has_no_outline_and_keeps_content_rows() {
+        let frame = crate::native_box_style::EffectiveBox {
+            border_style: crate::native_box_style::BorderStyle::None,
+            preset: crate::native_box_style::RadiusPreset::Rounded,
+            radius: 4,
+            thickness: 2,
+            padding: 2,
+        };
+        assert!(!frame.has_border());
+        let rows = ChatView::new().render_typed_classified_framed(
+            40, 12, "ws", &[], "draft", false, frame,
+        );
+        assert_eq!(rows.len(), 12);
+        assert!(rows.iter().all(|(row, _)| {
+            !row.chars().any(|ch| "┌┐└┘─│╭╮╰╯═║━┃".contains(ch))
+        }));
+        assert!(rows.iter().any(|(row, class)| {
+            *class == ChatRowClass::Composer && row.contains("> draft")
+        }));
+    }
+
+    #[test]
+    fn borderless_message_bubble_uses_plain_typed_rows_without_outline() {
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.overrides.insert(
+            crate::native_box_style::BoxId::Assistant,
+            crate::native_box_style::BoxOverride {
+                border_style: Some(crate::native_box_style::BorderStyle::None),
+                padding: Some(2),
+                ..Default::default()
+            },
+        );
+        let messages = [ChatMessage::text(ChatRole::Assistant, "message bubble")];
+        let rows = ChatView::new().render_styled(
+            40, 12, "ws", &messages, "", false, &appearance,
+        );
+        let bubble = rows
+            .iter()
+            .find(|row| row.0.contains("message bubble"))
+            .expect("borderless assistant content row");
+        assert!(!bubble.0.chars().any(|ch| "┌┐└┘─│╭╮╰╯═║━┃".contains(ch)));
+    }
+
+    #[test]
+    fn composer_layout_boundary_uses_plain_mode_at_height_three() {
+        let frame = crate::native_box_style::EffectiveBox {
+            border_style: crate::native_box_style::BorderStyle::Single,
+            preset: crate::native_box_style::RadiusPreset::Sharp,
+            radius: 0,
+            thickness: 1,
+            padding: 0,
+        };
+        let layout = composer_layout(40, 3, "draft", frame);
+        assert!(!layout.framed);
+        assert_eq!(layout.height, 1);
+        let layout = composer_layout(40, 4, "draft", frame);
+        assert!(layout.framed);
+        assert!(layout.height >= 3);
+    }
+
+    #[test]
+    fn framed_direct_render_clamps_extreme_height_before_allocation() {
+        let frame = crate::native_box_style::EffectiveBox {
+            border_style: crate::native_box_style::BorderStyle::Single,
+            preset: crate::native_box_style::RadiusPreset::Sharp,
+            radius: 0,
+            thickness: 1,
+            padding: 0,
+        };
+        let rows = ChatView::new().render_typed_classified_framed(
+            40, usize::MAX, "ws", &[], "draft", false, frame,
+        );
+        assert_eq!(rows.len(), MAX_VIEW_ROWS);
     }
 
     /// ANSI, OSC-8 hyperlinks and tabs never cross the render boundary;
@@ -2543,7 +2578,7 @@ mod tests {
         let rows = view.render(0, 6, workspace, &long_h, "", true);
         assert!(rows[0].contains(workspace), "width 0 keeps workspace");
         assert!(
-            rows[0].contains("[turn in flight]"),
+            rows[0].contains("Thinking…"),
             "width 0 keeps busy label"
         );
         assert!(rows[0].contains("[+3 up]"), "width 0 keeps scroll label");

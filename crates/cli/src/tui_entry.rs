@@ -785,6 +785,93 @@ struct PaintCtx {
     logo: Option<(u16, u16)>,
 }
 
+#[cfg(all(test, feature = "native"))]
+mod surface_paint_regressions {
+    use super::*;
+
+    #[test]
+    fn horizontal_rules_span_past_512_cells_without_crossing_viewport() {
+        let mut renderer = NativeRenderer::create_memory(620, 5).unwrap();
+        let color = Rgba::rgb(220, 220, 220);
+        draw_horizontal_rule(&mut renderer, 2, 1, 616, '─', color, color).unwrap();
+        // The request spills past the last column. Clipping, not a partial
+        // edge or an out-of-bounds FFI write, decides the visible 618 cells.
+        draw_horizontal_rule(&mut renderer, 617, 2, 500, '─', color, color).unwrap();
+        renderer.frame(|_| {}).unwrap();
+        let snapshot = renderer.snapshot_text().unwrap();
+        let rows: Vec<_> = snapshot.lines().collect();
+        assert_eq!(rows[1].chars().filter(|&ch| ch == '─').count(), 616);
+        assert_eq!(rows[2].chars().filter(|&ch| ch == '─').count(), 3);
+    }
+
+    #[test]
+    fn outlined_panel_clips_without_inventing_right_edge_on_resize() {
+        use crate::native_box_style::{BoxAppearance, BoxId, RadiusPreset};
+        let appearance = BoxAppearance { preset: RadiusPreset::IosSquircle, ..Default::default() };
+        assert!(appearance.full_outline(BoxId::Menu));
+        let style = appearance.effective(BoxId::Menu);
+        let mut renderer = NativeRenderer::create_memory(20, 8).unwrap();
+        let accent = Rgba::rgb(200, 190, 100);
+        let surface = Rgba::rgb(25, 25, 25);
+        draw_panel_outline(&mut renderer, (17, 1, 10, 5), style, accent, surface, surface).unwrap();
+        renderer.frame(|_| {}).unwrap();
+        let snapshot = renderer.snapshot_text().unwrap();
+        let rows: Vec<_> = snapshot.lines().collect();
+        assert_eq!(rows[1].chars().nth(17), Some('╭'));
+        assert_eq!(rows[1].chars().nth(19), Some('─'), "clipped edge never creates a fake closing corner");
+        assert_eq!(rows[2].chars().nth(17), Some('│'));
+    }
+
+    #[test]
+    fn active_loading_paint_preserves_composer_top_border() {
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let lines = view.render_typed("draft", &[], true, &[]);
+        let composer = view.composer_region("draft").expect("composer region");
+        let mut renderer = NativeRenderer::create_memory(80, 24).expect("memory renderer");
+        native_paint(&mut renderer, &lines, PaintCtx {
+            palette: crate::native_theme_runtime::Palette::opencode_dark(),
+            presentation: view.presentation(),
+            modal_rows: None,
+            modal: view.modal_presentation(),
+            sidebar_backdrop_alpha: view.sidebar_backdrop_alpha(),
+            chat_row_classes: view.chat_row_classes().to_vec(),
+            selection: Vec::new(),
+            appearance: crate::native_box_style::BoxAppearance::default(),
+            modal_box: crate::native_box_style::BoxId::Dialog,
+            loading: Some(('⠦', "Thinking…")),
+            home: false,
+            composer: Some(composer),
+            completion: None,
+            ui_regions: view.ui_regions(),
+            modal_underlay_rows: view.modal_underlay_rows(),
+            page_panel: view.page_panel(),
+            logo: None,
+        }).expect("paint native frame");
+        let snapshot = renderer.snapshot_text().expect("native text snapshot");
+        let actual = snapshot.lines().nth(usize::from(composer.1)).expect("painted border row");
+        assert_eq!(actual.trim_end(), lines[usize::from(composer.1)].trim_end(),
+            "busy status must not overwrite the composer's outline");
+    }
+
+    #[test]
+    fn borderless_home_prompt_has_no_rail_or_bottom_edge() {
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        view.set_session_route(false);
+        view.set_box_appearance(crate::native_box_style::BoxAppearance {
+            border_style: crate::native_box_style::BorderStyle::None,
+            ..Default::default()
+        });
+        let lines = view.render_typed("borderless draft", &[], false, &[]);
+        let (left, top, width, height) = view.composer_region("borderless draft").expect("Home composer");
+        for row in &lines[usize::from(top)..usize::from(top + height)] {
+            let text = crate::native_view_layout::slice_cells(row, left, width);
+            assert!(!text.chars().any(|ch| "┃│╹╵┌┐└┘─▀".contains(ch)),
+                "borderless Home must not retain rail or edge cells: {text:?}");
+        }
+    }
+}
+
 /// Content rows of a rendered modal block: the last non-blank rendered row
 /// (modal renderers pad to full height with blank rows, so the row count is
 /// the last non-blank index + 1 — never the padded height).
@@ -838,14 +925,15 @@ fn surface_underlay_background(in_panel: bool, role: Option<Rgba>, in_composer: 
 
 #[cfg(feature = "native")]
 fn home_composer_root_cell(appearance: &crate::native_box_style::BoxAppearance, style: crate::native_box_style::EffectiveBox, rect: (u16, u16, u16, u16), x: u32, y: u32) -> bool {
-    let framed = appearance != &crate::native_box_style::BoxAppearance::default();
+    let framed = appearance.home_composer_outline() && style.has_border();
     (!framed && x == u32::from(rect.0))
         || (framed && style.rounded_corner_cell(rect, x as u16, y as u16, style.corner_glyphs().top_right))
 }
 
 #[cfg(feature = "native")]
 fn home_composer_bottom_halfblock_override(appearance: &crate::native_box_style::BoxAppearance, glyph: &str) -> bool {
-    appearance == &crate::native_box_style::BoxAppearance::default() && matches!(glyph, "▀" | "▄")
+    !appearance.home_composer_outline()
+        && matches!(glyph, "▀" | "▄")
 }
 
 #[cfg(feature = "native")]
@@ -1154,9 +1242,109 @@ mod sidebar_paint_geometry_tests {
     }
 }
 
+/// Paint a horizontal stroke in fixed-size runs. Unlike a single truncated
+/// run, this covers the entire visible edge even for large terminal widths,
+/// without ever submitting a write outside the native renderer viewport.
+#[cfg(feature = "native")]
+fn draw_horizontal_rule(
+    renderer: &mut NativeRenderer,
+    x: u32,
+    y: u32,
+    width: u32,
+    glyph: char,
+    fg: Rgba,
+    bg: Rgba,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if x >= renderer.cols() || y >= renderer.rows() { return Ok(()); }
+    let mut written = 0u32;
+    let visible = width.min(renderer.cols() - x);
+    while written < visible {
+        let count = (visible - written).min(512) as usize;
+        renderer.draw_text_styled(
+            x + written, y, &glyph.to_string().repeat(count), fg, Some(bg), 0,
+        )?;
+        written += count as u32;
+    }
+    Ok(())
+}
+
+/// Draw only the outline cells of a page/menu panel. All four edges share the
+/// *original* rectangle (not a second clipped width), so clipping cannot
+/// fabricate a new closing corner or spill into the following viewport cell.
+#[cfg(feature = "native")]
+fn draw_panel_outline(
+    renderer: &mut NativeRenderer,
+    rect: (u16, u16, u16, u16),
+    style: crate::native_box_style::EffectiveBox,
+    fg: Rgba,
+    surface: Rgba,
+    root: Rgba,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let Some(geometry) = crate::native_box_style::BoxGeometry::framed(
+        rect.0, rect.1, rect.2, rect.3, style.padding,
+    ) else { return Ok(()); };
+    let Some(frame) = crate::native_box_style::TextFrame::new(
+        style, geometry.width as usize, style.padding as usize,
+    ) else { return Ok(()); };
+    let x = u32::from(geometry.x);
+    let y = u32::from(geometry.y);
+    let width = u32::from(frame.width);
+    let bottom = y + u32::from(geometry.height) - 1;
+    let right = x + width - 1;
+    let corners = style.corner_glyphs();
+    let (horizontal, vertical) = style.border_glyphs();
+    if y < renderer.rows() {
+        draw_horizontal_rule(renderer, x + 1, y, width - 2, horizontal, fg, surface)?;
+    }
+    if bottom < renderer.rows() {
+        draw_horizontal_rule(renderer, x + 1, bottom, width - 2, horizontal, fg, surface)?;
+    }
+    // Reserve the enclosing background behind curved corners, not a square
+    // panel-colored cell. A sharp corner retains the solid panel background.
+    let curved = matches!(style.border_style, crate::native_box_style::BorderStyle::Single)
+        && (matches!(style.preset,
+            crate::native_box_style::RadiusPreset::Rounded |
+            crate::native_box_style::RadiusPreset::IosSquircle)
+            || matches!(style.preset, crate::native_box_style::RadiusPreset::Custom)
+               && style.radius > 0);
+    let corner_bg = if curved { root } else { surface };
+    for (cx, cy, glyph) in [
+        (x, y, corners.top_left), (right, y, corners.top_right),
+        (x, bottom, corners.bottom_left), (right, bottom, corners.bottom_right),
+    ] {
+        if cx < renderer.cols() && cy < renderer.rows() {
+            renderer.draw_text_styled(cx, cy, &glyph.to_string(), fg, Some(corner_bg), 0)?;
+        }
+    }
+    for cy in (y + 1)..bottom.min(renderer.rows()) {
+        if x < renderer.cols() {
+            renderer.draw_text_styled(x, cy, &vertical.to_string(), fg, Some(surface), 0)?;
+        }
+        if right < renderer.cols() {
+            renderer.draw_text_styled(right, cy, &vertical.to_string(), fg, Some(surface), 0)?;
+        }
+    }
+    Ok(())
+}
+
 /// Native styled paint with cell-aligned semantic spans and explicit opaque
 /// backgrounds. Modal/sidebar source-over dimming is resolved in Rust before
 /// FFI; native alpha or null-background preservation is not assumed.
+#[cfg(feature = "native")]
+fn surface_fill_rect(
+    style: crate::native_box_style::EffectiveBox,
+    rect: (u16, u16, u16, u16),
+) -> Option<(u16, u16, u16, u16)> {
+    let geometry = crate::native_box_style::BoxGeometry::for_border(
+        style.border_style, rect.0, rect.1, rect.2, rect.3, style.padding,
+    )?;
+    if geometry.has_border {
+        geometry.interior()
+    } else {
+        Some((geometry.x, geometry.y, geometry.width, geometry.height))
+    }
+}
+
 #[cfg(feature = "native")]
 fn native_paint(
     renderer: &mut NativeRenderer,
@@ -1215,7 +1403,17 @@ fn native_paint(
     let modal = ctx.modal_rows.and_then(|count| visible_modal_rect(cols, rows,
         u32::from(ctx.modal.x), u32::from(ctx.modal.y), u32::from(ctx.modal.width),
         count.saturating_add(usize::from(ctx.modal.content_y.saturating_sub(ctx.modal.y).saturating_sub(1)))
-            .saturating_add(usize::from(ctx.modal.bottom_padding))));
+             .saturating_add(usize::from(ctx.modal.bottom_padding))));
+    // Modal layout owns the semantic content rectangle. Keep the painter's
+    // clip exactly on those declared coordinates; do not recompute a second
+    // inset from border geometry (modal presentation has its own 2-cell
+    // framing contract).
+    let modal_content_rect = modal.map(|_| (
+        u32::from(ctx.modal.content_x),
+        u32::from(ctx.modal.content_y),
+        u32::from(ctx.modal.content_width),
+        ctx.modal_rows.unwrap_or(0) as u32,
+    ));
     let base_alpha = if modal.is_some() {
         ctx.modal.backdrop_alpha
     } else {
@@ -1227,12 +1425,36 @@ fn native_paint(
         (ctx.appearance.effective(crate::native_box_style::BoxId::Sidebar), presentation.sidebar_offset.map(|left|
             (left, 0, presentation.sidebar_width, rows.saturating_sub(1) as u16))),
     ];
+    let outside_fill = |x: u32, y: u32| {
+        corner_surfaces.iter().rev().any(|(style, rect)| rect.is_some_and(|rect|
+            x <= u32::from(u16::MAX) && y <= u32::from(u16::MAX)
+                && (style.rounded_fill_corner(rect, x as u16, y as u16)
+                    || (style.has_border() && style.rounded_fill_corner(rect, rect.0, rect.1)
+                        && x >= u32::from(rect.0) && x < u32::from(rect.0) + u32::from(rect.2)
+                        && y >= u32::from(rect.1) && y < u32::from(rect.1) + u32::from(rect.3)
+                        && (x == u32::from(rect.0) || x + 1 == u32::from(rect.0) + u32::from(rect.2)
+                            || y == u32::from(rect.1) || y + 1 == u32::from(rect.1) + u32::from(rect.3))))))
+    };
     renderer.fill_rect(0, 0, cols, rows, dim(background, base_alpha))?;
     if let Some((x, y, width, height)) = ctx.page_panel {
-        fill_clipped(renderer, cols, rows, (x, y, width, height), dim(panel, base_alpha))?;
+        let style = ctx.appearance.effective(crate::native_box_style::BoxId::Menu);
+        let rect = (x, y, width, height);
+        let spans = if style.has_border() && style.rounded_fill_corner(rect, x, y) {
+            surface_fill_rect(style, rect).into_iter().collect()
+        } else { style.fill_rectangles(rect) };
+        for rect in spans {
+            fill_clipped(renderer, cols, rows, rect, dim(panel, base_alpha))?;
+        }
     }
     if let Some((left, top, width, height)) = ctx.composer {
-        fill_clipped(renderer, cols, rows, (left, top, width, height), dim(element, base_alpha))?;
+        let style = ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+        let rect = (left, top, width, height);
+        let spans = if style.has_border() && style.rounded_fill_corner(rect, left, top) {
+            surface_fill_rect(style, rect).into_iter().collect()
+        } else { style.fill_rectangles(rect) };
+        for rect in spans {
+            fill_clipped(renderer, cols, rows, rect, dim(element, base_alpha))?;
+        }
     }
     for (row, line) in lines.iter().enumerate().take(rows as usize) {
         let y = row as u32;
@@ -1260,15 +1482,24 @@ fn native_paint(
             None => text_color,
         };
         let mut spans: Vec<(u32, String, Rgba, Rgba, u32)> = Vec::with_capacity(8);
+        // A styled run may only merge *adjacent display cells*. Modal masks
+        // skip cells, and a style-only merge across a skipped region shifts
+        // the rest of the row left, potentially eating the opposite border.
+        let mut span_end = 0u32;
         crate::native_view_layout::visit_cells(
             line,
             cols.min(u16::MAX as u32) as u16,
-            |x, glyph, _| {
+            |x, glyph, cells| {
                 let x = u32::from(x);
                 let sidebar = sidebar_cell(presentation, x, y);
                 let in_modal = modal.is_some_and(|(left, top, width, height)| {
                     x >= left && x < left + width && y >= top && y < top + height
                 });
+                if in_modal {
+                    let Some((left, top, width, height)) = modal_content_rect else { return; };
+                    if x < left || x >= left.saturating_add(width)
+                        || y < top || y >= top.saturating_add(height) { return; }
+                }
                 let composer = ctx.composer.is_some_and(|(left, top, width, height)| {
                     x >= u32::from(left)
                         && x < u32::from(left) + u32::from(width)
@@ -1323,7 +1554,8 @@ fn native_paint(
                             && y >= u32::from(top)
                             && y < u32::from(top + height)
                         {
-                            if x == u32::from(left) && ctx.appearance == crate::native_box_style::BoxAppearance::default() {
+                            let composer_style = ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+                            if x == u32::from(left) && !composer_style.has_border() {
                                 fg = accent;
                                 bg = background;
                             } else if y == u32::from(top + height - 1)
@@ -1342,6 +1574,10 @@ fn native_paint(
                     }
                 }
                 if !in_modal {
+                    // Every text cell, including whitespace, must obey the
+                    // same fill mask as the rectangle pass. Glyph-only corner
+                    // adjustment cannot repair opaque rectangular underpaint.
+                    if outside_fill(x, y) { bg = background; }
                     let alpha = if modal.is_some() {
                         ctx.modal.backdrop_alpha
                     } else if !sidebar {
@@ -1358,16 +1594,19 @@ fn native_paint(
                     fg = background;
                 }
                 if let Some((_, text, last_fg, last_bg, last_attributes)) = spans.last_mut() {
-                    if *last_fg == fg
+                    if span_end == x
+                        && *last_fg == fg
                         && *last_bg == bg
                         && *last_attributes == attributes
                         && text.len().saturating_add(glyph.len()) <= 32 * 1024
                     {
                         text.push_str(glyph);
+                        span_end = x.saturating_add(u32::from(cells));
                         return;
                     }
                 }
                 spans.push((x, glyph.to_owned(), fg, bg, attributes));
+                span_end = x.saturating_add(u32::from(cells));
             },
         );
         for (x, text, fg, bg, attributes) in spans {
@@ -1424,21 +1663,23 @@ fn native_paint(
             }
         }
     }
+    if let Some(rect) = ctx.page_panel {
+        if ctx.appearance.full_outline(crate::native_box_style::BoxId::Menu) {
+            draw_panel_outline(
+                renderer, rect,
+                ctx.appearance.effective(crate::native_box_style::BoxId::Menu),
+                accent, dim(panel, base_alpha), dim(background, base_alpha),
+            )?;
+        }
+    }
     if let (Some(count), Some((left, top, width, height))) = (ctx.modal_rows, modal) {
         let style = ctx.appearance.effective(ctx.modal_box);
         let corners = style.corner_glyphs();
-        let (horizontal, vertical) = match style.border_style {
-            crate::native_box_style::BorderStyle::Single => ('─', "│"),
-            crate::native_box_style::BorderStyle::Double => ('═', "║"),
-            crate::native_box_style::BorderStyle::Heavy => ('━', "┃"),
-        };
+        let (horizontal, vertical) = style.border_glyphs();
         let bottom = top
             .saturating_add(height.saturating_sub(1))
             .min(rows.saturating_sub(1));
-        if width >= 4 && count > 0 && bottom > top {
-            let edge = horizontal
-                .to_string()
-                .repeat(width.saturating_sub(2).min(512) as usize);
+        if style.has_border() && width >= 4 && count > 0 && bottom > top {
             let modal_rect = (left as u16, top as u16, width as u16, height as u16);
             let underlay_at = |x: u32, y: u32| {
                 let contains = |rect: (u16, u16, u16, u16)| {
@@ -1462,6 +1703,7 @@ fn native_paint(
                     }
                 }
                 if home_root { color = background; }
+                if outside_fill(x, y) { color = background; }
                 let underlying_glyph = ctx.modal_underlay_rows.get(y as usize)
                     .map(|row| crate::native_view_layout::slice_cells(row, x as u16, 1));
                 if let Some(glyph) = underlying_glyph {
@@ -1479,28 +1721,29 @@ fn native_paint(
             renderer.draw_text_styled(left, bottom, &corners.bottom_left.to_string(), accent, Some(bl), 0)?;
             renderer.draw_text_styled(left + width - 1, bottom, &corners.bottom_right.to_string(), accent, Some(br), 0)?;
             if width > 2 {
-                renderer.draw_text_styled(left + 1, top, &edge, accent, Some(panel), 0)?;
-                renderer.draw_text_styled(left + 1, bottom, &edge, accent, Some(panel), 0)?;
+                draw_horizontal_rule(renderer, left + 1, top, width - 2, horizontal, accent, panel)?;
+                draw_horizontal_rule(renderer, left + 1, bottom, width - 2, horizontal, accent, panel)?;
             }
             for y in top + 1..bottom {
-                renderer.draw_text_styled(left, y, vertical, accent, Some(panel), 0)?;
-                renderer.draw_text_styled(left + width - 1, y, vertical, accent, Some(panel), 0)?;
+                renderer.draw_text_styled(left, y, &vertical.to_string(), accent, Some(panel), 0)?;
+                renderer.draw_text_styled(left + width - 1, y, &vertical.to_string(), accent, Some(panel), 0)?;
             }
         }
     }
-    if let (Some((glyph, label)), Some((left, top, width, _))) = (ctx.loading, ctx.composer) {
-        if modal.is_none() && width >= 18 {
-            let label = crate::native_view_layout::slice_cells(
-                &format!("{glyph} {label}"),
-                0,
-                width.saturating_sub(4),
-            );
+    if let Some((glyph, _)) = ctx.loading {
+        let left = presentation.main_offset.saturating_add(presentation.main_padding);
+        if modal.is_none() && rows > 0
+            && left < presentation.main_offset.saturating_add(presentation.main_width)
+            && matches!(ctx.chat_row_classes.first(), Some(crate::native_view_chat::ChatRowClass::Header))
+        {
+            // The facade owns the Thinking label in the main header. Animate
+            // its leading gutter, never the composer's outline or draft.
             renderer.draw_text_styled(
-                u32::from(left + 2),
-                u32::from(top),
-                &label,
+                u32::from(left),
+                0,
+                &glyph.to_string(),
                 accent,
-                Some(element),
+                Some(background),
                 0,
             )?;
         }
@@ -2575,6 +2818,18 @@ fn native_loop(
                 let request_tail = request.kind == HistoryRequestKind::Tail;
                 let request_newer = request.kind == HistoryRequestKind::Newer;
                 let request_refresh = request.kind == HistoryRequestKind::Refresh;
+                // Persisted history can lag the current worker's streamed
+                // reasoning. A periodic snapshot must not replace that live
+                // projection, including a refresh issued before the turn.
+                if request_refresh && worker.as_ref().is_some_and(|owned| {
+                    owned.owns(
+                        live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                        binding_generation,
+                    )
+                }) {
+                    history_trace("history.response.deferred_active_turn", &view, history_window.as_ref(), Some(request), history_navigation_request, history_pending, history_navigation_revision, Some("live_worker_owns_projection"));
+                    continue;
+                }
                 match (history_window.as_mut(), result) {
                     (Some(window), Ok(value)) => {
                         let previous_window = window.clone();
@@ -3040,7 +3295,10 @@ fn native_loop(
         // history endpoint, never replayed through the provider.  A refresh
         // updates the tail anchor while browsing, and replaces the visible
         // window only when already following the tail.
-        if !history_pending && last_history_refresh.elapsed() >= Duration::from_millis(750) {
+        if (!binding_active || worker_finished)
+            && !history_pending
+            && last_history_refresh.elapsed() >= Duration::from_millis(750)
+        {
             if let Some(snapshot) = live.as_ref() {
                 last_history_refresh = Instant::now();
                 history_pending = true;
@@ -3334,7 +3592,7 @@ fn native_loop(
             }
         }
         if view.dialogs.is_open() {
-            appearance.open = false;
+            let _ = appearance.cancel();
         }
         if appearance.open {
             overlay = appearance.rows(view.modal_presentation().content_width);
@@ -3531,10 +3789,8 @@ fn native_loop(
                     } else {
                         crate::native_box_style::BoxId::Dialog
                     },
-                    // Footer loading is frame-authoritative and represents
-                    // only the current session turn. Model discovery/setup
-                    // may animate its own dialog, but must not latch a
-                    // conversation "Thinking" indicator.
+                    // Animate the bounded main header for the current turn;
+                    // the facade supplies its label and composer geometry.
                     loading: (binding_active && !worker_finished).then(|| {
                         (
                             crate::native_box_style::frame(
@@ -3610,6 +3866,11 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(mut event) = input.pop() else { continue };
+        let memory_source_direction = match &event {
+            native_input_decoder::InputEvent::ArrowUp => Some(false),
+            native_input_decoder::InputEvent::ArrowDown => Some(true),
+            _ => None,
+        };
         let (kind, size, control) = match &event {
             native_input_decoder::InputEvent::Byte(byte) if *byte < 32 || *byte == 127 => {
                 ("control", 1, Some(*byte))
@@ -3797,7 +4058,7 @@ fn native_loop(
                 }
                 if appearance.open {
                     let modal = view.modal_presentation();
-                    if appearance.pointer_hit(
+                    if let Some(outcome) = appearance.pointer_outcome(
                         x,
                         y,
                         kind,
@@ -3805,15 +4066,18 @@ fn native_loop(
                         modal.content_y,
                         modal.content_width,
                         view.modal_content_height().min(u16::MAX as usize) as u16,
-                    )
-                    {
-                        if let Err(error) =
-                            crate::native_ui_preferences::UiPreferences::persist_appearance(
-                                &state_path,
-                                &appearance.style,
-                            )
-                        {
-                            append_transcript(&mut transcript, format!("error: {error}"));
+                    ) {
+                        match outcome {
+                            crate::native_appearance::AppearanceOutcome::Apply => {
+                                if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_appearance(&state_path, &appearance.style) {
+                                    append_transcript(&mut transcript, format!("error: {error}"));
+                                }
+                                view.set_dialog_size(crate::native_view::DialogSize::Medium);
+                            }
+                            crate::native_appearance::AppearanceOutcome::Cancel => {
+                                view.set_dialog_size(crate::native_view::DialogSize::Medium);
+                            }
+                            _ => {}
                         }
                     }
                     needs_paint = true;
@@ -4128,13 +4392,17 @@ fn native_loop(
             continue;
         }
         if appearance.open && !matches!(byte, 3 | 4) {
-            if appearance.key(byte) {
-                if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_appearance(
-                    &state_path,
-                    &appearance.style,
-                ) {
-                    append_transcript(&mut transcript, format!("error: {error}"));
+            match appearance.key_outcome(byte) {
+                crate::native_appearance::AppearanceOutcome::Apply => {
+                    if let Err(error) = crate::native_ui_preferences::UiPreferences::persist_appearance(
+                        &state_path, &appearance.style,
+                    ) { append_transcript(&mut transcript, format!("error: {error}")); }
+                    view.set_dialog_size(crate::native_view::DialogSize::Medium);
                 }
+                crate::native_appearance::AppearanceOutcome::Cancel => {
+                    view.set_dialog_size(crate::native_view::DialogSize::Medium);
+                }
+                _ => {}
             }
             needs_paint = true;
             continue;
@@ -4253,10 +4521,51 @@ fn native_loop(
         if page_open
             && !help_open
             && !matches!(byte, 3 | 4 | 27 | 13 | 10 | 14 | 2)
+            && !(view.page() == crate::native_view_pages::Page::Memory && byte == 6)
             && !(page_query_open && (byte == 8 || byte == 127 || byte >= 0x20))
         {
             utf8.reset();
             continue;
+        }
+        // Memory is a dedicated backend-backed page, not a selectable row
+        // list. Keep source navigation and content scrolling here so the
+        // composer draft remains untouched.
+        if page_open && view.page() == crate::native_view_pages::Page::Memory
+            && !help_open && matches!(dialog, native_setup::Dialog::None)
+        {
+            if let Some(forward) = memory_source_direction {
+                view.memory_mut().select_next(forward);
+                continue;
+            }
+            match byte {
+                6 => {
+                    let width = usize::from(view.presentation().main_width.saturating_sub(4));
+                    view.memory_mut().scroll_content(8, width, renderer.rows() as usize);
+                    continue;
+                }
+                2 => {
+                    let width = usize::from(view.presentation().main_width.saturating_sub(4));
+                    view.memory_mut().scroll_content(-8, width, renderer.rows() as usize);
+                    continue;
+                }
+                13 | 10 => {
+                    if let (Some(snapshot), Some((endpoint, body))) = (
+                        live.as_ref(), view.memory().toggle_request()
+                    ) {
+                        let path = format!("/api/sessions/{}/memory/{endpoint}", snapshot.session_id);
+                        match http_request(&snapshot.origin, "POST", &path, Some(&body), auth)
+                            .and_then(|ack| view.load_memory(&ack))
+                        {
+                            Ok(()) => {}
+                            Err(error) => view.set_memory_error(&error),
+                        }
+                    } else if live.is_none() {
+                        view.set_memory_error("daemon unavailable");
+                    }
+                    continue;
+                }
+                _ => {}
+            }
         }
         match byte {
             3 | 4 => break,
@@ -5074,7 +5383,19 @@ fn native_loop(
                         view.open_commands_page();
                     } else {
                         view.open_page(page);
-                        if page == crate::native_view_pages::Page::Agents {
+                        if page == crate::native_view_pages::Page::Memory {
+                            match live.as_ref() {
+                                Some(snapshot) => {
+                                    let path = format!("/api/sessions/{}/memory", snapshot.session_id);
+                                    match http_request(&snapshot.origin, "GET", &path, None, auth)
+                                        .and_then(|body| view.load_memory(&body)) {
+                                        Ok(()) => {}
+                                        Err(error) => view.set_memory_error(&error),
+                                    }
+                                }
+                                None => view.set_memory_error("daemon unavailable"),
+                            }
+                        } else if page == crate::native_view_pages::Page::Agents {
                             // Real metadata rows from the same authenticated
                             // `GET /api/commands` catalogue the @mention
                             // loader consumes. Fetch/parse failure keeps the
@@ -5377,7 +5698,7 @@ fn native_loop(
                         view.close_command_palette();
                         view.close_page();
                         help_open = false;
-                        appearance.open = false;
+                        let _ = appearance.cancel();
                         dialog = native_setup::Dialog::None;
                         view.set_dialog_size(crate::native_view::DialogSize::Large);
                         consume_local_command(&mut draft, command, from_chat_composer);
@@ -5714,6 +6035,7 @@ fn native_local_page_route(command: &str) -> Option<crate::native_view_pages::Pa
         "/workspace" => Some(Page::Workspaces),
         "/agents" => Some(Page::Agents),
         "/context" => Some(Page::Context),
+        "/memory" => Some(Page::Memory),
         "/diff" => Some(Page::Diff),
         "/commands" => Some(Page::Commands),
         "/import" | "/settings-import" => Some(Page::Chat),
@@ -6103,6 +6425,7 @@ mod command_consumption_tests {
         );
         assert!(super::native_exit_route("/exit"));
         assert_eq!(super::native_local_page_route("/not-a-local-command"), None);
+        assert_eq!(super::native_local_page_route("/memory"), Some(crate::native_view_pages::Page::Memory));
         assert!(!super::native_exit_route("/not-a-local-command"));
     }
     use super::{consume_local_command, is_recognized_local_command};
