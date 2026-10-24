@@ -837,9 +837,15 @@ fn surface_underlay_background(in_panel: bool, role: Option<Rgba>, in_composer: 
 }
 
 #[cfg(feature = "native")]
-fn home_composer_root_cell(style: crate::native_box_style::EffectiveBox, framed: bool, rect: (u16, u16, u16, u16), x: u32, y: u32) -> bool {
-    x == u32::from(rect.0) || y + 1 == u32::from(rect.1) + u32::from(rect.3)
+fn home_composer_root_cell(appearance: &crate::native_box_style::BoxAppearance, style: crate::native_box_style::EffectiveBox, rect: (u16, u16, u16, u16), x: u32, y: u32) -> bool {
+    let framed = appearance != &crate::native_box_style::BoxAppearance::default();
+    (!framed && x == u32::from(rect.0))
         || (framed && style.rounded_corner_cell(rect, x as u16, y as u16, style.corner_glyphs().top_right))
+}
+
+#[cfg(feature = "native")]
+fn home_composer_bottom_halfblock_override(appearance: &crate::native_box_style::BoxAppearance, glyph: &str) -> bool {
+    appearance == &crate::native_box_style::BoxAppearance::default() && matches!(glyph, "▀" | "▄")
 }
 
 #[cfg(feature = "native")]
@@ -864,7 +870,7 @@ fn visible_modal_rect(cols:u32, rows:u32, x:u32,y:u32,width:u32,content:usize)->
 
 #[cfg(all(test, feature = "native"))]
 mod rounded_surface_color_tests {
-    use super::{finish_surface_background, home_composer_root_cell, modal_surface_background, resolve_surface_corner_background, rounded_surface_background, surface_underlay_background, visible_modal_rect};
+    use super::{finish_surface_background, home_composer_bottom_halfblock_override, home_composer_root_cell, modal_surface_background, resolve_surface_corner_background, rounded_surface_background, surface_underlay_background, visible_modal_rect};
     use crate::native_box_style::{BorderStyle, EffectiveBox, RadiusPreset};
     use opencode_rk_opentui_bridge::Rgba;
 
@@ -953,18 +959,63 @@ mod rounded_surface_color_tests {
     fn modal_underlay_matches_rounded_home_top_right_corner() {
         let rounded = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
         let rect = (5, 2, 8, 4);
-        assert!(home_composer_root_cell(rounded, true, rect, 12, 2));
-        assert!(!home_composer_root_cell(rounded, false, rect, 12, 2));
-        assert!(!home_composer_root_cell(EffectiveBox { preset: RadiusPreset::Sharp, ..rounded }, true, rect, 12, 2));
-        assert!(!home_composer_root_cell(rounded, true, rect, 11, 2));
-        assert!(home_composer_root_cell(rounded, true, rect, 5, 3));
-        assert!(home_composer_root_cell(rounded, true, rect, 10, 5));
+        let default_appearance = crate::native_box_style::BoxAppearance::default();
+        let framed_appearance = crate::native_box_style::BoxAppearance { preset: RadiusPreset::Rounded, ..default_appearance.clone() };
+        assert!(home_composer_root_cell(&framed_appearance, rounded, rect, 12, 2));
+        assert!(!home_composer_root_cell(&default_appearance, rounded, rect, 12, 2));
+        assert!(!home_composer_root_cell(&framed_appearance, EffectiveBox { preset: RadiusPreset::Sharp, ..rounded }, rect, 12, 2));
+        assert!(!home_composer_root_cell(&framed_appearance, rounded, rect, 11, 2));
+        assert!(!home_composer_root_cell(&framed_appearance, rounded, rect, 5, 3));
+        assert!(!home_composer_root_cell(&framed_appearance, rounded, rect, 10, 5));
         let root = Rgba::new(10, 10, 10, 255);
         let element = Rgba::new(30, 30, 30, 255);
         let panel = Rgba::new(20, 20, 20, 255);
         let underlay = surface_underlay_background(false, None, true,
-            home_composer_root_cell(rounded, true, rect, 12, 2), root, panel, element);
+            home_composer_root_cell(&framed_appearance, rounded, rect, 12, 2), root, panel, element);
         assert_eq!(modal_surface_background(rounded, (12, 2, 8, 4), 12, 2, "╭", underlay, panel, 150), finish_surface_background(root, None, 150));
+    }
+
+    #[test]
+    fn home_framed_bottom_middle_keeps_element_background() {
+        let rounded = EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 };
+        let rect = (10, 4, 8, 5);
+        let root = Rgba::new(10, 10, 10, 255);
+        let panel = Rgba::new(20, 20, 20, 255);
+        let element = Rgba::new(30, 30, 30, 255);
+        let bottom_middle = (u32::from(rect.0) + 3, u32::from(rect.1) + u32::from(rect.3) - 1);
+        let framed_appearance = crate::native_box_style::BoxAppearance { preset: RadiusPreset::Rounded, ..Default::default() };
+        let home_root = home_composer_root_cell(&framed_appearance, rounded, rect, bottom_middle.0, bottom_middle.1);
+        let projected = surface_underlay_background(false, None, true, home_root, root, panel, element);
+        assert_eq!(projected, element, "Home bottom border must retain BackgroundElement fill");
+        let default_appearance = crate::native_box_style::BoxAppearance::default();
+        let framed_appearance = crate::native_box_style::BoxAppearance { preset: RadiusPreset::Rounded, ..default_appearance.clone() };
+        assert!(!home_composer_bottom_halfblock_override(&default_appearance, "─"));
+        assert!(home_composer_bottom_halfblock_override(&default_appearance, "▀"));
+        assert!(!home_composer_bottom_halfblock_override(&framed_appearance, "▀"));
+    }
+
+    #[test]
+    fn home_halfblock_override_uses_actual_appearance_state() {
+        let default_appearance = crate::native_box_style::BoxAppearance::default();
+        let framed_appearance = crate::native_box_style::BoxAppearance { preset: RadiusPreset::Rounded, ..default_appearance.clone() };
+        assert!(home_composer_bottom_halfblock_override(&default_appearance, "▄"));
+        assert!(!home_composer_bottom_halfblock_override(&framed_appearance, "▄"));
+    }
+
+    #[test]
+    fn framed_home_perimeter_has_no_root_midpoints() {
+        let appearance = crate::native_box_style::BoxAppearance { preset: RadiusPreset::Rounded, ..Default::default() };
+        let rect = (10, 4, 8, 5);
+        let styles = [
+            EffectiveBox { preset: RadiusPreset::Sharp, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 },
+            EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Single, thickness: 1, padding: 0 },
+            EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Double, thickness: 1, padding: 0 },
+            EffectiveBox { preset: RadiusPreset::Rounded, radius: 0, border_style: BorderStyle::Heavy, thickness: 1, padding: 0 },
+        ];
+        for style in styles {
+            assert!(!home_composer_root_cell(&appearance, style, rect, 13, 8));
+            assert!(!home_composer_root_cell(&appearance, style, rect, 10, 6));
+        }
     }
 
     #[test]
@@ -1272,10 +1323,15 @@ fn native_paint(
                             && y >= u32::from(top)
                             && y < u32::from(top + height)
                         {
-                            if x == u32::from(left) {
+                            if x == u32::from(left) && ctx.appearance == crate::native_box_style::BoxAppearance::default() {
                                 fg = accent;
                                 bg = background;
-                            } else if y == u32::from(top + height - 1) {
+                            } else if y == u32::from(top + height - 1)
+                                && home_composer_bottom_halfblock_override(
+                                    &ctx.appearance,
+                                    glyph,
+                                )
+                            {
                                 // Bottom half-block carries the element color
                                 // over the root background, matching the prompt
                                 // separator rather than drawing a bright rule.
@@ -1391,8 +1447,8 @@ fn native_paint(
                 };
                 let composer = ctx.composer.filter(|rect| contains(*rect));
                 let home_root = ctx.home && composer.is_some_and(|rect|
-                    home_composer_root_cell(ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer),
-                        ctx.appearance != crate::native_box_style::BoxAppearance::default(), rect, x, y));
+                    home_composer_root_cell(&ctx.appearance,
+                        ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer), rect, x, y));
                 let role = chat_row_background(ctx.chat_row_classes.get(y as usize), background, panel, element);
                 let mut color = surface_underlay_background(
                     sidebar_cell(presentation, x, y) || ctx.page_panel.is_some_and(contains),

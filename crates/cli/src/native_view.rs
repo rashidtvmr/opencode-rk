@@ -671,7 +671,7 @@ impl NativeView {
                     .saturating_sub(composer_height)
                     .saturating_add(usize::from(body_height > composer_height)) as u16,
                 width - 4,
-                (composer_height + usize::from(height >= 4)) as u16,
+                composer_height as u16,
             ))
         } else {
             let (count, _, input_top) = self.home_positions(draft);
@@ -1942,7 +1942,7 @@ mod framed_composer_tests {
             view.render_height() - 2 - frame_h + 1,
             "composer_region follows the actual framed chat row after header insertion"
         );
-        assert_eq!(region_h as usize, frame_h + 1);
+        assert_eq!(region_h as usize, frame_h);
         let row = |index: usize| rows[index].chars().collect::<Vec<_>>();
         assert_eq!(row(top)[left], '┌');
         assert_eq!(row(top)[left + width - 1], '┐');
@@ -1952,6 +1952,36 @@ mod framed_composer_tests {
         assert_eq!(row(top + 1)[left + width - 1], '│');
         assert!(rows[top + 1].contains(draft), "draft inside the border");
         assert!(!rows[top].contains(draft), "border row is not painted over");
+    }
+
+    #[test]
+    fn composer_region_matches_rendered_frame_bottom_for_default_and_padded_styles() {
+        for (appearance, draft) in [
+            (crate::native_box_style::BoxAppearance::default(), "default draft"),
+            ({
+                let mut appearance = crate::native_box_style::BoxAppearance::default();
+                appearance.preset = crate::native_box_style::RadiusPreset::Rounded;
+                appearance.padding = 1;
+                appearance
+            }, "padded draft"),
+        ] {
+            let mut view = NativeView::new(60, 24);
+            view.set_session_route(true);
+            view.set_box_appearance(appearance.clone());
+            let rows = view.render_typed(draft, &[], false, &[]);
+            let (left, top, width, height) = view.composer_region(draft).expect("composer region");
+            let row = |index: usize| rows[index].chars().collect::<Vec<_>>();
+            let bottom = top as usize + height as usize - 1;
+            assert_eq!(row(top as usize)[left as usize], appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().top_left);
+            assert_eq!(row(top as usize)[left as usize + width as usize - 1], appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().top_right);
+            assert_eq!(row(bottom)[left as usize], appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().bottom_left);
+            assert_eq!(row(bottom)[left as usize + width as usize - 1], appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().bottom_right);
+            assert_eq!(bottom, rows.iter().position(|line| line.chars().nth(left as usize) == Some(appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().bottom_left)).expect("rendered bottom corner"));
+            assert!(bottom < rows.len() - 1, "composer frame must not include shared footer");
+        }
+        let mut narrow = NativeView::new(1, 10);
+        narrow.set_session_route(true);
+        assert_eq!(narrow.composer_region("x"), None);
     }
 
     #[test]
