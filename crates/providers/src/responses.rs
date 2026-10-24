@@ -963,7 +963,23 @@ impl OpenAiResponsesClient {
             });
         }
         let payload = responses_request_payload(model, "", input, &[], false)?;
-        let request_bytes = serde_json::to_vec(&payload)
+        self.compact_payload(&payload).await
+    }
+
+    /// Recompact the provider-owned window and complete typed tail without
+    /// converting opaque items into local transcript records.
+    pub async fn compact_with_compaction_window(
+        &self,
+        model: &str,
+        window: &ResponsesCompactionWindow,
+        tail: &[ResponsesItem],
+    ) -> Result<ResponsesCompactionWindow, ResponsesError> {
+        let payload = compaction_continuation_payload(model, "", window, tail, &[], false)?;
+        self.compact_payload(&payload).await
+    }
+
+    async fn compact_payload(&self, payload: &Value) -> Result<ResponsesCompactionWindow, ResponsesError> {
+        let request_bytes = serde_json::to_vec(payload)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
         if request_bytes.len() > MAX_RESPONSES_INPUT_BYTES {
             return Err(ResponsesError::InputTooLarge {
@@ -972,7 +988,7 @@ impl OpenAiResponsesClient {
             });
         }
         let mut response = self
-            .send_with_retry_path("responses/compact", &payload)
+            .send_with_retry_path("responses/compact", payload)
             .await?;
         let body = read_bounded_body(&mut response).await?;
         parse_compaction_window(&body)

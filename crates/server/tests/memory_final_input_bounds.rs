@@ -16,9 +16,10 @@ impl Drop for Environment { fn drop(&mut self) {
 
 #[tokio::test]
 async fn full_selected_context_is_rejected_explicitly_without_losing_history() {
-    let _environment = Environment(["OPENAI_API_KEY", "OPENAI_BASE_URL"].into_iter().map(|key| (key, std::env::var_os(key))).collect());
+    let _environment = Environment(["OPENAI_API_KEY", "OPENAI_BASE_URL", "OPENCODE_RK_COMPACTION__ENABLED"].into_iter().map(|key| (key, std::env::var_os(key))).collect());
     std::env::set_var("OPENAI_API_KEY", "context-bound-fixture-key");
     std::env::set_var("OPENAI_BASE_URL", "http://127.0.0.1:9");
+    std::env::set_var("OPENCODE_RK_COMPACTION__ENABLED", "false");
     for (count, bytes) in [(99, 16), (8, 60_000)] {
         let root = tempfile::tempdir().unwrap();
         let instruction = "m".repeat(60_000);

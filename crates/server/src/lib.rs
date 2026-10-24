@@ -16,6 +16,7 @@ pub use agent_loop::{
 pub mod app_protocols;
 pub mod app_runtime;
 pub mod auto_loop;
+pub mod auto_compaction;
 pub mod auto_report;
 pub mod auto_window;
 mod browser_resume;
@@ -1903,6 +1904,8 @@ async fn create_turn(
     let provider = responses_client(provider_id)
         .await
         .map_err(provider_failure)?;
+    auto_compaction::before_user_append(&state.sessions, &provider, &owner, id,
+        provider_id, model_id, &body.text).await?;
     let user_message = state
         .sessions
         .append_text(id, MessageRole::User, body.text)
@@ -2313,6 +2316,13 @@ pub(crate) fn create_turn_stream_with_message(
     let client = responses_client(provider_id)
         .await
         .map_err(provider_failure)?;
+    // A provider retry already has a durable prompt.  Do not compact across
+    // that prompt before replay: the retry path must preserve its exact
+    // durable boundary and must never manufacture a second prompt.
+    if retry.is_none() {
+        auto_compaction::before_user_append(&state.sessions, &client, &owner, id,
+            provider_id, model_id, &body.text).await?;
+    }
     let user_message = if let Some(retry) = retry {
         if retry.child_id != id || retry.generation == 0 || state.sessions.has_tool_admissions(id).await.map_err(ApiFailure::internal)? {
             return Err(ApiFailure::bad_request("retry refused: child session has tool admissions"));
