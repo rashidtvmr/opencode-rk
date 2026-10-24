@@ -111,3 +111,37 @@ stopped at panel command entry before Stop/Retry. Separate command edit/submit
 repair is underway. Installed entrypoint observer is being changed to decode
 completed terminal screen state rather than treating deltas as full snapshots.
 No final-artifact installation, restart, acceptance or push is claimed here.
+
+## Delivered and reviewed baseline — 26de4961
+
+The sections above retain the chronological evidence. Their pending statements
+describe earlier candidates; current measured status is:
+
+- `26de4961ee9689d1edd26c62002ea9f590f821a2` is installed and pushed. Its exact
+  archive was rebuilt after cleaning the CLI package to exclude stale reuse.
+- The user-authorized daemon restart preserved all16 session identities;
+  authenticated requests returned200 and unauthenticated requests401.
+- Exact-source verification passes691 native CLI tests,10 startup tests,
+  12 focused lifecycle/permission tests,1 poisoned-registry regression and the
+  portable check. These checks are source/scoped evidence, not aggregate acceptance.
+- All20 installed journey scopes have independent PASS_SCOPED reviews. Native
+  keyboard Stop, visible selected-child failure before mouse Retry, Menu/Dialog
+  padding, modal corner/fill geometry, and default-wide sidebar RGB have separate
+  exact-artifact scoped approvals.
+- Keyboard501 and mouse2500 journeys independently pass meaningful trace checks,
+  oldest-message access, return to tail and resize. The historical600-second
+  mouse timeout remains preserved; the fresh run passes with the existing
+  configurable1500-second budget, without changing semantic assertions.
+
+Evidence root:
+`target/phase1-convergence-20261021/release-26de4961ee9689d1edd26c62002ea9f590f821a2/`.
+See `final-batch-review-index.json`, `release-status.json` and the scoped reviews.
+
+### Completion work requested by user
+
+The user directed "complete everythimg" after this baseline. Finish the existing
+task scope by repairing permission-runner fixture cleanup, extending meaningful
+installed rendered-cell coverage to the remaining surface/style/theme cases,
+and executing the real aggregate Phase-1 judge. Preserve the original failed
+receipts and unproven cases. Full task completion and aggregate product
+acceptance remain unchecked until these final checks actually pass.

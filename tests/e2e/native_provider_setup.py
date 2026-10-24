@@ -104,11 +104,30 @@ class TerminalScreen:
     def contains(self, marker): return marker.casefold() in self.text().casefold()
     def has_model_status(self): return model_ready(self, "Non-default fixture")
     def has_api_prompt(self):
-        # SOURCE: crates/cli/src/tui_entry.rs:2078 renders "key: {} (enter /
-        # escape)" with an empty mask before typing, so zero stars is valid.
-        lines = [line.strip(" ╭╮╰╯│║┌┐└┘┃") for line in self.text().splitlines()]
-        return any(title == "API key" and re.fullmatch(r"key:\s*\*{0,40}\s*\(enter / escape\)", entry)
-                   for title, entry in zip(lines, lines[1:]))
+        """Recognize the bounded API-key dialog, rather than old inline hints.
+
+        SOURCE: crates/cli/src/tui_entry.rs:3207-3219 on local 26de4961 renders
+        the API-key dialog.  The installed replay has a title, a separately
+        rendered ``Key:`` input (empty inputs show the cursor), and a footer
+        containing the save/cancel instructions.  Keep all three anchors in
+        one small, ordered window so a composer or a stale title cannot pass.
+        """
+        def clean(line):
+            return line.strip(" ╭╮╰╯│║┌┐└┘┃").strip()
+
+        lines = [clean(line) for line in self.text().splitlines()]
+        field = re.compile(r"(?i)^key:\s*(?:\*{1,40}\s*[▏▎▋▌█]?|[▏▎▋▌█])$")
+        footer = re.compile(r"(?i)^enter\s+save\s*[·•]\s*esc\s+cancel$")
+        for title_index, line in enumerate(lines):
+            if line != "API key":
+                continue
+            # The dialog body is deliberately bounded: title -> input ->
+            # footer must occur in the following eight visible rows.
+            body = lines[title_index + 1:title_index + 9]
+            key_index = next((i for i, value in enumerate(body) if field.fullmatch(value)), None)
+            if key_index is not None and any(footer.fullmatch(value) for value in body[key_index + 1:]):
+                return True
+        return False
     def has_assistant(self, text): return text.casefold() in self.text().casefold()
     def picker_closed(self): return not self.contains("Select model")
 
@@ -394,6 +413,26 @@ def self_check():
     assert observed.has_model_status()
     observed.feed(b"\x1b[3;1HSelect model")
     assert not observed.has_model_status()  # picker text cannot impersonate selection
+    # API-key prompt contract: assert the current dialog body, not merely its
+    # title or the obsolete inline ``key: ... (enter / escape)`` hint.
+    api_prompt = TerminalScreen(cols=80, rows=12)
+    api_prompt.feed(b"\x1b[2J\x1b[2;10HAPI key\n")
+    for chunk in (b"  \n", b"  Key: ", b"\xe2\x96", b"\x8f\n",
+                  b"  \n", b"  Enter save ", b"\xc2", b"\xb7 Esc cancel"):
+        api_prompt.feed(chunk)
+    assert api_prompt.has_api_prompt()  # padded current replay, fragmented UTF-8
+    masked = TerminalScreen()
+    masked.feed("API key\n\nKey: ******▏\n\nEnter save · Esc cancel".encode())
+    assert masked.has_api_prompt()
+    title_only = TerminalScreen()
+    title_only.feed(b"API key\ncomposer text\n")
+    assert not title_only.has_api_prompt()
+    stale_hint = TerminalScreen()
+    stale_hint.feed(b"API key\nkey: ******** (enter / escape)\n")
+    assert not stale_hint.has_api_prompt()
+    unmasked = TerminalScreen()
+    unmasked.feed(b"API key\nKey: plaintext\nEnter save \xc2\xb7 Esc cancel")
+    assert not unmasked.has_api_prompt()
     fresh = TerminalScreen()
     fresh.feed(("\x1b[2J"+"\n".join(HOME_LOGO)+"\nAsk anything\nNon-default fixture openai").encode())
     assert home_ready(fresh,"Non-default fixture")

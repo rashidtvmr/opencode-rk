@@ -28,6 +28,10 @@ require 'fileutils'
 require 'securerandom'
 require 'tmpdir'
 require 'digest'
+require 'rbconfig'
+require 'timeout'
+require 'open3'
+require 'shellwords'
 
 # ---------------------------------------------------------------------------
 # Configuration constants
@@ -363,14 +367,16 @@ end
 
 class DisposableEnv
   def initialize(label)
-    @root = File.expand_path(
-      File.join(Dir.tmpdir, "rk-pty-verification-#{label}-#{SecureRandom.hex(8)}")
-    )
-    FileUtils.mkdir_p(@root)
+    prefix = "rk-pty-verification-#{label.gsub(/[^A-Za-z0-9_.-]/, '_')}-"
+    @root = Dir.mktmpdir(prefix, Dir.tmpdir)
+    @root_owner = fixture_root_identity(@root, prefix)
     setup_dirs
+  rescue StandardError
+    cleanup_owned_fixture_dir(@root, @root_owner) if @root && @root_owner
+    raise
   end
 
-  attr_reader :root
+  attr_reader :root, :root_owner
 
   def data_dir
     File.join(@root, 'data')
@@ -413,9 +419,7 @@ class DisposableEnv
   end
 
   def cleanup
-    FileUtils.rm_rf(@root)
-  rescue StandardError
-    nil
+    cleanup_owned_fixture_dir(@root, @root_owner)
   end
 
   def write_config(name, content)
@@ -431,6 +435,207 @@ class DisposableEnv
   def config_content(name)
     path = File.join(config_dir, name)
     File.exist?(path) ? File.read(path) : nil
+  end
+end
+
+FixtureRoot = Struct.new(:path, :realpath, :device, :inode, :prefix)
+
+def fixture_root_identity(path, prefix)
+  expanded = File.expand_path(path)
+  stat = File.lstat(expanded)
+  realpath = File.realpath(expanded)
+  temp_root = File.realpath(Dir.tmpdir)
+  unless stat.directory? && !stat.symlink? &&
+         (realpath == expanded || File.realpath(expanded) == realpath) &&
+         File.realpath(File.dirname(realpath)) == temp_root && File.basename(realpath).start_with?(prefix)
+    raise "fixture root ownership check failed: #{path}"
+  end
+  FixtureRoot.new(expanded, realpath, stat.dev, stat.ino, prefix).freeze
+end
+
+MAX_FIXTURE_EVIDENCE_BYTES = 256 * 1024
+MAX_TARGET_EVIDENCE_BYTES = 64 * 1024
+
+def snapshot_fixture_file(path, owner, max_bytes: MAX_FIXTURE_EVIDENCE_BYTES, include_content: false)
+  expanded = File.expand_path(path)
+  root_prefix = owner.path.end_with?(File::SEPARATOR) ? owner.path : owner.path + File::SEPARATOR
+  raise "fixture evidence path outside owned root: #{path}" unless expanded.start_with?(root_prefix)
+
+  root_stat = File.lstat(owner.path)
+  raise "fixture evidence root changed: #{owner.path}" unless root_stat.directory? && !root_stat.symlink? && root_stat.dev == owner.device && root_stat.ino == owner.inode && File.realpath(owner.path) == owner.realpath
+
+  relative_parts = expanded.delete_prefix(root_prefix).split(File::SEPARATOR)
+  raise "invalid fixture evidence path: #{path}" if relative_parts.empty? || relative_parts.any? { |part| part.empty? || part == '.' || part == '..' }
+  cursor = owner.path
+  relative_parts[0...-1].each do |part|
+    cursor = File.join(cursor, part)
+    stat = File.lstat(cursor)
+    raise "unsafe fixture evidence parent: #{cursor}" unless stat.directory? && !stat.symlink?
+    canonical = File.realpath(cursor)
+    raise "fixture evidence parent escaped root: #{cursor}" unless canonical == owner.realpath || canonical.start_with?(owner.realpath + File::SEPARATOR)
+  end
+
+  leaf = File.lstat(expanded)
+  raise "fixture evidence is not a regular file: #{path}" unless leaf.file? && !leaf.symlink?
+  File.open(expanded, File::RDONLY | File::NOFOLLOW | File::NONBLOCK) do |file|
+    stat = file.stat
+    raise "fixture evidence is not a regular file: #{path}" unless stat.file?
+    raise "fixture evidence changed before read: #{path}" unless stat.dev == leaf.dev && stat.ino == leaf.ino
+    raise "fixture evidence exceeds #{max_bytes} bytes: #{path}" if stat.size > max_bytes
+    content = file.read(max_bytes + 1)
+    raise "fixture evidence exceeds #{max_bytes} bytes: #{path}" if content.bytesize > max_bytes
+    current = File.lstat(expanded)
+    raise "fixture evidence changed during read: #{path}" unless current.file? && !current.symlink? && current.dev == stat.dev && current.ino == stat.ino
+    record = { exists: true, size_bytes: content.bytesize, sha256: Digest::SHA256.hexdigest(content) }
+    record[:content] = content.force_encoding('UTF-8').scrub if include_content
+    record
+  end
+rescue Errno::ENOENT
+  { exists: false }
+rescue StandardError => error
+  { exists: false, error: "#{error.class}: #{error.message}" }
+end
+
+def fixture_target_snapshot(path, expected_content, owner)
+  return { exists: false } unless path
+  record = snapshot_fixture_file(path, owner, max_bytes: MAX_TARGET_EVIDENCE_BYTES, include_content: true)
+  return record unless record[:exists]
+  record.merge(content_matches: record[:content].b == expected_content.b)
+end
+
+def snapshot_trial_fixture_files(trial_env)
+  owner = trial_env.root_owner
+  paths = {
+    'custom-providers.json' => [File.join(trial_env.config_dir, 'custom-providers.json'), true, true],
+    'permission-rules.json' => [File.join(trial_env.data_dir, 'permission-rules.json'), true],
+    'model.json' => [File.join(trial_env.state_dir, 'opencode', 'model.json'), true],
+    'backend.json' => [File.join(trial_env.data_dir, 'runtime', 'backend.json'), false]
+  }
+  paths.each_with_object({}) do |(name, (path, include_content)), evidence|
+    begin
+      record = snapshot_fixture_file(path, owner, include_content: include_content)
+      if record[:exists] && name == 'backend.json'
+        backend_record = snapshot_fixture_file(path, owner, include_content: true)
+        descriptor = JSON.parse(backend_record.fetch(:content))
+        record[:descriptor_keys] = descriptor.keys.sort
+        record[:pid] = descriptor['pid']
+        record[:http_origin] = descriptor['http_origin']
+        record[:auth_token_present] = descriptor['auth_token'].is_a?(String) && !descriptor['auth_token'].empty?
+      end
+      evidence[name] = record
+    rescue StandardError => error
+      evidence[name] = { exists: false, error: "#{error.class}: #{error.message}" }
+    end
+  end
+end
+
+def fixture_snapshot_errors(evidence, required: [])
+  errors = evidence.each_with_object([]) do |(name, record), found|
+    found << "#{name}: #{record[:error]}" if record[:error]
+    found << "#{name}: required fixture missing" if required.include?(name) && record[:exists] != true && !record[:error]
+  end
+  errors
+end
+
+def cleanup_owned_fixture_dir(path, owner)
+  raise 'fixture root ownership record missing' unless owner
+  expanded = File.expand_path(path)
+  stat = File.lstat(expanded)
+  realpath = File.realpath(expanded)
+  temp_root = File.realpath(Dir.tmpdir)
+  unless expanded == owner.path && realpath == owner.realpath &&
+         File.realpath(File.dirname(realpath)) == temp_root && File.basename(realpath).start_with?(owner.prefix) &&
+         stat.directory? && !stat.symlink? && stat.dev == owner.device && stat.ino == owner.inode
+    raise "fixture root ownership changed: #{path}"
+  end
+
+  FileUtils.remove_entry_secure(realpath)
+  gone = begin
+    File.lstat(expanded)
+    false
+  rescue Errno::ENOENT
+    true
+  end
+  raise "fixture cleanup could not verify removal: #{path}" unless gone
+  { verified_gone: true }
+rescue StandardError => error
+  { verified_gone: false, error: "#{error.class}: #{error.message}" }
+end
+
+def permission_cleanup_self_test!
+  prefix = "permission-cleanup-self-test-#{SecureRandom.hex(8)}-"
+  owned_path = Dir.mktmpdir(prefix, Dir.tmpdir)
+  owned = fixture_root_identity(owned_path, prefix)
+  target = File.join(owned.path, 'canary.txt')
+  canary = "FIXTURE_CANARY_#{SecureRandom.hex(8)}\n"
+  File.binwrite(target, canary)
+  snapshot = fixture_target_snapshot(target, canary, owned)
+  raise 'fixture evidence hash/content self-test failed' unless
+    snapshot[:sha256] == Digest::SHA256.hexdigest(canary) && snapshot[:content_matches]
+  receipt = cleanup_owned_fixture_dir(owned.path, owned)
+  raise 'owned fixture cleanup self-test failed' unless receipt[:verified_gone]
+
+  unrelated_prefix = "permission-cleanup-unrelated-#{SecureRandom.hex(8)}-"
+  unrelated_path = Dir.mktmpdir(unrelated_prefix, Dir.tmpdir)
+  unrelated = fixture_root_identity(unrelated_path, unrelated_prefix)
+  sentinel = File.join(unrelated.path, 'must-survive.txt')
+  File.write(sentinel, 'unowned')
+  denied = cleanup_owned_fixture_dir(unrelated.path, owned)
+  raise 'unowned fixture protection self-test failed' if denied[:verified_gone] || File.read(sentinel) != 'unowned'
+  cleanup = cleanup_owned_fixture_dir(unrelated.path, unrelated)
+  raise 'self-test fixture cleanup failed' unless cleanup[:verified_gone]
+  unrelated = nil
+
+  oversized_prefix = "permission-cleanup-oversized-#{SecureRandom.hex(8)}-"
+  oversized_root = Dir.mktmpdir(oversized_prefix, Dir.tmpdir)
+  oversized_owner = fixture_root_identity(oversized_root, oversized_prefix)
+  oversized = File.join(oversized_root, 'oversized.json')
+  File.open(oversized, 'wb') { |file| file.write('x' * (MAX_FIXTURE_EVIDENCE_BYTES + 1)) }
+  oversized_record = snapshot_fixture_file(oversized, oversized_owner)
+  raise 'oversized evidence rejection self-test failed' unless oversized_record[:error]
+  cleanup_owned_fixture_dir(oversized_root, oversized_owner)
+
+  owner = nil
+  daemon_root = Dir.mktmpdir("permission-cleanup-daemon-#{SecureRandom.hex(8)}-", Dir.tmpdir)
+  owner = fixture_root_identity(daemon_root, File.basename(daemon_root).sub(/\d+-.+\z/, ''))
+  daemon_data = File.join(daemon_root, 'data')
+  daemon_bin = RbConfig.ruby
+  FileUtils.mkdir_p(File.join(daemon_data, 'runtime'))
+  fake_command = Shellwords.join(['/bin/echo', daemon_bin, '--data-dir', daemon_data])
+  raise 'fixture matcher accepted executable in arguments' if fixture_process_matches?(fake_command, daemon_bin, File.realpath(daemon_data))
+  daemon_pid = Process.spawn(daemon_bin, '-e', 'sleep 30', '--', '--data-dir', daemon_data, out: File::NULL, err: File::NULL)
+  Process.kill(0, daemon_pid)
+  File.write(File.join(daemon_data, 'runtime', 'backend.json'), JSON.generate({ pid: daemon_pid }))
+  daemon_receipt = cleanup_fixture_daemon(daemon_data, daemon_bin)
+  Process.waitpid(daemon_pid) rescue nil
+  raise "fixture daemon cleanup self-test failed: #{daemon_receipt.inspect}" unless daemon_receipt[:verified_gone] && daemon_receipt[:daemon] == 'stopped' && daemon_receipt[:pids].include?(daemon_pid)
+  cleanup_owned_fixture_dir(daemon_root, fixture_root_identity(daemon_root, File.basename(daemon_root).sub(/\d+-.+\z/, '')))
+  daemon_root = nil
+  symlink_root = Dir.mktmpdir("permission-cleanup-symlink-#{SecureRandom.hex(8)}-", Dir.tmpdir)
+  symlink_owner = fixture_root_identity(symlink_root, File.basename(symlink_root).sub(/\d+-.+\z/, ''))
+  outside = File.join(symlink_root, 'outside')
+  FileUtils.mkdir_p(outside)
+  outside_file = File.join(outside, 'kept.json')
+  File.write(outside_file, '{"kept":true}')
+  File.symlink(outside, File.join(symlink_root, 'escape'))
+  escaped = snapshot_fixture_file(File.join(symlink_root, 'escape', 'kept.json'), symlink_owner)
+  raise 'symlink-parent evidence escape self-test failed' unless escaped[:error]
+  fifo = File.join(symlink_root, 'must-not-block.fifo')
+  File.mkfifo(fifo, 0o600)
+  fifo_record = Timeout.timeout(0.25) { snapshot_fixture_file(fifo, symlink_owner) }
+  raise 'FIFO evidence snapshot blocked or accepted a non-regular file' unless fifo_record[:error]&.include?('not a regular file')
+  cleanup_owned_fixture_dir(symlink_root, symlink_owner)
+
+  contaminated = { 'fixture.json' => { exists: false, error: 'unsafe fixture evidence file' } }
+  raise 'snapshot entry error self-test failed' unless fixture_snapshot_errors(contaminated).any?
+
+  puts JSON.generate({ owned_cleanup: true, evidence_hash_before_cleanup: true, unowned_root_protected: true, fixture_daemon_stopped: true, symlink_parent_rejected: true, oversized_file_rejected: true, snapshot_entry_error_fails: true, fifo_rejected_without_blocking: true })
+ensure
+  cleanup_owned_fixture_dir(owned.path, owned) if defined?(owned) && owned
+  cleanup_owned_fixture_dir(unrelated.path, unrelated) if defined?(unrelated) && unrelated
+  if defined?(daemon_root) && daemon_root && File.exist?(daemon_root)
+    prefix = File.basename(daemon_root).sub(/\d+-.+\z/, '')
+    cleanup_owned_fixture_dir(daemon_root, fixture_root_identity(daemon_root, prefix))
   end
 end
 
@@ -558,6 +763,66 @@ def read_backend_json(data_dir)
   JSON.parse(File.read(path))
 rescue JSON::ParserError => e
   raise "Failed to parse backend.json: #{e}"
+end
+
+def fixture_process_matches?(command, expected_binary, expected_data)
+  argv = Shellwords.shellsplit(command) rescue []
+  return false unless argv.first && File.realpath(argv.first) == File.realpath(expected_binary)
+  argv.each_cons(2).any? do |left, right|
+    next false unless left == '--data-dir'
+    begin
+      File.realpath(right) == expected_data
+    rescue Errno::ENOENT
+      false
+    end
+  end
+rescue Errno::ENOENT, Errno::ENOTDIR
+  false
+end
+
+def fixture_processes(expected_binary, expected_data)
+  stdout, _stderr, status = Open3.capture3('/bin/ps', '-axo', 'pid=,command=')
+  raise 'ps process listing failed' unless status.success?
+  stdout.lines.map do |line|
+    pid_text, command = line.strip.split(/\s+/, 2)
+    next unless pid_text && command && fixture_process_matches?(command, expected_binary, expected_data)
+    pid_text.to_i
+  end.compact
+end
+
+def cleanup_fixture_daemon(data_dir, binary)
+  expected_binary = File.expand_path(binary)
+  expected_data = File.realpath(data_dir)
+  descriptor_path = File.join(expected_data, 'runtime', 'backend.json')
+  descriptor_stat = File.lstat(descriptor_path) rescue nil
+  unless descriptor_stat
+    running = fixture_processes(expected_binary, expected_data)
+    return { verified_gone: false, daemon: 'missing_descriptor_process_found', pids: running } unless running.empty?
+    return { verified_gone: true, daemon: 'not_started' }
+  end
+  unless descriptor_stat.file? && !descriptor_stat.symlink?
+    return { verified_gone: false, daemon: 'unsafe_descriptor_type' }
+  end
+
+  descriptor = JSON.parse(File.read(descriptor_path))
+  pid = descriptor['pid']
+  return { verified_gone: false, daemon: 'invalid_pid' } unless pid.is_a?(Integer) && pid > 1
+  owned_pids = fixture_processes(expected_binary, expected_data)
+  return { verified_gone: true, daemon: 'already_gone', pid: pid } if owned_pids.empty?
+  unless owned_pids.include?(pid)
+    return { verified_gone: false, daemon: 'identity_mismatch', pid: pid, owned_pids: owned_pids }
+  end
+
+  owned_pids.each { |owned_pid| Process.kill('TERM', owned_pid) }
+  deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+  while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+    remaining = fixture_processes(expected_binary, expected_data)
+    return { verified_gone: true, daemon: 'stopped', pids: owned_pids, signal: 'TERM' } if remaining.empty?
+    sleep 0.05
+  end
+  { verified_gone: false, daemon: 'term_timeout', pids: owned_pids, remaining_pids: fixture_processes(expected_binary, expected_data) }
+rescue StandardError => error
+  { verified_gone: false, daemon: 'cleanup_error', error: "#{error.class}: #{error.message}" }
 end
 
 def read_session_id(descriptor)
@@ -862,15 +1127,23 @@ def run_single_permission_trial(binary, env_vars, data_dir, choice_index, provid
   # (the supported session-directory API), rather than inferred from cwd.
   trial_root = File.dirname(data_dir)
   fixture_root = File.join(trial_root, 'project-root')
-  outside_root = File.join(Dir.tmpdir, "rk-pty-outside-#{label}-#{choice_index}-#{SecureRandom.hex(6)}")
-  FileUtils.mkdir_p([fixture_root, outside_root])
+  outside_root = nil
+  outside_owner = nil
+  target_path = nil
+  target_content = nil
+
+  begin
+  outside_prefix = "rk-pty-outside-#{label.gsub(/[^A-Za-z0-9_.-]/, '_')}-#{choice_index}-"
+  outside_root = Dir.mktmpdir(outside_prefix, Dir.tmpdir)
+  outside_owner = fixture_root_identity(outside_root, outside_prefix)
+  FileUtils.mkdir_p(fixture_root)
   target_path = File.join(outside_root, "write-#{label}-#{choice_index}.txt")
   target_content = "PTY_PERMISSION_#{label}_#{choice_index}_#{SecureRandom.hex(8)}\n"
-      provider.configure_write(target_path, target_content)
+  provider.configure_write(target_path, target_content)
   results[:fixture_root] = fixture_root
   results[:outside_root] = outside_root
-      results[:target_path] = target_path
-      results[:expected_provider_write_arguments] = provider.write_arguments
+  results[:target_path] = target_path
+  results[:expected_provider_write_arguments] = provider.write_arguments
 
   # Pre-write provider config directly (bypass fragile UI flow)
   config_dir = env_vars['OPENCODE_CONFIG_DIR']
@@ -1296,6 +1569,22 @@ def run_single_permission_trial(binary, env_vars, data_dir, choice_index, provid
       Process.wait(pid) rescue nil
     end
   end
+  rescue StandardError => error
+    results[:error] ||= "trial setup/cleanup exception: #{error.class}: #{error.message}"
+  ensure
+    begin
+      results[:target_fixture_before_cleanup] = fixture_target_snapshot(target_path, target_content, outside_owner) if outside_owner && target_path
+    rescue StandardError => snapshot_error
+      results[:target_fixture_before_cleanup_error] = "#{snapshot_error.class}: #{snapshot_error.message}"
+      results[:error] ||= 'target fixture evidence snapshot failed'
+    ensure
+      results[:target_fixture_cleanup] = cleanup_owned_fixture_dir(outside_root, outside_owner) if outside_owner
+      results[:target_fixture_cleanup] ||= { verified_gone: false, error: 'outside fixture root was not created' }
+      unless results.dig(:target_fixture_cleanup, :verified_gone) == true
+        results[:error] ||= 'outside fixture cleanup failed'
+      end
+    end
+  end
 
   results
 end
@@ -1305,6 +1594,10 @@ end
 # ---------------------------------------------------------------------------
 
 def main
+  if ARGV == ['--self-test-fixture-cleanup']
+    permission_cleanup_self_test!
+    return
+  end
   if ARGV.length < 3
     raise "Usage: ruby3 pty_verification_harness.rb <binary_path> <output_dir> <label>\n" \
           "  binary_path: path to target/debug/oc2\n" \
@@ -1327,9 +1620,14 @@ def main
   # Start fake provider server
   provider = FakeProviderServer.new
 
+  begin
   # Run each permission choice in a fresh disposable environment
   PERMISSION_CHOICES.each_with_index do |choice_label, choice_index|
     provider.clear_requests
+    trial_env = nil
+    trial_data_dir = nil
+    result = nil
+    begin
     trial_env = DisposableEnv.new("#{label}-#{choice_index}")
     trial_data_dir = trial_env.data_dir
     env_vars = trial_env.env_vars(
@@ -1369,29 +1667,50 @@ def main
     puts "[harness] Result: #{JSON.pretty_generate(result)}"
 
     all_results << result
-    trial_env.cleanup
+    rescue StandardError => error
+      result ||= { label: label, choice_index: choice_index, choice: choice_label }
+      result[:error] ||= "trial orchestration exception: #{error.class}: #{error.message}"
+      all_results << result unless all_results.include?(result)
+    ensure
+      result[:trial_data_dir] = trial_data_dir if result && trial_data_dir
+      if trial_env
+        begin
+          result[:trial_fixture_evidence] = snapshot_trial_fixture_files(trial_env)
+          required_fixtures = ['custom-providers.json', 'model.json']
+          errors = fixture_snapshot_errors(result[:trial_fixture_evidence], required: required_fixtures)
+          result[:trial_fixture_evidence_errors] = errors unless errors.empty?
+          result[:error] ||= 'trial fixture evidence snapshot failed' unless errors.empty?
+        rescue StandardError => evidence_error
+          result[:trial_fixture_evidence_error] = "#{evidence_error.class}: #{evidence_error.message}"
+          result[:error] ||= 'trial fixture evidence snapshot failed'
+        end
+        daemon_cleanup = cleanup_fixture_daemon(trial_data_dir, binary)
+        result[:daemon_cleanup] = daemon_cleanup
+        result[:error] ||= 'fixture daemon cleanup failed' unless daemon_cleanup[:verified_gone] == true
+        if daemon_cleanup[:verified_gone] == true
+          cleanup = trial_env.cleanup
+          result[:trial_fixture_cleanup] = cleanup
+          result[:error] ||= 'trial fixture cleanup failed' unless cleanup[:verified_gone] == true
+        else
+          result[:trial_fixture_cleanup] = { verified_gone: false, retained: true, reason: 'fixture daemon identity/exit was not verified' }
+        end
+      end
+      result_file = File.join(output_dir, "permission-footer-fix-20261022-mouse-#{choice_index}.json")
+      File.write(result_file, JSON.pretty_generate(result)) if result
+      puts "[harness] Result: #{JSON.pretty_generate(result)}" if result
+    end
 
     break if ENV['PHASE1_ONLY'] == '1'
 
-    if result[:error]
+    if result && result[:error]
       provider_errors << result[:error]
     end
   end
-
-  # Kill any leftover daemon
-  begin
-    all_results.each do |r|
-      backend_path = File.join(r[:trial_data_dir], 'runtime', 'backend.json')
-      if File.exist?(backend_path)
-        descriptor = JSON.parse(File.read(backend_path))
-        kill_daemon(descriptor)
-      end
-    end
-  rescue StandardError
-    nil
+  rescue StandardError => error
+    provider_errors << "orchestration: #{error.class}: #{error.message}"
+  ensure
+    provider.stop if provider
   end
-
-  provider.stop
 
   # Summary
   # All checks must pass: tool execution correct, no errors, provider saved, dialog seen
@@ -1414,7 +1733,8 @@ def main
     terminal_rows: TERMINAL_ROWS,
     total_trials: total,
     tool_execution_verified: passed,
-    all_passed: passed == total,
+    selected_trials_passed: total.positive? && passed == total,
+    all_passed: total == PERMISSION_CHOICES.length && passed == total,
     durable_restart_all_passed: [3, 5].all? { |choice| all_results.any? { |r| r[:choice_index] == choice && r[:restart_scope_verified] == true } },
     results: all_results.map { |r| { choice: r[:choice], tool_executed: r[:tool_executed_correct], tool_effect: r[:tool_effect_correct], scope_verified: r[:scope_verified] == true, restart_scope_verified: r[:restart_scope_verified], error: r[:error], provider_saved: r[:provider_saved], dialog_visible: r[:permission_dialog_visible], permission_poll: r[:permission_poll], provider_requests: r[:provider_requests], followup_function_call: r[:distinct_followup_function_call], followup_outcome_verified: r[:scope_verified] == true, initial_file_correct: r[:initial_file_correct], followup_file_has_marker: r[:followup_file_has_marker], file_absent: r[:file_absent], denied_call_result: r[:followup_output_denied] == true } }
   }

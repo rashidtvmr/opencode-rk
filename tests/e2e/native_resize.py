@@ -58,8 +58,39 @@ def cup_rows(data):
     return [int(m.group(1)) for m in re.finditer(rb"\x1b\[([0-9]+);[0-9]+[Hf]", data)]
 
 
+def valid_frame_closure(data, start=0):
+    """Require a complete synchronized-update frame after ``start``.
+
+    A resize boundary is only meaningful after the prior renderer frame has
+    emitted both DEC 2026 delimiters.  This deliberately does not discard any
+    bytes or CSI rows; it only supplies a causal boundary for classification.
+    """
+    open_at = data.rfind(b"\x1b[?2026h", start)
+    close_at = data.rfind(b"\x1b[?2026l", start)
+    return open_at >= start and close_at > open_at
+
+
+def settle_old_frame(master, captured, screen, deadline):
+    """Drain the old frame, retaining every byte, then require quiet output."""
+    quiet_since = time.monotonic()
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([master], [], [], .02)
+        if ready:
+            chunk = os.read(master, min(65536, MAX_PTY - len(captured)))
+            if not chunk:
+                raise AssertionError("PTY EOF while settling old frame")
+            captured.extend(chunk)
+            screen.feed(chunk)
+            quiet_since = time.monotonic()
+        if len(captured) >= MAX_PTY:
+            raise AssertionError("capture bound while settling old frame")
+        if valid_frame_closure(bytes(captured)) and time.monotonic() - quiet_since >= .1:
+            return
+    raise AssertionError("old-size synchronized frame did not settle within 2 seconds")
+
+
 def bounded_resize_read(master, captured, screen, deadline, start):
-    """Drain only a bounded post-ioctl frame and require visible new content."""
+    """Drain a complete post-ioctl frame and require visible new content."""
     while time.monotonic() < deadline and len(captured) < MAX_PTY:
         ready, _, _ = select.select([master], [], [], min(.1, deadline - time.monotonic()))
         if not ready:
@@ -72,7 +103,8 @@ def bounded_resize_read(master, captured, screen, deadline, start):
             raise AssertionError("PTY EOF before resized native frame")
         captured.extend(chunk)
         screen.feed(chunk)
-        if len(captured) > start and model_ready(screen,"Resize fixture") and screen.contains(">"):
+        if (len(captured) > start and valid_frame_closure(bytes(captured), start)
+                and model_ready(screen,"Resize fixture") and screen.contains(">")):
             return
     if len(captured) >= MAX_PTY:
         raise AssertionError("PTY capture bound reached while awaiting resized frame")
@@ -199,6 +231,8 @@ def run(binary, library, manifest, artifacts):
 
         # Idle resize: no byte is written to the PTY and no provider call may
         # result.  The kernel geometry is the sole stimulus.
+        settle_old_frame(master, captured, initial_screen,
+                         min(started + TOTAL_TIMEOUT, time.monotonic() + 2))
         before = len(captured)
         set_winsize(master, RESIZED_ROWS, RESIZED_COLS)
         bounded_resize_read(master, captured, resized_screen,

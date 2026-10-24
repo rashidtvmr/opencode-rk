@@ -9,6 +9,7 @@ artifact arguments.
 """
 
 import argparse
+import errno
 import hashlib
 import http.server
 import json
@@ -76,51 +77,85 @@ def redact(value):
     return value.replace(KEY, "[REDACTED]")
 
 
-def reap_cli_then_daemon(child, descriptor_value, master):
-    """Exit the owned native CLI before probing its owned daemon group.
-
-    The descriptor helper intentionally remains unchanged.  A graceful Ctrl-C
-    first lets the CLI close its daemon connection; only then is the validated
-    daemon group handed to the frozen helper.  This avoids probing a dead
-    process group while its parent Popen object is still unreaped.
-    """
+def reap_cli_then_daemon(child, descriptor_value, master, captures=None, screen=None, exit_timeout=10):
+    """Drain bounded PTY output during graceful exit before probing its daemon."""
     if child is None:
         return
     timed_out = False
-    if child.poll() is None:
-        if master is not None:
-            try:
-                os.write(master, b"\x03")
-            except OSError:
-                pass
+    capture_overflow = False
+    screen_error = None
+    if child.poll() is None and master is not None:
         try:
-            child.wait(timeout=10)
+            os.write(master, b"\x03")
+        except OSError:
+            pass
+    deadline = time.monotonic() + exit_timeout
+    while time.monotonic() < deadline:
+        if master is None or captures is None:
+            if child.poll() is not None:
+                break
+            try:
+                child.wait(timeout=min(.1, max(0, deadline - time.monotonic())))
+            except subprocess.TimeoutExpired:
+                continue
+            break
+        ready, _, _ = select.select([master], [], [], min(.1, max(0, deadline - time.monotonic())))
+        if not ready:
+            if child.poll() is not None:
+                break
+            continue
+        remaining = MAX_PTY - len(captures)
+        if remaining <= 0:
+            capture_overflow = True
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=3)
+            break
+        try:
+            chunk = os.read(master, min(65536, remaining))
+        except OSError as error:
+            if error.errno == errno.EIO and child.poll() is not None:
+                break
+            raise AssertionError(f"PTY read failed during CLI exit: {error}") from error
+        if not chunk:
+            break
+        captures.extend(chunk)
+        if screen is not None:
+            try:
+                screen.feed(chunk)
+            except AssertionError as error:
+                if screen_error is None:
+                    screen_error = error
+    if child.poll() is None:
+        try:
+            child.wait(timeout=max(0, deadline - time.monotonic()))
         except subprocess.TimeoutExpired:
             child.kill()
             child.wait(timeout=3)
             timed_out = True
-    daemon_pid = descriptor_value.get("_validated_pid") if descriptor_value else None
-    if not isinstance(daemon_pid, int) or daemon_pid <= 1:
+    def check_cli_exit():
         if timed_out:
             raise AssertionError("native CLI did not exit after Ctrl-C")
         if child.returncode != 0:
             raise AssertionError(f"native CLI exited with status {child.returncode}")
+        if capture_overflow:
+            raise AssertionError("PTY capture bound reached during CLI exit")
+        if screen_error is not None:
+            raise AssertionError(f"terminal screen rejected CLI exit output: {screen_error}") from screen_error
+
+    daemon_pid = descriptor_value.get("_validated_pid") if descriptor_value else None
+    if not isinstance(daemon_pid, int) or daemon_pid <= 1:
+        check_cli_exit()
         return
     try:
         os.kill(daemon_pid, 0)
     except ProcessLookupError:
-        if timed_out:
-            raise AssertionError("native CLI did not exit after Ctrl-C")
-        if child.returncode != 0:
-            raise AssertionError(f"native CLI exited with status {child.returncode}")
+        check_cli_exit()
         return
     except PermissionError as error:
         raise AssertionError("validated daemon ownership probe was denied") from error
     stop_owned_daemon(descriptor_value)
-    if timed_out:
-        raise AssertionError("native CLI did not exit after Ctrl-C")
-    if child.returncode != 0:
-        raise AssertionError(f"native CLI exited with status {child.returncode}")
+    check_cli_exit()
 
 
 def sse(event, data):
@@ -316,7 +351,9 @@ def run(binary, library, manifest, artifacts):
         second_start = len(captures); os.write(master, (SECOND + "\r").encode()); read_until(master, time.monotonic() + FIXTURE_TIMEOUT, captures, SECOND_FINAL.encode(), second_start, screen, lambda: screen.contains(SECOND_FINAL))
         resume_id = persisted_session_id(d, SECOND_FINAL)
         old_daemon = daemon
-        reap_cli_then_daemon(old_daemon, d, master)
+        reap_cli_then_daemon(old_daemon, d, master, captures, screen)
+        if KEY.encode() in captures or KEY in screen.text():
+            raise AssertionError("fixture API key appeared in terminal output")
         daemon = None
         # Restart the installed native CLI and its owned daemon through a new
         # PTY.  The prior PTY is closed only after the validated process group
@@ -345,7 +382,7 @@ def run(binary, library, manifest, artifacts):
         state.partial_visible.set(); state.release_partial.set()
         if daemon is not None:
             try:
-                reap_cli_then_daemon(daemon, descriptors[-1] if descriptors else None, master)
+                reap_cli_then_daemon(daemon, descriptors[-1] if descriptors else None, master, captures, screen)
             except (OSError, RuntimeError, AssertionError) as error:
                 state.fail(f"owned cleanup failed: {redact(str(error))}")
         if slave is not None: os.close(slave)
