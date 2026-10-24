@@ -91,6 +91,7 @@ use std::{
     io::{BufRead, IsTerminal as _, Read, Write},
     net::{TcpStream, ToSocketAddrs},
     path::{Path, PathBuf},
+    sync::mpsc as std_mpsc,
     time::{Duration, Instant},
 };
 
@@ -436,6 +437,242 @@ fn http_request(
     auth: Option<&str>,
 ) -> Result<String, String> {
     http_request_with_status(origin, method, path, body, auth).map(|(body, _status)| body)
+}
+
+#[cfg(feature = "native")]
+struct NativeCompactWorker {
+    rx: tokio::sync::mpsc::Receiver<Result<String, String>>,
+    task: Option<tokio::task::JoinHandle<()>>,
+    session_id: String,
+    generation: u64,
+    origin: String,
+    auth: String,
+}
+
+#[cfg(feature = "native")]
+impl NativeCompactWorker {
+    fn start(origin: &str, session_id: &str, auth: &str, model: &str, generation: u64) -> Result<Self, String> {
+        if !crate::daemon_client::is_wellformed_token(auth) {
+            return Err("missing validated daemon token".into());
+        }
+        if crate::daemon_client::parse_loopback_port(origin).is_none() {
+            return Err("native compaction requires a canonical loopback daemon origin".into());
+        }
+        if model.trim().is_empty() || !model.contains('/') {
+            return Err("native compaction requires a qualified provider/model selection".into());
+        }
+        let origin = origin.to_owned();
+        let request_origin = origin.clone();
+        let session = session_id.to_owned();
+        let token = auth.to_owned();
+        let request_token = token.clone();
+        let qualified = model.to_owned();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let worker_session = session.clone();
+        let task = tokio::spawn(async move {
+                let path = format!("/api/sessions/{worker_session}/compact");
+                let body = serde_json::json!({"model": qualified, "strategy": "native"});
+                let result = async {
+                    let client = reqwest::Client::builder().no_proxy()
+                        .redirect(reqwest::redirect::Policy::none())
+                        .connect_timeout(Duration::from_secs(5))
+                        .timeout(Duration::from_secs(300))
+                        .build().map_err(|error| error.to_string())?;
+                    let mut response = client.post(format!("{request_origin}{path}"))
+                        .bearer_auth(&request_token).json(&body).send().await
+                        .map_err(|error| format!("compact request failed: {error}"))?;
+                    let status = response.status();
+                    const MAX_ACK_BYTES: usize = 64 * 1024;
+                    if response.content_length().is_some_and(|size| size > MAX_ACK_BYTES as u64) {
+                        return Err("compact response exceeded byte budget".to_owned());
+                    }
+                    let mut bytes = Vec::new();
+                    while let Some(chunk) = response.chunk().await.map_err(|error| error.to_string())? {
+                        if chunk.len() > MAX_ACK_BYTES.saturating_sub(bytes.len()) {
+                            return Err("compact response exceeded byte budget".to_owned());
+                        }
+                        bytes.extend_from_slice(&chunk);
+                    }
+                    if !status.is_success() {
+                        return Err(format!("compact failed with HTTP {}: {}", status.as_u16(),
+                            crate::native_transcript::strip_ansi(&String::from_utf8_lossy(&bytes)).chars().take(512).collect::<String>()));
+                    }
+                    let body = String::from_utf8(bytes).map_err(|_| "compact response was not UTF-8".to_owned())?;
+                        let value: serde_json::Value = serde_json::from_str(&body)
+                            .map_err(|_| "compact response was not valid JSON".to_owned())?;
+                        if value["compacted"].as_bool() == Some(true)
+                            && value["strategy"].as_str() == Some("native")
+                        {
+                            Ok(body)
+                        } else {
+                            Err("compact response did not acknowledge native compaction".into())
+                        }
+                }.await;
+                let _ = tx.send(result).await;
+            });
+        Ok(Self { rx, task: Some(task), session_id: session, generation, origin, auth: token })
+    }
+
+    fn try_result(&mut self) -> Option<Result<String, String>> {
+        match self.rx.try_recv() {
+            Ok(result) => {
+                if let Some(task) = self.task.take() { task.abort(); }
+                Some(result)
+            }
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty) => None,
+            Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                if let Some(task) = self.task.take() { task.abort(); }
+                Some(Err("compact worker stopped without a response".into()))
+            }
+        }
+    }
+
+    fn owns(&self, session: Option<&str>, generation: u64) -> bool {
+        self.generation == generation && session == Some(self.session_id.as_str())
+    }
+}
+
+#[cfg(feature = "native")]
+impl Drop for NativeCompactWorker {
+    fn drop(&mut self) {
+        if let Some(task) = self.task.take() {
+            // Cancel the daemon owner before aborting the request task and
+            // closing its socket. This is deliberately tied to the captured
+            // original session/origin, never the current binding.
+            let path = format!("/api/session/{}/interrupt", self.session_id);
+            let _ = http_request_with_status(
+                &self.origin,
+                "POST",
+                &path,
+                Some("{}"),
+                Some(&self.auth),
+            );
+            task.abort();
+        }
+    }
+}
+
+#[cfg(feature = "native")]
+fn compact_command(text: &str) -> Option<Result<(), &'static str>> {
+    let mut parts = text.split_whitespace();
+    if parts.next()? != "/compact" { return None; }
+    match parts.next() {
+        Some("native") if parts.next().is_none() => Some(Ok(())),
+        None => Some(Err("plain /compact has no configured strategy; use /compact native")),
+        _ => Some(Err("usage: /compact native")),
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod compact_command_tests {
+    use super::{compact_command, NativeCompactWorker};
+    use std::{io::{Read, Write}, net::{TcpListener, TcpStream}, time::{Duration, Instant}};
+
+    fn accept(listener: &TcpListener) -> TcpStream {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match listener.accept() {
+                Ok((stream, _)) => return stream,
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    assert!(Instant::now() < deadline, "compact fixture accept deadline");
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+                Err(error) => panic!("compact fixture accept: {error}"),
+            }
+        }
+    }
+
+    fn request(stream: &mut TcpStream) -> String {
+        stream.set_nonblocking(false).unwrap();
+        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        stream.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut bytes = Vec::new();
+        loop {
+            let mut chunk = [0; 1024];
+            let read = stream.read(&mut chunk).unwrap();
+            assert!(read > 0, "request ended before its body");
+            assert!(bytes.len() + read <= 16 * 1024);
+            bytes.extend_from_slice(&chunk[..read]);
+            if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                let headers = std::str::from_utf8(&bytes[..end]).unwrap();
+                let length = headers.lines().find_map(|line| line.to_ascii_lowercase()
+                    .strip_prefix("content-length:").and_then(|value| value.trim().parse::<usize>().ok())).unwrap_or(0);
+                if bytes.len() >= end + 4 + length { return String::from_utf8(bytes).unwrap(); }
+            }
+        }
+    }
+
+    fn acknowledge(stream: &mut TcpStream) {
+        let body = r#"{"compacted":true,"strategy":"native"}"#;
+        write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn compact_worker_sends_authenticated_request_and_does_not_interrupt_after_ack() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let token = "ab".repeat(32);
+        let fixture = std::thread::spawn(move || {
+            let mut stream = accept(&listener);
+            let request = request(&mut stream);
+            // Native provider work may legitimately outlast the short GET
+            // transport timeout; the owned request must remain cancellable.
+            std::thread::sleep(Duration::from_millis(2100));
+            acknowledge(&mut stream);
+            request
+        });
+        let mut worker = NativeCompactWorker::start(&origin, "fixture-session", &token, "openai/fixture", 7).unwrap();
+        assert!(worker.owns(Some("fixture-session"), 7));
+        assert!(!worker.owns(Some("other-session"), 7));
+        assert!(!worker.owns(Some("fixture-session"), 8));
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(result) = worker.try_result() { result.unwrap(); break; }
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        assert!(worker.task.is_none(), "completed work must not send a late interrupt on drop");
+        drop(worker);
+        let request = fixture.join().unwrap();
+        assert!(request.starts_with("POST /api/sessions/fixture-session/compact HTTP/1.1\r\n"));
+        assert!(request.to_ascii_lowercase().contains(&format!("authorization: bearer {token}")));
+        let body: serde_json::Value = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body, serde_json::json!({"model":"openai/fixture","strategy":"native"}));
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn dropping_pending_compact_interrupts_the_captured_session_before_join() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let token = "cd".repeat(32);
+        let (started, ready) = std::sync::mpsc::sync_channel(1);
+        let fixture = std::thread::spawn(move || {
+            let mut compact = accept(&listener);
+            let first = request(&mut compact);
+            started.send(()).unwrap();
+            let mut interrupt = accept(&listener);
+            let second = request(&mut interrupt);
+            write!(interrupt, "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
+            acknowledge(&mut compact);
+            (first, second)
+        });
+        let worker = NativeCompactWorker::start(&origin, "original-session", &token, "openai/fixture", 3).unwrap();
+        ready.recv_timeout(Duration::from_secs(2)).unwrap();
+        drop(worker);
+        let (compact, interrupt) = fixture.join().unwrap();
+        assert!(compact.starts_with("POST /api/sessions/original-session/compact "));
+        assert!(interrupt.starts_with("POST /api/session/original-session/interrupt "));
+        assert!(interrupt.to_ascii_lowercase().contains(&format!("authorization: bearer {token}")));
+    }
+    #[test]
+    fn compact_route_is_explicit_and_never_an_ordinary_turn() {
+        assert_eq!(compact_command("/compact native"), Some(Ok(())));
+        assert!(compact_command("/compact").is_some());
+        assert!(compact_command("/compact bogus").is_some());
+        assert_eq!(compact_command("hello"), None);
+    }
 }
 
 /// Fetch the live session snapshot: target session (explicit id or most
@@ -2567,6 +2804,7 @@ fn native_loop(
     // match; a superseded (stale) worker is drained and never touches the
     // current busy flag, transcript or live snapshot.
     let mut worker: Option<crate::native_view::OwnedWorker<native_turn::TurnWorker>> = None;
+    let mut compact_worker: Option<NativeCompactWorker> = None;
     let mut pending_submission: Option<String> = None;
     let mut binding_generation: u64 = 0;
     // History pagination is deliberately separate from turn/completion
@@ -3286,6 +3524,29 @@ fn native_loop(
                 }
             }
         }
+        if let Some(compact) = compact_worker.as_mut() {
+            if compact.owns(live.as_ref().map(|s| s.session_id.as_str()), binding_generation) {
+                if let Some(result) = compact.try_result() {
+                    compact_worker = None;
+                    match result {
+                        Ok(_) => {
+                            if let Some(current) = live.as_ref() {
+                                match fetch_snapshot(&current.origin, Some(&current.session_id), auth) {
+                                    Ok(snapshot) if snapshot.session_id == current.session_id => {
+                                        live = Some(snapshot);
+                                        append_transcript(&mut transcript, "compaction complete".into());
+                                    }
+                                    Ok(_) => append_transcript(&mut transcript, "error: compaction refresh changed session; history retained".into()),
+                                    Err(error) => append_transcript(&mut transcript, format!("error: compaction refresh failed: {error}")),
+                                }
+                            }
+                        }
+                        Err(error) => append_transcript(&mut transcript, format!("error: compact: {error}")),
+                    }
+                    needs_paint = true;
+                }
+            }
+        }
         // Older pages are fetched off the input loop.  The visible window is
         // unchanged until the complete, cursor-validated response arrives.
         if !history_pending && history_navigation_request == Some(HistoryRequestKind::Older) {
@@ -3878,7 +4139,7 @@ fn native_loop(
         let now = Instant::now();
         input.expire(now);
         let worker_deadline =
-            (worker.is_some() || model_load.is_some()).then(|| now + Duration::from_millis(20));
+            (worker.is_some() || compact_worker.is_some() || model_load.is_some()).then(|| now + Duration::from_millis(20));
         let timeout = match (worker_deadline, input.next_deadline()) {
             (Some(a), Some(b)) => a.min(b).saturating_duration_since(now),
             (Some(a), None) => a.saturating_duration_since(now),
@@ -4822,7 +5083,7 @@ fn native_loop(
                         live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
                         binding_generation,
                     )
-                }) || view.dialogs.is_open();
+                }) || compact_worker.as_ref().is_some_and(|owned| owned.owns(live.as_ref().map(|s| s.session_id.as_str()), binding_generation)) || view.dialogs.is_open();
                 if busy {
                     append_transcript(
                         &mut transcript,
@@ -4960,7 +5221,7 @@ fn native_loop(
                                         live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
                                         binding_generation,
                                     )
-                                }) || view.dialogs.is_open();
+                                }) || compact_worker.as_ref().is_some_and(|owned| owned.owns(live.as_ref().map(|s| s.session_id.as_str()), binding_generation)) || view.dialogs.is_open();
                                 if busy {
                                     // Refused BEFORE any HTTP fetch: no
                                     // auto-abort, no replay, composer
@@ -5462,6 +5723,28 @@ fn native_loop(
                 // Real-backend pages (/sessions, /agents) additionally
                 // report one honest error line when their fetch/parse
                 // fails — that is state reporting, not a transcript turn.
+                if let Some(compact) = compact_command(command) {
+                    consume_local_command(&mut draft, command, from_chat_composer);
+                    match compact {
+                        Ok(()) => {
+                    let busy = worker.as_ref().is_some_and(|owned| owned.owns(live.as_ref().map(|s| s.session_id.as_str()), binding_generation))
+                                || compact_worker.as_ref().is_some_and(|owned| owned.owns(live.as_ref().map(|s| s.session_id.as_str()), binding_generation)) || view.dialogs.is_open();
+                            if busy {
+                                append_transcript(&mut transcript, "busy: turn or compaction already in progress".into());
+                            } else if let (Some(snapshot), Some(model)) = (live.as_ref(), selected.as_ref()) {
+                                match auth.ok_or_else(|| "missing daemon token".to_owned()).and_then(|token| NativeCompactWorker::start(&snapshot.origin, &snapshot.session_id, token, &model.qualified(), binding_generation)) {
+                                    Ok(next) => compact_worker = Some(next),
+                                    Err(error) => append_transcript(&mut transcript, format!("error: compact: {error}")),
+                                }
+                            } else {
+                                append_transcript(&mut transcript, "error: /compact native requires a live session and selected model".into());
+                            }
+                        }
+                        Err(reason) => append_transcript(&mut transcript, format!("error: {reason}")),
+                    }
+                    needs_paint = true;
+                    continue;
+                }
                 let local_page = native_local_page_route(command);
                 if let Some(page) = local_page {
                     if matches!(page, crate::native_view_pages::Page::Commands) {
@@ -5582,7 +5865,7 @@ fn native_loop(
                             live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
                             binding_generation,
                         )
-                    }) || view.dialogs.is_open();
+                    }) || compact_worker.as_ref().is_some_and(|owned| owned.owns(live.as_ref().map(|s| s.session_id.as_str()), binding_generation)) || view.dialogs.is_open();
                     if busy {
                         // Refused BEFORE any HTTP creation: no auto-abort,
                         // no replay, composer draft untouched.
@@ -5717,7 +6000,7 @@ fn native_loop(
                             live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
                             binding_generation,
                         )
-                    }) || view.dialogs.is_open();
+                    }) || compact_worker.as_ref().is_some_and(|owned| owned.owns(live.as_ref().map(|s| s.session_id.as_str()), binding_generation)) || view.dialogs.is_open();
                     if busy {
                         append_transcript(&mut transcript, "busy: turn or permission decision in progress; /cd refused".to_owned());
                         needs_paint = true;
@@ -5872,6 +6155,11 @@ fn native_loop(
                 }
                 if !command.is_empty() {
                     if worker.as_ref().is_some_and(|owned| {
+                        owned.owns(
+                            live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
+                            binding_generation,
+                        )
+                    }) || compact_worker.as_ref().is_some_and(|owned| {
                         owned.owns(
                             live.as_ref().map(|snapshot| snapshot.session_id.as_str()),
                             binding_generation,
@@ -6084,7 +6372,7 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import")
+        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
