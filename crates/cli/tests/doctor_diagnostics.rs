@@ -207,7 +207,7 @@ fn ops_010_t04_tools_check_reports_core_builtins() {
         .collect::<Vec<_>>();
     builtins.sort_unstable();
 
-    assert_eq!(builtins, ["bash", "edit", "file", "grep", "read", "write"]);
+    assert_eq!(builtins, ["bash", "edit", "file", "glob", "grep", "read", "shell", "webfetch", "websearch", "write"]);
 }
 
 #[test]
