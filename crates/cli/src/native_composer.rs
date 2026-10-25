@@ -43,6 +43,56 @@ pub fn acknowledge_submitted_draft(captured: &str, draft: &mut String) -> bool {
     if draft == captured { draft.clear(); true } else { false }
 }
 
+/// Keep a legacy string-backed cursor valid after any external draft
+/// replacement. This is deliberately a boundary clamp, not state recovery;
+/// callers still supply the correct semantic cursor for known replacements.
+pub fn normalize_cursor(draft: &str, cursor: &mut usize) {
+    *cursor = (*cursor).min(draft.len());
+    while *cursor > 0 && !draft.is_char_boundary(*cursor) { *cursor -= 1; }
+}
+
+/// ACK-aware clear for the transitional native caller. A matching ACK clears
+/// both text and cursor; a stale ACK leaves both untouched (including edits
+/// made while admission was in flight).
+pub fn acknowledge_submitted_draft_with_cursor(
+    captured: &str,
+    draft: &mut String,
+    cursor: &mut usize,
+) -> bool {
+    if acknowledge_submitted_draft(captured, draft) {
+        *cursor = 0;
+        true
+    } else {
+        normalize_cursor(draft, cursor);
+        false
+    }
+}
+
+/// Apply Ctrl-A/Ctrl-E to a caller-owned draft while preserving the caller's
+/// cursor metadata. This adapter is used by the legacy string-backed native
+/// loop until its full draft storage is migrated to `Composer`.
+pub fn apply_line_binding(draft: &str, cursor: &mut usize, byte: u8) -> bool {
+    let mut buffer = EditBuffer::new();
+    if buffer.set_text(draft.to_owned()).is_err() { return false; }
+    buffer.set_cursor(*cursor);
+    let handled = match byte {
+        1 => { buffer.move_to_line_start(); true }
+        5 => { buffer.move_to_line_end(); true }
+        _ => false,
+    };
+    if handled { *cursor = buffer.cursor(); }
+    handled
+}
+
+/// Replace a complete draft and place the cursor at an explicit valid offset.
+/// Native route/session restoration uses this instead of assigning a String
+/// and leaving stale cursor metadata behind.
+pub fn replace_draft_with_cursor(draft: &mut String, cursor: &mut usize, replacement: String, position: usize) {
+    *draft = replacement;
+    *cursor = position.min(draft.len());
+    normalize_cursor(draft, cursor);
+}
+
 #[cfg(test)]
 mod native_submission_ack_tests {
     use super::acknowledge_submitted_draft;
@@ -57,6 +107,19 @@ mod native_submission_ack_tests {
         let mut replacement = "new task".to_owned();
         assert!(!acknowledge_submitted_draft("old task", &mut replacement));
         assert_eq!(replacement, "new task");
+
+        let mut cursor = edited.len();
+        assert!(!super::acknowledge_submitted_draft_with_cursor(
+            "change café 世界", &mut edited, &mut cursor
+        ));
+        assert_eq!(cursor, edited.len());
+        let mut matching = "change café 世界".to_owned();
+        let mut matching_cursor = matching.len();
+        assert!(super::acknowledge_submitted_draft_with_cursor(
+            "change café 世界", &mut matching, &mut matching_cursor
+        ));
+        assert!(matching.is_empty());
+        assert_eq!(matching_cursor, 0);
     }
 }
 /// Max drafts queued while a turn is in flight.
@@ -170,6 +233,15 @@ pub const fn decide_key(key: Key, keymap: SubmitKeymap) -> KeyAction {
     }
 }
 
+/// Resolve a raw decoder byte through the same keymap used by Composer.
+pub const fn decide_byte(byte: u8, keymap: SubmitKeymap) -> Option<KeyAction> {
+    match byte {
+        b'\r' => Some(decide_key(Key::Enter, keymap)),
+        b'\n' => Some(decide_key(Key::CtrlJ, keymap)),
+        _ => None,
+    }
+}
+
 /// Strip bracketed-paste framing. Returns `None` unless the frame carries
 /// both markers; the inner body is returned verbatim (newlines included).
 #[must_use]
@@ -228,6 +300,18 @@ impl EditBuffer {
     #[must_use]
     pub fn cursor(&self) -> usize {
         self.cursor
+    }
+
+    /// Restore a cursor captured by the native input owner.  Callers must
+    /// provide a UTF-8 boundary; invalid offsets are clamped to the nearest
+    /// preceding boundary rather than allowing a later edit to panic.
+    pub fn set_cursor(&mut self, cursor: usize) {
+        let mut cursor = cursor.min(self.text.len());
+        while cursor > 0 && !self.text.is_char_boundary(cursor) {
+            cursor -= 1;
+        }
+        self.cursor = cursor;
+        self.check();
     }
 
     #[must_use]
@@ -368,6 +452,24 @@ impl EditBuffer {
 
     pub fn move_to_end(&mut self) {
         self.cursor = self.text.len();
+        self.check();
+    }
+
+    /// Move to the beginning of the logical line containing the cursor.
+    /// This is the upstream `input.line.home` command (Ctrl-A), not buffer
+    /// home: a multiline draft keeps its other lines and its suffix intact.
+    pub fn move_to_line_start(&mut self) {
+        self.cursor = self.text[..self.cursor].rfind('\n').map_or(0, |i| i + 1);
+        self.check();
+    }
+
+    /// Move to the end of the logical line containing the cursor.  The
+    /// newline itself remains outside the line, so End on a non-final line
+    /// lands immediately before `\n`.
+    pub fn move_to_line_end(&mut self) {
+        self.cursor = self.text[self.cursor..]
+            .find('\n')
+            .map_or(self.text.len(), |i| self.cursor + i);
         self.check();
     }
 
@@ -570,6 +672,24 @@ impl Composer {
         }
     }
 
+    /// Dispatch the two upstream line-edit bindings that arrive as control
+    /// bytes from the native decoder: Ctrl-A and Ctrl-E.  Buffer-home/end are
+    /// intentionally not aliases here; upstream leaves those bindings
+    /// unbound by default.
+    pub fn handle_line_binding(&mut self, byte: u8) -> bool {
+        match byte {
+            1 => {
+                self.buf.move_to_line_start();
+                true
+            }
+            5 => {
+                self.buf.move_to_line_end();
+                true
+            }
+            _ => false,
+        }
+    }
+
     /// Bracketed-paste gate: insert `body` (already unwrapped with
     /// [`unwrap_bracketed`]) literally at the cursor. Embedded newlines,
     /// commands and escape text stay inert draft bytes; busy/queue are
@@ -633,6 +753,57 @@ impl Composer {
 impl Default for Composer {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod line_cursor_tests {
+    use super::{Composer, EditBuffer, Key};
+
+    #[test]
+    fn ctrl_line_home_end_preserve_other_lines_and_unicode_boundaries() {
+        let mut buffer = EditBuffer::new();
+        buffer.set_text("前 café\n中間 🦀 suffix\n終".to_owned()).unwrap();
+        let line_start = "前 café\n".len();
+        let line_end = "前 café\n中間 🦀 suffix".len();
+        let initial = "前 café\n中間 🦀".len();
+        buffer.set_cursor(initial);
+        buffer.move_to_line_start();
+        assert_eq!(buffer.cursor(), line_start);
+        assert_eq!(&buffer.text()[buffer.cursor()..], "中間 🦀 suffix\n終");
+        buffer.move_to_line_end();
+        assert_eq!(buffer.cursor(), line_end);
+        assert_eq!(buffer.text(), "前 café\n中間 🦀 suffix\n終");
+        assert_eq!(&buffer.text()[buffer.cursor()..], "\n終");
+        assert!(buffer.is_cursor_on_boundary());
+    }
+
+    #[test]
+    fn composer_home_end_dispatch_is_line_local() {
+        let mut composer = Composer::new();
+        composer.set_draft("αβ\n世界 🦀 tail").unwrap();
+        composer.buffer_mut().set_cursor("αβ\n世界 🦀".len());
+        assert!(composer.handle_line_binding(1));
+        assert_eq!(composer.buffer().cursor(), "αβ\n".len());
+        assert!(composer.handle_line_binding(5));
+        assert_eq!(composer.buffer().cursor(), "αβ\n世界 🦀 tail".len());
+        assert_eq!(&composer.draft()[composer.buffer().cursor()..], "");
+        assert!(composer.buffer().is_cursor_on_boundary());
+        assert_eq!(composer.buffer().cursor(), composer.draft().len());
+    }
+
+    #[test]
+    fn physical_home_end_remain_buffer_operations_and_ctrl_bindings_are_line_local() {
+        let mut composer = Composer::new();
+        composer.set_draft("a\n世界 tail\nempty\n終").unwrap();
+        composer.buffer_mut().set_cursor("a\n世界".len());
+        assert_eq!(composer.handle_key(Key::Home), Ok(super::KeyHandled::Edited));
+        assert_eq!(composer.buffer().cursor(), 0);
+        composer.buffer_mut().set_cursor("a\n世界".len());
+        assert!(composer.handle_line_binding(1));
+        assert_eq!(composer.buffer().cursor(), "a\n".len());
+        assert!(composer.handle_line_binding(5));
+        assert_eq!(&composer.draft()[composer.buffer().cursor()..], "\nempty\n終");
     }
 }
 
@@ -969,6 +1140,17 @@ mod tests {
         assert_eq!(ctrlj.draft(), "hi\n");
         assert!(!ctrlj.is_busy());
         assert_eq!(ctrlj.handle_key(Key::CtrlJ), Ok(KeyHandled::Submitted));
+    }
+
+    #[test]
+    fn raw_enter_and_ctrlj_bytes_follow_decide_key_for_both_maps() {
+        for (map, cr, lf) in [
+            (SubmitKeymap::Enter, KeyAction::Submit, KeyAction::Newline),
+            (SubmitKeymap::CtrlJ, KeyAction::Newline, KeyAction::Submit),
+        ] {
+            assert_eq!(decide_byte(b'\r', map), Some(cr));
+            assert_eq!(decide_byte(b'\n', map), Some(lf));
+        }
     }
 
     #[test]

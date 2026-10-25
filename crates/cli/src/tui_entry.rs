@@ -291,6 +291,14 @@ pub fn resolve_keymap(flag: Option<SubmitKeymapArg>) -> Result<SubmitKeymap, Str
     Ok(SubmitKeymap::Enter)
 }
 
+#[cfg(feature = "native")]
+const fn native_composer_keymap(keymap: SubmitKeymap) -> crate::native_composer::SubmitKeymap {
+    match keymap {
+        SubmitKeymap::Enter => crate::native_composer::SubmitKeymap::Enter,
+        SubmitKeymap::CtrlJ => crate::native_composer::SubmitKeymap::CtrlJ,
+    }
+}
+
 // ---------- live daemon state ----------
 
 /// Real session state fetched from the daemon. No field is fabricated; every
@@ -2823,6 +2831,10 @@ fn native_loop(
     let _ = renderer.enable_kitty_keyboard(1);
     renderer.set_title("OpenCode RK")?;
     let mut draft = String::new();
+    // Byte cursor for the native string-backed composer. Ctrl-A/Ctrl-E use
+    // the production native_composer line-binding adapter; buffer Home/End
+    // remain intentionally unbound by default.
+    let mut draft_cursor = 0usize;
     let mut selection = crate::native_text_selection::TextSelection::default();
     // Setup is an action from Home, not a mandatory startup modal. In
     // particular, custom-provider discovery must never steal composer input.
@@ -3561,8 +3573,8 @@ fn native_loop(
                         native_turn::Event::User { text: accepted_text } => {
                             transcript.begin_reasoning_turn();
                             if let Some(captured) = pending_submission.take() {
-                                crate::native_composer::acknowledge_submitted_draft(
-                                    &captured, &mut draft,
+                                crate::native_composer::acknowledge_submitted_draft_with_cursor(
+                                    &captured, &mut draft, &mut draft_cursor,
                                 );
                                 let captured = accepted_text.unwrap_or(captured);
                                 transcript.append(
@@ -4315,7 +4327,7 @@ fn native_loop(
                         && !children_panel.open && !appearance.open && !permission_editor.open
                         && matches!(dialog, native_setup::Dialog::None)
                         && view.page() == crate::native_view_pages::Page::Chat {
-                        view.composer_region(draft_echo).and_then(|anchor| completion.panel(anchor))
+                        view.composer_region(draft_echo).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor))
                     } else { None },
                     ui_regions: if help_open { help_regions.clone() } else { view.ui_regions() },
                     modal_underlay_rows: view.modal_underlay_rows(),
@@ -4454,11 +4466,11 @@ fn native_loop(
             && !view.dialogs.intercepts_input() && !view.command_palette_open()
             && matches!(dialog, native_setup::Dialog::None)
             && import_dialog.as_ref().is_none_or(|import| !import.is_open())
-            && view.composer_region(&draft).and_then(|anchor| completion.panel(anchor)).is_some()
+            && view.composer_region(&draft).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor)).is_some()
         {
             match &event {
-                native_input_decoder::InputEvent::ArrowUp => { completion.navigate(false); needs_paint = true; continue; }
-                native_input_decoder::InputEvent::ArrowDown => { completion.navigate(true); needs_paint = true; continue; }
+                native_input_decoder::InputEvent::ArrowUp => { completion.navigate_at(&draft, draft_cursor, false); needs_paint = true; continue; }
+                native_input_decoder::InputEvent::ArrowDown => { completion.navigate_at(&draft, draft_cursor, true); needs_paint = true; continue; }
                 native_input_decoder::InputEvent::Escape => { completion.dismiss(); needs_paint = true; continue; }
                 native_input_decoder::InputEvent::Byte(key) => {
                     if matches!(*key, b'\r' | b'\n') {
@@ -4471,19 +4483,23 @@ fn native_loop(
                             // completion (for example `/cd` must still get a
                             // directory before it can run).
                             if route != "/cd" {
-                                draft = route;
+                                let route_cursor = route.len();
+                                crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor);
                                 completion.sync(&draft);
-                            } else if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
+                            } else if let Some(cursor) = completion.complete_key_at(*key, &mut draft, draft_cursor, MAX_NATIVE_DRAFT_BYTES) {
+                                draft_cursor = cursor;
                                 utf8.reset();
                                 needs_paint = true;
                                 continue;
                             }
-                        } else if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
+                        } else if let Some(cursor) = completion.complete_key_at(*key, &mut draft, draft_cursor, MAX_NATIVE_DRAFT_BYTES) {
+                            draft_cursor = cursor;
                             utf8.reset();
                             needs_paint = true;
                             continue;
                         }
-                    } else if completion.complete_key(*key, &mut draft, MAX_NATIVE_DRAFT_BYTES) {
+                    } else if let Some(cursor) = completion.complete_key_at(*key, &mut draft, draft_cursor, MAX_NATIVE_DRAFT_BYTES) {
+                        draft_cursor = cursor;
                         utf8.reset();
                         needs_paint = true;
                         continue;
@@ -4508,18 +4524,26 @@ fn native_loop(
             && !view.command_palette_open()
             && matches!(dialog, native_setup::Dialog::None)
             && import_dialog.as_ref().is_none_or(|import| !import.is_open())
-            && view.composer_region(&draft).and_then(|anchor| completion.panel(anchor)).is_some();
+            && view.composer_region(&draft).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor)).is_some();
         if completion_mouse_eligible {
             if let native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } = event {
-            if let Some(panel) = view.composer_region(&draft).and_then(|anchor| completion.panel(anchor)) {
+            if let Some(panel) = view.composer_region(&draft).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor)) {
                             if let Some(route) = panel.command_at(x, y).map(str::to_owned) {
                     if route == "/cd" {
-                        let _ = completion.accept_value(&mut draft, &route, MAX_NATIVE_DRAFT_BYTES);
+                        if let Some(cursor) = completion.accept_value_at(
+                            &mut draft,
+                            &route,
+                            draft_cursor,
+                            MAX_NATIVE_DRAFT_BYTES,
+                        ) {
+                            draft_cursor = cursor;
+                        }
                         needs_paint = true;
                         continue;
                     }
                     if route == "/exit" || route == "/quit" { break; }
-                    draft = route;
+                    let route_cursor = route.len();
+                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor);
                     completion.sync(&draft);
                     event = native_input_decoder::InputEvent::Byte(13);
                 }
@@ -5224,6 +5248,7 @@ fn native_loop(
                 dialog = native_setup::Dialog::None;
                 key_input.clear();
                 draft.clear();
+                draft_cursor = 0;
                 utf8.reset();
             }
             16 if matches!(dialog, native_setup::Dialog::None) => {
@@ -5396,7 +5421,8 @@ fn native_loop(
                          blocked_history_scroll = None;
                             history_tail_refresh_pending = false;
                             history_browsing = false;
-                            draft = restored_draft;
+                            let restored_cursor = restored_draft.len();
+                            crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
                             // Committed ONLY on a successful bind.
                             binding_generation = prospective;
                             needs_paint = true;
@@ -5431,26 +5457,38 @@ fn native_loop(
                 } else if matches!(dialog, native_setup::Dialog::ApiKey) {
                     key_input.pop();
                 } else if matches!(dialog, native_setup::Dialog::None) {
-                    draft.pop();
+                    crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
+                    if draft_cursor > 0 {
+                        let previous = draft[..draft_cursor].char_indices().next_back().map_or(0, |(i, _)| i);
+                        draft.drain(previous..draft_cursor);
+                        draft_cursor = previous;
+                    }
                 } else {
                     filter_input.pop();
                 }
                 utf8.reset();
             }
-            // Ctrl-J submit keymap: Enter is a literal newline in the draft
-            // (multiline composer); Ctrl-J (b'\n') still submits below.
-            b'\r'
-                if matches!(keymap, SubmitKeymap::CtrlJ)
-                    && palette_route.is_none()
+            b'\r' | b'\n'
+                if palette_route.is_none()
                     && !page_open
-                    && matches!(dialog, native_setup::Dialog::None) =>
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && matches!(crate::native_composer::decide_byte(byte, native_composer_keymap(keymap)), Some(crate::native_composer::KeyAction::Newline)) =>
             {
                 utf8.reset();
                 if draft.len() < MAX_NATIVE_DRAFT_BYTES {
-                    draft.push('\n');
+                    draft.insert(draft_cursor, '\n');
+                    draft_cursor += 1;
                 }
             }
-            b'\r' | b'\n' => {
+            1 | 5 if !page_open && !help_open && matches!(dialog, native_setup::Dialog::None) => {
+                if crate::native_composer::apply_line_binding(&draft, &mut draft_cursor, byte) {
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+            }
+            b'\r' | b'\n'
+                if matches!(crate::native_composer::decide_byte(byte, native_composer_keymap(keymap)), Some(crate::native_composer::KeyAction::Submit)) => {
                 crate::native_debug::event(
                     "input.enter",
                     serde_json::json!({"dialog":format!("{dialog:?}"),"page":format!("{:?}",view.page()),"composer_bytes":draft.len(),"model":selected.as_ref().map(|model|model.qualified()),"daemon_attached":live.is_some(),"busy":worker.is_some()}),
@@ -5536,7 +5574,8 @@ fn native_loop(
                                          history_navigation_request = None;
                                         history_tail_refresh_pending = false;
                                         history_browsing = false;
-                                        draft = restored_draft;
+                                        let restored_cursor = restored_draft.len();
+                                        crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
                                         // Committed ONLY on a real bind
                                         // success.
                                         binding_generation = prospective;
@@ -5604,7 +5643,10 @@ fn native_loop(
                             // Selecting a template wraps the existing draft as
                             // its arguments; submitting still requires Enter
                             // and the normal backend ACK owns draft clearing.
-                            draft = format!("/{name} {draft}");
+                            let prefix_bytes = format!("/{name} ").len();
+                            let insertion_cursor = prefix_bytes + draft_cursor;
+                            let replacement = format!("/{name} {draft}");
+                            crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, replacement, insertion_cursor);
                             view.close_page();
                             utf8.reset();
                             needs_paint = true;
@@ -5916,7 +5958,7 @@ fn native_loop(
                 // source's own buffer is untouched.
                 if command == "/help" {
                     help_open = true;
-                    consume_local_command(&mut draft, command, from_chat_composer);
+                    consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
                     utf8.reset();
                     continue;
                 }
@@ -5930,7 +5972,7 @@ fn native_loop(
                     // and only a chat-composer typed command is consumed
                     // (a segregated source's own buffer is untouched).
                     view.open_page(crate::native_view_pages::Page::Sessions);
-                    consume_local_command(&mut draft, command, from_chat_composer);
+                    consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
                     match live.as_ref() {
                         Some(snapshot) => {
                             match session_page_rows(
@@ -5987,7 +6029,7 @@ fn native_loop(
                         Ok(None) => append_transcript(&mut transcript, "Import settings: no supported sources found".to_owned()),
                         Err(error) => append_transcript(&mut transcript, format!("Import settings unavailable: {error}")),
                     }
-                    consume_local_command(&mut draft, command, from_chat_composer);
+                     consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
                     needs_paint = true;
                     continue;
                 }
@@ -6230,7 +6272,8 @@ fn native_loop(
                                     live = Some(snapshot);
                                     // Visible draft updates ONLY on this
                                     // successful commit.
-                                    draft = restored_draft;
+                                    let restored_cursor = restored_draft.len();
+                                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
                                     binding_generation = prospective;
                                     append_transcript(
                                         &mut transcript,
@@ -6305,7 +6348,8 @@ fn native_loop(
                             match bound {
                                 Ok((snapshot, restored)) => {
                                     live = Some(snapshot);
-                                    draft = restored;
+                                    let restored_cursor = restored.len();
+                                    crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored, restored_cursor);
                                     session_route = true;
                                     view.set_session_route(true);
                                     history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
@@ -6575,30 +6619,19 @@ fn native_loop(
                         view.page_query_push(character);
                     }
                 } else {
-                    let (target, limit) = if matches!(dialog, native_setup::Dialog::ApiKey) {
-                        // Segregated API-key buffer: never the chat draft.
-                        (&mut key_input, 16 * 1024)
-                    } else if matches!(dialog, native_setup::Dialog::None) {
-                        (&mut draft, MAX_NATIVE_DRAFT_BYTES)
-                    } else {
-                        // Provider/model filter: dialog-local buffer,
-                        // never the chat draft.
-                        (&mut filter_input, MAX_NATIVE_DRAFT_BYTES)
-                    };
                     if let Some(character) = utf8.push(b) {
                         let width = character.len_utf8();
-                        if target
-                            .len()
-                            .checked_add(width)
-                            .is_some_and(|len| len <= limit)
-                        {
-                            target.push(character);
-                            if matches!(
-                                dialog,
-                                native_setup::Dialog::Model | native_setup::Dialog::Provider
-                            ) {
-                                model_row = 0;
+                        if matches!(dialog, native_setup::Dialog::None) {
+                            crate::native_composer::normalize_cursor(&draft, &mut draft_cursor);
+                            if draft.len().checked_add(width).is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES) {
+                                draft.insert(draft_cursor, character);
+                                draft_cursor += width;
                             }
+                        } else if matches!(dialog, native_setup::Dialog::ApiKey) {
+                            if key_input.len().checked_add(width).is_some_and(|len| len <= 16 * 1024) { key_input.push(character); }
+                        } else if filter_input.len().checked_add(width).is_some_and(|len| len <= MAX_NATIVE_DRAFT_BYTES) {
+                            filter_input.push(character);
+                            model_row = 0;
                         }
                     }
                 }
@@ -6656,6 +6689,21 @@ fn is_recognized_local_command(command: &str) -> bool {
 fn consume_local_command(draft: &mut String, command: &str, from_chat_composer: bool) {
     if from_chat_composer && is_recognized_local_command(command) {
         draft.clear();
+    }
+}
+
+#[cfg(feature = "native")]
+fn consume_local_command_with_cursor(
+    draft: &mut String,
+    cursor: &mut usize,
+    command: &str,
+    from_chat_composer: bool,
+) {
+    if from_chat_composer && is_recognized_local_command(command) {
+        draft.clear();
+        *cursor = 0;
+    } else {
+        crate::native_composer::normalize_cursor(draft, cursor);
     }
 }
 
