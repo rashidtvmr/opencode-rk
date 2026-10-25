@@ -200,6 +200,7 @@ async fn save_options(config: CustomProviderConfig, preserve_buffered: bool) -> 
     tokio::task::spawn_blocking(move || { let _permit = permit; save_at_with_mode(&path, &config, preserve_buffered) }).await.map_err(|_| CustomProviderError::Io)?
 }
 
+#[cfg(test)]
 fn save_at(path: &Path, config: &CustomProviderConfig) -> Result<(), CustomProviderError> {
     save_at_with_mode(path, config, false)
 }

@@ -1,5 +1,6 @@
 //! INT-005 T01: decision + success path (RED: module missing).
 
+#[allow(dead_code)]
 #[path = "../src/int_refresh.rs"]
 mod int_refresh;
 

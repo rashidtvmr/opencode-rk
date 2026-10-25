@@ -13,7 +13,9 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use reqwest::Url;
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value};
+#[cfg(test)]
+use serde_json::json;
 use thiserror::Error;
 
 /// Maximum bytes accepted for the own config file.

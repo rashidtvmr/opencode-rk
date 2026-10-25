@@ -224,7 +224,6 @@ fn int_005_t05_no_side_effects_safety() {
     match gate.try_begin(secret_id) {
         Err(e) => assert_eq!(e, RefreshError::AlreadyRefreshing),
         Ok(_) => {
-            callbacks += 1;
             panic!("denied begin must not admit");
         }
     }

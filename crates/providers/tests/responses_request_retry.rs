@@ -23,12 +23,6 @@ use tokio::sync::Mutex as AsyncMutex;
 
 /// One request body exactly as the fixture server received it, plus the
 /// arrival time used to prove backoff ordering.
-#[derive(Clone, Debug)]
-struct RecordedRequest {
-    body: String,
-    arrived: Instant,
-}
-
 /// Owned by the spawned server task: the listener lives inside the task, so
 /// the test only ever touches the address, the channel of bodies and the
 /// handle used to keep the server alive for the whole test.
@@ -53,9 +47,8 @@ async fn spawn_fixture(canned: Vec<Vec<u8>>) -> Fixture {
     let bodies: Arc<AsyncMutex<Vec<(String, Instant)>>> = Arc::default();
     let task_bodies = Arc::clone(&bodies);
     let server = tokio::spawn(async move {
-        let mut canned = canned.into_iter();
-        loop {
-            let Some(response) = canned.next() else { break };
+        let canned = canned.into_iter();
+        for response in canned {
             let Ok((mut socket, _)) = listener.accept().await else { break };
             let body = read_request(&mut socket).await;
             let bodies = Arc::clone(&task_bodies);

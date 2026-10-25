@@ -3,6 +3,7 @@
 //! The module under test is included by path so this lane never edits the
 //! shared `crates/providers/src/lib.rs` (integrator-owned).
 
+#[allow(dead_code)]
 #[path = "../src/int_methods.rs"]
 mod int_methods;
 

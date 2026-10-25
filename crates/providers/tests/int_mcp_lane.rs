@@ -188,7 +188,7 @@ fn int006_t03_bounds_hold() {
         auth: McpAuth::None,
     };
     assert_eq!(att_long.validate().unwrap_err(), McpError::InvalidEndpoint);
-    assert!(HANDSHAKE_TIMEOUT_MS == 10_000);
+    assert_eq!(HANDSHAKE_TIMEOUT_MS, 10_000);
     let mut t = LoopbackTransport::with_script(vec![
         FakeStep::bytes(vec![0x42u8; 16], 6_000),
         FakeStep::bytes(vec![0x43u8; 16], 6_000),

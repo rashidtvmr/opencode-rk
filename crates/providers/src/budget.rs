@@ -298,7 +298,7 @@ mod tests {
         assert!((status.percent_used - 100.0).abs() < 0.001);
 
         // Edge: zero-limit budget reports 0 percent
-        let mut zero_budget = ProviderBudget::new(0, 0.0, BudgetTier::Free, 0.01);
+        let zero_budget = ProviderBudget::new(0, 0.0, BudgetTier::Free, 0.01);
         let status = zero_budget.check_budget();
         assert!((status.percent_used - 0.0).abs() < 0.001);
     }

@@ -4,6 +4,7 @@
 //! shared `crates/providers/src/lib.rs` (integrator-owned). Exact owned
 //! path `crates/providers/src/connection.rs`; borrowed `&str` material.
 
+#[allow(dead_code)]
 #[path = "../src/connection.rs"]
 mod connection;
 

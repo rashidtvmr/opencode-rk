@@ -4,6 +4,7 @@
 //! wire `crates/providers/src/provider_dispatch.rs` into `lib.rs` without
 //! this lane touching shared files.
 
+#[allow(dead_code)]
 #[path = "../src/provider_dispatch.rs"]
 mod provider_dispatch;
 
@@ -151,12 +152,11 @@ fn int_003_t04_failure_states() {
     let mut table = MethodTable::new();
     table.register("prov", "key", 7).expect("seed");
     let before = table.len();
-    let mut executions = 0u32;
+    let executions = 0u32;
 
     match table.dispatch("nope", "key", &input(b"h")) {
         Err(MethodError::UnknownProvider) => {}
         Ok(r) => {
-            executions += 1;
             panic!("expected UnknownProvider, dispatched {r:?}");
         }
         other => panic!("expected UnknownProvider, got {other:?}"),
@@ -164,7 +164,6 @@ fn int_003_t04_failure_states() {
     match table.dispatch("prov", "nope", &input(b"h")) {
         Err(MethodError::UnknownMethod) => {}
         Ok(r) => {
-            executions += 1;
             panic!("expected UnknownMethod, dispatched {r:?}");
         }
         other => panic!("expected UnknownMethod, got {other:?}"),
@@ -222,11 +221,10 @@ fn int_003_t05_no_side_effects_safety() {
         "receipt must not carry handle bytes"
     );
 
-    let mut executed = 0u32;
+    let executed = 0u32;
     match table.dispatch("prov", "missing", &input(secret)) {
         Err(MethodError::UnknownMethod) => {}
         Ok(r) => {
-            executed += 1;
             panic!("expected UnknownMethod, dispatched {r:?}");
         }
         other => panic!("expected UnknownMethod, got {other:?}"),

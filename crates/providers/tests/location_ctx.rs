@@ -14,11 +14,11 @@ use location_ctx::{
 fn req(dir: Option<&str>, ws: Option<&str>) -> RequestCtx {
     RequestCtx {
         dir: dir.map(|p| DirHint { path: p.to_owned() }),
-        ws: ws.map(|id| WsHintAlias(id)),
+        ws: ws.map(ws_hint_alias),
     }
 }
 
-fn WsHintAlias(id: &str) -> location_ctx::WsHint {
+fn ws_hint_alias(id: &str) -> location_ctx::WsHint {
     location_ctx::WsHint { id: id.to_owned() }
 }
 

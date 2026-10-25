@@ -155,11 +155,10 @@ fn prov_024_t05_offline_proof_and_unknown_provider() {
         "unknown provider has no shape"
     );
     let outcome: Result<Value, &str> = Err("UnknownProvider");
-    assert_eq!(
-        outcome.unwrap_err(),
-        "UnknownProvider",
-        "explicit unknown, never synthesized"
-    );
+    let Err(error) = outcome else {
+        panic!("explicit unknown, never synthesized");
+    };
+    assert_eq!(error, "UnknownProvider", "explicit unknown, never synthesized");
     let (_, openai) = read_fixture("openai", "request");
     let url = openai.get("url_template").and_then(Value::as_str).unwrap();
     assert!(

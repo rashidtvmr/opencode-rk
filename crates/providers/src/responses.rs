@@ -1121,7 +1121,7 @@ impl OpenAiResponsesClient {
 
     async fn stream_with_payload(
         &self,
-        model: &str,
+        _model: &str,
         buffered: bool,
         mut payload: Value,
     ) -> Result<OpenAiResponsesStream, ResponsesError> {

@@ -564,7 +564,7 @@ mod tests {
         let decision = decide_failover(
             &current,
             &all,
-            &[b.clone()],
+            std::slice::from_ref(&b),
             FailureKind::QuotaExhausted,
             None,
         );

@@ -334,7 +334,7 @@ async fn legacy_id_collision_endpoint_and_credential_consistent() {
     let config = load("shared-llm").await.expect("should load").unwrap();
     // api_key should NOT be the imported secret (legacy convention uses SHARED_LLM_API_KEY)
     assert!(
-        config.api_key.as_ref().map(|k| k.as_str()) != Some("imported-secret-key"),
+        config.api_key.as_deref() != Some("imported-secret-key"),
         "legacy shadowing should not use imported api_key_env"
     );
     std::env::remove_var("IMPORTED_SHARED_API_KEY");

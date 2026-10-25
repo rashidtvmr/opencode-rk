@@ -5,6 +5,7 @@
 //! file from `integration_connection.rs` (different slice, oracle-count fix
 //! pending elsewhere): this lane borrows `code` as `&str` and retains nothing.
 
+#[allow(dead_code)]
 #[path = "../src/int_connect.rs"]
 mod int_connect;
 
