@@ -3242,7 +3242,9 @@ fn provider_stream_code(error: &ResponsesError) -> &'static str {
         ResponsesError::StreamFailed { code, .. } if code == "service_unavailable" => "service_unavailable",
         ResponsesError::StreamFailed { code, .. } if code == "timeout" => "timeout",
         ResponsesError::StreamFailed { code, .. } if code == "rate_limit" || code == "rate_limited" => "rate_limited",
-        ResponsesError::StreamFailed { .. } => "bad_gateway",
+        ResponsesError::StreamFailed { code, .. } if code == "bad_request" => "bad_request",
+        ResponsesError::StreamFailed { code, .. } if code == "unknown" => "bad_gateway",
+        ResponsesError::StreamFailed { .. } => "provider_stream_failed",
         ResponsesError::UnexpectedStreamEnd => "bad_gateway",
         _ => "bad_gateway",
     }
