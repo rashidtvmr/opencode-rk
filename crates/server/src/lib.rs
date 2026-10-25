@@ -1074,8 +1074,15 @@ async fn list_messages(
         let mut parts = Vec::new();
         for tool in tools.iter().filter(|tool| tool.message_id == message_id) {
             if tool.kind == "call" {
+                // Match the live event projection: write content remains in
+                // typed storage for provider replay, never public transcript parts.
+                let arguments = if tool.name == "write" {
+                    json!({})
+                } else {
+                    serde_json::from_str::<Value>(&tool.payload).unwrap_or_else(|_| json!({}))
+                };
                 parts.push(json!({"type":"tool_call","call_id":tool.call_id,"name":tool.name,
-                    "arguments":serde_json::from_str::<Value>(&tool.payload).unwrap_or_else(|_|json!({})),
+                    "arguments":arguments,
                     "status":if tools.iter().any(|output|output.kind=="output" && output.call_id==tool.call_id && output.round_id==tool.round_id){"completed"}else{"pending"}}));
             } else if tool.kind == "output" {
                 let envelope = serde_json::from_str::<Value>(&tool.payload)

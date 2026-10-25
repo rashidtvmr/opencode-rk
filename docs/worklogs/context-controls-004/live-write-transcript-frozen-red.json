@@ -1,0 +1,7 @@
+{
+  "integrated_base": "0b8cee50c16d27907db47bcbef32de07c91c66b0",
+  "test": "crates/server/tests/live_file_tool_allowed_inroot.rs",
+  "sha256": "b726f6793eecb6181272c8c71d4a8d47523607312645d486e153c2a5c6ec8985",
+  "red_log": "live-write-transcript-integrated-red.log",
+  "observed": "Public streamed events redact file content, but GET messages exposes persisted write content through parts.arguments; durable typed arguments must remain unchanged for replay."
+}
