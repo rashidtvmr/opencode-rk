@@ -410,3 +410,17 @@ fn duplicate_completed_event_cannot_overwrite_usage() {
     assert!(parser.parse_event(None, &forged).unwrap().is_none());
     assert_eq!(parser.usage(), full_usage(9, 4, None, None));
 }
+#[test]
+fn openai_responses_inclusive_input_does_not_double_count_cache_subset() {
+    let mut parser = ResponsesStreamParser::new();
+    let completed = json!({
+        "type":"response.completed",
+        "response":{"usage":{"input_tokens":125000,"output_tokens":32,
+        "input_tokens_details":{"cached_tokens":120000}}}
+    })
+    .to_string();
+    feed(&mut parser, &completed);
+    let usage = parser.usage().expect("provider usage");
+    assert_eq!(usage.input_tokens, 125000);
+    assert_eq!(usage.cached_tokens, Some(120000));
+}

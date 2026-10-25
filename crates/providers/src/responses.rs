@@ -312,6 +312,12 @@ pub struct ResponsesStreamParser {
 /// zero. Reported numbers pass through verbatim; the client never
 /// "corrects" them, even when they look inconsistent. Serialization
 /// emits `null` for unreported subsets.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompletedResponse {
+    pub text: String,
+    pub usage: Option<ReportedUsage>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct ReportedUsage {
     pub input_tokens: u64,
@@ -1012,9 +1018,32 @@ impl OpenAiResponsesClient {
         reasoning_effort: &str,
         items: &[ResponsesItem],
     ) -> Result<String, ResponsesError> {
+        Ok(self
+            .create_with_items_and_usage(model, reasoning_effort, items)
+            .await?
+            .text)
+    }
+
+    /// Non-streaming response with provider-authoritative usage metadata.
+    pub async fn create_with_items_and_usage(
+        &self,
+        model: &str,
+        reasoning_effort: &str,
+        items: &[ResponsesItem],
+    ) -> Result<CompletedResponse, ResponsesError> {
         let mut payload = responses_request_payload(model, reasoning_effort, items, &[], false)?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
-        self.create_with_payload(&payload).await
+        let mut response = self.send_with_retry(&payload).await?;
+        let body = read_bounded_body(&mut response).await?;
+        let text = std::str::from_utf8(&body)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        let value: Value = serde_json::from_str(text)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        let parsed = BufferedResponsesBody::parse(text)?;
+        Ok(CompletedResponse {
+            text: extract_output_text(&value)?,
+            usage: parsed.usage(),
+        })
     }
 
     /// Generate a bounded, tool-free textual summary through the ordinary

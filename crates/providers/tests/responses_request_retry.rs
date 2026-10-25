@@ -162,6 +162,55 @@ fn fixture_client(base_url: String) -> OpenAiResponsesClient {
     .unwrap()
 }
 
+fn buffered_usage_response(usage: Option<&str>) -> Vec<u8> {
+    let body = match usage {
+        Some(usage) => format!(
+            "{{\"status\":\"completed\",\"usage\":{},\"output\":[{{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{{\"type\":\"output_text\",\"text\":\"fixture answer\"}}]}}]}}",
+            usage
+        ),
+        None => "{\"status\":\"completed\",\"output\":[{\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"output_text\",\"text\":\"fixture answer\"}]}]}".to_owned(),
+    };
+    format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    )
+    .into_bytes()
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn nonstreaming_usage_api_preserves_inclusive_input_and_unknown_subsets() {
+    let fixture = spawn_fixture(vec![
+        buffered_usage_response(Some("{\"input_tokens\":125000,\"output_tokens\":32,\"input_tokens_details\":{\"cached_tokens\":120000}}")),
+        buffered_usage_response(None),
+    ])
+    .await;
+    let client = fixture_client(format!("http://{}", fixture.address));
+    let items = vec![ResponsesItem::Text {
+        role: ResponsesRole::User,
+        content: "hello".into(),
+    }];
+
+    let reported = client
+        .create_with_items_and_usage("fixture-model", "", &items)
+        .await
+        .unwrap();
+    assert_eq!(reported.text, "fixture answer");
+    let usage = reported.usage.unwrap();
+    assert_eq!(usage.input_tokens, 125000);
+    assert_eq!(usage.output_tokens, 32);
+    assert_eq!(usage.cached_tokens, Some(120000));
+    assert_eq!(usage.reasoning_tokens, None);
+
+    let unreported = client
+        .create_with_items_and_usage("fixture-model", "", &items)
+        .await
+        .unwrap();
+    assert_eq!(unreported.text, "fixture answer");
+    assert_eq!(unreported.usage, None);
+    wait_for_requests(&fixture.bodies, 2).await;
+    fixture.server.abort();
+}
+
 fn fixture_turn() -> (Vec<ResponsesItem>, Vec<ResponsesTool>) {
     let items = vec![
         ResponsesItem::Text {
