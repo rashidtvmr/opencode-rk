@@ -78,6 +78,7 @@ pub struct NativeView {
     chat: ChatView,
     pages: PageState,
     memory: crate::native_memory::Memory,
+    compaction: crate::native_compaction_settings::CompactionSettingsView,
     command_palette: crate::native_command_palette::CommandPalette,
     status: StatusView,
     /// Held from day one; `DialogView::request/answer` wiring is explicitly
@@ -432,6 +433,7 @@ impl NativeView {
             chat: ChatView::default(),
             pages: PageState::default(),
             memory: crate::native_memory::Memory::new(),
+            compaction: crate::native_compaction_settings::CompactionSettingsView::new(),
             status: StatusView::default(),
             dialogs: DialogView::default(),
             command_palette: crate::native_command_palette::CommandPalette::default(),
@@ -863,6 +865,8 @@ impl NativeView {
     pub fn set_memory_error(&mut self, error: &str) { self.memory.set_error(error); }
     pub fn memory_mut(&mut self) -> &mut crate::native_memory::Memory { &mut self.memory }
     pub fn memory(&self) -> &crate::native_memory::Memory { &self.memory }
+    pub fn compaction(&self) -> &crate::native_compaction_settings::CompactionSettingsView { &self.compaction }
+    pub fn compaction_mut(&mut self) -> &mut crate::native_compaction_settings::CompactionSettingsView { &mut self.compaction }
     pub fn scroll_memory_content(&mut self, lines: isize) {
         let Some((_, _, width, height)) = self.page_panel() else { return; };
         let inset = if width >= 8 { 2 } else { 0 };
@@ -1454,6 +1458,12 @@ impl NativeView {
                         else if index == 1 && self.memory.selected().is_some() && self.memory.error().is_none() {
                             crate::native_ui_style::Role::Selected
                         } else { crate::native_ui_style::Role::Item },
+                    detail_from: None,
+                }).collect()
+            } else if self.pages.page() == Page::Compaction {
+                self.compaction.render(content_width as usize, content_height).into_iter().enumerate().map(|(index, text)| crate::native_ui_style::Line {
+                    text,
+                    role: if index == 0 { crate::native_ui_style::Role::Heading } else { crate::native_ui_style::Role::Item },
                     detail_from: None,
                 }).collect()
             } else { self.pages.render_styled(content_width as usize, content_height) };

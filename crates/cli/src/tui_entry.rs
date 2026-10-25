@@ -441,6 +441,34 @@ fn http_request(
 }
 
 #[cfg(feature = "native")]
+fn request_compaction_settings(
+    origin: &str,
+    session: &str,
+    auth: Option<&str>,
+    body: Option<&str>,
+) -> Result<String, String> {
+    if crate::daemon_client::parse_loopback_port(origin).is_none() {
+        return Err("compaction settings require a canonical loopback daemon origin".into());
+    }
+    let session_id = session.parse::<opencode_rk_contracts::SessionId>()
+        .map_err(|_| "compaction settings require a valid session identity".to_owned())?;
+    if session != session_id.to_string() {
+        return Err("compaction settings require a canonical session identity".into());
+    }
+    if body.is_some_and(|body| body.len() > 4096) {
+        return Err("compaction settings request exceeds its byte budget".into());
+    }
+    let path = format!("/api/sessions/{session_id}/compaction/settings");
+    let (response, status) = http_request_with_status(
+        origin, if body.is_some() { "PUT" } else { "GET" }, &path, body, auth,
+    )?;
+    if status != 200 || response.len() > 32 * 1024 {
+        return Err("compaction settings response has an invalid status or exceeds its byte budget".into());
+    }
+    Ok(response)
+}
+
+#[cfg(feature = "native")]
 struct NativeCompactWorker {
     rx: tokio::sync::mpsc::Receiver<Result<String, String>>,
     task: Option<tokio::task::JoinHandle<()>>,
@@ -2907,6 +2935,7 @@ fn native_loop(
     let mut todos_refresh = Instant::now();
     let mut memory_binding: Option<(String, u64)> = None;
     let mut memory_page_observed = false;
+    let mut compaction_page_observed = false;
     let mut appearance = crate::native_appearance::AppearanceEditor::new(
         crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
     );
@@ -3058,8 +3087,10 @@ fn native_loop(
         let current_memory_binding = live.as_ref().map(|snapshot| (snapshot.session_id.clone(), binding_generation));
         if memory_binding != current_memory_binding {
             *view.memory_mut() = crate::native_memory::Memory::new();
+            view.compaction_mut().invalidate();
             memory_binding = current_memory_binding;
             memory_page_observed = false;
+            compaction_page_observed = false;
         }
         if view.page() == crate::native_view_pages::Page::Memory {
             if !memory_page_observed {
@@ -3078,6 +3109,20 @@ fn native_loop(
             memory_page_observed = true;
         } else {
             memory_page_observed = false;
+        }
+        if view.page() == crate::native_view_pages::Page::Compaction {
+            if !compaction_page_observed {
+                let result = match live.as_ref() {
+                    Some(snapshot) => request_compaction_settings(&snapshot.origin, &snapshot.session_id, auth, None)
+                        .and_then(|body| view.compaction_mut().load_response(&body)),
+                    None => Err("daemon unavailable".into()),
+                };
+                if let Err(error) = result { view.compaction_mut().set_error(&error); }
+                needs_paint = true;
+            }
+            compaction_page_observed = true;
+        } else {
+            compaction_page_observed = false;
         }
         completion.sync(&draft);
         if !completion.triggered() { completion_loaded = false; }
@@ -4688,6 +4733,11 @@ fn native_loop(
                 {
                     continue;
                 }
+                if view.page() == crate::native_view_pages::Page::Compaction {
+                    view.compaction_mut().key(if direction == native_input_decoder::InputEvent::ArrowUp { b'k' } else { b'j' });
+                    needs_paint = true;
+                    continue;
+                }
                 if direction == native_input_decoder::InputEvent::ArrowUp {
                     2
                 } else {
@@ -4914,6 +4964,32 @@ fn native_loop(
             && matches!(dialog, native_setup::Dialog::None)
         {
             view.open_page(view.page().next());
+            needs_paint = true;
+            utf8.reset();
+            continue;
+        }
+        if page_open && view.page() == crate::native_view_pages::Page::Compaction
+            && !help_open && matches!(dialog, native_setup::Dialog::None)
+            && !matches!(byte, 3 | 4 | 27)
+        {
+            let key = match byte { 2 => b'k', 14 => b'j', other => other };
+            if let Some(body) = view.compaction_mut().key(key) {
+                let result = match live.as_ref() {
+                    Some(snapshot) => request_compaction_settings(&snapshot.origin, &snapshot.session_id, auth, Some(&body))
+                        .and_then(|ack| {
+                            let requested: serde_json::Value = serde_json::from_str(&body)
+                                .map_err(|_| "invalid compaction policy request".to_owned())?;
+                            let acknowledged: serde_json::Value = serde_json::from_str(&ack)
+                                .map_err(|_| "invalid compaction policy acknowledgement".to_owned())?;
+                            if acknowledged["configured"] != requested {
+                                return Err("backend did not acknowledge the requested compaction policy".into());
+                            }
+                            view.compaction_mut().load_response(&ack)
+                        }),
+                    None => Err("daemon unavailable".into()),
+                };
+                if let Err(error) = result { view.compaction_mut().set_error(&error); }
+            }
             needs_paint = true;
             utf8.reset();
             continue;
@@ -6450,6 +6526,7 @@ fn native_local_page_route(command: &str) -> Option<crate::native_view_pages::Pa
         "/agents" => Some(Page::Agents),
         "/context" => Some(Page::Context),
         "/memory" => Some(Page::Memory),
+        "/compaction" => Some(Page::Compaction),
         "/diff" => Some(Page::Diff),
         "/commands" => Some(Page::Commands),
         "/import" | "/settings-import" => Some(Page::Chat),
@@ -7008,6 +7085,59 @@ mod compact_strategy_worker_tests {
                 if bytes.len() >= end + 4 + length { return String::from_utf8(bytes).unwrap(); }
             }
         }
+    }
+
+    #[test]
+    fn settings_requests_are_authenticated_and_bound_to_the_requested_session() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let token = "c".repeat(64);
+        let fixture = std::thread::spawn(move || {
+            let mut requests = Vec::new();
+            for _ in 0..2 {
+                let (mut stream, _) = listener.accept().unwrap();
+                requests.push(read_request(&mut stream));
+                let body = r#"{"scope":"session"}"#;
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+            }
+            requests
+        });
+        let first = "00000000-0000-4000-8000-000000000001";
+        let second = "00000000-0000-4000-8000-000000000002";
+        assert!(super::request_compaction_settings(&origin, first, Some(&token), None).is_ok());
+        let policy = r#"{"enabled":false,"threshold_tokens":12000,"keep_recent_turns":2,"strategy":"fallback"}"#;
+        assert!(super::request_compaction_settings(&origin, second, Some(&token), Some(policy)).is_ok());
+        let requests = fixture.join().unwrap();
+        assert!(requests[0].starts_with(&format!("GET /api/sessions/{first}/compaction/settings HTTP/1.1\r\n")));
+        assert!(requests[1].starts_with(&format!("PUT /api/sessions/{second}/compaction/settings HTTP/1.1\r\n")));
+        for request in &requests {
+            assert!(request.to_ascii_lowercase().contains(&format!("authorization: bearer {token}")));
+        }
+        assert_eq!(requests[1].split_once("\r\n\r\n").unwrap().1, policy);
+    }
+
+    #[test]
+    fn settings_refuse_invalid_authority_before_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let session = "00000000-0000-4000-8000-000000000001";
+        assert!(super::request_compaction_settings(&origin, session, None, None).is_err());
+        assert!(super::request_compaction_settings("http://192.0.2.1:1", session, Some(&"c".repeat(64)), None).is_err());
+        assert!(super::request_compaction_settings(&origin, "not-a-session", Some(&"c".repeat(64)), None).is_err());
+        assert!(matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
+    }
+
+    #[test]
+    fn settings_refuse_noncanonical_uuid_before_connecting() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin = format!("http://{}", listener.local_addr().unwrap());
+        let uppercase = "ABCDEF12-1234-4000-8000-000000000001";
+        assert!(super::request_compaction_settings(
+            &origin, uppercase, Some(&"c".repeat(64)), None
+        ).is_err());
+        assert!(matches!(listener.accept(), Err(error) if error.kind() == std::io::ErrorKind::WouldBlock));
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

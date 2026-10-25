@@ -53,6 +53,12 @@ mod native_workspace;
 mod native_debug;
 #[cfg(feature = "native")]
 mod native_memory;
+#[cfg(feature = "native")]
+mod native_compaction_settings;
+#[cfg(all(test, feature = "native"))]
+mod native_compaction_settings_tests;
+#[cfg(all(test, feature = "native"))]
+mod native_compaction_settings_provenance_tests;
 mod native_layout;
 mod native_navigation;
 mod native_palette;

@@ -127,7 +127,7 @@ use std::collections::HashSet;
 
 /// Static local command routes (user-requested local routes). The integrator
 /// binds each route to real navigation; nothing here fetches or mutates.
-pub const COMMAND_ROUTES: [(&str, &str); 13] = [
+pub const COMMAND_ROUTES: [(&str, &str); 14] = [
     ("/sessions", "Sessions"),
     ("/models", "Models"),
     ("/connect", "Providers"),
@@ -141,6 +141,7 @@ pub const COMMAND_ROUTES: [(&str, &str); 13] = [
     ("/agents", "Agents"),
     ("/import", "Import settings"),
     ("/memory", "Memory"),
+    ("/compaction", "Compaction"),
 ];
 
 // ── Page ──────────────────────────────────────────────────────────────
@@ -164,11 +165,12 @@ pub enum Page {
     Context,
     Commands,
     Memory,
+    Compaction,
 }
 
 impl Page {
     /// Tab/page cycling order.
-    pub const ORDER: [Page; 14] = [
+    pub const ORDER: [Page; 15] = [
         Page::Chat,
         Page::Sessions,
         Page::Help,
@@ -183,6 +185,7 @@ impl Page {
         Page::Context,
         Page::Commands,
         Page::Memory,
+        Page::Compaction,
     ];
 
     /// Page title (a page always renders rows too — a heading alone never
@@ -204,6 +207,7 @@ impl Page {
             Page::Context => "Context",
             Page::Commands => "Commands",
             Page::Memory => "Memory",
+            Page::Compaction => "Compaction",
         }
     }
 
@@ -231,6 +235,7 @@ impl Page {
             Page::Context => Some("/context"),
             Page::Commands => None,
             Page::Memory => Some("/memory"),
+            Page::Compaction => Some("/compaction"),
         }
     }
 
@@ -259,7 +264,8 @@ impl Page {
             Page::Diff => Page::Context,
             Page::Context => Page::Commands,
             Page::Commands => Page::Memory,
-            Page::Memory => Page::Chat,
+            Page::Memory => Page::Compaction,
+            Page::Compaction => Page::Chat,
         }
     }
 
@@ -267,7 +273,7 @@ impl Page {
     #[must_use]
     pub const fn prev(self) -> Page {
         match self {
-            Page::Chat => Page::Memory,
+            Page::Chat => Page::Compaction,
             Page::Sessions => Page::Chat,
             Page::Help => Page::Sessions,
             Page::Models => Page::Help,
@@ -281,6 +287,7 @@ impl Page {
             Page::Context => Page::Diff,
             Page::Commands => Page::Context,
             Page::Memory => Page::Commands,
+            Page::Compaction => Page::Memory,
         }
     }
 }
@@ -300,6 +307,38 @@ mod searchable_selection_tests {
         assert!(!Page::Chat.accepts_search());
         assert!(!Page::Help.accepts_search());
         assert!(!Page::Status.accepts_search());
+    }
+
+    #[test]
+    fn compaction_settings_page_route_is_reachable() {
+        assert_eq!(Page::from_route("/compaction").map(Page::title), Some("Compaction"));
+        assert_eq!(Page::ORDER.len(), 15);
+        assert_eq!(
+            &Page::ORDER[..14],
+            &[
+                Page::Chat,
+                Page::Sessions,
+                Page::Help,
+                Page::Models,
+                Page::Providers,
+                Page::Agents,
+                Page::Workspaces,
+                Page::Theme,
+                Page::Status,
+                Page::Mcp,
+                Page::Diff,
+                Page::Context,
+                Page::Commands,
+                Page::Memory,
+            ][..]
+        );
+        assert_eq!(Page::ORDER.last().copied().map(Page::title), Some("Compaction"));
+        assert_eq!(Page::ORDER.last().copied().and_then(Page::route), Some("/compaction"));
+        for page in Page::ORDER {
+            if let Some(route) = page.route() {
+                assert_eq!(Page::from_route(route), Some(page));
+            }
+        }
     }
 }
 
@@ -1223,8 +1262,8 @@ mod tests {
 
     #[test]
     fn commands_page_yields_static_local_routes() {
-        assert_eq!(COMMAND_ROUTES.len(), 13);
-        assert_eq!(command_rows().len(), 13);
+        assert_eq!(COMMAND_ROUTES.len(), 14);
+        assert_eq!(command_rows().len(), 14);
         assert_eq!(Page::from_route("/sessions"), Some(Page::Sessions));
         assert_eq!(Page::from_route("/models"), Some(Page::Models));
         assert_eq!(Page::from_route("/connect"), Some(Page::Providers));
@@ -1245,6 +1284,12 @@ mod tests {
         let import = command_rows().into_iter().find(|row| row.id == "/import").expect("import command exists");
         assert!(import.enabled);
         assert_eq!(import.label, "Import settings");
+        let compaction = command_rows()
+            .into_iter()
+            .find(|row| row.id == "/compaction")
+            .expect("compaction command exists");
+        assert!(compaction.enabled);
+        assert_eq!(compaction.detail, "open the Compaction page");
 
         let mut state = PageState::new();
         state.open(Page::Commands);
