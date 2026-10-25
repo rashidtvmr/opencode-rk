@@ -183,6 +183,7 @@ pub mod session_todos;
 mod session_memory;
 pub mod session_mcp;
 pub mod session_compaction;
+pub mod session_compaction_settings;
 impl Storage {
     pub fn open(paths: StoragePaths) -> Result<Self, StorageError> {
         fs::create_dir_all(&paths.root)?;
@@ -1526,6 +1527,10 @@ impl Storage {
             window_json TEXT NOT NULL CHECK(length(CAST(window_json AS BLOB)) BETWEEN 1 AND 1048576),
             window_bytes INTEGER NOT NULL CHECK(window_bytes BETWEEN 1 AND 1048576),
             created_at TEXT NOT NULL
+        );")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS session_compaction_settings(
+            session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+            policy_json TEXT NOT NULL CHECK(length(CAST(policy_json AS BLOB)) BETWEEN 1 AND 1024)
         );")?;
         Ok(())
     }

@@ -18,6 +18,7 @@ pub mod app_runtime;
 pub mod auto_loop;
 pub mod auto_compaction;
 mod fallback_compaction;
+mod compaction_settings;
 pub mod auto_report;
 pub mod auto_window;
 mod browser_resume;
@@ -211,6 +212,7 @@ pub fn router_with_events(
         .route("/api/sessions/{id}", get(get_session).patch(rename_session))
         .route("/api/sessions/{id}/archive", post(archive_session))
         .route("/api/sessions/{id}/compact", post(compact_session))
+        .route("/api/sessions/{id}/compaction/settings", get(compaction_settings::get).put(compaction_settings::put).layer(DefaultBodyLimit::max(4096)))
         .route(
             "/api/sessions/{id}/messages",
             get(list_messages).post(append_message),
@@ -1440,17 +1442,24 @@ async fn compact_session(
     state.sessions.get(id).await.map_err(|error| {
         if error.to_string().contains("session not found") { ApiFailure::not_found(error.to_string()) } else { ApiFailure::internal(error) }
     })?;
-    let strategy = match body.strategy.as_str() {
-        "native" => "native",
-        "fallback" => "fallback",
-        "auto" => if auto_compaction::settings()?.strategy_native { "native" } else { "fallback" },
+    // Resolve strategy and fallback retention from one policy snapshot. A
+    // concurrent preference change applies to the next compaction operation.
+    let (strategy, keep_recent_turns) = match body.strategy.as_str() {
+        "native" => ("native", 20), // Native retention is provider-owned.
+        "fallback" | "auto" => {
+            let policy = auto_compaction::settings(&state.sessions, id).await?;
+            let strategy = if body.strategy == "auto" && policy.strategy == opencode_rk_sessions::CompactionStrategy::Native {
+                "native"
+            } else { "fallback" };
+            (strategy, policy.keep_recent_turns)
+        }
         _ => return Err(ApiFailure::bad_request("compact strategy must be native, fallback or auto")),
     };
     let (provider_id, model_id) = body.model.split_once('/').filter(|(p,m)| !p.is_empty() && !m.is_empty())
         .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
     if strategy == "fallback" {
         let client = responses_client(provider_id).await.map_err(provider_failure)?;
-        fallback_compaction::compact(&state.sessions, &client, &owner, provider_id, model_id, auto_compaction::settings()?.keep_recent_turns).await?;
+        fallback_compaction::compact(&state.sessions, &client, &owner, provider_id, model_id, keep_recent_turns).await?;
         return Ok(Json(json!({"compacted":true,"strategy":"fallback"})));
     }
     // Capture the actual durable head before loading input. The transactional

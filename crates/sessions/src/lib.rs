@@ -71,6 +71,7 @@ pub type SessionRecord = SessionSummary;
 pub use opencode_rk_contracts::MessageRole as Role;
 pub use opencode_rk_storage::{HistoryItem, ToolCallAdmission, ToolRound};
 pub use opencode_rk_storage::session_compaction::CompactionCheckpoint;
+pub use opencode_rk_storage::session_compaction_settings::{CompactionStrategy, SessionCompactionSettings};
 const ACTIVE: i64 = 0;
 const ARCHIVED: i64 = 1;
 const PAGE_MAX: usize = 500;
@@ -617,6 +618,16 @@ impl SessionService {
     pub async fn compaction_checkpoint(&self, session_id: SessionId) -> Result<Option<CompactionCheckpoint>, SessionError> {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.compaction_checkpoint(session_id)).await
+    }
+
+    pub async fn compaction_settings(&self, session_id: SessionId) -> Result<Option<SessionCompactionSettings>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.session_compaction_settings(session_id)).await
+    }
+
+    pub async fn set_compaction_settings(&self, session_id: SessionId, settings: SessionCompactionSettings) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.set_session_compaction_settings(session_id, &settings)).await
     }
 
     pub async fn bounded_history_after(&self, session_id: SessionId, boundary: MessageId, max_provider_items: usize, max_provider_bytes: usize) -> Result<Vec<HistoryItem>, SessionError> {
