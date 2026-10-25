@@ -277,3 +277,116 @@ async fn native_compaction_survives_restart_and_continues_without_duplicate_hist
         assert!(messages.iter().any(|message| serde_json::to_string(&message.body).unwrap().contains(text)), "missing durable text: {text}");
     }
 }
+
+/// Recompaction is a real recurrence, rather than a second independent
+/// checkpoint.  In particular the second request must carry the provider's
+/// opaque window followed by the typed tail produced by the intervening turn.
+#[tokio::test]
+async fn native_compaction_can_recompact_after_a_nonstreaming_continuation() {
+    let _environment_lock = ENV_LOCK.lock().await;
+    let root = tempdir().expect("disposable fixture root");
+    std::fs::write(root.path().join("AGENTS.md"), "NATIVE_RECOMPACTION_AGENTS_SENTINEL").unwrap();
+    let paths = StoragePaths::under(root.path().join("storage"));
+    let (tx, mut rx) = mpsc::channel::<Value>(8);
+    let compact_calls = Arc::new(AtomicUsize::new(0));
+    let turn_calls = Arc::new(AtomicUsize::new(0));
+    let first_window = json!({"type":"compaction","id":"cmp_recur_1","created_at":1735000100,"encrypted_content":"opaque-recur-one","unknown_nested_metadata":{"keep":"one"}});
+    let second_window = json!({"type":"compaction","id":"cmp_recur_2","created_at":1735000102,"encrypted_content":"opaque-recur-two","unknown_nested_metadata":{"keep":"two"}});
+    let retained = json!({"type":"message","role":"assistant","content":[{"type":"output_text","text":"recompacted canonical context"}],"unknown_metadata":{"fixture":"preserve"}});
+    let typed_call = json!({"type":"function_call","id":"fc_recur_fixture","call_id":"call_recur_fixture","name":"read","arguments":"{\"path\":\"fixture.txt\"}"});
+    let typed_output = json!({"type":"function_call_output","call_id":"call_recur_fixture","output":"fixture tool result"});
+    let next_typed_call = json!({"type":"function_call","id":"fc_recur_fixture_2","call_id":"call_recur_fixture_2","name":"read","arguments":"{\"path\":\"fixture-2.txt\"}"});
+    let next_typed_output = json!({"type":"function_call_output","call_id":"call_recur_fixture_2","output":"fixture tool result two"});
+    let typed_call_for_provider = typed_call.clone();
+    let typed_output_for_provider = typed_output.clone();
+    let next_typed_call_for_provider = next_typed_call.clone();
+    let next_typed_output_for_provider = next_typed_output.clone();
+    let first_window_for_provider = first_window.clone();
+    let second_window_for_provider = second_window.clone();
+    let retained_for_provider = retained.clone();
+    let compact_tx = tx.clone();
+    let compact_count = compact_calls.clone();
+    let provider = Router::new()
+        .route("/responses/compact", post(move |Json(body): Json<Value>| {
+            let tx = compact_tx.clone();
+            let count = compact_count.fetch_add(1, Ordering::SeqCst);
+            let output = if count == 0 {
+                vec![retained_for_provider.clone(), first_window_for_provider.clone(), typed_call_for_provider.clone(), typed_output_for_provider.clone()]
+            } else {
+                vec![retained_for_provider.clone(), second_window_for_provider.clone(), next_typed_call_for_provider.clone(), next_typed_output_for_provider.clone()]
+            };
+            async move {
+                tx.send(body).await.unwrap();
+                Json(json!({"id":format!("resp_recur_compact_{count}"),"object":"response.compaction","created_at":1735000101 + count as u64,"output":output}))
+            }
+        }))
+        .route("/responses", post(move |Json(body): Json<Value>| {
+            let tx = tx.clone();
+            let count = turn_calls.fetch_add(1, Ordering::SeqCst);
+            async move {
+                tx.send(body).await.unwrap();
+                let output = json!([{"type":"message","role":"assistant","content":[{"type":"output_text","text":"continued before recompaction"}]}]);
+                Json(json!({"id":format!("resp_recur_turn_{count}"),"status":"completed","output":output}))
+            }
+        }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let _provider_task = Task(tokio::spawn(async move { axum::serve(listener, provider).await.unwrap(); }));
+    let _env = EnvGuard::set(&[
+        ("OPENAI_BASE_URL", format!("http://{address}")),
+        ("OPENAI_API_KEY", "disposable-recompaction-key".into()),
+        ("OPENCODE_RK_HOME", root.path().to_string_lossy().into_owned()),
+        ("OPENCODE_RK_TURN_TOOLS", "todowrite".into()),
+        ("OPENCODE_RK_PERMISSION_RULES", root.path().join("no-rules.json").to_string_lossy().into_owned()),
+    ]);
+    let sessions = SessionService::new(Arc::new(Storage::open(paths).unwrap()));
+    let session = sessions.create_in_directory("native recompaction", Some(root.path().to_owned())).await.unwrap();
+    let mut old_boundary = None;
+    for index in 0..100 {
+        let role = if index % 2 == 0 { MessageRole::User } else { MessageRole::Assistant };
+        old_boundary = Some(sessions.append_text(session.id, role, format!("old recurrence message {index}")).await.unwrap().id);
+    }
+    let app = router(AppState { sessions: sessions.clone(), catalog: Arc::new(Catalog::default()) });
+    let compact = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/sessions/{}/compact", session.id)).header("content-type","application/json").body(Body::from(json!({"model":"openai/fixture","strategy":"native"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(compact.status(), StatusCode::OK);
+    let first_compact_request = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+    assert!(first_compact_request["input"].to_string().contains("old recurrence message 99"));
+
+    let turn = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/sessions/{}/turns", session.id)).header("content-type","application/json").body(Body::from(json!({"model":"openai/fixture","text":"turn before recurrence"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(turn.status(), StatusCode::CREATED);
+    let first_turn_request = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+    assert!(first_turn_request["input"].as_array().unwrap().iter().any(|item| item == &first_window));
+    assert!(first_turn_request["input"].as_array().unwrap().iter().any(|item| item == &typed_call));
+    assert!(first_turn_request["input"].as_array().unwrap().iter().any(|item| item == &typed_output));
+
+    let second = app.clone().oneshot(Request::builder().method("POST").uri(format!("/api/sessions/{}/compact", session.id)).header("content-type","application/json").body(Body::from(json!({"model":"openai/fixture","strategy":"native"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(second.status(), StatusCode::OK);
+    let second_compact_request = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+    let second_input = second_compact_request["input"].as_array().unwrap();
+    assert!(second_input.iter().any(|item| item == &first_window));
+    assert!(second_input.iter().any(|item| item == &typed_call));
+    assert!(second_input.iter().any(|item| item == &typed_output));
+    assert!(!second_compact_request.to_string().contains("old recurrence message 0"));
+    assert!(!second_compact_request.to_string().contains("opaque-recur-two"));
+    let messages = sessions.messages(session.id, 200).await.unwrap();
+    assert_eq!(messages.len(), 102);
+    let latest = messages.last().unwrap();
+    assert_ne!(latest.id, old_boundary.unwrap());
+    let checkpoint = sessions.compaction_checkpoint(session.id).await.unwrap().unwrap();
+    assert_eq!(checkpoint.boundary_message_id, latest.id);
+    assert_ne!(checkpoint.boundary_message_id, old_boundary.unwrap());
+    assert!(!serde_json::to_string(&messages).unwrap().contains("opaque-recur-one"));
+    assert!(!serde_json::to_string(&messages).unwrap().contains("opaque-recur-two"));
+    let artifact = root.path().join("recompaction-test-artifact.json");
+    std::fs::write(&artifact, serde_json::to_vec(&second_compact_request).unwrap()).unwrap();
+    assert_eq!(std::fs::read(&artifact).unwrap(), serde_json::to_vec(&second_compact_request).unwrap());
+
+    let third = app.oneshot(Request::builder().method("POST").uri(format!("/api/sessions/{}/turns", session.id)).header("content-type","application/json").body(Body::from(json!({"model":"openai/fixture","text":"turn after recurrence"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(third.status(), StatusCode::CREATED);
+    let third_turn_request = tokio::time::timeout(Duration::from_secs(2), rx.recv()).await.unwrap().unwrap();
+    let third_input = third_turn_request["input"].as_array().unwrap();
+    assert!(third_input.iter().any(|item| item == &second_window));
+    assert!(third_input.iter().any(|item| item == &next_typed_call));
+    assert!(third_input.iter().any(|item| item == &next_typed_output));
+    assert!(!third_turn_request.to_string().contains("opaque-recur-one"));
+}

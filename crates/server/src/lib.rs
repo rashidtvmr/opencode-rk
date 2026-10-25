@@ -1439,20 +1439,25 @@ async fn compact_session(
     if body.strategy != "native" { return Err(ApiFailure::bad_request("compact strategy must be native")); }
     let (provider_id, model_id) = body.model.split_once('/').filter(|(p,m)| !p.is_empty() && !m.is_empty())
         .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
-    if state.sessions.compaction_checkpoint(id).await.map_err(ApiFailure::internal)?.is_some() {
-        return Err(ApiFailure::unprocessable("native recompaction is not supported"));
-    }
-    let history = bounded_typed_history(&state.sessions, id, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES)
-        .await.map_err(ApiFailure::internal)?;
-    let boundary = state.sessions.messages(id, MAX_RESPONSES_INPUT_MESSAGES).await
-        .map_err(ApiFailure::internal)?.into_iter().last()
+    // Capture the actual durable head before loading input. The transactional
+    // save rejects concurrent appends instead of compacting unseen messages.
+    let boundary = state.sessions.history_page(id, None, 1).await
+        .map_err(ApiFailure::internal)?.0.into_iter().last()
         .ok_or_else(|| ApiFailure::unprocessable("cannot compact an empty session"))?;
+    let (history, previous_window) = checkpoint_provider_history(
+        &state.sessions, id, &body.model, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES,
+    ).await?;
     let client = responses_client(provider_id).await.map_err(provider_failure)?;
     let mut cancelled = owner.cancellation_receiver();
     let window = tokio::select! {
         biased;
         _ = cancelled.changed() => return Err(ApiFailure::bad_gateway("compaction cancelled")),
-        result = client.compact(model_id, &history) => result.map_err(provider_failure)?,
+        result = async {
+            match previous_window.as_ref() {
+                Some(window) => client.compact_with_compaction_window(model_id, window, &history).await,
+                None => client.compact(model_id, &history).await,
+            }
+        } => result.map_err(provider_failure)?,
     };
     if owner.is_cancelled() { return Err(ApiFailure::bad_gateway("compaction cancelled")); }
     let window_json = serde_json::to_string(&json!({"id": window.id.clone(), "object":"response.compaction", "created_at":window.created_at, "usage":window.usage.clone(), "output":window.output.clone()}))
