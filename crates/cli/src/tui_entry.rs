@@ -80,6 +80,7 @@ fn history_trace(
         "outcome": outcome,
     }));
 }
+
 #[cfg(feature = "native")]
 use opencode_rk_opentui_bridge::{Renderer as NativeRenderer, Rgba};
 use opencode_rk_sessions::tui_state::{
@@ -451,7 +452,15 @@ struct NativeCompactWorker {
 
 #[cfg(feature = "native")]
 impl NativeCompactWorker {
+    #[cfg(test)]
     fn start(origin: &str, session_id: &str, auth: &str, model: &str, generation: u64) -> Result<Self, String> {
+        Self::start_strategy(origin, session_id, auth, model, generation, "native")
+    }
+
+    fn start_strategy(origin: &str, session_id: &str, auth: &str, model: &str, generation: u64, strategy: &str) -> Result<Self, String> {
+        if !matches!(strategy, "native" | "fallback" | "auto") {
+            return Err("unsupported compaction strategy".into());
+        }
         if !crate::daemon_client::is_wellformed_token(auth) {
             return Err("missing validated daemon token".into());
         }
@@ -467,11 +476,12 @@ impl NativeCompactWorker {
         let token = auth.to_owned();
         let request_token = token.clone();
         let qualified = model.to_owned();
+        let strategy = strategy.to_owned();
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         let worker_session = session.clone();
         let task = tokio::spawn(async move {
                 let path = format!("/api/sessions/{worker_session}/compact");
-                let body = serde_json::json!({"model": qualified, "strategy": "native"});
+                let body = serde_json::json!({"model": qualified, "strategy": strategy});
                 let result = async {
                     let client = reqwest::Client::builder().no_proxy()
                         .redirect(reqwest::redirect::Policy::none())
@@ -500,12 +510,14 @@ impl NativeCompactWorker {
                     let body = String::from_utf8(bytes).map_err(|_| "compact response was not UTF-8".to_owned())?;
                         let value: serde_json::Value = serde_json::from_str(&body)
                             .map_err(|_| "compact response was not valid JSON".to_owned())?;
-                        if value["compacted"].as_bool() == Some(true)
-                            && value["strategy"].as_str() == Some("native")
+                         let acknowledged = value["strategy"].as_str();
+                         if value["compacted"].as_bool() == Some(true)
+                             && matches!(acknowledged, Some("native" | "fallback"))
+                             && (strategy == "auto" || acknowledged == Some(strategy.as_str()))
                         {
                             Ok(body)
                         } else {
-                            Err("compact response did not acknowledge native compaction".into())
+                             Err("compact response did not acknowledge the requested compaction strategy".into())
                         }
                 }.await;
                 let _ = tx.send(result).await;
@@ -557,9 +569,9 @@ fn compact_command(text: &str) -> Option<Result<(), &'static str>> {
     let mut parts = text.split_whitespace();
     if parts.next()? != "/compact" { return None; }
     match parts.next() {
-        Some("native") if parts.next().is_none() => Some(Ok(())),
-        None => Some(Err("plain /compact has no configured strategy; use /compact native")),
-        _ => Some(Err("usage: /compact native")),
+        Some("native" | "fallback" | "auto") if parts.next().is_none() => Some(Ok(())),
+        None => Some(Ok(())),
+        _ => Some(Err("usage: /compact [native|fallback|auto]")),
     }
 }
 
@@ -669,7 +681,11 @@ mod compact_command_tests {
     #[test]
     fn compact_route_is_explicit_and_never_an_ordinary_turn() {
         assert_eq!(compact_command("/compact native"), Some(Ok(())));
-        assert!(compact_command("/compact").is_some());
+        // Supersedes the former plain-command Err expectation: plain compact
+        // is now a supported strategy request, resolved by configuration.
+        assert_eq!(compact_command("/compact"), Some(Ok(())));
+        assert_eq!(compact_command("/compact fallback"), Some(Ok(())));
+        assert_eq!(compact_command("/compact auto"), Some(Ok(())));
         assert!(compact_command("/compact bogus").is_some());
         assert_eq!(compact_command("hello"), None);
     }
@@ -5766,12 +5782,13 @@ fn native_loop(
                             if busy {
                                 append_transcript(&mut transcript, "busy: turn or compaction already in progress".into());
                             } else if let (Some(snapshot), Some(model)) = (live.as_ref(), selected.as_ref()) {
-                                match auth.ok_or_else(|| "missing daemon token".to_owned()).and_then(|token| NativeCompactWorker::start(&snapshot.origin, &snapshot.session_id, token, &model.qualified(), binding_generation)) {
+                                let strategy = text.split_whitespace().nth(1).unwrap_or("auto");
+                                match auth.ok_or_else(|| "missing daemon token".to_owned()).and_then(|token| NativeCompactWorker::start_strategy(&snapshot.origin, &snapshot.session_id, token, &model.qualified(), binding_generation, strategy)) {
                                     Ok(next) => compact_worker = Some(next),
                                     Err(error) => append_transcript(&mut transcript, format!("error: compact: {error}")),
                                 }
                             } else {
-                                append_transcript(&mut transcript, "error: /compact native requires a live session and selected model".into());
+                                append_transcript(&mut transcript, "error: /compact requires a live session and selected model".into());
                             }
                         }
                         Err(reason) => append_transcript(&mut transcript, format!("error: {reason}")),
@@ -6394,7 +6411,7 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import")
+        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/compact fallback" | "/compact auto" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
@@ -6967,5 +6984,64 @@ mod command_consumption_tests {
         assert!(super::parse_created_session_id("not json").is_err());
         drop(working); // Err arm discards the working copy
         assert_eq!(visible, "/new", "original preserved for manual retry");
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod compact_strategy_worker_tests {
+    use super::NativeCompactWorker;
+    use std::{io::{Read, Write}, net::{TcpListener, TcpStream}, time::{Duration, Instant}};
+
+    fn read_request(stream: &mut TcpStream) -> String {
+        stream.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+        let mut bytes = Vec::new();
+        loop {
+            let mut chunk = [0u8; 1024];
+            let read = stream.read(&mut chunk).unwrap();
+            assert!(read > 0);
+            assert!(bytes.len() + read <= 16 * 1024);
+            bytes.extend_from_slice(&chunk[..read]);
+            if let Some(end) = bytes.windows(4).position(|part| part == b"\r\n\r\n") {
+                let headers = std::str::from_utf8(&bytes[..end]).unwrap();
+                let length = headers.lines().find_map(|line| line.to_ascii_lowercase()
+                    .strip_prefix("content-length:").and_then(|value| value.trim().parse::<usize>().ok())).unwrap_or(0);
+                if bytes.len() >= end + 4 + length { return String::from_utf8(bytes).unwrap(); }
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn strategy_worker_selects_and_validates_authenticated_strategy_ack() {
+        for (requested, acknowledged, succeeds) in [
+            ("fallback", "fallback", true), ("auto", "fallback", true),
+            ("auto", "native", true), ("native", "fallback", false),
+        ] {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            let origin = format!("http://{}", listener.local_addr().unwrap());
+            let token = "b".repeat(64);
+            let fixture = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let request = read_request(&mut stream);
+                let body = format!(r#"{{"compacted":true,"strategy":"{acknowledged}"}}"#);
+                write!(stream, "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                request
+            });
+            let mut worker = NativeCompactWorker::start_strategy(&origin, "strategy-session", &token, "openai/fixture", 19, requested).unwrap();
+            assert!(worker.owns(Some("strategy-session"), 19));
+            assert!(!worker.owns(Some("other-session"), 19));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let result = loop {
+                if let Some(result) = worker.try_result() { break result; }
+                assert!(Instant::now() < deadline);
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            };
+            assert_eq!(result.is_ok(), succeeds, "requested={requested}, acknowledged={acknowledged}");
+            let request = fixture.join().unwrap();
+            assert!(request.starts_with("POST /api/sessions/strategy-session/compact HTTP/1.1\r\n"));
+            assert!(request.to_ascii_lowercase().contains(&format!("authorization: bearer {token}")));
+            let sent: serde_json::Value = serde_json::from_str(request.split_once("\r\n\r\n").unwrap().1).unwrap();
+            assert_eq!(sent, serde_json::json!({"model":"openai/fixture", "strategy":requested}));
+        }
+        assert!(NativeCompactWorker::start_strategy("http://192.0.2.1:1", "s", &"b".repeat(64), "openai/fixture", 1, "fallback").is_err());
     }
 }

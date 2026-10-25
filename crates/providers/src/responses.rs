@@ -1017,6 +1017,38 @@ impl OpenAiResponsesClient {
         self.create_with_payload(&payload).await
     }
 
+    /// Generate a bounded, tool-free textual summary through the ordinary
+    /// Responses API. Native context, when present, stays provider-owned.
+    pub async fn summarize_with_context(
+        &self,
+        model: &str,
+        window: Option<&ResponsesCompactionWindow>,
+        items: &[ResponsesItem],
+    ) -> Result<String, ResponsesError> {
+        let mut payload = match window {
+            Some(window) => compaction_continuation_payload(model, "", window, items, &[], false)?,
+            None => responses_request_payload(model, "", items, &[], false)?,
+        };
+        payload["max_output_tokens"] = json!(self.max_output_tokens.min(4096));
+        payload["tools"] = json!([]);
+        payload["stream"] = json!(false);
+        let mut response = self.send_with_retry(&payload).await?;
+        let body = read_bounded_body(&mut response).await?;
+        let value: Value = serde_json::from_slice(&body)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        if value["status"].as_str() != Some("completed")
+            || value.get("error").is_some_and(|error| !error.is_null())
+            || value["output"].as_array().is_none_or(|output| output.iter().any(|item|
+                !matches!(item["type"].as_str(), Some("message" | "reasoning")))) {
+            return Err(ResponsesError::InvalidJson("summary must be a completed tool-free response".into()));
+        }
+        // Validate roles, part types, item statuses and UTF-8 before accepting
+        // text. Partial or tool-bearing output must never replace a checkpoint.
+        BufferedResponsesBody::parse(std::str::from_utf8(&body)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?)?;
+        extract_output_text(&value)
+    }
+
     /// Continue from standalone compaction output without converting opaque
     /// provider-owned items into the narrower local transcript enum.
     pub async fn create_with_compaction_window(

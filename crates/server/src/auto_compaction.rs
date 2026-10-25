@@ -1,4 +1,4 @@
-//! Explicitly opted-in native Responses compaction at the turn boundary.
+//! Native or tool-free summary compaction at the turn boundary.
 //!
 //! This is deliberately a small boundary policy, rather than a second history
 //! implementation.  The session service remains the source of truth for
@@ -10,13 +10,13 @@ const DEFAULT_THRESHOLD: u64 = 100_000;
 const MAX_THRESHOLD: u64 = 10_000_000;
 
 #[derive(Clone, Copy)]
-struct Settings { enabled: bool, threshold: u64, strategy_native: bool }
+pub(crate) struct Settings { enabled: bool, threshold: u64, pub(crate) strategy_native: bool, pub(crate) keep_recent_turns: usize }
 
 fn setting(name: &str) -> Option<String> {
     std::env::var(format!("OPENCODE_RK_COMPACTION__{name}")).ok()
 }
 
-fn settings() -> Result<Settings, ApiFailure> {
+pub(crate) fn settings() -> Result<Settings, ApiFailure> {
     let enabled = match setting("ENABLED").as_deref() {
         None => true,
         Some("true") => true,
@@ -28,21 +28,22 @@ fn settings() -> Result<Settings, ApiFailure> {
         Some(value) => value.parse::<u64>().ok().filter(|v| (1..=MAX_THRESHOLD).contains(v))
             .ok_or_else(|| ApiFailure::bad_request("compaction threshold_tokens must be within 1..=10000000"))?,
     };
-    // keep_recent_turns is provider-owned for native compaction.  Still parse
-    // and validate it here so malformed configuration is never silently used.
-    if let Some(value) = setting("KEEP_RECENT_TURNS") {
-        let valid = value.parse::<u64>().ok().is_some_and(|v| (1..=1000).contains(&v));
-        if !valid { return Err(ApiFailure::bad_request("compaction keep_recent_turns must be within 1..=1000")); }
-    }
+    // Native retention stays provider-owned; fallback applies this whole-turn
+    // retention count when constructing its durable continuation projection.
+    let keep_recent_turns = match setting("KEEP_RECENT_TURNS") {
+        None => 20,
+        Some(value) => value.parse::<usize>().ok().filter(|v| (1..=1000).contains(v))
+            .ok_or_else(|| ApiFailure::bad_request("compaction keep_recent_turns must be within 1..=1000"))?,
+    };
     let strategy_native = match setting("STRATEGY").as_deref() {
         None | Some("auto") | Some("fallback") => false,
         Some("native") => true,
         Some(_) => return Err(ApiFailure::bad_request("unsupported compaction strategy")),
     };
-    Ok(Settings { enabled, threshold, strategy_native })
+    Ok(Settings { enabled, threshold, strategy_native, keep_recent_turns })
 }
 
-/// Perform the native preflight while the turn permit is held, before a new
+/// Perform compaction preflight while the turn permit is held, before a new
 /// user row is appended.  A checkpoint is never deleted on provider failure.
 pub(crate) async fn before_user_append(
     sessions: &SessionService,
@@ -54,7 +55,7 @@ pub(crate) async fn before_user_append(
     next_text: &str,
 ) -> Result<(), ApiFailure> {
     let cfg = settings()?;
-    if !cfg.enabled || !cfg.strategy_native { return Ok(()); }
+    if !cfg.enabled { return Ok(()); }
     if owner.is_cancelled() { return Err(ApiFailure::bad_gateway("turn cancelled")); }
 
     // Capture the head before reading the input. If any writer appends after
@@ -85,6 +86,10 @@ pub(crate) async fn before_user_append(
     if estimated_tokens < cfg.threshold && canonical.len().saturating_add(3) <= MAX_RESPONSES_INPUT_MESSAGES
         && bytes.saturating_add(next_text.len()) < MAX_RESPONSES_INPUT_BYTES {
         return Ok(());
+    }
+
+    if !cfg.strategy_native {
+        return fallback_compaction::compact(sessions, client, owner, provider_id, model_id, cfg.keep_recent_turns).await;
     }
 
     let mut cancelled = owner.cancellation_receiver();

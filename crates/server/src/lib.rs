@@ -17,6 +17,7 @@ pub mod app_protocols;
 pub mod app_runtime;
 pub mod auto_loop;
 pub mod auto_compaction;
+mod fallback_compaction;
 pub mod auto_report;
 pub mod auto_window;
 mod browser_resume;
@@ -1422,8 +1423,11 @@ struct CreateTurnBody {
 #[serde(deny_unknown_fields)]
 struct CompactBody {
     model: String,
+    #[serde(default = "default_compact_strategy")]
     strategy: String,
 }
+
+fn default_compact_strategy() -> String { "auto".into() }
 
 async fn compact_session(
     State(state): State<AppState>,
@@ -1436,9 +1440,19 @@ async fn compact_session(
     state.sessions.get(id).await.map_err(|error| {
         if error.to_string().contains("session not found") { ApiFailure::not_found(error.to_string()) } else { ApiFailure::internal(error) }
     })?;
-    if body.strategy != "native" { return Err(ApiFailure::bad_request("compact strategy must be native")); }
+    let strategy = match body.strategy.as_str() {
+        "native" => "native",
+        "fallback" => "fallback",
+        "auto" => if auto_compaction::settings()?.strategy_native { "native" } else { "fallback" },
+        _ => return Err(ApiFailure::bad_request("compact strategy must be native, fallback or auto")),
+    };
     let (provider_id, model_id) = body.model.split_once('/').filter(|(p,m)| !p.is_empty() && !m.is_empty())
         .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
+    if strategy == "fallback" {
+        let client = responses_client(provider_id).await.map_err(provider_failure)?;
+        fallback_compaction::compact(&state.sessions, &client, &owner, provider_id, model_id, auto_compaction::settings()?.keep_recent_turns).await?;
+        return Ok(Json(json!({"compacted":true,"strategy":"fallback"})));
+    }
     // Capture the actual durable head before loading input. The transactional
     // save rejects concurrent appends instead of compacting unseen messages.
     let boundary = state.sessions.history_page(id, None, 1).await
@@ -1922,27 +1936,9 @@ async fn create_turn(
         session: id,
         message_id: user_message.id,
     });
-    let checkpoint = state.sessions.compaction_checkpoint(id).await.map_err(ApiFailure::internal)?;
-    if checkpoint.as_ref().is_some_and(|cp| cp.provider_id != provider_id || cp.model_id != model_id) {
-        return Err(ApiFailure::unprocessable("compaction checkpoint belongs to a different provider/model"));
-    }
-    let mut input = match checkpoint.as_ref() {
-        Some(cp) => state.sessions.bounded_history_after(
-            id, cp.boundary_message_id, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES,
-        ).await.map_err(ApiFailure::internal)?.into_iter()
-            .map(history_item_to_responses_item).collect::<Result<Vec<_>, _>>().map_err(ApiFailure::internal)?,
-        None => bounded_typed_history(&state.sessions, id, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES)
-            .await.map_err(ApiFailure::internal)?,
-    };
-    let checkpoint = checkpoint.map(|cp| {
-            let value: Value = serde_json::from_str(&cp.window_json).map_err(ApiFailure::internal)?;
-            Ok(ResponsesCompactionWindow {
-                id: value["id"].as_str().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?.to_owned(),
-                created_at: value["created_at"].as_u64().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?,
-                usage: match value.get("usage") { Some(Value::Null) | None => None, Some(v) => Some(v.clone()) },
-                output: value["output"].as_array().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?.clone(),
-            })
-        }).transpose()?;
+    let (mut input, checkpoint) = checkpoint_provider_history(
+        &state.sessions, id, &body.model, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES,
+    ).await?;
     memory_http::prepend(&state, id, model_id, &mut input).await?;
     let mut cancelled = owner.cancellation_receiver();
     let assistant_text = tokio::select! {
@@ -3133,6 +3129,13 @@ async fn checkpoint_provider_history(
         .await.map_err(ApiFailure::internal)?.into_iter().map(history_item_to_responses_item)
         .collect::<Result<Vec<_>, _>>().map_err(ApiFailure::internal)?;
     let value: Value = serde_json::from_str(&checkpoint.window_json).map_err(ApiFailure::internal)?;
+    if fallback_compaction::is_checkpoint(&value) {
+        let mut restored = fallback_compaction::restore(value)?;
+        restored.extend(input);
+        opencode_rk_providers::responses::responses_request_payload(model, "", &restored, &[], false)
+            .map_err(provider_failure)?;
+        return Ok((restored, None));
+    }
     let window = ResponsesCompactionWindow {
         id: value["id"].as_str().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?.to_owned(),
         created_at: value["created_at"].as_u64().ok_or_else(|| ApiFailure::internal("invalid compaction checkpoint"))?,
