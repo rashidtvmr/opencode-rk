@@ -37,7 +37,7 @@ pub const MIN_THICKNESS: u8 = 1;
 pub const MAX_THICKNESS: u8 = 2;
 /// Honest description of what a terminal can and cannot draw.
 pub const IOS_SQUIRCLE_APPROXIMATION: &str =
-    "cell-grid approximation: connected elbows; pixel-perfect squircle requires graphics support";
+    "cell-grid approximation: connected elbows, no continuous curvature; pixel-perfect squircle requires graphics support";
 
 /// Rounded elbow corner cells for `Single` borders, reading order
 /// (top-left, top-right, bottom-left, bottom-right).

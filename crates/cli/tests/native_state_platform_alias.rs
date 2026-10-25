@@ -2,6 +2,8 @@
 
 #[path = "../src/native_box_style.rs"]
 mod native_box_style;
+#[path = "../src/native_view_layout.rs"]
+mod native_view_layout;
 #[path = "../src/native_ui_budget.rs"]
 mod native_ui_budget;
 #[path = "../src/native_ui_preferences.rs"]

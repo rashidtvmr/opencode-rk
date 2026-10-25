@@ -1,5 +1,7 @@
 #[path = "../src/native_box_style.rs"]
 mod native_box_style;
+#[path = "../src/native_view_layout.rs"]
+mod native_view_layout;
 
 use native_box_style::{
     BRAILLE_FRAMES, BorderStyle, BoxAppearance, BoxId, BoxOverride, IOS_SQUIRCLE_APPROXIMATION,
@@ -217,6 +219,7 @@ fn every_box_key_round_trips_and_unknown_values_stay_bounded() {
             (
                 id,
                 BoxOverride {
+                    frame_mode: None,
                     preset: Some(RadiusPreset::Rounded),
                     radius: Some(0),
                     border_style: Some(BorderStyle::Single),
