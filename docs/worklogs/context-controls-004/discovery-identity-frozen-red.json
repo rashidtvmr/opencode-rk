@@ -1,0 +1,10 @@
+{
+  "base_sha": "0b8cee50",
+  "test": "crates/cli/tests/discovery_identity_boundary.rs",
+  "sha256": "f70095349c929e62093e51254c129c2e1657db0152c25f29d100addafbcee5f6",
+  "red_log": "docs/worklogs/context-controls-004/discovery-identity-installed-observation.log",
+  "observed": "Actual bundled native default entrypoint reached foreign public health then sent bearer to foreign API listener. Both health reachability and leakage independently recorded.",
+  "fixture": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/oc2-discovery-pV7zXq",
+  "binary_source": "prior debug context candidate; fingerprint in context-inspector-terminal-fixture.json",
+  "command": "OC2_E2E_BIN=<bundled candidate> OPENCODE_TEST_TMP_ROOT=<approved temp> cargo test -p opencode-rk-cli --features native --test discovery_identity_boundary"
+}

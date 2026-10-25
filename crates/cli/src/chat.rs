@@ -504,6 +504,24 @@ fn probe_daemon(origin: &str) -> bool {
     matches!(request(origin, "GET", "/health", None, None), Ok((200, _)))
 }
 
+pub(crate) fn verify_discovery_proof(origin: &str, descriptor: &server_daemon::BackendDescriptor) -> bool {
+    if !daemon_client::is_wellformed_token(&descriptor.auth_token) { return false; }
+    let mut nonce = [0u8; 32];
+    let Ok(mut random) = std::fs::File::open("/dev/urandom") else { return false };
+    if random.read_exact(&mut nonce).is_err() { return false; }
+    let nonce_hex = nonce.iter().map(|b| format!("{b:02x}")).collect::<String>();
+    let Ok((status, body)) = request_with_cap(origin, "GET", &format!("/discovery-proof?nonce={nonce_hex}"), None, None, 1024) else { return false };
+    if status != 200 { return false; }
+    let Ok(value) = serde_json::from_str::<Value>(&body) else { return false };
+    let (Some(mac), Some(echo), Some(echo_origin), Some(pid), Some(schema)) = (
+        value.get("mac").and_then(Value::as_str), value.get("nonce").and_then(Value::as_str),
+        value.get("http_origin").and_then(Value::as_str), value.get("pid").and_then(Value::as_u64),
+        value.get("schema_version").and_then(Value::as_u64)) else { return false };
+    echo == nonce_hex && echo_origin == origin && pid == u64::from(descriptor.pid)
+        && schema == u64::from(daemon_client::EXPECTED_SCHEMA_VERSION)
+        && opencode_rk_server::discovery_proof::verify(&descriptor.auth_token, &nonce, origin, schema as u16, descriptor.pid, mac)
+}
+
 /// Bearer for `/api/*` reuse, threaded from
 /// [`daemon_client::decide_lifecycle_authed`] (`daemon_client.rs:722-735`).
 /// `healthy` is the `/health` probe outcome (`true` == HTTP 200). Any
@@ -522,6 +540,9 @@ fn reuse_credential(data_dir: &Path, probed_origin: &str, healthy: bool) -> Opti
         return None;
     }
     if !daemon_client::is_wellformed_token(&published.auth_token) {
+        return None;
+    }
+    if !healthy || !verify_discovery_proof(probed_origin, &published) {
         return None;
     }
     let authed = daemon_client::AuthenticatedDescriptor {
@@ -595,6 +616,11 @@ fn request(
     body: Option<&str>,
     auth: Option<&str>,
 ) -> Result<(u16, String), String> {
+    request_with_cap(origin, method, path, body, auth, MAX_BODY_BYTES)
+}
+fn request_with_cap(
+    origin: &str, method: &str, path: &str, body: Option<&str>, auth: Option<&str>, max_body: usize,
+) -> Result<(u16, String), String> {
     let wire = build_request_wire(origin, method, path, body, auth)?;
     let host = origin
         .strip_prefix("http://")
@@ -638,8 +664,8 @@ fn request(
         if read == 0 {
             break;
         }
-        if raw.len() + read > MAX_BODY_BYTES {
-            return Err(format!("response exceeds {MAX_BODY_BYTES} byte bound"));
+        if raw.len() + read > max_body {
+            return Err(format!("response exceeds {max_body} byte bound"));
         }
         raw.extend_from_slice(&chunk[..read]);
     }

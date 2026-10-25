@@ -34,6 +34,7 @@ pub mod control_plane_exposure;
 pub mod control_plane_inputs;
 pub mod daemon;
 pub mod daemon_auth;
+pub mod discovery_proof;
 pub mod desktop_bridge;
 pub mod enterprise_link;
 pub mod error_translate;
@@ -172,6 +173,7 @@ pub fn router_with_events(
     let children = task_children::Children::with_mcp(mcp_registry.clone());
     let app = Router::new()
         .route("/health", get(health))
+        .route("/discovery-proof", get(discovery_proof))
         .route(
             "/auth/browser-resume",
             post(issue_browser_resume).delete(revoke_browser_resume),
@@ -624,6 +626,31 @@ async fn reply_session_permission(
 
 async fn health() -> Json<Value> {
     Json(json!({"schema_version":WIRE_SCHEMA_VERSION,"status":"ok","runtime":"native-rust"}))
+}
+#[derive(Deserialize)]
+struct DiscoveryQuery { nonce: String }
+async fn discovery_proof(
+    Extension(auth): Extension<daemon_auth::DaemonAuth>,
+    Query(query): Query<DiscoveryQuery>,
+) -> Response {
+    let Some((origin, pid)) = auth.discovery_identity() else {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    };
+    let Some(nonce) = hex_decode_nonce(&query.nonce) else { return StatusCode::BAD_REQUEST.into_response(); };
+    let Some(mac) = discovery_proof::mac(auth.token(), &nonce, origin, WIRE_SCHEMA_VERSION, pid) else { return StatusCode::SERVICE_UNAVAILABLE.into_response(); };
+    Json(json!({"schema_version": WIRE_SCHEMA_VERSION, "pid": pid, "http_origin": origin, "nonce": query.nonce, "mac": mac})).into_response()
+}
+fn hex_decode_nonce(s: &str) -> Option<Vec<u8>> {
+    if s.len() != discovery_proof::NONCE_BYTES * 2 { return None; }
+    let bytes = s.as_bytes();
+    if !bytes.iter().all(u8::is_ascii) { return None; }
+    bytes.chunks_exact(2)
+        .map(|pair| {
+            let high = match pair[0] { b'0'..=b'9' => pair[0] - b'0', b'a'..=b'f' => pair[0] - b'a' + 10, b'A'..=b'F' => pair[0] - b'A' + 10, _ => return None };
+            let low = match pair[1] { b'0'..=b'9' => pair[1] - b'0', b'a'..=b'f' => pair[1] - b'a' + 10, b'A'..=b'F' => pair[1] - b'A' + 10, _ => return None };
+            Some((high << 4) | low)
+        })
+        .collect()
 }
 async fn web_capabilities() -> Json<Value> {
     let registry = ToolRegistry::new();

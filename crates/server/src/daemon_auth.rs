@@ -38,6 +38,8 @@ pub const TOKEN_HEX_LEN: usize = TOKEN_BYTES * 2;
 #[derive(Clone)]
 pub struct DaemonAuth {
     token: String,
+    discovery_origin: std::sync::Arc<std::sync::OnceLock<String>>,
+    discovery_pid: u32,
     browser_resume: std::sync::Arc<crate::browser_resume::BrowserResumeRegistry>,
 }
 
@@ -67,6 +69,8 @@ impl DaemonAuth {
         let bytes = random_bytes()?;
         Ok(Self {
             token: hex_encode(&bytes),
+            discovery_origin: std::sync::Arc::new(std::sync::OnceLock::new()),
+            discovery_pid: std::process::id(),
             browser_resume: std::sync::Arc::new(
                 crate::browser_resume::BrowserResumeRegistry::default(),
             ),
@@ -81,6 +85,8 @@ impl DaemonAuth {
         }
         Ok(Self {
             token: token.to_owned(),
+            discovery_origin: std::sync::Arc::new(std::sync::OnceLock::new()),
+            discovery_pid: std::process::id(),
             browser_resume: std::sync::Arc::new(
                 crate::browser_resume::BrowserResumeRegistry::default(),
             ),
@@ -91,6 +97,8 @@ impl DaemonAuth {
     pub fn token(&self) -> &str {
         &self.token
     }
+    pub fn with_discovery_origin(self, origin: String) -> Self { let _ = self.discovery_origin.set(origin); self }
+    pub(crate) fn discovery_identity(&self) -> Option<(&str, u32)> { Some((self.discovery_origin.get()?.as_str(), self.discovery_pid)) }
 
     pub(crate) fn browser_resume(
         &self,

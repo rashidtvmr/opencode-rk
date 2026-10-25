@@ -720,6 +720,9 @@ async fn web(data: PathBuf, args: WebArgs) -> Result<(), Box<dyn std::error::Err
     if let Some(descriptor) = read_backend_descriptor(&data)? {
         println!("{}", descriptor.http_origin);
         if !args.no_open {
+            if !chat::verify_discovery_proof(&descriptor.http_origin, &descriptor) {
+                return Err("existing daemon failed discovery ownership proof".into());
+            }
             open_web_browser(&descriptor.http_origin, &descriptor.auth_token)?;
         }
         return Ok(());
@@ -751,6 +754,9 @@ async fn serve(
             })?;
             println!("{}", descriptor.http_origin);
             if open_browser {
+                if !chat::verify_discovery_proof(&descriptor.http_origin, &descriptor) {
+                    return Err("existing daemon failed discovery ownership proof".into());
+                }
                 open_web_browser(&descriptor.http_origin, &descriptor.auth_token)?;
             }
             return Ok(());
@@ -774,7 +780,9 @@ async fn serve(
     // ("backend is already running but its endpoint descriptor is
     // unavailable"). Mint the real daemon credential and publish it.
     //
-    let credential = DaemonAuth::mint().map_err(|error| error.to_string())?;
+    let credential = DaemonAuth::mint()
+        .map_err(|error| error.to_string())?
+        .with_discovery_origin(format!("http://{listen}"));
     let descriptor =
         publish_backend_descriptor_with_auth(&data, listen, credential.token().to_owned())?;
     println!("{}", descriptor.http_origin);
