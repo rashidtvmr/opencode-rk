@@ -1,4 +1,4 @@
-//! Narrow, schema-filtered access to OpenCode's persisted API credentials.
+//! Narrow, bounded access to OpenCode's persisted API/OAuth credentials.
 use serde_json::Value;
 use std::sync::{Arc, OnceLock};
 use std::{
@@ -11,6 +11,34 @@ use tokio::sync::Semaphore;
 const MAX_AUTH_BYTES: usize = 1024 * 1024;
 const MAX_AUTH_ENTRIES: usize = 256;
 const MAX_API_KEY_BYTES: usize = 16 * 1024;
+const MAX_ACCOUNT_ID_BYTES: usize = 1024;
+static AUTH_WRITE_GATE: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+/// A validated OAuth record read from the upstream `auth.json` format.
+///
+/// Token values are intentionally not included in `Debug` output by the
+/// custom implementation below.  `expires_at` is the upstream epoch value,
+/// in milliseconds where supplied by the provider.
+#[derive(Clone, PartialEq, Eq)]
+pub struct PersistedOAuth {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_at: u64,
+    pub account_id: Option<String>,
+    pub enterprise_url: Option<String>,
+}
+
+impl std::fmt::Debug for PersistedOAuth {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PersistedOAuth")
+            .field("access_token", &"<redacted>")
+            .field("refresh_token", &"<redacted>")
+            .field("expires_at", &self.expires_at)
+            .field("account_id", &self.account_id)
+            .field("enterprise_url", &self.enterprise_url)
+            .finish()
+    }
+}
 
 pub async fn api_key(provider: &str, ambient_name: &str) -> Option<String> {
     let content = env::var("OPENCODE_AUTH_CONTENT").ok();
@@ -73,8 +101,7 @@ pub async fn save_api_key(
         return Err("credential metadata exceeds size limit".to_owned());
     }
     let path = auth_path().ok_or_else(|| "unable to resolve auth path".to_owned())?;
-    static WRITE_GATE: OnceLock<Arc<Semaphore>> = OnceLock::new();
-    let permit = WRITE_GATE
+    let permit = AUTH_WRITE_GATE
         .get_or_init(|| Arc::new(Semaphore::new(1)))
         .clone()
         .try_acquire_owned()
@@ -160,6 +187,191 @@ pub async fn save_api_key(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Persist an explicitly approved OAuth result in the upstream auth.json
+/// shape. The caller must have obtained these values from a successful,
+/// human-authorized provider flow. This function never reads or writes API-key
+/// entries except to preserve them, and atomically replaces only `provider`.
+pub async fn save_oauth_credential(
+    provider: String,
+    access: String,
+    refresh: String,
+    expires: u64,
+    account_id: Option<String>,
+) -> Result<(), String> {
+    save_oauth_credential_with_metadata(provider, access, refresh, expires, account_id, None).await
+}
+
+/// Persist a validated OAuth result, including provider account metadata.
+pub async fn save_oauth_credential_with_metadata(
+    provider: String,
+    access: String,
+    refresh: String,
+    expires: u64,
+    account_id: Option<String>,
+    enterprise_url: Option<String>,
+) -> Result<(), String> {
+    let normalized = provider.trim_end_matches('/').to_owned();
+    if normalized.is_empty()
+        || provider.len() > 128
+        || provider.chars().any(char::is_control)
+        || access.trim().is_empty()
+        || refresh.trim().is_empty()
+        || access.len() > MAX_API_KEY_BYTES
+        || refresh.len() > MAX_API_KEY_BYTES
+        || account_id
+            .as_ref()
+            .is_some_and(|id| id.len() > MAX_ACCOUNT_ID_BYTES || id.chars().any(char::is_control))
+        || enterprise_url.as_ref().is_some_and(|url| {
+            url.len() > MAX_ACCOUNT_ID_BYTES || url.chars().any(char::is_control)
+        })
+    {
+        return Err("invalid oauth credential".to_owned());
+    }
+    let path = auth_path().ok_or_else(|| "unable to resolve auth path".to_owned())?;
+    let permit = AUTH_WRITE_GATE
+        .get_or_init(|| Arc::new(Semaphore::new(1)))
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| "provider auth write busy".to_owned())?;
+    tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        let mut root = match read_auth_document(&path)? {
+            Some(value) => value,
+            None => Value::Object(serde_json::Map::new()),
+        };
+        let object = root.as_object_mut().ok_or_else(|| "invalid auth document".to_owned())?;
+        if object.len() > MAX_AUTH_ENTRIES { return Err("auth entry limit exceeded".to_owned()); }
+        object.remove(&provider);
+        object.remove(&format!("{normalized}/"));
+        if object.len() >= MAX_AUTH_ENTRIES && !object.contains_key(&normalized) {
+            return Err("auth entry limit exceeded".to_owned());
+        }
+        let mut entry = serde_json::json!({"type":"oauth", "access":access, "refresh":refresh, "expires":expires});
+        if let Some(account_id) = account_id { entry["accountId"] = serde_json::Value::String(account_id); }
+        if let Some(enterprise_url) = enterprise_url { entry["enterpriseUrl"] = serde_json::Value::String(enterprise_url); }
+        object.insert(normalized, entry);
+        let bytes = serde_json::to_vec_pretty(&root).map_err(|_| "unable to encode auth file".to_owned())?;
+        if bytes.len() > MAX_AUTH_BYTES { return Err("auth file exceeds size limit".to_owned()); }
+        if let Some(parent) = path.parent() { fs::create_dir_all(parent).map_err(|e| e.to_string())?; }
+        let tmp = path.with_extension(format!("json.{}.tmp", unique_suffix()));
+        let mut options = OpenOptions::new();
+        options.create_new(true).write(true);
+        #[cfg(unix)]
+        { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+        let mut file = options.open(&tmp).map_err(|_| "unable to create auth file".to_owned())?;
+        let cleanup = TemporaryAuthFile(tmp.clone());
+        #[cfg(unix)]
+        { use std::os::unix::fs::PermissionsExt; file.set_permissions(fs::Permissions::from_mode(0o600)).map_err(|_| "unable to protect auth file".to_owned())?; }
+        file.write_all(&bytes).map_err(|_| "unable to write auth file".to_owned())?;
+        file.sync_all().map_err(|_| "unable to sync auth file".to_owned())?;
+        fs::rename(&tmp, &path).map_err(|_| "unable to commit auth file".to_owned())?;
+        drop(cleanup);
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// Load one OAuth record without converting API-key or legacy records.
+pub async fn oauth(provider: &str) -> Option<PersistedOAuth> {
+    let provider = provider.trim_end_matches('/');
+    if provider.is_empty() || provider.len() > 128 || provider.chars().any(char::is_control) {
+        return None;
+    }
+    let inline = env::var("OPENCODE_AUTH_CONTENT")
+        .ok()
+        .filter(|raw| !raw.is_empty() && raw.len() <= MAX_AUTH_BYTES)
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok());
+    let value = if let Some(value) = inline {
+        value
+    } else {
+        let path = auth_path()?;
+        tokio::task::spawn_blocking(move || read_auth_document(&path).ok().flatten())
+            .await
+            .ok()??
+    };
+    oauth_from_value(&value, provider)
+}
+
+/// Compatibility-explicit spelling for callers that prefer the credential name.
+pub async fn load_oauth_credential(provider: &str) -> Option<PersistedOAuth> {
+    oauth(provider).await
+}
+
+/// Atomically update only access token and expiry after a successful refresh.
+/// The existing refresh token and account metadata are retained verbatim.
+pub async fn refresh_oauth_credential(
+    provider: String,
+    access: String,
+    expires: u64,
+) -> Result<(), String> {
+    let existing = oauth(&provider)
+        .await
+        .ok_or_else(|| "oauth credential not found".to_owned())?;
+    save_oauth_credential_with_metadata(
+        provider,
+        access,
+        existing.refresh_token,
+        expires,
+        existing.account_id,
+        existing.enterprise_url,
+    )
+    .await
+}
+
+/// Persist a complete OAuth refresh result, including a provider-rotated
+/// refresh token.  This deliberately delegates to the atomic, preserving
+/// writer above rather than rebuilding auth.json from one credential.
+pub async fn save_refreshed_oauth(
+    provider: String,
+    access: String,
+    refresh: String,
+    expires: u64,
+    account_id: Option<String>,
+    enterprise_url: Option<String>,
+) -> Result<(), String> {
+    save_oauth_credential_with_metadata(
+        provider,
+        access,
+        refresh,
+        expires,
+        account_id,
+        enterprise_url,
+    )
+    .await
+}
+
+fn oauth_from_value(root: &Value, provider: &str) -> Option<PersistedOAuth> {
+    let entries = root.as_object()?;
+    if entries.len() > MAX_AUTH_ENTRIES {
+        return None;
+    }
+    let item = entries.get(provider)?.as_object()?;
+    if item.get("type")?.as_str()? != "oauth" {
+        return None;
+    }
+    let access = item.get("access")?.as_str()?;
+    let refresh = item.get("refresh")?.as_str()?;
+    let expires = item.get("expires")?.as_u64()?;
+    if access.trim().is_empty()
+        || refresh.trim().is_empty()
+        || access.len() > MAX_API_KEY_BYTES
+        || refresh.len() > MAX_API_KEY_BYTES
+    {
+        return None;
+    }
+    let optional = |name: &str| -> Option<String> {
+        let value = item.get(name)?.as_str()?;
+        (value.len() <= MAX_ACCOUNT_ID_BYTES && !value.chars().any(char::is_control))
+            .then(|| value.to_owned())
+    };
+    Some(PersistedOAuth {
+        access_token: access.to_owned(),
+        refresh_token: refresh.to_owned(),
+        expires_at: expires,
+        account_id: optional("accountId"),
+        enterprise_url: optional("enterpriseUrl"),
+    })
 }
 fn unique_suffix() -> String {
     use std::time::{SystemTime, UNIX_EPOCH};

@@ -1,12 +1,14 @@
 //! Bounded OpenAI Responses API client for native turns.
 
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use opencode_rk_contracts::{MAX_INLINE_PAYLOAD_BYTES, MAX_REASONING_SUMMARY_BYTES};
 use reqwest::redirect::Policy;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use thiserror::Error;
+use tokio::sync::Mutex;
 
 use crate::config::ProviderConfig;
 
@@ -241,6 +243,8 @@ pub enum ResponsesError {
     InputTooLarge { max: usize, actual: usize },
     #[error("provider request failed: {0}")]
     Request(String),
+    #[error("OpenAI OAuth refresh failed: {0}")]
+    OAuthRefresh(String),
     #[error("provider returned HTTP {status}: {message}")]
     Upstream { status: u16, message: String },
     #[error("provider response exceeded {max} bytes")]
@@ -255,6 +259,8 @@ pub enum ResponsesError {
     ReasoningSummaryTooLarge { max: usize },
     #[error("unsupported provider stream event: {0}")]
     UnsupportedStreamEvent(String),
+    #[error("provider transport protocol is unsupported: {0}")]
+    UnsupportedProtocol(String),
     #[error("provider stream failed ({code}): {message}")]
     StreamFailed { code: String, message: String },
     #[error("provider stream ended before a completion event")]
@@ -507,14 +513,18 @@ impl ResponsesStreamParser {
                 }))
             }
             Some("response.completed") => {
-                self.usage = value.pointer("/response/usage").and_then(ReportedUsage::parse);
+                self.usage = value
+                    .pointer("/response/usage")
+                    .and_then(ReportedUsage::parse);
                 self.completed = true;
                 Ok(Some(ResponsesStreamEvent::Completed {
                     stop_reason: ResponsesStopReason::Completed,
                 }))
             }
             Some("response.incomplete") => {
-                self.usage = value.pointer("/response/usage").and_then(ReportedUsage::parse);
+                self.usage = value
+                    .pointer("/response/usage")
+                    .and_then(ReportedUsage::parse);
                 self.completed = true;
                 let reason = value
                     .pointer("/response/incomplete_details/reason")
@@ -530,7 +540,12 @@ impl ResponsesStreamParser {
                     .or_else(|| value.pointer("/error/code"))
                     .or_else(|| value.get("code"))
                     .and_then(Value::as_str)
-                    .map(|code| code.chars().filter(|ch| !ch.is_control()).take(256).collect::<String>())
+                    .map(|code| {
+                        code.chars()
+                            .filter(|ch| !ch.is_control())
+                            .take(256)
+                            .collect::<String>()
+                    })
                     .filter(|code| !code.is_empty())
                     .unwrap_or_else(|| "unknown".to_owned());
                 let message = value
@@ -640,7 +655,10 @@ fn parse_compaction_window(body: &[u8]) -> Result<ResponsesCompactionWindow, Res
     if value.get("object").and_then(Value::as_str) != Some("response.compaction") {
         return Err(invalid());
     }
-    let id = value.get("id").and_then(Value::as_str).ok_or_else(invalid)?;
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .ok_or_else(invalid)?;
     if id.is_empty() || id.len() > 256 || id.chars().any(char::is_control) {
         return Err(invalid());
     }
@@ -648,7 +666,10 @@ fn parse_compaction_window(body: &[u8]) -> Result<ResponsesCompactionWindow, Res
         .get("created_at")
         .and_then(Value::as_u64)
         .ok_or_else(invalid)?;
-    let output = value.get("output").and_then(Value::as_array).ok_or_else(invalid)?;
+    let output = value
+        .get("output")
+        .and_then(Value::as_array)
+        .ok_or_else(invalid)?;
     if output.len() > MAX_RESPONSES_COMPACT_OUTPUT_ITEMS {
         return Err(invalid());
     }
@@ -697,8 +718,13 @@ pub struct BufferedResponsesBody {
 }
 impl BufferedResponsesBody {
     pub fn parse(body: &str) -> Result<Self, ResponsesError> {
-        if body.len() > MAX_RESPONSES_BODY_BYTES { return Err(ResponsesError::ResponseTooLarge { max: MAX_RESPONSES_BODY_BYTES }); }
-        let value: Value = serde_json::from_str(body).map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        if body.len() > MAX_RESPONSES_BODY_BYTES {
+            return Err(ResponsesError::ResponseTooLarge {
+                max: MAX_RESPONSES_BODY_BYTES,
+            });
+        }
+        let value: Value = serde_json::from_str(body)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
         let kind = match value["status"].as_str() {
             Some("completed") => "response.completed",
             Some("incomplete") => "response.incomplete",
@@ -708,59 +734,117 @@ impl BufferedResponsesBody {
         let mut parser = ResponsesStreamParser::new();
         let invalid = || ResponsesError::InvalidJson("invalid buffered Responses output".into());
         if value.get("error").is_some_and(|error| !error.is_null()) || kind == "response.failed" {
-            let code = value.pointer("/error/code").and_then(Value::as_str)
-                .map(|code| code.chars().filter(|ch| !ch.is_control()).take(256).collect::<String>())
-                .filter(|code| !code.is_empty()).unwrap_or_else(|| "unknown".to_owned());
-            return Err(ResponsesError::StreamFailed { code, message: value.pointer("/error/message").and_then(Value::as_str).unwrap_or("provider response failed").chars().filter(|ch| !ch.is_control()).take(1024).collect() });
+            let code = value
+                .pointer("/error/code")
+                .and_then(Value::as_str)
+                .map(|code| {
+                    code.chars()
+                        .filter(|ch| !ch.is_control())
+                        .take(256)
+                        .collect::<String>()
+                })
+                .filter(|code| !code.is_empty())
+                .unwrap_or_else(|| "unknown".to_owned());
+            return Err(ResponsesError::StreamFailed {
+                code,
+                message: value
+                    .pointer("/error/message")
+                    .and_then(Value::as_str)
+                    .unwrap_or("provider response failed")
+                    .chars()
+                    .filter(|ch| !ch.is_control())
+                    .take(1024)
+                    .collect(),
+            });
         }
         let output = value["output"].as_array().ok_or_else(invalid)?;
-        if output.len() > 128 { return Err(invalid()); }
+        if output.len() > 128 {
+            return Err(invalid());
+        }
         let mut events = Vec::new();
         let mut calls = std::collections::BTreeSet::new();
         let mut argument_bytes: usize = 0;
         for item in output {
             // Compatible providers may omit item status. An explicit status
             // must agree with a completed envelope before any call can escape.
-            if kind == "response.completed" && item.get("status").is_some_and(|status| status.as_str() != Some("completed")) { return Err(invalid()); }
+            if kind == "response.completed"
+                && item
+                    .get("status")
+                    .is_some_and(|status| status.as_str() != Some("completed"))
+            {
+                return Err(invalid());
+            }
             match item["type"].as_str() {
                 Some("message") => {
-                    if item["role"].as_str() != Some("assistant") { return Err(invalid()); }
+                    if item["role"].as_str() != Some("assistant") {
+                        return Err(invalid());
+                    }
                     let content = item["content"].as_array().ok_or_else(invalid)?;
                     for part in content {
                         let text = match part["type"].as_str() {
                             Some("output_text") => part["text"].as_str(),
                             Some("refusal") => part["refusal"].as_str(),
                             _ => return Err(invalid()),
-                        }.ok_or_else(invalid)?;
-                        if let Some(event) = parser.parse_event(None, &json!({"type":"response.output_text.delta","delta":text}).to_string())? { events.push(event); }
+                        }
+                        .ok_or_else(invalid)?;
+                        if let Some(event) = parser.parse_event(
+                            None,
+                            &json!({"type":"response.output_text.delta","delta":text}).to_string(),
+                        )? {
+                            events.push(event);
+                        }
                     }
                 }
                 Some("reasoning") => {
                     if let Some(summary) = item.get("summary") {
                         for part in summary.as_array().ok_or_else(invalid)? {
-                            if part["type"].as_str() != Some("summary_text") { return Err(invalid()); }
+                            if part["type"].as_str() != Some("summary_text") {
+                                return Err(invalid());
+                            }
                             let text = part["text"].as_str().ok_or_else(invalid)?;
                             if let Some(event) = parser.parse_event(None, &json!({"type":"response.reasoning_summary_text.delta","delta":text}).to_string())? { events.push(event); }
                         }
                     }
                 }
                 Some("function_call") => {
-                    if kind == "response.incomplete" { continue; }
+                    if kind == "response.incomplete" {
+                        continue;
+                    }
                     let call_id = item["call_id"].as_str().ok_or_else(invalid)?;
                     let name = item["name"].as_str().ok_or_else(invalid)?;
                     let arguments = item["arguments"].as_str().ok_or_else(invalid)?;
-                    if call_id.is_empty() || call_id.len() > 256 || call_id.chars().any(char::is_control) || name.is_empty() || name.len() > 256 || name.chars().any(char::is_control) || !calls.insert(call_id) { return Err(invalid()); }
+                    if call_id.is_empty()
+                        || call_id.len() > 256
+                        || call_id.chars().any(char::is_control)
+                        || name.is_empty()
+                        || name.len() > 256
+                        || name.chars().any(char::is_control)
+                        || !calls.insert(call_id)
+                    {
+                        return Err(invalid());
+                    }
                     argument_bytes = argument_bytes.saturating_add(arguments.len());
-                    if argument_bytes > MAX_INLINE_PAYLOAD_BYTES { return Err(ResponsesError::OutputTooLarge { max: MAX_INLINE_PAYLOAD_BYTES }); }
+                    if argument_bytes > MAX_INLINE_PAYLOAD_BYTES {
+                        return Err(ResponsesError::OutputTooLarge {
+                            max: MAX_INLINE_PAYLOAD_BYTES,
+                        });
+                    }
                     let args: Value = serde_json::from_str(arguments).map_err(|_| invalid())?;
-                    if !args.is_object() { return Err(invalid()); }
+                    if !args.is_object() {
+                        return Err(invalid());
+                    }
                     // Incomplete output can contain partial calls. Never turn
                     // those into executable work; terminal semantics survive.
-                    events.push(ResponsesStreamEvent::FunctionCall { call_id:call_id.into(), name:name.into(), arguments:arguments.into() });
+                    events.push(ResponsesStreamEvent::FunctionCall {
+                        call_id: call_id.into(),
+                        name: name.into(),
+                        arguments: arguments.into(),
+                    });
                 }
                 Some("compaction") => {
                     let id = item["id"].as_str().ok_or_else(invalid)?;
-                    let encrypted_content = item["encrypted_content"].as_str().ok_or_else(invalid)?;
+                    let encrypted_content =
+                        item["encrypted_content"].as_str().ok_or_else(invalid)?;
                     if id.is_empty()
                         || id.len() > 256
                         || id.chars().any(char::is_control)
@@ -777,7 +861,10 @@ impl BufferedResponsesBody {
                 _ => return Err(invalid()),
             }
         }
-        if let Some(event) = parser.parse_event(Some(kind), &json!({"type": kind, "response": value}).to_string())? {
+        if let Some(event) = parser.parse_event(
+            Some(kind),
+            &json!({"type": kind, "response": value}).to_string(),
+        )? {
             events.push(event);
         }
         Ok(Self {
@@ -811,9 +898,40 @@ impl BufferedResponsesBody {
 pub struct OpenAiResponsesClient {
     http: reqwest::Client,
     base_url: String,
-    api_key: Option<String>,
+    credential: Arc<Mutex<RequestCredential>>,
+    oauth_token_url: String,
     max_output_tokens: u32,
     buffered_model_ids: Vec<String>,
+    /// Catalog-resolved provider model ID.  The public call still receives
+    /// the user's qualified selection, but the wire payload uses this ID.
+    model_id: Option<String>,
+}
+
+const OPENAI_OAUTH_TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
+const OPENAI_CODEX_BASE_URL: &str = "https://chatgpt.com/backend-api/codex";
+const OPENAI_OAUTH_CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
+const OAUTH_REFRESH_SKEW_MS: u64 = 60_000;
+
+#[derive(Clone, Debug)]
+enum RequestCredential {
+    Anonymous,
+    ApiKey(String),
+    OAuth(crate::persisted_auth::PersistedOAuth),
+}
+
+#[derive(Debug, Deserialize)]
+struct OAuthRefreshResponse {
+    access_token: Option<String>,
+    refresh_token: Option<String>,
+    expires_in: Option<u64>,
+}
+
+fn epoch_ms() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .min(u128::from(u64::MAX)) as u64
 }
 
 /// Only unambiguous pre-execution admission failures are retried. Other 5xx
@@ -861,6 +979,9 @@ impl OpenAiResponsesClient {
     pub async fn from_persisted_env() -> Result<Self, ResponsesError> {
         let config = ProviderConfig::from_env("openai");
         config.validate().map_err(ResponsesError::InvalidConfig)?;
+        if let Some(oauth) = crate::persisted_auth::load_oauth_credential("openai").await {
+            return Self::from_oauth_config(config, oauth);
+        }
         let key = crate::persisted_auth::api_key("openai", &config.api_key_env)
             .await
             .ok_or_else(|| ResponsesError::MissingCredential(config.api_key_env.clone()))?;
@@ -877,7 +998,10 @@ impl OpenAiResponsesClient {
         Self::from_config(config, Some(api_key))
     }
 
-    pub fn from_config(config: ProviderConfig, api_key: Option<String>) -> Result<Self, ResponsesError> {
+    pub fn from_config(
+        config: ProviderConfig,
+        api_key: Option<String>,
+    ) -> Result<Self, ResponsesError> {
         config.validate().map_err(ResponsesError::InvalidConfig)?;
         let http = reqwest::Client::builder()
             .timeout(Duration::from_secs(config.timeout_secs.clamp(1, 300)))
@@ -888,10 +1012,147 @@ impl OpenAiResponsesClient {
         Ok(Self {
             http,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
-            api_key,
+            credential: Arc::new(Mutex::new(api_key.map_or(
+                RequestCredential::Anonymous,
+                RequestCredential::ApiKey,
+            ))),
+            oauth_token_url: OPENAI_OAUTH_TOKEN_URL.to_owned(),
             max_output_tokens: config.max_tokens.clamp(1, 65_536),
             buffered_model_ids: Vec::new(),
+            model_id: None,
         })
+    }
+
+    fn from_oauth_config(
+        config: ProviderConfig,
+        oauth: crate::persisted_auth::PersistedOAuth,
+    ) -> Result<Self, ResponsesError> {
+        Self::from_oauth_config_with_endpoint(config, oauth, OPENAI_OAUTH_TOKEN_URL)
+    }
+
+    /// Test/integration constructor retaining the production request path but
+    /// directing the OAuth exchange to a disposable local fixture.
+    pub fn from_oauth_config_with_endpoint(
+        config: ProviderConfig,
+        oauth: crate::persisted_auth::PersistedOAuth,
+        oauth_token_url: impl Into<String>,
+    ) -> Result<Self, ResponsesError> {
+        config.validate().map_err(ResponsesError::InvalidConfig)?;
+        let http = reqwest::Client::builder()
+            .timeout(Duration::from_secs(config.timeout_secs.clamp(1, 300)))
+            .redirect(Policy::none())
+            .build()
+            .map_err(|error| ResponsesError::InvalidConfig(error.to_string()))?;
+        let base_url = if config.base_url.trim_end_matches('/')
+            == "https://api.openai.com/v1"
+        {
+            OPENAI_CODEX_BASE_URL.to_owned()
+        } else {
+            config.base_url.trim_end_matches('/').to_owned()
+        };
+        Ok(Self {
+            http,
+            base_url,
+            credential: Arc::new(Mutex::new(RequestCredential::OAuth(oauth))),
+            oauth_token_url: oauth_token_url.into(),
+            max_output_tokens: config.max_tokens.clamp(1, 65_536),
+            buffered_model_ids: Vec::new(),
+            model_id: None,
+        })
+    }
+
+    async fn credential_for_request(
+        &self,
+    ) -> Result<(Option<String>, Option<String>, bool), ResponsesError> {
+        let mut credential = self.credential.lock().await;
+        match &*credential {
+            RequestCredential::Anonymous => Ok((None, None, false)),
+            RequestCredential::ApiKey(key) => Ok((Some(key.clone()), None, false)),
+            RequestCredential::OAuth(value)
+                if value.expires_at > epoch_ms().saturating_add(OAUTH_REFRESH_SKEW_MS) =>
+            {
+                Ok((Some(value.access_token.clone()), value.account_id.clone(), true))
+            }
+            RequestCredential::OAuth(value) => {
+                let response = self
+                    .http
+                    .post(&self.oauth_token_url)
+                    .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .form(&[
+                        ("grant_type", "refresh_token"),
+                        ("refresh_token", value.refresh_token.as_str()),
+                        ("client_id", OPENAI_OAUTH_CLIENT_ID),
+                    ])
+                    .send()
+                    .await
+                    .map_err(|error| ResponsesError::OAuthRefresh(error.to_string()))?;
+                if !response.status().is_success() {
+                    return Err(ResponsesError::OAuthRefresh(format!(
+                        "refresh rejected with HTTP {}",
+                        response.status()
+                    )));
+                }
+                let token: OAuthRefreshResponse = response
+                    .json()
+                    .await
+                    .map_err(|error| ResponsesError::OAuthRefresh(error.to_string()))?;
+                let access = token
+                    .access_token
+                    .filter(|value| !value.trim().is_empty())
+                    .ok_or_else(|| {
+                        ResponsesError::OAuthRefresh(
+                            "refresh response missing access_token".to_owned(),
+                        )
+                    })?;
+                let refresh = token
+                    .refresh_token
+                    .filter(|value| !value.trim().is_empty())
+                    .unwrap_or_else(|| value.refresh_token.clone());
+                let expires = epoch_ms().saturating_add(
+                    token.expires_in.unwrap_or(3600).saturating_mul(1000),
+                );
+                crate::persisted_auth::save_refreshed_oauth(
+                    "openai".to_owned(),
+                    access.clone(),
+                    refresh.clone(),
+                    expires,
+                    value.account_id.clone(),
+                    value.enterprise_url.clone(),
+                )
+                .await
+                .map_err(ResponsesError::OAuthRefresh)?;
+                let account_id = value.account_id.clone();
+                let enterprise_url = value.enterprise_url.clone();
+                *credential = RequestCredential::OAuth(crate::persisted_auth::PersistedOAuth {
+                    access_token: access.clone(),
+                    refresh_token: refresh,
+                    expires_at: expires,
+                    account_id: account_id.clone(),
+                    enterprise_url,
+                });
+                Ok((Some(access), account_id, true))
+            }
+        }
+    }
+
+    /// Apply models.dev transport resolution without changing credential
+    /// handling.  The endpoint is validated by `ProviderConfig` before this
+    /// method is called; the model ID is deliberately kept separate from the
+    /// provider config because it is selected per request.
+    pub fn with_resolved_transport(
+        mut self,
+        api: Option<String>,
+        model_id: Option<String>,
+    ) -> Self {
+        if let Some(api) = api.filter(|value| !value.trim().is_empty()) {
+            self.base_url = api.trim_end_matches('/').to_owned();
+        }
+        self.model_id = model_id.filter(|value| !value.trim().is_empty());
+        self
+    }
+
+    fn resolved_model<'a>(&'a self, requested: &'a str) -> &'a str {
+        self.model_id.as_deref().unwrap_or(requested)
     }
 
     /// Explicit capability selection, evaluated per request before dispatch.
@@ -904,10 +1165,7 @@ impl OpenAiResponsesClient {
     /// Dispatch one already-built payload, retrying only 429/503 up to three
     /// attempts. Network errors and all other non-success statuses are returned
     /// immediately; success returns before any body is consumed.
-    async fn send_with_retry(
-        &self,
-        payload: &Value,
-    ) -> Result<reqwest::Response, ResponsesError> {
+    async fn send_with_retry(&self, payload: &Value) -> Result<reqwest::Response, ResponsesError> {
         self.send_with_retry_path("responses", payload).await
     }
 
@@ -920,9 +1178,22 @@ impl OpenAiResponsesClient {
         let mut attempt = 0;
         loop {
             attempt += 1;
-            let mut request = self.http.post(format!("{}/{path}", self.base_url)).json(payload);
-            if let Some(key) = self.api_key.as_deref() { request = request.bearer_auth(key); }
-            let response = request.send()
+            let mut request = self
+                .http
+                .post(format!("{}/{path}", self.base_url))
+                .json(payload);
+            let (token, account_id, oauth) = self.credential_for_request().await?;
+            if let Some(token) = token {
+                request = request.bearer_auth(token);
+            }
+            if oauth {
+                request = request.header("originator", "opencode");
+                if let Some(account_id) = account_id {
+                    request = request.header("chatgpt-account-id", account_id);
+                }
+            }
+            let response = request
+                .send()
                 .await
                 .map_err(|error| ResponsesError::Request(error.to_string()))?;
             let status = response.status();
@@ -968,7 +1239,7 @@ impl OpenAiResponsesClient {
                 actual: model.len(),
             });
         }
-        let payload = responses_request_payload(model, "", input, &[], false)?;
+        let payload = responses_request_payload(self.resolved_model(model), "", input, &[], false)?;
         self.compact_payload(&payload).await
     }
 
@@ -980,11 +1251,21 @@ impl OpenAiResponsesClient {
         window: &ResponsesCompactionWindow,
         tail: &[ResponsesItem],
     ) -> Result<ResponsesCompactionWindow, ResponsesError> {
-        let payload = compaction_continuation_payload(model, "", window, tail, &[], false)?;
+        let payload = compaction_continuation_payload(
+            self.resolved_model(model),
+            "",
+            window,
+            tail,
+            &[],
+            false,
+        )?;
         self.compact_payload(&payload).await
     }
 
-    async fn compact_payload(&self, payload: &Value) -> Result<ResponsesCompactionWindow, ResponsesError> {
+    async fn compact_payload(
+        &self,
+        payload: &Value,
+    ) -> Result<ResponsesCompactionWindow, ResponsesError> {
         let request_bytes = serde_json::to_vec(payload)
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
         if request_bytes.len() > MAX_RESPONSES_INPUT_BYTES {
@@ -1055,8 +1336,15 @@ impl OpenAiResponsesClient {
         items: &[ResponsesItem],
     ) -> Result<String, ResponsesError> {
         let mut payload = match window {
-            Some(window) => compaction_continuation_payload(model, "", window, items, &[], false)?,
-            None => responses_request_payload(model, "", items, &[], false)?,
+            Some(window) => compaction_continuation_payload(
+                self.resolved_model(model),
+                "",
+                window,
+                items,
+                &[],
+                false,
+            )?,
+            None => responses_request_payload(self.resolved_model(model), "", items, &[], false)?,
         };
         payload["max_output_tokens"] = json!(self.max_output_tokens.min(4096));
         payload["tools"] = json!([]);
@@ -1067,14 +1355,22 @@ impl OpenAiResponsesClient {
             .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
         if value["status"].as_str() != Some("completed")
             || value.get("error").is_some_and(|error| !error.is_null())
-            || value["output"].as_array().is_none_or(|output| output.iter().any(|item|
-                !matches!(item["type"].as_str(), Some("message" | "reasoning")))) {
-            return Err(ResponsesError::InvalidJson("summary must be a completed tool-free response".into()));
+            || value["output"].as_array().is_none_or(|output| {
+                output
+                    .iter()
+                    .any(|item| !matches!(item["type"].as_str(), Some("message" | "reasoning")))
+            })
+        {
+            return Err(ResponsesError::InvalidJson(
+                "summary must be a completed tool-free response".into(),
+            ));
         }
         // Validate roles, part types, item statuses and UTF-8 before accepting
         // text. Partial or tool-bearing output must never replace a checkpoint.
-        BufferedResponsesBody::parse(std::str::from_utf8(&body)
-            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?)?;
+        BufferedResponsesBody::parse(
+            std::str::from_utf8(&body)
+                .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?,
+        )?;
         extract_output_text(&value)
     }
 
@@ -1087,8 +1383,14 @@ impl OpenAiResponsesClient {
         window: &ResponsesCompactionWindow,
         tail: &[ResponsesItem],
     ) -> Result<String, ResponsesError> {
-        let mut payload =
-            compaction_continuation_payload(model, reasoning_effort, window, tail, &[], false)?;
+        let mut payload = compaction_continuation_payload(
+            self.resolved_model(model),
+            reasoning_effort,
+            window,
+            tail,
+            &[],
+            false,
+        )?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
         self.create_with_payload(&payload).await
     }
@@ -1121,8 +1423,13 @@ impl OpenAiResponsesClient {
         items: &[ResponsesItem],
         tools: &[ResponsesTool],
     ) -> Result<OpenAiResponsesStream, ResponsesError> {
-        let buffered = self.buffered_model_ids.iter().any(|id| id == model);
-        let payload = responses_request_payload(model, reasoning_effort, items, tools, !buffered)?;
+        let wire_model = self.resolved_model(model);
+        let buffered = self
+            .buffered_model_ids
+            .iter()
+            .any(|id| id == model || id == wire_model);
+        let payload =
+            responses_request_payload(wire_model, reasoning_effort, items, tools, !buffered)?;
         self.stream_with_payload(model, buffered, payload).await
     }
 
@@ -1136,9 +1443,13 @@ impl OpenAiResponsesClient {
         tail: &[ResponsesItem],
         tools: &[ResponsesTool],
     ) -> Result<OpenAiResponsesStream, ResponsesError> {
-        let buffered = self.buffered_model_ids.iter().any(|id| id == model);
+        let wire_model = self.resolved_model(model);
+        let buffered = self
+            .buffered_model_ids
+            .iter()
+            .any(|id| id == model || id == wire_model);
         let payload = compaction_continuation_payload(
-            model,
+            wire_model,
             reasoning_effort,
             window,
             tail,

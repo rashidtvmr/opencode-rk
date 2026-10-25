@@ -3216,8 +3216,13 @@ async fn bounded_typed_history(
 
 fn provider_failure(error: ResponsesError) -> ApiFailure {
     match error {
-        ResponsesError::MissingCredential(_) | ResponsesError::InvalidConfig(_) => {
+        ResponsesError::MissingCredential(_)
+        | ResponsesError::InvalidConfig(_)
+        | ResponsesError::UnsupportedProtocol(_) => {
             ApiFailure::service_unavailable(error.to_string())
+        }
+        ResponsesError::OAuthRefresh(_) => {
+            ApiFailure::service_unavailable("provider authentication unavailable")
         }
         ResponsesError::EmptyModel
         | ResponsesError::UnsupportedReasoningEffort(_)
@@ -3233,6 +3238,24 @@ fn provider_failure(error: ResponsesError) -> ApiFailure {
         | ResponsesError::UnsupportedStreamEvent(_)
         | ResponsesError::StreamFailed { .. }
         | ResponsesError::UnexpectedStreamEnd => ApiFailure::bad_gateway(error.to_string()),
+    }
+}
+
+#[cfg(test)]
+mod provider_failure_tests {
+    use super::*;
+
+    #[test]
+    fn oauth_and_protocol_admission_failures_are_service_unavailable_without_secret_body() {
+        for error in [
+            ResponsesError::OAuthRefresh("refresh-secret-must-not-escape".into()),
+            ResponsesError::UnsupportedProtocol("unsupported-protocol".into()),
+        ] {
+            let failure = provider_failure(error);
+            assert_eq!(failure.status, StatusCode::SERVICE_UNAVAILABLE);
+            assert_eq!(failure.code, "service_unavailable");
+            assert!(!failure.message.contains("refresh-secret-must-not-escape"));
+        }
     }
 }
 
