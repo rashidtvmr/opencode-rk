@@ -1,9 +1,9 @@
 //! Pinned/whole-response `/api/capabilities` contract.
 //!
-//! Registry truth: eight built-in ids emitted sorted (bash, edit, file, glob,
-//! grep, read, shell, write). Default operator env (`OPENCODE_RK_TURN_TOOLS`
-//! unset) must mark the seven real turn tools true and keep the legacy
-//! registered `file` inspector false; env-dependent scenarios are serialized
+//! Registry truth: ten built-in ids emitted sorted (bash, edit, file, glob,
+//! grep, read, shell, webfetch, websearch, write). Default operator env
+//! (`OPENCODE_RK_TURN_TOOLS` unset) must mark the nine real turn tools true
+//! and keep the legacy registered `file` inspector false; env-dependent scenarios are serialized
 //! with a process mutex, and env-independent scenarios never touch the var.
 #![forbid(unsafe_code)]
 
@@ -22,8 +22,8 @@ use tempfile::tempdir;
 use tower::ServiceExt;
 
 /// All built-in ids in the sorted wire order, including legacy `file`.
-const BUILTIN_IDS: [&str; 8] = [
-    "bash", "edit", "file", "glob", "grep", "read", "shell", "write",
+const BUILTIN_IDS: [&str; 10] = [
+    "bash", "edit", "file", "glob", "grep", "read", "shell", "webfetch", "websearch", "write",
 ];
 const TURN_ALLOWLIST_KEY: &str = "OPENCODE_RK_TURN_TOOLS";
 

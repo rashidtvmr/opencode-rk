@@ -2,10 +2,11 @@
 //!
 //! Every capability/tool entry must carry a non-empty, honest reason that names
 //! the turn-adapter boundary. Default (`OPENCODE_RK_TURN_TOOLS` unset) is the
-//! operator default: the seven real turn tools (bash, shell, read, write, edit,
-//! grep, glob) are advertised true while the legacy registered `file` inspector
-//! stays non-dispatchable. An explicit env value is not required to make the
-//! reasons honest — never over-constrain a token that is not the wire contract.
+//! operator default: the nine real turn tools (bash, shell, read, write, edit,
+//! grep, glob, webfetch, websearch) are advertised true while the legacy
+//! registered `file` inspector stays non-dispatchable. An explicit env value is
+//! not required to make the reasons honest - never over-constrain a token that
+//! is not the wire contract.
 #![forbid(unsafe_code)]
 
 use std::{
@@ -22,8 +23,13 @@ use serde_json::Value;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
-/// Built-in registry ids in sorted order: seven real turn tools plus `file`.
-const TURN_IDS: [&str; 7] = ["bash", "edit", "glob", "grep", "read", "shell", "write"];
+/// Turn-dispatchable registry ids in sorted order; legacy `file` excluded.
+const TURN_IDS: [&str; 9] = [
+    "bash", "edit", "glob", "grep", "read", "shell", "webfetch", "websearch", "write",
+];
+const BUILTIN_IDS: [&str; 10] = [
+    "bash", "edit", "file", "glob", "grep", "read", "shell", "webfetch", "websearch", "write",
+];
 const TURN_ALLOWLIST_KEY: &str = "OPENCODE_RK_TURN_TOOLS";
 
 fn env_lock() -> MutexGuard<'static, ()> {
@@ -89,9 +95,14 @@ async fn web_013_reason_unavailable_entries_carry_non_empty_reasons() {
         let reason = value[key]["reason"].as_str().unwrap();
         assert!(!reason.is_empty(), "{key} reason must be non-empty");
     }
-    // Honesty in both directions: no entry claims silence, every reason names
-    // the turn-adapter boundary, and the default advertisement is truthful.
+    // Honesty in both directions: exact registry inventory, sorted; every
+    // reason names the turn-adapter boundary; default advertisement is truthful.
     let tools = value["tools"].as_array().expect("tools array");
+    let ids: Vec<_> = tools
+        .iter()
+        .map(|tool| tool["id"].as_str().expect("tool id"))
+        .collect();
+    assert_eq!(ids, BUILTIN_IDS);
     for tool in tools {
         let id = tool["id"].as_str().expect("tool id");
         let reason = tool["reason"].as_str().unwrap();

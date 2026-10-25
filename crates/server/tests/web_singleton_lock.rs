@@ -1,5 +1,5 @@
 use opencode_rk_server::daemon::{
-    publish_backend_descriptor, read_backend_descriptor, DaemonPaths, PidLock,
+    publish_backend_descriptor_with_auth, read_backend_descriptor, DaemonPaths, PidLock,
 };
 use std::{
     fs,
@@ -22,9 +22,10 @@ fn web_006_t02_stale_pid_and_descriptor_are_recoverable() {
     drop(lock);
     assert!(!PidLock::is_held(&paths.pid));
 
-    let published = publish_backend_descriptor(
+    let published = publish_backend_descriptor_with_auth(
         dir.path(),
         SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 41001),
+        "a".repeat(64),
     )
     .expect("publish current descriptor");
     assert_eq!(

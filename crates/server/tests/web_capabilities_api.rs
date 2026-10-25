@@ -1,9 +1,9 @@
 //! Native tool advertisement over `/api/capabilities` (default = actual tools).
 //!
-//! Contract, derived from the shipped registry and turn allowlist (seven real
+//! Contract, derived from the shipped registry and turn allowlist (nine real
 //! turn tools plus the legacy registered `file` inspector):
-//! - `OPENCODE_RK_TURN_TOOLS` unset (the normal operator default): all eight
-//!   built-in ids appear sorted; the seven real turn tools are honest
+//! - `OPENCODE_RK_TURN_TOOLS` unset (the normal operator default): all ten
+//!   built-in ids appear sorted; the nine real turn tools are honestly
 //!   `available_for_web_turn=true`; the legacy registered `file` id stays
 //!   `false` because the turn adapter does not dispatch it.
 //! - Explicit `OPENCODE_RK_TURN_TOOLS=""`: every built-in id is denied, the
@@ -31,12 +31,14 @@ use serde_json::Value;
 use tempfile::tempdir;
 use tower::ServiceExt;
 
-/// All eight registered built-in ids, in the sorted wire order.
-const BUILTIN_IDS: [&str; 8] = [
-    "bash", "edit", "file", "glob", "grep", "read", "shell", "write",
+/// All ten registered built-in ids, in the sorted wire order.
+const BUILTIN_IDS: [&str; 10] = [
+    "bash", "edit", "file", "glob", "grep", "read", "shell", "webfetch", "websearch", "write",
 ];
 /// The ids the turn adapter actually dispatches (legacy `file` excluded).
-const TURN_IDS: [&str; 7] = ["bash", "edit", "glob", "grep", "read", "shell", "write"];
+const TURN_IDS: [&str; 9] = [
+    "bash", "edit", "glob", "grep", "read", "shell", "webfetch", "websearch", "write",
+];
 const TURN_ALLOWLIST_KEY: &str = "OPENCODE_RK_TURN_TOOLS";
 
 fn env_lock() -> MutexGuard<'static, ()> {
@@ -149,7 +151,7 @@ async fn web_012_t01_daemon_reports_real_tools_and_unavailable_web_adapters() {
     let _lock = env_lock();
     let _ambient = EnvGuard::unset(TURN_ALLOWLIST_KEY);
 
-    // Default (unset): the seven real turn tools are advertised executable;
+    // Default (unset): the nine real turn tools are advertised executable;
     // the legacy registered `file` id must stay false, not blanket-true.
     let value = get_capabilities().await;
     assert_sorted_ids(&value);
