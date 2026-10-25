@@ -1,0 +1,125 @@
+COMMAND ['cargo', 'test', '-p', 'opencode-rk-server', '--test', 'session_turn_stream_api']
+warning: crates/cli/Cargo.toml: file `/Users/mymac/Projects/opencode-rk-recovery-20261005/crates/cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `oc2`
+  * `bin` target `opencode-rk`
+warning: `opencode-rk-cli` (manifest) generated 1 warning
+warning: variable does not need to be mutable
+    --> crates/storage/src/lib.rs:1861:13
+     |
+1861 |         let mut actual: Vec<String> = statement
+     |             ----^^^^^^
+     |             |
+     |             help: remove this `mut`
+     |
+     = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: variable does not need to be mutable
+    --> crates/storage/src/lib.rs:1864:13
+     |
+1864 |         let mut expected: Vec<String> = columns.iter().map(|s| (*s).to_owned()).collect();
+     |             ----^^^^^^^^
+     |             |
+     |             help: remove this `mut`
+
+warning: `opencode-rk-storage` (lib) generated 2 warnings (run `cargo fix --lib -p opencode-rk-storage` to apply 2 suggestions)
+   Compiling opencode-rk-server v0.1.0-alpha.1 (/Users/mymac/Projects/opencode-rk-recovery-20261005/crates/server)
+warning: variable does not need to be mutable
+   --> crates/server/src/task_children.rs:373:92
+    |
+373 |     let GenerationClaim { generation: mut generation_id, chain_id: _chain_id, mut stopped, mut finished } = claim;
+    |                                                                                            ----^^^^^^^^
+    |                                                                                            |
+    |                                                                                            help: remove this `mut`
+    |
+    = note: `#[warn(unused_mut)]` (part of `#[warn(unused)]`) on by default
+
+warning: unused variable: `finished`
+   --> crates/server/src/task_children.rs:373:92
+    |
+373 |     let GenerationClaim { generation: mut generation_id, chain_id: _chain_id, mut stopped, mut finished } = claim;
+    |                                                                                            ^^^^^^^^^^^^ help: try ignoring the field: `finished: _`
+    |
+    = note: `#[warn(unused_variables)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `foreground_claim` is never read
+   --> crates/server/src/task_children.rs:858:32
+    |
+858 |     let mut foreground_claim = None;
+    |                                ^^^^ this value is reassigned later and never used
+...
+862 |         foreground_claim = Some(restart(state.clone(), children.clone(), events.clone(), child.clone(), prompt, false, false)?);
+    |         ---------------- `foreground_claim` is overwritten here before the previous value is read
+    |
+    = note: `#[warn(unused_assignments)]` (part of `#[warn(unused)]`) on by default
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:2993:45
+     |
+2993 | ...                   Err(_) => { state.stage = TurnStreamStage::Done; return None; }
+     |                                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:3034:29
+     |
+3034 | ...                   state.stage = TurnStreamStage::Done;
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: value assigned to `state` is never read
+    --> crates/server/src/lib.rs:3016:29
+     |
+3016 | ...                   state.stage = TurnStreamStage::Done;
+     |                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+     |
+     = help: maybe it is overwritten before being read?
+
+warning: field `message` is never read
+   --> crates/server/src/lib.rs:574:5
+    |
+571 | struct PermissionReplyBody {
+    |        ------------------- field in this struct
+...
+574 |     message: Option<String>,
+    |     ^^^^^^^
+    |
+    = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: methods `claim_generation`, `current_control`, `current_chain`, and `cancel_generation` are never used
+   --> crates/server/src/task_children.rs:98:8
+    |
+ 73 | impl Child {
+    | ---------- methods in this implementation
+...
+ 98 |     fn claim_generation(&self, manual_retry: bool) -> Result<(u32, watch::Receiver<bool>, watch::Sender<bool>), ApiFailure> {
+    |        ^^^^^^^^^^^^^^^^
+...
+106 |     fn current_control(&self) -> (u32, watch::Sender<bool>, watch::Receiver<bool>) {
+    |        ^^^^^^^^^^^^^^^
+...
+110 |     fn current_chain(&self) -> (u64, watch::Receiver<bool>) {
+    |        ^^^^^^^^^^^^^
+...
+139 |     fn cancel_generation(&self, generation: u32) {
+    |        ^^^^^^^^^^^^^^^^^
+
+warning: function `spawn` is never used
+   --> crates/server/src/task_children.rs:366:4
+    |
+366 | fn spawn(state: AppState, children: Children, events: event_bus::EventBus, child: Arc<Child>, prompt: String, replay: bool) -> Resu...
+    |    ^^^^^
+
+warning: `opencode-rk-server` (lib) generated 9 warnings (run `cargo fix --lib -p opencode-rk-server` to apply 2 suggestions)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 3.61s
+     Running tests/session_turn_stream_api.rs (target/native-usability-candidate-20261024-0542/debug/deps/session_turn_stream_api-dd0770dc104c96cb)
+
+running 2 tests
+test session_turn_stream_forwards_deltas_before_completion_and_persists_once ... ok
+test session_turn_stream_reports_provider_failure_without_persisting_assistant ... ok
+
+test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.05s
+
+
+[exit 0]

@@ -1,0 +1,16 @@
+{
+  "base_sha": "36daa6f1f35be19c1fa3510838f501890d127c05",
+  "test": "crates/server/tests/session_turn_stream_api.rs",
+  "sha256": "886cb9967a8861b7d66ed5f1d50700bc6a10272f27c619c64d6b8d92bd6129df",
+  "red_log": "docs/worklogs/context-controls-004/server-remaining-failures-baseline.log",
+  "red_log_sha256": "0210807d60a19b728f8d85ef18a40ef05b29f2b8d22f75ae5fa6ab07c773da4f",
+  "observed": "Code-less response.failed reports provider_stream_failed; existing API contract requires bad_gateway. No assistant message may be persisted on failure.",
+  "command": [
+    "cargo",
+    "test",
+    "-p",
+    "opencode-rk-server",
+    "--test",
+    "session_turn_stream_api"
+  ]
+}
