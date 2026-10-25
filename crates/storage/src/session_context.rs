@@ -20,6 +20,43 @@ pub struct ContextToolPreview {
     pub truncated: bool,
 }
 
+// Separate foreign keys establish existence, not session ownership. Validate
+// both incoming and outgoing links before selection can hide corrupt rows.
+pub(super) fn validate_typed_ownership(
+    connection: &rusqlite::Connection,
+    session: SessionId,
+) -> Result<(), StorageError> {
+    let session = session.to_string();
+    // Every check is seeded by the requested session.  In particular, do not
+    // combine these into an OR predicate: that permits SQLite to scan all
+    // typed metadata while checking an unrelated session.
+    let invalid_queries = [
+        "SELECT EXISTS(SELECT 1 FROM tool_rounds r INDEXED BY tool_rounds_session_idx
+          WHERE r.session_id=?1 AND NOT EXISTS(
+            SELECT 1 FROM messages turn WHERE turn.id=r.turn_message_id
+              AND turn.session_id=r.session_id) LIMIT 1)",
+        "SELECT EXISTS(SELECT 1 FROM messages turn INDEXED BY messages_session_idx
+          JOIN tool_rounds r ON r.turn_message_id=turn.id
+          WHERE turn.session_id=?1 AND r.session_id!=turn.session_id LIMIT 1)",
+        "SELECT EXISTS(SELECT 1 FROM typed_tool_records t INDEXED BY typed_tool_round_idx
+          JOIN tool_rounds r INDEXED BY tool_rounds_session_idx ON r.round_id=t.round_id
+          WHERE r.session_id=?1 AND NOT EXISTS(
+            SELECT 1 FROM messages display WHERE display.id=t.message_id
+              AND display.session_id=r.session_id AND display.role='tool') LIMIT 1)",
+        "SELECT EXISTS(SELECT 1 FROM typed_tool_records t INDEXED BY typed_tool_message_idx
+          JOIN messages display INDEXED BY messages_session_idx ON display.id=t.message_id
+          WHERE display.session_id=?1 AND NOT EXISTS(
+            SELECT 1 FROM tool_rounds r
+             WHERE r.round_id=t.round_id AND r.session_id=display.session_id) LIMIT 1)",
+    ];
+    for sql in invalid_queries {
+        if connection.query_row(sql, params![session], |row| row.get::<_, bool>(0))? {
+            return Err(StorageError::TypedHistoryIdentity);
+        }
+    }
+    Ok(())
+}
+
 impl Storage {
     pub fn context_tool_preview(
         &self,
@@ -27,6 +64,8 @@ impl Storage {
         message: MessageId,
     ) -> Result<Vec<ContextToolPreview>, StorageError> {
         let conn = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let conn = conn.unchecked_transaction()?;
+        validate_typed_ownership(&conn, session)?;
         let role: Option<String> = conn
             .query_row(
                 "SELECT role FROM messages WHERE session_id=?1 AND id=?2 LIMIT 1",

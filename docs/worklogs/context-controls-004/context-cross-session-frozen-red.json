@@ -1,0 +1,6 @@
+{
+  "base_sha": "fa845813",
+  "test": "crates/storage/tests/context_cross_session_integrity.rs",
+  "sha256": "34f2201db9f97da5d61ab91260488ab5a8c417678eec0ca951ed497809353f21",
+  "red_log": "context-cross-session-compiled-red.log"
+}

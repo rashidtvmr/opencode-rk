@@ -477,6 +477,7 @@ impl Storage {
             ).optional()?.ok_or(StorageError::MessageNotFound(id))?,
             None => 0,
         };
+        session_context::validate_typed_ownership(&tx, session_id)?;
         if boundary.is_some() {
             // A checkpoint cannot divide a typed round. A tool display row in
             // the tail must have its owning turn and every paired row there too.
@@ -904,6 +905,8 @@ impl Storage {
         limit: usize,
     ) -> Result<Vec<ToolHistoryItem>, StorageError> {
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let connection = connection.unchecked_transaction()?;
+        session_context::validate_typed_ownership(&connection, id)?;
         let mut query = connection.prepare(
             "SELECT r.round_id,r.pair_index,r.kind,r.call_id,r.name,r.payload,r.message_id,r.byte_len
             FROM typed_tool_records r JOIN tool_rounds t ON t.round_id=r.round_id
@@ -1659,13 +1662,14 @@ impl Storage {
                 false,
                 &["round_id", "pair_index", "kind"],
             )?;
+            validate_typed_index(connection, "typed_tool_message_idx", false, &["message_id", "round_id"])?;
             validate_typed_index(
                 connection,
                 "tool_rounds_identity_idx",
                 true,
                 &["round_id", "turn_message_id", "round_ordinal"],
             )?;
-            connection.execute_batch("CREATE INDEX IF NOT EXISTS tool_rounds_session_idx ON tool_rounds(session_id,created_at,round_id); CREATE INDEX IF NOT EXISTS typed_tool_round_idx ON typed_tool_records(round_id,pair_index,kind); CREATE UNIQUE INDEX IF NOT EXISTS tool_rounds_identity_idx ON tool_rounds(round_id,turn_message_id,round_ordinal);")?;
+            connection.execute_batch("CREATE INDEX IF NOT EXISTS tool_rounds_session_idx ON tool_rounds(session_id,created_at,round_id); CREATE INDEX IF NOT EXISTS typed_tool_round_idx ON typed_tool_records(round_id,pair_index,kind); CREATE INDEX IF NOT EXISTS typed_tool_message_idx ON typed_tool_records(message_id,round_id); CREATE UNIQUE INDEX IF NOT EXISTS tool_rounds_identity_idx ON tool_rounds(round_id,turn_message_id,round_ordinal);")?;
             validate_typed_index(
                 connection,
                 "tool_rounds_session_idx",
@@ -1678,6 +1682,7 @@ impl Storage {
                 false,
                 &["round_id", "pair_index", "kind"],
             )?;
+            validate_typed_index(connection, "typed_tool_message_idx", false, &["message_id", "round_id"])?;
             validate_typed_index(
                 connection,
                 "tool_rounds_identity_idx",
@@ -1826,7 +1831,7 @@ fn validate_typed_index(
     unique: bool,
     columns: &[&str],
 ) -> Result<(), StorageError> {
-    let table = if name == "typed_tool_round_idx" {
+    let table = if name == "typed_tool_round_idx" || name == "typed_tool_message_idx" {
         "typed_tool_records"
     } else {
         "tool_rounds"
@@ -1857,8 +1862,6 @@ fn validate_typed_index(
             .query_map(params![name], |row| row.get(0))?
             .collect::<Result<_, _>>()?;
         let mut expected: Vec<String> = columns.iter().map(|s| (*s).to_owned()).collect();
-        actual.sort();
-        expected.sort();
         if (flag != 0) != unique || actual != expected {
             return Err(StorageError::TypedHistorySchema);
         }

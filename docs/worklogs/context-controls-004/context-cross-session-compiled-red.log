@@ -1,0 +1,33 @@
+warning: crates/cli/Cargo.toml: file `/Users/mymac/Projects/opencode-rk-recovery-20261005/crates/cli/src/main.rs` found to be present in multiple build targets:
+  * `bin` target `oc2`
+  * `bin` target `opencode-rk`
+warning: `opencode-rk-cli` (manifest) generated 1 warning
+   Compiling opencode-rk-storage v0.1.0-alpha.1 (/Users/mymac/Projects/opencode-rk-recovery-20261005/crates/storage)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.75s
+     Running tests/context_cross_session_integrity.rs (target/native-usability-candidate-20261024-0542/debug/deps/context_cross_session_integrity-9c678de3e7bf3769)
+
+running 2 tests
+test cross_session_round_links_are_rejected_by_raw_and_context_history ... FAILED
+test cross_session_round_links_are_rejected_by_tool_preview ... FAILED
+
+failures:
+
+---- cross_session_round_links_are_rejected_by_raw_and_context_history stdout ----
+
+thread 'cross_session_round_links_are_rejected_by_raw_and_context_history' (735371) panicked at crates/storage/tests/context_cross_session_integrity.rs:60:5:
+cross-session corruption must be rejected as integrity failure, got Ok([Tool(ToolHistoryItem { round_id: "round-a", pair_index: 0, kind: "call", call_id: "call-a", name: "fixture.tool", payload: "{}", message_id: MessageId(4b559551-2739-4b9a-beea-028bbe354fa1) }), Tool(ToolHistoryItem { round_id: "round-a", pair_index: 0, kind: "output", call_id: "call-a", name: "fixture.tool", payload: "ok", message_id: MessageId(4b559551-2739-4b9a-beea-028bbe354fa1) })])
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- cross_session_round_links_are_rejected_by_tool_preview stdout ----
+
+thread 'cross_session_round_links_are_rejected_by_tool_preview' (735372) panicked at crates/storage/tests/context_cross_session_integrity.rs:60:5:
+cross-session corruption must be rejected as integrity failure, got Ok([ContextToolPreview { kind: "call", name: "fixture.tool", call_id: "call-a", pair_index: 0, payload: "{}", bytes: 2, truncated: false }, ContextToolPreview { kind: "output", name: "fixture.tool", call_id: "call-a", pair_index: 0, payload: "ok", bytes: 2, truncated: false }])
+
+
+failures:
+    cross_session_round_links_are_rejected_by_raw_and_context_history
+    cross_session_round_links_are_rejected_by_tool_preview
+
+test result: FAILED. 0 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.02s
+
+error: test failed, to rerun pass `-p opencode-rk-storage --test context_cross_session_integrity`
