@@ -30,6 +30,9 @@ pub(crate) struct ContextItem {
     pub(crate) selectable: bool,
     pub(crate) content: String,
     pub(crate) reason: Option<String>,
+    /// Typed authority for whether this item is represented by a checkpoint.
+    /// This remains distinct from the legacy display reason.
+    pub(crate) represented_by_checkpoint: bool,
     pub(crate) bytes: u64,
     pub(crate) estimated_tokens: u64,
     pub(crate) records: Vec<ContextRecord>,
@@ -178,8 +181,12 @@ impl ContextView {
                 Some(Value::String(s)) => Some(s.chars().take(512).collect()),
                 _ => return Err("context item reason is invalid".into()),
             };
-            let compacted = optional_bool(o, "represented_by_checkpoint")?.unwrap_or(false)
-                || reason.as_deref() == Some("checkpoint_is_indivisible");
+            // An explicitly typed representation flag is authoritative. The
+            // reason fallback is retained only for legacy payloads omitting it.
+            let compacted = match optional_bool(o, "represented_by_checkpoint")? {
+                Some(value) => value,
+                None => reason.as_deref() == Some("checkpoint_is_indivisible"),
+            };
             let mandatory = optional_bool(o, "mandatory")?.unwrap_or(false);
             if selectable && (role == "system" || kind == "memory" || compacted || mandatory) {
                 return Err(
@@ -206,6 +213,7 @@ impl ContextView {
                 selectable,
                 content,
                 reason,
+                represented_by_checkpoint: compacted,
                 bytes: bytes.unwrap_or(0),
                 estimated_tokens,
                 records,
@@ -261,7 +269,7 @@ impl ContextView {
                 if item.selectable { "▸" } else { "•" },
                 item.kind,
                 item.role,
-                if item.reason.as_deref() == Some("checkpoint_is_indivisible") {
+                if item.represented_by_checkpoint {
                     "compacted"
                 } else if item.included {
                     "included"
@@ -380,7 +388,7 @@ fn reason_label(item: &ContextItem) -> String {
                 .map(|x| format!(" ({x})"))
                 .unwrap_or_default()
         )
-    } else if item.reason.as_deref() == Some("checkpoint_is_indivisible") {
+    } else if item.represented_by_checkpoint {
         "represented by checkpoint (compacted)".into()
     } else if item.reason.is_some() && !item.included {
         "excluded".into()

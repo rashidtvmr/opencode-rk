@@ -199,3 +199,29 @@ fn long_source_and_checkpoint_metadata_remain_reachable_by_detail_scrolling() {
     assert!(seen.contains("SOURCE_SUFFIX"), "source attribution must be fully inspectable");
     assert!(seen.contains("MODEL_SUFFIX"), "checkpoint identity must be fully inspectable");
 }
+#[test]
+fn typed_checkpoint_representation_authority_and_legacy_fallback() {
+    let mut explicit_false = item("00000000-0000-0000-0000-000000000001", "message");
+    explicit_false["represented_by_checkpoint"] = serde_json::json!(false);
+    explicit_false["reason"] = serde_json::json!("checkpoint_is_indivisible");
+    let mut view = ContextView::new();
+    view.load_response(&body(serde_json::json!([explicit_false])))
+        .unwrap();
+    assert!(!view.items()[0].represented_by_checkpoint);
+    assert!(view.items()[0].selectable);
+
+    let mut legacy = item("00000000-0000-0000-0000-000000000002", "message");
+    legacy.as_object_mut().unwrap().remove("represented_by_checkpoint");
+    legacy["selectable"] = serde_json::json!(false);
+    legacy["reason"] = serde_json::json!("checkpoint_is_indivisible");
+    let mut legacy_view = ContextView::new();
+    legacy_view.load_response(&body(serde_json::json!([legacy]))).unwrap();
+    assert!(legacy_view.items()[0].represented_by_checkpoint);
+
+    let mut explicit_true = item("00000000-0000-0000-0000-000000000003", "message");
+    explicit_true["selectable"] = serde_json::json!(false);
+    explicit_true["represented_by_checkpoint"] = serde_json::json!(true);
+    let mut true_view = ContextView::new();
+    true_view.load_response(&body(serde_json::json!([explicit_true]))).unwrap();
+    assert!(true_view.items()[0].represented_by_checkpoint);
+}
