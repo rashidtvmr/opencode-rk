@@ -20,20 +20,81 @@ pub fn mcp_advertised() -> bool {
     }
 }
 
+/// 128-bit (32 hex char) blake3 digest of the (server, tool) pair.
+/// blake3 produces 256 bits; we truncate to 128 bits (32 hex chars).
+fn stable_digest(server: &str, tool: &str) -> String {
+    let hex = blake3::hash(format!("{server}\0{tool}").as_bytes()).to_hex().to_string();
+    hex.chars().take(32).collect()
+}
+
+/// Legacy 8-hex prefix used by the pre-fix stable_name. Reconstructed verbatim
+/// so existing DENY rules targeting `mcp_{8hex}_{sanitized}` remain honored.
+fn legacy_8hex(server: &str, tool: &str) -> String {
+    let digest = stable_digest(server, tool);
+    digest.chars().take(8).collect()
+}
+
+/// Sanitize a tool name into ASCII-safe bytes, replacing any non-alphanumeric
+/// character (except underscore) with underscore.
+fn sanitize_tool_name(tool: &str) -> String {
+    tool.chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect()
+}
+
+/// Reconstruct the exact legacy qualified name `mcp_{8hex}_{sanitized}`.
+/// Existing DENY rules store this exact form; they must continue to match.
+fn legacy_deny_name(server: &str, tool: &str) -> String {
+    let digest = legacy_8hex(server, tool);
+    let sanitized = sanitize_tool_name(tool);
+    let keep = MAX_TOOL_NAME_BYTES.saturating_sub(13 + 1 + 8);
+    format!("mcp_{}_{}", &digest, sanitized.chars().take(keep).collect::<String>())
+}
+
+/// Stable 128-bit (32-hex) qualified name with a sanitized suffix.
+/// Format: `mcp_{32hex}_{sanitized_suffix}` where suffix is bounded so the
+/// total never exceeds MAX_TOOL_NAME_BYTES (64). The 128-bit digest eliminates
+/// the collision probability that made 8-hex truncation insecure.
 fn stable_name(server: &str, tool: &str) -> String {
-    let digest = blake3::hash(format!("{server}\0{tool}").as_bytes()).to_hex().to_string();
-    let sanitized: String = tool.chars().map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' }).collect();
-    let keep = MAX_TOOL_NAME_BYTES.saturating_sub(13 + 1 + digest.len().min(8));
-    format!("mcp_{}_{}", &digest[..8], sanitized.chars().take(keep).collect::<String>())
+    let digest = stable_digest(server, tool);
+    let sanitized = sanitize_tool_name(tool);
+    // mcp_ = 4, _ = 1, 32 hex = 32, _ = 1 => 38 prefix bytes; suffix gets the rest.
+    let keep = MAX_TOOL_NAME_BYTES.saturating_sub(4 + 1 + 32 + 1);
+    format!("mcp_{}_{}", &digest, sanitized.chars().take(keep).collect::<String>())
+}
+
+/// Check DENY rules for both the current qualified name and the legacy
+/// 8-hex qualified name. This preserves backward compatibility with DENY rules
+/// persisted under the old naming scheme while adopting collision-resistant names.
+/// Checks at both preapproval and effect boundary.
+fn is_denied(name: &str, legacy_name: &str, session: &str, intent: &OperationIntent, broker: &PermissionBroker) -> bool {
+    let legacy_intent = match intent {
+        OperationIntent::Tool { description, .. } => OperationIntent::Tool {
+            name: legacy_name.to_owned(),
+            description: description.clone(),
+        },
+        _ => intent.clone(),
+    };
+    crate::permission_rules::denied(name, session, intent, broker)
+        || crate::permission_rules::denied(legacy_name, session, &legacy_intent, broker)
 }
 
 pub async fn effective_tools(registry: &McpStatusRegistry, session: SessionId, sessions: &opencode_rk_sessions::SessionService) -> Result<Vec<McpToolDefinition>, String> {
     if !mcp_advertised() { return Ok(Vec::new()); }
     let excluded = sessions.mcp_exclusions(session).await.map_err(|e| e.to_string())?;
     let mut out = Vec::new();
+    let mut seen_names = std::collections::HashSet::new();
     for server in registry.connected_names().await.into_iter().filter(|s| !excluded.iter().any(|x| x == s)) {
         for tool in registry.effective_tools(&server).await {
-            out.push(McpToolDefinition { name: stable_name(&server, &tool.name), description: format!("MCP {server}/{0}: {1}", tool.name, tool.description), input_schema: tool.input_schema, server: server.clone(), tool: tool.name });
+            let name = stable_name(&server, &tool.name);
+            // Reject ANY duplicate advertised qualified names before provider
+            // payload. First-match ambiguity is a security failure mode; a
+            // duplicate means two distinct (server, tool) pairs resolved to the
+            // same identity, which must fail closed rather than first-match.
+            if !seen_names.insert(name.clone()) {
+                return Err(format!("duplicate MCP qualified name rejected: {name}"));
+            }
+            out.push(McpToolDefinition { name, description: format!("MCP {server}/{0}: {1}", tool.name, tool.description), input_schema: tool.input_schema, server: server.clone(), tool: tool.name });
         }
     }
     Ok(out)
@@ -42,10 +103,12 @@ pub async fn effective_tools(registry: &McpStatusRegistry, session: SessionId, s
 pub async fn execute(registry: &McpStatusRegistry, sessions: &opencode_rk_sessions::SessionService, session: SessionId, owner: &Arc<RunOwner>, broker: &PermissionBroker, message_id: MessageId, call_id: &str, call_name: &str, arguments: Value) -> Result<(String, bool), String> {
     let defs = effective_tools(registry, session, sessions).await?;
     let Some(def) = defs.into_iter().find(|d| d.name == call_name) else { return Err("unknown or disabled MCP tool".into()); };
+    let legacy_name = legacy_deny_name(&def.server, &def.tool);
     let description = serde_json::to_string(&json!({"server":def.server,"tool":def.tool,"arguments":arguments})).map_err(|_| "invalid MCP arguments")?;
     if description.len() > MAX_RESULT_BYTES { return Err("MCP arguments too large".into()); }
     let intent = OperationIntent::Tool { name: def.name.clone(), description };
-    if crate::permission_rules::denied(&def.name, &session.to_string(), &intent, broker) {
+    // Preapproval deny check: honor BOTH current and legacy DENY rules.
+    if is_denied(&def.name, &legacy_name, &session.to_string(), &intent, broker) {
         return Ok(("MCP permission denied by saved rule".into(), false));
     }
     let request = PermissionRequest { id: format!("per_{}", opencode_rk_contracts::ApprovalId::new()), session_id: session.to_string(), action: def.name.clone(), resources: vec![intent_resource(&intent)], source: PermissionSource { kind: "tool", message_id: message_id.to_string(), call_id: call_id.to_owned() } };
@@ -65,7 +128,9 @@ pub async fn execute(registry: &McpStatusRegistry, sessions: &opencode_rk_sessio
         return Ok(("MCP tool disabled for this session".into(), false));
     }
     if owner.is_cancelled() { return Ok(("MCP call cancelled".into(), false)); }
-    if crate::permission_rules::denied(&def.name, &session.to_string(), &intent, broker) {
+    // Effect-boundary deny recheck: DENY rules may have been persisted while
+    // human approval was pending. Check both current and legacy names.
+    if is_denied(&def.name, &legacy_name, &session.to_string(), &intent, broker) {
         return Ok(("MCP permission denied by saved rule".into(), false));
     }
     let result = registry.call_tool_checked(&def.server, &def.tool, arguments).await?;
@@ -135,3 +200,11 @@ done
         assert!(outcome.is_err() || !outcome.unwrap().1);
     }
 }
+
+#[cfg(test)]
+#[path = "mcp_context_collision_tests.rs"]
+mod collision_tests;
+
+#[cfg(test)]
+#[path = "mcp_legacy_deny_tests.rs"]
+mod legacy_deny_tests;

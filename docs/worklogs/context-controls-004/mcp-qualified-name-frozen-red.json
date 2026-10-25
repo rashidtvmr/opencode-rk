@@ -1,0 +1,6 @@
+{
+  "base_sha": "fa845813",
+  "test": "crates/server/src/mcp_context_collision_tests.rs",
+  "sha256": "ad8c2501953786d88b60ce7d4b92bcb65fc6b10e139a666c4b0d4e5693085f5f",
+  "red_log": "mcp-qualified-name-compiled-red.log"
+}
