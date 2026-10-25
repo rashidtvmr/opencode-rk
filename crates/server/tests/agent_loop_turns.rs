@@ -545,7 +545,7 @@ async fn agentic_loop_e2e_execute_cap_and_policy() {
     assert_eq!(
         advertised,
         vec![
-            "bash", "edit", "glob", "grep", "read", "shell", "task", "webfetch",
+            "bash", "edit", "glob", "grep", "read", "shell", "task", "todowrite", "webfetch",
             "websearch", "write",
         ]
     );
