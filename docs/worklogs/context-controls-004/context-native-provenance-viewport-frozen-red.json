@@ -1,0 +1,6 @@
+{
+  "test": "crates/cli/src/native_context_tests.rs",
+  "sha256": "7b45c9140b6d77fa4e26b6a7fc8538755897dfa4e6d9936902be739f505bc7b5",
+  "red": "context-native-provenance-viewport-red.log:long source suffix is inaccessible through detail scrolling",
+  "command": "cargo test -p opencode-rk-cli --bin oc2 --features native long_source_and_checkpoint_metadata"
+}

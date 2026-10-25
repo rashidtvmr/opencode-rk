@@ -55,6 +55,12 @@ mod native_debug;
 mod native_memory;
 #[cfg(feature = "native")]
 mod native_compaction_settings;
+#[cfg(feature = "native")]
+mod native_context;
+#[cfg(all(test, feature = "native"))]
+mod native_context_tests;
+#[cfg(all(test, feature = "native"))]
+mod native_context_security_tests;
 #[cfg(all(test, feature = "native"))]
 mod native_compaction_settings_tests;
 #[cfg(all(test, feature = "native"))]

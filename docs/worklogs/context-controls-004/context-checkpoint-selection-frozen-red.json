@@ -1,0 +1,13 @@
+{
+  "test": "crates/server/tests/context_checkpoint_selection.rs",
+  "sha256": "20f5ba5a58efe90457f7c273f47133f3adc4a72faae6e3e93c36f8a6b4b16cec",
+  "red": "context-checkpoint-selection-valid-red.log",
+  "contract": "compacted per-message include and exclude conflict; opaque checkpoint stays provider-only, whole-checkpoint excludes/include survives restart; replacement checkpoint does not retain stale exclusions; route auth mandatory",
+  "initial_observer_corrections": "native retained context comes only from provider output and post-boundary tail, not a pre-boundary raw message absent from provider output",
+  "second_observed_failure": "context-checkpoint-replacement-red.log:GET400 after successful checkpoint replacement, expected200; compiled original frozen test unchanged",
+  "independent_observer_correction": {
+    "artifact": "context-checkpoint-observer-collision-correction.md",
+    "corrected_sha256": "728e660b2cf5ad434e342b2062373badf173e468f2480b857e2e77fd1a372111",
+    "reason": "old opaque marker is a prefix of replacement marker; compare exact encrypted_content values recursively, preserving absence/presence semantics"
+  }
+}

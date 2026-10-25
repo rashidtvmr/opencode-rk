@@ -60,7 +60,8 @@ use opencode_rk_contracts::{
     DraftAttachment, MAX_REASONING_SUMMARY_BYTES, MAX_TITLE_BYTES, MessageId, MessageRecord,
     MessageRole, PayloadRef, SessionId, SessionState, SessionSummary, Timestamp,
 };
-use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, StorageError, V2Writer};
+use opencode_rk_storage::{CatalogV2, NewMessage, NewSession, Storage, V2Writer};
+pub use opencode_rk_storage::StorageError;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::{
     path::{Path, PathBuf},
@@ -71,6 +72,7 @@ pub type SessionRecord = SessionSummary;
 pub use opencode_rk_contracts::MessageRole as Role;
 pub use opencode_rk_storage::{HistoryItem, ToolCallAdmission, ToolRound};
 pub use opencode_rk_storage::session_compaction::CompactionCheckpoint;
+pub use opencode_rk_storage::session_context::{ContextSelection, ContextToolPreview};
 pub use opencode_rk_storage::session_compaction_settings::{CompactionStrategy, SessionCompactionSettings};
 const ACTIVE: i64 = 0;
 const ARCHIVED: i64 = 1;
@@ -613,6 +615,38 @@ impl SessionService {
             Ok(items)
         })
         .await
+    }
+
+    pub async fn context_selection(&self, id: SessionId) -> Result<ContextSelection, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.context_selection(id)).await.map_err(todo_error)
+    }
+    pub async fn set_context_included(&self, id: SessionId, item: MessageId, checkpoint: bool, included: bool) -> Result<(), SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.set_context_included(id, item, checkpoint, included)).await.map_err(todo_error)
+    }
+    pub async fn context_message_compacted(&self, session: SessionId, message: MessageId, boundary: MessageId) -> Result<bool, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.context_message_compacted(session, message, boundary)).await.map_err(todo_error)
+    }
+    pub async fn context_tool_preview(&self, session: SessionId, message: MessageId) -> Result<Vec<ContextToolPreview>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.context_tool_preview(session, message)).await
+    }
+    pub async fn bounded_context_history(&self, id: SessionId, boundary: Option<MessageId>, items: usize, bytes: usize) -> Result<Vec<HistoryItem>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || {
+            let mut result = storage.bounded_context_history(id, boundary, items, bytes)?;
+            for item in &mut result {
+                if let HistoryItem::Message(message) = item {
+                    if let PayloadRef::Blob { hash, .. } = &message.body {
+                        let bytes = storage.blob_store().get_bounded(hash, bytes)?;
+                        message.body = PayloadRef::Inline { text: String::from_utf8(bytes).map_err(|_| StorageError::TypedHistoryIdentity)? };
+                    }
+                }
+            }
+            Ok(result)
+        }).await
     }
 
     pub async fn compaction_checkpoint(&self, session_id: SessionId) -> Result<Option<CompactionCheckpoint>, SessionError> {

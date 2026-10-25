@@ -1,0 +1,6 @@
+{
+  "test": "crates/cli/src/native_context_security_tests.rs",
+  "sha256": "d8903f585fc9dd8a91651089da6be7e7234315eb525b56c2a4ad9a9c4755b82e",
+  "red": "context-native-security-red.log:2 compiled failures; malformed selection authority accepted and oversized record payload accepted",
+  "command": "cargo test -p opencode-rk-cli --bin oc2 --features native native_context_security_tests"
+}

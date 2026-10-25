@@ -19,6 +19,7 @@ pub mod auto_loop;
 pub mod auto_compaction;
 mod fallback_compaction;
 mod compaction_settings;
+mod context_http;
 pub mod auto_report;
 pub mod auto_window;
 mod browser_resume;
@@ -213,6 +214,9 @@ pub fn router_with_events(
         .route("/api/sessions/{id}/archive", post(archive_session))
         .route("/api/sessions/{id}/compact", post(compact_session))
         .route("/api/sessions/{id}/compaction/settings", get(compaction_settings::get).put(compaction_settings::put).layer(DefaultBodyLimit::max(4096)))
+        .route("/api/sessions/{id}/context", get(context_http::get))
+        .route("/api/sessions/{id}/context/exclude", post(context_http::exclude).layer(DefaultBodyLimit::max(1024)))
+        .route("/api/sessions/{id}/context/include", post(context_http::include).layer(DefaultBodyLimit::max(1024)))
         .route(
             "/api/sessions/{id}/messages",
             get(list_messages).post(append_message),
@@ -3129,12 +3133,19 @@ async fn checkpoint_provider_history(
         return bounded_typed_history(sessions, session_id, max_items, max_bytes).await
             .map(|items| (items, None)).map_err(ApiFailure::internal);
     };
+    let selection = sessions.context_selection(session_id).await.map_err(ApiFailure::internal)?;
+    if selection.checkpoints.contains(&checkpoint.boundary_message_id) {
+        let input = sessions.bounded_context_history(session_id, Some(checkpoint.boundary_message_id), max_items, max_bytes)
+            .await.map_err(ApiFailure::internal)?.into_iter().map(history_item_to_responses_item)
+            .collect::<Result<Vec<_>,_>>().map_err(ApiFailure::internal)?;
+        return Ok((input, None));
+    }
     let (provider, model) = qualified_model.split_once('/')
         .ok_or_else(|| ApiFailure::bad_request("model must use provider/model format"))?;
     if checkpoint.provider_id != provider || checkpoint.model_id != model {
         return Err(ApiFailure::unprocessable("compaction checkpoint belongs to a different provider/model"));
     }
-    let input = sessions.bounded_history_after(session_id, checkpoint.boundary_message_id, max_items, max_bytes)
+    let input = sessions.bounded_context_history(session_id, Some(checkpoint.boundary_message_id), max_items, max_bytes)
         .await.map_err(ApiFailure::internal)?.into_iter().map(history_item_to_responses_item)
         .collect::<Result<Vec<_>, _>>().map_err(ApiFailure::internal)?;
     let value: Value = serde_json::from_str(&checkpoint.window_json).map_err(ApiFailure::internal)?;
@@ -3161,7 +3172,7 @@ async fn bounded_typed_history(
     max_bytes: usize,
 ) -> Result<Vec<ResponsesItem>, SessionError> {
     let items = sessions
-        .bounded_history(session_id, max_items, max_bytes)
+        .bounded_context_history(session_id, None, max_items, max_bytes)
         .await?;
     items
         .into_iter()

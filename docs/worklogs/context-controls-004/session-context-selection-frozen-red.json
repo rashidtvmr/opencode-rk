@@ -1,0 +1,7 @@
+{
+  "base": "e3069eee04d9a3414517b2452df803c9c145c9d3",
+  "test": "crates/server/tests/session_context_selection.rs",
+  "sha256": "df39053148b72b7b29646c5c4f4d061a8abce3166cae9d4196d4947bfb4e400a",
+  "command": "cargo test -p opencode-rk-server --test session_context_selection",
+  "red": "session-context-selection-red.log: compiled, context GET404 expected200"
+}

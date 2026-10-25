@@ -79,6 +79,7 @@ pub struct NativeView {
     pages: PageState,
     memory: crate::native_memory::Memory,
     compaction: crate::native_compaction_settings::CompactionSettingsView,
+    context: crate::native_context::ContextView,
     command_palette: crate::native_command_palette::CommandPalette,
     status: StatusView,
     /// Held from day one; `DialogView::request/answer` wiring is explicitly
@@ -434,6 +435,7 @@ impl NativeView {
             pages: PageState::default(),
             memory: crate::native_memory::Memory::new(),
             compaction: crate::native_compaction_settings::CompactionSettingsView::new(),
+            context: crate::native_context::ContextView::new(),
             status: StatusView::default(),
             dialogs: DialogView::default(),
             command_palette: crate::native_command_palette::CommandPalette::default(),
@@ -867,6 +869,13 @@ impl NativeView {
     pub fn memory(&self) -> &crate::native_memory::Memory { &self.memory }
     pub fn compaction(&self) -> &crate::native_compaction_settings::CompactionSettingsView { &self.compaction }
     pub fn compaction_mut(&mut self) -> &mut crate::native_compaction_settings::CompactionSettingsView { &mut self.compaction }
+    pub fn load_context(&mut self, body: &str) -> Result<(), String> { self.context.load_response(body) }
+    pub fn set_context_error(&mut self, error: &str) { self.context.set_error(error); }
+    pub fn invalidate_context(&mut self) { self.context.invalidate(); }
+    pub fn context_mut(&mut self) -> &mut crate::native_context::ContextView { &mut self.context }
+    pub fn context(&self) -> &crate::native_context::ContextView { &self.context }
+    pub fn select_context_step(&mut self, down: bool) { self.context.select_step(down); }
+    pub fn scroll_context_detail(&mut self, down: bool) { self.context.scroll_detail(down); }
     pub fn scroll_memory_content(&mut self, lines: isize) {
         let Some((_, _, width, height)) = self.page_panel() else { return; };
         let inset = if width >= 8 { 2 } else { 0 };
@@ -1464,6 +1473,12 @@ impl NativeView {
                 self.compaction.render(content_width as usize, content_height).into_iter().enumerate().map(|(index, text)| crate::native_ui_style::Line {
                     text,
                     role: if index == 0 { crate::native_ui_style::Role::Heading } else { crate::native_ui_style::Role::Item },
+                    detail_from: None,
+                }).collect()
+            } else if self.pages.page() == Page::Context {
+                self.context.render(content_width as usize, content_height).into_iter().enumerate().map(|(index, text)| crate::native_ui_style::Line {
+                    text,
+                    role: if index == 0 { crate::native_ui_style::Role::Heading } else if index == 1 { crate::native_ui_style::Role::Selected } else { crate::native_ui_style::Role::Item },
                     detail_from: None,
                 }).collect()
             } else { self.pages.render_styled(content_width as usize, content_height) };

@@ -1,0 +1,33 @@
+{
+  "root": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/context-inspector-terminal-sutbylsz",
+  "port": 64150,
+  "binary": "/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/context-inspector-terminal-sutbylsz/bin/oc2",
+  "status": "debug candidate copied; not final installed release",
+  "base": "e3069eee04d9a3414517b2452df803c9c145c9d3",
+  "binary_sha256": "7929e5b050c508918d47c427c504589f4ee5991d18c41e94988c97aecc222f48",
+  "source_sha256": {
+    "crates/storage/src/lib.rs": "7229fb0b7982b3a532847b0148d922b1f7181e0782dab74243c122e4d667616f",
+    "crates/storage/src/session_context.rs": "ac22d690ac07fb1e1f8ec8e1c6fb332674cf865254d61e90da6dcf475e0a4829",
+    "crates/storage/src/session_compaction.rs": "a3e7a1cf324c3c78a7eeb2d380bf445d9a9e22c2829eba0174408db3f30e65d8",
+    "crates/sessions/src/lib.rs": "f155e726776e6966012d19564cbd0cf62c03abb43a6b8bec68072a2a98ebe5d5",
+    "crates/server/src/lib.rs": "44e9dd5215dac825fb5bc0b4f2503530bfc5bb7519307a14e2035644e69c9783",
+    "crates/server/src/context_http.rs": "a3f5b0f9dea7682c016e9206ae9bbe9255454a6f8bb5ab4dadebbb4108bbc184",
+    "crates/cli/src/main.rs": "b5d8d88912e6f45a85b2a5ba09e212d7e32bd9ff0e0bda58acffd2dff3a87f29",
+    "crates/cli/src/native_view.rs": "15533f73bd04a9627f908c5f4687ab5966de6352a1b7c2fb44e8037a775658a8",
+    "crates/cli/src/tui_entry.rs": "945309c21ccbab8d3a00926eb821eaddaea424e1b9b2e069cb112d1835bbac74",
+    "crates/cli/src/native_context.rs": "e990a33d0f88beafe9974c4687dbc30fd211a7d27bfcefebc8f3895e73e7305c"
+  },
+  "final_candidate_binary_sha256": "f34a2854b47954300978f20e10ae3b7da60850754cc8a4df0556435c40dc4bbd",
+  "final_candidate_source_sha256": {
+    "crates/storage/src/lib.rs": "7229fb0b7982b3a532847b0148d922b1f7181e0782dab74243c122e4d667616f",
+    "crates/storage/src/session_context.rs": "4ca5c8cb967083f4ca5314f7e53b75b7f64d278541cacfc0912df9be07e29db2",
+    "crates/storage/src/session_compaction.rs": "a3e7a1cf324c3c78a7eeb2d380bf445d9a9e22c2829eba0174408db3f30e65d8",
+    "crates/sessions/src/lib.rs": "f155e726776e6966012d19564cbd0cf62c03abb43a6b8bec68072a2a98ebe5d5",
+    "crates/server/src/lib.rs": "44e9dd5215dac825fb5bc0b4f2503530bfc5bb7519307a14e2035644e69c9783",
+    "crates/server/src/context_http.rs": "9401349c39adedbeb8e02890c6a0682a63789aa4f4ee18b05ba09dcc59cf528f",
+    "crates/cli/src/main.rs": "6a94374624219d3bf8dc99b6503420208cbb2f81c427f90be99bb482958492d1",
+    "crates/cli/src/native_view.rs": "15533f73bd04a9627f908c5f4687ab5966de6352a1b7c2fb44e8037a775658a8",
+    "crates/cli/src/tui_entry.rs": "945309c21ccbab8d3a00926eb821eaddaea424e1b9b2e069cb112d1835bbac74",
+    "crates/cli/src/native_context.rs": "9bd943dbe32650cbc728f5991e6d02d3fa3454a82d0312f3b8bcf31da5064ad5"
+  }
+}

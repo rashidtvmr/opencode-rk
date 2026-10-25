@@ -49,6 +49,10 @@ impl Storage {
         let head: Option<i64> = tx.query_row("SELECT rowid FROM messages WHERE session_id=?1 ORDER BY rowid DESC LIMIT 1", params![session_id.to_string()], |r| r.get(0)).optional()?;
         if head != Some(boundary_rowid) { return Err(StorageError::TypedHistoryIdentity); }
         tx.execute("INSERT INTO session_compaction_checkpoints(session_id,boundary_message_id,provider_id,model_id,window_json,window_bytes,created_at) VALUES(?1,?2,?3,?4,?5,?6,?7) ON CONFLICT(session_id) DO UPDATE SET boundary_message_id=excluded.boundary_message_id,provider_id=excluded.provider_id,model_id=excluded.model_id,window_json=excluded.window_json,window_bytes=excluded.window_bytes,created_at=excluded.created_at", params![session_id.to_string(), checkpoint.boundary_message_id.to_string(), checkpoint.provider_id, checkpoint.model_id, checkpoint.window_json, checkpoint.window_json.len() as i64, Timestamp::now().to_string()])?;
+        // An exclusion identifies the snapshot that the user inspected, not
+        // every future checkpoint for this session. Reconcile it atomically
+        // with successful replacement; message exclusions remain untouched.
+        tx.execute("DELETE FROM session_context_exclusions WHERE session_id=?1 AND item_kind='checkpoint'", params![session_id.to_string()])?;
         tx.commit()?;
         Ok(())
     }

@@ -16,6 +16,7 @@ pub mod quota_v2;
 pub mod retention_v2;
 pub mod rollout_v2;
 pub mod schema_v2;
+pub mod session_context;
 pub mod snapshot_v2;
 pub mod writer_v2;
 pub use admission_v2::AdmissionV2;
@@ -39,6 +40,7 @@ pub use retention_v2::RetentionV2;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 pub use schema_v2::SchemaV2;
 pub use snapshot_v2::SnapshotV2;
+pub use session_context::{ContextSelection, ContextToolPreview};
 use std::{
     fs,
     io::{Read, Write},
@@ -452,7 +454,7 @@ impl Storage {
         max_provider_items: usize,
         max_provider_bytes: usize,
     ) -> Result<Vec<HistoryItem>, StorageError> {
-        self.bounded_history_from(session_id, None, max_provider_items, max_provider_bytes)
+        self.bounded_history_from(session_id, None, max_provider_items, max_provider_bytes, false)
     }
 
     fn bounded_history_from(
@@ -461,6 +463,7 @@ impl Storage {
         boundary: Option<MessageId>,
         max_provider_items: usize,
         max_provider_bytes: usize,
+        select_context: bool,
     ) -> Result<Vec<HistoryItem>, StorageError> {
         if max_provider_items == 0 || max_provider_bytes == 0 {
             return Ok(Vec::new());
@@ -497,14 +500,29 @@ impl Storage {
         )
         .map_err(|_| StorageError::TypedHistoryLimit)?;
         let mut headers = tx.prepare(
-            "SELECT rowid,length(CAST(round_id AS BLOB)),expected_pairs FROM tool_rounds WHERE session_id=?1 AND (?3=0 OR turn_message_id IN (SELECT id FROM messages WHERE session_id=?1 AND rowid>?3)) ORDER BY created_at,round_id LIMIT ?2",
+            "SELECT r.rowid,length(CAST(r.round_id AS BLOB)),r.expected_pairs,
+                    (SELECT count(DISTINCT t.pair_index) FROM typed_tool_records t
+                     JOIN messages m ON m.id=t.message_id AND m.session_id=r.session_id
+                     WHERE t.round_id=r.round_id AND (?4=0 OR NOT EXISTS
+                       (SELECT 1 FROM session_context_exclusions e WHERE e.session_id=r.session_id
+                        AND e.item_kind='message' AND e.item_id=t.message_id)))
+             FROM tool_rounds r WHERE r.session_id=?1
+               AND (?3=0 OR r.turn_message_id IN
+                 (SELECT id FROM messages WHERE session_id=?1 AND rowid>?3))
+               AND (?4=0 OR EXISTS (SELECT 1 FROM typed_tool_records t
+                 JOIN messages m ON m.id=t.message_id AND m.session_id=r.session_id
+                 WHERE t.round_id=r.round_id AND NOT EXISTS
+                   (SELECT 1 FROM session_context_exclusions e WHERE e.session_id=r.session_id
+                    AND e.item_kind='message' AND e.item_id=t.message_id)))
+             ORDER BY r.created_at,r.round_id LIMIT ?2",
         )?;
         let header_rows =
-            headers.query_map(params![session_id.to_string(), header_limit, boundary_rowid], |row| {
+            headers.query_map(params![session_id.to_string(), header_limit, boundary_rowid, if select_context { 1 } else { 0 }], |row| {
                 Ok((
                     row.get::<_, i64>(0)?,
                     row.get::<_, i64>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
                 ))
             })?;
         let mut header_count = 0usize;
@@ -516,7 +534,7 @@ impl Storage {
             if header_count > max_provider_items {
                 return Err(StorageError::TypedHistoryLimit);
             }
-            let (round_rowid, round_id_len, expected_raw) = row?;
+            let (round_rowid, round_id_len, expected_raw, selected_pairs) = row?;
             let round_id_len =
                 usize::try_from(round_id_len).map_err(|_| StorageError::TypedHistoryLimit)?;
             if round_id_len > max_provider_bytes {
@@ -529,10 +547,15 @@ impl Storage {
             )?;
             let expected =
                 u32::try_from(expected_raw).map_err(|_| StorageError::TypedHistoryIncomplete)?;
-            let pair_items = usize::try_from(expected)
+            let pair_items = if select_context {
+                usize::try_from(selected_pairs)
+                    .map_err(|_| StorageError::TypedHistoryLimit)?
+                    .checked_mul(2)
+                    .ok_or(StorageError::TypedHistoryLimit)?
+            } else { usize::try_from(expected)
                 .ok()
                 .and_then(|n| n.checked_mul(2))
-                .ok_or(StorageError::TypedHistoryLimit)?;
+                .ok_or(StorageError::TypedHistoryLimit)? };
             header_items = header_items
                 .checked_add(pair_items)
                 .ok_or(StorageError::TypedHistoryLimit)?;
@@ -570,7 +593,7 @@ impl Storage {
         drop(headers);
         let mut messages = tx.prepare(
             "SELECT rowid,length(CAST(id AS BLOB)),length(CAST(role AS BLOB)),length(CAST(inline_text AS BLOB)),blob_hash IS NOT NULL,byte_len
-             FROM messages WHERE session_id=?1 AND rowid>?3 ORDER BY rowid LIMIT ?2",
+             FROM messages WHERE session_id=?1 AND rowid>?3 AND (?4=0 OR NOT EXISTS (SELECT 1 FROM session_context_exclusions e WHERE e.session_id=?1 AND e.item_kind='message' AND e.item_id=messages.id)) ORDER BY rowid LIMIT ?2",
         )?;
         let lim = i64::try_from(
             max_provider_items
@@ -578,7 +601,7 @@ impl Storage {
                 .ok_or(StorageError::TypedHistoryLimit)?,
         )
         .map_err(|_| StorageError::TypedHistoryLimit)?;
-        let rows = messages.query_map(params![session_id.to_string(), lim, boundary_rowid], |row| {
+        let rows = messages.query_map(params![session_id.to_string(), lim, boundary_rowid, if select_context { 1 } else { 0 }], |row| {
             Ok((
                 row.get::<_, i64>(0)?,
                 row.get::<_, i64>(1)?,
@@ -654,10 +677,21 @@ impl Storage {
                 let shared_round_id: Arc<str> = Arc::from(round_id);
                 let expected =
                     u32::try_from(expected).map_err(|_| StorageError::TypedHistoryIncomplete)?;
-                let pair_items = usize::try_from(expected)
-                    .ok()
-                    .and_then(|n| n.checked_mul(2))
-                    .ok_or(StorageError::TypedHistoryLimit)?;
+                let selected_pairs: i64 = if select_context {
+                    tx.query_row(
+                        "SELECT count(DISTINCT pair_index) FROM typed_tool_records t WHERE round_id=?1
+                         AND NOT EXISTS(SELECT 1 FROM session_context_exclusions e
+                           WHERE e.session_id=?2 AND e.item_kind='message' AND e.item_id=t.message_id)",
+                        params![shared_round_id.as_ref(),session_id.to_string()],|row|row.get(0),
+                    )?
+                } else { i64::from(expected) };
+                 let pair_items = if select_context {
+                     usize::try_from(selected_pairs).map_err(|_| StorageError::TypedHistoryLimit)?
+                         .checked_mul(2).ok_or(StorageError::TypedHistoryLimit)?
+                 } else { usize::try_from(expected)
+                     .ok()
+                     .and_then(|n| n.checked_mul(2))
+                     .ok_or(StorageError::TypedHistoryLimit)? };
                 items_used = items_used
                     .checked_add(pair_items)
                     .ok_or(StorageError::TypedHistoryLimit)?;
@@ -665,14 +699,11 @@ impl Storage {
                     return Err(StorageError::TypedHistoryLimit);
                 }
                 let mut typed = tx.prepare(
-                    "SELECT rowid,pair_index,CASE kind WHEN 'call' THEN 0 ELSE 1 END,length(CAST(call_id AS BLOB)),length(CAST(name AS BLOB)),length(CAST(message_id AS BLOB)),byte_len FROM typed_tool_records WHERE round_id=?1 ORDER BY CASE kind WHEN 'call' THEN 0 ELSE 1 END,pair_index LIMIT ?2",
+                    "SELECT rowid,pair_index,CASE kind WHEN 'call' THEN 0 ELSE 1 END,length(CAST(call_id AS BLOB)),length(CAST(name AS BLOB)),length(CAST(message_id AS BLOB)),byte_len FROM typed_tool_records t WHERE round_id=?1 AND (?3=0 OR NOT EXISTS (SELECT 1 FROM session_context_exclusions e WHERE e.session_id=?4 AND e.item_kind='message' AND e.item_id=t.message_id)) ORDER BY CASE kind WHEN 'call' THEN 0 ELSE 1 END,pair_index LIMIT ?2",
                 )?;
-                let expected_count = usize::try_from(expected)
-                    .ok()
-                    .and_then(|v| v.checked_mul(2))
-                    .ok_or(StorageError::TypedHistoryLimit)?;
+                let expected_count = pair_items;
                 let mut record_count = 0usize;
-                for row in typed.query_map(params![shared_round_id.as_ref(), lim], |row| {
+                for row in typed.query_map(params![shared_round_id.as_ref(), lim, if select_context { 1 } else { 0 }, session_id.to_string()], |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
                         row.get::<_, i64>(1)?,
@@ -717,7 +748,7 @@ impl Storage {
                     if used > max_provider_bytes {
                         return Err(StorageError::TypedHistoryLimit);
                     }
-                    let (call_id, name, _record_message): (String, String, String) = tx.query_row(
+                    let (call_id, name, record_message): (String, String, String) = tx.query_row(
                         "SELECT call_id,name,message_id FROM typed_tool_records WHERE rowid=?1",
                         params![typed_rowid],
                         |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
@@ -739,7 +770,7 @@ impl Storage {
                         call_id,
                         name,
                         payload,
-                        message_id,
+                        message_id: MessageId::from_str(&record_message).map_err(|_| StorageError::TypedHistoryIdentity)?,
                     }));
                 }
                 if record_count != expected_count {
@@ -810,7 +841,7 @@ impl Storage {
     /// same-session checkpoint, filtering both round headers and messages
     /// before their admission limits are applied.
     pub fn bounded_history_after(&self, session_id: SessionId, boundary: MessageId, max_provider_items: usize, max_provider_bytes: usize) -> Result<Vec<HistoryItem>, StorageError> {
-        self.bounded_history_from(session_id, Some(boundary), max_provider_items, max_provider_bytes)
+        self.bounded_history_from(session_id, Some(boundary), max_provider_items, max_provider_bytes, false)
     }
 
     pub fn create_session(&self, session: &SessionSummary) -> Result<(), StorageError> {
@@ -1531,6 +1562,12 @@ impl Storage {
         connection.execute_batch("CREATE TABLE IF NOT EXISTS session_compaction_settings(
             session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
             policy_json TEXT NOT NULL CHECK(length(CAST(policy_json AS BLOB)) BETWEEN 1 AND 1024)
+        );")?;
+        connection.execute_batch("CREATE TABLE IF NOT EXISTS session_context_exclusions(
+            session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+            item_kind TEXT NOT NULL CHECK(item_kind IN ('message','checkpoint')),
+            item_id TEXT NOT NULL REFERENCES messages(id) ON DELETE CASCADE CHECK(length(CAST(item_id AS BLOB)) BETWEEN 1 AND 64),
+            PRIMARY KEY(session_id,item_kind,item_id)
         );")?;
         Ok(())
     }

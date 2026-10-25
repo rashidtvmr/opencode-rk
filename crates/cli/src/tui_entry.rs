@@ -469,6 +469,99 @@ fn request_compaction_settings(
 }
 
 #[cfg(feature = "native")]
+fn request_context_inspection(
+    origin: &str, session: &str, auth: Option<&str>, before: Option<&str>,
+    selection: Option<(&str, bool)>,
+) -> Result<String, String> {
+    if crate::daemon_client::parse_loopback_port(origin).is_none() {
+        return Err("context inspection requires a canonical loopback daemon".into());
+    }
+    let id = session.parse::<opencode_rk_contracts::SessionId>()
+        .map_err(|_| "context inspection requires a valid session identity")?;
+    if id.to_string() != session { return Err("context inspection requires a canonical session identity".into()); }
+    let path = format!("/api/sessions/{id}/context");
+    let get_path = if let Some(before) = before {
+        let cursor = before.parse::<opencode_rk_contracts::MessageId>().map_err(|_| "invalid context page cursor")?;
+        if cursor.to_string()!=before { return Err("context cursor must be canonical".into()); }
+        format!("{path}?before={cursor}")
+    } else { path.clone() };
+    if let Some((item, included)) = selection {
+        let raw = item.strip_prefix("checkpoint:").unwrap_or(item);
+        let item_id = raw.parse::<opencode_rk_contracts::MessageId>()
+            .map_err(|_| "invalid selectable context identity")?;
+        if item_id.to_string() != raw { return Err("context identity must be canonical".into()); }
+        let body = serde_json::json!({"item_id":item}).to_string();
+        let (ack,status) = http_request_with_status(origin,"POST",
+            &format!("{path}/{}",if included {"include"} else {"exclude"}),Some(&body),auth)?;
+        if status!=200 || ack.len()>4096 { return Err("invalid context selection acknowledgement".into()); }
+        let ack:serde_json::Value = serde_json::from_str(&ack).map_err(|_| "invalid context acknowledgement JSON")?;
+        if ack["scope"].as_str()!=Some("session") || ack["item_id"].as_str()!=Some(item)
+            || ack["excluded"].as_bool()!=Some(!included) || ack["history_preserved"].as_bool()!=Some(true) {
+            return Err("backend did not acknowledge the selected context state".into());
+        }
+    }
+    let (body,status) = http_request_with_status(origin,"GET",&get_path,None,auth)?;
+    if status!=200 || body.len()>512*1024 { return Err("invalid or oversized context inspection response".into()); }
+    Ok(body)
+}
+
+#[cfg(all(test, feature = "native"))]
+mod context_inspection_transport_tests {
+    use super::request_context_inspection;
+    use std::io::{Read,Write};
+
+    #[test]
+    fn rejects_invalid_identity_cursor_and_credentials_before_network_io() {
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let origin=format!("http://{}",listener.local_addr().unwrap());
+        let token="a".repeat(64);
+        let id="abcdef12-1234-4000-8000-000000000001";
+        assert!(request_context_inspection(&origin,&id.to_uppercase(),Some(&token),None,None).is_err());
+        assert!(request_context_inspection(&origin,id,Some(&token),Some("../invalid"),Some((id,false))).is_err());
+        assert!(request_context_inspection(&origin,id,None,None,None).is_err());
+        assert!(matches!(listener.accept(),Err(error) if error.kind()==std::io::ErrorKind::WouldBlock));
+    }
+
+    #[test]
+    fn a_mismatched_selection_ack_does_not_trigger_a_followup_get() {
+        let listener=std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let origin=format!("http://{}",listener.local_addr().unwrap());
+        let server=std::thread::spawn(move||{
+            let (mut stream,_)=listener.accept().unwrap();
+            stream.set_read_timeout(Some(std::time::Duration::from_secs(2))).unwrap();
+            let mut request=Vec::new();
+            let mut chunk=[0u8;1024];
+            loop {
+                let count=stream.read(&mut chunk).unwrap();
+                assert!(count>0 && request.len()+count<=8192);
+                request.extend_from_slice(&chunk[..count]);
+                if let Some(start)=request.windows(4).position(|window|window==b"\r\n\r\n") {
+                    let header=String::from_utf8_lossy(&request[..start]);
+                    let length=header.lines().find_map(|line|line.strip_prefix("Content-Length: "))
+                        .unwrap().parse::<usize>().unwrap();
+                    if request.len()>=start+4+length {break;}
+                }
+            }
+            let body=r#"{"scope":"session","item_id":"abcdef12-1234-4000-8000-000000000002","excluded":true,"history_preserved":true}"#;
+            write!(stream,"HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",body.len()).unwrap();
+            drop(stream);
+            listener.set_nonblocking(true).unwrap();
+            (String::from_utf8(request).unwrap(),listener)
+        });
+        let token="a".repeat(64);
+        let id="abcdef12-1234-4000-8000-000000000001";
+        let error=request_context_inspection(&origin,id,Some(&token),None,Some((id,false))).unwrap_err();
+        assert!(error.contains("did not acknowledge"));
+        let (request,listener)=server.join().unwrap();
+        assert!(request.starts_with(&format!("POST /api/sessions/{id}/context/exclude HTTP/1.1")));
+        assert!(request.contains(&format!("Authorization: Bearer {token}\r\n")));
+        assert!(request.ends_with(&serde_json::json!({"item_id":id}).to_string()));
+        assert!(matches!(listener.accept(),Err(error) if error.kind()==std::io::ErrorKind::WouldBlock));
+    }
+}
+
+#[cfg(feature = "native")]
 struct NativeCompactWorker {
     rx: tokio::sync::mpsc::Receiver<Result<String, String>>,
     task: Option<tokio::task::JoinHandle<()>>,
@@ -2936,6 +3029,8 @@ fn native_loop(
     let mut memory_binding: Option<(String, u64)> = None;
     let mut memory_page_observed = false;
     let mut compaction_page_observed = false;
+    let mut context_page_observed = false;
+    let mut context_before: Option<String> = None;
     let mut appearance = crate::native_appearance::AppearanceEditor::new(
         crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
     );
@@ -3088,6 +3183,9 @@ fn native_loop(
         if memory_binding != current_memory_binding {
             *view.memory_mut() = crate::native_memory::Memory::new();
             view.compaction_mut().invalidate();
+            view.context_mut().invalidate();
+            context_before = None;
+            context_page_observed = false;
             memory_binding = current_memory_binding;
             memory_page_observed = false;
             compaction_page_observed = false;
@@ -3124,6 +3222,18 @@ fn native_loop(
         } else {
             compaction_page_observed = false;
         }
+        if view.page() == crate::native_view_pages::Page::Context {
+            if !context_page_observed {
+                let result = match live.as_ref() {
+                    Some(snapshot) => request_context_inspection(&snapshot.origin, &snapshot.session_id, auth,
+                        context_before.as_deref(),None).and_then(|body| view.context_mut().load_response(&body)),
+                    None => Err("daemon unavailable".into()),
+                };
+                if let Err(error)=result { view.context_mut().set_error(&error); }
+                needs_paint=true;
+            }
+            context_page_observed=true;
+        } else { context_page_observed=false; }
         completion.sync(&draft);
         if !completion.triggered() { completion_loaded = false; }
         if let Ok((files, catalogue)) = completion_rx.try_recv() {
@@ -4738,6 +4848,11 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                if view.page() == crate::native_view_pages::Page::Context {
+                    view.context_mut().select_step(direction == native_input_decoder::InputEvent::ArrowDown);
+                    needs_paint = true;
+                    continue;
+                }
                 if direction == native_input_decoder::InputEvent::ArrowUp {
                     2
                 } else {
@@ -4965,6 +5080,41 @@ fn native_loop(
         {
             view.open_page(view.page().next());
             needs_paint = true;
+            utf8.reset();
+            continue;
+        }
+        if page_open && view.page() == crate::native_view_pages::Page::Context
+            && !help_open && matches!(dialog,native_setup::Dialog::None)
+            && !matches!(byte,3|4|27)
+        {
+            match byte {
+                b'j'|14 => view.context_mut().select_step(true),
+                b'k'|2 => view.context_mut().select_step(false),
+                b'f'|6 => view.context_mut().scroll_detail(true),
+                b'b' => view.context_mut().scroll_detail(false),
+                b'p' => {
+                    if let Some(cursor)=view.context().next_before().map(str::to_owned) {
+                        context_before=Some(cursor);
+                        context_page_observed=false;
+                    }
+                }
+                b'r' => {context_before=None;context_page_observed=false;}
+                13|10|b' ' => {
+                    let selection=view.context().selected().filter(|item|item.selectable)
+                        .map(|item|(item.id.clone(),!item.included));
+                    if let Some((item,included))=selection {
+                        let result=match live.as_ref() {
+                            Some(snapshot)=>request_context_inspection(&snapshot.origin,&snapshot.session_id,auth,
+                                context_before.as_deref(),Some((&item,included)))
+                                .and_then(|body|view.context_mut().load_response(&body)),
+                            None=>Err("daemon unavailable".into()),
+                        };
+                        if let Err(error)=result {view.context_mut().set_error(&error);}
+                    }
+                }
+                _=>{}
+            }
+            needs_paint=true;
             utf8.reset();
             continue;
         }

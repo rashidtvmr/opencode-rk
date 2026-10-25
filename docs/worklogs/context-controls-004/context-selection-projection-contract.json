@@ -1,0 +1,8 @@
+{
+  "test": "crates/server/tests/context_selection_projection.rs",
+  "sha256": "f8a359444450cfa50ac5ced66d3cc4beb7ee70338e33e95977617365a14aaf7e",
+  "first_compiling_observation": "context-selection-second-check.log: typed exclusion genuinely leaked call-0; two other observer assertions were invalid and corrected independently before freezing",
+  "independent_test_owner": "context-selection-projection-test-handoff.md",
+  "green": "context-selection-fourth-check.log:3 supplemental and1 original API tests passed",
+  "status": "Supplemental regression contract; not falsely claimed unchanged compiling RED after observer corrections"
+}
