@@ -2889,6 +2889,8 @@ fn native_loop(
     let mut children_panel = crate::native_children::Panel::default();
     let mut children_refresh = Instant::now();
     let mut todos_refresh = Instant::now();
+    let mut memory_binding: Option<(String, u64)> = None;
+    let mut memory_page_observed = false;
     let mut appearance = crate::native_appearance::AppearanceEditor::new(
         crate::native_ui_preferences::UiPreferences::appearance(&state_path).unwrap_or_default(),
     );
@@ -3037,6 +3039,30 @@ fn native_loop(
     let mut completion_loaded = false;
     let mut byte = [0u8; 1];
     loop {
+        let current_memory_binding = live.as_ref().map(|snapshot| (snapshot.session_id.clone(), binding_generation));
+        if memory_binding != current_memory_binding {
+            *view.memory_mut() = crate::native_memory::Memory::new();
+            memory_binding = current_memory_binding;
+            memory_page_observed = false;
+        }
+        if view.page() == crate::native_view_pages::Page::Memory {
+            if !memory_page_observed {
+                match live.as_ref() {
+                    Some(snapshot) => {
+                        let path = format!("/api/sessions/{}/memory", snapshot.session_id);
+                        if let Err(error) = http_request(&snapshot.origin, "GET", &path, None, auth)
+                            .and_then(|body| view.load_memory(&body)) {
+                            view.set_memory_error(&error);
+                        }
+                    }
+                    None => view.set_memory_error("daemon unavailable"),
+                }
+                needs_paint = true;
+            }
+            memory_page_observed = true;
+        } else {
+            memory_page_observed = false;
+        }
         completion.sync(&draft);
         if !completion.triggered() { completion_loaded = false; }
         if let Ok((files, catalogue)) = completion_rx.try_recv() {
@@ -4868,6 +4894,14 @@ fn native_loop(
         // Sessions filter and the command buffer, printable and
         // backspace bytes are additionally routed to that bounded query
         // (and only it) below; every other page keeps the inert contract.
+        if page_open && byte == b'\t' && !help_open
+            && matches!(dialog, native_setup::Dialog::None)
+        {
+            view.open_page(view.page().next());
+            needs_paint = true;
+            utf8.reset();
+            continue;
+        }
         if page_open
             && !help_open
             && !matches!(byte, 3 | 4 | 27 | 13 | 10 | 14 | 2)
@@ -5753,19 +5787,7 @@ fn native_loop(
                         view.open_commands_page();
                     } else {
                         view.open_page(page);
-                        if page == crate::native_view_pages::Page::Memory {
-                            match live.as_ref() {
-                                Some(snapshot) => {
-                                    let path = format!("/api/sessions/{}/memory", snapshot.session_id);
-                                    match http_request(&snapshot.origin, "GET", &path, None, auth)
-                                        .and_then(|body| view.load_memory(&body)) {
-                                        Ok(()) => {}
-                                        Err(error) => view.set_memory_error(&error),
-                                    }
-                                }
-                                None => view.set_memory_error("daemon unavailable"),
-                            }
-                        } else if page == crate::native_view_pages::Page::Agents {
+                        if page == crate::native_view_pages::Page::Agents {
                             // Real metadata rows from the same authenticated
                             // `GET /api/commands` catalogue the @mention
                             // loader consumes. Fetch/parse failure keeps the
