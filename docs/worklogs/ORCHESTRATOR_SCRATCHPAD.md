@@ -24,6 +24,150 @@ and operating rules at the top of `AGENTS.md` before dispatching more work.
 
 ## Immediate continuation — user-selected context UI
 
+### Continuation after checkpoint: actual validation and integration
+
+Latest: product HEAD `1c639d753c9c3fcfdc923c9540d60fab23b918a7` integrates
+metadata/home cursor exact reviewed/tested97be7e92... source. Main's full native
+CLI suite on this integrated product source: **858 PASS, 0 FAIL**. Raw logs and
+receipt `ready-cli-validation-4n3v0ij9/metadata-integrated-cli-*`. Only native_view.rs
+staged in this commit. Installed user binary NOT updated; full parity NOT claimed.
+
+Context grid helper v4ec1c403e... actual independent rustc test run **11 PASS**,
+after v2 had8PASS3FAIL arithmeticpanic and v3 had10PASS1FAIL deterministic tie.
+Frozen tests retained through corrections. Receipt/rawlogs
+`context-grid-v4-verification-e_5xi627/`. This is a tested helper, not live dashboard.
+Original renderer still owns01 mutable production candidate and painter proposal;
+independent13-gridreview `ses_e882911fbffelaWgKJ54QBmFy7` inspecting frozenv3,
+will need finalv4 exact-hash review. Helper integration into renderer still pending.
+
+Metadata v4 zero-context cursor hunk requires git apply --unidiff-zero in private
+validation, then exact97be... hash asserted. First normal gitapply failure occurred
+BEFORE tests; corrected attempt ran3PASS, then scoped integration and858PASS.
+
+Markdown corrected6c61... compiles but actual37focusedtests **36 PASS, 1 FAIL**:
+fenced-code preservation test joins rows without newline and compares multiline
+expected; actual failure retained in markdown-corrected.stdout. Determine test
+reconstruction vs lost-line semantic before modifying any assertion. Not integrated.
+
+Additional useful replacements/latest work:
+- Context backend v2 NEEDS_FIX9d56e728... sole remaining mismatch: memory injected
+  but notrecognized at input0 emits Some0 while coverage says unreported. Pending
+  author repair should useNone forunknown, then exactrereview. No capture integrated.
+- Consumer originalnegative0/92 structuredpredicates -> author resumed08 actual
+  dispatch, evaluator11notes64a229...; no fixturedefinitionacceptedasrun.
+- Pointer e88cf570... independent reviewer `ses_e882a160fffe9IHVmD1urKIdL8`
+  (12-pointerreview), actual native mouse handler included, source only.
+- Shell preview c0748b8c... original reviewerAPPROVE77241cc6... isolatedprojection;
+  actual ACK/painter caller wiring remains absent.
+- Home repair88b4e62f... original reviewer `ses_e883ac366ffezx0lu3n2vkWO9O`
+  renewed review. Detaching handle/drop receiver must not cancel daemon work.
+- Vertical fixturea5d9... legitimate intendedbehavior but productmissingkind7
+  hover/render_with_hover and orientationresizefallback. Runtime implementation
+  `ses_e882acea0ffeX4Vv9qNktz02g6` (108-tabhoverresize), standaloneproposalonly.
+- Horizontal v3 attempt had NOartifact; `/status` provides session id UUID fact.
+  Own85 optimizer needs write-first actual helper/observed close, notanotherplan.
+- Kitty coherentv3ae9138.../entry2dcc... combined9b034... -> reviewer
+  `ses_e88279cddffecZR6Otc6v6gUh1` (110-decoderreview), preserveintegratedleader
+  on latercomposition. No compileclaim fromvariantmention sourceaudit.
+- Leader realbytefixture102 discoveredCSIArrowRight swallowed withnoInputEvent;
+  cancellationoccursoneventpop so possible remainingstalechord. Diagnostician
+  `ses_e882911f6ffern8MDyq8iVokN8` (109-leaderarrowdiagnosis). 855/858unitPASS
+  doesnotprove this installedjourney. Do not callallleader behavioraccepted.
+- Chatcursor actualnegative paddedmeasurement/modalguards: optimizer87 resumed,
+  review105d309...; actualproposalhashc192... differsoldreported045..., reconcile.
+- Keybind prose57bc... not implementation. Own86 author resumedactualRustmodule
+  +canonicalruntimeproposal; no prose-to-product completion claims.
+- Compaction v41diagnosis99noartifact/unconfirmed mixedstalesource -> newread-only
+  `ses_e8826a2eaffehlczs6cu1yoRbw` (111-compactionexact), hashcurrentprivatefile
+  first and writeinstrumentationproposal foractualsuppressbranch. Mainheavyfree
+  after858PASS; future grant explicit, neverconcurrentCargo.
+- Shell wiring97returnedowner-module-only; no runtimeintegration. Need tools
+  executorverified-proof callback before lifecycleapprovaltransition; do not use
+  proofpresenceassufficientauthority. Securitynegativeintegrationgapretained.
+
+No release build/installed journey/user binary update/push during this segment.
+Maintain usefulconcurrentassignments, ledgeractualcompletionstates, preserveuser
+web/server changes anddaemon73389. Routecumulativeusage UNKNOWN. Do not re-count
+completed sessions as active or infer quota remaining from successful calls.
+
+Latest capacity replacements after final validation:
+- Authorized `xkiro-gpt-6-luna` is an EXACT harness inventory identifier (notalias;
+  no model override/fallback). First two dispatches now:
+  `ses_e88256402ffewuAMWJq7Z37Jdl` replaces completed no-code108tab worker and
+  owns108-tabhoverresize private base1c639copies/runtimepatch;
+  `ses_e8825204effeeSUEd5ceTTHKEj` independent failingMarkdownline reconstruction
+  diagnosis/testowner (112-markdownlinefailure). Tokenusage UNKNOWN, no newbudget
+  inferred. Neither gets heavy execution permission.
+- Contextaccounting author resumed02v3 unknownmemoryNone/minimalregression after
+  originalnegative; all other v2 corrections preserved, no acceptance yet.
+- Home originalreview APPROVED88b4e62f... a4d445db...; currentleader composition
+  preparer `ses_e8824b62fffexg6d3CTfOekHyz` (113-homeready) usesbase1c639 and
+  newcomposedhashrequiresrenewedreview. No oldapprovaltransfer.
+- Gridhelper11PASS v4 exactec1c403e... can go to reviewer13/newrenderer integration
+  after currentprivateauthorhandoff; don'toverwriteactiveauthorcopies.
+Main serialized heavy slot FREE after858PASS and11gridPASS. Most urgent next
+actualexecution: backendcapturecompilercheckafterv3review, correctedcontext
+dashboard+grid integration checks, andHome composedfocusedtests. ReadyCLI tool
+projection26PASS stillunintegrated; releasebuild/installedjourneysremainpending.
+
+- Current product HEAD now `2aafbfbf` (leader dispatch/cancellation), exact reviewed
+  source hash fa708ed3ce3d1968034e5957d3ff846e971e2de52f8aca41895a25c730b7840b.
+  Only tui_entry.rs committed. Private candidate compiled; two shared close-result
+  tests PASS. Installed real-byte leader journey remains UNEXECUTED.
+- Main resumed the serialized heavy slot after compaction worker completed with
+  v5 unfinished and BOTH runtime tests failing provider-boundary timeout355.
+  Compaction diagnosis read-only worker `ses_e883554daffeZIdNDpaQyGKqgz` (v41)
+  owns replenishment99-compactiondiagnosis. No current v5 patch accepted.
+- Actual validation archive `ready-cli-validation-4n3v0ij9/` at ee9b92a1 with
+  approved candidate overlays: Markdown808855... FAILED COMPILE E0308 at File
+  match arm1214 (push_wrapped now bool). No test PASS attributed to this candidate.
+  Repair106-markdowncompile candidate6c61dbf8... from original author; original
+  reviewer `ses_e8858daf1ffeMcw3IglEkcob6z` renewing exact review.
+- Removing Markdown overlay allowed independent actual validation:
+  native_chat_projection **26 PASS** on62ce0f30...;
+  composer_metadata_regression_tests **1 PASS, 2 FAIL** on4a093230...;
+  render_fixture_tests **1 PASS** (actual six Home/Chat frame outputs);
+  shared_close_result **2 PASS**. Exit0 shell is not all-tests-PASS: per-command
+  exit codes/logs retained in isolated-ready-receipt.json.
+- Metadata actual failures contradict static arithmetic: width43 actual model
+  `modelmodelmodel…`, expected`modelmodelm…`; Home cursor actual87,19 expected19,19.
+  Original optimizer resumed40-metadatafix; do not integrate statically approved
+  candidate until corrected/reviewed/verified. Preserve semantic assertions.
+- Main full exact-integrated CLI validation on2aafbfbf now background shell
+  sh_177d304ab001MVqNEpo50EgWJL; all candidate overlays removed from private archive.
+  No other worker has Cargo/PTY grant. Installed acceptance remains false.
+- Context accounting eaa70e9d... review NEEDS_FIX missingcomma608/MCP capture
+  before refreshed tools/compaction gap/memory source loss. Author resumed02 v2.
+  Reviewer `ses_e8834a4e0ffeYYsRXWhHik9V5C` notes saved10-accountingreview.
+- Context frozen renderer9c0... NEEDS_FIX compile/unknown-grid/overflow/narrow.
+  Original author resumed01; separate09 helper author fixing its admitted partial
+  marker ordering invariant. Neither mutable artifact is ready for integration.
+- Context pointer e88cf570... now actual mouse handler included and private
+  applycheck PASS; independent review still pending. No actual context click PASS.
+- Context golden consumer798e26ca... actual Rust tests authored, no execution;
+  evaluator `ses_e882db7b3ffe7sdnx4qBnzfk3j` (11-consumerreview) reviews API/assertions.
+- Raw six Rust frames being extracted from executed log by
+  `ses_e882ddd15ffekFVC0e10nzYT1b` (107-rustframes); approved91 comparator is
+  text-cell-only. Color parity UNVERIFIED; no Rust-frame provenance invented.
+- Cursor proposal045759c0... reviewer `ses_e882fff26ffeN6gLCnCmvftl84`
+  (105-cursorreview), source-only geometry/security review, no fixture weakening.
+- Permission second reviewer retracted unsafe-exposure objection: live callers
+  pass absent/empty save so persistent allow hidden; eligible-save parity remains
+  incomplete. Existing exact-source security approval62627f94... still scoped.
+- Permission realEscape fixture93097ffb... APPROVED original reviewer5c69908e...;
+  no PTY execution. Denial extension preserved. Shell previewc0748b8c... corrected
+  width/C1 filtering but not yet rereviewed/wired/tested.
+- Horizontal bc1d2b00... original evaluator resumed76-v2; vertical a5d9d7a7...
+  original evaluator resumed103-v2 for actual middleSGR/rightneighbor/fallback.
+- Kitty decoder601d7d84... author resumed77 actual exhaustive native-loop wiring.
+  Keybind57bc... was prose despite .diff extension; NEEDS_FIX remains until actual
+  applicable source patch exists. No prose accepted as implementation.
+Route telemetry UNKNOWN. Recent route calls all allowlisted; no provider fallback.
+Replenishment lag occurred during checkpoint/read/serialized validation recovery;
+do not claim an audited20-active roster from historical launches. Completed workers
+are excluded; continue useful independent replacements, bounded writes and one
+heavy slot. Preserve unknown user web/server edits and daemon73389/4096.
+
 User supplied Claude Code screenshot/text and explicitly wants that `/context`.
 Read `docs/CONTEXT_USAGE_UI_REQUIREMENTS.md`. UI/private accounting/pointer work
 is in progress; inventory-only display is not the requested completion. Primary:
