@@ -236,7 +236,7 @@ def validate_artifact_hashes(manifest: dict, artifact_dir: pathlib.Path, *,
 
     # Archive: oc2-linux-arm64.tar.gz (Linux convention), must be regular file.
     archive = artifact_dir / "oc2-linux-arm64.tar.gz"
-    if archive.lexists():
+    if os.path.lexists(archive):
         _check_regular_file(archive, "archive")
         _check_hash(archive, archive_expected, "archive")
     elif manifest.get("require_archive", True):

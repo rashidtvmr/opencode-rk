@@ -1,6 +1,6 @@
 {
   "schema": "r1-release-gates/1",
-  "source_sha": "ddff2e6d617f2c70f60ed046f7af7636087f1d61",
+  "source_sha": "<SOURCE_SHA>",
   "generated_on": "2026-10-02",
   "notes": [
     "Template for the R1 exact-SHA gate contract; regenerate per integrated SHA.",
@@ -9,7 +9,7 @@
     "runner_sha256 is the retained Ubuntu verify-native-utf8.py copied verbatim into release/."
   ],
   "artifact_contract": {
-    "source_sha": "ddff2e6d617f2c70f60ed046f7af7636087f1d61",
+    "source_sha": "<SOURCE_SHA>",
     "profile": "release",
     "native": true,
     "target": "installed-binary",
