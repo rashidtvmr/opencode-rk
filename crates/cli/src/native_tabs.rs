@@ -153,6 +153,9 @@ pub struct TabStrip {
     /// structural for every tab wide enough to contain `right=1,width=1`, but
     /// it is only a close hit while its parent is hovered.
     hovered: Option<SessionRef>,
+    /// Explicit paint projection for the hovered close child. Structural
+    /// `close_rects` remain available for hit testing but are not paint commands.
+    visible_close_session: Option<SessionRef>,
 }
 
 impl TabStrip {
@@ -230,6 +233,7 @@ impl TabStrip {
             overflow_after: false,
             scroll: 0,
             hovered: hovered.cloned(),
+            visible_close_session: None,
         };
         if width == 0 || height == 0 {
             return out;
@@ -318,7 +322,22 @@ impl TabStrip {
             }
             x_or_y = x_or_y.saturating_add(if horizontal { item_width } else { 1 });
         }
+        out.visible_close_session = out
+            .hovered
+            .as_ref()
+            .filter(|session| out.close_rects.iter().any(|(id, _)| id == *session))
+            .cloned();
         out
+    }
+
+    /// Return the one close child visible in this frame, if any.
+    #[must_use]
+    pub fn visible_close_rect(&self) -> Option<TabRect> {
+        let session = self.visible_close_session.as_ref()?;
+        self.close_rects
+            .iter()
+            .find(|(id, _)| id == session)
+            .map(|(_, rect)| *rect)
     }
 
     #[must_use]
@@ -738,6 +757,24 @@ mod tests {
             id
         );
         assert!(hovered.rows[0].contains('✕'));
+    }
+
+    #[test]
+    fn visible_close_projection_is_hover_gated_while_hit_rect_stays_structural() {
+        let first = SessionRef("first".into());
+        let second = SessionRef("second".into());
+        let inputs = [input("first", "one"), input("second", "two")];
+        let plain = TabStrip::render(&inputs, TabOrientation::Horizontal, 40, 1, 0);
+        assert!(plain.visible_close_rect().is_none());
+        assert_eq!(plain.close_rects.len(), 2);
+        let hovered = TabStrip::render_with_hover(
+            &inputs, TabOrientation::Horizontal, 40, 1, 0, Some(&second),
+        );
+        let visible = hovered.visible_close_rect().expect("hovered close is painted");
+        assert_eq!(visible, hovered.close_rects[1].1);
+        assert_eq!(hovered.hit(hovered.close_rects[0].1.x, 0).unwrap().close, false);
+        assert_eq!(hovered.hit(visible.x, visible.y).unwrap().close, true);
+        assert_eq!(first, hovered.rects[0].0);
     }
 
     #[test]

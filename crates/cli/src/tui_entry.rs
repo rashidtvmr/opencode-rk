@@ -2099,7 +2099,9 @@ fn native_paint(
                 renderer.draw_text_styled(x, y, row, fg, Some(bg), 0)?;
             }
         }
-        for (_session, rect) in &tabs.close_rects {
+        // Structural close rectangles are for hit testing. Paint only the
+        // explicitly projected hovered close child.
+        if let Some(rect) = tabs.visible_close_rect() {
             if rect.x < cols as u16 && rect.y < rows as u16 {
                 renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), "✕", fg, Some(bg), 0)?;
             }
@@ -3080,6 +3082,8 @@ fn native_loop(
     // The last painted strip is the sole hit-test snapshot; paint and input
     // never independently recompute tab geometry.
     let mut rendered_tabs: Option<TabStrip> = None;
+    let mut tab_hovered: Option<crate::native_navigation::SessionRef> = None;
+    let mut tab_viewport: Option<(u16, u16)> = None;
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
@@ -4250,31 +4254,40 @@ fn native_loop(
         let dialog_open = view.dialogs.is_open();
         let mut help_regions = Vec::new();
         let mut help_panel = None;
-        let tab_reservation = TabReservation::for_view(
-            match navigation.orientation() {
-                crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
-                crate::native_navigation::TabOrientation::Vertical => TabOrientation::Vertical,
-            },
+        let viewport = (
             renderer.cols().min(u32::from(u16::MAX)) as u16,
             renderer.rows().min(u32::from(u16::MAX)) as u16,
         );
+        let configured_orientation = match navigation.orientation() {
+            crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
+            crate::native_navigation::TabOrientation::Vertical => TabOrientation::Vertical,
+        };
+        let tab_reservation = TabReservation::for_view(configured_orientation, viewport.0, viewport.1);
+        let effective_orientation = tab_reservation.orientation.unwrap_or(TabOrientation::Horizontal);
+        if tab_viewport != Some(viewport) {
+            tab_hovered = None;
+            tab_viewport = Some(viewport);
+        }
+        if dialog_open || help_open || view.command_palette_open() || permission_editor.open
+            || appearance.open || children_panel.open
+        {
+            tab_hovered = None;
+        }
         view.set_tab_reservation(tab_reservation);
         let tab_inputs = TabStrip::from_navigation(&navigation, &[]);
-        let frame_tabs = TabStrip::render(
+        let frame_tabs = TabStrip::render_with_hover(
             &tab_inputs,
-            match navigation.orientation() {
-                crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
-                crate::native_navigation::TabOrientation::Vertical => TabOrientation::Vertical,
+            effective_orientation,
+            match effective_orientation {
+                TabOrientation::Horizontal => viewport.0,
+                TabOrientation::Vertical => tab_reservation.width,
             },
-            match navigation.orientation() {
-                crate::native_navigation::TabOrientation::Horizontal => renderer.cols().min(u32::from(u16::MAX)) as u16,
-                crate::native_navigation::TabOrientation::Vertical => tab_reservation.width,
-            },
-            match navigation.orientation() {
-                crate::native_navigation::TabOrientation::Horizontal => 1,
-                crate::native_navigation::TabOrientation::Vertical => renderer.rows().min(u32::from(u16::MAX)) as u16,
+            match effective_orientation {
+                TabOrientation::Horizontal => 1,
+                TabOrientation::Vertical => viewport.1,
             },
             rendered_tabs.as_ref().map_or(0, |tabs| tabs.scroll),
+            tab_hovered.as_ref(),
         );
         let mut lines = if help_open && !dialog_open {
             Vec::new()
@@ -4701,11 +4714,21 @@ fn native_loop(
             native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
                 if !view.dialogs.intercepts_input() && !permission_editor.open && !appearance.open && !children_panel.open
                     && !help_open && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
-                    && kind == 0 && modifiers == 0
+                    && modifiers == 0
                 {
+                    if kind == 7 {
+                        tab_hovered = rendered_tabs
+                            .as_ref()
+                            .and_then(|tabs| tabs.hit(x, y))
+                            .map(|hit| hit.session);
+                        needs_paint = true;
+                        continue;
+                    }
+                    if kind == 0 {
                     if let Some(intent) = rendered_tabs.as_ref().and_then(|tabs| tabs.mouse_action(x, y)).map(|hit| if hit.close { NativeIntent::CloseTab { session: hit.session } } else { NativeIntent::SelectTab { session: hit.session } }) {
                         match intent {
                             NativeIntent::SelectTab { session } => {
+                                tab_hovered = None;
                                 let scroll = view.chat_scroll_offset();
                                 match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|model| model.qualified()), scroll) {
                                     Ok(result) => {
@@ -4717,6 +4740,7 @@ fn native_loop(
                                 needs_paint = true; continue;
                             }
                             NativeIntent::CloseTab { session } => {
+                                tab_hovered = None;
                                 let close_scroll = view.chat_scroll_offset();
                 match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
                                     Ok(result) => apply_close_tab_result(
@@ -4737,6 +4761,7 @@ fn native_loop(
                                 needs_paint = true; continue;
                             }
                         }
+                    }
                     }
                 }
                 // Tabs were resolved first. Send clicks were normalized before
