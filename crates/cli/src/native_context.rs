@@ -366,18 +366,24 @@ impl ContextView {
         let max_head = height.saturating_sub(1 + reserve).max(1);
         head.truncate(max_head);
         let grid_rows = height.saturating_sub(head.len() + reserve + 1).clamp(1, 10);
-        // Put the selected inventory detail before the long category dashboard
-        // so projection/count provenance and withheld-content explanations are
-        // visible in the first normal frame; the dashboard remains reachable
-        // by the existing bounded detail scroll.
-        let mut body = Vec::new();
+        // The assembled usage report owns the dashboard's first-frame
+        // prominence. Legacy inventory-only responses retain their established
+        // detail-first ordering so projection and withheld-content explanations
+        // remain reachable even when no report was returned.
+        let mut body = if report.is_some() {
+            usage_dashboard(report, width, grid_rows)
+        } else {
+            Vec::new()
+        };
         body.push(usage_line(format!("Context inventory: {} items · projection {} (not assembled-request accounting)", self.items.len(), self.projection.status), Vec::new()));
         if let Some(lines) = breakdown_lines(&self.items) { body.extend(lines.into_iter().map(|line| usage_line(line, Vec::new()))); }
         if let Some(item) = self.selected() {
             body.extend(self.metadata_lines().into_iter().flat_map(|line| wrap(&line, width)).map(|line| usage_line(line, Vec::new())));
             body.extend(item_detail(item, width).into_iter().map(|line| usage_line(line, Vec::new())));
         } else if self.items.is_empty() { body.push(usage_line("Context inventory unloaded; authenticated session GET required".into(), Vec::new())); }
-        body.extend(usage_dashboard(report, width, grid_rows));
+        if report.is_none() {
+            body.extend(usage_dashboard(report, width, grid_rows));
+        }
         if let Some(source) = report.and_then(|r| r.provenance.as_deref()) { body.push(usage_line(format!("Usage provenance: {source}"), Vec::new())); }
         if let Some(source) = report.and_then(|r| r.estimate_provenance.as_deref()) { body.push(usage_line(format!("Category estimates: {source}"), Vec::new())); }
         if let Some(coverage) = report.and_then(|r| r.coverage.as_deref()) { body.push(usage_line(format!("Coverage: {coverage}"), Vec::new())); }
@@ -1090,6 +1096,97 @@ mod usage_report_self_tests {
         for expected in ["Context Usage", "selected-model", "Used: 35 / 100", "System prompt", "MCP tools · /mcp", "AGENTS.md", "Skills · /skills", "Suggestions", "large memory file"] {
             assert!(visible.contains(expected), "missing {expected}");
         }
+    }
+
+    #[test]
+    fn reported_partial_usage_leads_with_grid_and_preserves_selected_detail() {
+        let mut view = ContextView::new();
+        let selected = serde_json::json!({
+            "id":"00000000-0000-4000-8000-000000000026", "kind":"message", "role":"user",
+            "source":"durable_history", "included":true, "selectable":true,
+            "content":"message body", "content_available":false, "truncated":true,
+            "bytes":40, "estimated_tokens":10,
+            "count_provenance":"stored UTF-8 bytes / 4"
+        });
+        let body = serde_json::json!({
+            "scope":"session", "items":[selected],
+            "projection":{"status":"available","bytes":40,"estimated_tokens":10,"typed_tail_items":1,"provenance":"bytes / 4"},
+            "usage_report": {
+                "model_id":"selected-model", "capacity_tokens":1000,
+                "reported_used_tokens":120,
+                "categories":[{"id":"messages","tokens":120}],
+                "coverage":{"complete":false,"gaps":["tool schemas unavailable"]}
+            }
+        }).to_string();
+        view.load_response(&body).unwrap();
+        let lines = view.render(80, 24);
+        let grid = lines.iter().position(|line| line.contains("Estimated usage by category")).expect("grid heading");
+        assert!(lines.iter().any(|line| line.contains("selected-model")));
+        assert!(lines.iter().any(|line| line.contains("Coverage gaps: tool schemas unavailable")));
+        assert!(lines.iter().any(|line| line.chars().filter(|c| *c == '■').count() >= 20));
+        assert!(lines.iter().position(|line| line.contains("Context inventory:")).is_none_or(|inventory| grid < inventory));
+        let mut seen = String::new();
+        for _ in 0..80 { seen.push_str(&view.render(40, 8).join("\n")); view.scroll_detail(true); }
+        assert!(seen.contains("content not available from the daemon"));
+        assert!(!seen.contains("message body"));
+    }
+
+    #[test]
+    fn installed_partial_report_has_initial_grid_at_page_content_geometry() {
+        let mut view = ContextView::new();
+        let body = json!({
+            "scope":"session",
+            "items":[{
+                "id":"00000000-0000-4000-8000-000000000026",
+                "kind":"message", "role":"user", "source":"durable_history",
+                "included":true, "selectable":true,
+                "content":"native provider contract first", "content_available":true,
+                "bytes":30, "estimated_tokens":8,
+                "count_provenance":"stored UTF-8 bytes / 4; not measured tokenizer usage"
+            }],
+            "projection":{
+                "status":"available", "bytes":111, "estimated_tokens":28,
+                "typed_tail_items":2,
+                "provenance":"selected typed tail JSON plus included checkpoint JSON; excludes prospective user input, rebuilt instructions, tools and request envelope"
+            },
+            "usage_report":{
+                "model_id":"openai/gpt-5.6-mini", "capacity_tokens":200000,
+                "reported_used_tokens":null, "estimated_total_tokens":null,
+                "categories":[
+                    {"id":"system_prompt","tokens":0,"provenance":"estimated_utf8_bytes_div_4"},
+                    {"id":"system_tools","tokens":1184,"provenance":"estimated_utf8_bytes_div_4"},
+                    {"id":"mcp_server_instructions","tokens":0,"provenance":"estimated_utf8_bytes_div_4"},
+                    {"id":"memory_files","tokens":0,"provenance":"estimated_utf8_bytes_div_4"},
+                    {"id":"skills","tokens":null,"provenance":"unreported"},
+                    {"id":"messages","tokens":14,"provenance":"estimated_utf8_bytes_div_4"},
+                    {"id":"free_space","tokens":null,"provenance":"unreported"}
+                ],
+                "coverage":{"complete":false,"gaps":[
+                    "Skills are not exposed as a distinct assembled-request source",
+                    "Provider request framing, reasoning options and tool-choice envelope are not tokenized"
+                ]},
+                "mcp_tools":[], "memory_files":[], "skills":[], "suggestions":[]
+            }
+        });
+        view.load_response(&body.to_string()).unwrap();
+        let initial = view.render_styled(72, 19);
+        let text = initial.iter().map(|line| line.text.as_str()).collect::<Vec<_>>().join("\n");
+        for expected in ["Context Usage", "openai/gpt-5.6-mini", "200000", "Coverage gaps:", "Counting:"] {
+            assert!(text.contains(expected), "missing initial {expected}");
+        }
+        let grid = initial.iter().position(|line| line.text.contains("Estimated usage by category")).expect("initial grid heading");
+        assert!(initial.iter().skip(grid + 1).any(|line| line.text.contains('■') && line.styles.iter().any(|span| span.cells > 0)), "initial grid must contain visible styled cells");
+        assert!(initial.iter().position(|line| line.text.contains("Context inventory:")).is_none_or(|inventory| grid < inventory));
+        assert!(!text.contains("Estimated usage total:"));
+        let mut reachable = String::new();
+        for _ in 0..100 {
+            reachable.push_str(&view.render(72, 19).join("\n"));
+            view.scroll_detail(true);
+        }
+        for expected in ["Skills: unreported", "Free space: unreported", "Context inventory:", "native provider contract first", "MCP tools", "Memory files", "Suggestions"] {
+            assert!(reachable.contains(expected), "missing scroll-reachable {expected}");
+        }
+        assert!(!reachable.contains("Estimated usage total:"));
     }
 
     #[test]
