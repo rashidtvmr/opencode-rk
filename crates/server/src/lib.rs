@@ -2003,7 +2003,20 @@ async fn create_turn(
     let (mut input, checkpoint) = checkpoint_provider_history(
         &state.sessions, id, &body.model, MAX_RESPONSES_INPUT_MESSAGES, MAX_RESPONSES_INPUT_BYTES,
     ).await?;
-    memory_http::prepend(&state, id, model_id, &mut input).await?;
+    let memory_usage = memory_http::prepend_with_usage(&state, id, model_id, &mut input).await?;
+    let capacity_tokens = state.catalog.model(provider_id, model_id).ok().and_then(|model| model.context_window);
+    let usage_input = context_accounting::capture_assembled_request(
+        &body.model,
+        capacity_tokens,
+        &input,
+        &[],
+        !memory_usage.paths.is_empty(),
+        &[],
+        &memory_usage.paths,
+        memory_usage.paths_truncated,
+        checkpoint.is_some(),
+    );
+    context_accounting::publish_usage_report(id, &usage_input, None);
     let mut cancelled = owner.cancellation_receiver();
     let completed = tokio::select! {
         biased;
@@ -2020,6 +2033,11 @@ async fn create_turn(
     if owner.is_cancelled() { return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() }); }
     let assistant_text = completed.text;
     let usage = completed.usage;
+    context_accounting::publish_usage_report(
+        id,
+        &usage_input,
+        usage.as_ref().map(|usage| usage.input_tokens),
+    );
     let assistant_message = state
         .sessions
         .append_text(id, MessageRole::Assistant, assistant_text)

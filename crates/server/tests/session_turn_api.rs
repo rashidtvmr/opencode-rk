@@ -61,7 +61,7 @@ impl Drop for EnvGuard {
     }
 }
 
-fn spawn_openai_fixture() -> (String, thread::JoinHandle<String>) {
+fn spawn_openai_fixture_with_usage(usage: Option<Value>) -> (String, thread::JoinHandle<String>) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("bind provider fixture");
     let address = listener.local_addr().expect("fixture address");
 
@@ -108,7 +108,7 @@ fn spawn_openai_fixture() -> (String, thread::JoinHandle<String>) {
             );
         }
 
-        let response = json!({
+        let mut response = json!({
             "id": "resp_fixture",
             "status": "completed",
             "output": [{
@@ -116,8 +116,11 @@ fn spawn_openai_fixture() -> (String, thread::JoinHandle<String>) {
                 "role": "assistant",
                 "content": [{"type": "output_text", "text": "Fixture assistant reply"}]
             }]
-        })
-        .to_string();
+        });
+        if let Some(usage) = usage {
+            response["usage"] = usage;
+        }
+        let response = response.to_string();
         let wire = format!(
             "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}",
             response.len(),
@@ -131,6 +134,10 @@ fn spawn_openai_fixture() -> (String, thread::JoinHandle<String>) {
     });
 
     (format!("http://{address}/v1"), task)
+}
+
+fn spawn_openai_fixture() -> (String, thread::JoinHandle<String>) {
+    spawn_openai_fixture_with_usage(None)
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -215,4 +222,85 @@ async fn session_turn_executes_provider_and_persists_both_messages() {
         messages["messages"][1]["body"]["text"],
         "Fixture assistant reply"
     );
+}
+
+
+#[tokio::test(flavor = "current_thread")]
+async fn nonstream_turn_publishes_provider_usage_memory_and_unknown_when_absent() {
+    let root = tempdir().expect("memory fixture root");
+    let instruction = root.path().join("AGENTS.md");
+    std::fs::write(&instruction, "NONSTREAM_ACCOUNTING_MEMORY_SENTINEL").unwrap();
+    let storage = Storage::open_in_memory(root.path().join("blobs")).unwrap();
+    let sessions = SessionService::new(Arc::new(storage));
+    let session = sessions
+        .create_in_directory("Non-stream accounting", Some(root.path().to_owned()))
+        .await
+        .unwrap();
+    let app = router(AppState {
+        sessions,
+        catalog: Arc::new(Catalog::default()),
+    });
+    let (provider_base, provider_request) = spawn_openai_fixture_with_usage(Some(json!({
+        "input_tokens": 120,
+        "output_tokens": 30,
+        "input_tokens_details": {"cached_tokens": 40},
+        "output_tokens_details": {"reasoning_tokens": 10}
+    })));
+    let _base_url = EnvGuard::set("OPENAI_BASE_URL", &provider_base);
+    let _api_key = EnvGuard::set("OPENAI_API_KEY", "fixture-secret");
+    let session_id = session.id.to_string();
+    let turn = app.clone().oneshot(Request::builder()
+        .method("POST")
+        .uri(format!("/api/sessions/{session_id}/turns"))
+        .header("content-type", "application/json")
+        .body(Body::from(json!({"text":"account this", "model":"openai/gpt-5.6"}).to_string()))
+        .unwrap()).await.unwrap();
+    assert_eq!(turn.status(), StatusCode::CREATED);
+    provider_request.join().unwrap();
+    let context = app.clone().oneshot(Request::builder()
+        .uri(format!("/api/sessions/{session_id}/context"))
+        .body(Body::empty()).unwrap()).await.unwrap();
+    let report = json_body(context).await["usage_report"].clone();
+    assert_eq!(report["reported_used_tokens"], 120);
+    assert_eq!(report["memory_files"].as_array().unwrap().len(), 1);
+    assert_eq!(report["memory_files"][0], instruction.canonicalize().unwrap().to_string_lossy().as_ref());
+    assert_eq!(report["mcp_tools"].as_array().unwrap().len(), 0);
+    let category = |id: &str| report["categories"].as_array().unwrap().iter()
+        .find(|category| category["id"] == id).unwrap().clone();
+    assert_eq!(category("system_tools")["tokens"], 0);
+    assert_eq!(category("mcp_server_instructions")["tokens"], 0);
+    assert_eq!(category("memory_files")["tokens"].is_number(), true);
+    assert_eq!(category("free_space")["provenance"], "derived_from_reported_usage");
+    assert_eq!(report["coverage"]["complete"], false);
+    assert!(report["coverage"]["gaps"].as_array().unwrap().iter()
+        .any(|gap| gap == "Skills are not exposed as a distinct assembled-request source"));
+
+    let missing_base = spawn_openai_fixture_with_usage(None);
+    let _missing_base = EnvGuard::set("OPENAI_BASE_URL", &missing_base.0);
+    let missing_root = tempdir().expect("missing-usage fixture root");
+    let missing_storage = Storage::open_in_memory(missing_root.path().join("blobs")).unwrap();
+    let missing_sessions = SessionService::new(Arc::new(missing_storage));
+    let missing_session = missing_sessions
+        .create_in_directory("Missing usage", Some(missing_root.path().to_owned()))
+        .await
+        .unwrap();
+    let missing_id = missing_session.id.to_string();
+    let missing_app = router(AppState {
+        sessions: missing_sessions,
+        catalog: Arc::new(Catalog::default()),
+    });
+    let turn = missing_app.clone().oneshot(Request::builder()
+        .method("POST").uri(format!("/api/sessions/{missing_id}/turns"))
+        .header("content-type", "application/json")
+        .body(Body::from(json!({"text":"unknown usage", "model":"openai/gpt-5.6"}).to_string())).unwrap()).await.unwrap();
+    assert_eq!(turn.status(), StatusCode::CREATED);
+    missing_base.1.join().unwrap();
+    let context = missing_app.oneshot(Request::builder()
+        .uri(format!("/api/sessions/{missing_id}/context")).body(Body::empty()).unwrap()).await.unwrap();
+    let report = json_body(context).await["usage_report"].clone();
+    assert_eq!(report["reported_used_tokens"], Value::Null);
+    let free_space = report["categories"].as_array().unwrap().iter()
+        .find(|category| category["id"] == "free_space").unwrap();
+    assert_eq!(free_space["tokens"], Value::Null);
+    assert_eq!(free_space["provenance"], "unreported");
 }
