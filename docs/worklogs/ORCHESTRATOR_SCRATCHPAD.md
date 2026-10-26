@@ -26,6 +26,241 @@ and operating rules at the top of `AGENTS.md` before dispatching more work.
 
 ### Continuation after checkpoint: actual validation and integration
 
+Post-checkpoint 2026-10-26: actual HEAD eba78312 (measured usage footer click
+integration); exact composed candidate native CLI **858 PASS** prior integration,
+source hashes checked on all three canonical files before scoped commit. Broader
+suite lacked target regressions: private06-pointer test overlay ran **1 PASS,
+1 FAIL** (stale target remained active after open_page). Main working native_view
+adds Page::Chat eligibility gate; same frozen tests rerun **2 PASS** in
+ready-cli-validation-4n3v0ij9/context-pointer-guard.*. Original reviewer12 renewed
+review session ses_e882a160fffe9IHVmD1urKIdL8, guard UNCOMMITTED until exact approval.
+This finding remains distinct from real installed mouse journey, still unexecuted.
+
+Markdown candidateebb7a4e... now original reviewer28 **APPROVE** a7f614fb... and
+main exact37testsPASS; no Markdown product integration yet. Grid v4ec1c403e...
+originalnegative reviewer13 **APPROVE** fc992eea... and main11testsPASS; v3 rejection
+retained. Renderer live integration remains pending01 author's final artifact.
+
+Recent replenishment (all privatewrites, noheavygrants, nofallback, usageUNKNOWN):
+- ses_e881cc726ffe8M5wbG95rNoll7 xkiro-gpt-6-luna117-keybindruntime replaces
+  repeated86no-codehandoffs; realmodule/wiring/tests required.
+- ses_e881c36cbffe1UkvtUVPVczwBd xkiro118-homecurrent replaces113corruptpatch;
+  approvedHomecomposition must preserve currenteba783pointer/leader, newreview.
+- ses_e881b71f1ffeHQc8PXf6JY8Rmw xkiro119-accountingmerge prepares scopedindex
+  patch and separateprivatecomposition preservingunknownuserdirtylib.rs work.
+  Exactbackendv3 approveda60b730e... +294serverPASS, NOTintegratedyet.
+- ses_e881b2eeaffeq4WBfHWdMN3s3E luna120-releaseprep exactpackaging/provenance/
+  disposableinstalledcommands read-only; no user install or daemon mutations.
+- ses_e881ec694fferRLzonJpRsgxHU luna116-tabhoverreview evaluatesactual108worker
+  path /T/opencode/108-tabhoverresize (NOreplenish20prefix). Patch88e35f54...
+  sourcee58f761f... base1c639; currentcontextpointercompositionstillneeded.
+Mainheavy slot FREE after two targetedpointertestsPASS. Preserveunknownweb/server
+edits anddaemon73389. Currentactivecountnotfullyaudited; do not claim20 from
+launchhistory, replenishindependentusefulassignments withoutduplicatewriters.
+
+Route availability change: 9router-luna-free now reports `[codex/gpt-6-luna]
+rule luna-free left no eligible account` on consumer08, pointer12 re-review,
+decoder77 composition, release120, and hover116. STOP dispatching this route;
+unfinished work redirected explicitly to authorized xkiro-gpt-6-luna or
+vyce-deepseek-v41 (never automatic fallback). All cumulativeusage UNKNOWN.
+GLM/combined/TokenHarbor earlier pauses remain in force. No budget reset inferred.
+
+Actual fresh validations:
+- Chat114 patchc101ab5... applies ontoeba783 but targeted tests **1 PASS 2 FAIL**,
+  duplicated #[test] registration of Unicodecase; validexpectedSome4,28 gotNone.
+  Author ses_e88238007ffel7KrMpn0CE2H2v resumedv2, oldcandidate NOTready.
+- Keybind117 realmodule73681906... privatecompile **3 PASS**, runtimewiring is
+  STILLPROSEONLY. Independentreview125active; do notcallmodulecompletefeature.
+  CorrectCLIcommand always --bin oc2 --features native (no --lib target).
+- Main SERIALIZED heavy slot NOW releasebuildshell sh_177e8c29b001ezlc1745UN1Ma6:
+  disposable archiveexacteba783, cargo+1.98.1 build --release -popencode-rk-cli
+  --featuresnative --locked --offline --binoc2, jobs1. Testoverlaysremovedfrom
+  main/view/entry. Awaitnotification; no otherCargo/PTYgrant. Userbinnotinstalled.
+
+Replacement/useful assignment roster added (all private artifacts/noheavy):
+- xkiro121pointerguardreview ses_e881a52faffeGWMOtHe4OPg7hD (workingguardexacthash)
+- xkiro15renderfinish ses_e881a0128ffeOsgD3p4KE1bRXf (author01completedstalehashes;
+  exactbackendv3+approvedgridv4+actualpainter composition required)
+- xkiro16consumerfinish ses_e8819c868ffevKo7wZPdNHwihG (92predicate actualconsumer)
+- xkiro122hoverreview ses_e88199881ffeYXC3ZAFQpj7TCA (replacefailed116)
+- xkiro124decodercompose ses_e88190d52ffepH4INVkeTW1rsA (replacefailed77)
+- xkiro14contractaudit ses_e881a871bffeAx1Q3NGF5RWD8X (snapshotproducer/parser)
+- vyce123releaseprep ses_e88193f71ffemwvved0jzPYf5P (replacefailed120)
+- vyce17endpointtests ses_e8818c3acffes2dx2ndmeVMl9n (actualHTTPcoverage)
+- vyce125keybindreview ses_e8818427cffex9w1UZloCoyekU (moduleupstreamsemantics)
+- vyce126toolcurrent ses_e88178e30ffeGmFE4m3sCeHENY (26PASSapprovedintegrationpatch)
+- vyce127modelsdevaudit ses_e8816fce5ffep0siTAqHefQuNw (runtimecatalogexactflow)
+- vyce128authedgeready ses_e8816c9ebffeesK73UBx7JjBtP (approved12testsnewfileprep)
+- xkiro129permissionsave ses_e88169771ffecjl1GyABDzsjSE (trustedrequestsaveparity)
+- xkiro130shellverifiedwiring ses_e88165807ffeg78c6cCGW7N4GE (typedcallbackatverified
+  brokerpoint; explicitnewtools/serverprivategrant, no proofpresenceapproval)
+Previousactive115arrowfix/118homecurrent/119accountingmerge remain independent.
+Vyce route six listed unfinished assignments, below eight concurrentlimit;
+exclude completed99diagnosis from activecount. Track completions promptly.
+
+Latest actual release build eba78312 SUCCEEDED. Binary (not installed):
+`context-exact-integrated-jjhruynv/target/release/oc2`, SHA256
+6790ff2352f99c96b9c952e86e4be5d4f297e7253de7b5913b67a533644eb779.
+Receipt ready-cli-validation-4n3v0ij9/release-build-receipt.json. This binary lacks
+pending completehitguard/dashboard/Home/Kitty repairs; not finalreleaseacceptance.
+
+Pointer121 originalnewreview NEEDS_FIX working622219...: PageChat doublesasHome.
+Mainnowadds session_route eligibility ANDclearscontext_usage_hit onroutechange,
+withtwocanonicalregressions (geometry/page andunknownzero/Homebeforepaint/resize).
+Reviewer121 resumedv2 exactnewhash. FullCLIvalidationnow shell
+sh_177ebf77d001TprV8Mq6s2K4Qu oneba783archive+workingnative_view ONLY. Other
+privateoverlaysremoved; decoderbytecomparedtocleanbase. Resultpending, noheavy
+otherworkergrant. Do not use earlier2PASSascandidate resultfornewtests.
+
+Unexpected canonical native_input_decoder.rs dirtydiff now observed (38lines:
+TabNext/Previous/Slot declarations/Kitty mappings) after earliercleanstatus.
+Provenance UNCONFIRMED; treataspotentialuserwork, preserve/DO NOTstage/reset.
+CurrentworkingTUIlacksnewvariants so canonicaldirtytree notattestedbuildsource.
+All mainvalidationisolatedgitarchives exclude thisdiff. Exact115authorhandoff
+hasincorrectbaseSHA/truncatedhashclaims; reviewcurrentbasecompositionbeforeuse.
+
+119accountingmerge privatecomposition successfulpreservinguseragentstreamroute;
+privatecomposedlib7ed71577... (differentfromreviewedcleanlibf7ac...). User
+daemon_authuntouchedfb7f8ac6...; newindependentreview andcompositiontestsneeded.
+118Homecurrent validpatch4c9beafc... source9106ef3b... preservesleader/context;
+review131active ses_e8815a07cffeqM6RLRI2QQr7az, oldapprovalnottransferred.
+
+122hoverreview NEEDS_FIX: painterdrawsALLstructuralclose_rects sohoverrowtextfix
+aloneinsufficient. Author108 resumedv2expandednative_tabs+entryprivategrant,
+actualpaintvisibilityneededwithoutbreakingstableSessionRefclosehitgeometry.
+
+15dashboardv1candidate6ada... actualbackendpathclaimunavailablewasfalse (main
+compiled294testsfromthosepaths); authorresumedv2exactproducerpaths provided,
+musthandlecategoriesarray/coverageobject/model_id/reported_used_tokens/etc.
+14audit usedOLDrejected9c0snapshotdespiteaskedlatest; fieldmatrix83a... useful
+backendshapeonly, notverdictagainstnewb91... parser. Do not repeatold-sourceclaims.
+16goldenconsumernewcf3ffce3... declares92predicatecoverage, UNEXECUTED/APIgap;
+needsactualrenderercompositioncompileandindependentreviewnotclaimedPASS.
+
+Keybind117module736819... main3PASS;125reviewmoduleAPPROVEbutitsdurationoverflow
+hardeningnote is hypothetical (MAX_SAFE9e15 < i64max9e18; as_millis isu128).
+No newtimeoutcapauthorized; exactelapsed-safeMAXbehavior remainsrequired.
+RuntimewiringstillMDproposal, nofeatureacceptance. Priornegativeprose-onlykept.
+
+Main completepointerguard +two canonicalregressions actualnativeCLI **860 PASS**,
+receipt ready-cli-validation-4n3v0ij9/pointer-complete-guard-receipt.json. Reviewer121
+v2 pending. Homecurrent9106... actualcompile FAILED E0061 leadernumeric/wcallers
+missingnewcompact_workerarg6932/6959. No testPASSforHome; optimizer118resumedv2.
+Never treatprivategitapplyproofascompileverification. Mainheavyfreeafterfailure.
+Do not combineoldHomecompilefailurewithpointer860PASSassingleGREENcandidate.
+
+Integrated complete contextpointerrepair as **f1a902e1** after reviewer121v2
+APPROVE0d2f2207... exactsourced56e2c31... andmain860PASS. Only native_view.rs
+staged; preserveunknowncanonicaldecoder/userwebserverdiffs. Exactintegrated
+targetfilterrerunpending; preintegrationcandidatebytesmatchedreview/testreceipt.
+
+Renderer15v2 candidate49fb822f... usesabsoluteprivatepathsindiffheaders so
+`git apply --check`failedBEFOREcompilation. Main now usesfiveexacthashchecked
+candidatefiles (73c2.../EC1helper/82afview/f623entry/270edmain) onfresh eba783
+archive in serializedshell sh_177ef9006001Eiv00CswL0uJ2Y. This is theFIRSTactual
+dashboardcompileattempt, noPASSyet. Sourcefilesin15-renderfinish-v2/canonical/
+crates/cli/src/. Independent14reviewactualv2 nowrunning, previousauditold9c0
+notacceptance. Mainprivatecandidateviewincludesrouteguardbutnotnewcanonicaltests;
+latercurrentf1a902compositionmustpreservethem.
+
+Home118v2 actualsource215b7dd8... patchd1e431a5... addsmissingcompactworkerarg
+toleadernumeric/w. Original131negativeagreesoldcompilefail; resumedv2exactreview.
+No newHomecompilePASSyet. Hover108v2 nowexplicitvisible_close_rectpaintgate,
+patches3bf6f171native_tabs/407d2da2entry; renewed122reviewstillneeded.
+Kitty124sourcepreparedbutreportretainsPUArejectionandASCIIAltBackspacewhich
+contradictpriorapprovedordinaryPUAfallback/realKitty57352/57353rule; independent
+reviewneededbeforeheavy/acceptance. Do notintegratefromauthorprotocolsummary.
+Arrow115sourcepatchheadersprivateabsoluteandbaseclaimincorrect; evaluator132
+ses_e8811ad6bffepwbCuz91EWeBL2 reviewsactualapplyability/semantics independently.
+
+Exact integratedf1a902e12839cec840b5d44e10c03036cabc1087 pointerfilter now **2 PASS**
+withallcandidateoverlaysremoved; receipt pointer-integrated-receipt.json. Full
+preintegrationexactbytesuite860PASS retained. Homev2source215b7dd8... now actual
+fullnativeCLI **861 PASS** privatecompositionwithf1a902view; receipt home-v2-receipt.
+Renewed131reviewpending. These are distinctsourceidentities; HomeNOTintegrated.
+
+Dashboardv2actualcompiler **FAIL 5 E0609/E0560**: UsageReportmissingcoverage_gaps/
+estimated_total_tokens despiteusages+initializer. Rawlogscontext-dashboard-v2-
+compile-m6avdxds/test.stderr. Author15resumedv3fields/allconstructors+relativepatch.
+No dashboardtestexecuted, no rendererGREEN. Heavy slot now FREE.
+
+WRITE-SCOPE CONTAINMENT: canonicalnewdirtypermission files (run_owner,mcp_context,
+todo,task_children/tests,native_view_dialogs,tui_entry,lib) match129handoff which
+claimsimplementedinassignedrepositorydespiteexplicitprivate-onlygrant. Canonical
+tools/executor+shell_toolnewdirtyalsoobservedwhile130active. Directed129/130/124
+toSTOPALLcanonicalwrites, preserveuserwork(noreset/revert), returnactualpaths/
+preimages/tools/provenanceprivate. These workers mustnotclaimnosourcewritesfrom
+'noGitmutations'. No suchdiffstaged/integratedbyorchestrator.
+Preservedforensic snapshot of13workingfilesandHEADpreimages+working.diff:
+`shared-write-provenance-sw7j9n4j/manifest.json`. Userdirtylib/daemon_authpreexisted;
+DO NOToverwrite/resetwholeroutefiles. Private119lib.user-beforehasprioruseragent
+streamwork andcouldassistprecisepreimagecomparison afterworkerprovenancearrives.
+UnconfirmeddecoderTabNext/Previous/Slotdirtydiffpreservedseparatelywithsamecopies.
+Canonicaldirtytree is NOTreleaseattestedsource. All build/tests isolatedarchives.
+Transport interruption recovery: last attempted patch call had empty arguments and
+failed with provider WebSocket inbound queue overflow; no successful restoration
+patch was applied. Canonical tools dirtydiff was inspected and matches130callback
+changes. Worker130admitscanonicaltools+serverlibwrites; private130/worker.patch
+568f963d... preservescandidate. Worker124admitscanonicaldecoderwrites; own124/
+provenance.mdf4912e... recordsactual57352/57353unimplemented/PUArejectiongaps.
+Do not restorewholelib; useragentstreamworkpreexists. Forensiccopies retained.
+
+Dashboardv3actualcompilerFAIL E0373 inner .map closure borrowsownedline.styles
+at338. Main applied ONE LINE privatecompilecopy `map(move |text| ...)`, no
+canonicalrendererwrites. Privatecopy now distinctunreviewedcandidate; notyet
+rerun/hashfreeze. Authorv3fa57... remainsimmutable/rejectedcompileartifact.
+Homev2independent131APPROVE510bc7f4... exact215b... +main861PASS; integration
+blockedbyunreviewedpermissionworkerwritesintui_entry. Preserve/identifyworker
+preimageandpreparecleanindexratherthanaccidentallystagingsecuritycandidate.
+
+Continuation: attributed124/129/130canonicalwrites now precisely removed using
+scopedpatch hunks AFTERworkeradmissions+forensiccopies. Verified11workeronlypaths
+byte-identicalHEAD; sharedserverlib byte-identical119savedUSERpreimage hash
+a63ca89b68ed9c10fade2b0fb5a58c97a8f63989fcd31ec9fe294d96aaa7aa22.
+No useragentstream/daemon_auth/web edits removed. No wholesaleGitreset/revert.
+Private rejectedcandidatepatches/provenance preserved outsidecanonical.
+
+Homev2canonicalpatchapplied viafunctions.patch produced EXACT215b7dd8... hash;
+review131510bc7f4... +main861PASScheckedbeforeonlytui_entry.rs staged. Integrated
+as **6ab59222**. Mainexactintegratedtui_entryfilter now running serializedshell
+sh_177f9a3f80018gUBE27iVz2vzK, disposablearchivevalidation paths. Installedstill
+unverified. Userbinaryunchanged. Do notclaimfullPhase1orUIparityfromthesechecks.
+
+Dashboardv3+privateclosuremove compiles: **33 PASS 5 FAIL** of38native_context
+tests, move-fix.stdout/receipt incontext-dashboard-v2-compile-m6avdxds. Fiveactual
+semanticfailures: missingMessagescoloredspan; inventorydetailprovenanceunreachable;
+projectionavailableabsent80x8; smallviewportselectedsummaryabsent; unavailable
+contentdetailunreachable. Author15resumedprivatev4 preservingsemanticassertions,
+estimated-onlyfallbackwithprovenancealsoexplicitfix. No dashboardintegration.
+
+Incoming127catalogreportincorrectlyclaimsdoc/last_updated/open_weightsmissing;
+canonicalcataloglibhasall+serdeflattenretainsmetadata. models.dev URL differs
+frompinnedupstreamdefaultconfirmed; liveCDN/ETagclaimUNVERIFIED(noevidence).
+134models-evidence ses_e88071d22ffe2Tx6S5GN2rJfWb taskedcorrectdurablesourceaudit.
+Incoming17endpointworkerreturnedNOARTIFACT andwrongsourceclaims; upstreamTSsource
+exists, actualbackendv3doesaddusage_report. 0testfilterdoesNOTprovetotalHTTPtest
+coveragezero. Replacement18endpointactual ses_e8806ce70ffeYF7J1UlqF5EWjQ usesexact
+backendprivatecandidatepaths realtestsrequired. Tool126claimedfunctions.patchbut
+copiedunifieddiffandconflicting62ce/62cefhashes; verifyactualbytesbeforereliance.
+
+Exact integrated6ab59222 Home/nativeentryfilter **95 PASS** (766filtered) receipt
+ready-cli-validation-4n3v0ij9/home-integrated-receipt.json. Installedacceptancefalse.
+Chat114v2appliescleanlyoncurrentHome+pointerbutactualtests **0 PASS 2 FAIL**:
+longclippedprefixvisitorcapswidthso`cells>text_width`neverdetectsclipping; Unicode
+fixturebyte2inside3byte界wronglyexpectsSome. ExistingSend/homecursortestlost#[test]
+registrationinv2. Author114resumedv3naturalmeasure/clipping; independent135testowner
+ses_e8804eb68ffe4r1TWkg8BKnD4e correctsfixturederivingactualrendergeometry, preserves
+invalidboundary/longdraftassertions/restoresoldtestregistration. Noassertionweaken.
+MainheavyFREE afterfailure, no otherworkerheavygrant.
+136accountingcompositionreview ses_e8804a43cffem4MCMi1YBPkgWs reviews7ed71577lib
+delta onactualpreexistinguserliba63ca89b... beforeapprovedbackendintegration.
+122originalhoverreviewresumedv2actualpaintprojectione05ec80b/019fc0bd.
+RouteusageUNKNOWN; active20roster notachieved/audited, sourcewritecontainmentand
+repeatedcompletedno-artifactworkers reducedcapacity. Do notclaim20fromhistory.
+Continueusefulindependentwork/replenishmentwhilekeepheavyserializedandonewriter.
+MainSOLEintegrationwriter remains; lastproductSHAf1a902e1. Userbinaryoldstillnot
+updated, daemon73389/4096notstopped, norealOAuthperformed. Negativeverdictsheld.
+
 Latest: product HEAD `1c639d753c9c3fcfdc923c9540d60fab23b918a7` integrates
 metadata/home cursor exact reviewed/tested97be7e92... source. Main's full native
 CLI suite on this integrated product source: **858 PASS, 0 FAIL**. Raw logs and
@@ -109,6 +344,53 @@ Main serialized heavy slot FREE after858PASS and11gridPASS. Most urgent next
 actualexecution: backendcapturecompilercheckafterv3review, correctedcontext
 dashboard+grid integration checks, andHome composedfocusedtests. ReadyCLI tool
 projection26PASS stillunintegrated; releasebuild/installedjourneysremainpending.
+
+Chat cursor87 optimizer completed with NO v2 files; padded measurement/modal
+blockers remain. Replenished with authorized exact xkiro-gpt-6-luna worker
+`ses_e88238007ffel7KrMpn0CE2H2v` (114-chatcursor), exclusive new private directory,
+base1c639, real source patch/tests required. No heavy execution grant. Preserve
+fresh-frame cursor assertions; no product completion from this assignment.
+
+Context memory v3 actualsource5180558f.../libf7ac6bad.../httpb9eae549.../
+memory_http024e9da9... now frozen; original evaluator10 resumed exact composition
+review of delta3a3cc9ee... with v2. Main serialized heavy slot NOW owns compiler/
+focusedregression command in shell `sh_177dd407f001Dv5cEZLMcS8Baz`, disposable
+archive1c639 plus fourexacthashedcandidatefiles; userdirtyserverfiles untouched.
+No result yet; regression source alone remains UNEXECUTED until notification.
+
+LeaderRight-arrow diagnosis109 confirmed recognized CSI C silently consumed so
+leader remainsarmed. Replacement authorized xkiro worker
+`ses_e88227209ffecIZJ9QtLfprOUd` (115-leaderarrowfix) owns newprivate base1c639
+decoder/entry copies and minimal event/runtime patch/tests. Existing77candidate
+underreview frozen; do not mutate it. No unknownprotocol blanketcancellation.
+Independent review/realbyte installed execution stillrequired. UsageUNKNOWN.
+
+Context accounting v3 executed validation: exact four source hashes fromv3manifest
+compile successfully in fresharchive1c639. New unknown-memory regression **1 PASS**;
+full context_accounting filter **4 PASS**. context_http filter executed **0 tests**,
+so it is NOT endpoint coverage/PASS. Logs/receipts in
+`context-accounting-v3-validation-i7kh754x/`. Broader candidate server --lib run
+now mainserializedshell `sh_177de50630017PFs6CRcXSniKE`, result pending.
+Reviewer10 independently evaluating exactv3 composition; no serverintegration yet.
+Candidate server --lib completed **294 PASS, 0 FAIL** on exactv3 source hashes;
+receipt `context-accounting-v3-validation-i7kh754x/server-lib-receipt.json`.
+Heavy slot released. These are privatecandidate tests, NOT integrated/dashboard/
+installed acceptance; originalindependentreview stillrequired.
+
+Markdown independent testowner112 determined linefailure is badrowreconstruction,
+not demonstratedrendererloss. Test-only correction candidateebb7a4e... now main
+executed **37 native_view_chat PASS**, receipt markdown-row-repair-receipt.json in
+ready-cli-validation-4n3v0ij9. Originalevaluator28 resumedv6 exacttestintent review;
+no weakeningapproveduntilreview, no integrationyet.
+
+Kitty combinedv3 review110NEEDS_FIX losesintegratedleaderpendingclear. Author77
+resumednewbase1c639 composition preservingfa708leaderbehavior/newmetadata97be.
+Originalnegativebc09f5c1... retained, decodercandidate notready.
+
+Contextpointer e88cf570... reviewer12APPROVE8ad3fb5e...; mainnowserialized
+validation shell `sh_177dff9ef001e2oz9S0C6Neidc` appliesapproveddiff onto1c639
+privatearchive preservingmetadata/leader and runsnativeCLI suite. Pointergeometry/
+realclickjourney stillunproven; compile/testresultpending. No other heavy grant.
 
 - Current product HEAD now `2aafbfbf` (leader dispatch/cancellation), exact reviewed
   source hash fa708ed3ce3d1968034e5957d3ff846e971e2de52f8aca41895a25c730b7840b.
