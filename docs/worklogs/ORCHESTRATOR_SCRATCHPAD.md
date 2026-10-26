@@ -241,3 +241,79 @@ clarification, now applied. Durable rationale and original scratchpad SHA256 are
 in `docs/worklogs/research/2026-10-26-agent-operating-rules-review.md`. The worker
 wrote inside canonical `.private-tmp/` despite its read-only grant; preserve the
 original and require a genuinely external absolute scratchpad on reassignment.
+
+## Subsequent verified findings and availability changes
+
+- Corrected inspector tests now PASS: 23 context tests and all 847 CLI tests in
+  `context-red-green-d7y4lapv/final-{context,cli}.stdout`; final receipt records
+  exact source hashes. Original evaluator `ses_e88ea7c96ffeXWoM1LdIeaU8aB`
+  received the final aggregate and APPROVED exact SHAaf4f1d5c... . The two detail
+  files were integrated as `27722646f55ba59276d1308e7b2e55eaff031b04` (status was
+  already integrated). A fresh exact-27722646 source archive with a fresh Cargo
+  target passed **847/847 CLI tests**; raw logs and receipt:
+  `.../T/opencode/context-exact-integrated-jjhruynv/`, plus the shared Git evidence
+  receipt at `recovery-evidence/27722646f55ba59276d1308e7b2e55eaff031b04/context-integrated/`.
+  Installed click and `/context` journeys still PENDING; do not repeat a reviewer's
+  claim that preintegration candidate logs were exact integrated verification.
+- Full normalization trace confirms inclusive Rust input/output must NOT have
+  cache/reasoning added again. Upstream normalizes before session summation:
+  `packages/ai/src/protocols/open-responses.ts::mapUsage` and
+  `packages/core/src/session/usage.ts::tokens`. For input=100, cache=40,
+  output=20, reasoning=5, upstream decomposes 60+40+15+5=120; Rust uses
+  100+20=120. The unreviewed 200-total worker proposal was incorrect.
+  Research note: `.../T/opencode/research-token-normalization/scratchpad.md`,
+  SHA256 `4c5903f633dd66bffda5342986e92db7040cf342a6d1cc60ccd6aaa20e029cda`.
+  Missing Rust cache-write detail is a separate gap, not a reason to inflate totals.
+- Upstream Home retry accepted the actual rotating-placeholder contract rather
+  than one particular example. `home-retry-receipt.json` exit 0; all six Home/chat
+  viewport captures are now available across `frames-locked/` and
+  `frames-home-retry/`. These are reference captures, not a Rust differential.
+  All 12 raw files, hashes, label rows and run receipts were also preserved under
+  the shared Git directory at
+  `recovery-evidence/upstream-450e7b92412c780a7b5a75226bb8d49aaca24e22/rendered-home-chat/`.
+  Repeated source-only claim that `ctrl+p commands` is absent is refuted by the
+  actual upstream captured footer; do not remove it based on literal grep.
+- Combined DeepSeek route returned `no eligible account` for sessions
+  `ses_e88d55f6affe1nSMUg6fSHhOTM`, `ses_e88d69c44ffevqSB0bay7HDBvD`,
+  `ses_e88d69c4affelIqL0fWyzjnAYe`. Pause NEW dispatches on that route; do not
+  infer token exhaustion or balances. Existing workers may still return results.
+  Replacements: GLM `ses_e88cf7e8cffeQQupeK9RWPjqgO` (Home send safety),
+  Token Harbor `ses_e88cf7e88ffeq5jHM32xSWbaIM` (browser OAuth) and
+  `ses_e88cf7e86ffemIND4Wyk4N2s7v` (output limits). GLM cumulative use UNKNOWN;
+  stop dispatching it on any error as required by its budget rule.
+- Horizontal F1v2 SHA6661c295... was independently rejected again by
+  `ses_e88eb2ed1ffe6ExuTgL0v6GS6U`. Merely renaming a prompt-label registry
+  does not fix actual `Chat` titles. Strategy note:
+  `.../T/opencode/strategy-tabs-identity/TAB_IDENTITY_STRATEGY.md`, SHA256
+  `15924b1a825573aa0e05b941270d9b8dbe2f4d9aa5899cc693584c0598e40ca2`.
+  Next repair must use bounded rendered title occurrences checked against the
+  authenticated UUID ledger, or genuinely created/renamed unique titles with
+  verified propagation. No fixture acceptance from self-check/assertion counts.
+- Original edge-auth negative reviewer approved SHA3a4d55... boundedness, but
+  coordinator then found a missed EOF defect: `.expect(...)` on `read()` rejects
+  errors, not `Ok(0)`, so the helper spins until timeout rather than failing EOF
+  immediately. No test execution/integration yet. Token Harbor private author
+  `ses_e88cea7e7ffeL1e1uHVpVJqm0U` owns explicit `n > 0` correction in a NEW
+  external copy; original reviewer must evaluate that new hash again.
+- Confirmed actual source defect: `daemon_client.rs::pid_alive` and
+  `discover_presence` both use `/proc`, invalid on macOS. Server's existing safe
+  rustix `kill(pid, 0)` implementation provides the repair pattern. Token Harbor
+  author `ses_e88cde434ffe1Tk103SMKsVVrb` owns only a private daemon_client.rs
+  candidate plus regression. No user daemon touched; do not call this the proven
+  sole cause of the second-client EOF until the installed journey is rerun.
+- Packaging audit `ses_e88d55f84ffe61W2pion4IU1Qz` reconciled old b24 receipt
+  hashes, but its rebuild trigger list was incomplete: ANY linked product source
+  change requires a new binary/release provenance for the new SHA, not only build
+  scripts/lock/installer changes. Old b24 binary/archive remain evidence for b24;
+  never relabel them as a newer verified release. Audit note:
+  `.../T/opencode/auditor-b24-scratch/RELEASE_AUDIT_b24.md`, SHA256
+  `10a925c2d9c6b2d1d15b06cab8bd7296fafe62636c44c53da419bb0528775e81`.
+- Vertical repair author claimed `.../T/opencode/vertical-tabs-repair-v2/` but
+  coordinator read confirmed that directory DOES NOT EXIST. Treat the handoff as
+  INCOMPLETE, not an implementation. New Token Harbor owner
+  `ses_e88ca554affeVqwp0ljN0bmuXS` owns real private horizontal/vertical fixture
+  artifacts using the independent identity strategy and correct model labels.
+- PTY reviewer `ses_e88d69c3dffeP2Guqpqw6bOIE1` approved the cancellation-test
+  idea but reported the fix diff malformed. Do not apply a fragment or blindly
+  change cleanup to return every existing state: review successful/running/error
+  retry semantics and run a compiling RED/GREEN on a real candidate first.
