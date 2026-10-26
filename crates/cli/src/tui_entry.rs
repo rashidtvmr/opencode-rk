@@ -4372,13 +4372,28 @@ fn native_loop(
                     crate::native_view_pages::Page::Chat | crate::native_view_pages::Page::Theme
                 )
                 && !session_route;
+            let input_overlay = dialog_open
+                || view.command_palette_open()
+                || appearance.open
+                || children_panel.open
+                || permission_editor.open
+                || import_modal_visible(
+                    dialog_open,
+                    permission_editor.open,
+                    !matches!(dialog, native_setup::Dialog::None),
+                    import_dialog.as_ref().is_some_and(|import| import.is_open()),
+                )
+                || modal_rows.is_some();
             let cursor = if !help_open
-                && !dialog_open
-                && !view.command_palette_open()
+                && !input_overlay
                 && matches!(dialog, native_setup::Dialog::None)
                 && view.page() == crate::native_view_pages::Page::Chat
             {
-                view.home_cursor(draft_echo)
+                if session_route {
+                    view.chat_cursor(draft_echo, draft_cursor)
+                } else {
+                    view.home_cursor(draft_echo)
+                }
             } else {
                 None
             };

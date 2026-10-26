@@ -1133,6 +1133,84 @@ impl NativeView {
         Some((left + 3 + cells.min(width - 4), top + 1 + row))
     }
 
+    /// Cursor position for the session composer, using the same bounded,
+    /// unpadded cell accounting as `render_composer`.
+    pub fn chat_cursor(&self, draft: &str, byte_cursor: usize) -> Option<(u16, u16)> {
+        if !self.session_route || self.pages.page() != Page::Chat {
+            return None;
+        }
+        let (left, top, width, height) = self.composer_region(draft)?;
+        let body_height = if self.render_height() >= 4 {
+            self.render_height() - 2
+        } else {
+            self.render_height()
+        };
+        let frame = self
+            .box_appearance
+            .effective(crate::native_box_style::BoxId::ChatComposer);
+        let layout = crate::native_view_chat::composer_layout(
+            usize::from(width),
+            body_height,
+            draft,
+            frame,
+        );
+        let pad = usize::from(frame.padding);
+        let (text_left, text_top, text_width, text_height) = if layout.framed {
+            let content_width = usize::from(width).checked_sub(2 + 2 * pad)?;
+            let content_height = usize::from(height).checked_sub(2 + 2 * pad)?;
+            (
+                left.checked_add((1 + pad + 2) as u16)?,
+                top.checked_add((1 + pad) as u16)?,
+                content_width.checked_sub(2)? ,
+                content_height,
+            )
+        } else {
+            (
+                left.checked_add(2)?,
+                top,
+                usize::from(width).checked_sub(2)?,
+                usize::from(height),
+            )
+        };
+        if text_width == 0 || text_height == 0 {
+            return None;
+        }
+
+        let bounded_len = draft.len().min(crate::native_view_chat::MAX_DRAFT_BYTES);
+        let visible_len = (0..=bounded_len)
+            .rev()
+            .find(|index| draft.is_char_boundary(*index))?;
+        if byte_cursor > visible_len || !draft.is_char_boundary(byte_cursor) {
+            return None;
+        }
+        let before = draft.get(..byte_cursor)?;
+        let row = before.bytes().filter(|byte| *byte == b'\n').count();
+        let line = before.rsplit('\n').next().unwrap_or("");
+        let line = crate::native_transcript::strip_ansi(line).replace('\t', " ");
+        let cells = crate::native_view_layout::visit_unpadded_cells(
+            &line,
+            text_width.saturating_add(1),
+            |_, _| {},
+        );
+        // `render_composer` clips a row, rather than wrapping it.  A caret at
+        // or beyond the clipped edge has no rendered cell to own.
+        if cells > text_width {
+            return None;
+        }
+        let draft_rows = draft
+            .get(..visible_len)?
+            .split('\n')
+            .count();
+        let visible_rows = usize::from(text_height);
+        if row >= visible_rows || (draft_rows > visible_rows && row + 1 >= visible_rows) {
+            return None;
+        }
+        Some((
+            text_left.checked_add(cells as u16)?,
+            text_top.checked_add(row as u16)?,
+        ))
+    }
+
     pub fn set_session(&mut self, session: Option<String>) {
         self.status.set_session(session);
     }
@@ -3806,6 +3884,29 @@ mod composer_metadata_regression_tests {
         view.set_composer_agent(Some("builder".into()), None);
         view.set_composer_model("model123456789012345", "供应商名称 / 外部");
         assert_eq!(view.composer_metadata(), "builder · model123456789012345 外部");
+    }
+
+    #[test]
+    fn chat_cursor_uses_unpadded_rendered_cells_and_unicode_boundaries() {
+        let mut view = configured(100, "model", "provider");
+        let draft = "界e\u{301}";
+        let _ = view.render_typed(draft, &[], false, &[]);
+        let (left, top, _, _) = view.composer_region(draft).expect("composer region");
+        assert_eq!(view.chat_cursor(draft, draft.len()), Some((left + 6, top + 1)));
+        assert_eq!(view.chat_cursor(draft, 1), None, "never split a UTF-8 scalar");
+        assert_eq!(view.chat_cursor(draft, 2), None, "never split a UTF-8 scalar");
+        assert_eq!(view.chat_cursor(draft, 3), Some((left + 5, top + 1)));
+    }
+
+    #[test]
+    fn chat_cursor_hides_clipped_rows_and_columns() {
+        let mut view = configured(20, "model", "provider");
+        let draft = "123456789012345678901234567890";
+        let _ = view.render_typed(draft, &[], false, &[]);
+        assert_eq!(view.chat_cursor(draft, draft.len()), None);
+        let multiline = "one\ntwo";
+        let _ = view.render_typed(multiline, &[], false, &[]);
+        assert!(view.chat_cursor(multiline, multiline.len()).is_some());
     }
 
     #[test]
