@@ -574,6 +574,49 @@ Durable source/test/build/install/failed-vertical evidence and fixture now copie
 with SHA256 inventory to shared Git common directory:
 `/Users/mymac/Projects/opencode-rk/.git/recovery-evidence/c18418a1e49f94fd9e56efe59b535904ccaf5ffb/context-delivery/`.
 These are scoped verification records, not full Phase-1 acceptance. Heavy slot free.
+
+### Follow-up roster and initial-layout repair (2026-10-26)
+
+Reviewer25 exact fixture APPROVE (`9f495747...`), fixture SHA256
+`8c410d67e81181b790d1f083534f03927023695746922a6bdeae31b23e279f24`
+matches executed v7 and installed-path source. Reviewer label “v6” does not change
+that byte identity. Grid is scroll-reachable, not initially prominent; footer and
+color acceptance remain unproven. Worker26 owns private native_context.rs-only
+initial-layout repair; parser/grid allocator/painter remain approved and excluded.
+
+Replenished **20 pending useful assignments** (3 existing + 17 new tool-confirmed
+launches; remove/replenish on completion notifications). Prior concurrency shortfall
+remains historical, not erased. Canonical source grants are read-only for all;
+only26 may prepare private Context renderer edits. All write grants are unique
+external `context-user-NN-*` directories. Main sole integration/heavy writer.
+
+| ID | Role/topic | Route | Session |
+|---|---|---|---|
+|23|Actual native renderer color regression|vyce-deepseek-v41|ses_e87e5aadaffepVhRhpdoHs2xjI|
+|24|Vertical installed startup diagnosis|vyce-deepseek-v41|ses_e87dc0614ffeLE3oZ7HBWWPZnI|
+|26|Initial Context grid/layout repair|xkiro-gpt-6-luna|ses_e87d4fdc7ffepT2l6sN1AXoyDj|
+|27|Compaction timeout diagnosis|vyce-deepseek-v41|ses_e87d4343dffed8caJwvv6CybJk|
+|28|Kitty real-byte decoder audit|vyce-deepseek-v41|ses_e87d43419ffeSCxQKzElYxc8hj|
+|29|Permission save-eligibility security contract|vyce-deepseek-v41|ses_e87d43414ffe7wbJ1YYIdGeZcs|
+|30|Keybind runtime wiring|vyce-deepseek-v41|ses_e87d4340fffe0nwKeutey6oZ2Y|
+|31|Reviewed Markdown integration preparation|vyce-deepseek-v41|ses_e87d43330ffeNE0NniuLeJ31I0|
+|32|Tool projection integration preparation|vyce-deepseek-v41|ses_e87d4332cffeZNTGb9U6R1AQ6M|
+|33|Real catalog HTTP/cache call graph|xkiro-gpt-6-luna|ses_e87d33b47ffes277gQBHRhZLxS|
+|34|Non-stream context-accounting coverage|xkiro-gpt-6-luna|ses_e87d33b2fffeIRAnNUMVBCELM9|
+|35|Horizontal tab fixture contract|xkiro-gpt-6-luna|ses_e87d33b10ffer5QaK6RLlJaw95|
+|36|Installed context mouse journey proposal|xkiro-gpt-6-luna|ses_e87d33af4ffeen0MerFr9G8dUe|
+|37|Non-canceling daemon upgrade analysis|xkiro-gpt-6-luna|ses_e87d33addffe9IEUBXhRXt4iCH|
+|38|Shell callback independent security review|xkiro-gpt-6-luna|ses_e87d33a9effe8QWf3UeCKRpbMS|
+|39|Theme settings equality/render/persistence|xkiro-gpt-6-luna|ses_e87d33a36ffetpfGgjkhzWVikc|
+|40|Composer Send/draft state adversarial audit|xkiro-gpt-6-luna|ses_e87d33a33ffeDKzXmsMOp2qVP3|
+|41|Subagent inspection parity|xkiro-gpt-6-luna|ses_e87d339e4ffeJOEeUjAKV23qBL|
+|42|Golden predicate consumer API compatibility|xkiro-gpt-6-luna|ses_e87d339beffequgbHARAKHReoC|
+|43|Supported device OAuth loopback fixture proposal|xkiro-gpt-6-luna|ses_e87d339bbffeclROGYU3TB844O|
+
+Eight pending vyce-deepseek-v41 assignments is its hard concurrent limit.
+No further assignments to that route until a completion frees capacity.
+Reported token usage remains UNKNOWN; no invented provider balance. Paused/error
+routes remain paused as recorded. No workers have Cargo/PTY/network/DB grants.
 MainSOLEintegrationwriter remains; lastproductSHAf1a902e1. Userbinaryoldstillnot
 updated, daemon73389/4096notstopped, norealOAuthperformed. Negativeverdictsheld.
 
