@@ -991,6 +991,8 @@ impl NativeView {
         if height == 0 || width <= 4 || !matches!(self.pages.page(), Page::Chat | Page::Theme) {
             return None;
         }
+        // Upstream child sessions replace the main composer with return-parent UI.
+        if self.parent_session { return None; }
         if self.session_route {
             let body_height = if height >= 4 { height - 2 } else { height };
             let frame = self

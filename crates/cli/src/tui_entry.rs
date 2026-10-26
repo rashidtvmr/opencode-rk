@@ -348,6 +348,8 @@ struct LiveSnapshot {
     #[cfg(feature = "native")]
     parent_session: bool,
     #[cfg(feature = "native")]
+    parent_session_id: Option<String>,
+    #[cfg(feature = "native")]
     directory: Option<String>,
 }
 
@@ -853,9 +855,7 @@ mod compact_command_tests {
     }
 }
 
-/// Fetch the live session snapshot: target session (explicit id or most
-/// recently updated) plus its bounded message list. `auth` is the raw bearer
-/// token from the validated backend descriptor.
+/// Fetch the live session snapshot: target session (explicit id or most recently updated) plus its bounded message list.
 fn fetch_snapshot(
     origin: &str,
     session: Option<&str>,
@@ -903,6 +903,12 @@ fn snapshot_from_listing(
         .as_str()
         .ok_or_else(|| "daemon session is missing its id".to_string())?
         .to_owned();
+    let parent_session_id = match target["parent_session_id"].as_str().filter(|id| !id.is_empty()) {
+        Some(parent) => Some(parent.parse::<opencode_rk_contracts::SessionId>()
+            .map_err(|_| "daemon session has an invalid parent session id".to_owned())?
+            .to_string()),
+        None => None,
+    };
     let messages_body = http_request(
         origin,
         "GET",
@@ -951,6 +957,8 @@ fn snapshot_from_listing(
         parent_session: target["parent_session_id"]
             .as_str()
             .is_some_and(|id| !id.is_empty()),
+        #[cfg(feature = "native")]
+        parent_session_id,
         #[cfg(feature = "native")]
         directory: target["directory"].as_str().map(str::to_owned),
     })
@@ -2763,16 +2771,25 @@ fn children_action_http(
     action: crate::native_children::Action,
     live: Option<&LiveSnapshot>,
     auth: Option<&str>,
-) {
+    generation: u64,
+) -> Option<String> {
     use crate::native_children::Action;
-    if let Some(snapshot) = live {
-        let (id, operation, body) = match action {
-            Action::Stop(id) => (id, "stop", serde_json::json!({})),
-            Action::Retry(id) => (id, "retry", serde_json::json!({})),
-            Action::Followup(id, text) => (id, "continue", serde_json::json!({"text":text})),
-        };
-        panel.action_error = http_request(&snapshot.origin, "POST", &format!("/api/sessions/{}/children/{id}/{operation}", panel.parent), Some(&body.to_string()), auth).err();
-    }
+    let Action::Open(id) = action else {
+        if let Some(snapshot) = live {
+            if snapshot.session_id != panel.parent || !panel.context_valid(&snapshot.session_id, generation, auth) { panel.invalidate_context(); return None; }
+            let (id, operation, body) = match action {
+                Action::Stop(id) => (id, "stop", serde_json::json!({})),
+                Action::Retry(id) => (id, "retry", serde_json::json!({})),
+                Action::Followup(id, text) => (id, "continue", serde_json::json!({"text":text})),
+                Action::Open(_) => unreachable!("open handled before child control HTTP"),
+            };
+            let result = http_request(&snapshot.origin, "POST", &format!("/api/sessions/{}/children/{id}/{operation}", panel.parent), Some(&body.to_string()), auth);
+            if result.is_err() { panel.invalidate_actions(); } else { panel.invalidate_actions(); }
+            panel.action_error = result.err();
+        }
+        return None;
+    };
+    if let Some(snapshot) = live { if snapshot.session_id == panel.parent && panel.lease_valid(&snapshot.session_id, generation, auth) { Some(id) } else { panel.invalidate_context(); None } } else { panel.invalidate_context(); None }
 }
 
 #[cfg(feature = "native")]
@@ -3755,11 +3772,21 @@ fn native_loop(
         if children_panel.open && children_refresh.elapsed() >= Duration::from_millis(750) {
             children_refresh = Instant::now();
             if let Some(snapshot) = live.as_ref() {
+                if !children_panel.context_valid(&snapshot.session_id, binding_generation, auth.as_deref()) {
+                    children_panel.invalidate_context();
+                    children_panel.error = Some("child panel context changed; reopen required".to_owned());
+                    needs_paint = true;
+                    continue;
+                }
                 let result = http_request(&snapshot.origin, "GET", &format!("/api/sessions/{}/children", children_panel.parent), None, auth)
                     .and_then(|body| serde_json::from_str(&body).map_err(|_| "invalid child listing JSON".to_owned()))
                     .and_then(|value| children_panel.update(&value));
-                if let Err(error) = result { children_panel.error = Some(error); }
-                if children_panel.detail {
+                match result {
+                    Ok(()) if snapshot.session_id == children_panel.parent => children_panel.bind_lease(&snapshot.session_id, binding_generation, auth.as_deref()),
+                    Ok(()) => children_panel.invalidate_context(),
+                    Err(error) => { children_panel.invalidate_actions(); children_panel.error = Some(error); }
+                }
+                if children_panel.detail && children_panel.lease_valid(&snapshot.session_id, binding_generation, auth.as_deref()) {
                     if let Some(id) = children_panel.selected_id() {
                         match http_request(&snapshot.origin, "GET", &format!("/api/sessions/{id}/messages?limit=200"), None, auth)
                             .and_then(|body| serde_json::from_str(&body).map_err(|_| "invalid child history JSON".to_owned())) {
@@ -4663,6 +4690,7 @@ fn native_loop(
                     },
                     completion: if !help_open && modal_rows.is_none()
                         && !children_panel.open && !appearance.open && !permission_editor.open
+            && !live.as_ref().is_some_and(|snapshot| snapshot.parent_session_id.is_some())
                         && matches!(dialog, native_setup::Dialog::None)
                         && view.page() == crate::native_view_pages::Page::Chat {
                         view.composer_region(draft_echo).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor))
@@ -4808,6 +4836,7 @@ fn native_loop(
         // Completion owns navigation before composer/session shortcuts, but
         // never before a credential, permission or other modal surface.
         if !page_open && !help_open && !children_panel.open && !appearance.open && !permission_editor.open
+            && !live.as_ref().is_some_and(|snapshot| snapshot.parent_session_id.is_some())
             && !view.dialogs.intercepts_input() && !view.command_palette_open()
             && matches!(dialog, native_setup::Dialog::None)
             && import_dialog.as_ref().is_none_or(|import| !import.is_open())
@@ -5080,8 +5109,13 @@ fn native_loop(
                             modal.content_width,
                             view.modal_content_height(),
                         ) {
-                            children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref());
-                            children_refresh = Instant::now() - Duration::from_secs(1);
+                            if let Some(child) = children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref(), binding_generation) {
+                                let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|parent_snapshot| open_child_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &parent_snapshot.origin, auth.as_deref(), binding_generation, &parent_snapshot.session_id, &child, selected.as_ref().map(|model| model.qualified())));
+                                match result {
+                                    Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => { children_panel.open = false; view.set_dialog_size(crate::native_view::DialogSize::Medium); commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion); }
+                                    Err(error) => append_transcript(&mut transcript, format!("error: child open: {error}")),
+                                }
+                            } else { children_refresh = Instant::now() - Duration::from_secs(1); }
                         }
                     }
                     if !children_panel.open {
@@ -5346,6 +5380,10 @@ fn native_loop(
                     for character in text.chars() { children_panel.text(character); }
                     continue;
                 }
+                if live.as_ref().is_some_and(|snapshot| snapshot.parent_session_id.is_some()) {
+                    // Main child composer is disabled; paste belongs nowhere.
+                    continue;
+                }
                 if help_open {
                     // Help owns focus; paste must not mutate the hidden draft.
                     continue;
@@ -5405,10 +5443,42 @@ fn native_loop(
                 children_panel.key(byte)
             };
             if let Some(action) = action {
-                children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref());
-                children_refresh = Instant::now() - Duration::from_secs(1);
+                if let Some(child) = children_action_http(&mut children_panel, action, live.as_ref(), auth.as_deref(), binding_generation) {
+                    let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|parent_snapshot| open_child_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &parent_snapshot.origin, auth.as_deref(), binding_generation, &parent_snapshot.session_id, &child, selected.as_ref().map(|model| model.qualified())));
+                    match result {
+                        Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => { children_panel.open = false; view.set_dialog_size(crate::native_view::DialogSize::Medium); commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion); }
+                        Err(error) => append_transcript(&mut transcript, format!("error: child open: {error}")),
+                    }
+                } else { children_refresh = Instant::now() - Duration::from_secs(1); }
             }
             if !children_panel.open { view.set_dialog_size(crate::native_view::DialogSize::Medium); }
+            needs_paint = true;
+            continue;
+        }
+        if byte == 27 && !page_open && !help_open && !appearance.open
+            && !permission_editor.open && !view.dialogs.intercepts_input()
+            && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
+        {
+            if let Some(parent) = live.as_ref().and_then(|snapshot| snapshot.parent_session_id.clone()) {
+                let result = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|child_snapshot| return_parent_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, &child_snapshot.origin, auth.as_deref(), binding_generation, &parent));
+                match result {
+                    Ok((snapshot, restored, generation, target_cursor, target_scroll, target_model)) => commit_child_route(snapshot, restored, generation, target_cursor, target_scroll, target_model, &models, &mut selected, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut session_route, &mut completion),
+                    Err(error) => append_transcript(&mut transcript, format!("error: return to parent: {error}")),
+                }
+                needs_paint = true;
+                continue;
+            }
+        }
+        // Child sessions have no editable composer: upstream replaces it with
+        // the return-parent affordance. Arrow navigation remains handled above;
+        // ordinary text/edit/submit bytes are inert while child-bound.
+        if !matches!(byte, 3 | 4 | 27)
+            && live.as_ref().is_some_and(|snapshot| snapshot.parent_session_id.is_some())
+            && !page_open && !help_open && !appearance.open
+            && !permission_editor.open && !view.dialogs.intercepts_input()
+            && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
+        {
+            utf8.reset();
             needs_paint = true;
             continue;
         }
@@ -6857,6 +6927,7 @@ fn native_loop(
                 if command == "/subagents" {
                     if let Some(snapshot) = live.as_ref() {
                         children_panel.show(&snapshot.session_id);
+                        children_panel.bind_lease(&snapshot.session_id, binding_generation, auth.as_deref());
                         children_refresh = Instant::now() - Duration::from_secs(1);
                         view.close_command_palette();
                         view.close_page();
@@ -7329,6 +7400,81 @@ struct CloseTabResult {
     selected_model: Option<String>,
     generation: u64,
     home: bool,
+}
+
+#[cfg(feature = "native")]
+fn commit_child_route(
+    snapshot: LiveSnapshot, restored: String, generation: u64,
+    target_cursor: usize, target_scroll: usize, target_model: Option<String>,
+    models: &[native_setup::Model], selected: &mut Option<native_setup::Model>,
+    view: &mut crate::native_view::NativeView,
+    live: &mut Option<LiveSnapshot>,
+    history_window: &mut Option<crate::native_chat_projection::NativeHistoryWindow>,
+    binding_generation: &mut u64, draft: &mut String, draft_cursor: &mut usize,
+    session_route: &mut bool, completion: &mut crate::native_completion::Completion,
+) {
+    *history_window = Some(crate::native_chat_projection::NativeHistoryWindow::new(&snapshot.raw_history, snapshot.history_next_before.clone()));
+    *live = Some(snapshot); *binding_generation = generation;
+    crate::native_composer::replace_draft_with_cursor(draft, draft_cursor, restored, target_cursor);
+    crate::native_composer::normalize_cursor(draft, draft_cursor);
+    view.set_chat_scroll_offset(target_scroll);
+    *selected = target_model.as_deref().and_then(|qualified| models.iter().find(|model| model.qualified() == qualified).cloned());
+    if let Some(model) = selected.as_ref() {
+        view.set_model(Some(model.qualified()));
+        view.set_composer_model(&model.name, &model.provider_id);
+    } else { view.set_model_unknown(); }
+    *session_route = true; view.set_session_route(true); completion.sync(draft);
+}
+
+#[cfg(feature = "native")]
+fn open_child_transition(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut NativeChatHistory,
+    navigation: &mut crate::native_navigation::NavigationState,
+    draft: &str,
+    cursor: usize,
+    origin: &str,
+    auth: Option<&str>,
+    generation: u64,
+    parent: &str,
+    child: &str,
+    selected_model: Option<String>,
+) -> Result<(LiveSnapshot, String, u64, usize, usize, Option<String>), String> {
+    let mut staged = navigation.clone();
+    staged.save_active_state(draft.to_owned(), cursor, view.chat_scroll_offset(), None)
+        .map_err(|error| format!("child open refused: {error:?}"))?;
+    staged.open_forked(crate::native_navigation::SessionRef(child.to_owned()), crate::native_navigation::SessionRef(parent.to_owned()));
+    if let Some(tab) = staged.active_mut() { tab.selected_model = selected_model; }
+    let prospective = crate::native_view::reserve_generation(generation)
+        .ok_or_else(|| "child open refused: binding generation exhausted".to_owned())?;
+    let (snapshot, restored) = bind_session(view, transcript, draft, cursor, origin, Some(child), auth)?;
+    let target = staged.active().cloned().ok_or_else(|| "child open target missing".to_owned())?;
+    *navigation = staged;
+    Ok((snapshot, if target.draft.is_empty() { restored } else { target.draft }, prospective, target.cursor, target.scroll, target.selected_model))
+}
+
+#[cfg(feature = "native")]
+fn return_parent_transition(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut NativeChatHistory,
+    navigation: &mut crate::native_navigation::NavigationState,
+    draft: &str,
+    cursor: usize,
+    origin: &str,
+    auth: Option<&str>,
+    generation: u64,
+    parent: &str,
+) -> Result<(LiveSnapshot, String, u64, usize, usize, Option<String>), String> {
+    let mut staged = navigation.clone();
+    staged.save_active_state(draft.to_owned(), cursor, view.chat_scroll_offset(), None)
+        .map_err(|error| format!("parent return refused: {error:?}"))?;
+    staged.open(crate::native_navigation::SessionRef(parent.to_owned()));
+    let prospective = crate::native_view::reserve_generation(generation)
+        .ok_or_else(|| "parent return refused: binding generation exhausted".to_owned())?;
+    let (snapshot, restored) = bind_session(view, transcript, draft, cursor, origin, Some(parent), auth)?;
+    let target = staged.active().cloned().ok_or_else(|| "parent return target missing".to_owned())?;
+    *navigation = staged;
+    Ok((snapshot, if target.draft.is_empty() { restored } else { target.draft }, prospective, target.cursor, target.scroll, target.selected_model))
 }
 
 #[cfg(feature = "native")]
@@ -7930,6 +8076,34 @@ mod tab_binding_tests {
     }
 
     #[test]
+    fn malformed_parent_identity_is_rejected_before_history_fetch() {
+        let fixture = Fixture::new();
+        let listing = serde_json::json!({"sessions":[{"id":A,"title":"A","state":"idle","updated_at":"2026-10-26T00:00:00Z","parent_session_id":"not-a-uuid"}]});
+        assert!(snapshot_from_listing(&fixture.origin, &listing, Some(A), Some(&fixture.token)).is_err());
+        assert!(!fixture.requests.lock().unwrap().iter().any(|route| route.contains("/history?")));
+    }
+
+    #[test]
+    fn child_route_commit_restores_target_model_and_cursor_from_staged_tab() {
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let mut live = None;
+        let mut history = None;
+        let mut generation = 1;
+        let mut draft = String::new();
+        let mut cursor = 0;
+        let mut route = true;
+        let mut completion = crate::native_completion::Completion::default();
+        let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None }];
+        let mut selected = None;
+        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, parent_session: true, parent_session_id: Some(B.into()), directory: None };
+        commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
+        assert_eq!(draft, "child draft");
+        assert_eq!(cursor, 8);
+        assert_eq!(view.chat_scroll_offset(), 13);
+        assert_eq!(selected.as_ref().map(|model| model.qualified()), Some("fixture/child".into()));
+    }
+
+    #[test]
     fn exhausted_binding_generation_refuses_selection_before_http_or_local_mutation() {
         let fixture = Fixture::new();
         let mut view = crate::native_view::NativeView::new(100, 32);
@@ -8231,6 +8405,7 @@ mod command_consumption_tests {
             raw_history: Vec::new(),
             history_next_before: None,
             parent_session: false,
+            parent_session_id: None,
             directory: None,
         });
         let mut history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(
@@ -8282,7 +8457,7 @@ mod command_consumption_tests {
             session_id: "00000000-0000-0000-0000-000000000001".into(),
             title: "Closed session".into(), state: "idle".into(), updated_at: String::new(),
             message_count: 0, last_text: None, history: Vec::new(), typed_history: Vec::new(),
-            raw_history: Vec::new(), history_next_before: None, parent_session: false, directory: None,
+            raw_history: Vec::new(), history_next_before: None, parent_session: false, parent_session_id: None, directory: None,
         });
         let mut history = None;
         let mut generation = 7;

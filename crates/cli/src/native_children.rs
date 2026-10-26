@@ -1,6 +1,8 @@
 //! Native child-task roster and typed history viewer. The caller owns HTTP;
 //! this component emits explicit controls and never invents lifecycle state.
 use serde_json::Value;
+use opencode_rk_contracts::SessionId;
+use std::hash::{Hash, Hasher};
 use crate::native_view_chat::{ChatMessage, ChatView};
 use crate::native_view_layout::fit;
 
@@ -17,6 +19,11 @@ pub struct Panel {
     pub action_error: Option<String>,
     history: Vec<ChatMessage>,
     chat: ChatView,
+    roster_generation: u64,
+    actions_generation: u64,
+    lease_parent: Option<String>,
+    lease_generation: Option<u64>,
+    lease_auth: Option<u64>,
 }
 
 #[cfg(test)]
@@ -34,6 +41,7 @@ mod tests {
         let mut panel = Panel::default();
         panel.show("parent");
         panel.update(&json!({"children":[{"session_id":"11111111-1111-1111-1111-111111111111","agent":"explore","state":"running","description":"inspect"}]})).unwrap();
+        panel.bind_lease("parent", 1, Some("auth"));
         panel
     }
     fn roster(mut count: usize) -> Panel {
@@ -47,6 +55,7 @@ mod tests {
             "description": format!("task {index}")
         })).collect();
         panel.update(&json!({ "children": children })).unwrap();
+        panel.bind_lease("parent", 1, Some("auth"));
         panel
     }
     /// Clicks one footer region at the given geometry and reports the action.
@@ -55,6 +64,66 @@ mod tests {
         let region = map[height - 1].iter().find(|r| r.hit == hit).copied()?;
         panel.mouse(height as u16 - 1, (region.start + region.end) / 2, width, height)
     }
+    #[test]
+    fn successful_refresh_clears_stale_action_error_presentation() {
+        let mut panel = panel();
+        panel.action_error = Some("STALE_ACTION_FAILURE".into());
+        panel.error = Some("STALE_ROSTER_FAILURE".into());
+        assert!(panel.render(100, 24).join("\n").contains("STALE_ACTION_FAILURE"));
+        panel.invalidate_actions();
+        panel.update(&json!({"children":[{"session_id":IDS[0],"agent":"explore","state":"stopped","description":"inspect"}]})).unwrap();
+        panel.bind_lease("parent", 1, Some("auth"));
+        assert!(panel.action_error.is_none());
+        assert!(panel.error.is_none());
+        assert!(panel.lease_valid("parent", 1, Some("auth")));
+        let rendered = panel.render(100, 24).join("\n");
+        assert!(!rendered.contains("STALE_ACTION_FAILURE"));
+        assert!(!rendered.contains("STALE_ROSTER_FAILURE"));
+        assert!(rendered.contains("stopped"));
+    }
+
+    #[test]
+    fn failed_refresh_invalidates_all_existing_child_actions() {
+        let mut panel = panel();
+        assert!(matches!(panel.key(b'o'), Some(Action::Open(_))));
+        panel.invalidate_actions();
+        assert!(panel.key(b'o').is_none());
+        assert!(panel.key(b's').is_none());
+        assert!(panel.key(b'r').is_none());
+        panel.key(b'c');
+        panel.text('x');
+        assert!(panel.key(13).is_none());
+    }
+
+    #[test]
+    fn lease_rejects_parent_generation_and_auth_context_changes() {
+        let mut panel = panel();
+        assert!(panel.lease_valid("parent", 1, Some("auth")));
+        assert!(!panel.lease_valid("other", 1, Some("auth")));
+        assert!(!panel.lease_valid("parent", 2, Some("auth")));
+        assert!(!panel.lease_valid("parent", 1, Some("other")));
+        panel.invalidate_actions();
+        assert!(panel.key(b's').is_none());
+    }
+
+    #[test]
+    fn action_epoch_invalidation_preserves_context_but_context_invalidation_requires_reopen() {
+        let mut panel = panel();
+        assert!(panel.context_valid("parent", 1, Some("auth")));
+        assert!(panel.lease_valid("parent", 1, Some("auth")));
+        panel.invalidate_actions();
+        assert!(panel.context_valid("parent", 1, Some("auth")));
+        assert!(!panel.lease_valid("parent", 1, Some("auth")));
+        panel.update(&json!({"children":[{"session_id":IDS[0],"agent":"explore","state":"running","description":"inspect"}]})).unwrap();
+        panel.bind_lease("parent", 1, Some("auth"));
+        assert!(panel.lease_valid("parent", 1, Some("auth")));
+        panel.invalidate_context();
+        assert!(!panel.context_valid("parent", 1, Some("auth")));
+        assert!(!panel.lease_valid("parent", 1, Some("auth")));
+        panel.update(&json!({"children":[{"session_id":IDS[0],"agent":"explore","state":"running","description":"inspect"}]})).unwrap();
+        assert!(!panel.context_valid("parent", 1, Some("auth")), "context cannot be rebound without reopen");
+    }
+
     #[test]
     fn failed_child_detail_shows_its_error_and_clears_it_after_recovery() {
         let mut panel = panel();
@@ -209,7 +278,7 @@ mod tests {
                                 assert!(action.is_none(), "child click must not submit");
                                 assert_eq!(panel.selected_id().as_deref(), Some(IDS[index]));
                             }
-                            Hit::Stop | Hit::Retry | Hit::Followup | Hit::Send | Hit::Back | Hit::Close => {
+                            Hit::Stop | Hit::Retry | Hit::Open | Hit::Followup | Hit::Send | Hit::Back | Hit::Close => {
                                 assert!(row == height - 1 && height > 1, "footer hit off the footer row {row}");
                                 assert!(rendered[row].contains("stop")
                                     || rendered[row].contains("Esc")
@@ -326,12 +395,18 @@ mod tests {
 }
 
 #[derive(Debug)]
-pub enum Action { Stop(String), Retry(String), Followup(String, String) }
+pub enum Action {
+    /// Open the selected child as the active authenticated session route.
+    Open(String),
+    Stop(String),
+    Retry(String),
+    Followup(String, String),
+}
 
 /// Visible screen targets the pointer can land on. Row clicks are addressed
 /// by rendered child index; footer labels reuse their keyboard equivalents.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Hit { Child(usize), Stop, Retry, Followup, Send, Back, Close }
+pub enum Hit { Child(usize), Stop, Retry, Open, Followup, Send, Back, Close }
 
 /// One clickable column range on one rendered row (row = hit-map index).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -357,17 +432,37 @@ impl Panel {
     pub fn show(&mut self, parent: &str) {
         *self = Self { open:true, parent:parent.into(), ..Self::default() };
     }
+    /// Invalidate controls while a refresh is unavailable or malformed.
+    /// Invalidate only the current roster/action epoch. The bound context remains
+    /// usable so a failed action can be followed by a legitimate refresh.
+    pub fn invalidate_actions(&mut self) { self.actions_generation = self.actions_generation.wrapping_add(1); }
+    /// Invalidate the context lease itself; reopening the panel is required.
+    pub fn invalidate_context(&mut self) { self.lease_parent = None; self.lease_generation = None; self.lease_auth = None; self.invalidate_actions(); }
+    fn auth_identity(auth: Option<&str>) -> Option<u64> {
+        auth.map(|value| { let mut hasher = std::collections::hash_map::DefaultHasher::new(); value.hash(&mut hasher); hasher.finish() })
+    }
+    pub fn bind_lease(&mut self, parent: &str, generation: u64, auth: Option<&str>) { self.lease_parent = Some(parent.to_owned()); self.lease_generation = Some(generation); self.lease_auth = Self::auth_identity(auth); self.actions_generation = self.roster_generation; }
+    pub fn lease_valid(&self, parent: &str, generation: u64, auth: Option<&str>) -> bool { self.actions_valid() && self.lease_parent.as_deref() == Some(parent) && self.lease_generation == Some(generation) && self.lease_auth == Self::auth_identity(auth) }
+    pub fn context_valid(&self, parent: &str, generation: u64, auth: Option<&str>) -> bool { self.lease_parent.as_deref() == Some(parent) && self.lease_generation == Some(generation) && self.lease_auth == Self::auth_identity(auth) }
+    pub fn actions_valid(&self) -> bool { self.actions_generation == self.roster_generation }
+    fn action_id(&self) -> Option<String> {
+        if !self.actions_valid() { return None; }
+        self.selected_id()
+    }
     pub fn update(&mut self, value: &Value) -> Result<(), String> {
         let rows = value["children"].as_array().ok_or("invalid child listing")?;
         if rows.len() > 128 { return Err("child listing exceeds limit".into()); }
         let selected = self.selected_id();
         for row in rows {
             let id = row["session_id"].as_str().ok_or("child id missing")?;
-            if id.len() != 36 || !id.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') { return Err("invalid child id".into()); }
+            id.parse::<SessionId>().map_err(|_| "invalid child id".to_owned())?;
         }
         self.rows = rows.clone();
+        self.roster_generation = self.roster_generation.wrapping_add(1);
+        self.actions_generation = self.roster_generation;
         self.selected = selected.and_then(|id| self.rows.iter().position(|row| row["session_id"] == id)).unwrap_or(self.selected).min(self.rows.len().saturating_sub(1));
         self.error = None;
+        self.action_error = None;
         Ok(())
     }
     pub fn history(&mut self, value: &Value) {
@@ -387,7 +482,7 @@ impl Panel {
                 27 => { self.composing = false; self.input.clear(); }
                 8 | 127 => { self.input.pop(); }
                 13 | 10 if !self.input.trim().is_empty() => {
-                    let id = self.selected_id()?;
+                    let id = self.action_id()?;
                     self.composing = false;
                     return Some(Action::Followup(id, std::mem::take(&mut self.input)));
                 }
@@ -403,8 +498,9 @@ impl Panel {
             14 => self.selected = self.selected.saturating_add(1).min(self.rows.len().saturating_sub(1)),
             2 => self.selected = self.selected.saturating_sub(1),
             13 | 10 if !self.rows.is_empty() => { self.detail = true; self.chat = ChatView::default(); }
-            b's' => return self.selected_id().map(Action::Stop),
-            b'r' => return self.selected_id().map(Action::Retry),
+            b'o' => return self.action_id().map(Action::Open),
+            b's' => return self.action_id().map(Action::Stop),
+            b'r' => return self.action_id().map(Action::Retry),
             b'c' if !self.rows.is_empty() => { self.detail = true; self.composing = true; }
             b'1'..=b'9' => {
                 // Numeric child selection mirrors the pointer row click; the
@@ -428,13 +524,13 @@ impl Panel {
         if height > 1 {
             let footer = if self.composing { "Enter send follow-up · Esc cancel" }
                 else if self.detail { "↑/↓ scroll · s stop · r retry · c follow-up · Esc back" }
-                else { "↑/↓ select · Enter detail · s stop · r retry · Esc close" };
+                else { "↑/↓ select · Enter detail · s stop · r retry · Esc close · o open" };
             let labels: &[(&str, Hit)] = if self.composing {
                 &[("Enter send follow-up", Hit::Send), ("Esc cancel", Hit::Back)]
             } else if self.detail {
                 &[("s stop", Hit::Stop), ("r retry", Hit::Retry), ("c follow-up", Hit::Followup), ("Esc back", Hit::Back)]
             } else {
-                &[("s stop", Hit::Stop), ("r retry", Hit::Retry), ("Esc close", Hit::Close)]
+                &[("s stop", Hit::Stop), ("r retry", Hit::Retry), ("Esc close", Hit::Close), ("o open", Hit::Open)]
             };
             let mut buttons = Vec::new();
             footer_buttons(&mut buttons, footer, labels);
@@ -489,6 +585,7 @@ impl Panel {
                 None
             }
             Hit::Stop => self.key(b's'),
+            Hit::Open => self.key(b'o'),
             Hit::Retry => self.key(b'r'),
             Hit::Followup => { self.key(b'c'); None }
             Hit::Send => self.key(13),
@@ -500,7 +597,7 @@ impl Panel {
         let mut lines = vec!["Subagents".into(), String::new()];
         let footer = if self.composing { "Enter send follow-up · Esc cancel" }
             else if self.detail { "↑/↓ scroll · s stop · r retry · c follow-up · Esc back" }
-            else { "↑/↓ select · Enter detail · s stop · r retry · Esc close" };
+            else { "↑/↓ select · Enter detail · s stop · r retry · Esc close · o open" };
         if let Some(error) = self.action_error.as_ref().or(self.error.as_ref()) { lines.push(format!("Error: {error}")); }
         if self.detail {
             if let Some(row) = self.rows.get(self.selected) {
