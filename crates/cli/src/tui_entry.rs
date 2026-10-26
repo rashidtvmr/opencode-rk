@@ -4770,6 +4770,8 @@ fn native_loop(
             native_input_decoder::InputEvent::Paste(text) => ("paste", text.len(), None),
             native_input_decoder::InputEvent::ArrowUp => ("up", 0, None),
             native_input_decoder::InputEvent::ArrowDown => ("down", 0, None),
+            native_input_decoder::InputEvent::ArrowLeft => ("left", 0, None),
+            native_input_decoder::InputEvent::ArrowRight => ("right", 0, None),
             native_input_decoder::InputEvent::Escape => ("escape", 0, None),
             native_input_decoder::InputEvent::Mouse { .. } => ("mouse", 0, None),
         };
@@ -4940,6 +4942,24 @@ fn native_loop(
                 && matches!(dialog, native_setup::Dialog::None)
                 && import_dialog.as_ref().is_none_or(|import| !import.is_open()),
         );
+        if !page_open && !help_open && !children_panel.open && !appearance.open
+            && !permission_editor.open && !view.dialogs.intercepts_input()
+            && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
+            && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+            && view.composer_region(&draft).is_some()
+        {
+            match &event {
+                native_input_decoder::InputEvent::ArrowLeft
+                | native_input_decoder::InputEvent::ArrowRight => {
+                    let left = matches!(&event, native_input_decoder::InputEvent::ArrowLeft);
+                    crate::native_composer::apply_horizontal_binding(&draft, &mut draft_cursor, left);
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                _ => {}
+            }
+        }
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
@@ -5432,6 +5452,10 @@ fn native_loop(
             // Preserve the existing standalone-escape action (clear dialog /
             // draft) while keeping protocol escape bytes out of the composer.
             native_input_decoder::InputEvent::Escape => 27,
+            // An input owner above blocked composer dispatch; keep its
+            // horizontal arrows inert rather than converting them to bytes.
+            native_input_decoder::InputEvent::ArrowLeft
+            | native_input_decoder::InputEvent::ArrowRight => continue,
         };
         if children_panel.open && !view.dialogs.intercepts_input() && !matches!(byte, 3 | 4) {
             let composing = children_panel.composing;

@@ -84,6 +84,16 @@ pub fn apply_line_binding(draft: &str, cursor: &mut usize, byte: u8) -> bool {
     handled
 }
 
+/// Apply a decoded horizontal cursor key to the legacy native draft.
+pub fn apply_horizontal_binding(draft: &str, cursor: &mut usize, left: bool) -> bool {
+    let mut buffer = EditBuffer::new();
+    if buffer.set_text(draft.to_owned()).is_err() { return false; }
+    buffer.set_cursor(*cursor);
+    let moved = if left { buffer.move_left() } else { buffer.move_right() };
+    *cursor = buffer.cursor();
+    moved
+}
+
 /// Replace a complete draft and place the cursor at an explicit valid offset.
 /// Native route/session restoration uses this instead of assigning a String
 /// and leaving stale cursor metadata behind.
@@ -120,6 +130,19 @@ mod native_submission_ack_tests {
         ));
         assert!(matching.is_empty());
         assert_eq!(matching_cursor, 0);
+    }
+
+    #[test]
+    fn horizontal_binding_moves_by_unicode_scalar_without_inserting_protocol_bytes() {
+        let draft = "Aé界B";
+        let mut cursor = draft.len();
+        assert!(super::apply_horizontal_binding(draft, &mut cursor, true));
+        assert_eq!(&draft[..cursor], "Aé界");
+        assert!(super::apply_horizontal_binding(draft, &mut cursor, true));
+        assert_eq!(&draft[..cursor], "Aé");
+        assert!(super::apply_horizontal_binding(draft, &mut cursor, false));
+        assert_eq!(&draft[..cursor], "Aé界");
+        assert!(draft.is_char_boundary(cursor));
     }
 }
 /// Max drafts queued while a turn is in flight.

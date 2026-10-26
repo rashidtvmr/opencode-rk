@@ -24,6 +24,8 @@ pub(crate) enum InputEvent {
     Escape,
     ArrowUp,
     ArrowDown,
+    ArrowLeft,
+    ArrowRight,
     Paste(String),
     Mouse { x: u16, y: u16, kind: u8, modifiers: u8 },
 }
@@ -252,14 +254,18 @@ impl TerminalInputDecoder {
             }
             // Decode only unmodified keyboard arrows. Other CSI reports and
             // modifier/intermediate forms remain protocol, never typed text.
-            if matches!(byte, b'A' | b'B')
+            if matches!(byte, b'A' | b'B' | b'C' | b'D')
                 && (self.len == 0
                     || (self.state == State::Csi && &self.sequence[..self.len] == b"1"))
             {
                 self.emit(if byte == b'A' {
                     InputEvent::ArrowUp
-                } else {
+                } else if byte == b'B' {
                     InputEvent::ArrowDown
+                } else if byte == b'C' {
+                    InputEvent::ArrowRight
+                } else {
+                    InputEvent::ArrowLeft
                 });
             } else if self.state == State::Csi && byte == b'u' {
                 self.decode_kitty();
@@ -403,6 +409,14 @@ impl TerminalInputDecoder {
         if !matches!(event_type, 1 | 2) {
             return;
         } // release is not text; repeat has the same printable press value
+        if modifier == 1 {
+            match codepoint {
+                57350 => self.emit(InputEvent::ArrowLeft),
+                57351 => self.emit(InputEvent::ArrowRight),
+                _ => {}
+            }
+            return;
+        }
         if (0xE000..=0xF8FF).contains(&codepoint) || codepoint > 0x10FFFF {
             return;
         }
@@ -458,6 +472,33 @@ impl TerminalInputDecoder {
         self.paste_end_len = 0;
         self.paste_deadline = None;
         self.string_deadline = None;
+    }
+}
+
+#[cfg(test)]
+mod horizontal_cursor_regressions {
+    use super::*;
+
+    #[test]
+    fn unmodified_horizontal_cursor_sequences_are_events_not_draft_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[D\x1b[1C\x1bOD\x1bOC" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn kitty_plain_horizontal_cursor_private_keys_decode_but_modified_stays_inert() {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        for byte in b"\x1b[57350;1u\x1b[57351;1u\x1b[57350;5u" { decoder.push(*byte, now); }
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowLeft));
+        assert_eq!(decoder.pop(), Some(InputEvent::ArrowRight));
+        assert_eq!(decoder.pop(), None);
     }
 }
 
