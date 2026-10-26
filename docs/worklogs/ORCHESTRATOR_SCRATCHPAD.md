@@ -235,3 +235,9 @@ The captured upstream footer visibly includes `ctrl+p commands`, refuting the
 earlier source-only audit that called it a fabricated Rust hint. No Rust visual
 comparison or pixel parity is established. Heavy slot is released. Corrected
 inspector tests and exact integrated-SHA CLI checks are next in that serial slot.
+
+Operating-instructions audit completed APPROVE with a minor authority-list wording
+clarification, now applied. Durable rationale and original scratchpad SHA256 are
+in `docs/worklogs/research/2026-10-26-agent-operating-rules-review.md`. The worker
+wrote inside canonical `.private-tmp/` despite its read-only grant; preserve the
+original and require a genuinely external absolute scratchpad on reassignment.

@@ -210,7 +210,9 @@ Resolve decisions in this order:
 
 1. current explicit user requirement;
 2. explicitly approved opencode-rk extension;
-3. observable behavior of the pinned OpenCode revision in `sources/upstream.lock.json`;
+3. observable behavior of the current user-selected OpenCode revision recorded
+   above, falling back to `sources/upstream.lock.json` only when no user-selected
+   revision is in effect;
 4. simplest safe Rust implementation preserving that behavior;
 5. historical local plans/tests/assumptions.
 
