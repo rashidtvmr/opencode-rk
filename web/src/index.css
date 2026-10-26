@@ -1168,6 +1168,70 @@
 .codex-permission-dock ul { margin: .25rem 0 0; padding-left: 1.2rem; max-height: 5rem; overflow: auto; }
 .codex-permission-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 
+.codex-subagent-activity,
+.codex-subagent-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.codex-subagent-activity {
+  padding: 0 0.85rem 0.7rem;
+  color: #9f9f9f;
+  font-size: 0.7rem;
+}
+
+.codex-subagent-activity span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.codex-subagent-filters {
+  padding: 0 0.75rem 0.75rem;
+}
+
+.codex-subagent-search,
+.codex-subagent-filter {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid #444;
+  border-radius: 0.55rem;
+  background: #252525;
+  padding: 0.38rem 0.5rem;
+  color: #999;
+}
+
+.codex-subagent-search {
+  flex: 1 1 12rem;
+}
+
+.codex-subagent-search input,
+.codex-subagent-filter select {
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #ddd;
+  font: inherit;
+  font-size: 0.72rem;
+}
+
+.codex-subagent-search input {
+  width: 100%;
+}
+
+.codex-subagent-filter select {
+  cursor: pointer;
+}
+
+.codex-subagent-card {
+  transition: margin-left 120ms ease, border-color 120ms ease;
+}
+
 @media (max-width: 900px) {
   .codex-app {
     grid-template-columns: 235px minmax(0, 1fr);

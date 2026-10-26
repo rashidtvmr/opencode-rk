@@ -2521,7 +2521,7 @@ pub(crate) fn create_turn_stream_with_message(
     // explicitly enabled (OPENCODE_RK_TURN_TOOLS). The list is deny-by-default:
     // an advertised tool is executable, an unadvertised one is not.
     let mut turn_tools = turn_tool_config();
-    if children.is_child(id) { turn_tools.retain(|name| name != "task"); }
+    if !children.can_delegate_from(id) { turn_tools.retain(|name| name != "task"); }
     if body.read_only {
         turn_tools.retain(|name| matches!(name.as_str(), "read" | "grep" | "glob" | "websearch" | "webfetch"));
     }

@@ -7,6 +7,7 @@ use tokio::sync::watch;
 use crate::builtin_agents;
 
 const MAX_CHILDREN: usize = 128;
+const MAX_DELEGATION_DEPTH: u8 = 3;
 const MAX_TAIL: usize = 8192;
 const MAX_FOLLOWUPS: usize = 4;
 const MAX_MANUAL_RETRIES: u32 = 3;
@@ -190,10 +191,21 @@ impl Children {
     pub fn is_child(&self, id: SessionId) -> bool {
         self.0.lock().map_or(true, |rows| rows.contains_key(&id.to_string()))
     }
+    pub fn can_delegate_from(&self, id: SessionId) -> bool {
+        self.lineage(id).is_ok_and(|(depth, inherited_read_only)| {
+            depth < MAX_DELEGATION_DEPTH && !inherited_read_only
+        })
+    }
     fn child(&self, parent: SessionId, id: &str) -> Result<Arc<Child>, ApiFailure> {
-        self.0.lock().map_err(|_| ApiFailure::internal("child registry unavailable"))?
-            .get(id).filter(|entry| entry.parent == parent).cloned()
-            .ok_or_else(|| ApiFailure::not_found("child task not found"))
+        let rows = self.0.lock().map_err(|_| ApiFailure::internal("child registry unavailable"))?;
+        let child = rows.get(id).cloned().ok_or_else(|| ApiFailure::not_found("child task not found"))?;
+        let mut ancestor = child.parent;
+        for _ in 0..MAX_DELEGATION_DEPTH {
+            if ancestor == parent { return Ok(child); }
+            let Some(entry) = rows.get(&ancestor.to_string()) else { break; };
+            ancestor = entry.parent;
+        }
+        Err(ApiFailure::not_found("child task not found"))
     }
 
     pub(crate) fn validate_retry_context(
@@ -237,12 +249,41 @@ impl Children {
         recorded.retry_message = Some((generation, message_id));
         Ok(())
     }
-    fn rows(&self, parent: SessionId) -> Result<Vec<Arc<Child>>, ApiFailure> {
-        Ok(self.0.lock().map_err(|_| ApiFailure::internal("child registry unavailable"))?
-            .values().filter(|entry| entry.parent == parent).cloned().collect())
+    fn lineage(&self, session: SessionId) -> Result<(u8, bool), ApiFailure> {
+        let rows = self.0.lock().map_err(|_| ApiFailure::internal("child registry unavailable"))?;
+        let mut current = session;
+        let mut depth = 0u8;
+        let mut inherited_read_only = false;
+        while let Some(child) = rows.get(&current.to_string()) {
+            depth = depth.checked_add(1).ok_or_else(|| ApiFailure::bad_request("subagent depth limit reached"))?;
+            if depth > MAX_DELEGATION_DEPTH {
+                return Err(ApiFailure::bad_request("subagent depth limit reached"));
+            }
+            inherited_read_only |= child.read_only;
+            current = child.parent;
+        }
+        Ok((depth, inherited_read_only))
+    }
+    fn descendants(&self, root: SessionId) -> Result<Vec<(Arc<Child>, u8)>, ApiFailure> {
+        let rows = self.0.lock().map_err(|_| ApiFailure::internal("child registry unavailable"))?;
+        let mut result = Vec::new();
+        let mut frontier = vec![(root, 0u8)];
+        while let Some((parent, depth)) = frontier.pop() {
+            for child in rows.values().filter(|entry| entry.parent == parent) {
+                let child_depth = depth.saturating_add(1);
+                result.push((child.clone(), child_depth));
+                if child_depth < MAX_DELEGATION_DEPTH {
+                    frontier.push((child.id, child_depth));
+                }
+            }
+        }
+        result.sort_by(|(left, left_depth), (right, right_depth)| {
+            left_depth.cmp(right_depth).then_with(|| left.id.to_string().cmp(&right.id.to_string()))
+        });
+        Ok(result)
     }
     pub fn pending(&self, parent: SessionId) -> Vec<(SessionId, PermissionRequest)> {
-        self.rows(parent).unwrap_or_default().into_iter().filter_map(|entry| {
+        self.descendants(parent).unwrap_or_default().into_iter().filter_map(|(entry, _)| {
             run_owner::active(entry.id).and_then(|owner| owner.pending()).map(|pending| (entry.id, pending))
         }).collect()
     }
@@ -271,10 +312,10 @@ mod rejection_continuation_tests {
     }
 }
 
-fn snapshot(child: &Child) -> Value {
+fn snapshot_at_depth(child: &Child, depth: u8) -> Value {
     let followups = child.followups.lock().map_or(0, |queue| queue.len());
     match child.status.lock() {
-        Ok(status) => json!({"session_id":child.id,"parent_id":child.parent,"description":child.description,
+        Ok(status) => json!({"session_id":child.id,"parent_id":child.parent,"depth":depth,"description":child.description,
             "agent":child.agent,"model":child.model,"read_only":child.read_only,"state":if status.state == "queued" && run_owner::active(child.id).is_some() { "running" } else { status.state },"output_tail":status.output,
             "error":status.error,"has_tool_calls":child.tool_seen.load(Ordering::Acquire),
             "generation":child.generation.load(Ordering::Acquire),
@@ -286,6 +327,8 @@ fn snapshot(child: &Child) -> Value {
     }
 }
 
+fn snapshot(child: &Child) -> Value { snapshot_at_depth(child, 1) }
+
 pub(crate) fn schema() -> ResponsesTool {
     ResponsesTool::function("task", "Delegate a bounded child session. Predefined: explore, research, planner, reviewer, plan are enforceably read-only; general, build, implementer, debug and tester use the full tool loop. Configured agents and explicit prompts are honored. Background tasks can be inspected, followed up and retried through the Subagents panel.",
         json!({"type":"object","properties":{"description":{"type":"string","maxLength":160},"prompt":{"type":"string","maxLength":32768},"subagent_type":{"type":"string"},"task_id":{"type":"string"},"background":{"type":"boolean"}},"required":["description","prompt","subagent_type"],"additionalProperties":false}))
@@ -294,7 +337,7 @@ pub(crate) fn schema() -> ResponsesTool {
 pub(crate) async fn list(State(state): State<AppState>, Path(id): Path<String>, Extension(children): Extension<Children>) -> Result<Json<Value>, ApiFailure> {
     let parent = parse_session_id(&id)?;
     state.sessions.get(parent).await.map_err(ApiFailure::internal)?;
-    Ok(Json(json!({"children":children.rows(parent)?.iter().map(|entry| snapshot(entry)).collect::<Vec<_>>(),
+    Ok(Json(json!({"children":children.descendants(parent)?.iter().map(|(entry, depth)| snapshot_at_depth(entry, *depth)).collect::<Vec<_>>(),
         "registry_scope":"current daemon lifetime; child transcripts remain durable"})))
 }
 
@@ -455,6 +498,53 @@ mod generation_control_tests {
             manual_retries: AtomicU32::new(0),
             followups: Mutex::new(VecDeque::new()),
         })
+    }
+
+    fn child_fixture_with(parent: SessionId, read_only: bool) -> Arc<Child> {
+        let (stop, _) = watch::channel(false);
+        let (finished, _) = watch::channel(true);
+        Arc::new(Child {
+            parent,
+            id: SessionId::new(),
+            description: "lineage fixture".into(),
+            agent: "general".into(),
+            model: "openai/fixture".into(),
+            prompt: "fixture prompt".into(),
+            workdir: ".".into(),
+            agent_prompt: "fixture agent".into(),
+            read_only,
+            status: Mutex::new(Status { state: "completed", output: String::new(), error: None }),
+            control: Mutex::new(GenerationControl { generation: 0, chain_id: 0, stop, finished, claimed: false, retry_message: None, explicit_cancelled: false }),
+            tool_seen: AtomicBool::new(false),
+            generation: AtomicU32::new(0),
+            auto_retries: AtomicU32::new(0),
+            manual_retries: AtomicU32::new(0),
+            followups: Mutex::new(VecDeque::new()),
+        })
+    }
+
+    #[test]
+    fn lineage_depth_is_bounded_and_read_only_is_inherited() {
+        let children = Children::default();
+        let root = SessionId::new();
+        let first = child_fixture_with(root, true);
+        let second = child_fixture_with(first.id, false);
+        let third = child_fixture_with(second.id, false);
+        {
+            let mut rows = children.0.lock().unwrap();
+            rows.insert(first.id.to_string(), first.clone());
+            rows.insert(second.id.to_string(), second.clone());
+            rows.insert(third.id.to_string(), third.clone());
+        }
+        assert_eq!(children.lineage(first.id).unwrap(), (1, true));
+        assert_eq!(children.lineage(second.id).unwrap(), (2, true));
+        assert_eq!(children.lineage(third.id).unwrap(), (3, true));
+        assert!(!children.can_delegate_from(first.id));
+        assert!(children.can_delegate_from(root));
+        assert_eq!(children.child(root, &third.id.to_string()).unwrap().id, third.id);
+        assert!(children.child(SessionId::new(), &third.id.to_string()).is_err());
+        let depths = children.descendants(root).unwrap().into_iter().map(|(_, depth)| depth).collect::<Vec<_>>();
+        assert_eq!(depths, vec![1, 2, 3]);
     }
 
     #[test]
@@ -772,7 +862,8 @@ pub(crate) async fn execute(state: AppState, children: Children, events: event_b
 }
 
 async fn execute_inner(state: AppState, children: Children, events: event_bus::EventBus, parent: &Arc<RunOwner>, broker: &PermissionBroker, message_id: MessageId, call: &RequestedCall, model: &str, workdir: &std::path::Path) -> Result<Value, ApiFailure> {
-    if children.is_child(parent.session_id) { return Err(ApiFailure::bad_request("subagent depth limit reached")); }
+    let (parent_depth, inherited_read_only) = children.lineage(parent.session_id)?;
+    if parent_depth >= MAX_DELEGATION_DEPTH { return Err(ApiFailure::bad_request("subagent depth limit reached")); }
     if call.arguments.len() > 40 * 1024 { return Err(ApiFailure::bad_request("task arguments exceed limit")); }
     let input: Value = serde_json::from_str(&call.arguments).map_err(|_| ApiFailure::bad_request("invalid task arguments"))?;
     let object = input.as_object().ok_or_else(|| ApiFailure::bad_request("task arguments must be an object"))?;
@@ -878,12 +969,14 @@ async fn execute_inner(state: AppState, children: Children, events: event_bus::E
         let configured_prompt = config.and_then(|v| v["prompt"].as_str()).map(str::to_owned);
         let base_prompt = configured_prompt.unwrap_or_else(|| role.map_or_else(|| "Complete the delegated task, use tools as needed, and report a concise factual result.".to_owned(), |role| role.prompt.to_owned()));
         let configured_read_only = config.and_then(|v| v.get("read_only").and_then(Value::as_bool)).unwrap_or(false);
+        let read_only = inherited_read_only || configured_read_only || role.is_some_and(|role| role.read_only);
+        let remaining_depth = MAX_DELEGATION_DEPTH.saturating_sub(parent_depth + 1);
         let (stop, _) = watch::channel(false);
         let (finished, _) = watch::channel(true);
         let child = Arc::new(Child { parent:parent.session_id, id:summary.id, description, agent:canonical.clone(),
             model:child_model, prompt:prompt.clone(), workdir:workdir.to_string_lossy().into_owned(),
-            agent_prompt:format!("Agent: {canonical}\n{base_prompt}\nYou cannot delegate further tasks."),
-            read_only:configured_read_only || role.is_some_and(|role| role.read_only), status:Mutex::new(Status { state:"queued", output:String::new(), error:None }), control:Mutex::new(GenerationControl { generation:0, chain_id:0, stop, finished, claimed:false, retry_message:None, explicit_cancelled:false }), tool_seen:AtomicBool::new(false),
+            agent_prompt:format!("Agent: {canonical}\n{base_prompt}\nNested delegation is allowed through the native task tool for at most {remaining_depth} additional level(s). Child sessions inherit this session's restrictive permissions."),
+            read_only, status:Mutex::new(Status { state:"queued", output:String::new(), error:None }), control:Mutex::new(GenerationControl { generation:0, chain_id:0, stop, finished, claimed:false, retry_message:None, explicit_cancelled:false }), tool_seen:AtomicBool::new(false),
             generation:AtomicU32::new(0), auto_retries:AtomicU32::new(0), manual_retries:AtomicU32::new(0), followups:Mutex::new(VecDeque::new()) });
         let claimed = child.claim_generation_receipt(false)?;
         {

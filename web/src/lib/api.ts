@@ -114,6 +114,7 @@ export interface CommandInventory { commands: ConfiguredCommand[]; agents: Agent
 export interface SubagentSnapshot {
   session_id: string
   parent_id: string
+  depth: number
   description: string
   agent: string
   model: string
@@ -136,6 +137,7 @@ function normalizeSubagent(value: unknown): SubagentSnapshot | null {
   return {
     session_id: raw.session_id,
     parent_id: raw.parent_id,
+    depth: typeof raw.depth === 'number' && Number.isInteger(raw.depth) && raw.depth >= 1 && raw.depth <= 3 ? raw.depth : 1,
     description: typeof raw.description === 'string' ? raw.description : '',
     agent: typeof raw.agent === 'string' ? raw.agent : '',
     model: typeof raw.model === 'string' ? raw.model : '',
