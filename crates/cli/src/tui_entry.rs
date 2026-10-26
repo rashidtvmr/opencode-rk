@@ -681,6 +681,12 @@ impl NativeCompactWorker {
         Ok(Self { rx, task: Some(task), session_id: session, generation, origin, auth: token })
     }
 
+    fn retire(&mut self) {
+        // Taking the handle detaches work. NativeCompactWorker::drop sends an
+        // interrupt only while the handle remains present.
+        drop(self.task.take());
+    }
+
     fn try_result(&mut self) -> Option<Result<String, String>> {
         match self.rx.try_recv() {
             Ok(result) => {
@@ -2882,6 +2888,7 @@ fn native_tui_config_paths() -> Result<Vec<std::path::PathBuf>, String> {
 fn native_loop(
     memory: &[MemoryFile],
     mut live: Option<LiveSnapshot>,
+    daemon_origin: Option<&str>,
     auth: Option<&str>,
     startup_view: Option<crate::app_start::StartupView>,
     keymap: SubmitKeymap,
@@ -4702,7 +4709,7 @@ fn native_loop(
                                 let scroll = view.chat_scroll_offset();
                                 match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|model| model.qualified()), scroll) {
                                     Ok(result) => {
-                                        apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route);
+                                        apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
                                         completion.sync(&draft);
                                     }
                                     Err(error) => append_transcript(&mut transcript, format!("error: select tab: {error}")),
@@ -4723,6 +4730,7 @@ fn native_loop(
                                         &mut selected,
                                         &models,
                                         &mut session_route,
+                                        &mut compact_worker,
                                     ),
                                     Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
                                 }
@@ -4730,6 +4738,25 @@ fn native_loop(
                             }
                         }
                     }
+                }
+                // Tabs were resolved first. Send clicks were normalized before
+                // this mouse match, and the explicit rect guard keeps the two targets disjoint.
+                if !page_open
+                    && !view.dialogs.intercepts_input()
+                    && !permission_editor.open
+                    && !appearance.open
+                    && !children_panel.open
+                    && !help_open
+                    && !view.command_palette_open()
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+                    && kind == 0 && modifiers == 0
+                    && !view.send_button_hit(&draft, x, y)
+                    && view.context_usage_hit(x, y)
+                {
+                    view.open_context_usage();
+                    needs_paint = true;
+                    continue;
                 }
                 // Tabs were resolved first. Send clicks were normalized before
                 // this mouse match, and the explicit rect guard keeps the two targets disjoint.
@@ -5951,6 +5978,7 @@ fn native_loop(
                                 &mut selected,
                                 &models,
                                 &mut session_route,
+                                &mut compact_worker,
                             ),
                             Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
                         }
@@ -6708,6 +6736,60 @@ fn native_loop(
                         // owns the current binding.
                         continue;
                     }
+                    if live.is_none() {
+                        let Some(origin) = daemon_origin else {
+                            append_transcript(&mut transcript, "offline: turn not executed".to_owned());
+                            needs_paint = true;
+                            continue;
+                        };
+                        if worker.is_some() || compact_worker.is_some() || view.dialogs.is_open() {
+                            append_transcript(&mut transcript, "busy: prior session work or permission decision is still active; prompt preserved".to_owned());
+                            needs_paint = true;
+                            continue;
+                        }
+                        let Some(prospective) = crate::native_view::reserve_generation(binding_generation) else {
+                            append_transcript(&mut transcript, "error: binding generation exhausted; session create refused".into());
+                            needs_paint = true;
+                            continue;
+                        };
+                        let directory = std::env::current_dir().unwrap_or_default().display().to_string();
+                        let body = serde_json::json!({"title":"Chat", "directory":directory}).to_string();
+                        let created = http_request(origin, "POST", "/api/sessions", Some(&body), auth)
+                            .and_then(|response| parse_created_session_id(&response));
+                        match created {
+                            Err(error) => {
+                                append_transcript(&mut transcript, format!("error: session create: {error}; draft preserved (not retried)"));
+                                needs_paint = true;
+                                continue;
+                            }
+                            Ok(created_id) => match bind_session(
+                                &mut view,
+                                &mut transcript,
+                                &draft,
+                                draft_cursor,
+                                origin,
+                                Some(&created_id),
+                                auth,
+                            ) {
+                                Ok((snapshot, _restored_draft)) => {
+                                    navigation.open(crate::native_navigation::SessionRef(snapshot.session_id.clone()));
+                                    history_window = Some(crate::native_chat_projection::NativeHistoryWindow::new(
+                                        &snapshot.raw_history,
+                                        snapshot.history_next_before.clone(),
+                                    ));
+                                    live = Some(snapshot);
+                                    binding_generation = prospective;
+                                    session_route = true;
+                                    view.set_session_route(true);
+                                }
+                                Err(error) => {
+                                    append_transcript(&mut transcript, format!("error: session create: {error}; created session {created_id} preserved (not bound, not retried); draft preserved"));
+                                    needs_paint = true;
+                                    continue;
+                                }
+                            },
+                        }
+                    }
                     if let Some(snapshot) = live.as_ref() {
                         // Commit the conversation shell before starting the
                         // potentially delayed provider request.  The route is
@@ -6851,6 +6933,7 @@ fn native_loop(
                                         result, &mut view, &mut live, &mut history_window,
                                         &mut binding_generation, &mut draft, &mut draft_cursor,
                                         &mut selected, &models, &mut session_route,
+                                        &mut compact_worker,
                                     );
                                     completion.sync(&draft);
                                 }
@@ -6878,6 +6961,7 @@ fn native_loop(
                                     result, &mut view, &mut live, &mut history_window,
                                     &mut binding_generation, &mut draft, &mut draft_cursor,
                                     &mut selected, &models, &mut session_route,
+                                    &mut compact_worker,
                                 ),
                                 Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
                             }
@@ -7107,7 +7191,14 @@ fn apply_close_tab_result(
     selected: &mut Option<native_setup::Model>,
     models: &[native_setup::Model],
     session_route: &mut bool,
+    compact_worker: &mut Option<NativeCompactWorker>,
 ) {
+    if result.home {
+        if let Some(worker) = compact_worker.as_mut() {
+            worker.retire();
+        }
+        *compact_worker = None;
+    }
     if let Some(snapshot) = result.snapshot {
         *history_window = Some(crate::native_chat_projection::NativeHistoryWindow::new(
             &snapshot.raw_history,
@@ -7124,8 +7215,12 @@ fn apply_close_tab_result(
     );
     crate::native_composer::normalize_cursor(draft, draft_cursor);
     if result.home {
+        // Home has no active session binding. Keep daemon_origin separately
+        // so the next prompt can create and bind a fresh session.
+        *live = None;
+        *history_window = None;
+        view.reset_to_home_after_tab_close();
         *session_route = false;
-        view.set_session_route(false);
     } else {
         view.set_chat_scroll_offset(result.scroll);
         *selected = result.selected_model.as_deref().and_then(|qualified| {
@@ -7356,6 +7451,7 @@ pub fn run_with_dir(
                     return native_loop(
                         &memory,
                         Some(snapshot),
+                        args.origin.as_deref(),
                         auth,
                         startup_view,
                         keymap,
@@ -7398,6 +7494,7 @@ pub fn run_with_dir(
         native_loop(
             &memory,
             None,
+            args.origin.as_deref(),
             auth,
             startup_view,
             keymap,
@@ -7576,8 +7673,9 @@ mod tab_binding_tests {
         let mut cursor = 3;
         let mut selected = None;
         let mut route = true;
+        let mut compact_worker = None;
         let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None }];
-        apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route);
+        apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route, &mut compact_worker);
         assert_eq!(live.as_ref().unwrap().session_id, B, "Send reads its session identity from live");
         assert_eq!(generation, 5);
         assert_eq!(draft, "left 世界 right");
@@ -7860,6 +7958,7 @@ mod command_consumption_tests {
             context_window: None,
         }];
         let mut route = true;
+        let mut compact_worker = None;
         super::apply_close_tab_result(
             super::CloseTabResult {
                 snapshot: None,
@@ -7879,6 +7978,7 @@ mod command_consumption_tests {
             &mut selected,
             &models,
             &mut route,
+            &mut compact_worker,
         );
         assert_eq!(draft, "left 世界 right");
         assert_eq!(cursor, 8, "cursor 9 in fixture is mid-codepoint; normalize_cursor must pull it back to the UTF-8 boundary at byte 8");
@@ -7889,17 +7989,35 @@ mod command_consumption_tests {
     }
 
     #[test]
-    fn shared_close_result_application_home_clears_route_without_erasing_live_work() {
+    fn shared_close_result_application_home_clears_stale_live_binding_and_route() {
         let mut view = crate::native_view::NativeView::new(80, 24);
         view.set_session_route(true);
-        let mut live = None;
-        let mut history_window = None;
+        let mut live = Some(super::LiveSnapshot {
+            origin: "http://127.0.0.1:1".into(),
+            session_id: "00000000-0000-0000-0000-000000000001".into(),
+            title: "Closed session".into(),
+            state: "idle".into(),
+            updated_at: String::new(),
+            message_count: 0,
+            last_text: None,
+            history: Vec::new(),
+            typed_history: Vec::new(),
+            raw_history: Vec::new(),
+            history_next_before: None,
+            parent_session: false,
+            directory: None,
+        });
+        let mut history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(
+            &snapshot.raw_history,
+            snapshot.history_next_before.clone(),
+        ));
         let mut generation = 7;
         let mut draft = "unsent".into();
         let mut cursor = 3;
         let mut selected = None;
         let models = Vec::new();
         let mut route = true;
+        let mut compact_worker = None;
         super::apply_close_tab_result(
             super::CloseTabResult {
                 snapshot: None,
@@ -7919,11 +8037,60 @@ mod command_consumption_tests {
             &mut selected,
             &models,
             &mut route,
+            &mut compact_worker,
         );
         assert!(!route);
         assert!(draft.is_empty());
         assert_eq!(cursor, 0);
-        assert!(live.is_none(), "application seam does not invent or clear daemon state");
+        assert!(live.is_none(), "Home clears the closed session binding");
+        assert!(history_window.is_none(), "Home clears history bound to the closed session");
+        assert!(compact_worker.is_none(), "Home releases stale compact admission slot");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn closing_last_tab_retires_compact_worker_without_cancelling_daemon_work() {
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let mut live = Some(super::LiveSnapshot {
+            origin: "http://127.0.0.1:1".into(),
+            session_id: "00000000-0000-0000-0000-000000000001".into(),
+            title: "Closed session".into(), state: "idle".into(), updated_at: String::new(),
+            message_count: 0, last_text: None, history: Vec::new(), typed_history: Vec::new(),
+            raw_history: Vec::new(), history_next_before: None, parent_session: false, directory: None,
+        });
+        let mut history = None;
+        let mut generation = 7;
+        let mut draft = String::new();
+        let mut cursor = 0;
+        let mut selected = None;
+        let mut route = true;
+        let (result_tx, result_rx) = tokio::sync::mpsc::channel(1);
+        let (release_tx, release_rx) = tokio::sync::oneshot::channel();
+        let (finished_tx, finished_rx) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = release_rx.await;
+            let delivered = result_tx.send(Ok("old session compaction complete".to_owned())).await.is_ok();
+            let _ = finished_tx.send(delivered);
+        });
+        let mut compact_worker = Some(super::NativeCompactWorker {
+            rx: result_rx, task: Some(task),
+            session_id: "00000000-0000-0000-0000-000000000001".into(), generation,
+            origin: "http://127.0.0.1:1".into(), auth: "a".repeat(64),
+        });
+        let models = Vec::new();
+        super::apply_close_tab_result(
+            super::CloseTabResult { snapshot: None, draft: String::new(), cursor: 0, scroll: 0,
+                selected_model: None, generation, home: true },
+            &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor,
+            &mut selected, &models, &mut route,
+            &mut compact_worker,
+        );
+        assert!(compact_worker.is_none(), "fresh Home admission has no stale compact slot");
+        assert!(live.is_none(), "last-tab close clears the old binding");
+        assert!(!route, "last-tab close returns to Home");
+        assert!(!view.dialogs.is_open());
+        release_tx.send(()).unwrap();
+        assert!(!finished_rx.await.unwrap(), "request completes but stale UI result is discarded");
     }
 
     /// Installed bug reproduced as a pure production-helper contract:
