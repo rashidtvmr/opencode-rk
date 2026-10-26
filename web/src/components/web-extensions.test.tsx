@@ -3,11 +3,12 @@ import { cleanup, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Composer } from './composer'
 import { SettingsPanel } from './settings-panel'
-import { ToolTimeline } from './tool-timeline'
+import { ToolTimeline, deriveStoredToolTimeline } from './tool-timeline'
 import { MessageMarkdown } from './message-markdown'
 import { SubagentPanel } from './subagent-panel'
 import { withBrowserResume } from '@/test/browser-resume-fixture'
 import type { WebPreferences } from '@/lib/web-preferences'
+import { listHistoryPage } from '@/lib/api'
 
 const models = [{ id: 'gpt-5.6', provider: 'openai', name: 'GPT-5.6' }]
 const preferences: WebPreferences = {
@@ -58,9 +59,76 @@ describe('working composer discovery', () => {
     await user.keyboard('{ArrowDown}{Enter}')
     expect(editor.textContent).toContain('@reviewer ')
   })
+
+  it('dismisses autocomplete on Escape until the user edits the draft again', async () => {
+    const user = userEvent.setup()
+    render(<Composer
+      sessionId="chat-escape"
+      models={models}
+      selectedModel="openai/gpt-5.6"
+      onModelChange={vi.fn()}
+      agents={[{ name: 'reviewer', description: 'Review code', read_only: true }]}
+    />)
+    const editor = screen.getByRole('textbox', { name: 'Message' })
+    await user.click(editor)
+    await user.type(editor, '@rev')
+    expect(screen.getByRole('listbox', { name: 'Agent mentions' })).not.toBeNull()
+    await user.keyboard('{Escape}')
+    expect(screen.queryByRole('listbox', { name: 'Agent mentions' })).toBeNull()
+    await user.type(editor, 'i')
+    expect(screen.getByRole('listbox', { name: 'Agent mentions' })).not.toBeNull()
+  })
+
+  it('looks up read-only @file paths through the native session directory and inserts the chosen path', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      if (path.endsWith('/files/lookup?q=App')) {
+        return new Response(JSON.stringify({ results: ['src/App.tsx'] }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ message: 'not found' }), { status: 404, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', withBrowserResume(fetchMock))
+    render(<Composer
+      sessionId="chat-files"
+      models={models}
+      selectedModel="openai/gpt-5.6"
+      onModelChange={vi.fn()}
+    />)
+    const editor = screen.getByRole('textbox', { name: 'Message' })
+    await user.click(editor)
+    await user.type(editor, '@App')
+    const option = await screen.findByRole('option', { name: /src\/App.tsx/ })
+    await user.click(option)
+    expect(editor.textContent).toContain('@src/App.tsx ')
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/chat-files/files/lookup?q=App', expect.anything())
+  })
 })
 
 describe('developer panels', () => {
+  it('rehydrates paginated durable tool calls and their failure statuses', async () => {
+    const session = '0195f36a-2997-7a89-a11a-fc3359b0aa99'
+    const mock = vi.fn(async () => new Response(JSON.stringify({ messages: [{
+      id: 'typed-1', session_id: session, role: 'tool', body: { storage: 'inline', text: '[bash] failed' },
+      parts: [
+        { type: 'tool_call', call_id: 'call-1', name: 'bash', arguments: { command: 'exit 1' }, status: 'completed' },
+        { type: 'tool_output', call_id: 'call-1', name: 'bash', output: 'permission denied', success: false },
+      ],
+    }], next_before: null }), {
+      status: 200, headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', withBrowserResume(mock))
+    const page = await listHistoryPage(session, 50)
+    const tools = deriveStoredToolTimeline(page.messages)
+    expect(tools.get('call-1')).toMatchObject({
+      name: 'bash', arguments: '{"command":"exit 1"}', output: 'permission denied', state: 'failed',
+    })
+    render(<ToolTimeline tools={Array.from(tools.values())} />)
+    expect(screen.getByText('Failed')).not.toBeNull()
+  })
+
   it('renders headings, fenced code and tables without executing untrusted markdown HTML', () => {
     const { container } = render(<MessageMarkdown text={
       '# Review results\n\n**Safe** output.\n\n```ts\nconst safe = true\n```\n\n| File | State |\n| --- | --- |\n| src/App.tsx | clean |\n\n<img src=x onerror=alert(1)>'

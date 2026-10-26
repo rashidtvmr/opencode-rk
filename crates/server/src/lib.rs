@@ -67,6 +67,8 @@ pub mod route_table;
 pub mod rules_globs;
 pub mod rules_loader;
 mod todo_http;
+mod workspace_files;
+mod git_http;
 mod todo_tool;
 mod memory_http;
 pub mod run_owner;
@@ -245,6 +247,10 @@ pub fn router_with_events_and_integration(
         .route("/api/sessions/{id}/memory/include", post(memory_http::include).layer(DefaultBodyLimit::max(8192)))
         .route("/api/sessions/{id}/todo", get(todo_http::get).put(todo_http::replace)
             .layer(DefaultBodyLimit::max(512 * 1024)))
+        .route("/api/sessions/{id}/files", get(workspace_files::get))
+        .route("/api/sessions/{id}/files/lookup", get(workspace_files::lookup))
+        .route("/api/sessions/{id}/git", get(git_http::get))
+        .route("/api/sessions/{id}/git/diff", get(git_http::diff))
         .route("/api/sessions/{id}/command", post(run_configured_command))
         .route(
             "/api/sessions/{id}/attachments",
@@ -1090,6 +1096,53 @@ struct HistoryPageParams {
     before: Option<String>,
 }
 
+/// Uniform typed tool projection for both the first page and older pages.
+/// Never surface write-tool content from the internal provider replay ledger.
+fn display_message(
+    message: MessageRecord,
+    tools: &[opencode_rk_sessions::ToolHistoryItem],
+    activities: &[opencode_rk_contracts::AssistantActivity],
+) -> Result<Value, ApiFailure> {
+    let message_id = message.id;
+    let mut value = serde_json::to_value(message).map_err(ApiFailure::internal)?;
+    let mut parts = Vec::new();
+    for tool in tools.iter().filter(|tool| tool.message_id == message_id) {
+        if tool.kind == "call" {
+            let arguments = if tool.name == "write" {
+                json!({})
+            } else {
+                serde_json::from_str::<Value>(&tool.payload).unwrap_or_else(|_| json!({}))
+            };
+            parts.push(json!({"type":"tool_call","call_id":tool.call_id,"name":tool.name,
+                "arguments":arguments,
+                "status":if tools.iter().any(|output|output.kind=="output"
+                    && output.call_id==tool.call_id && output.round_id==tool.round_id)
+                    {"completed"}else{"pending"}}));
+        } else if tool.kind == "output" {
+            let envelope = serde_json::from_str::<Value>(&tool.payload)
+                .ok()
+                .filter(|value| value["format"] == "opencode.tool-result.v1");
+            let output = envelope
+                .as_ref()
+                .and_then(|value| value["output"].as_str())
+                .unwrap_or(&tool.payload);
+            let success = envelope
+                .as_ref()
+                .and_then(|value| value["success"].as_bool());
+            parts.push(json!({"type":"tool_output","call_id":tool.call_id,"name":tool.name,
+                "output":output,"success":success,"is_error":success.map(|ok|!ok),
+                "error":if success==Some(false){Some(output)}else{None}}));
+        }
+    }
+    for activity in activities {
+        if activity.message_id == message_id {
+            value["reasoning_summary"] = json!(activity.reasoning_summary);
+        }
+    }
+    if !parts.is_empty() { value["parts"] = json!(parts); }
+    Ok(value)
+}
+
 async fn list_messages(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1112,50 +1165,9 @@ async fn list_messages(
         .assistant_activity(id, limit)
         .await
         .map_err(ApiFailure::internal)?;
-    let mut rows = Vec::with_capacity(messages.len());
-    for message in messages {
-        let message_id = message.id;
-        let mut value = serde_json::to_value(message).map_err(ApiFailure::internal)?;
-        let mut parts = Vec::new();
-        for tool in tools.iter().filter(|tool| tool.message_id == message_id) {
-            if tool.kind == "call" {
-                // Match the live event projection: write content remains in
-                // typed storage for provider replay, never public transcript parts.
-                let arguments = if tool.name == "write" {
-                    json!({})
-                } else {
-                    serde_json::from_str::<Value>(&tool.payload).unwrap_or_else(|_| json!({}))
-                };
-                parts.push(json!({"type":"tool_call","call_id":tool.call_id,"name":tool.name,
-                    "arguments":arguments,
-                    "status":if tools.iter().any(|output|output.kind=="output" && output.call_id==tool.call_id && output.round_id==tool.round_id){"completed"}else{"pending"}}));
-            } else if tool.kind == "output" {
-                let envelope = serde_json::from_str::<Value>(&tool.payload)
-                    .ok()
-                    .filter(|value| value["format"] == "opencode.tool-result.v1");
-                let output = envelope
-                    .as_ref()
-                    .and_then(|value| value["output"].as_str())
-                    .unwrap_or(&tool.payload);
-                let success = envelope
-                    .as_ref()
-                    .and_then(|value| value["success"].as_bool());
-                parts.push(json!({"type":"tool_output","call_id":tool.call_id,"name":tool.name,"output":output,
-                    "success":success,"is_error":success.map(|success|!success),
-                    "error":if success==Some(false){Some(output)}else{None}}));
-            }
-        }
-        // Assistant activity is already durable and bounded independently of the display body.
-        for activity in &activities {
-            if activity.message_id == message_id {
-                value["reasoning_summary"] = json!(activity.reasoning_summary);
-            }
-        }
-        if !parts.is_empty() {
-            value["parts"] = json!(parts);
-        }
-        rows.push(value);
-    }
+    let rows = messages.into_iter()
+        .map(|message| display_message(message, &tools, &activities))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(json!({"messages":rows})))
 }
 
@@ -1166,9 +1178,10 @@ async fn list_history_page(
 ) -> Result<Json<Value>, ApiFailure> {
     let id = parse_session_id(&id)?;
     let before = params.before.as_deref().map(parse_message_id).transpose()?;
+    let limit = params.limit.unwrap_or(50).clamp(1, 100);
     let (messages, next_before) = state
         .sessions
-        .history_page(id, before, params.limit.unwrap_or(50).clamp(1, 100))
+        .history_page(id, before, limit)
         .await
         .map_err(|error| match error {
             SessionError::HistoryCursorNotFound(_) | SessionError::NotFound(_) => {
@@ -1176,8 +1189,17 @@ async fn list_history_page(
             }
             other => ApiFailure::internal(other),
         })?;
+    // The paginated web transcript must preserve typed tool-call/output
+    // history, including pages older than the initial 50 messages.
+    let tools = state.sessions.display_tool_history_page(id, before, limit)
+        .await.map_err(ApiFailure::internal)?;
+    let activities = state.sessions.assistant_activity(id, 500)
+        .await.map_err(ApiFailure::internal)?;
+    let rows = messages.into_iter()
+        .map(|message| display_message(message, &tools, &activities))
+        .collect::<Result<Vec<_>, _>>()?;
     Ok(Json(json!({
-        "messages": messages,
+        "messages": rows,
         "next_before": next_before,
     })))
 }

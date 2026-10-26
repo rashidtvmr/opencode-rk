@@ -54,6 +54,19 @@ afterEach(() => {
 })
 
 describe('daemon-backed composer actions', () => {
+  it('opens real workspace pages and isolates the hidden conversation controls', async () => {
+    const user = userEvent.setup()
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Developer conversation' })
+    await user.click(screen.getByRole('button', { name: /^Workspace$/ }))
+    expect(await screen.findByRole('heading', { name: 'Projects & workspaces' })).not.toBeNull()
+    expect(document.querySelector('.codex-conversation')?.hasAttribute('inert')).toBe(true)
+    await user.click(screen.getByRole('button', { name: 'Tasks' }))
+    expect(await screen.findByRole('heading', { name: 'Conversation tasks' })).not.toBeNull()
+    await user.click(screen.getByRole('button', { name: 'Close workspace' }))
+    expect(document.querySelector('.codex-conversation')?.hasAttribute('inert')).toBe(false)
+  })
+
   it('sends a configured slash command to the command endpoint without silently falling back', async () => {
     const user = userEvent.setup()
     render(<App />)

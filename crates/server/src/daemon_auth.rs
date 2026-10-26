@@ -260,6 +260,11 @@ pub async fn require_bearer(
     let resume_api_path = custom_provider_resume_path(&method, &path)
         || path == "/api/capabilities"
         || (path == "/api/commands" && (method == axum::http::Method::GET || method == axum::http::Method::HEAD))
+        || (path == "/api/permission-rules"
+            && matches!(method, axum::http::Method::GET | axum::http::Method::POST))
+        || (path == "/api/mcp"
+            && matches!(method, axum::http::Method::GET | axum::http::Method::POST))
+        || mcp_lifecycle_resume_path(&method, &path)
         || path == "/api/workspaces"
         || path == "/api/models"
         || path.starts_with("/api/models/")
@@ -377,6 +382,16 @@ fn custom_provider_resume_path(method: &axum::http::Method, path: &str) -> bool 
     *method == axum::http::Method::POST && opencode_rk_providers::custom_provider::valid_id(tail)
 }
 
+fn mcp_lifecycle_resume_path(method: &axum::http::Method, path: &str) -> bool {
+    if *method != axum::http::Method::POST { return false; }
+    let Some(tail) = path.strip_prefix("/api/mcp/") else { return false; };
+    let Some(name) = tail.strip_suffix("/connect").or_else(|| tail.strip_suffix("/disconnect"))
+        else { return false; };
+    name.len() <= 64
+        && name.bytes().next().is_some_and(|byte| byte.is_ascii_alphabetic())
+        && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
+}
+
 fn missing_credential() -> Response {
     (
         StatusCode::UNAUTHORIZED,
@@ -412,6 +427,50 @@ fn loopback_origin_from_host(host: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn browser_resume_workspace_routes_are_exact_and_mutations_require_origin() {
+        use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+        use tower::ServiceExt;
+        let auth = DaemonAuth::mint().unwrap();
+        let origin = "http://127.0.0.1:4096";
+        let (capability, _) = auth.browser_resume().issue(origin, 60_000).unwrap();
+        let admitted = Arc::new(AtomicUsize::new(0));
+        let tracker = admitted.clone();
+        let app = axum::Router::new().fallback(move || {
+            let count = tracker.clone();
+            async move { count.fetch_add(1, Ordering::SeqCst); StatusCode::NO_CONTENT }
+        }).layer(axum::middleware::from_fn_with_state(auth, require_bearer));
+        let cases = [
+            ("GET", "/api/commands", None, StatusCode::NO_CONTENT),
+            ("GET", "/api/sessions/test/files?path=src", None, StatusCode::NO_CONTENT),
+            ("GET", "/api/sessions/test/git/diff?path=src", None, StatusCode::NO_CONTENT),
+            ("GET", "/api/permission-rules", None, StatusCode::NO_CONTENT),
+            ("POST", "/api/permission-rules", Some(origin), StatusCode::NO_CONTENT),
+            ("POST", "/api/permission-rules", None, StatusCode::FORBIDDEN),
+            ("GET", "/api/mcp", None, StatusCode::NO_CONTENT),
+            ("POST", "/api/mcp", Some(origin), StatusCode::NO_CONTENT),
+            ("POST", "/api/mcp", None, StatusCode::FORBIDDEN),
+            ("POST", "/api/mcp/test-server/connect", Some(origin), StatusCode::NO_CONTENT),
+            ("POST", "/api/mcp/test-server/disconnect", Some(origin), StatusCode::NO_CONTENT),
+            ("GET", "/api/mcp/test-server/connect", None, StatusCode::FORBIDDEN),
+            ("POST", "/api/mcp//connect", Some(origin), StatusCode::FORBIDDEN),
+            ("POST", "/api/mcp/test-server/connect/extra", Some(origin), StatusCode::FORBIDDEN),
+            ("POST", "/api/mcp/test-server/connect", Some("http://localhost:9999"), StatusCode::FORBIDDEN),
+        ];
+        let mut expected_admitted = 0;
+        for (method, path, supplied_origin, expected) in cases {
+            let mut request = axum::http::Request::builder().method(method).uri(path)
+                .header("Host", "127.0.0.1:4096")
+                .header("Authorization", format!("BrowserResume {capability}"));
+            if let Some(origin) = supplied_origin { request = request.header("Origin", origin); }
+            let response = app.clone().oneshot(request.body(axum::body::Body::empty()).unwrap())
+                .await.unwrap();
+            assert_eq!(response.status(), expected, "{method} {path}");
+            if expected == StatusCode::NO_CONTENT { expected_admitted += 1; }
+        }
+        assert_eq!(admitted.load(Ordering::SeqCst), expected_admitted);
+    }
 
     #[tokio::test]
     async fn browser_resume_custom_providers_are_exact_and_origin_bound() {

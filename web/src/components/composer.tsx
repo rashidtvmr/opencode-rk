@@ -38,6 +38,7 @@ import {
 import {
   modelKey,
   modelLabel,
+  searchSessionFiles,
   type AgentMention,
   type ConfiguredCommand,
   type DraftAttachment,
@@ -204,18 +205,40 @@ export function Composer({
   const [effort, setEffort] = useState<ReasoningEffort>('high')
   const [submitting, setSubmitting] = useState(false)
   const [palette, setPalette] = useState<'commands' | 'agents' | null>(null)
+  const [dismissedForDraft, setDismissedForDraft] = useState<string | null>(null)
   const [suggestionIndex, setSuggestionIndex] = useState(0)
+  const [fileMatches, setFileMatches] = useState<string[]>([])
 
   const commandTrigger = /(?:^|\n)\/([\w-]*)$/.exec(draftText)
-  const mentionTrigger = /(?:^|\s)@([\w-]*)$/.exec(draftText)
-  const activePalette = palette ?? (mentionTrigger ? 'agents' : commandTrigger ? 'commands' : null)
+  const mentionTrigger = /(?:^|\s)@([\w./-]*)$/.exec(draftText)
+  const fileQuery = mentionTrigger?.[1] ?? ''
+
+  useEffect(() => {
+    const controller = new AbortController()
+    if (!sessionId || fileQuery.length < 2) {
+      setFileMatches([])
+      return () => controller.abort()
+    }
+    const timeout = window.setTimeout(() => {
+      searchSessionFiles(sessionId, fileQuery, controller.signal)
+        .then((files) => { if (!controller.signal.aborted) setFileMatches(files) })
+        .catch(() => { if (!controller.signal.aborted) setFileMatches([]) })
+    }, 150)
+    return () => { controller.abort(); window.clearTimeout(timeout) }
+  }, [sessionId, fileQuery])
+  const activePalette = dismissedForDraft === draftText
+    ? null : palette ?? (mentionTrigger ? 'agents' : commandTrigger ? 'commands' : null)
   const suggestionQuery = palette ? '' : activePalette === 'agents' ? mentionTrigger?.[1] ?? '' : commandTrigger?.[1] ?? ''
   const suggestions = activePalette === 'commands'
     ? commands.filter((item) => item.name.toLowerCase().includes(suggestionQuery.toLowerCase())).slice(0, 12)
         .map((item) => ({ key: `/${item.name}`, description: item.description }))
     : activePalette === 'agents'
-      ? agents.filter((item) => item.name.toLowerCase().includes(suggestionQuery.toLowerCase())).slice(0, 12)
-          .map((item) => ({ key: `@${item.name}`, description: item.description }))
+      ? [
+          ...agents.filter((item) => item.name.toLowerCase().includes(suggestionQuery.toLowerCase()))
+            .map((item) => ({ key: `@${item.name}`, description: item.description })),
+          ...fileMatches.filter((path) => path.toLowerCase().includes(suggestionQuery.toLowerCase()))
+            .map((path) => ({ key: `@${path}`, description: 'Session file path · agent must use its native read tool' })),
+        ].slice(0, 12)
       : []
 
   const acceptSuggestion = (key: string) => {
@@ -227,7 +250,7 @@ export function Composer({
     const offset = selection?.anchorOffset ?? 0
     if (anchor?.nodeType === Node.TEXT_NODE && editor.contains(anchor)) {
       const before = (anchor.textContent ?? '').slice(0, offset)
-      const token = /([@/][\w-]*)$/.exec(before)
+      const token = /([@/][\w./-]*)$/.exec(before)
       if (token && token[1][0] === key[0]) {
         const range = document.createRange()
         range.setStart(anchor, offset - token[1].length)
@@ -321,6 +344,7 @@ export function Composer({
     if (activePalette && !event.nativeEvent.isComposing) {
       if (event.key === 'Escape') {
         event.preventDefault()
+        setDismissedForDraft(draftText)
         setPalette(null)
         return
       }
@@ -547,7 +571,12 @@ export function Composer({
             aria-label="Commands and mentions"
             aria-expanded={Boolean(activePalette)}
             isDisabled={disabled || running}
-            onPress={() => { setPalette((current) => current === 'commands' ? 'agents' : 'commands'); setSuggestionIndex(0); editorRef.current?.focus() }}
+            onPress={() => {
+              setDismissedForDraft(null)
+              setPalette((current) => current === 'commands' ? 'agents' : 'commands')
+              setSuggestionIndex(0)
+              editorRef.current?.focus()
+            }}
           >
             <Command aria-hidden="true" />
           </Button>

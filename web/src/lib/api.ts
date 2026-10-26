@@ -26,6 +26,16 @@ export interface HealthResponse {
 
 export type MessageRole = 'system' | 'user' | 'assistant' | 'tool'
 
+export interface StoredToolPart {
+  type: 'tool_call' | 'tool_output'
+  call_id: string
+  name: string
+  arguments?: string
+  output?: string
+  status?: 'pending' | 'completed'
+  success?: boolean | null
+}
+
 export type MessageBody =
   | { storage: 'inline'; text: string }
   | { storage: 'blob'; hash: string; bytes: number }
@@ -35,6 +45,7 @@ export interface MessageRecord {
   session_id: string
   role: MessageRole
   body: MessageBody
+  parts?: StoredToolPart[]
   created_at?: unknown
 }
 
@@ -419,11 +430,37 @@ function normalizeMessage(value: unknown): MessageRecord | null {
     return null
   }
 
+  const parts: StoredToolPart[] = []
+  if (Array.isArray(candidate.parts)) {
+    for (const element of candidate.parts.slice(0, 100)) {
+      if (!element || typeof element !== 'object') continue
+      const p = element as Record<string, unknown>
+      if (!['tool_call', 'tool_output'].includes(String(p.type))
+        || typeof p.call_id !== 'string' || p.call_id.length > 256
+        || typeof p.name !== 'string' || p.name.length > 128) continue
+      if (p.type === 'tool_call') {
+        const args = typeof p.arguments === 'string' ? p.arguments : JSON.stringify(p.arguments ?? {})
+        parts.push({
+          type: 'tool_call', call_id: p.call_id, name: p.name,
+          arguments: args.slice(0, 65536),
+          status: p.status === 'completed' ? 'completed' : 'pending',
+        })
+      } else {
+        parts.push({
+          type: 'tool_output', call_id: p.call_id, name: p.name,
+          output: typeof p.output === 'string' ? p.output.slice(0, 131072) : '',
+          success: typeof p.success === 'boolean' ? p.success : null,
+        })
+      }
+    }
+  }
+
   return {
     id: candidate.id,
     session_id: candidate.session_id,
     role: candidate.role as MessageRole,
     body,
+    ...(parts.length ? { parts } : {}),
     created_at: candidate.created_at,
   }
 }
@@ -1046,6 +1083,7 @@ export interface ToolOutput {
   call_id: string
   name: string
   output: string
+  success?: boolean
 }
 
 const MAX_TURN_STREAM_BYTES = 2 * 1024 * 1024
@@ -1127,6 +1165,7 @@ function parseTurnStreamEvent(
         call_id: event.call_id,
         name: event.name,
         output: event.output,
+        ...(typeof event.success === 'boolean' ? { success: event.success } : {}),
       })
       break
     }
@@ -1230,26 +1269,31 @@ export async function runTurnStream(
   signal?: AbortSignal,
   configuredCommand?: { name: string; arguments: string },
   mentionedAgent?: string,
+  nativeShellCommand?: string,
 ): Promise<TurnResult> {
   const path = configuredCommand
     ? `/api/sessions/${encodeURIComponent(id)}/command`
     : mentionedAgent
       ? `/api/sessions/${encodeURIComponent(id)}/agent/stream`
+      : nativeShellCommand
+        ? `/api/sessions/${encodeURIComponent(id)}/shell/stream`
       : `/api/sessions/${encodeURIComponent(id)}/turns/stream`
   const response = await authenticatedFetch(path, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(configuredCommand
-      ? { command: configuredCommand.name, arguments: configuredCommand.arguments, model }
-      : mentionedAgent
+    body: JSON.stringify(nativeShellCommand
+      ? { command: nativeShellCommand }
+      : configuredCommand
+        ? { command: configuredCommand.name, arguments: configuredCommand.arguments, model }
+        : mentionedAgent
         ? { agent: mentionedAgent, text, model, reasoning_effort: reasoningEffort }
         : { text, model, reasoning_effort: reasoningEffort }),
     signal,
   })
 
   if (response.status === 404) {
-    if (configuredCommand || mentionedAgent) {
-      throw new ApiError(404, `Requested ${configuredCommand ? 'command' : 'agent'} route is unavailable on this daemon`)
+    if (configuredCommand || mentionedAgent || nativeShellCommand) {
+      throw new ApiError(404, 'Requested native action is unavailable on this daemon')
     }
     const turn = await runTurn(id, text, model, reasoningEffort, signal)
     handlers.onUserMessage?.(turn.userMessage)
@@ -1409,6 +1453,194 @@ export async function updateSubagent(
     throw new Error('Server returned an invalid subagent update')
   }
   return result
+}
+
+export interface BrowserFileEntry {
+  name: string
+  path: string
+  is_dir: boolean
+  bytes: number
+}
+
+export type BrowserFileResult =
+  | { type: 'directory'; path: string; entries: BrowserFileEntry[]; truncated: boolean; read_only: true }
+  | { type: 'text'; path: string; text: string; bytes: number; read_only: true }
+
+export interface SessionGitInfo {
+  available: boolean
+  root: string
+  reason?: string
+  status?: string[]
+  worktrees: Array<{ path: string; head: string; branch: string; locked: boolean; prunable: boolean }>
+  read_only?: true
+}
+
+export async function getSessionGit(sessionId: string, signal?: AbortSignal): Promise<SessionGitInfo> {
+  const result = await request<SessionGitInfo>(`/api/sessions/${encodeURIComponent(sessionId)}/git`, { signal })
+  if (typeof result.available !== 'boolean' || !Array.isArray(result.worktrees) || result.worktrees.length > 256) {
+    throw new Error('Invalid Git inventory from daemon')
+  }
+  return result
+}
+
+export async function getSessionGitDiff(sessionId: string, path: string, signal?: AbortSignal): Promise<string> {
+  if (!path || path.length > 1024 || path.startsWith('/') || path.includes('..') || path.includes('\\')) {
+    throw new Error('Invalid Git diff file path')
+  }
+  const result = await request<{ diff: unknown; available: boolean }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/git/diff?path=${encodeURIComponent(path)}`,
+    { signal },
+  )
+  if (!result.available) throw new Error('Git diff is unavailable for this session')
+  if (typeof result.diff !== 'string' || result.diff.length > 256 * 1024) {
+    throw new Error('Invalid or oversized Git diff')
+  }
+  return result.diff
+}
+
+export async function browseSessionFiles(sessionId: string, path = '.', signal?: AbortSignal): Promise<BrowserFileResult> {
+  const result = await request<BrowserFileResult>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/files?path=${encodeURIComponent(path)}`, { signal },
+  )
+  if (result.type === 'text' && typeof result.text === 'string' && result.text.length <= 128 * 1024) return result
+  if (result.type === 'directory' && Array.isArray(result.entries) && result.entries.length <= 200
+    && result.entries.every((entry) => typeof entry.name === 'string' && typeof entry.path === 'string'
+      && typeof entry.is_dir === 'boolean' && typeof entry.bytes === 'number')) return result
+  throw new Error('Invalid or oversized file listing from daemon')
+}
+
+export async function searchSessionFiles(sessionId: string, query: string, signal?: AbortSignal): Promise<string[]> {
+  if (!query || query.length > 128 || query.includes('..')) return []
+  const payload = await request<{ results: unknown }>(
+    `/api/sessions/${encodeURIComponent(sessionId)}/files/lookup?q=${encodeURIComponent(query)}`,
+    { signal },
+  )
+  if (!Array.isArray(payload.results) || payload.results.length > 50
+    || !payload.results.every((entry) => typeof entry === 'string' && entry.length <= 1024)) {
+    throw new Error('Invalid file mention inventory')
+  }
+  return payload.results as string[]
+}
+
+export interface NativePermissionRule {
+  tool: string
+  decision: 'allow' | 'deny' | 'ask'
+  scope: 'session' | 'always'
+  session_id: string | null
+  resource?: string | null
+  context?: string | null
+}
+
+export async function listPermissionRules(sessionId?: string, signal?: AbortSignal): Promise<NativePermissionRule[]> {
+  const query = sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ''
+  const response = await request<{ rules: NativePermissionRule[] }>(`/api/permission-rules${query}`, { signal })
+  if (!Array.isArray(response.rules) || response.rules.length > 256) throw new Error('Invalid permission rules response')
+  return response.rules
+}
+
+export async function savePermissionRule(rule: Pick<NativePermissionRule, 'tool' | 'decision' | 'scope' | 'session_id'>): Promise<void> {
+  if (!/^(bash|shell|read|write|edit|glob|grep|webfetch|websearch|task|todowrite|mcp_[A-Za-z0-9_]{1,60})$/.test(rule.tool)
+    || !['allow', 'deny', 'ask'].includes(rule.decision)
+    || !['session', 'always'].includes(rule.scope)
+    || (rule.scope === 'session' && !rule.session_id)) {
+    throw new Error('Invalid permission rule')
+  }
+  await request<void>('/api/permission-rules', { method: 'POST', body: JSON.stringify(rule) })
+}
+
+export interface NativeProvider {
+  id: string
+  name: string
+  base_url: string
+  buffered_model_ids: string[]
+}
+
+export async function listCustomProviders(signal?: AbortSignal): Promise<NativeProvider[]> {
+  const response = await request<{ providers: NativeProvider[] }>('/api/providers', { signal })
+  if (!Array.isArray(response.providers) || response.providers.length > 256) throw new Error('Invalid provider inventory')
+  return response.providers.filter((p) => typeof p?.id === 'string' && typeof p?.name === 'string')
+}
+
+export async function saveCustomProvider(provider: {
+  id: string; name: string; base_url: string; api_key?: string
+}): Promise<void> {
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]{1,62}$/.test(provider.id)) throw new Error('Invalid provider identifier')
+  const parsed = new URL(provider.base_url)
+  if (!['http:', 'https:'].includes(parsed.protocol) || !provider.name.trim()) {
+    throw new Error('Invalid provider name or URL')
+  }
+  await request<unknown>(`/api/providers/${encodeURIComponent(provider.id)}`, {
+    method: 'POST', body: JSON.stringify({ ...provider }),
+  })
+}
+
+export interface NativeMcpStatus {
+  status: string
+  enabled?: boolean
+  error?: string
+  tools?: Array<{ name: string; description?: string }>
+}
+
+export async function listMcpStatuses(signal?: AbortSignal): Promise<Record<string, NativeMcpStatus>> {
+  const data = await request<Record<string, NativeMcpStatus>>('/api/mcp', { signal })
+  if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).length > 256) {
+    throw new Error('Invalid MCP status map')
+  }
+  return data
+}
+
+export async function addDisabledMcp(name: string, command: string[]): Promise<void> {
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]{1,63}$/.test(name) || command.length < 1 || command.length > 32
+    || command.some((part) => typeof part !== 'string' || !part || part.length > 4096)) {
+    throw new Error('Invalid MCP server name or command')
+  }
+  await request<unknown>('/api/mcp', {
+    method: 'POST',
+    body: JSON.stringify({ name, config: { type: 'local', command, enabled: false } }),
+  })
+}
+
+export async function setMcpConnection(name: string, connect: boolean): Promise<void> {
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]{1,63}$/.test(name)) throw new Error('Invalid MCP server name')
+  await request<unknown>(`/api/mcp/${encodeURIComponent(name)}/${connect ? 'connect' : 'disconnect'}`, {
+    method: 'POST', body: '{}',
+  })
+}
+
+export interface NativeTodo {
+  id: string
+  content: string
+  status: 'pending' | 'in_progress' | 'completed' | 'cancelled'
+  priority: 'high' | 'medium' | 'low'
+}
+
+export async function listSessionTodos(sessionId: string, signal?: AbortSignal): Promise<NativeTodo[]> {
+  const result = await request<{ todos: NativeTodo[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/todo`, { signal })
+  if (!Array.isArray(result.todos) || result.todos.length > 100) throw new Error('Invalid todo collection')
+  return result.todos
+}
+
+export async function saveSessionTodos(sessionId: string, todos: NativeTodo[]): Promise<NativeTodo[]> {
+  if (todos.length > 100 || todos.some((todo) => !todo.content.trim() || todo.content.length > 4096)) {
+    throw new Error('Todo collection exceeds native limits')
+  }
+  const result = await request<{ todos: NativeTodo[] }>(`/api/sessions/${encodeURIComponent(sessionId)}/todo`, {
+    method: 'PUT', body: JSON.stringify({ todos }),
+  })
+  if (!Array.isArray(result.todos)) throw new Error('Invalid saved todo response')
+  return result.todos
+}
+
+export async function runNativeShellStream(
+  sessionId: string,
+  command: string,
+  handlers: TurnStreamHandlers = {},
+  signal?: AbortSignal,
+): Promise<TurnResult> {
+  if (!command.trim() || command.length > 32768 || command.includes('\0')) {
+    throw new Error('Invalid shell command')
+  }
+  return runTurnStream(sessionId, `!${command}`, '', '', handlers, signal, undefined, undefined, command)
 }
 
 export async function listModels() {

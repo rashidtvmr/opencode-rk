@@ -904,18 +904,55 @@ impl Storage {
         id: SessionId,
         limit: usize,
     ) -> Result<Vec<ToolHistoryItem>, StorageError> {
+        self.display_tool_history_selected(id, None, limit, true)
+    }
+
+    /// Read exactly the tool display rows in one page of conversation messages.
+    /// Uses the same before-cursor semantics as list_message_history_page,
+    /// rather than always hydrating only the oldest N tool rows.
+    pub fn display_tool_history_page(
+        &self,
+        id: SessionId,
+        before: Option<MessageId>,
+        limit: usize,
+    ) -> Result<Vec<ToolHistoryItem>, StorageError> {
+        self.display_tool_history_selected(id, before, limit, false)
+    }
+
+    fn display_tool_history_selected(
+        &self,
+        id: SessionId,
+        before: Option<MessageId>,
+        limit: usize,
+        oldest_first: bool,
+    ) -> Result<Vec<ToolHistoryItem>, StorageError> {
         let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
         let connection = connection.unchecked_transaction()?;
         session_context::validate_typed_ownership(&connection, id)?;
-        let mut query = connection.prepare(
+        let query_text = if oldest_first {
             "SELECT r.round_id,r.pair_index,r.kind,r.call_id,r.name,r.payload,r.message_id,r.byte_len
             FROM typed_tool_records r JOIN tool_rounds t ON t.round_id=r.round_id
             WHERE t.session_id=?1 AND r.message_id IN
             (SELECT id FROM messages WHERE session_id=?1 ORDER BY rowid ASC LIMIT ?2)
-            ORDER BY r.rowid ASC LIMIT 1000",
-        )?;
+            ORDER BY r.rowid ASC LIMIT 1000"
+        } else {
+            "SELECT r.round_id,r.pair_index,r.kind,r.call_id,r.name,r.payload,r.message_id,r.byte_len
+            FROM typed_tool_records r JOIN tool_rounds t ON t.round_id=r.round_id
+            WHERE t.session_id=?1 AND r.message_id IN
+            (SELECT id FROM messages WHERE session_id=?1
+                AND (?3 IS NULL OR rowid < (SELECT rowid FROM messages WHERE session_id=?1 AND id=?3))
+                ORDER BY rowid DESC LIMIT ?2)
+            ORDER BY r.rowid ASC LIMIT 1000"
+        };
+        let mut query = connection.prepare(query_text)?;
+        let params: Vec<rusqlite::types::Value> = if oldest_first {
+            vec![id.to_string().into(), (limit.clamp(1, 1000) as i64).into()]
+        } else {
+            vec![id.to_string().into(), (limit.clamp(1, 1000) as i64).into(),
+                before.map(|value| value.to_string()).into()]
+        };
         let records = query.query_map(
-            params![id.to_string(), limit.clamp(1, 1000) as i64],
+            rusqlite::params_from_iter(params),
             |row| {
                 Ok((
                     row.get::<_, String>(0)?,

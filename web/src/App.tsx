@@ -1,4 +1,6 @@
 import {
+  lazy,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
@@ -13,6 +15,7 @@ import {
   Copy,
   Ellipsis,
   FileText,
+  FolderGit2,
   GitFork,
   Menu,
   MessageSquarePlus,
@@ -26,10 +29,9 @@ import {
 } from 'lucide-react'
 
 import { Composer, type ReasoningEffort } from '@/components/composer'
-import { SettingsPanel } from '@/components/settings-panel'
-import { SubagentPanel } from '@/components/subagent-panel'
-import { PersistedToolMessage, ToolTimeline, type ToolExecutionItem } from '@/components/tool-timeline'
+import { PersistedToolMessage, ToolTimeline, deriveStoredToolTimeline, type ToolExecutionItem } from '@/components/tool-timeline'
 import { MessageMarkdown } from '@/components/message-markdown'
+import type { HubPage } from '@/components/workspace-hub'
 import { useWebPreferences } from '@/lib/web-preferences'
 import { Button } from '@/components/ui/button'
 import {
@@ -91,6 +93,17 @@ import {
 
 type LoadState = 'loading' | 'ready' | 'error'
 type MessageLoadState = 'idle' | LoadState
+
+// Developer workspace pages are loaded on demand, keeping chat startup lean.
+const WorkspaceHub = lazy(async () => ({
+  default: (await import('@/components/workspace-hub')).WorkspaceHub,
+}))
+const SettingsPanel = lazy(async () => ({
+  default: (await import('@/components/settings-panel')).SettingsPanel,
+}))
+const SubagentPanel = lazy(async () => ({
+  default: (await import('@/components/subagent-panel')).SubagentPanel,
+}))
 
 function workspaceStatusLabel(status: number) {
   return ['Provisioning', 'Ready', 'Deleting', 'Unavailable'][status] ?? `Status ${status}`
@@ -203,6 +216,7 @@ function App() {
   const [commandInventory, setCommandInventory] = useState<CommandInventory>({ commands: [], agents: [] })
   const [showSettings, setShowSettings] = useState(false)
   const [showSubagents, setShowSubagents] = useState(false)
+  const [hubPage, setHubPage] = useState<HubPage | null>(null)
   const [liveToolExecutions, setLiveToolExecutions] = useState<ToolExecutionItem[]>([])
   const [workspaceState, setWorkspaceState] = useState<WorkspaceCatalogState>({
     available: false,
@@ -228,6 +242,7 @@ function App() {
   const [newTitle, setNewTitle] = useState('')
   const [notice, setNotice] = useState('')
   const [messages, setMessages] = useState<MessageRecord[]>([])
+  const storedTools = useMemo(() => deriveStoredToolTimeline(messages), [messages])
   const [messageLoadState, setMessageLoadState] = useState<MessageLoadState>('idle')
   const [messageError, setMessageError] = useState('')
   const [historyBefore, setHistoryBefore] = useState<string | null>(null)
@@ -674,7 +689,7 @@ function App() {
                   name: toolOutput.name,
                   arguments: existing?.arguments ?? '',
                   output: toolOutput.output,
-                  state: 'completed',
+                  state: toolOutput.success === false ? 'failed' : 'completed',
                 },
               ]
             })
@@ -799,12 +814,8 @@ function App() {
       })
     }
     const parsedAgent = /^@([\w-]+)(?:\s+[\s\S]+)$/.exec(text.trim())
-    if (parsedAgent) {
+    if (parsedAgent && commandInventory.agents.some((candidate) => candidate.name === parsedAgent[1])) {
       const agent = parsedAgent[1]
-      if (!commandInventory.agents.some((candidate) => candidate.name === agent)) {
-        setNotice(`Unknown @agent ${agent}. Select one of the daemon's advertised agents.`)
-        return false
-      }
       return executeTurnInSession(selectedSessionId, text, reasoningEffort, undefined, undefined, undefined, agent)
     }
     return executeTurnInSession(selectedSessionId, text, reasoningEffort)
@@ -1147,15 +1158,19 @@ function App() {
           <Button
             variant="ghost"
             className="codex-new-chat"
-            onPress={() => setCreating(true)}
+            onPress={() => { setHubPage(null); setCreating(true) }}
           >
             <MessageSquarePlus aria-hidden="true" />
             New chat
           </Button>
-          <a href="#models" className="codex-nav-link">
+          <button type="button" onClick={() => setHubPage('projects')} className="codex-nav-link">
+            <FolderGit2 aria-hidden="true" />
+            Workspace
+          </button>
+          <button type="button" onClick={() => setHubPage('models')} className="codex-nav-link">
             <Sparkles aria-hidden="true" />
             Models
-          </a>
+          </button>
           <button type="button" onClick={() => setShowSettings(true)} className="codex-nav-link">
             <Settings aria-hidden="true" />
             Settings
@@ -1385,7 +1400,7 @@ function App() {
                 <Menu aria-hidden="true" />
               </Button>
             ) : null}
-            <span className="codex-header-title">{selectedSession?.title ?? 'New chat'}</span>
+            <span className="codex-header-title">{hubPage ? 'Workspace tools' : selectedSession?.title ?? 'New chat'}</span>
           </div>
 
           <div className="codex-header-actions">
@@ -1428,7 +1443,23 @@ function App() {
           </div>
         </header>
 
-        <section className="codex-conversation" aria-labelledby="conversation-title">
+        {hubPage ? (
+          <Suspense fallback={<div className="codex-hub-loading" role="status">Loading workspace tools…</div>}>
+            <WorkspaceHub
+              page={hubPage}
+              onPageChange={setHubPage}
+              onClose={() => setHubPage(null)}
+              sessionId={selectedSessionId}
+              workspaces={workspaceState}
+              models={models}
+              inventory={commandInventory}
+              onChooseModel={setSelectedModel}
+              onOpenSubagents={() => { setHubPage(null); setShowSubagents(true) }}
+            />
+          </Suspense>
+        ) : null}
+
+        <section className="codex-conversation" aria-labelledby="conversation-title" inert={hubPage !== null}>
           <div className="codex-conversation-inner">
             {selectedSession ? (
               <>
@@ -1558,6 +1589,14 @@ function App() {
                             </form>
                           ) : (
                             <>
+                              {message.parts?.some((part) => part.type === 'tool_call') ? (
+                                <ToolTimeline tools={message.parts
+                                  .filter((part) => part.type === 'tool_call')
+                                  .flatMap((part) => {
+                                    const item = storedTools.get(part.call_id)
+                                    return item ? [item] : []
+                                  })} />
+                              ) : null}
                               {message.role === 'assistant' && assistantActivity[message.id] ? (
                                 <details className="codex-assistant-activity">
                                   <summary>Reasoning summary</summary>
@@ -1746,7 +1785,7 @@ function App() {
           </aside>
         ) : null}
 
-        <footer className="codex-composer-dock" id="models">
+        <footer className="codex-composer-dock" id="models" inert={hubPage !== null}>
           <div className="codex-composer-wrap">
             {pendingPermission && pendingPermission.sessionID === selectedSessionId ? (
               <section className="codex-permission-dock" aria-label="Permission request">
@@ -1789,31 +1828,35 @@ function App() {
           </div>
         </footer>
         {showSubagents && selectedSessionId ? (
-          <SubagentPanel
-            sessionId={selectedSessionId}
-            onClose={() => setShowSubagents(false)}
-            onOpenSession={(child: SubagentSnapshot) => {
-              if (activeTurnRef.current?.sessionId === selectedSessionId) {
-                setNotice('Stop the running parent turn before opening a child transcript.')
-                return
-              }
-              setSessions((current) => current.some((session) => session.id === child.session_id)
-                ? current : [...current, { id: child.session_id, title: child.description || child.agent, state: 'active' }])
-              setSelectedSessionId(child.session_id)
-              setShowSubagents(false)
-            }}
-          />
+          <Suspense fallback={<div role="status" className="codex-subagents-panel">Loading subagent tree…</div>}>
+            <SubagentPanel
+              sessionId={selectedSessionId}
+              onClose={() => setShowSubagents(false)}
+              onOpenSession={(child: SubagentSnapshot) => {
+                if (activeTurnRef.current?.sessionId === selectedSessionId) {
+                  setNotice('Stop the running parent turn before opening a child transcript.')
+                  return
+                }
+                setSessions((current) => current.some((session) => session.id === child.session_id)
+                  ? current : [...current, { id: child.session_id, title: child.description || child.agent, state: 'active' }])
+                setSelectedSessionId(child.session_id)
+                setShowSubagents(false)
+              }}
+            />
+          </Suspense>
         ) : null}
       </main>
       {showSettings ? (
-        <SettingsPanel
-          onClose={() => setShowSettings(false)}
-          preferences={preferences}
-          setPreferences={setPreferences}
-          models={models}
-          capabilities={capabilities}
-          health={health}
-        />
+        <Suspense fallback={<div className="codex-settings-overlay" role="status">Loading settings…</div>}>
+          <SettingsPanel
+            onClose={() => setShowSettings(false)}
+            preferences={preferences}
+            setPreferences={setPreferences}
+            models={models}
+            capabilities={capabilities}
+            health={health}
+          />
+        </Suspense>
       ) : null}
     </div>
   )

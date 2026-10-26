@@ -70,7 +70,7 @@ use std::{
 use thiserror::Error;
 pub type SessionRecord = SessionSummary;
 pub use opencode_rk_contracts::MessageRole as Role;
-pub use opencode_rk_storage::{HistoryItem, ToolCallAdmission, ToolRound};
+pub use opencode_rk_storage::{HistoryItem, ToolCallAdmission, ToolHistoryItem, ToolRound};
 pub use opencode_rk_storage::session_compaction::CompactionCheckpoint;
 pub use opencode_rk_storage::session_context::{ContextSelection, ContextToolPreview};
 pub use opencode_rk_storage::session_compaction_settings::{CompactionStrategy, SessionCompactionSettings};
@@ -496,6 +496,15 @@ impl SessionService {
     ) -> Result<Vec<opencode_rk_storage::ToolHistoryItem>, SessionError> {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.display_tool_history(id, limit)).await
+    }
+    pub async fn display_tool_history_page(
+        &self,
+        id: SessionId,
+        before: Option<MessageId>,
+        limit: usize,
+    ) -> Result<Vec<opencode_rk_storage::ToolHistoryItem>, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.display_tool_history_page(id, before, limit)).await
     }
     pub async fn get(&self, id: SessionId) -> Result<SessionSummary, SessionError> {
         if let Some(manager) = self.fork_manager_for(id).await? {

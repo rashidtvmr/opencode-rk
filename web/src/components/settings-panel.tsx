@@ -23,16 +23,34 @@ export function SettingsPanel({ onClose, preferences, setPreferences, models, ca
 }) {
   const [tab, setTab] = useState<Tab>('appearance')
   const closeButton = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
   useEffect(() => {
+    const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
     closeButton.current?.focus()
-    const onEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose() }
-    document.addEventListener('keydown', onEscape)
-    return () => document.removeEventListener('keydown', onEscape)
+    const onKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); onClose(); return }
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const controls = [...dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]',
+      )].filter((element) => element.getClientRects().length > 0 || element === closeButton.current)
+      if (!controls.length) return
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      const active = document.activeElement
+      if (event.shiftKey && active === first) { event.preventDefault(); last.focus() }
+      else if (!event.shiftKey && active === last) { event.preventDefault(); first.focus() }
+      else if (!dialogRef.current.contains(active)) { event.preventDefault(); first.focus() }
+    }
+    document.addEventListener('keydown', onKeydown)
+    return () => {
+      document.removeEventListener('keydown', onKeydown)
+      previousFocus?.focus()
+    }
   }, [onClose])
 
   return (
     <div className="codex-settings-overlay" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose() }}>
-      <section role="dialog" aria-modal="true" aria-label="Settings" className="codex-settings-dialog">
+      <section ref={dialogRef} role="dialog" aria-modal="true" aria-label="Settings" className="codex-settings-dialog">
         <div className="codex-panel-title">
           <div><h2>Settings</h2><p>Personalize OpenCode RK on this device</p></div>
           <button ref={closeButton} className="codex-panel-icon" aria-label="Close settings" onClick={onClose}><X size={18} /></button>
