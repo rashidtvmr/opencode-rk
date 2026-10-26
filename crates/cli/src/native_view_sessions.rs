@@ -94,6 +94,13 @@ impl SessionView {
     /// Pending intent is cleared when its target vanished. Unsent drafts for
     /// surviving ids are retained untouched.
     pub fn set_rows(&mut self, rows: Vec<SessionRow>, active: Option<String>) {
+        // Capture the selected identity before replacing the backing rows so
+        // refresh/reorder cannot silently move the cursor to another session.
+        let selected_id = self
+            .filter_window()
+            .get(self.selected)
+            .and_then(|&index| self.rows.get(index))
+            .map(|row| row.id.clone());
         let mut rows: Vec<SessionRow> = rows
             .into_iter()
             .take(MAX_ROWS)
@@ -107,12 +114,9 @@ impl SessionView {
         rows.dedup_by(|a, b| a.id == b.id);
         self.rows = rows;
 
-        // Selection lives in filtered-window space: keep by id, else clamp.
-        let prev_id = self
-            .filtered_ids()
-            .get(self.selected)
-            .cloned()
-            .or_else(|| self.rows.first().map(|r| r.id.clone()));
+        // Selection lives in filtered-window space: keep by id across reorder,
+        // else fall back to the first surviving row.
+        let prev_id = selected_id.or_else(|| self.rows.first().map(|r| r.id.clone()));
         let window = self.filtered_ids();
         self.selected = prev_id
             .and_then(|id| window.iter().position(|w| *w == id))
@@ -142,7 +146,7 @@ impl SessionView {
         if window.is_empty() {
             return None;
         }
-        self.selected = (self.selected + 1).min(window.len() - 1);
+        self.selected = (self.selected + 1) % window.len();
         let id = self.rows[window[self.selected]].id.clone();
         self.pending = Some(id.clone());
         Some(id)
@@ -155,7 +159,11 @@ impl SessionView {
         if window.is_empty() {
             return None;
         }
-        self.selected = self.selected.saturating_sub(1);
+        self.selected = if self.selected == 0 {
+            window.len() - 1
+        } else {
+            self.selected - 1
+        };
         let id = self.rows[window[self.selected]].id.clone();
         self.pending = Some(id.clone());
         Some(id)
@@ -827,6 +835,17 @@ mod tests {
         // refresh that loses the active id: active follows backend (None)
         v.set_rows(vec![], None);
         assert_eq!(v.active_id(), None);
+        v.set_rows(
+            vec![
+                SessionRow { id: VALID_ID.to_string(), title: "alpha".into() },
+                SessionRow { id: OTHER_ID.to_string(), title: "beta".into() },
+            ],
+            None,
+        );
+        v.set_query(Some("missing"));
+        assert_eq!(v.select_next(), None);
+        assert_eq!(v.select_prev(), None);
+        assert_eq!(v.selected_id(), None);
     }
 
     #[test]
@@ -844,17 +863,35 @@ mod tests {
         v.set_rows(
             vec![
                 SessionRow {
-                    id: VALID_ID.to_string(),
-                    title: "a".into(),
-                },
-                SessionRow {
                     id: OTHER_ID.to_string(),
                     title: "b".into(),
+                },
+                SessionRow {
+                    id: VALID_ID.to_string(),
+                    title: "a".into(),
                 },
             ],
             None,
         );
         assert_eq!(v.selected_id(), Some(VALID_ID));
+    }
+
+    #[test]
+    fn navigation_wraps_at_first_and_last_filtered_rows() {
+        let mut v = view();
+        assert_eq!(v.select_prev().as_deref(), Some(OTHER_ID));
+        assert_eq!(v.selected_id(), Some(OTHER_ID));
+        assert_eq!(v.select_next().as_deref(), Some(VALID_ID));
+        assert_eq!(v.selected_id(), Some(VALID_ID));
+    }
+
+    #[test]
+    fn navigation_wraps_within_search_results() {
+        let mut v = view();
+        assert_eq!(v.search("beta"), Some(OTHER_ID.to_string()));
+        assert_eq!(v.select_next().as_deref(), Some(OTHER_ID));
+        assert_eq!(v.select_prev().as_deref(), Some(OTHER_ID));
+        assert_eq!(v.selected_id(), Some(OTHER_ID));
     }
 
     #[test]
