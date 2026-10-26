@@ -154,8 +154,8 @@ pub fn parse_backend_descriptor(bytes: &[u8]) -> Result<BackendDescriptor, Descr
 
 /// Validate a parsed descriptor. Mirrors `daemon.rs:142-147`: schema check,
 /// PID liveness, loopback-origin check. Returns the loopback port on success.
-/// `is_alive` is caller-supplied (production: `/proc/<pid>` exists check,
-/// same as `daemon::pid_alive`); tests inject fakes.
+/// `is_alive` is caller-supplied (production: rustix `kill(pid,0)` via
+/// `pid_alive` in this module); tests inject fakes.
 pub fn validate_descriptor(
     descriptor: &BackendDescriptor,
     is_alive: impl Fn(u32) -> bool,
@@ -193,13 +193,35 @@ pub fn parse_loopback_port(origin: &str) -> Option<u16> {
     Some(port as u16)
 }
 
-/// Production PID-liveness check, same rule as `daemon::pid_alive`
-/// (`daemon.rs:43-48`): PID 0 is never alive; otherwise `/proc/<pid>` exists.
+/// Production PID-liveness check using the native `kill(pid, 0)` probe via
+/// rustix (`daemon.rs:43-48`), avoiding any `/proc` dependency so this works on
+/// macOS/iOS/BSD where `/proc` does not exist. PID 0 or any value above
+/// `i32::MAX` is rejected before any probe; `ESRCH` => dead; `EPERM` => alive
+/// (foreign owner, never mistaken for stale); unexpected error => alive
+/// (conservative: an unprobeable PID is never replaced). `Pid::from_raw` is the
+/// checked safe constructor and returns `None` for out-of-range values.
 pub fn pid_alive(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
+    let raw = match i32::try_from(pid) {
+        Ok(raw) if raw > 0 => raw,
+        _ => return false,
+    };
+    #[cfg(unix)]
+    {
+        let Some(pid) = rustix::process::Pid::from_raw(raw) else {
+            return false;
+        };
+        match rustix::process::test_kill_process(pid) {
+            Ok(()) => true,
+            Err(rustix::io::Errno::SRCH) => false,
+            Err(rustix::io::Errno::PERM) => true,
+            Err(_) => true,
+        }
     }
-    std::path::Path::new(&format!("/proc/{pid}")).exists()
+    #[cfg(not(unix))]
+    {
+        let _ = raw;
+        true
+    }
 }
 
 /// Client/server schema version pair for health/version negotiation.
@@ -749,7 +771,7 @@ pub fn discover_presence(data_dir: &std::path::Path) -> crate::app_start::Daemon
             }
         })
         .unwrap_or(0);
-    let live = |pid: u32| std::path::Path::new(&format!("/proc/{pid}")).exists();
+    let live = |pid: u32| pid_alive(pid);
     match discover_from_path(&paths.descriptor, uid, live).ok() {
         Some(_) => crate::app_start::DaemonPresence::Reusable,
         None => match std::fs::symlink_metadata(&paths.descriptor) {
@@ -855,6 +877,59 @@ pub fn resolve_credential(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // APP-002 RED: PID liveness must detect the current live process.
+    #[test]
+    fn app002_pid_alive_current_process_is_alive() {
+        let me = std::process::id();
+        assert!(
+            pid_alive(me),
+            "current process pid {me} must be alive; /proc probe broken on this platform"
+        );
+    }
+
+    #[test]
+    fn app002_pid_alive_zero_is_dead() {
+        assert!(!pid_alive(0), "pid 0 must never be reported alive");
+    }
+
+    // Out-of-i32 range must be rejected conservatively (cannot signal beyond i32).
+    #[test]
+    fn app002_pid_alive_out_of_i32_range_is_dead() {
+        assert!(!pid_alive(i32::MAX as u32 + 1), "pid above i32::MAX must be treated as not alive");
+    }
+
+    // Reusable-descriptor regression: a descriptor whose PID is the current live
+    // process must classify DaemonPresence::Reusable through discover_presence,
+    // exercising the production liveness closure (no injected fake).
+    #[test]
+    fn app002_discover_presence_reusable_with_live_pid() {
+        let me = std::process::id();
+        let dir = std::env::temp_dir().join(format!(
+            "daemon_client_red_{}_{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let desc = opencode_rk_server::daemon::DaemonPaths::for_data_dir(&dir).descriptor;
+        std::fs::create_dir_all(desc.parent().unwrap()).unwrap();
+        let json = format!(
+            r#"{{"pid":{me},"http_origin":"http://127.0.0.1:4096","schema_version":{EXPECTED_SCHEMA_VERSION},"auth_token":"{token}"}}"#,
+            token = hex_token(1)
+        );
+        std::fs::write(&desc, json).unwrap();
+        let presence = discover_presence(&dir);
+        assert_eq!(
+            presence,
+            crate::app_start::DaemonPresence::Reusable,
+            "live current-process descriptor must be Reusable; liveness closure is broken"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     fn valid_json(pid: u32) -> Vec<u8> {
         format!(
