@@ -64,6 +64,7 @@ pub struct TextSelection {
     anchor: Option<Pos>,
     focus: Option<Pos>,
     dragging: bool,
+    dragged: bool,
     input_rows: Vec<String>,
 }
 
@@ -71,21 +72,24 @@ impl TextSelection {
     /// Apply platform-sensitive mouse copy policy and return clipboard text.
     pub fn copy_for_input_kind(&mut self, kind: u8, disable_copy_on_select: bool) -> Option<String> {
         let event = MouseCopyEvent::from_input_kind(kind);
-        if event == MouseCopyEvent::LeftRelease {
-            self.release();
-        }
         let should_copy = match event {
-            MouseCopyEvent::LeftRelease => !disable_copy_on_select,
+            MouseCopyEvent::LeftRelease => {
+                let dragged = std::mem::replace(&mut self.dragged, false);
+                self.release();
+                !disable_copy_on_select && dragged
+            }
             MouseCopyEvent::RightPress => disable_copy_on_select,
-            MouseCopyEvent::RightRelease => !disable_copy_on_select,
-            MouseCopyEvent::Other => false,
+            MouseCopyEvent::RightRelease | MouseCopyEvent::Other => false,
         };
         if !should_copy {
             return None;
         }
-        let text = self.selected_text()?;
-        self.clear();
-        Some(text)
+        // A single-cell start is not a meaningful upstream cell selection.
+        if self.anchor == self.focus {
+            return None;
+        }
+        // Upstream clipboard copy retains the selection highlight and click history.
+        self.selected_text()
     }
 
     /// Replace the rendered view and discard any selection tied to the old view.
@@ -141,6 +145,7 @@ impl TextSelection {
         self.anchor = Some(pos);
         self.focus = Some(pos);
         self.dragging = true;
+        self.dragged = false;
         true
     }
 
@@ -151,6 +156,7 @@ impl TextSelection {
             return;
         }
         if let Some(pos) = self.nearest(x, y, self.anchor.unwrap()) {
+            self.dragged = true;
             self.focus = Some(pos);
         }
     }
@@ -234,6 +240,7 @@ impl TextSelection {
         self.anchor = None;
         self.focus = None;
         self.dragging = false;
+        self.dragged = false;
     }
 
     fn bounds(&self) -> Option<(Pos, Pos)> {
@@ -393,13 +400,13 @@ mod tests {
     }
 
     #[test]
-    fn default_left_release_copies_bounded_utf8_selection_and_clears_it() {
+    fn default_left_release_copies_bounded_utf8_selection_and_retains_it() {
         let mut selection = selected();
         assert_eq!(
             selection.copy_for_input_kind(2, false).as_deref(),
             Some("界e\u{301}")
         );
-        assert_eq!(selection.selected_text(), None);
+        assert_eq!(selection.selected_text().as_deref(), Some("界e\u{301}"));
     }
 
     #[test]
@@ -409,7 +416,7 @@ mod tests {
             selection.copy_for_input_kind(5, true).as_deref(),
             Some("界e\u{301}")
         );
-        assert_eq!(selection.selected_text(), None);
+        assert_eq!(selection.selected_text().as_deref(), Some("界e\u{301}"));
 
         let mut selection = selected();
         assert_eq!(selection.copy_for_input_kind(2, true), None);
@@ -421,27 +428,35 @@ mod tests {
     }
 
     #[test]
-    fn right_release_inert_when_copy_on_select_disabled() {
-        let mut selection = selected();
-        assert_eq!(selection.copy_for_input_kind(6, true), None);
-        assert_eq!(selection.selected_text().as_deref(), Some("界e\u{301}"));
+    fn right_release_never_copies_or_clears_selection() {
+        for disabled in [false, true] {
+            let mut selection = selected();
+            assert_eq!(selection.copy_for_input_kind(6, disabled), None);
+            assert_eq!(selection.selected_text().as_deref(), Some("界e\u{301}"));
+        }
     }
 
     #[test]
-    fn right_release_copies_when_copy_on_select_enabled() {
-        let mut selection = selected();
-        assert_eq!(
-            selection.copy_for_input_kind(6, false).as_deref(),
-            Some("界e\u{301}"),
-        );
-        assert_eq!(selection.selected_text(), None);
+    fn click_only_release_does_not_copy_and_keeps_single_cell_selection() {
+        let mut selection = TextSelection::default();
+        selection.set_rows(&rows(&["alpha"]), 0, 0, 8);
+        assert!(selection.press(1, 0));
+        assert_eq!(selection.copy_for_input_kind(2, false), None);
+        assert_eq!(selection.selected_text().as_deref(), Some("l"));
+        assert!(!selection.dragging);
+        assert_eq!(selection.copy_for_input_kind(5, true), None);
+    }
 
-        let mut selection = selected();
-        assert_eq!(
-            selection.copy_for_input_kind(6, false).as_deref(),
-            Some("界e\u{301}"),
-        );
-        assert_eq!(selection.copy_for_input_kind(6, false), None);
+    #[test]
+    fn drag_release_copies_unicode_multiline_and_retains_highlight() {
+        let mut selection = TextSelection::default();
+        selection.set_rows(&rows(&["a界", "e\u{301}x"]), 2, 3, 8);
+        assert!(selection.press(3, 3));
+        selection.drag(3, 4);
+        let expected = "界\ne\u{301}x";
+        assert_eq!(selection.copy_for_input_kind(2, false).as_deref(), Some(expected));
+        assert_eq!(selection.selected_text().as_deref(), Some(expected));
+        assert_eq!(selection.spans(), vec![(3, 3, 2), (4, 2, 1), (4, 3, 1)]);
     }
 
     #[test]
