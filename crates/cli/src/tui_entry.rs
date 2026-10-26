@@ -2798,14 +2798,154 @@ pub(crate) fn parse_created_session_id(response: &str) -> Result<String, String>
 }
 
 #[cfg(feature = "native")]
+#[derive(Clone, Debug)]
+struct NativeThemeChoice {
+    /// Exact persisted identity. Rows and resolution use this same value.
+    name: String,
+    /// Whether the current native resolver can load this identity.
+    available: bool,
+}
+
+#[cfg(feature = "native")]
+fn native_theme_choices(
+    config_paths: &[std::path::PathBuf],
+    current: Option<&str>,
+    mode: crate::native_theme_runtime::ThemeMode,
+) -> Result<Vec<NativeThemeChoice>, String> {
+    use std::collections::BTreeMap;
+    use std::fs;
+
+    // Enumeration is deliberately bounded independently of file-read limits.
+    const MAX_DIRECTORY_ENTRIES: usize = 256;
+    const MAX_DISCOVERED_NAMES: usize = 128;
+    crate::native_ui_budget::check_paths(config_paths)?;
+    let mut choices = BTreeMap::<String, NativeThemeChoice>::new();
+    // Keep the exact winning custom file. Config paths are traversed in
+    // precedence order, so later entries replace earlier ones just like the
+    // resolver's reverse search.
+    let mut custom_sources = BTreeMap::<String, std::path::PathBuf>::new();
+
+    for (name, _) in crate::native_theme_assets::ASSETS {
+        choices.insert((*name).to_owned(), NativeThemeChoice {
+            name: (*name).to_owned(),
+            available: false,
+        });
+    }
+    for name in ["dark", "light", "system", "nocolor", "high-contrast"] {
+        choices.entry(name.to_owned()).or_insert_with(|| NativeThemeChoice {
+            name: name.to_owned(),
+            available: false,
+        });
+    }
+
+    for config in config_paths {
+        let Some(directory) = config.parent() else { continue };
+        let themes = directory.join("themes");
+        let Ok(entries) = fs::read_dir(&themes) else { continue };
+        for (index, entry) in entries.enumerate() {
+            if index >= MAX_DIRECTORY_ENTRIES {
+                return Err("theme directory entry budget exceeded".into());
+            }
+            let entry = entry.map_err(|_| "theme directory entry could not be read")?;
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|stem| stem.to_str()) else { continue };
+            if stem.is_empty()
+                || stem.len() > crate::native_theme_runtime::MAX_KEY_BYTES
+                || stem.chars().any(|c| c.is_control() || c == '/' || c == '\\')
+            {
+                continue;
+            }
+            if !choices.contains_key(stem) && choices.len() >= MAX_DISCOVERED_NAMES {
+                return Err("discovered theme name budget exceeded".into());
+            }
+            custom_sources.insert(stem.to_owned(), path.clone());
+            choices.entry(stem.to_owned()).or_insert_with(|| NativeThemeChoice {
+                name: stem.to_owned(),
+                available: false,
+            });
+        }
+    }
+
+    // Validate each discovered identity from its already-selected winning
+    // file. This avoids charging every theme for the same missing lower-
+    // precedence probes. The explicit validation cap keeps registry work and
+    // total theme bytes responsive; exceeding it reports an incomplete
+    // registry rather than inventing per-theme unavailable results.
+    const MAX_REGISTRY_VALIDATIONS: usize = 32;
+    let mut validations = 0usize;
+    for choice in choices.values_mut() {
+        if matches!(choice.name.as_str(), "nocolor" | "high-contrast") {
+            choice.available = false;
+            continue;
+        }
+        let resolver_name = match choice.name.as_str() {
+            "dark" | "light" | "system" => "opencode",
+            name => name,
+        };
+        choice.available = if let Some(path) = custom_sources.get(resolver_name) {
+            validations = validations.saturating_add(1);
+            if validations > MAX_REGISTRY_VALIDATIONS {
+                return Err("theme registry validation budget exceeded; registry incomplete".into());
+            }
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            validate_native_theme_file(&choice.name, mode, path, &mut budget).is_ok()
+        } else {
+            crate::native_theme_assets::lookup(resolver_name).is_some()
+        };
+    }
+    if let Some(name) = current.filter(|name| !name.is_empty()) {
+        choices.entry(name.to_owned()).or_insert_with(|| NativeThemeChoice {
+            name: name.to_owned(),
+            available: false,
+        });
+    }
+    Ok(choices.into_values().collect())
+}
+
+#[cfg(feature = "native")]
+fn validate_native_theme_file(
+    name: &str,
+    mode: crate::native_theme_runtime::ThemeMode,
+    path: &std::path::Path,
+    budget: &mut crate::native_ui_budget::ReadBudget,
+) -> Result<crate::native_theme_runtime::RuntimeTheme, String> {
+    use crate::native_theme_runtime::{RuntimeTheme, ThemeMode};
+    let (runtime_name, mode) = match name {
+        "dark" => ("opencode", ThemeMode::Dark),
+        "light" => ("opencode", ThemeMode::Light),
+        "system" => ("opencode", mode),
+        _ => (name, mode),
+    };
+    let text = budget
+        .read(path, 262144, "theme asset")?
+        .ok_or_else(|| "theme asset disappeared during registry validation".to_owned())?;
+    let value = serde_json::from_str(&text).map_err(|_| "invalid theme JSON")?;
+    RuntimeTheme::from_asset(runtime_name, &value, mode)
+        .map_err(|error| format!("invalid theme: {error}"))
+}
+
+#[cfg(feature = "native")]
 fn load_native_theme(
     name: &str,
     mode: crate::native_theme_runtime::ThemeMode,
     config_paths: &[std::path::PathBuf],
 ) -> Result<crate::native_theme_runtime::RuntimeTheme, String> {
-    use crate::native_theme_runtime::{RuntimeTheme, ThemeMode};
     crate::native_ui_budget::check_paths(config_paths)?;
     let mut budget = crate::native_ui_budget::ReadBudget::default();
+    load_native_theme_with_budget(name, mode, config_paths, &mut budget)
+}
+
+#[cfg(feature = "native")]
+fn load_native_theme_with_budget(
+    name: &str,
+    mode: crate::native_theme_runtime::ThemeMode,
+    config_paths: &[std::path::PathBuf],
+    budget: &mut crate::native_ui_budget::ReadBudget,
+) -> Result<crate::native_theme_runtime::RuntimeTheme, String> {
+    use crate::native_theme_runtime::{RuntimeTheme, ThemeMode};
     let (name, mode) = match name {
         "dark" => ("opencode", ThemeMode::Dark),
         "light" => ("opencode", ThemeMode::Light),
@@ -2813,17 +2953,13 @@ fn load_native_theme(
         _ => (name, mode),
     };
     if name.is_empty()
-        || name.len() > 64
-        || name
-            .chars()
-            .any(|c| c.is_control() || c == '/' || c == '\\')
+        || name.len() > crate::native_theme_runtime::MAX_KEY_BYTES
+        || name.chars().any(|c| c.is_control() || c == '/' || c == '\\')
     {
         return Err("invalid theme name".into());
     }
     for path in config_paths.iter().rev() {
-        let Some(directory) = path.parent() else {
-            continue;
-        };
+        let Some(directory) = path.parent() else { continue };
         let candidate = directory.join("themes").join(format!("{name}.json"));
         if let Some(text) = budget.read(&candidate, 262144, "theme asset")? {
             let value = serde_json::from_str(&text).map_err(|_| "invalid theme JSON")?;
@@ -2831,8 +2967,8 @@ fn load_native_theme(
                 .map_err(|error| format!("invalid theme: {error}"));
         }
     }
-    let json =
-        crate::native_theme_assets::lookup(name).ok_or_else(|| format!("unknown theme: {name}"))?;
+    let json = crate::native_theme_assets::lookup(name)
+        .ok_or_else(|| format!("unknown theme: {name}"))?;
     let value = serde_json::from_str(json).map_err(|_| "invalid bundled theme JSON")?;
     RuntimeTheme::from_asset(name, &value, mode).map_err(|error| format!("invalid theme: {error}"))
 }
@@ -6415,31 +6551,30 @@ fn native_loop(
                                 ),
                             }
                         } else if page == crate::native_view_pages::Page::Theme {
-                            let mut rows: Vec<_> = crate::native_theme_assets::ASSETS
-                                .iter()
-                                .map(|(name, _)| crate::native_view_pages::PageRow {
-                                    id: (*name).into(),
-                                    label: (*name).into(),
-                                    detail: if *name == theme.name {
-                                        "selected".into()
-                                    } else {
-                                        String::new()
-                                    },
-                                    enabled: true,
+                            let choices = native_theme_choices(&config_paths, Some(theme.name.as_str()), theme_mode)
+                                .unwrap_or_else(|error| {
+                                    append_transcript(&mut transcript, format!("error: theme registry: {error}"));
+                                    Vec::new()
+                                });
+                            let rows: Vec<_> = choices
+                                .into_iter()
+                                .map(|choice| {
+                                    let name = choice.name;
+                                    let selected = name == theme.name;
+                                    crate::native_view_pages::PageRow {
+                                        id: name.clone(),
+                                        label: name,
+                                        detail: if selected {
+                                            "selected".into()
+                                        } else if !choice.available {
+                                            "unavailable: native resolver is not installed".into()
+                                        } else {
+                                            String::new()
+                                        },
+                                        enabled: choice.available,
+                                    }
                                 })
                                 .collect();
-                            rows.push(crate::native_view_pages::PageRow {
-                                id: "dark".into(),
-                                label: "OpenCode dark".into(),
-                                detail: String::new(),
-                                enabled: true,
-                            });
-                            rows.push(crate::native_view_pages::PageRow {
-                                id: "light".into(),
-                                label: "OpenCode light".into(),
-                                detail: String::new(),
-                                enabled: true,
-                            });
                             view.set_page_rows(rows);
                         }
                     }
@@ -8400,5 +8535,75 @@ mod compact_strategy_worker_tests {
             assert_eq!(sent, serde_json::json!({"model":"openai/fixture", "strategy":requested}));
         }
         assert!(NativeCompactWorker::start_strategy("http://192.0.2.1:1", "s", &"b".repeat(64), "openai/fixture", 1, "fallback").is_err());
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod native_theme_registry_tests {
+    use super::native_theme_choices;
+    use std::path::PathBuf;
+
+    struct Fixture(PathBuf);
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    fn fixture() -> (Fixture, PathBuf) {
+        let root = std::env::temp_dir().join(format!(
+            "opencode-theme-registry-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let themes = root.join("themes");
+        std::fs::create_dir_all(&themes).unwrap();
+        (Fixture(root.clone()), root.join("tui.json"))
+    }
+
+    #[test]
+    fn malformed_custom_shadow_is_not_advertised_as_available() {
+        let (_fixture, config) = fixture();
+        std::fs::write(config.parent().unwrap().join("themes/opencode.json"), "{").unwrap();
+        let choices = native_theme_choices(&[config], None, crate::native_theme_runtime::ThemeMode::Dark).unwrap();
+        let opencode = choices.iter().find(|choice| choice.name == "opencode").unwrap();
+        assert!(!opencode.available);
+    }
+
+    #[test]
+    fn directory_enumeration_has_a_hard_entry_bound() {
+        let (_fixture, config) = fixture();
+        let themes = config.parent().unwrap().join("themes");
+        for index in 0..257 {
+            std::fs::write(themes.join(format!("theme-{index}.json")), "{}").unwrap();
+        }
+        assert!(native_theme_choices(&[config], None, crate::native_theme_runtime::ThemeMode::Dark).is_err());
+    }
+
+    #[test]
+    fn validation_cap_reports_incomplete_instead_of_false_unavailable() {
+        let (_fixture, config) = fixture();
+        let themes = config.parent().unwrap().join("themes");
+        let asset = crate::native_theme_assets::lookup("opencode").unwrap();
+        for index in 0..33 {
+            std::fs::write(themes.join(format!("custom-{index}.json")), asset).unwrap();
+        }
+        let result = native_theme_choices(
+            &[config],
+            None,
+            crate::native_theme_runtime::ThemeMode::Dark,
+        );
+        assert!(matches!(result, Err(error) if error.contains("registry incomplete")));
+    }
+
+    #[test]
+    fn disappeared_current_custom_identity_remains_unavailable() {
+        let (_fixture, config) = fixture();
+        let choices = native_theme_choices(&[config], Some("removed-custom"), crate::native_theme_runtime::ThemeMode::Dark).unwrap();
+        let removed = choices.iter().find(|choice| choice.name == "removed-custom").unwrap();
+        assert!(!removed.available);
     }
 }
