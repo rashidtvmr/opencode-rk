@@ -190,3 +190,48 @@ excerpts; require verified sources and actual rendered frames before acting.
 5. Repair second-client failure and tab fixture identities; run exact-release
    installed journeys after final integration. Rebuild for the actual final SHA.
 6. Complete verified installation and fast-forward push only after release checks.
+
+## New role-first dispatch roster — 2026-10-26
+
+Twenty new background assignments were launched on the allowed unlimited
+`9router-vyce-deepseek-v4.1-free-combined` route after the rules were committed.
+Each prompt assigns role, goal and success criteria first, then worker practices,
+explicit read-only/private grants, source pins, resource limits and a unique
+research scratchpad path/hash requirement. These are launch receipts, not a claim
+that every assignment remains active after this snapshot; update on completion.
+No route usage telemetry was returned; consumed/remaining tokens remain UNKNOWN.
+
+| Session | Assignment |
+| --- | --- |
+| `ses_e88d69ce8ffeZCusa8cOLB0F2I` | Final context aggregate review |
+| `ses_e88d69ce2ffeQjDPvtUDUFQuh6` | Wire-to-UI token normalization evidence |
+| `ses_e88d69cd6ffeJHwwPLF1hy3irJ` | Private context installed-journey author |
+| `ses_e88d69cd4ffeXQ7i0yUzX5nXew` | Operating-instructions audit |
+| `ses_e88d69c4affelIqL0fWyzjnAYe` | Model output limit propagation |
+| `ses_e88d69c49ffelbqhgSyI6SudfU` | Credential/catalog availability contract |
+| `ses_e88d69c44ffevqSB0bay7HDBvD` | Browser OAuth parity package |
+| `ses_e88d69c3effefvtxyLUf4G1uMv` | Copilot entitlement/transport contract |
+| `ses_e88d69c3dffeP2Guqpqw6bOIE1` | Real PTY cancellation regression review |
+| `ses_e88d69c37ffejbFbCJF1HONrRe` | Persistent PTY ownership contract |
+| `ses_e88d56019ffeYYipe9Aw99jevG` | Private keyboard tab decoder candidate |
+| `ses_e88d5600fffepyWKGmG4cZKga7` | Private leader tab dispatch candidate |
+| `ses_e88d56006ffewtocB1Wmf4VBr1` | Child inspection behavior review |
+| `ses_e88d56000ffeqoLH4ZPxXG05qe` | Executable honest coverage manifest |
+| `ses_e88d55f84ffe61W2pion4IU1Qz` | Release/package provenance prep |
+| `ses_e88d55f7dffefeGDtU1f8fLfQu` | Worker artifact preservation inventory |
+| `ses_e88d55f7dffdly4XpexGhsHhLE` | Global CLI settings parity |
+| `ses_e88d55f6affe1nSMUg6fSHhOTM` | Last-tab Home direct-send safety |
+| `ses_e88d55f68ffeS42RTNZ4kig7v2` | Third compaction regression strategy review |
+| `ses_e88d55f68ffdrB0eOsXmq6vHmD` | Current device-auth edge fixture review |
+
+Heavy slot: upstream capture retry with correct locked dependencies launched as
+`sh_1772acd18001sScpqMRKhltHgg`; logs/receipt `locked.*` under the disposable
+upstream capture root above. It completed: **4 PASS / 2 FAIL**, exit 1. Home at
+120x40 and chat at all three sizes captured actual frames; Home 106/105 timed out
+because the fixture demanded one specific rotating example while the rendered
+placeholder showed another valid example. Preserve failures; repair readiness
+against the actual placeholder contract before retrying only the failing cases.
+The captured upstream footer visibly includes `ctrl+p commands`, refuting the
+earlier source-only audit that called it a fabricated Rust hint. No Rust visual
+comparison or pixel parity is established. Heavy slot is released. Corrected
+inspector tests and exact integrated-SHA CLI checks are next in that serial slot.
