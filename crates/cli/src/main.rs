@@ -57,6 +57,8 @@ mod native_memory;
 mod native_compaction_settings;
 #[cfg(feature = "native")]
 mod native_context;
+#[cfg(feature = "native")]
+mod native_context_grid;
 #[cfg(all(test, feature = "native"))]
 mod native_context_tests;
 #[cfg(all(test, feature = "native"))]

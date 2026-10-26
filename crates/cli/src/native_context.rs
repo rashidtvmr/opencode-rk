@@ -69,9 +69,29 @@ struct CheckpointMeta {
     model: String,
 }
 
+const USAGE_KEYS: [&str; 7] = ["system_prompt", "system_tools", "mcp_instructions", "memory_files", "skills", "messages", "free_space"];
+const MAX_USAGE_ENTRIES: usize = 115;
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct UsageEntry { name: String, path: Option<String>, group: Option<String>, tokens: Option<u64> }
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+struct UsageReport {
+    model: Option<String>, capacity_tokens: Option<u64>, used_tokens: Option<u64>,
+    provenance: Option<String>, coverage: Option<String>, coverage_gaps: Vec<String>,
+    estimate_provenance: Option<String>, estimated_total_tokens: Option<u64>,
+    categories: [Option<u64>; 7], mcp_tools: Option<Vec<UsageEntry>>,
+    memory_files: Option<Vec<UsageEntry>>, skills: Option<Vec<UsageEntry>>,
+    suggestions: Option<Vec<(String, String)>>,
+}
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct UsageStyleSpan { pub(crate) start_cell: usize, pub(crate) cells: usize, pub(crate) slot: crate::native_theme_runtime::Slot }
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct UsageLine { pub(crate) text: String, pub(crate) styles: Vec<UsageStyleSpan> }
+
 #[derive(Debug, Default)]
 pub(crate) struct ContextView {
     items: Vec<ContextItem>,
+    usage_report: Option<UsageReport>,
     selected_id: Option<String>,
     detail_offset: usize,
     error: Option<String>,
@@ -262,6 +282,7 @@ impl ContextView {
             _ => return Err("next_before is invalid".into()),
         };
         let projection = parse_projection(object.get("projection"))?;
+        let usage_report = parse_usage_report(object.get("usage_report"))?;
         let checkpoint = parse_checkpoint(object.get("checkpoint"))?;
         let page_budget = parse_pair(
             object.get("page_budget"),
@@ -270,6 +291,7 @@ impl ContextView {
         )?;
         let input_limits = parse_pair(object.get("input_limits"), "items", "bytes")?;
         self.items = parsed;
+        self.usage_report = usage_report;
         self.selected_id = selected;
         self.detail_offset = 0;
         self.error = None;
@@ -282,65 +304,103 @@ impl ContextView {
     }
 
     pub(crate) fn render(&self, width: usize, height: usize) -> Vec<String> {
-        if width == 0 || height == 0 {
-            return Vec::new();
-        }
-        let mut rows = Vec::new();
-        rows.push(format!(
-            "Context · {} items · projection {}",
-            self.items.len(),
-            self.projection.status
-        ));
-        if let Some(item) = self.selected() {
-            rows.push(format!(
-                "{} {} · {} · {} · {}",
-                if item.selectable { "▸" } else { "•" },
-                item.kind,
-                item.role,
-                if item.represented_by_checkpoint {
-                    "compacted"
-                } else if item.included {
-                    "included"
+        self.render_styled(width, height).into_iter().map(|line| line.text).collect()
+    }
+
+    /// Context grid carries explicit theme-slot spans, never ANSI escapes.
+    pub(crate) fn render_styled(&self, width: usize, height: usize) -> Vec<UsageLine> {
+        if width == 0 || height == 0 { return Vec::new(); }
+        if height <= 2 {
+            let mut rows = Vec::new();
+            if height == 1 {
+                rows.push(usage_line("Context Usage".into(), Vec::new()));
+            } else {
+                // Preserve the selected measurement as a complete, compact
+                // acknowledgement in the two-row viewport.  The normal
+                // dashboard remains cell-clipped by `fit_usage`; this short
+                // summary is intentionally allowed to wrap at the caller's
+                // terminal edge so neither token value nor provenance is
+                // silently dropped.
+                if let Some(item) = self.selected() {
+                    rows.push(usage_line(format!("Context Usage · {}", item.kind), Vec::new()));
+                    rows.push(usage_line(format!("{} bytes / {} tokens", shown(item.bytes), shown(item.estimated_tokens)), Vec::new()));
                 } else {
-                    "excluded"
-                },
-                item.source
-            ));
-            rows.push(format!(
-                "{} bytes / {} tokens · {}",
-                shown(item.bytes),
-                shown(item.estimated_tokens),
-                reason_label(item)
-            ));
-        } else {
-            rows.push("Context unloaded; authenticated session GET required".into());
+                    rows.push(usage_line("Context unloaded".into(), Vec::new()));
+                }
+            }
+            return rows;
         }
-        if height <= 2 && self.selected().is_some() {
-            rows.remove(0);
-        }
-        if let Some(e) = &self.error {
-            rows.push(format!("Refresh failed; showing last loaded context: {e}"));
-        }
-        let footer = "j/k select · Enter include/exclude · f/b detail · p older · r latest";
-        let reserve_footer = height >= 4;
-        let detail_height = height.saturating_sub(rows.len() + usize::from(reserve_footer));
-        let mut detail: Vec<String> = self
-            .metadata_lines()
-            .into_iter()
-            .flat_map(|line| wrap(&line, width.max(1)))
-            .collect();
+        let report = self.usage_report.as_ref();
+        let mut head = vec![usage_line("Context Usage".into(), Vec::new())];
+        head.push(usage_line(format!("Model: {} · Context capacity: {} tokens",
+            report.and_then(|r| r.model.as_deref()).unwrap_or("unreported"),
+            report.and_then(|r| r.capacity_tokens).map_or_else(|| "unreported".into(), |x| x.to_string())), Vec::new()));
+        let used = report.and_then(|r| r.used_tokens);
+        let capacity = report.and_then(|r| r.capacity_tokens);
+        head.push(usage_line(format!("Used: {} / {} tokens · {}",
+            shown(used), capacity.map_or_else(|| "unreported".into(), |x| x.to_string()), utilization(used, capacity)), Vec::new()));
         if let Some(item) = self.selected() {
-            detail.extend(item_detail(item, width.max(1)));
+            head.push(usage_line(format!("Selected: {} {} · {} bytes / {} tokens · {} · projection {}",
+                if item.selectable { "▸" } else { "•" }, item.kind,
+                shown(item.bytes), shown(item.estimated_tokens), reason_label(item), self.projection.status), Vec::new()));
+        } else {
+            head.push(usage_line(format!("Context unloaded: {} · authenticated session GET required", self.projection.status), Vec::new()));
         }
-        let start = self.detail_offset.min(detail.len());
-        rows.extend(detail.into_iter().skip(start).take(detail_height));
-        if reserve_footer {
-            rows.push(footer.into());
+        if let Some(item) = self.selected() {
+            if let Some(provenance) = &item.count_provenance {
+                head.push(usage_line(format!("Counting: {provenance}"), Vec::new()));
+            }
         }
-        rows.into_iter()
-            .take(height)
-            .map(|s| crate::native_view_layout::fit(&s, width.min(u16::MAX as usize) as u16))
-            .collect()
+        if let Some(report) = report {
+            if used.is_none() {
+                if let Some(total) = report.estimated_total_tokens {
+                    head.push(usage_line(format!("Estimated usage total: {total} tokens · backend estimate (provider usage unreported)"), Vec::new()));
+                }
+            }
+            if !report.coverage_gaps.is_empty() {
+                head.push(usage_line(format!("Coverage gaps: {}", report.coverage_gaps.join("; ")), Vec::new()));
+            }
+        }
+        let reserve = usize::from(height >= 4);
+        head = head.into_iter().flat_map(|line| wrap(&line.text, width.max(1)).into_iter().map(move |text| usage_line(text, line.styles.clone()))).collect();
+        let max_head = height.saturating_sub(1 + reserve).max(1);
+        head.truncate(max_head);
+        let grid_rows = height.saturating_sub(head.len() + reserve + 1).clamp(1, 10);
+        // Put the selected inventory detail before the long category dashboard
+        // so projection/count provenance and withheld-content explanations are
+        // visible in the first normal frame; the dashboard remains reachable
+        // by the existing bounded detail scroll.
+        let mut body = Vec::new();
+        body.push(usage_line(format!("Context inventory: {} items · projection {} (not assembled-request accounting)", self.items.len(), self.projection.status), Vec::new()));
+        if let Some(lines) = breakdown_lines(&self.items) { body.extend(lines.into_iter().map(|line| usage_line(line, Vec::new()))); }
+        if let Some(item) = self.selected() {
+            body.extend(self.metadata_lines().into_iter().flat_map(|line| wrap(&line, width)).map(|line| usage_line(line, Vec::new())));
+            body.extend(item_detail(item, width).into_iter().map(|line| usage_line(line, Vec::new())));
+        } else if self.items.is_empty() { body.push(usage_line("Context inventory unloaded; authenticated session GET required".into(), Vec::new())); }
+        body.extend(usage_dashboard(report, width, grid_rows));
+        if let Some(source) = report.and_then(|r| r.provenance.as_deref()) { body.push(usage_line(format!("Usage provenance: {source}"), Vec::new())); }
+        if let Some(source) = report.and_then(|r| r.estimate_provenance.as_deref()) { body.push(usage_line(format!("Category estimates: {source}"), Vec::new())); }
+        if let Some(coverage) = report.and_then(|r| r.coverage.as_deref()) { body.push(usage_line(format!("Coverage: {coverage}"), Vec::new())); }
+         if let Some(report) = report { if !report.coverage_gaps.is_empty() { body.push(usage_line(format!("Coverage gaps: {}", report.coverage_gaps.join("; ")), Vec::new())); } if let Some(total) = report.estimated_total_tokens { body.push(usage_line(format!("Estimated usage total: {total} tokens · backend estimate"), Vec::new())); } }
+        if let Some(error) = &self.error { body.insert(0, usage_line(format!("Refresh failed; showing last loaded context: {error}"), Vec::new())); }
+        let mut body = body;
+        let mut grid_heading = format!("Estimated usage by category · {} columns × {} rows maximum", width.min(20), grid_rows);
+        if let Some(report) = report {
+            if let Some(capacity) = report.capacity_tokens {
+                let known = report.categories.iter().flatten().fold(0u128, |sum, tokens| sum.saturating_add(u128::from(*tokens)));
+                if known > u128::from(capacity) { grid_heading.push_str(" · categories exceed capacity; proportions normalized"); }
+            }
+        }
+        if let Some(index) = body.iter().position(|line| line.text == "Estimated usage by category") {
+            body[index] = usage_line(grid_heading, Vec::new());
+        }
+        let footer = usage_line("j/k select · Enter include/exclude · f/b detail · p older · r latest".into(), Vec::new());
+        let visible = height.saturating_sub(head.len() + reserve);
+        let offset = self.detail_offset.min(body.len());
+        let mut rows = head;
+        rows.extend(body.into_iter().skip(offset).take(visible));
+        if reserve > 0 { rows.push(footer); }
+        fit_usage(rows, width)
     }
 
     fn metadata_lines(&self) -> Vec<String> {
@@ -382,6 +442,248 @@ impl ContextView {
         }
         out
     }
+}
+
+fn usage_line(text: String, styles: Vec<UsageStyleSpan>) -> UsageLine { UsageLine { text, styles } }
+fn category_slot(category: crate::native_context_grid::CategoryId) -> crate::native_theme_runtime::Slot {
+    use crate::native_context_grid::CategoryId as C;
+    use crate::native_theme_runtime::Slot as S;
+    match category {
+        C::SystemPrompt => S::Primary,
+        C::SystemTools => S::Warning,
+        C::McpInstructions => S::Success,
+        C::MemoryFiles => S::Error,
+        C::Skills => S::TextMuted,
+        C::Messages => S::Border,
+        C::FreeSpace => S::Text,
+    }
+}
+fn utilization(used: Option<u64>, capacity: Option<u64>) -> String {
+    match (used, capacity) {
+        (Some(_value), Some(0)) => "capacity is 0; percentage unavailable".into(),
+        (Some(value), Some(capacity)) => crate::native_context_grid::percentage(value, Some(capacity))
+            .map_or_else(|| "capacity is 0; percentage unavailable".into(), |percent| format!("{percent}%")),
+        (Some(_), None) => "capacity unreported".into(),
+        (None, _) => "unreported".into(),
+    }
+}
+fn parse_usage_text(o: &serde_json::Map<String, Value>, key: &str, limit: usize) -> Result<String, String> {
+    let text = o.get(key).and_then(Value::as_str).ok_or_else(|| format!("usage_report {key} must be a string"))?;
+    if text.len() > limit || text.chars().any(char::is_control) { return Err(format!("usage_report {key} is invalid")); }
+    Ok(text.to_owned())
+}
+fn optional_usage_text(o: &serde_json::Map<String, Value>, key: &str, limit: usize) -> Result<Option<String>, String> {
+    match o.get(key) {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::String(s)) if s.len() <= limit && !s.chars().any(char::is_control) => Ok(Some(s.clone())),
+        _ => Err(format!("usage_report {key} is invalid")),
+    }
+}
+fn validate_usage_text(text: &str, limit: usize, field: &str) -> Result<String, String> {
+    if text.len() > limit || text.chars().any(char::is_control) {
+        return Err(format!("usage_report {field} is invalid"));
+    }
+    Ok(text.to_owned())
+}
+fn parse_usage_entries(o: &serde_json::Map<String, Value>, key: &str) -> Result<Option<Vec<UsageEntry>>, String> {
+    let Some(value) = o.get(key) else { return Ok(None) };
+    if value.is_null() { return Ok(None); }
+    let values = value.as_array().ok_or_else(|| format!("usage_report {key} must be an array"))?;
+    if values.len() > MAX_USAGE_ENTRIES { return Err(format!("usage_report {key} exceeds {MAX_USAGE_ENTRIES} entries")); }
+    let mut entries = Vec::with_capacity(values.len());
+    for value in values {
+        let row = value.as_object().ok_or_else(|| format!("usage_report {key} entry must be an object"))?;
+        entries.push(UsageEntry { name: parse_usage_text(row, "name", 512)?, path: optional_usage_text(row, "path", MAX_PATH_BYTES)?,
+            group: optional_usage_text(row, "group", 128)?, tokens: optional_u64(row, "tokens")? });
+    }
+    Ok(Some(entries))
+}
+fn parse_usage_report(value: Option<&Value>) -> Result<Option<UsageReport>, String> {
+    let Some(value) = value else { return Ok(None) };
+    if value.is_null() { return Ok(None); }
+    let o = value.as_object().ok_or_else(|| "usage_report must be an object".to_owned())?;
+    const ALLOWED: &[&str] = &["model_id", "capacity_tokens", "reported_used_tokens", "estimated_total_tokens", "categories", "mcp_tools", "memory_files", "skills", "suggestions", "coverage"];
+    if o.keys().any(|key| !ALLOWED.contains(&key.as_str())) { return Err("usage_report contains an unknown field".into()); }
+    let model = optional_usage_text(o, "model_id", 512)?;
+    let capacity_tokens = optional_u64(o, "capacity_tokens")?;
+    let used_tokens = optional_u64(o, "reported_used_tokens")?;
+    let estimated_total_tokens = optional_u64(o, "estimated_total_tokens")?;
+    let mut categories = [None; 7];
+    let mut category_present = [false; 7];
+    let raw_categories = o.get("categories").and_then(|v| if v.is_null() { None } else { Some(v) });
+    if let Some(raw) = raw_categories {
+        let values = raw.as_array().ok_or_else(|| "usage_report categories must be an array".to_owned())?;
+        if values.len() > 7 { return Err("usage_report categories exceeds 7 entries".into()); }
+        for value in values {
+            let row = value.as_object().ok_or_else(|| "usage_report category must be an object".to_owned())?;
+            const CATEGORY_FIELDS: &[&str] = &["id", "label", "tokens", "provenance"];
+            if row.keys().any(|key| !CATEGORY_FIELDS.contains(&key.as_str())) { return Err("usage_report category contains an unknown field".into()); }
+            let id = row.get("id").and_then(Value::as_str).ok_or_else(|| "usage_report category id is required".to_owned())?;
+            let index = match id {
+                "system_prompt" => 0, "system_tools" => 1, "mcp_server_instructions" => 2,
+                "memory_files" => 3, "skills" => 4, "messages" => 5, "free_space" => 6,
+                _ => return Err("usage_report category id is unknown".into()),
+            };
+            if category_present[index] { return Err("usage_report contains duplicate category".into()); }
+            category_present[index] = true;
+            if let Some(label) = row.get("label") {
+                let text = label.as_str().ok_or_else(|| "usage_report category label is invalid".to_owned())?;
+                validate_usage_text(text, 512, "category label")?;
+            }
+            if let Some(provenance) = row.get("provenance") {
+                let text = provenance.as_str().ok_or_else(|| "usage_report category provenance is invalid".to_owned())?;
+                validate_usage_text(text, 512, "category provenance")?;
+            }
+            categories[index] = optional_u64(row, "tokens")?;
+        }
+    }
+    let coverage_obj = o.get("coverage").and_then(|v| if v.is_null() { None } else { Some(v) });
+    let (coverage, coverage_gaps) = if let Some(raw) = coverage_obj {
+        let row = raw.as_object().ok_or_else(|| "usage_report coverage must be an object".to_owned())?;
+        if row.keys().any(|key| key != "complete" && key != "gaps") { return Err("usage_report coverage contains an unknown field".into()); }
+        let complete = row.get("complete").and_then(Value::as_bool).ok_or_else(|| "usage_report coverage complete is required".to_owned())?;
+        let gaps = match row.get("gaps") {
+            None | Some(Value::Null) => Vec::new(),
+            Some(Value::Array(values)) if values.len() <= 32 => values.iter().map(|v| {
+                let text = v.as_str().ok_or_else(|| "usage_report coverage gap is invalid".to_owned())?;
+                validate_usage_text(text, 256, "coverage gap")
+            }).collect::<Result<Vec<String>, String>>()?,
+            Some(Value::Array(_)) => return Err("usage_report coverage gaps exceeds 32 entries".into()),
+            Some(_) => return Err("usage_report coverage gaps must be an array".into()),
+        };
+        (Some(if complete && gaps.is_empty() { "complete".into() } else { "partial".into() }), gaps)
+    } else { (None, Vec::new()) };
+    fn detail_entries(o: &serde_json::Map<String, Value>, key: &str) -> Result<Option<Vec<UsageEntry>>, String> {
+        let Some(value) = o.get(key) else { return Ok(None) }; if value.is_null() { return Ok(None); }
+        let values = value.as_array().ok_or_else(|| format!("usage_report {key} must be an array"))?;
+        if values.len() > MAX_USAGE_ENTRIES { return Err(format!("usage_report {key} exceeds {MAX_USAGE_ENTRIES} entries")); }
+        let mut out = Vec::with_capacity(values.len());
+        for value in values {
+            if let Some(text) = value.as_str() {
+                if text.len() > MAX_PATH_BYTES || text.chars().any(char::is_control) { return Err(format!("usage_report {key} detail is invalid")); }
+                out.push(UsageEntry { name: text.to_owned(), path: None, group: None, tokens: None });
+            } else if let Some(row) = value.as_object() {
+                // Backend v3 emits strings.  Retain bounded compatibility with
+                // the pre-v3 detail shape so existing inventory consumers do
+                // not lose source paths while the producer migrates.
+                let name = parse_usage_text(row, "name", 512)?;
+                out.push(UsageEntry { name, path: optional_usage_text(row, "path", MAX_PATH_BYTES)?, group: optional_usage_text(row, "group", 128)?, tokens: optional_u64(row, "tokens")? });
+            } else { return Err(format!("usage_report {key} detail must be a string or object")); }
+        }
+        Ok(Some(out))
+    }
+    let suggestions = match o.get("suggestions") {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(values)) if values.len() <= 32 => { let mut out = Vec::with_capacity(values.len()); for value in values { let row=value.as_object().ok_or_else(|| "usage suggestion must be an object".to_owned())?; out.push((parse_usage_text(row,"text",1024)?,parse_usage_text(row,"evidence",2048)?)); } Some(out) }
+        Some(Value::Array(_)) => return Err("usage_report suggestions exceeds 32 entries".into()), Some(_) => return Err("usage_report suggestions must be an array".into()),
+    };
+    let estimate_provenance = Some("backend ContextUsageReport category provenance; no client recomputation".to_owned());
+    Ok(Some(UsageReport { model, capacity_tokens, used_tokens, provenance: Some("backend ContextUsageReport".into()), coverage, coverage_gaps, estimate_provenance, estimated_total_tokens, categories,
+        mcp_tools: detail_entries(o, "mcp_tools")?, memory_files: detail_entries(o, "memory_files")?, skills: detail_entries(o, "skills")?, suggestions }))
+}
+fn usage_dashboard(report: Option<&UsageReport>, width: usize, grid_rows: usize) -> Vec<UsageLine> {
+    let mut rows = vec![usage_line("Estimated usage by category".into(), Vec::new())];
+    rows.extend(usage_grid(report, width, grid_rows));
+    for category in crate::native_context_grid::CategoryId::ALL {
+        let index = category.index();
+        let raw = report.and_then(|r| r.categories[index]);
+        let tokens = if category == crate::native_context_grid::CategoryId::FreeSpace
+            && report.and_then(|r| r.capacity_tokens).filter(|cap| *cap > 0).is_none() { None } else { raw };
+        let count_label = tokens.map_or_else(|| "unreported".into(), |n| n.to_string());
+        let percent = tokens.and_then(|n| report.and_then(|r| crate::native_context_grid::percentage(n, r.capacity_tokens)))
+            .map_or_else(|| "unreported".into(), |n| format!("{n}%"));
+        let legend = format!("■ {}: {count_label} tokens · {percent} of capacity (estimated)", category.label());
+        for (line_index, text) in wrap(&legend, width.max(1)).into_iter().enumerate() {
+            let swatch = line_index == 0;
+            rows.push(usage_line(text, if swatch { vec![UsageStyleSpan { start_cell: 0, cells: 1, slot: category_slot(category) }] } else { Vec::new() }));
+        }
+    }
+    for (title, entries) in [("MCP tools · /mcp", report.and_then(|r| r.mcp_tools.as_deref())),
+        ("Memory files · /memory", report.and_then(|r| r.memory_files.as_deref())),
+        ("Skills · /skills", report.and_then(|r| r.skills.as_deref()))] { rows.extend(usage_tree(title, entries, width)); }
+    rows.push(usage_line("Suggestions".into(), Vec::new()));
+    match report.and_then(|r| r.suggestions.as_deref()) {
+        None => rows.push(usage_line("  unreported".into(), Vec::new())),
+        Some(items) if items.is_empty() => rows.push(usage_line("  none reported".into(), Vec::new())),
+        Some(items) => for (text, evidence) in items { rows.push(usage_line(format!("  • {text} · Evidence: {evidence}"), Vec::new())); },
+    }
+    rows
+}
+
+fn usage_tree(title: &str, entries: Option<&[UsageEntry]>, width: usize) -> Vec<UsageLine> {
+    let mut rows = vec![usage_line(title.into(), Vec::new())];
+    match entries {
+        None => rows.push(usage_line("  unreported".into(), Vec::new())),
+        Some(entries) if entries.is_empty() => rows.push(usage_line("  none reported".into(), Vec::new())),
+        Some(entries) => for (i, entry) in entries.iter().enumerate() {
+            if let Some(group) = &entry.group { rows.extend(wrap(group, width).into_iter().map(|s| usage_line(format!("  {s}"), Vec::new()))); }
+            let branch = if i + 1 == entries.len() { "└─" } else { "├─" };
+            let path = entry.path.as_deref().map_or(String::new(), |path| format!(" · {path}"));
+            rows.extend(wrap(&format!("{branch} {}{} · {} tokens", entry.name, path, shown(entry.tokens)), width).into_iter().map(|s| usage_line(s, Vec::new())));
+        },
+    }
+    rows
+}
+fn usage_grid(report: Option<&UsageReport>, width: usize, rows: usize) -> Vec<UsageLine> {
+    use crate::native_context_grid::{allocate, CategoryId, CategoryTokens, CountBasis, Coverage, GridCell, GridInput, GridState};
+    let mut categories = [None; crate::native_context_grid::CATEGORY_COUNT];
+    if let Some(report) = report {
+        for category in CategoryId::ALL {
+            categories[category.index()] = report.categories[category.index()].map(|tokens| CategoryTokens { tokens, basis: CountBasis::Estimated });
+        }
+    }
+    let coverage = report.and_then(|r| match r.coverage.as_deref() {
+        Some("complete") => Some(Coverage::Complete),
+        Some("partial") => Some(Coverage::Partial),
+        _ => None,
+    });
+    let allocation = allocate(GridInput {
+        capacity_tokens: report.and_then(|r| r.capacity_tokens), categories, coverage,
+        columns: width.min(crate::native_context_grid::MAX_GRID_COLUMNS),
+        rows: rows.min(crate::native_context_grid::MAX_GRID_ROWS),
+    });
+    let mut lines = Vec::new();
+    match allocation.state {
+        GridState::CapacityUnreported => lines.push(usage_line("Grid: capacity unreported; usage proportions unavailable".into(), Vec::new())),
+        GridState::ZeroCapacity => lines.push(usage_line("Grid: reported capacity is zero; proportions unavailable".into(), Vec::new())),
+        GridState::NoVisibleArea => lines.push(usage_line("Grid: no visible terminal cells".into(), Vec::new())),
+        GridState::Allocated => {}
+    }
+    if let Some(over) = allocation.over_capacity_tokens {
+        lines.push(usage_line(format!("Warning: estimated categories exceed capacity by {over} tokens; grid proportions normalized"), Vec::new()));
+    }
+    if allocation.unaccounted_capacity_tokens.is_some_and(|n| n > 0) {
+        lines.push(usage_line("Unaccounted capacity remains unknown; not inferred as free space".into(), Vec::new()));
+    }
+    if allocation.unknown_is_coverage_marker {
+        lines.push(usage_line("Unknown cell marks incomplete category coverage; not a proportional estimate".into(), Vec::new()));
+    }
+    if !allocation.omitted_categories.is_empty() {
+        let names = allocation.omitted_categories.iter().map(|id| id.label()).collect::<Vec<_>>().join(", ");
+        lines.push(usage_line(format!("Grid resolution omitted positive categories: {names}"), Vec::new()));
+    }
+    if allocation.columns > 0 {
+        for chunk in allocation.cells.chunks(allocation.columns) {
+            let mut text = String::new();
+            let mut styles = Vec::with_capacity(chunk.len());
+            for (column, cell) in chunk.iter().enumerate() {
+                text.push('■');
+                let slot = match cell { GridCell::Category(id) => category_slot(*id), GridCell::Unknown => crate::native_theme_runtime::Slot::TextMuted };
+                styles.push(UsageStyleSpan { start_cell: column, cells: 1, slot });
+            }
+            lines.push(usage_line(text, styles));
+        }
+    }
+    lines
+}
+
+fn fit_usage(lines: Vec<UsageLine>, width: usize) -> Vec<UsageLine> {
+    lines.into_iter().map(|mut line| {
+        line.text = crate::native_view_layout::fit(&line.text, width.min(u16::MAX as usize) as u16);
+        line.styles.retain(|span| span.start_cell < width);
+        for span in &mut line.styles { span.cells = span.cells.min(width - span.start_cell); }
+        line
+    }).collect()
 }
 
 fn item_detail(item: &ContextItem, width: usize) -> Vec<String> {
@@ -704,4 +1006,106 @@ fn wrap(text: &str, width: usize) -> Vec<String> {
         out.push(cur);
     }
     out
+}
+
+#[cfg(test)]
+mod usage_report_self_tests {
+    use super::*;
+    use serde_json::json;
+    #[test]
+    fn unreported_zero_and_colored_categories_stay_distinct() {
+        let report = parse_usage_report(Some(&json!({"model_id":"test-model","capacity_tokens":100,"reported_used_tokens":0,
+            "coverage":{"complete":false,"gaps":["missing categories"]},"categories":[{"id":"messages","label":"Messages","tokens":0,"provenance":"provider_reported"},{"id":"free_space","label":"Free space","tokens":90,"provenance":"derived_from_reported_usage"}]}))).unwrap().unwrap();
+        assert_eq!(report.categories[5], Some(0)); assert_eq!(report.categories[0], None);
+        let grid = usage_grid(Some(&report), 20, 10);
+        assert!(grid.iter().flat_map(|line| &line.styles).any(|span| span.slot == category_slot(crate::native_context_grid::CategoryId::FreeSpace)));
+        let dashboard = usage_dashboard(Some(&report), 80, 10);
+        for category in crate::native_context_grid::CategoryId::ALL {
+            let prefix = format!("■ {}:", category.label());
+            let swatch = dashboard.iter().find(|line| line.text.starts_with(&prefix))
+                .and_then(|line| line.styles.first());
+            assert!(swatch.is_some_and(|span| span.cells >= 1), "legend swatch missing for {}", category.label());
+            assert_eq!(swatch.expect("checked above").slot, category_slot(category));
+        }
+        assert!(dashboard.iter().find(|line| line.text.starts_with("■ Messages:"))
+            .and_then(|line| line.styles.first()).is_some_and(|span| span.cells >= 1));
+        assert_eq!(grid.iter().filter(|line| line.styles.len() == 20).count(), 10);
+        assert_eq!(crate::native_context_grid::percentage(u64::MAX, Some(u64::MAX)), Some(100));
+        let missing = usage_grid(Some(&UsageReport { capacity_tokens: None, categories: [Some(17), None, None, None, None, None, Some(40)], ..UsageReport::default() }), 8, 10);
+        assert!(missing.iter().any(|line| line.text.contains("capacity unreported")));
+        assert_eq!(missing.iter().filter(|line| line.styles.len() == 8).count(), 10);
+        assert!(missing.iter().flat_map(|line| &line.styles).all(|span| span.slot == crate::native_theme_runtime::Slot::TextMuted));
+        assert_eq!(utilization(None, Some(0)), "unreported");
+        assert!(utilization(Some(1), Some(0)).contains("unavailable"));
+        assert_eq!(utilization(Some(u64::MAX), Some(u64::MAX)), "100%");
+    }
+    #[test]
+    fn source_lists_and_text_remain_bounded() {
+        let list = (0..=MAX_USAGE_ENTRIES).map(|_| serde_json::json!({"name":"tool"})).collect::<Vec<_>>();
+        assert!(parse_usage_report(Some(&serde_json::json!({"mcp_tools":list}))).is_err());
+        assert!(parse_usage_report(Some(&serde_json::json!({"memory_files":[{"name":"x","path":"bad\npath"}]}))).is_err());
+        let max_percent = utilization(Some(u64::MAX), Some(u64::MAX));
+        assert_eq!(max_percent, "100%");
+    }
+
+    #[test]
+    fn usage_categories_reject_duplicate_null_and_control_values() {
+        let cases = [
+            serde_json::json!({"categories":[{"id":"messages","tokens":null},{"id":"messages","tokens":null}]}),
+            serde_json::json!({"coverage":{"complete":false,"gaps":["unsafe\u{001b}[31m"]}}),
+            serde_json::json!({"categories":[{"id":"messages","tokens":0,"label":17}]}),
+        ];
+        for usage in cases {
+            let body = serde_json::json!({"scope":"session","items":[],"usage_report":usage});
+            let mut view = ContextView::new();
+            assert!(view.load_response(&body.to_string()).is_err());
+        }
+    }
+
+    #[test]
+    fn narrow_grid_tracks_visible_cell_budget() {
+        let report = UsageReport { capacity_tokens: Some(100), categories: [Some(1), None, None, None, None, Some(99), None], ..UsageReport::default() };
+        let lines = usage_grid(Some(&report), 8, 4);
+        assert_eq!(lines.iter().filter(|line| line.styles.len() == 8).count(), 4);
+        assert!(lines.iter().all(|line| line.styles.len() <= 8));
+    }
+
+    #[test]
+    fn dashboard_header_and_all_source_sections_are_scroll_reachable() {
+        let mut view = ContextView::new();
+        let body = serde_json::json!({"scope":"session","items":[],"usage_report":{
+            "model_id":"selected-model","capacity_tokens":100,"reported_used_tokens":35,"estimated_total_tokens":30,
+            "coverage":{"complete":true,"gaps":[]},
+            "categories":[{"id":"system_prompt","label":"System prompt","tokens":5,"provenance":"estimated_utf8_bytes_div_4"},{"id":"system_tools","label":"System tools","tokens":5,"provenance":"estimated_utf8_bytes_div_4"},{"id":"mcp_server_instructions","label":"MCP server instructions","tokens":5,"provenance":"estimated_utf8_bytes_div_4"},{"id":"memory_files","label":"Memory files","tokens":5,"provenance":"estimated_utf8_bytes_div_4"},{"id":"skills","label":"Skills","tokens":5,"provenance":"estimated_utf8_bytes_div_4"},{"id":"messages","label":"Messages","tokens":5,"provenance":"estimated_utf8_bytes_div_4"},{"id":"free_space","label":"Free space","tokens":65,"provenance":"derived_from_reported_usage"}],
+            "mcp_tools":["search · mcp/server"],
+            "memory_files":["AGENTS.md · /project/AGENTS.md"],
+            "skills":["review · builtin"],
+            "suggestions":[{"text":"trim context","evidence":"large memory file"}]}}).to_string();
+        view.load_response(&body).unwrap();
+        let mut visible = String::new();
+        for _ in 0..90 {
+            visible.push_str(&view.render(120, 12).join("\\n"));
+            view.scroll_detail(true);
+        }
+        for expected in ["Context Usage", "selected-model", "Used: 35 / 100", "System prompt", "MCP tools · /mcp", "AGENTS.md", "Skills · /skills", "Suggestions", "large memory file"] {
+            assert!(visible.contains(expected), "missing {expected}");
+        }
+    }
+
+    #[test]
+    fn estimated_total_is_visible_when_provider_usage_is_unreported() {
+        let mut view = ContextView::new();
+        let body = serde_json::json!({
+            "scope":"session", "items": [], "usage_report": {
+                "model_id":"provider/model", "capacity_tokens":1000,
+                "reported_used_tokens":null, "estimated_total_tokens":123,
+                "categories":[], "coverage":{"complete":false,"gaps":["provider usage unavailable"]}
+            }
+        }).to_string();
+        view.load_response(&body).unwrap();
+        let rendered = view.render(120, 12).join("\n");
+        assert!(rendered.contains("Estimated usage total: 123 tokens"));
+        assert!(rendered.contains("provider usage unreported"));
+        assert!(rendered.contains("Coverage gaps: provider usage unavailable"));
+    }
 }

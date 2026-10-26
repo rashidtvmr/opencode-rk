@@ -81,6 +81,7 @@ pub struct NativeView {
     memory: crate::native_memory::Memory,
     compaction: crate::native_compaction_settings::CompactionSettingsView,
     context: crate::native_context::ContextView,
+    context_usage_styles: Vec<(u16, u16, u16, crate::native_theme_runtime::Slot)>,
     command_palette: crate::native_command_palette::CommandPalette,
     status: StatusView,
     /// Held from day one; `DialogView::request/answer` wiring is explicitly
@@ -490,6 +491,7 @@ impl NativeView {
     pub fn ui_regions(&self) -> Vec<crate::native_ui_style::Region> {
         self.ui_regions.clone()
     }
+    pub fn context_usage_styles(&self) -> &[(u16, u16, u16, crate::native_theme_runtime::Slot)] { &self.context_usage_styles }
     pub fn set_overlay_roles(&mut self, roles: Vec<crate::native_ui_style::Role>) {
         self.overlay_roles = roles;
     }
@@ -552,6 +554,7 @@ impl NativeView {
             memory: crate::native_memory::Memory::new(),
             compaction: crate::native_compaction_settings::CompactionSettingsView::new(),
             context: crate::native_context::ContextView::new(),
+            context_usage_styles: Vec::new(),
             status: StatusView::default(),
             dialogs: DialogView::default(),
             command_palette: crate::native_command_palette::CommandPalette::default(),
@@ -913,6 +916,7 @@ impl NativeView {
     pub fn set_session_route(&mut self, session_route: bool) {
         if self.session_route != session_route {
             self.mcp_hit.clear();
+            self.context_usage_hit = None;
             self.context_usage_hit = None;
         }
         self.session_route = session_route;
@@ -1926,6 +1930,7 @@ impl NativeView {
         self.chat_text_bounds.clear();
         self.context_usage_hit = None;
         self.ui_regions.clear();
+        self.context_usage_styles.clear();
         self.modal_underlay_rows.clear();
         let height = self.render_height();
         if self.layout.cols == 0 || height == 0 {
@@ -1942,8 +1947,7 @@ impl NativeView {
             let vertical = usize::from(panel_height >= 4);
             let content_height = usize::from(panel_height).saturating_sub(2 * vertical);
             let lines = if self.pages.page() == Page::Status {
-                self.status
-                    .render_styled(content_width as usize, content_height)
+                self.status.render_styled(content_width as usize, content_height)
             } else if self.pages.page() == Page::Memory {
                 self.memory
                     .render(content_width as usize, content_height)
@@ -1953,10 +1957,7 @@ impl NativeView {
                         text,
                         role: if index == 0 {
                             crate::native_ui_style::Role::Heading
-                        } else if index == 1
-                            && self.memory.selected().is_some()
-                            && self.memory.error().is_none()
-                        {
+                        } else if index == 1 && self.memory.selected().is_some() && self.memory.error().is_none() {
                             crate::native_ui_style::Role::Selected
                         } else {
                             crate::native_ui_style::Role::Item
@@ -1981,24 +1982,35 @@ impl NativeView {
                     .collect()
             } else if self.pages.page() == Page::Context {
                 self.context
-                    .render(content_width as usize, content_height)
+                    .render_styled(content_width as usize, content_height)
                     .into_iter()
                     .enumerate()
-                    .map(|(index, text)| crate::native_ui_style::Line {
-                        text,
-                        role: if index == 0 {
-                            crate::native_ui_style::Role::Heading
-                        } else if index == 1 {
-                            crate::native_ui_style::Role::Selected
-                        } else {
-                            crate::native_ui_style::Role::Item
-                        },
-                        detail_from: None,
+                    .map(|(index, line)| {
+                        let x = left.saturating_add(inset);
+                        let y = (usize::from(top) + vertical + index).min(u16::MAX as usize) as u16;
+                        for span in &line.styles {
+                            self.context_usage_styles.push((
+                                x.saturating_add(span.start_cell.min(u16::MAX as usize) as u16),
+                                y,
+                                span.cells.min(u16::MAX as usize) as u16,
+                                span.slot,
+                            ));
+                        }
+                        crate::native_ui_style::Line {
+                            text: line.text,
+                            role: if index == 0 {
+                                crate::native_ui_style::Role::Heading
+                            } else if index == 1 {
+                                crate::native_ui_style::Role::Selected
+                            } else {
+                                crate::native_ui_style::Role::Item
+                            },
+                            detail_from: None,
+                        }
                     })
                     .collect()
             } else {
-                self.pages
-                    .render_styled(content_width as usize, content_height)
+                self.pages.render_styled(content_width as usize, content_height)
             };
             let mut center = vec![String::new(); height];
             for (index, line) in lines.into_iter().enumerate().take(content_height) {
