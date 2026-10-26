@@ -12,14 +12,37 @@ and operating rules at the top of `AGENTS.md` before dispatching more work.
 - Complete the working native Rust OpenCode application, faithful to OpenCode V2
   plus approved extensions; Phase 1 is the immediate release priority.
 - Canonical checkout: `/Users/mymac/Projects/opencode-rk-recovery-20261005`.
-- Last observed canonical HEAD before these documentation edits:
-  `52a89c156a6e6e30268c49d2587b131836c11233` (`main-v2`). The operating-rule
-  documentation subsequently landed as `b7a3178307832945538cc9fa815044b2fe8d3574`.
+- Latest product HEAD: `b797acda85109619b44d142f6a9aa2136fa8f1ca` (`main-v2`).
+  Includes PID reuse c821e522, mouse-selection5cdbb989, model subsequencebace0c71,
+  and session wrap/refreshb797acda. Exact picker filters PASS on this SHA;
+  installed binary remains older/unupdated. Documentation-only commits may follow.
 - User-selected upstream: `/Users/mymac/Projects/tmp/opencode`, verified HEAD
   `450e7b92412c780a7b5a75226bb8d49aaca24e22`. The older lock pin `95daf906...`
   is not the selected reference for current parity work.
 - Sole integration writer: main orchestrator. Preserve all legacy refs, user work,
   databases and preferences. Preserve user daemon PID 73389 on port 4096.
+
+## Immediate continuation — user-selected context UI
+
+User supplied Claude Code screenshot/text and explicitly wants that `/context`.
+Read `docs/CONTEXT_USAGE_UI_REQUIREMENTS.md`. UI/private accounting/pointer work
+is in progress; inventory-only display is not the requested completion. Primary:
+`ses_e884a754affe67GhqY705ThGFn` renderer/painter proposal;
+`ses_e884a7545ffenjzK3cSw9agMtH` actualrequestcapture/usage_report;
+`ses_e883ed3e3ffeLI48tWqLyqDqaa` missing context pointer hitbox/handler proposal;
+`ses_e883b519fffeZ8jwTxEaIf77Z1` frozenrenderer9c0eade9... review.
+Context fixturev3 SHA677fac0a... under context-user-03-acceptance, original
+evaluator `ses_e8846df84ffe9tLSREPE846AL0` reviewing contract only.
+
+Maintain20+useful assignments/replenish notifications. All recent dispatches on
+allowed Luna or <=6v41; no paused GLM/TokenHarbor/combined routes used.
+HEAVYslot: compaction optimizer `ses_e88bd254fffeg0P1UZYgSytZK9` owns v5
+race-regression compile/tests. Main must not run concurrent Cargo/PTY until slot
+released. v4 NEEDS_FIX independent snapshot-read race remains blocking.
+After release run focused CLI validation of APPROVED Markdown808855fe... and
+toolprojection62ce0f30... candidates, then integrate readyexactbytes promptly.
+Render capturefixture1232faf2... APPROVED source/wiring; validationoverlay prep
+`ses_e883c7028ffeRPAEOi5oQeDlIx`. Actual6Rustgrids still not captured.
 
 ## Route allowance snapshot
 
@@ -929,3 +952,187 @@ routes remain paused. Preserve dirty user web/server edits and daemon73389/4096.
   (`replenish20-63-authedgeready`), no auth behavior or canonical changes granted.
 - Markdown corrected diff2ca68a2b... returned, original evaluator resumed
   `ses_e8858daf1ffeMcw3IglEkcob6z` exact v2 source review, originalnegativeblocking.
+
+## Ready feature integration and notification replenishment
+
+- Integrated reviewed/tested model subsequence candidate8663374d... as
+  `bace0c71` (native_setup.rs only); reviewed/tested session wrap/refresh candidate
+  7bbe8d91... as `b797acda` (native_view_sessions.rs only). Exact final integrated
+  b797acda snapshot filters native_setup and native_view_sessions both exit0;
+  receipts/logs `integrated-pickers-yvdj1xl8/`. No installed UI acceptance claim.
+- Selection exact-integrated13PASS already recorded. Source integration does not
+  update actual user binary. No unrelated web/server edits staged or committed.
+- Completed subagent fixture -> reviewer `ses_e88476509ffevG4jiAnm7Bm2zY`
+  (`replenish20-64-subagentreview`), NEEDS_FIX stale-frame draft assertion ->
+  optimizer `ses_e8843de67ffecvzfrW61KC8mhp` (`replenish20-68-subagentdraftfix`).
+- Permission reviewer NEEDS_FIX unused new model/live DialogView remains
+  unchanged -> optimizer `ses_e88468ad4ffeLAT1ojAaYyF5nU`
+  (`replenish20-65-livepermission`), explicit live save-pattern gate repair.
+- Render v41 third handoff still no file; replaced with Luna
+  `ses_e88468abcffeIfS4Guw75vxF6a` who delivered actual test3b2c4345... ->
+  evaluator `ses_e88444b3affeqqCr514RFXpWNh` (`replenish20-67-renderreview`).
+- Context installed v41 third handoff no file; replaced with Luna
+  `ses_e88460c02ffepmTWAI6GbGgDG7` (`context-user-05-installed`), new screenshot
+  ContextUsage heading/slash/actualmouse route fixture, no fallback TUI research.
+- Composer fixture own known empty-string predicate NEEDS_FIX; sameauthor
+  `ses_e884d3d3bffelhHV5wUVadcIXU` resumed bounded correction/hash.
+- Tool pairing corrected18dd20ff... goes back to original evaluator
+  `ses_e8858fea9ffeItZ1GIXnRtNN88` exact v2 review.
+- Markdown evaluator found corrected delta808855fe... sound but againstoldproposal,
+  notcanonicalbase -> composition prep `ses_e88438f42ffet1HVwQpAn5aH6a`
+  (`replenish20-69-markdownbase`), unchangedlogic/exactfinalhashrequired.
+- Context golden fixture initial claimed artifact missing (coordinatorglob showed
+  onlyscratchpad). Author resumed/materialized actualJSON at exactabsolutepath,
+  newSHA170d28c44e33b9a24894782e9c99103f53b64e9c2ca812ed47e3b1508bd5a7bf.
+  Priorbdb...hash withdrawn. Original reviewer `ses_e8846df84ffe9tLSREPE846AL0`
+  resumed exactnewfile review. No fixturedefinition or parse claimedrenderPASS.
+- Auth fixture newfileproposal433cc550... now prepared after correctingfalse
+  missing-basepathblocker. Candidatef3ea4ccf exactbytes verified byworker;
+  integration stillpending. Replaced worker by device installed regression
+  `ses_e884327b0ffe9mc7EtLEoPV5u1` (`replenish20-70-devicejourney`), no real login.
+All above replacements were immediate on notifications, allowed routes only;
+continued20+launchedusefulroster, completedworkersnevercountedasactive. Main
+heavy slot free after exact-integrated picker checks; no subagent build grants.
+- Continued notification replacements, allowed Luna unless specified:
+  Home v41 draft delivered but not applied -> `ses_e88424fc4ffetAoXo1CSnA2wBH`
+  (`replenish20-71-homecandidate`) exclusive new private source candidate grant.
+  Context slash fixture partial015cc862... -> sameauthor resumed actualnative
+  hitbox and runnable slash/draft checks, no fallback path or fake pointer PASS.
+- Rail corrected6904b162... -> original `ses_e884ff79dffeh3gT15524CGoq5` v2 review;
+  leader corrected2ae4918c... originalAPPROVE -> preparation
+  `ses_e8841d6beffe5fvxqxrxRYOamD` (`replenish20-72-leadervalidate`).
+- Composer corrected5eb9b68c... -> evaluator `ses_e8841d6b6ffebB3VQ6sK4kOO5a`
+  (`replenish20-73-composerreview`). Legacy heading may be acceptable only for
+  preservation regression, never for new screenshot UI acceptance.
+- Markdown canonicalbased5897821a... unchangedfinal808855fe... -> original
+  evaluator `ses_e8858daf1ffeMcw3IglEkcob6z` v3 identity review.
+- Context accounting worker confirms inventory endpoint cannot account assembled
+  request. Resumed `ses_e884a7545ffenjzK3cSw9agMtH`, expandedPRIVATE grant for
+  base-extractedlib/state/contextaccounting/http copies and actual capture wiring
+  diff. Dirty canonical lib/auth userwork preserved; actual snapshot capture
+  after requestassembly, bounded identity/provenance, no fake category counts.
+- Context golden actual170d28c4... original reviewer NEEDS_FIX stronger semantic
+  assertions; sameauthor resumed coverage/unknown/zero/free/grid/legend fixes.
+- Tool projection original evaluator APPROVED18dd20ff... pairing/security only ->
+  `ses_e8841025affeDXP37IKyoK14fU` (`replenish20-74-toolready`) private applyproof.
+- Subagent fresh-frame supplemental152ebbc6... -> original evaluator
+  `ses_e88476509ffevG4jiAnm7Bm2zY` v2 composition and assertions review.
+No source-only or fixture-definition handoff counted as installed acceptance;
+each completed assignment replenished promptly, no route token balance invented.
+
+### Latest replenishment / verification queue
+
+- Render actualfixture3b2c... reviewerNEEDS_FIX noHome/assertions/wiring; author
+  delivered1232faf2... atallthreewidthswithHome/Chat/40rowassertions; original
+  `ses_e88444b3affeqqCr514RFXpWNh` rereviewing exactv2.
+- Compaction v5 sourceeditedafterpatchgeneration; staleac86...patchNOTcandidate.
+  Optimizer `ses_e88bd254fffeg0P1UZYgSytZK9` resumed sourcefreeze/actualraceREDGREEN.
+  HEAVYSLOT NOW OWNED BY THISWORKER, jobs1threads1, no mainparallelCargo.
+- Deviceinstalledauth safelyBLOCKED pinnedrealOpenAIendpoints/nofixtureinjection;
+  no real login performed. Replenished by permissionfixture
+  `ses_e88402df5ffe3LIpcqIYjK57p2` (`replenish20-75-permissionjourney`), resumed
+  write-first after initial noartifacthandoff. Savefieldcurrentlynottransported.
+- Horizontal correctedfa273c2c... delivered -> independent evaluator
+  `ses_e883fd8d7ffefJF0J4ZLqrV8vF` (`replenish20-76-horizontalreview`).
+- Decoder v41 again incorrectly mapsAltUp8/AltDown9; no integration. Replacement
+  `ses_e883fd8a8ffeRKeP8apTaujFKK` (`replenish20-77-decoderfix`) fixesactualKitty
+  functionalcodes/consumerwiringproposal, oldcandidate277353...NOTapproved.
+- Rail original reviewer reverseditsowndoubleoffsetrecommendation. Independent
+  strategy `ses_e883ed3e8ffeH1STSStahLVr7o` (`replenish20-78-railstrategy`)
+  resolvesactualrow/classindexinvariant. No rail patch integrated.
+- Actualcontextpointermissing perfixture sourceinvestigation; implementer
+  `ses_e883ed3e3ffeLI48tWqLyqDqaa` (`context-user-06-pointer`) producesstandalone
+  nativeview/entryproposal; existingmetadata/Homeownersremainnonoverlapping.
+- Keybind proposal8ef130d5... unvalidated -> evaluator
+  `ses_e883ed3bdffeG1YzBeZJnrrGBZ` (`replenish20-79-keybindreview`).
+- Approvedleaderproposal couldn'tapplybecauseexpectsunintroducedvariable ->
+  optimizer `ses_e883ed3bbffe4lvfPIR7Kwek04` (`replenish20-80-leaderbase`)
+  createscleanbasecandidate/newhashrequiringrenewedreview.
+- Markdown coordinator independentlyapplied5897821a... against actualc772972...
+  base, savedSEPARATEimmutablebasefile andfinal808855...; proofreceipt in69root.
+  Originalevaluator nowAPPROVE exactpatch in v4note585ad8b5... . Focusedtests
+  queued AFTERcompactionheavyslotrelease. Replacement assignment
+  `ses_e883dd6edffeRvuou57Ch1z6Tu` (`replenish20-82-markdownjourney`) installed
+  codeindent/Unicodefixture; no builds/PTY permission.
+- Metadata corrected80997120... -> original `ses_e8857d060ffe9A8vfXrLsJ3ka7`
+  exactv2 review. Auto stillunobserved; nofullmetadataparityclaim.
+- Toolprojection applyproof candidate62ce0f30... ready at74-toolready;
+  focusedtests queued AFTERcompactionheavyslotrelease. No product integration yet.
+- Subagent freshdraft152ebbc6... -> originalreviewercomposing/reviewingactual
+  revisedfixture, notdelta-onlyapproval.
+- Composer reviewNEEDS_FIX unboundsession_id; authorcorrectedc33e9d8b...,
+  original `ses_e8841d6b6ffebB3VQ6sK4kOO5a` v2rereview. No installedacceptance.
+- Shell task ownership tentativeDropremoval BLOCKED; new boundedowner/lifecycle
+  candidate `ses_e883e23cfffecFGExxuFOQAg0E` (`replenish20-81-shelllifecycle`).
+  Keep pendingapprovaldisconnectcancel, daemonshutdownreap andexplicitcancel.
+- Separate shellpreviewimplementation `ses_e883d66a4ffe0NEbKRNDrEzSPo`
+  (`replenish20-83-shellpreview`) private native_shell grant, no execution.
+- Context screenshotfixturesv2 a299d8f0... originalreviewerrereviewing; definition
+  isnotconsumerexecution. Renderer/accountingstillprivatependingintegration.
+- Livepermissioncandidateupdatedsourcebutstalepatch: authorresumed freeze/diff
+  beforesecurityrereview; no replacingbrokerpolicyoraddingalwaysalloweligibility.
+Replenishment remained continuous onnotifications; source HEAD advancedonlysingle
+integrationwriter. All route token usage remainsUNKNOWN, no exhaustedrouteused.
+
+Latest concrete handoffs and replacements:
+- Context renderer private snapshot9c0eade9... frozen as native_context-review-snapshot.rs;
+  independentreview `ses_e883b519fffeZ8jwTxEaIf77Z1` (`context-user-07-renderreview`).
+  Mutableauthorresumed caller/painter proposal plusparsingtests, optionalusage_report
+  anduncountedcategoriesexplicit. No compileddashboard or coloredUI claim yet.
+- Context accounting authorresumed actualcapture hook with privatebaseextracted
+  lib/state grant, NOTcanonicaldirtylib edits. Pointerworker independent standalone
+  proposal. No categorydata derivedfromonly50messagepage.
+- Context golden v3 actual677fac0a... originalreviewer finalboundedcontractreview.
+  v1/v2reviewsnegativepreserved; no JSONdefinitionrepresentedasa testexecution.
+- Permissionlive corrected0cf1e6c1.../c2ebc954... originalsecurityevaluator
+  `ses_e88499c77ffeO60qQusdfYE6y4` reviewing v2, unknowneligibilityfailclosed.
+- Keybind review NEEDS_FIX9dfd4bc8... actualKittyCtrlSpace/aliases/timer;
+  optimizer `ses_e883b51b2ffe4MxJbsGJ2L5TDi` (`replenish20-86-keybindfix`).
+- Subagent fixture missingchatcursorrevealsproductgap; implementer
+  `ses_e883ac36dffeaFQF2d6ugK6oFt` (`replenish20-87-chatcursor`) preparesactual
+  Chatcomposer cursorposition; do not weakenvalidcursorassertions intoPASS.
+- Home actual82644966... -> evaluator `ses_e883ac366ffezx0lu3n2vkWO9O`
+  (`replenish20-88-homereview`) newbaseb797diff, admission/draft/workerguards.
+- Composer originalreviewer APPROVEDc33e9d8b... -> executionprep
+  `ses_e883ac355ffedxi9pyNtDsE92M` (`replenish20-89-composerready`).
+- Independentrailstrategy81849f59... proves subtracty_offset required; original
+  reviewerfirstrecommendationwaswrong. Railauthorresumed correctoffset plus
+  themePrimaryexplicitapproximation, stillnotupstreamagentcategoricalparity.
+- Metadata80997120... negativeonlywidth43wrongtestarithmetic; authorresumed
+  minimalexpectationcorrection withnewhash/rereviewrequired.
+- Horizontal v41actual050858f2... mismatchedreportedhash; reviewerNEEDS_FIX
+  openUUIDrefreshreopensclosedtabs andduplicateChatdoublecounting. Replacement
+  optimizer `ses_e883c701cffel3th2K17NDypMO` (`replenish20-85-horizontalfix`).
+- Render1232faf2... originalreviewerAPPROVED; overlayprep
+  `ses_e883c7028ffeRPAEOi5oQeDlIx` (`replenish20-84-renderready`).
+No oldapproval transfers to correctedhashes; no silentnegativeoutvotes. Every
+completion inthissectionwasimmediatelyreplaced byusefulindependentassignment.
+
+### Most recent approved candidates and replenishment
+
+- Context golden v3 `677fac0a...` original evaluator APPROVED contract definition
+  only (review946e2e76...). Replaced by actual RUST predicate-consumer implementer
+  `ses_e88382b99ffeqIXnsQTYz3Yl40` (`context-user-08-goldenconsumer`), must call
+  real ContextView, not validate fixture against itself. No rendered acceptance.
+- Context mutable renderer9c0eade9... snapshot under independentreview07; author
+  adding actual painter/caller diff. Pointer author resumed write-first actual
+  geometry proposal after no-artifacthandoff. Accounting capture stillpending.
+- Livepermission c2ebc954... SECURITYAPPROVE received (62627f94...), candidate
+  preparation `ses_e88387ba7ffeOK5yac7LuK5Kf2` (`replenish20-92-permissionready`).
+- Render1232faf2... approved/wired overlay88244585... candidatea476d273... ready
+  for main's serialized NativeView Home/Chat capture test after compaction slot.
+  Comparator implementer `ses_e88387bafffeF985K359Co3QJB`
+  (`replenish20-91-renderdiff`) producesactualgridcomparison, colorsstillUNVERIFIED.
+- Vertical bafe8c2d... stillopenUUIDmodelincomplete -> replacement optimizer
+  `ses_e88387bb9ffei5Po74YKbDn9HG` (`replenish20-90-verticalidentity`), no accepted
+  titlecount-only identity. v41noartifact/researchloops notcontinued unnecessarily.
+- Bounded shellowner modulef84f3a0b... UNREADY -> independent SECURITY/async
+  evaluator `ses_e88382b89ffe7ejMR1ZZiq7j9o` (`replenish20-93-shellsecurity`).
+  Production runtime/shutdown wiring remains absent, no persistentPTYclaim.
+- Canonicalleader04355ff1... nowprivateapplyproofpassed -> original evaluator
+  `ses_e884e86d6ffeGgeYT6l2prwmnJ` v3review. Oldbadcontextapprovalnottransferred.
+- Metadata60a1d1aa... originalAPPROVE (reviewfc7e95d7...), candidateprep
+  `ses_e8837eb69ffeBbIZzzvPYdR5bY` (`replenish20-94-metadataready`), tests await
+  serializedslot. No auto state yet; no full metadata parity claim.
+All completion notifications replaced promptly. Canonical product HEAD remains
+b797acda (documentation may advance); no release installation completed.
