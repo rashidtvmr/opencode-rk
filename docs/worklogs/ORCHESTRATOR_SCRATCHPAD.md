@@ -719,3 +719,213 @@ Privateoutputs: exact absolute approved macOS temp root plus
 Workers must deliveractualpatches/scripts/hashes, notanotherbroadresearchsummary.
 Unexpecteduncommittedweb/serverauth/lib/web_distchanges are preserved; workers
 may not overwrite them or claim them as reviewedintegratedcode.
+
+### Prompt replenishment events
+
+- Modelpicker worker `ses_e886287fbffe9wj9n3E5mqJ6W2` completedwithoutpatch,
+  testsorscratchpad; inspectedwebappnotTUIreference. INCOMPLETE. Immediately
+  replaced by `ses_e885e1a87ffeeidQ5htZxnRxod` onallowedLunaroute, narrowedto
+  actualTUI dialog-model/native_setup search/order withwrite-early requirement.
+- Acceptanceauditor `ses_e8862872bffdQ62javDqxVyLnk` completedwithoutmatrixor
+  scratchpad. INCOMPLETE. Immediately replaced by `ses_e885e1a85ffeVYuz7QLnZGI9P3`
+  onallowedLuna, instructedtowritecollected12-rowdraftbeforefurtherresearch.
+- These two completions replacedone-for-one promptly, preserving20launched
+  usefulassignments absentothernotifications. Noartifactcompletionclaimed and
+  no heavyvalidation permissions added. Route token telemetry remainsUNKNOWN.
+
+### Further immediate replenishment
+
+Acceptance matrix delivered at `replenish20-17-acceptance/matrix.md`, read by
+coordinator; documents UNPROVEN journeys, not installed acceptance. Replaced by
+`ses_e885b1ea2ffeX8UrwRlqM2YR15` daemon reconnect regression (`replenish20-21-reconnect`).
+Six further completions replaced promptly, all allowed `9router-luna-free`:
+
+- Compaction author resumed `ses_e88bd254fffeg0P1UZYgSytZK9` to finish v4
+  captured-end identity repair. Current edits UNVERIFIED; owns only heavy slot.
+- Palette author delivered unexecuted private source; questionable settings to
+  appearance alias goes to `ses_e885ab270ffeHrDkZoRnsivcGB` independent review
+  and search-only correction (`replenish20-22-palettereview`).
+- Leader review NEEDS_FIX e025...: selected ID incorrectly included in other_ids.
+  Repair assigned `ses_e885a7e08ffel0ERWN71KFJOVQ` (`replenish20-23-leaderfix`).
+  No acceptance of impossible predicate or bypass of actual input-loop proof.
+- Keybind parser module delivered 13db5782... UNREADY without runtime wiring.
+  Independent schema review `ses_e885a55c3ffe1rjs8Yy9adBWB5`
+  (`replenish20-24-keybindreview`).
+- Six-frame theme comparison delivered ea2447df...; source-only user rail color
+  mismatch unresolved. Targeted paint precedence task `ses_e885a2ec7ffe7lODxGqg9sF317`
+  (`replenish20-25-railcolor`), no rendered parity claim.
+- Native model subsequence patch delivered 1e6f61cd...; ranking remains partial.
+  Independent review `ses_e8859f385ffex5tr5nm3wdMzNj`
+  (`replenish20-26-modelreview`).
+
+All new artifact directories are under the same exact approved external root
+`/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/`.
+No new build permission except existing compaction slot; canonical unchanged by
+workers. Twenty-assignment launched roster replenished one-for-one from notified
+completions; actual execution state only as harness reports, usage UNKNOWN.
+- Selection worker completed with incomplete private copy and no hashes/tests;
+  immediately resumed `ses_e88628775ffejvpYL51wPUGj0r` for bounded click-versus-drag
+  patch/tests and mandatory scratchpad/hash delivery in its existing grant.
+  No canonical changes or clipboard actions authorized; no progress claim for
+  incomplete edit. Replacement preserves one-for-one useful work replenishment.
+- Tool projection patch delivered `c344767dee824b5e105795e103e001efa7c39fd9ba06d848f99f3244f9abb420`,
+  unexecuted; worker replaced immediately by independent review
+  `ses_e8858fea9ffeItZ1GIXnRtNN88` (`replenish20-27-toolreview`). Full collapse/
+  expansion still requires renderer integration; no claim delivered.
+- Markdown private source delivered `31d87d1cc5d130dc77bdc0d11018bbcb56225cbc54f050a00d1b2077511ac4ac`,
+  unexecuted; replaced immediately by `ses_e8858daf1ffeMcw3IglEkcob6z`
+  (`replenish20-28-markdownreview`) checking actual live path as reported whitespace
+  defect is in native_transcript.rs but candidate changes native_view_chat.rs.
+  Both reviewers read-only canonical, unique external notes, no build authority.
+- Last-tab runner delivered cb3d8544... /1546cab4..., immediately replaced by
+  `ses_e8858252bffetdhVRmXDIJTTxm` independent fixture review (`replenish20-29-lastreview`).
+- Rail investigator source-level mismatch lacks render proof; replaced by
+  `ses_e8857f48affezRikwlDtb8zKGA` read-only scoped delta proposal
+  (`replenish20-30-raildelta`), no shared native_view write grant.
+- Metadata patch 18400f50... delivered; replaced by independent evaluator
+  `ses_e8857d060ffe9A8vfXrLsJ3ka7` (`replenish20-31-metadatareview`).
+- Coordinator independently verified six reported file hashes (metadata/model/
+  tool/markdown/two last-tab Python files) and AST parsed both Python files.
+  Receipt `replenish20-coordinator-receipts/delivered-hashes.json`. This is artifact
+  identity/syntax validation only, NOT compilation or installed acceptance.
+- Session-picker worker unfinished tests/notes: immediately resumed same session
+  `ses_e886287edffdTdyPnsKwXbJent` with <=9-tool bounded finishing assignment.
+- Daemon reconnect draft c4a03c77... delivered; immediately replaced by independent
+  ownership/identity evaluator `ses_e88573e98ffehVRZrhXqLXvrKZ`
+  (`replenish20-32-reconnectreview`). Must check stop helper doesn't kill daemon
+  before reconnect and descriptor proves same fixture daemon. UNEXECUTED.
+- Subsequent immediate replacements, all allowed Luna with private external grants:
+  selection delivered 597aa4b9... patch, evaluator `ses_e8856afdfffemWDOlBlNqWUKYZ`
+  (`replenish20-33-selectionreview`). Model limited subsequence APPROVE received
+  (not ranking parity); integration prep `ses_e88567d20ffeONwXBeqYt1BYV8`
+  (`replenish20-34-modelready`) awaits serialized validation, no new feature scope.
+- Keybind review NEEDS_FIX integral-decimal timeout; optimizer
+  `ses_e885601dbffed3XlyNjjkdvx2Z` (`replenish20-35-keybindfix`).
+- Markdown review NEEDS_FIX silently capped Unicode clusters / nonASCII fence
+  closer whitespace; optimizer `ses_e8855ce94ffeD3JygYoeiInSM4`
+  (`replenish20-36-markdownfix`). Original negatives remain blocking.
+- Corrected leader fixture 8b8edb4a... plus runner24ef9035... goes back to ORIGINAL
+  evaluator `ses_e88628729ffeN9jZVXc7Ku5Ac2` for exact v2 rereview.
+- Release runner unverified; evaluator/finisher `ses_e88551404ffeY9Wy3dwnWf2qFt`
+  (`replenish20-37-releasereview`) must use clean exact-commit archive, preserve
+  dirty canonical, verify helper flags/rpath, no release execution permission.
+- False settings=>appearance rejected, search-only correction not accepted yet.
+  Native settings state candidate `ses_e8854e5f4ffebTEg9A48uv1Yqo`
+  (`replenish20-38-settings`) owns NEW module only, shared runtime wiring ungranted.
+- Sessionpicker candidate delivered, evaluator `ses_e8854ba16ffeJfAWod5mqg7vcN`
+  (`replenish20-39-sessionreview`) computes missing exact hashes and checks callers.
+- Metadata review NEEDS_FIX 9-cell minimum/provider-boundary/Unicode/hitbox tests;
+  optimizer `ses_e88548dc1ffeVba5NM66ICKhgu` (`replenish20-40-metadatafix`).
+  Original 18400f50... not eligible; corrected exact candidate needs renewed review.
+All above replaced notified completions promptly; no old completed worker counted
+as running. Builds still only in existing compaction heavy slot. No private
+source-only approval represented as integrated or installed product PASS.
+- Model preparation found malformed hunkcounts in approved1e6f61cd... patch;
+  same `ses_e88567d20ffeONwXBeqYt1BYV8` resumed mechanical-only count repair,
+  preserveRustlogic, compute exact candidate hash. No valid applyproof/PASS yet.
+- Reconnect NEEDS_FIX same-descriptor/session assertion and swallowed cleanup;
+  optimizer `ses_e88538e04ffeTo8LSUzmaVNMcZ` (`replenish20-41-reconnectfix`).
+- Selection source APPROVE received; exact candidate preparation
+  `ses_e885318e7ffe05iOkeXN2T9wFo` (`replenish20-42-selectionready`) no test execution.
+- Corrected leader fixture/runnner original evaluator APPROVE exact8b8edb4a.../
+  24ef9035...; production minimal delta prep `ses_e8852daadffethin7HTqZjkwg4`
+  (`replenish20-43-leaderready`), shared source readonly proposal only.
+- Render worker delivered only scratchpad; immediately resumed
+  `ses_e8862880effdk2n0mBfIUi9H2k` bounded actualNativeView grid fixture,
+  no more bridge-only investigation. No six-Rust-screen capture delivered yet.
+- Decoder worker no patch; resumed `ses_e8862883fffebgXKQs6mA57Uap` bounded
+  private decoder/test completion. Functional keycodes must be verified, not
+  conflate AltUp/Down with ASCII Backspace/Tab. No product decoding claim yet.
+- Horizontal fixture worker no file; resumed `ses_e88628827ffeM293oX7j021F0x`
+  write-first finishing. Corrected its plan: ALL persisted sessions != OPEN tabs;
+  track open UUID set separately, preserve closed-session ledger. Duplicate Chat
+  labels cannot alone prove selected identity. No title-fixture acceptance yet.
+- Context worker misread mouse click as invented /contextclick command and found
+  it absent upstream; corrected/resumed `ses_e88628826ffeTUoylhew03fx8S`: actual
+  mouse hitrect plus /context LOCAL extension, no upstream-availability blocker.
+All completions above replenished promptly. No additional product commit from
+these handoffs; private deliverables need exact review and serialized verification.
+
+## User context screenshot requirement and continuing execution
+
+User explicitly supplied Claude Code `/context` text + screenshot and repeated
+"this is how I want my /context to be". Durable specification:
+`docs/CONTEXT_USAGE_UI_REQUIREMENTS.md`. This is the approved extension reference:
+colored grid, model/capacity headline, estimated categories, MCP tools/memory/
+skills trees and evidence-based suggestions. Actual request accounting required;
+inventory page estimates cannot masquerade as entire request. Unknowns remain
+unreported. Mouse context indicator and /context same display, no /contextclick.
+
+Three useful parallel assignments replace latest completions:
+- `ses_e884a754affe67GhqY705ThGFn`: private native_context renderer,
+  `context-user-01-render/`.
+- `ses_e884a7545ffenjzK3cSw9agMtH`: request-accounting/payload reuse and patch,
+  `context-user-02-accounting/`.
+- `ses_e884a7544ffeCnDf7sRAKY1LVL`: screenshot-derived acceptance fixtures,
+  `context-user-03-acceptance/`.
+All allowed Luna, private external outputs, no Cargo/PTY execution.
+
+Selection candidate independently compiled/tested **13 PASS** against clean
+archive c821e522; integrated exact reviewed bytes as
+`5cdbb9892a9087283c64da33d67c4a86718bf8ac`. Only native_text_selection.rs committed.
+No actual installed oc2 update. Exact-integrated selection + model/session
+candidate focused verification now runs in serialized background shell
+`sh_177b5fdae001QOMbncECpP8xw3`; no other worker has heavy validation grant.
+First archive attempt failed due old Python extractall(filter=...) BEFORE tests;
+corrected archive path validation and rerun passed 13 tests, no fabricated pass.
+
+Compaction v4 valid patch generated by coordinator with difflib, reverse apply
+check passed; patch `58dcc236d6923f37043498dea2593ef81e9b2e75d055fd81702929a6dd55c67a`
+under existing source/evidence/coordinator-v4/. Original evaluator APPROVE,
+second evaluator `ses_e88508938ffe0kMDgBYGW5pZTf` NEEDS_FIX separate-read race.
+V4 BLOCKED. Optimizer `ses_e88bd254fffeg0P1UZYgSytZK9` resumed v5 source-only;
+must bind captured end to exact precompute snapshot, not separate history read.
+
+Further prompt replacements (all allowed Luna unless noted):
+- Timeout schema conflict independently resolved via actual Effect isInt using
+  Number.isSafeInteger. Original evaluator corrected its incorrect v2 negative
+  and APPROVED exact77890eb9... in v3 note4041d5b1...; runtime still UNREADY.
+  Replenished by `ses_e884bd6baffebJWZ8BgsiPMxaR` keybind wiring proposal
+  (`replenish20-59-keybindwiring`).
+- `ses_e884ff79dffeh3gT15524CGoq5` rail review NEEDS_FIX double tab offset;
+  optimizer `ses_e88499c41ffe1pMOLZf8NGhobd` (`replenish20-61-railfix`).
+- `ses_e884ff717ffe6TFZw2ztOBMbT9` delivered approved session candidate applyproof;
+  replaced by `ses_e884d6b32ffeUGFhm6BTENdWbI` subagent regression
+  (`replenish20-55-subagentjourney`).
+- `ses_e884ff70cffe7DcBInKXDXXIyn` second-client key patch source approval is now
+  DISPUTED: later exactbase audit found producer finally overwrites success JSON,
+  leaving requests LIST and provider_requests INTEGER. Ubuntu auditor
+  `ses_e884c1d42ffepDh19UIOnCE4O3` correctly delivered NO_CHANGE evidence
+  be5cdb92.... Original keypatch evaluator `ses_e884e86e6ffeWECfkV0VCszXYh`
+  immediately reassigned final-write schema review; no consumer keypatch landed.
+- `ses_e884e86d6ffeGgeYT6l2prwmnJ` leader dispatch NEEDS_FIX stale control-byte
+  chord state; optimizer `ses_e884c1d16ffe9iSpZSH45Jw4Rf` (`replenish20-58-leadercancel`).
+- Reconnect v2 ebdaa9a7... cleanup corrected but original evaluator NEEDS_FIX:
+  reading descriptor doesn't prove second UI actually attached. Not accepted.
+- Last-tab installed runner static APPROVE cb3d8544.../1546cab4...; execution
+  preparer `ses_e884d6b47ffeGTG8YHz96F1rKS` returned wrong-path/access claims
+  and no artifact. No acceptance. Replaced capacity with requested context work.
+- Permission UI private patch b4a38831... delivered; security evaluator
+  `ses_e88499c77ffeO60qQusdfYE6y4` (`replenish20-60-approvalreview`).
+- Settings model e5d94586... NEEDS_FIX Text/OwnedText equality theme cycle;
+  no /settings feature advertisement; model and runtime remain unready.
+- Vertical v41 author resumed same session write-full-baseline finishing.
+- `ses_e884d6b42ffe0iw7eAv8GSoDfl` shell preview/persistence fixture
+  (`replenish20-54-shelljourney`) and `ses_e884d3d3bffelhHV5wUVadcIXU`
+  composer preservation fixture (`replenish20-56-composerjourney`) active at launch.
+Continue prompt replenishment on notifications. Token usage UNKNOWN; paused
+routes remain paused. Preserve dirty user web/server edits and daemon73389/4096.
+- Serialized shell completed: exact-integrated selection filter PASS on5cdbb989;
+  approved model and session candidate focused filters both exit0 in clean snapshot
+  `selection-integrated-model-session-381lsgqg/`, receipt.json. Model/session not
+  yet integrated; no installed acceptance. Heavy slot now released.
+- Shell fixture evidence shows !command executes, not preview; stream drop cancels
+  owner and remotePTY is model-only. Repair prep `ses_e884887edffeyyk7bYLyLcSb2N`
+  (`replenish20-62-shellownership`) replaces completed worker, no execution grant.
+- Second-client consumer keypatch original evaluator RETRACTED approval, now
+  NEEDS_FIX5ea88225...: finally writes requestsLIST/provider_requestsINTEGER.
+  Keep existing requests/exactfour assertion. No erroneous keypatch integrated.
+  Replaced with auth test integration prep `ses_e88484cb6ffe0wJhodFU8w7Syu`
+  (`replenish20-63-authedgeready`), no auth behavior or canonical changes granted.
+- Markdown corrected diff2ca68a2b... returned, original evaluator resumed
+  `ses_e8858daf1ffeMcw3IglEkcob6z` exact v2 source review, originalnegativeblocking.
