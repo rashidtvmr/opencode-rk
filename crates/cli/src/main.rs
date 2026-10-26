@@ -17,7 +17,15 @@ use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
 use opencode_rk_tools::registry::ToolRegistry;
 use serde::Serialize;
-use std::{env, fs, net::SocketAddr, path::PathBuf, str::FromStr, sync::Arc};
+use std::{
+    env,
+    fs,
+    io::Write,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    str::FromStr,
+    sync::Arc,
+};
 mod ci_output;
 mod ci_run;
 mod composer;
@@ -128,7 +136,9 @@ mod themes;
 mod title;
 mod transcript;
 mod tui_paint;
-const MODELS_DEV_URL: &str = "https://models.dev/api.json";
+const MODELS_DEV_URL: &str = "https://models.opencode.ai/api.json";
+const MAX_MODELS_CATALOG_BYTES: usize = 8 * 1024 * 1024;
+const MODELS_CATALOG_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 #[derive(Debug, Parser)]
 #[command(
     name = "oc2",
@@ -684,17 +694,12 @@ async fn session_command(
 async fn model_command(data: PathBuf, c: ModelCommand) -> Result<(), Box<dyn std::error::Error>> {
     match c {
         ModelCommand::Sync { url } => {
-            let bytes = reqwest::get(&url)
-                .await?
-                .error_for_status()?
-                .bytes()
-                .await?;
+            let bytes = fetch_catalog_bytes(&url).await?;
+            // Validate before touching the existing cache. A malformed or oversized
+            // response therefore cannot destroy the last known-good catalog.
             Catalog::from_models_dev_api_json(&bytes)?;
             let path = catalog_cache_path(&data);
-            if let Some(parent) = path.parent() {
-                fs::create_dir_all(parent)?;
-            }
-            fs::write(&path, &bytes)?;
+            write_catalog_atomically(&path, &bytes)?;
             println!("{}", path.display());
         }
         ModelCommand::Search {
@@ -844,8 +849,53 @@ fn open_web_browser(origin: &str, auth_token: &str) -> Result<(), Box<dyn std::e
         .spawn()?;
     Ok(())
 }
-fn catalog_cache_path(data: &std::path::Path) -> PathBuf {
+fn catalog_cache_path(data: &Path) -> PathBuf {
     data.join("catalog/models.dev.api.json")
+}
+
+/// Fetch one catalog with a total deadline and a hard response-body cap.
+/// The cap is enforced while streaming so a hostile endpoint cannot make the
+/// one-shot sync retain an unbounded body.
+async fn fetch_catalog_bytes(url: &str) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
+    tokio::time::timeout(MODELS_CATALOG_TIMEOUT, async {
+        let response = reqwest::Client::new().get(url).send().await?.error_for_status()?;
+        let announced = response.content_length().unwrap_or(0);
+        if announced > MAX_MODELS_CATALOG_BYTES as u64 {
+            return Err(format!("catalog response exceeds {} bytes", MAX_MODELS_CATALOG_BYTES).into());
+        }
+        let mut response = response;
+        let mut bytes = Vec::with_capacity(announced as usize);
+        while let Some(chunk) = response.chunk().await? {
+            if bytes.len().saturating_add(chunk.len()) > MAX_MODELS_CATALOG_BYTES {
+                return Err(format!("catalog response exceeds {} bytes", MAX_MODELS_CATALOG_BYTES).into());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        Ok(bytes)
+    })
+    .await
+    .map_err(|_| "catalog request timed out")?
+}
+
+/// Replace the catalog only after the complete validated body is durable in a
+/// same-directory temporary file. On fetch, parse, or write failure the old
+/// target remains untouched.
+fn write_catalog_atomically(path: &Path, bytes: &[u8]) -> Result<(), Box<dyn std::error::Error>> {
+    let parent = path.parent().ok_or("catalog path has no parent")?;
+    fs::create_dir_all(parent)?;
+    let temp = parent.join(format!(".models.dev.api.json.{}.tmp", std::process::id()));
+    let mut file = fs::OpenOptions::new().write(true).create_new(true).open(&temp)?;
+    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        drop(file);
+        fs::rename(&temp, path)?;
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temp);
+    }
+    result
 }
 fn resolve_data_dir(override_dir: Option<PathBuf>) -> Result<PathBuf, Box<dyn std::error::Error>> {
     if let Some(path) = override_dir {
