@@ -2585,6 +2585,35 @@ fn configured_command_rows(value: &serde_json::Value) -> Result<Vec<crate::nativ
 struct PendingPermission {
     id: String,
     title: String,
+    persistent_allowed: bool,
+}
+
+#[cfg(feature = "native")]
+fn permission_save_eligible(save: Option<&serde_json::Value>) -> bool {
+    let Some(serde_json::Value::Array(values)) = save else {
+        return false;
+    };
+    !values.is_empty()
+        && values
+            .iter()
+            .all(serde_json::Value::is_string)
+}
+
+#[cfg(all(test, feature = "native"))]
+mod permission_save_eligible_tests {
+    use super::permission_save_eligible;
+    use serde_json::json;
+
+    #[test]
+    fn accepts_only_nonempty_all_string_arrays() {
+        assert!(!permission_save_eligible(None));
+        assert!(!permission_save_eligible(Some(&json!(null))));
+        assert!(!permission_save_eligible(Some(&json!("bash"))));
+        assert!(!permission_save_eligible(Some(&json!([]))));
+        assert!(!permission_save_eligible(Some(&json!(["bash", 1]))));
+        assert!(!permission_save_eligible(Some(&json!([{}]))));
+        assert!(permission_save_eligible(Some(&json!(["bash"]))));
+    }
 }
 
 #[cfg(feature = "native")]
@@ -2622,9 +2651,15 @@ fn fetch_permission(
             .filter(|character| !character.is_control())
             .take(160)
             .collect();
+        // Match the upstream schema (`save?: string[]`) rather than merely
+        // checking that an arbitrary JSON array is non-empty.  Malformed,
+        // absent, null, scalar, empty, mixed, and object arrays are all
+        // ineligible for a persistent grant.
+        let persistent_allowed = permission_save_eligible(entry.get("save"));
         return Ok(Some(PendingPermission {
             id: id.to_owned(),
             title,
+            persistent_allowed,
         }));
     }
     Ok(None)
@@ -4168,10 +4203,11 @@ fn native_loop(
                     }
                     Ok(Some(pending)) => {
                         if !view.dialogs.is_open() {
-                            let result = view.dialogs.open_permission(
+                            let result = view.dialogs.open_permission_with_persistent(
                                 pending.id,
                                 snapshot.session_id.clone(),
                                 pending.title,
+                                pending.persistent_allowed,
                             );
                             match result {
                                 Ok(()) => {

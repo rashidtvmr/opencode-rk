@@ -584,12 +584,41 @@ impl DialogView {
         session_id: impl Into<String>,
         title: impl Into<String>,
     ) -> Result<(), DialogError> {
+        // The compatibility helper is retained for callers that do not have
+        // request metadata.  The real permission poll uses the explicit
+        // save-aware helper below; keeping this default enabled preserves the
+        // long-standing typed-dialog contract for local/test callers.
+        self.open_permission_with_persistent(request_id, session_id, title, true)
+    }
+
+    /// Open a permission prompt with the persistent-grant choice controlled
+    /// by the backend request's validated `save` capability.  `false` must
+    /// never remove either scoped deny choice or the session-scoped allow.
+    pub fn open_permission_with_persistent(
+        &mut self,
+        request_id: impl Into<String>,
+        session_id: impl Into<String>,
+        title: impl Into<String>,
+        persistent_allowed: bool,
+    ) -> Result<(), DialogError> {
+        let mut choices = vec![
+            "Allow once".to_owned(),
+            "Deny once".to_owned(),
+            "Allow for this session".to_owned(),
+        ];
+        if persistent_allowed {
+            choices.push("Always allow".to_owned());
+        }
+        choices.extend([
+            "Deny for this session".to_owned(),
+            "Always deny".to_owned(),
+        ]);
         self.open_request(DialogRequest {
             id: request_id.into(),
             session_id: session_id.into(),
             kind: DialogKind::Permission,
             title: title.into(),
-            choices: vec!["Allow once", "Deny once", "Allow for this session", "Always allow", "Deny for this session", "Always deny"].into_iter().map(str::to_owned).collect(),
+            choices,
             message: None,
             disabled: Vec::new(),
             error: None,
@@ -973,6 +1002,22 @@ mod scoped_input_tests {
             }
             assert!(!dialog.select(0));
         }
+    }
+
+    #[test]
+    fn save_ineligible_prompt_keeps_only_scoped_and_deny_choices() {
+        let mut dialog = DialogView::new();
+        dialog.open_permission_with_persistent("request", "session", "permission", false).unwrap();
+        let rows = dialog.render(80, 24);
+        assert!(rows.iter().any(|row| row.contains("Allow once")));
+        assert!(rows.iter().any(|row| row.contains("Allow for this session")));
+        assert!(rows.iter().any(|row| row.contains("Deny for this session")));
+        assert!(rows.iter().any(|row| row.contains("Always deny")));
+        assert!(!rows.iter().any(|row| row.contains("Always allow")));
+        assert!(dialog.select(3));
+        assert!(matches!(dialog.answer().unwrap(), DecisionIntent::ScopedPermission {
+            allow: false, persistent: false, ..
+        }));
     }
     #[test]
     fn mouse_rows_match_rendered_choices_at_compact_and_large_sizes() {
