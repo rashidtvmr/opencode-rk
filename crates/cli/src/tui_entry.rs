@@ -4731,6 +4731,25 @@ fn native_loop(
                         }
                     }
                 }
+                // Tabs were resolved first. Send clicks were normalized before
+                // this mouse match, and the explicit rect guard keeps the two targets disjoint.
+                if !page_open
+                    && !view.dialogs.intercepts_input()
+                    && !permission_editor.open
+                    && !appearance.open
+                    && !children_panel.open
+                    && !help_open
+                    && !view.command_palette_open()
+                    && matches!(dialog, native_setup::Dialog::None)
+                    && import_dialog.as_ref().is_none_or(|import| !import.is_open())
+                    && kind == 0 && modifiers == 0
+                    && !view.send_button_hit(&draft, x, y)
+                    && view.context_usage_hit(x, y)
+                {
+                    view.open_context_usage();
+                    needs_paint = true;
+                    continue;
+                }
                 if view.dialogs.intercepts_input() {
                     let modal = view.modal_presentation();
                     let row = y.checked_sub(modal.content_y).map(usize::from);

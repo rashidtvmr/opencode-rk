@@ -239,6 +239,15 @@ impl StatusView {
         self.session.as_deref()
     }
 
+    /// Last confirmed provider usage label, absent until measured.
+    pub fn context_usage_label(&self) -> Option<String> {
+        let (used, window) = self.context?;
+        Some(match window {
+            Some(window) => format!("Context Usage {used}/{window}"),
+            None => format!("Context Usage {used} tokens"),
+        })
+    }
+
     /// Upstream session sidebar content, separate from the diagnostic Status
     /// page. Session identity comes only from the accepted binding; the MCP
     /// section is omitted for an empty registry (sidebar/mcp.tsx:30).

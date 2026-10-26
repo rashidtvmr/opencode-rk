@@ -119,6 +119,8 @@ pub struct NativeView {
     dialog_size: DialogSize,
     composer_agent: Option<String>,
     send_pointer: Option<(u16, u16)>,
+    /// Bounds from the same frame that paints the Context Usage footer label.
+    context_usage_hit: Option<(u16, u16, u16)>,
     composer_variant: Option<String>,
     composer_model: Option<(String, String)>,
     composer_effort: Option<String>,
@@ -566,6 +568,7 @@ impl NativeView {
             dialog_size: DialogSize::Medium,
             composer_agent: None,
             send_pointer: None,
+            context_usage_hit: None,
             composer_variant: None,
             composer_model: None,
             composer_effort: None,
@@ -589,6 +592,7 @@ impl NativeView {
     pub fn set_tab_reservation(&mut self, reservation: TabReservation) {
         if self.tab_reservation != reservation {
             self.mcp_hit.clear();
+            self.context_usage_hit = None;
         }
         self.tab_reservation = reservation;
     }
@@ -600,6 +604,7 @@ impl NativeView {
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.mcp_hit.clear();
+        self.context_usage_hit = None;
         self.sidebar_content_height = 0;
         self.layout = Layout::new(cols, rows);
     }
@@ -1072,6 +1077,25 @@ impl NativeView {
             .is_some_and(|(left, row, width)| {
                 y == row && x >= left && x < left.saturating_add(width)
             })
+    }
+
+    /// Actual Context Usage footer cells, absent until a matching frame renders.
+    pub fn context_usage_region(&self) -> Option<(u16, u16, u16)> {
+        self.context_usage_hit
+    }
+
+    /// Admit a click only within the exact last-rendered usage label.
+    pub fn context_usage_hit(&self, x: u16, y: u16) -> bool {
+        !self.dialogs.intercepts_input()
+            && !self.command_palette_open()
+            && self.context_usage_hit.is_some_and(|(left, row, width)| {
+                width > 0 && y == row && x >= left && x < left.saturating_add(width)
+            })
+    }
+
+    /// Same destination as `/context`; does not mutate composer or binding state.
+    pub fn open_context_usage(&mut self) {
+        self.open_page(Page::Context);
     }
 
     pub fn set_send_pointer(&mut self, draft: &str, x: u16, y: u16) -> bool {
@@ -1819,6 +1843,7 @@ impl NativeView {
         self.frame_busy = false;
         self.chat_row_classes.clear();
         self.chat_text_bounds.clear();
+        self.context_usage_hit = None;
         self.ui_regions.clear();
         self.modal_underlay_rows.clear();
         let height = self.render_height();
@@ -2444,16 +2469,19 @@ impl NativeView {
             // `busy` is the authoritative provider-turn fact.  Keep it on
             // the footer even when a modal/overlay is present; `frame_busy`
             // is only the separate center-composer suppression projection.
-            let footer = self.footer_line(self.layout.cols, busy);
+            let (footer, context_hit) = self.footer_line(self.layout.cols, busy);
             frame[height - 1] = footer;
+            self.context_usage_hit = context_hit.map(|(left, width)| {
+                (left, height.saturating_sub(1) as u16, width)
+            });
         }
         frame
     }
 
-    fn footer_line(&self, width: u16, loading: bool) -> String {
+    fn footer_line(&self, width: u16, loading: bool) -> (String, Option<(u16, u16)>) {
         let inner = width.saturating_sub(4);
         if inner == 0 {
-            return padded("", width);
+            return (padded("", width), None);
         }
         // Active Thinking is rendered by the bounded conversation header
         // (`native_view_chat::render_header`), before sidebar composition. The
@@ -2475,24 +2503,54 @@ impl NativeView {
                 .count();
             right = format!("⊙ {connected} MCP /status  {right}");
         }
-        let right_width = right.chars().count().min(usize::from(inner));
+        let context_label = self
+            .status
+            .context_usage_label()
+            .filter(|label| label.chars().count().saturating_add(1) <= usize::from(inner));
+        let context_width = context_label
+            .as_ref()
+            .map_or(0, |label| label.chars().count()) as u16;
+        let context_gap = u16::from(context_width > 0);
+        let right_width = right
+            .chars()
+            .count()
+            .min(usize::from(inner.saturating_sub(context_width).saturating_sub(context_gap)))
+            as u16;
         let left_width = usize::from(inner)
-            .saturating_sub(right_width)
+            .saturating_sub(usize::from(right_width))
+            .saturating_sub(usize::from(context_width))
+            .saturating_sub(usize::from(context_gap))
             .saturating_sub(1);
-        let gap = usize::from(inner).saturating_sub(left_width + right_width);
+        let gap = usize::from(inner).saturating_sub(
+            left_width
+                + usize::from(right_width)
+                + usize::from(context_width)
+                + usize::from(context_gap),
+        );
+        let padding = (width / 2).min(2);
+        let context_hit = (context_width > 0).then_some((
+            padding.saturating_add(inner).saturating_sub(context_width),
+            context_width,
+        ));
         let directory = fit(
             &footer_directory(&self.workspace, left_width as u16),
             left_width as u16,
         );
-        padded(
+        let footer = padded(
             &format!(
-                "{}{}{}",
+                "{}{}{}{}{}",
                 directory,
                 " ".repeat(gap),
-                fit(&right, right_width as u16)
+                fit(&right, right_width),
+                " ".repeat(usize::from(context_gap)),
+                context_label
+                    .as_ref()
+                    .map(|label| fit(label, context_width))
+                    .unwrap_or_default()
             ),
             width,
-        )
+        );
+        (footer, context_hit)
     }
 
     // home.tsx: two flex-grow spacers, four fixed rows before the logo,
