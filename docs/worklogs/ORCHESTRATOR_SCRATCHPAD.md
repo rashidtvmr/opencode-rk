@@ -477,6 +477,84 @@ original and require a genuinely external absolute scratchpad on reassignment.
   research. Horizontalrepair still incomplete; no path/ACL diagnosis accepted
   from misspelled-directory errors. Model-label-only partial must not be called
   ledger identity/installed acceptance.
+- Leader evaluator `ses_e889cf0c2ffeB1ZYzmZezNb3R3` statically approved preserved
+  patch (reported hash prefix8aaf4a46), but no compilation/execution. Its phrase
+  ready-for-integration is premature. Coordinator found new tests call existing
+  select/close transition helpers or pure tab lookups rather than new Ctrl-X
+  dispatch, so they may pass pre-fix and fail to detect missing wiring. Same
+  evaluator reassigned to assess this gap and propose actual dispatch regression.
+  Static production approval retained, test adequacy unresolved; integration held
+  for focused execution and meaningful regression. Heavy slot still compaction.
+- Browser implementation delivered two private draft modules but no wiring or
+  executed tests. Coordinator inspected concrete blockers: callback spawn drops
+  listener/cancelreceiver; HTTPread_line unbounded/no deadline; provider accesses
+  private AuthTransport.client; direct ring dependency absent. Mark UNREADY and
+  assigned sameworker to repair owned bounded runtime/interfaces first. Allowed
+  PRIVATE providerCargo.toml ring dependency proposal only, no canonical changes.
+  No registration until listener exists before authorizeURL, cancellation works,
+  exchange/persistence flow wired and independently verified.
+- Last-tab v41 author again delivered noartifact. Narrowed to ONEactual function
+  plugged intoexistingJourneyharness, targetedreadsonly/writeearly. Corrected its
+  proposed assertion: new session receivingnewprompt must contain thatprompt,
+  notremainempty. Oldsessionhistorymustremainunchanged. No newbrowser/provider
+  harness rewrite; no execution authorized during compaction slot.
+- Compaction v3 author returned NEEDS_FIX, nofinalpatch/hashmanifest. Production
+  draft reconciles live suffix into held checkpoint to preserve upstream reuse.
+  Coordinator inspected actual test lines427-432: it still requires original
+  summary request to CONTAIN tail inserted AFTER requestcapture, a contradictory
+  v2resummaryexpectation. Correct v3 temporalcontract: summaryrequest excludes
+  newtail; checkpointretained andforegroundcontinuation include newtail; exactly
+  one summary reused. Author reassigned to freezecorrectedtest-onlyRED, retain
+  strongcontentassertions, runbaseRED andcandidateboth-testsGREEN withhashes.
+  Typedtoolpairtail remains unproven; don't claim User regression coversit.
+  Heavy slot remains exclusively Luna; no integration authorized yet.
+- Compaction v3 final artifacts now exist. Coordinator verified candidate patch
+  SHA256 `0dd7ca4f87bb9cb7ef3d0ea58b3bf756886468a60fe952d1aa9be18af419a7cb`,
+  test-only patch `cbb3062f37f623af0dd72e710ce8d2b1ab2f80ac37076cd708953d2a2956852f`,
+  manifest `4130707bd0c4747455bfdee2cb78cc05aaecea83f0bb66c549d95ec3240eab9b`.
+  Actualsourcehashes match worker finalproduction69f9fa23... andteste9095767... .
+  Worker reports baseRED andcandidate2PASS withonesummaryreuse, tooltailuntested.
+  Original evaluator `ses_e88a214ffffeUUkvoFWaknNEvj` and second independent
+  `ses_e88874839ffe8MSRh1o60l6TBG` reviewing EXACTv3hash. Content-only overlap
+  dedup deserves scrutiny for repeatedmessages; no integration before verdicts.
+- Luna released heavy slot. Coordinator now runs scoped macOS PID RED/GREEN
+  in existing private `context-exact-integrated-jjhruynv/` tree, exact reviewed
+  RED/GREEN patch hashes checked. Shell `sh_177790226001Bk7t3T7nZ2vxGk`, logs
+  `pid-{red,green}.{stdout,stderr}`, sourcehashes/commands/exitcodes in PID artifact
+  `coordinator-test-receipt.json`. No canonicalcode/daemon/userDB touched.
+- PID initial run compiled: base9PASS/2FAIL; candidate10PASS/1FAIL. Real
+  current-process liveness regression corrected by production fix, but descriptor
+  test wrote data/backend.json instead of actual data/runtime/backend.json,
+  causing Absent in BOTHphases. Coordinator repaired private fixture using
+  `DaemonPaths::for_data_dir(...).descriptor` and parentdirectory creation;
+  candidate rerun shell `sh_17779c4d5001f9EJPDYkRRSQJk`, logs
+  `pid-corrected-green.*`. No PASSclaim until completion. Corrected fixture
+  invalidates previous testhash and requires renewedreview plus cleanRED.
+- Verticalfixture author again returned NOartifact and repeated misspelled
+  `/var/...dj81nc_j2qyp2...` path/ACLclaims. Assignment stopped; no further
+  research pass. Correct outputdirectory remains coordinatorverified writable at
+  exact `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/opencode/...`.
+  Verticalfixture implementation still incomplete; authorreportnotacceptance.
+- Corrected PID regression now has meaningful actual RED/GREEN: baseproduction
+  withcorrectdescriptorfixture compiled9PASS/2FAIL (livePID+discoverReusable),
+  fixedcandidatefullCLIsuite **851PASS/0FAIL**. Logs inprivateCLI tree
+  `pid-corrected-red.stdout`, `pid-final-full-cli.stdout`. Candidate+hashes+commands
+  atPIDroot `coordinator-final.{patch,receipt.json}` and
+  `coordinator-final-candidate.rs`. Correctedfixturegreen11PASS includes app002
+  selector'sexistingtests aswellas4newtests; don'tclaim11newtests.
+  Two exactcandidateindependentevaluators assigned beforeintegration:
+  `ses_e88b92804ffeagmejD1Ya47dQS` (correctness/security) and
+  `ses_e88852fd1ffexRUvwa4HvtugzG` (secondreview). Candidateonlynotintegrated;
+  installedsecondclientEOFresolutionstillunproven. Heavy slotreleased.
+- Leader evaluator confirmed all five new tests are NOT_REGRESSION: they bypass
+  byte dispatch and pass baseproduction. Explicit NEEDS_FIX coverage verdict,
+  static production approval only. Note SHA256
+  `29214f29c9d12098200e2be86d2601e34bd4f57c25f173d79b18c5babaf12c2b` at
+  `.../T/opencode/leader-v41-review-recovery-20261026/scratchpad.md`.
+  New private author `ses_e888ddac0ffeu32szuvXRKUZQO` assigned actual live-used
+  dispatch seam plus byte/installed regression, external artifacts only. No
+  source-text assertions or duplicated test-only matching accepted. Candidate
+  changes require new independent review; no integration/acceptance yet.
 
 - Leader author `ses_e88d5600fffepyWKGmG4cZKga7` wrote canonical
   `crates/cli/src/tui_entry.rs` contrary to its private-copy grant. Actual diff
@@ -513,3 +591,131 @@ original and require a genuinely external absolute scratchpad on reassignment.
   concurrency is not verified at 20; route availability and incomplete handoffs
   constrain replenishment. Record launches/completions rather than claiming all
   twenty original assignments remain active.
+
+## Latest verified delivery status — PID and TUI
+
+- MacOS PID final candidate: private artifact directory
+  `.../T/opencode/macos-pid-v41-recovery-20261026/`,
+  `coordinator-final.patch` SHA256
+  `d76416947b6fae48e52e17d663505882bc986323c7bae36e405f86734dbff3ee`,
+  candidate source SHA256
+  `2f4b378f06aec9cb6c8f2c8649c71c89ef1dbee4a6fc437d9dbeaf507dc6d535`.
+  Corrected descriptor fixture uses production DaemonPaths runtime location.
+  Base production compiled with two actual failures; fixed candidate passed
+  **851 CLI tests**, raw logs `context-exact-integrated-jjhruynv/pid-corrected-red.stdout`
+  and `pid-final-full-cli.stdout`. Second evaluator
+  `ses_e88852fd1ffexRUvwa4HvtugzG` APPROVED exact hash. First correctness/security
+  evaluator `ses_e88b92804ffeagmejD1Ya47dQS` still pending. No integration or
+  installed second-client acceptance yet.
+- User explicitly challenged lack of installed visible progress and complete
+  OpenCode TUI parity. Acknowledged complete pinned V2 TUI is NOT delivered and
+  real installed oc2 has NOT been updated. Existing upstream source, scratchpads
+  and six rendered reference captures suffice for concrete Rust comparison;
+  avoid another broad research cycle. CLI test counts do not prove visual parity.
+- Compaction v3 exact patch SHA256
+  `0dd7ca4f87bb9cb7ef3d0ea58b3bf756886468a60fe952d1aa9be18af419a7cb`
+  under Luna private source/evidence/ is undergoing two independent reviews
+  (`ses_e88a214ffffeUUkvoFWaknNEvj`, `ses_e88874839ffe8MSRh1o60l6TBG`).
+  Reported 2 focused PASS preserving one-summary reuse. Content-only overlap
+  dedup requires scrutiny for legitimate repeated message loss. Not integrated.
+- Leader implementation worker returned byte-identical old source706a63b0...,
+  unchanged seam tests plus documentation, NOT requested coverage repair.
+  Rework loop stopped. Coordinator wrote actual private Python Journey function
+  `.../T/opencode/leader-installed-coordinator-20261026/native_leader_journey.py`,
+  SHA256 `e025bf5774e959a1c6e349cb2d43da42c9a7fc87ae036c85731a005c1acc57fa`.
+  Feeds real Ctrl-X+1/2/w bytes, asserts authenticated session selection through
+  existing screen identity predicate, last-tabHome, durable session preservation,
+  no provider calls and daemon alive. ASTsyntaxPASS only; needs runner integration,
+  independent fixture review and actual base/candidate installed execution. No
+  product acceptance or canonical product edits from this test authoring.
+- Browser author returned another incomplete draft: private provider transport
+  and redactedPKCE changes reported, but callback accept-loop/completion wiring,
+  regressiontests and finalmanifest remain missing. No compilation/execution.
+  FREEZE browser draft under `.../T/opencode/openai-browser-implementation-v41-20261026/`;
+  preserve files, do not integrate partial registration or advertise support.
+  No further OAuth rework assignment launched. Prioritize user's repeatedly
+  requested installed TUI parity and delivery over expanding this auth draft.
+- Original compaction evaluator returned supportive exactv3analysis but no
+  explicit approval verdict; do not translate supportive prose into acceptance.
+  Same evaluator asked for concise APPROVE/NEEDS_FIX with concrete orderedhistory
+  proof for overlap/repeatedmessage multiplicity and fullrequestbounds. Second
+  evaluator still pending; candidate remains private despite focused2PASS.
+- PID security evaluator found valid v1missingnonUnixcfg concern: explicit
+  NEEDS_FIX blocks old2f4b...candidate despite secondapproval. Coordinator added
+  exactserver#[cfg(unix)] nativeprobe and#[cfg(not(unix))] conservativepositivePID
+  fallback inPRIVATEtree, retainingzero/outofi32guards. New immutable
+  `coordinator-v2.{patch,rs}` (candidate file namedcoordinator-v2-candidate.rs)
+  andreceipt inPIDartifactroot. ActualfullCLIrerunexit0 at
+  `context-exact-integrated-jjhruynv/pid-v2-full-cli.stdout`; noWindowsbuildclaim.
+  Bothoriginalevaluators reassigned toexactv2; oldapprovalnottransferred.
+- Compaction second reviewer `ses_e88874839ffe8MSRh1o60l6TBG` explicitly
+  APPROVED exactv3. Original evaluator still returned truncated reasoning with
+  no verdict; requested bounded <=180worddecision without more broadresearch.
+  JSON equality by itself is not message-identity proof; retained/suffix ordering
+  invariant must justify multiplicity preservation. No integration yet.
+- PID original evaluator returnedAPPROVE but cited stale v1hashes. Actual v2
+  receipt candidate `fe3076ff93da5db8ae37e39cb1c8de241ac07a85a9928bde4bd5ce5081017362`,
+  patch `103245c4cd9aaf5d3a62d925b6699d1d6b6669579ed7d316931c8b779a4c9273`.
+  Reassigned onlyhashidentitycorrection+explicitverdict, max3tools, no repeated
+  research. Do not silently reinterpret approvalof2f4b...asapprovaloffe3076... .
+- PID second evaluator explicitly APPROVED correct v2fe3076.../103245... hashes.
+  Coordinatorverified candidate, patch and actualreviewnoteSHA256
+  `51e2fba8f168d63b1c513e8a0d5a36838e2f08308b94a368e39978c5e6740bf9` at
+  `.../T/opencode/pid-final-secondreview-20261026/v2-review.md`.
+  FullCLI851PASS confirmed. Onlyoriginalsecurityevaluator'salreadyrequested
+  exacthashcorrection remains before scopedintegration; do not launch another
+  broadreview orholdcandidateforunrelatedfeatures afterthatclears.
+- PID firstsecurityevaluator explicitly corrected approval to v2fe3076... and
+  patch103245...; both independent approvals now cover SAMEcandidate. Coordinator
+  applied exactreviewedbytes via scopedpatch, hashverified, committed ONLY
+  `crates/cli/src/daemon_client.rs` as
+  **`c821e522968217a5242e6c9da1eccc0068f2255c`** on main-v2. Integrationreceipt
+  externalPIDroot `integration-v2-receipt.json`. CandidateCLI851PASS; exact
+  integratedrun/installedsecondclientjourney still pending. RealuserbinaryNOT
+  updated bythiscommit. Otherworkingfiles preserved; command-localhookoverride
+  under Phase1instructionusedonlyforthisscopedcommit.
+- Compaction originalevaluator explicitly NEEDS_FIX v3content-overlapidentity;
+  secondapprovalcannotoutvote. Luna assigned v4identity/captured-endrepair plus
+  repeatedidenticalrowregression, owns serializedheavy slot again. No compaction
+  integration authorized; preservev3negativeuntilnewexactcandidate reviewed.
+
+## Continuous delegation replenished — 20 new launches
+
+User again required continuous20+usefulassignments. Launched20independent
+backgroundassignments below on allowed routes: sixvyce-deepseek-v41 (within8cap)
+and fourteen9router-luna-free. Oldercompletedworkers are NOT counted as active.
+Launchreceipts are not proof allwillremainrunning; replenish oncompletion/error
+withpendingindependentwork ratherthanwaitingforbatch. All use committedbase
+`c821e522968217a5242e6c9da1eccc0068f2255c`, selectedupstream450e7b9, role-first
+prompts, privateexternalartifactgrants andscratchpads. NOworkerbuild/PTY authority;
+compaction'sexistingheavy slot remains serialized. Token telemetry UNKNOWN;
+GLM/TokenHarbor/combinedroutes remain paused per recorded failures.
+
+| Session | Role/deliverable | Route |
+| --- | --- | --- |
+| `ses_e8862883fffebgXKQs6mA57Uap` | Decoder tab-key patch/tests | v41 |
+| `ses_e88628838ffeHyCY0ZRyQ648UB` | Vertical installed fixture | v41 |
+| `ses_e88628827ffeM293oX7j021F0x` | Horizontal installed fixture | v41 |
+| `ses_e88628826ffeTUoylhew03fx8S` | Context click/slash journey | v41 |
+| `ses_e8862880effer444k32wVdS8hd` | Last-tab Home fresh-session fix | v41 |
+| `ses_e8862880effdk2n0mBfIUi9H2k` | Rust actual-render capture fixture | v41 |
+| `ses_e8862880dffeZL1mol1A759VAM` | Composer metadata parity patch | luna |
+| `ses_e88628805ffeuX2ybBvbp6XOy3` | Command palette parity patch | luna |
+| `ses_e886287fbffe9wj9n3E5mqJ6W2` | Model picker parity patch | luna |
+| `ses_e886287edffenGd9b3jBds8IC9` | Approval dialog parity patch | luna |
+| `ses_e886287edffdTdyPnsKwXbJent` | Session picker parity patch | luna |
+| `ses_e88628788ffeHlnA7H0lbgsfrO` | Tool transcript projection patch | luna |
+| `ses_e88628777ffeMqGnEa0QC3PCS4` | Markdown render parity patch | luna |
+| `ses_e88628775ffejvpYL51wPUGj0r` | Text selection parity patch | luna |
+| `ses_e8862872cffeIEE4c80F3IHHxn` | Actual reference theme differential | luna |
+| `ses_e8862872bffenCeesh7rgZPA24` | Exact-release executable runner | luna |
+| `ses_e8862872bffdQ62javDqxVyLnk` | Bounded TUI acceptance matrix | luna |
+| `ses_e8862872afferJ5qk8Sazrza40` | Keybind override parser candidate | luna |
+| `ses_e88628729ffeN9jZVXc7Ku5Ac2` | Real-byte leader journey review | luna |
+| `ses_e88628728ffew6zpoCk0VjIfFY` | Last-tab installed runner completion | luna |
+
+Privateoutputs: exact absolute approved macOS temp root plus
+`replenish20-01-decoder/` through `replenish20-20-lastrunner/` as named inprompts.
+Workers must deliveractualpatches/scripts/hashes, notanotherbroadresearchsummary.
+Unexpecteduncommittedweb/serverauth/lib/web_distchanges are preserved; workers
+may not overwrite them or claim them as reviewedintegratedcode.
