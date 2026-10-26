@@ -40,6 +40,34 @@ pub struct UiPreferences {
 }
 
 impl UiPreferences {
+    pub fn tab_orientation(
+        cli_path: Option<&Path>,
+        inline: Option<&str>,
+    ) -> (crate::native_navigation::TabOrientation, Vec<String>) {
+        let mut orientation = crate::native_navigation::TabOrientation::Horizontal;
+        let mut diagnostics = Vec::new();
+        if let Some(path) = cli_path {
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            match budget.read(path, MAX_CONFIG_BYTES, "CLI config") {
+                Ok(Some(text)) => match parse_cli_tab_orientation(&text) {
+                    Ok(Some(layout)) => orientation = layout,
+                    Ok(None) => {}
+                    Err(()) => diagnostics.push("invalid global CLI tab configuration".into()),
+                },
+                Ok(None) => {}
+                Err(_) => diagnostics.push("unable to read bounded global CLI configuration".into()),
+            }
+        }
+        if let Some(text) = inline.filter(|text| !text.is_empty()) {
+            match parse_cli_tab_orientation(text) {
+                Ok(Some(layout)) => orientation = layout,
+                Ok(None) => {}
+                Err(()) => diagnostics.push("invalid or oversized inline CLI tab configuration".into()),
+            }
+        }
+        (orientation, diagnostics)
+    }
+
     pub fn appearance(state_path: &Path) -> Result<crate::native_box_style::BoxAppearance, String> {
         let state = read_state(state_path)?;
         state
@@ -565,17 +593,22 @@ mod anchored_race_tests {
         symlink(&target, &path).unwrap();
         assert!(location.write(value).is_err());
         assert_eq!(fs::read(&target).unwrap(), bytes);
-        assert!(
-            fs::symlink_metadata(&path)
-                .unwrap()
-                .file_type()
-                .is_symlink()
-        );
+        assert!(fs::symlink_metadata(&path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
     }
 }
 
 /// Strip JSONC comments and trailing commas without interpreting comment-like
 /// characters inside JSON strings. `serde_json` remains the sole JSON parser.
+/// Parse one OpenCode TUI JSON/JSONC document with the same bounded parser
+/// used by preference loading. Callers must not use plain JSON parsing here.
+pub(crate) fn parse_jsonc_value(input: &str) -> Result<Value, String> {
+    let cleaned = strip_jsonc(input)?;
+    serde_json::from_str(&cleaned).map_err(|_| "invalid JSONC configuration".into())
+}
+
 fn strip_jsonc(input: &str) -> Result<String, String> {
     let b = input.as_bytes();
     let mut out = Vec::with_capacity(b.len());
@@ -663,6 +696,98 @@ fn strip_jsonc(input: &str) -> Result<String, String> {
         return Err("unterminated JSON string".into());
     }
     String::from_utf8(out).map_err(|_| "invalid UTF-8 in JSONC".into())
+}
+
+fn parse_cli_tab_orientation(text: &str) -> Result<Option<crate::native_navigation::TabOrientation>, ()> {
+    if text.len() > MAX_CONFIG_BYTES {
+        return Err(());
+    }
+    let value: Value = serde_json::from_str(&strip_jsonc(text).map_err(|_| ())?).map_err(|_| ())?;
+    let object = value.as_object().ok_or(())?;
+    let Some(tabs) = object.get("tabs") else { return Ok(None) };
+    let tabs = tabs.as_object().ok_or(())?;
+    match tabs.get("layout") {
+        None => Ok(None),
+        Some(Value::String(layout)) if layout == "horizontal" => Ok(Some(crate::native_navigation::TabOrientation::Horizontal)),
+        Some(Value::String(layout)) if layout == "vertical" => Ok(Some(crate::native_navigation::TabOrientation::Vertical)),
+        Some(_) => Err(()),
+    }
+}
+
+#[cfg(test)]
+mod tab_config_tests {
+    use super::*;
+    use crate::native_navigation::TabOrientation;
+
+    #[test]
+    fn global_cli_layout_drives_navigation_orientation_without_rewriting_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        let original = "{ // keep this comment\n\"tabs\": {\"layout\": \"vertical\",}, \"unrelated\": 7 }\n";
+        fs::write(&path, original).unwrap();
+        let (orientation, diagnostics) = UiPreferences::tab_orientation(Some(&path), None);
+        let mut navigation = crate::native_navigation::NavigationState::new();
+        navigation.set_orientation(orientation);
+        assert_eq!(navigation.orientation(), TabOrientation::Vertical);
+        assert!(diagnostics.is_empty());
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+
+    #[test]
+    fn inline_layout_overrides_global_but_absent_inline_layout_preserves_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"tabs":{"layout":"vertical"}}"#).unwrap();
+        assert_eq!(UiPreferences::tab_orientation(Some(&path), Some(r#"{"tabs":{"layout":"horizontal"}}"#)).0, TabOrientation::Horizontal);
+        assert_eq!(UiPreferences::tab_orientation(Some(&path), Some(r#"{"tabs":{"mode":"on"},"mouse":true}"#)).0, TabOrientation::Vertical);
+    }
+
+    #[test]
+    fn invalid_inline_keeps_valid_global_and_does_not_echo_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"tabs":{"layout":"vertical"}}"#).unwrap();
+        for inline in [r#"{"tabs":{"layout":"FAKE_SECRET_LAYOUT"}}"#, r#"{"tabs":{"layout":42}}"#, r#"{"tabs":false}"#, "[1,2]", "not-json"] {
+            let (orientation, diagnostics) = UiPreferences::tab_orientation(Some(&path), Some(inline));
+            assert_eq!(orientation, TabOrientation::Vertical);
+            assert_eq!(diagnostics.len(), 1);
+            assert!(diagnostics.iter().all(|line| !line.contains("FAKE_SECRET_LAYOUT") && !line.contains("not-json")));
+        }
+    }
+
+    #[test]
+    fn absent_global_uses_horizontal_default_or_explicit_inline_without_home() {
+        assert_eq!(UiPreferences::tab_orientation(None, None), (TabOrientation::Horizontal, Vec::new()));
+        assert_eq!(UiPreferences::tab_orientation(None, Some("")), (TabOrientation::Horizontal, Vec::new()));
+        assert_eq!(UiPreferences::tab_orientation(None, Some(r#"{"tabs":{"layout":"vertical"}}"#)), (TabOrientation::Vertical, Vec::new()));
+        let dir = tempfile::tempdir().unwrap();
+        assert_eq!(UiPreferences::tab_orientation(Some(&dir.path().join("missing-cli.json")), None), (TabOrientation::Horizontal, Vec::new()));
+    }
+
+    #[test]
+    fn invalid_global_does_not_prevent_valid_inline_or_leak_file_contents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, "FAKE_SECRET_INVALID_JSON").unwrap();
+        let (orientation, diagnostics) = UiPreferences::tab_orientation(Some(&path), Some(r#"{"tabs":{"layout":"vertical"}}"#));
+        assert_eq!(orientation, TabOrientation::Vertical);
+        assert_eq!(diagnostics.len(), 1);
+        assert!(!diagnostics[0].contains("FAKE_SECRET_INVALID_JSON"));
+    }
+
+    #[test]
+    fn file_and_inline_config_are_bounded_independently() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        let oversized = " ".repeat(MAX_CONFIG_BYTES + 1);
+        fs::write(&path, &oversized).unwrap();
+        let (orientation, diagnostics) = UiPreferences::tab_orientation(Some(&path), Some(r#"{"tabs":{"layout":"vertical"}}"#));
+        assert_eq!(orientation, TabOrientation::Vertical);
+        assert_eq!(diagnostics.len(), 1);
+        let (orientation, diagnostics) = UiPreferences::tab_orientation(None, Some(&oversized));
+        assert_eq!(orientation, TabOrientation::Horizontal);
+        assert_eq!(diagnostics.len(), 1);
+    }
 }
 
 #[cfg(test)]

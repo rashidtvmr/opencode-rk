@@ -30,6 +30,16 @@ pub const MAX_TABS: usize = 32;
 /// Upper bound on navigable sidebar entries (mirrors the tab bound).
 pub const MAX_SIDEBAR: usize = MAX_TABS;
 
+/// Presentation orientation for the same session-tab identity list.  The
+/// orientation is deliberately not part of a tab identity: switching between
+/// horizontal and vertical strips must not recreate tabs or lose local state.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum TabOrientation {
+    #[default]
+    Horizontal,
+    Vertical,
+}
+
 /// Advance keyboard focus, skipping a collapsed/hidden sidebar so focus
 /// never strands on a zero-area region. Pure mirror of
 /// `crate::native_app::NativeApp::cycle_focus`: the caller passes whether
@@ -191,6 +201,8 @@ pub struct Tab {
     /// Parent session when this tab was opened by fork/branch navigation.
     pub parent: Option<SessionRef>,
     pub draft: String,
+    /// Composer cursor position, retained independently for every session tab.
+    pub cursor: usize,
     pub scroll: usize,
     pub selected_model: Option<String>,
 }
@@ -201,6 +213,7 @@ impl Tab {
             session,
             parent: None,
             draft: String::new(),
+            cursor: 0,
             scroll: 0,
             selected_model: None,
         }
@@ -270,10 +283,11 @@ pub enum DaemonEvent {
 }
 
 /// The full navigation state: open tabs, active tab, daemon work states.
-#[derive(Debug, Default)]
+#[derive(Clone, Debug, Default)]
 pub struct NavigationState {
     tabs: Vec<Tab>,
     active: usize,
+    orientation: TabOrientation,
     /// Daemon-reported work state per session, retained even with no tab.
     work: Vec<(SessionRef, WorkState)>,
     /// Display titles with the revision that set them.
@@ -286,6 +300,27 @@ impl NavigationState {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Current presentation orientation. Both orientations read the same
+    /// bounded `tabs` collection and therefore share identity and state.
+    #[must_use]
+    pub fn orientation(&self) -> TabOrientation {
+        self.orientation
+    }
+
+    /// Change only presentation; no tab is opened, closed, reordered, or
+    /// reconstructed.
+    pub fn set_orientation(&mut self, orientation: TabOrientation) {
+        self.orientation = orientation;
+    }
+
+    /// Toggle the presentation orientation without changing active identity.
+    pub fn toggle_orientation(&mut self) {
+        self.orientation = match self.orientation {
+            TabOrientation::Horizontal => TabOrientation::Vertical,
+            TabOrientation::Vertical => TabOrientation::Horizontal,
+        };
     }
 
     /// Open a tab for a session (or focus the existing one). When the list is
@@ -303,6 +338,12 @@ impl NavigationState {
         self.tabs.push(Tab::new(session));
         self.active = self.tabs.len() - 1;
         self.active
+    }
+
+    /// Explicit tab lifecycle name used by native view callers. This is an
+    /// alias over the single identity model, not a second tab framework.
+    pub fn open_tab(&mut self, session: SessionRef) -> usize {
+        self.open(session)
     }
 
     /// Open a tab for a forked child, preserving provenance (T02).
@@ -324,6 +365,57 @@ impl NavigationState {
         })
     }
 
+    /// Close the focused tab and choose the deterministic neighbor: the tab
+    /// to its right, or the tab to its left when it was the last tab. The
+    /// daemon work map is intentionally untouched.
+    pub fn close_active(&mut self) -> Result<CloseReceipt, NavRefusal> {
+        let session = self
+            .active()
+            .map(|tab| tab.session.clone())
+            .ok_or(NavRefusal::NoTabOpen)?;
+        self.close(&session)
+    }
+
+    /// Return the upstream close successor without mutating the tab list:
+    /// right neighbor first, otherwise the left neighbor.
+    #[must_use]
+    pub fn active_successor(&self) -> Option<SessionRef> {
+        let active = self.active()?.session.clone();
+        let index = self.tabs.iter().position(|tab| tab.session == active)?;
+        self.tabs
+            .get(index + 1)
+            .or_else(|| index.checked_sub(1).and_then(|i| self.tabs.get(i)))
+            .map(|tab| tab.session.clone())
+    }
+
+    /// Save the complete client-local state for the active tab. `cursor` is a
+    /// UTF-8 byte offset, matching the native composer boundary.
+    pub fn save_active_state(
+        &mut self,
+        draft: String,
+        cursor: usize,
+        scroll: usize,
+        selected_model: Option<String>,
+    ) -> Result<(), NavRefusal> {
+        let tab = self.active_mut().ok_or(NavRefusal::NoTabOpen)?;
+        tab.draft = draft;
+        tab.cursor = cursor;
+        tab.scroll = scroll;
+        tab.selected_model = selected_model;
+        Ok(())
+    }
+
+    /// Testable generation gate used by live worker/callback consumers.
+    #[must_use]
+    pub fn accepts_generation(
+        current: u64,
+        session: &SessionRef,
+        event_generation: u64,
+        event_session: &SessionRef,
+    ) -> bool {
+        current == event_generation && session == event_session
+    }
+
     /// Switch focus to a tab by session.
     pub fn switch(&mut self, session: &SessionRef) -> Result<usize, NavRefusal> {
         if self.tabs.is_empty() {
@@ -336,6 +428,36 @@ impl NavigationState {
             .ok_or(NavRefusal::NoSuchTab)?;
         self.active = idx;
         Ok(idx)
+    }
+
+    /// Select an existing tab by identity.
+    pub fn select_tab(&mut self, session: &SessionRef) -> Result<usize, NavRefusal> {
+        self.switch(session)
+    }
+
+    /// Move one session-tab slot, wrapping at either end. This is the native
+    /// counterpart of upstream `session.tab.next`/`previous`; it only changes
+    /// the local selection and never creates a tab.
+    pub fn step_tab(&mut self, forward: bool) -> Option<usize> {
+        if self.tabs.is_empty() {
+            return None;
+        }
+        self.active = if forward {
+            (self.active + 1) % self.tabs.len()
+        } else {
+            self.active.checked_sub(1).unwrap_or(self.tabs.len() - 1)
+        };
+        Some(self.active)
+    }
+
+    /// Select a one-based quick tab slot. Out-of-range slots are a no-op.
+    pub fn select_tab_slot(&mut self, slot: usize) -> Option<usize> {
+        let index = slot.checked_sub(1)?;
+        if index >= self.tabs.len() {
+            return None;
+        }
+        self.active = index;
+        Some(index)
     }
 
     /// The focused tab.
@@ -359,6 +481,11 @@ impl NavigationState {
     #[must_use]
     pub fn tabs(&self) -> &[Tab] {
         &self.tabs
+    }
+
+    #[must_use]
+    pub fn tab_at(&self, index: usize) -> Option<&Tab> {
+        self.tabs.get(index)
     }
 
     /// One page of the bounded tab list, oldest first. Empty when `page` is
@@ -527,11 +654,13 @@ mod tests {
         {
             let tab = nav.active_mut().unwrap();
             tab.draft = "draft a".into();
+            tab.cursor = 3;
             tab.selected_model = Some("model-a".into());
             tab.scroll = 7;
         }
         assert_eq!(nav.active().unwrap().draft, "draft a");
         assert_eq!(nav.active().unwrap().scroll, 7);
+        assert_eq!(nav.active().unwrap().cursor, 3);
         assert_eq!(
             nav.active().unwrap().selected_model.as_deref(),
             Some("model-a")
@@ -543,6 +672,49 @@ mod tests {
             nav.active().unwrap().selected_model.as_deref(),
             Some("model-b")
         );
+    }
+
+    #[test]
+    fn generation_gate_rejects_stale_session_and_accepts_current_successor() {
+        let a = s("a");
+        let b = s("b");
+        assert!(!NavigationState::accepts_generation(2, &b, 1, &b));
+        assert!(!NavigationState::accepts_generation(2, &b, 2, &a));
+        assert!(NavigationState::accepts_generation(2, &b, 2, &b));
+    }
+
+    #[test]
+    fn horizontal_and_vertical_views_share_identity_and_preserve_tab_state() {
+        let mut nav = NavigationState::new();
+        nav.open_tab(s("a"));
+        nav.active_mut().unwrap().draft = "unsent".into();
+        nav.active_mut().unwrap().cursor = 5;
+        nav.set_orientation(TabOrientation::Vertical);
+        assert_eq!(nav.orientation(), TabOrientation::Vertical);
+        assert_eq!(nav.tabs().len(), 1);
+        nav.toggle_orientation();
+        assert_eq!(nav.orientation(), TabOrientation::Horizontal);
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        assert_eq!(nav.active().unwrap().draft, "unsent");
+        assert_eq!(nav.active().unwrap().cursor, 5);
+    }
+
+    #[test]
+    fn close_active_selects_right_then_left_neighbor_without_daemon_side_effects() {
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.open(s("c"));
+        nav.apply(DaemonEvent::WorkState {
+            session: s("b"),
+            state: WorkState::Running,
+        });
+        nav.switch(&s("b")).unwrap();
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("c"));
+        assert_eq!(nav.work_state(&s("b")), Some(WorkState::Running));
+        nav.close_active().unwrap();
+        assert_eq!(nav.active().unwrap().session, s("a"));
     }
 
     #[test]
@@ -563,6 +735,100 @@ mod tests {
         // Closing an unknown tab refuses and leaves daemon state untouched.
         assert_eq!(nav.close(&s("ghost")), Err(NavRefusal::NoSuchTab));
         assert_eq!(nav.work_state(&s("work")), Some(WorkState::Running));
+    }
+
+    #[test]
+    fn close_clicked_background_tab_preserves_active_draft_unicode_cursor_and_daemon_work() {
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.open(s("c"));
+        // "b" is active with a non-empty Unicode draft and cursor.
+        nav.switch(&s("b")).unwrap();
+        nav.active_mut().unwrap().draft = "hello 世界 🌍".into();
+        nav.active_mut().unwrap().cursor = 12;
+        // "c" has daemon-owned running work.
+        nav.apply(DaemonEvent::WorkState {
+            session: s("c"),
+            state: WorkState::Running,
+        });
+
+        // Simulate a mouse click on "c"'s close button while "b" is active.
+        // The close action targets hit.session ("c"), NOT active ("b").
+        let receipt = nav.close(&s("c")).unwrap();
+        assert_eq!(receipt.session, s("c"));
+        assert_eq!(receipt.retained_work(), Some(WorkState::Running));
+
+        // Active tab ("b") is unchanged: same session, draft, cursor.
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        assert_eq!(nav.active().unwrap().draft, "hello 世界 🌍");
+        assert_eq!(nav.active().unwrap().cursor, 12);
+
+        // Daemon work for the closed session is still retained.
+        assert_eq!(nav.work_state(&s("c")), Some(WorkState::Running));
+
+        // The closed tab is removed from the tab list.
+        assert_eq!(nav.tab_len(), 2);
+        assert!(!nav.tabs().iter().any(|t| t.session == s("c")));
+    }
+
+    #[test]
+    fn close_clicked_background_tab_does_not_cascade_to_active_tab() {
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.open(s("c"));
+        nav.open(s("d"));
+        nav.switch(&s("b")).unwrap();
+
+        // Close "d" (background, right of active "b").
+        let r1 = nav.close(&s("d")).unwrap();
+        assert_eq!(r1.session, s("d"));
+        assert_eq!(nav.active().unwrap().session, s("b"));
+
+        // Close "a" (background, left of active "b").
+        let r2 = nav.close(&s("a")).unwrap();
+        assert_eq!(r2.session, s("a"));
+        assert_eq!(nav.active().unwrap().session, s("b"));
+
+        // Active tab "b" is still focused and intact.
+        assert_eq!(nav.tab_len(), 2);
+    }
+
+    #[test]
+    fn close_clicked_background_tab_missing_returns_nosuchtab_without_mutation() {
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.switch(&s("b")).unwrap();
+        nav.active_mut().unwrap().draft = "keep".into();
+
+        // Close a non-existent tab (stale click).
+        let err = nav.close(&s("ghost")).unwrap_err();
+        assert_eq!(err, NavRefusal::NoSuchTab);
+
+        // Active tab and its draft are untouched.
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        assert_eq!(nav.active().unwrap().draft, "keep");
+        assert_eq!(nav.tab_len(), 2);
+    }
+
+    #[test]
+    fn close_active_with_work_state_retains_daemon_work() {
+        // Verifies the explicit user extension: active close still retains
+        // daemon work (same as close_active) while also being callable via
+        // the navigation.close entry used for background closes.
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.apply(DaemonEvent::WorkState {
+            session: s("a"),
+            state: WorkState::Running,
+        });
+        let receipt = nav.close(&s("a")).unwrap();
+        assert_eq!(receipt.session, s("a"));
+        assert_eq!(receipt.retained_work(), Some(WorkState::Running));
+        assert_eq!(nav.work_state(&s("a")), Some(WorkState::Running));
+        assert_eq!(nav.tab_len(), 0);
     }
 
     #[test]
@@ -693,6 +959,23 @@ mod tests {
         assert_eq!(nav.switch(&s("x")), Err(NavRefusal::NoSuchTab));
         nav.close(&s("a")).unwrap();
         assert_eq!(nav.switch(&s("a")), Err(NavRefusal::NoTabOpen));
+    }
+
+    #[test]
+    fn keyboard_tab_steps_wrap_and_invalid_slots_do_not_mutate() {
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.open(s("b"));
+        nav.open(s("c"));
+        assert_eq!(nav.active().unwrap().session, s("c"));
+        assert_eq!(nav.step_tab(true), Some(0));
+        assert_eq!(nav.active().unwrap().session, s("a"));
+        assert_eq!(nav.step_tab(false), Some(2));
+        assert_eq!(nav.select_tab_slot(2), Some(1));
+        assert_eq!(nav.active().unwrap().session, s("b"));
+        assert_eq!(nav.select_tab_slot(0), None);
+        assert_eq!(nav.select_tab_slot(4), None);
+        assert_eq!(nav.active().unwrap().session, s("b"));
     }
 
     // RED (compile, fail on missing behavior): focus cycling must match

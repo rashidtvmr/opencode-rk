@@ -140,6 +140,9 @@ impl ChatView {
     #[must_use]
     pub fn at_tail(&self) -> bool { self.scroll.get() == 0 }
 
+    #[must_use]
+    pub fn scroll_offset(&self) -> usize { self.scroll.get() }
+
 
     /// Re-pin to the tail: the next [`ChatView::render`] shows the newest
     /// transcript rows.

@@ -474,6 +474,7 @@ fn decode_mouse(sequence: &[u8], end: u8) -> Option<InputEvent> {
     let kind = match (button & !28, end) {
         (0, b'M') => 0,
         (32, b'M') => 1,
+        (35, b'M') => 7,
         (0 | 3, b'm') => 2,
         (64, b'M') => 3,
         (65, b'M') => 4,
@@ -503,6 +504,36 @@ fn parse_number(bytes: &[u8]) -> Option<u32> {
 #[cfg(test)]
 mod mouse_protocol_tests {
     use super::*;
+    #[test]
+    fn sgr_hover_is_a_pointer_event_without_inserting_composer_bytes() {
+        let mut decoder = TerminalInputDecoder::default();
+        for byte in b"\x1b[<35;43;8M" {
+            decoder.push(*byte, Instant::now());
+        }
+        assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 42, y: 7, kind: 7, modifiers: 0 }));
+        assert_eq!(decoder.pop(), None);
+    }
+
+    #[test]
+    fn sgr_modified_hover_retains_modifiers_and_never_becomes_a_click() {
+        for modifiers in [4, 8, 16, 28] {
+            let sequence = format!("\x1b[<{};2;3M", 35 + modifiers);
+            let mut decoder = TerminalInputDecoder::default();
+            for byte in sequence.bytes() { decoder.push(byte, Instant::now()); }
+            assert_eq!(decoder.pop(), Some(InputEvent::Mouse { x: 1, y: 2, kind: 7, modifiers: modifiers as u8 }));
+            assert_eq!(decoder.pop(), None);
+        }
+    }
+
+    #[test]
+    fn malformed_hover_and_unsupported_release_do_not_emit_clicks() {
+        for sequence in [b"\x1b[<35;0;2M".as_slice(), b"\x1b[<35;1;0M", b"\x1b[<35;2;3m", b"\x1b[<35;2;3;4M"] {
+            let mut decoder = TerminalInputDecoder::default();
+            for byte in sequence { decoder.push(*byte, Instant::now()); }
+            assert_eq!(decoder.pop(), None);
+        }
+    }
+
     #[test]
     fn sgr_drag_press_and_release_are_real_events_not_draft_bytes() {
         let mut decoder = TerminalInputDecoder::default();

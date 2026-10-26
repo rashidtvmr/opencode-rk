@@ -71,6 +71,8 @@ mod native_palette;
 mod native_shell;
 mod native_status;
 #[cfg(feature = "native")]
+mod native_tabs;
+#[cfg(feature = "native")]
 mod native_text_selection;
 mod native_theme;
 #[cfg(feature = "native")]

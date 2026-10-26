@@ -32,6 +32,10 @@ mod native_turn;
 use crate::native_chat_history::NativeChatHistory;
 #[cfg(feature = "native")]
 use crate::native_view_chat::{ChatMessage, ChatPart, ChatRole};
+#[cfg(feature = "native")]
+use crate::native_tabs::{TabOrientation, TabReservation, TabStrip};
+#[cfg(feature = "native")]
+use crate::native_navigation::SessionRef;
 use clap::{Args, ValueEnum};
 
 #[cfg(feature = "native")]
@@ -297,6 +301,29 @@ const fn native_composer_keymap(keymap: SubmitKeymap) -> crate::native_composer:
         SubmitKeymap::Enter => crate::native_composer::SubmitKeymap::Enter,
         SubmitKeymap::CtrlJ => crate::native_composer::SubmitKeymap::CtrlJ,
     }
+}
+
+#[cfg(feature = "native")]
+fn composer_pointer_event(
+    event: native_input_decoder::InputEvent,
+    view: &crate::native_view::NativeView,
+    draft: &str,
+    keymap: SubmitKeymap,
+    composer_available: bool,
+) -> native_input_decoder::InputEvent {
+    // Normalize only an admitted left press. The existing keyboard branch
+    // owns busy checks, command routing, turn admission and draft ACKs.
+    if composer_available {
+        if let native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } = &event {
+            if view.send_button_hit(draft, *x, *y) {
+                return native_input_decoder::InputEvent::Byte(match keymap {
+                    SubmitKeymap::Enter => b'\r',
+                    SubmitKeymap::CtrlJ => b'\n',
+                });
+            }
+        }
+    }
+    event
 }
 
 // ---------- live daemon state ----------
@@ -1165,6 +1192,14 @@ struct PaintCtx {
     modal_underlay_rows: Vec<String>,
     page_panel: Option<(u16, u16, u16, u16)>,
     logo: Option<(u16, u16)>,
+    tabs: Option<TabStrip>,
+}
+
+#[cfg(feature = "native")]
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum NativeIntent {
+    SelectTab { session: SessionRef },
+    CloseTab { session: SessionRef },
 }
 
 #[cfg(all(test, feature = "native"))]
@@ -1229,6 +1264,7 @@ mod surface_paint_regressions {
             modal_underlay_rows: view.modal_underlay_rows(),
             page_panel: view.page_panel(),
             logo: None,
+            tabs: None,
         }).expect("paint native frame");
         let snapshot = renderer.snapshot_text().expect("native text snapshot");
         let actual = snapshot.lines().nth(usize::from(composer.1)).expect("painted border row");
@@ -2045,6 +2081,24 @@ fn native_paint(
             }
         }
     }
+    if let Some(tabs) = ctx.tabs {
+        let fg = accent;
+        let bg = dim(panel, base_alpha);
+        for (index, row) in tabs.rows.iter().enumerate() {
+            let Some((_, rect)) = tabs.rects.get(index) else { continue };
+            let x = u32::from(rect.x);
+            let y = u32::from(rect.y);
+            if x < cols && y < rows {
+                renderer.fill_rect(x, y, u32::from(rect.width).min(cols - x), u32::from(rect.height).min(rows - y), bg)?;
+                renderer.draw_text_styled(x, y, row, fg, Some(bg), 0)?;
+            }
+        }
+        for (_session, rect) in &tabs.close_rects {
+            if rect.x < cols as u16 && rect.y < rows as u16 {
+                renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), "✕", fg, Some(bg), 0)?;
+            }
+        }
+    }
     if let Some(rect) = ctx.page_panel {
         if ctx.appearance.full_outline(crate::native_box_style::BoxId::Menu) {
             draw_panel_outline(
@@ -2172,6 +2226,7 @@ fn bind_session(
     view: &mut crate::native_view::NativeView,
     transcript: &mut NativeChatHistory,
     global_draft: &str,
+    _global_cursor: usize,
     origin: &str,
     session: Option<&str>,
     auth: Option<&str>,
@@ -2761,6 +2816,21 @@ fn load_native_theme(
 }
 
 #[cfg(feature = "native")]
+fn native_cli_config_path() -> Option<std::path::PathBuf> {
+    use std::path::PathBuf;
+    env::var_os("XDG_CONFIG_HOME")
+        .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .filter(|path| path.is_absolute())
+                .map(|home| home.join(".config"))
+        })
+        .map(|directory| directory.join("opencode/cli.json"))
+}
+
+#[cfg(feature = "native")]
 fn native_tui_config_paths() -> Result<Vec<std::path::PathBuf>, String> {
     use std::path::PathBuf;
     let home = env::var_os("HOME")
@@ -2835,6 +2905,13 @@ fn native_loop(
     // the production native_composer line-binding adapter; buffer Home/End
     // remain intentionally unbound by default.
     let mut draft_cursor = 0usize;
+    // One bounded client-side roster backs both tab presentations.  It is
+    // deliberately initialized from the authenticated startup binding; later
+    // routes may add sessions without replacing this state machine.
+    let mut navigation = crate::native_navigation::NavigationState::new();
+    if let Some(snapshot) = live.as_ref() {
+        navigation.open(crate::native_navigation::SessionRef(snapshot.session_id.clone()));
+    }
     let mut selection = crate::native_text_selection::TextSelection::default();
     // Setup is an action from Home, not a mandatory startup modal. In
     // particular, custom-provider discovery must never steal composer input.
@@ -2993,6 +3070,9 @@ fn native_loop(
     let mut input = native_input_decoder::TerminalInputDecoder::default();
     let mut observed_size = (cols, rows);
     let mut needs_paint = true;
+    // The last painted strip is the sole hit-test snapshot; paint and input
+    // never independently recompute tab geometry.
+    let mut rendered_tabs: Option<TabStrip> = None;
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
     }
@@ -3059,6 +3139,17 @@ fn native_loop(
             crate::native_ui_preferences::UiPreferences::default()
         });
     for diagnostic in &preferences.diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
+    let cli_path = native_cli_config_path();
+    let inline_cli = env::var("OPENCODE_CLI_CONFIG_CONTENT").ok();
+    let (tab_orientation, tab_diagnostics) =
+        crate::native_ui_preferences::UiPreferences::tab_orientation(
+            cli_path.as_deref(),
+            inline_cli.as_deref(),
+        );
+    navigation.set_orientation(tab_orientation);
+    for diagnostic in tab_diagnostics {
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
     let theme_mode = if preferences.theme_mode.as_deref() == Some("light") {
@@ -4152,6 +4243,32 @@ fn native_loop(
         let dialog_open = view.dialogs.is_open();
         let mut help_regions = Vec::new();
         let mut help_panel = None;
+        let tab_reservation = TabReservation::for_view(
+            match navigation.orientation() {
+                crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
+                crate::native_navigation::TabOrientation::Vertical => TabOrientation::Vertical,
+            },
+            renderer.cols().min(u32::from(u16::MAX)) as u16,
+            renderer.rows().min(u32::from(u16::MAX)) as u16,
+        );
+        view.set_tab_reservation(tab_reservation);
+        let tab_inputs = TabStrip::from_navigation(&navigation, &[]);
+        let frame_tabs = TabStrip::render(
+            &tab_inputs,
+            match navigation.orientation() {
+                crate::native_navigation::TabOrientation::Horizontal => TabOrientation::Horizontal,
+                crate::native_navigation::TabOrientation::Vertical => TabOrientation::Vertical,
+            },
+            match navigation.orientation() {
+                crate::native_navigation::TabOrientation::Horizontal => renderer.cols().min(u32::from(u16::MAX)) as u16,
+                crate::native_navigation::TabOrientation::Vertical => tab_reservation.width,
+            },
+            match navigation.orientation() {
+                crate::native_navigation::TabOrientation::Horizontal => 1,
+                crate::native_navigation::TabOrientation::Vertical => renderer.rows().min(u32::from(u16::MAX)) as u16,
+            },
+            rendered_tabs.as_ref().map_or(0, |tabs| tabs.scroll),
+        );
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {
@@ -4337,8 +4454,10 @@ fn native_loop(
                     } else {
                         view.home_logo_region(draft_echo)
                     },
+                    tabs: Some(frame_tabs.clone()),
                 },
             )?;
+            rendered_tabs = Some(frame_tabs);
             needs_paint = false;
             crate::native_debug::event(
                 "ui.frame",
@@ -4475,9 +4594,8 @@ fn native_loop(
                 native_input_decoder::InputEvent::Byte(key) => {
                     if matches!(*key, b'\r' | b'\n') {
                         if let Some(route) = completion.selected_command().map(str::to_owned) {
-                            if route == "/exit" || route == "/quit" || route == ":q" || route == ":quit" {
-                                break;
-                            }
+                            // /exit is dispatched below as a typed tab-close intent;
+                            // process exit remains reserved for /quit and :q/:quit.
                             // Executable commands are dispatched by this same
                             // Enter event. Argument-bearing commands remain a
                             // completion (for example `/cd` must still get a
@@ -4541,7 +4659,9 @@ fn native_loop(
                         needs_paint = true;
                         continue;
                     }
-                    if route == "/exit" || route == "/quit" { break; }
+                    if route == "/exit" {
+                        event = native_input_decoder::InputEvent::Byte(13);
+                    } else if route == "/quit" { break; }
                     let route_cursor = route.len();
                     crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, route, route_cursor);
                     completion.sync(&draft);
@@ -4550,9 +4670,63 @@ fn native_loop(
             }
         }
         }
+        event = composer_pointer_event(
+            event,
+            &view,
+            &draft,
+            keymap,
+            !page_open
+                && !help_open
+                && !children_panel.open
+                && !appearance.open
+                && !permission_editor.open
+                && !view.dialogs.intercepts_input()
+                && !view.command_palette_open()
+                && matches!(dialog, native_setup::Dialog::None)
+                && import_dialog.as_ref().is_none_or(|import| !import.is_open()),
+        );
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
+                if !view.dialogs.intercepts_input() && !permission_editor.open && !appearance.open && !children_panel.open
+                    && !help_open && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
+                    && kind == 0 && modifiers == 0
+                {
+                    if let Some(intent) = rendered_tabs.as_ref().and_then(|tabs| tabs.mouse_action(x, y)).map(|hit| if hit.close { NativeIntent::CloseTab { session: hit.session } } else { NativeIntent::SelectTab { session: hit.session } }) {
+                        match intent {
+                            NativeIntent::SelectTab { session } => {
+                                let scroll = view.chat_scroll_offset();
+                                match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|model| model.qualified()), scroll) {
+                                    Ok(result) => {
+                                        apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route);
+                                        completion.sync(&draft);
+                                    }
+                                    Err(error) => append_transcript(&mut transcript, format!("error: select tab: {error}")),
+                                }
+                                needs_paint = true; continue;
+                            }
+                            NativeIntent::CloseTab { session } => {
+                                let close_scroll = view.chat_scroll_offset();
+                match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
+                                    Ok(result) => apply_close_tab_result(
+                                        result,
+                                        &mut view,
+                                        &mut live,
+                                        &mut history_window,
+                                        &mut binding_generation,
+                                        &mut draft,
+                                        &mut draft_cursor,
+                                        &mut selected,
+                                        &models,
+                                        &mut session_route,
+                                    ),
+                                    Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
+                                }
+                                needs_paint = true; continue;
+                            }
+                        }
+                    }
+                }
                 if view.dialogs.intercepts_input() {
                     let modal = view.modal_presentation();
                     let row = y.checked_sub(modal.content_y).map(usize::from);
@@ -5072,9 +5246,9 @@ fn native_loop(
                     if let Some(crate::native_command_palette::PaletteAction::Route(route)) =
                         view.command_palette_activate()
                     {
-                        if native_exit_route(route) {
-                            break;
-                        }
+                        // /exit must use the same typed close dispatcher as
+                        // completion and normal composer input. Only the
+                        // explicit process-exit routes terminate the loop.
                         palette_route = Some(route);
                         view.close_command_palette();
                     }
@@ -5401,6 +5575,7 @@ fn native_loop(
                                 &mut view,
                                 &mut transcript,
                                 &draft,
+                                draft_cursor,
                                 &snapshot.origin,
                                 Some(&candidate),
                                 auth,
@@ -5421,7 +5596,7 @@ fn native_loop(
                          blocked_history_scroll = None;
                             history_tail_refresh_pending = false;
                             history_browsing = false;
-                            let restored_cursor = restored_draft.len();
+                            let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored_draft.len());
                             crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
                             // Committed ONLY on a successful bind.
                             binding_generation = prospective;
@@ -5558,6 +5733,7 @@ fn native_loop(
                                             &mut view,
                                             &mut transcript,
                                             &draft,
+                                            draft_cursor,
                                             &snapshot.origin,
                                             Some(&id),
                                             auth,
@@ -5574,7 +5750,7 @@ fn native_loop(
                                          history_navigation_request = None;
                                         history_tail_refresh_pending = false;
                                         history_browsing = false;
-                                        let restored_cursor = restored_draft.len();
+                                        let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored_draft.len());
                                         crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
                                         // Committed ONLY on a real bind
                                         // success.
@@ -5730,7 +5906,37 @@ fn native_loop(
                     },
                 };
                 let command = text.trim();
-                if matches!(dialog, native_setup::Dialog::None) && native_exit_route(command) {
+                if matches!(dialog, native_setup::Dialog::None) && native_close_tab_route(command) {
+                    let Some(session) = navigation.active().map(|tab| tab.session.clone()) else {
+                        session_route = false;
+                        view.set_session_route(false);
+                        needs_paint = true;
+                        continue;
+                    };
+                    let intent = NativeIntent::CloseTab { session };
+                    if let NativeIntent::CloseTab { session } = intent {
+                        let close_scroll = view.chat_scroll_offset();
+                match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
+                            Ok(result) => apply_close_tab_result(
+                                result,
+                                &mut view,
+                                &mut live,
+                                &mut history_window,
+                                &mut binding_generation,
+                                &mut draft,
+                                &mut draft_cursor,
+                                &mut selected,
+                                &models,
+                                &mut session_route,
+                            ),
+                            Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
+                        }
+                    }
+                    consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, true);
+                    needs_paint = true;
+                    continue;
+                }
+                if matches!(dialog, native_setup::Dialog::None) && native_process_exit_route(command) {
                     break;
                 }
                 if !matches!(dialog, native_setup::Dialog::None) {
@@ -6258,6 +6464,7 @@ fn native_loop(
                                         &mut view,
                                         &mut transcript,
                                         &working_draft,
+                                        draft_cursor,
                                         &snapshot.origin,
                                         Some(&created_id),
                                         auth,
@@ -6272,7 +6479,7 @@ fn native_loop(
                                     live = Some(snapshot);
                                     // Visible draft updates ONLY on this
                                     // successful commit.
-                                    let restored_cursor = restored_draft.len();
+                                    let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored_draft.len());
                                     crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored_draft, restored_cursor);
                                     binding_generation = prospective;
                                     append_transcript(
@@ -6344,11 +6551,11 @@ fn native_loop(
                         Ok(id) => {
                             let working = command_transaction_draft(&draft, command, from_chat_composer);
                             let bound = live.as_ref().ok_or_else(|| "daemon unavailable".to_owned()).and_then(|snapshot|
-                                bind_session(&mut view, &mut transcript, &working, &snapshot.origin, Some(&id), auth));
+                                bind_session(&mut view, &mut transcript, &working, draft_cursor, &snapshot.origin, Some(&id), auth));
                             match bound {
                                 Ok((snapshot, restored)) => {
                                     live = Some(snapshot);
-                                    let restored_cursor = restored.len();
+                                    let restored_cursor = navigation.active().map(|tab| tab.cursor).unwrap_or(restored.len());
                                     crate::native_composer::replace_draft_with_cursor(&mut draft, &mut draft_cursor, restored, restored_cursor);
                                     session_route = true;
                                     view.set_session_route(true);
@@ -6708,9 +6915,142 @@ fn consume_local_command_with_cursor(
 }
 
 #[cfg(feature = "native")]
-#[cfg(feature = "native")]
 fn native_exit_route(command: &str) -> bool {
     matches!(command, ":q" | ":quit" | "/exit" | "/quit")
+}
+
+#[cfg(feature = "native")]
+fn native_close_tab_route(command: &str) -> bool {
+    command == "/exit"
+}
+
+#[cfg(feature = "native")]
+fn native_process_exit_route(command: &str) -> bool {
+    matches!(command, ":q" | ":quit" | "/quit")
+}
+
+#[cfg(feature = "native")]
+struct CloseTabResult {
+    snapshot: Option<LiveSnapshot>,
+    draft: String,
+    cursor: usize,
+    scroll: usize,
+    selected_model: Option<String>,
+    generation: u64,
+    home: bool,
+}
+
+#[cfg(feature = "native")]
+fn select_tab_transition(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut NativeChatHistory,
+    navigation: &mut crate::native_navigation::NavigationState,
+    draft: &str,
+    cursor: usize,
+    origin: Option<&str>,
+    auth: Option<&str>,
+    generation: u64,
+    session: &SessionRef,
+    selected_model: Option<String>,
+    scroll: usize,
+) -> Result<CloseTabResult, String> {
+    // Preflight every fallible navigation operation on a private snapshot.
+    // Failed target fetches must leave both the current tab and binding intact.
+    let mut staged = navigation.clone();
+    staged.save_active_state(draft.to_owned(), cursor, scroll, selected_model)
+        .map_err(|error| format!("select refused: {error:?}"))?;
+    staged.select_tab(session).map_err(|error| format!("select refused: {error:?}"))?;
+    let target = staged.active().cloned().ok_or_else(|| "select refused: target missing".to_owned())?;
+    if navigation.active().is_some_and(|tab| tab.session == *session) {
+        *navigation = staged;
+        return Ok(CloseTabResult { snapshot: None, draft: target.draft, cursor: target.cursor, scroll: target.scroll, selected_model: target.selected_model, generation, home: false });
+    }
+    let prospective = crate::native_view::reserve_generation(generation)
+        .ok_or_else(|| "select refused: binding generation exhausted".to_owned())?;
+    let origin = origin.ok_or_else(|| "select refused: daemon unavailable".to_owned())?;
+    let (snapshot, _) = bind_session(view, transcript, draft, cursor, origin, Some(&session.0), auth)?;
+    *navigation = staged;
+    Ok(CloseTabResult { snapshot: Some(snapshot), draft: target.draft, cursor: target.cursor, scroll: target.scroll, selected_model: target.selected_model, generation: prospective, home: false })
+}
+
+#[cfg(feature = "native")]
+fn close_tab_transition(
+    view: &mut crate::native_view::NativeView,
+    transcript: &mut NativeChatHistory,
+    navigation: &mut crate::native_navigation::NavigationState,
+    draft: &str,
+    cursor: usize,
+    origin: Option<&str>,
+    auth: Option<&str>,
+    generation: u64,
+    session: &SessionRef,
+    selected_model: Option<String>,
+    scroll: usize,
+) -> Result<CloseTabResult, String> {
+    let active = navigation.active().map(|tab| tab.session.clone());
+    let mut staged = navigation.clone();
+    staged.save_active_state(draft.to_owned(), cursor, scroll, selected_model.clone())
+        .map_err(|error| format!("close refused: {error:?}"))?;
+    if active.as_ref() != Some(session) {
+        staged.close(session).map_err(|error| format!("close refused: {error:?}"))?;
+        *navigation = staged;
+        return Ok(CloseTabResult { snapshot: None, draft: draft.to_owned(), cursor, scroll, selected_model, generation, home: navigation.tab_len() == 0 });
+    }
+    if navigation.tab_len() <= 1 {
+        staged.close(session).map_err(|error| format!("close refused: {error:?}"))?;
+        *navigation = staged;
+        return Ok(CloseTabResult { snapshot: None, draft: String::new(), cursor: 0, scroll: 0, selected_model: None, generation, home: true });
+    }
+    let successor = navigation.active_successor().ok_or_else(|| "close refused: successor missing".to_owned())?;
+    let prospective = crate::native_view::reserve_generation(generation)
+        .ok_or_else(|| "close refused: binding generation exhausted".to_owned())?;
+    let origin = origin.ok_or_else(|| "close refused: daemon unavailable".to_owned())?;
+    let target = staged.tab_at(staged.tabs().iter().position(|tab| tab.session == successor).ok_or_else(|| "close refused: successor missing" )?).cloned()
+        .ok_or_else(|| "close refused: successor missing".to_owned())?;
+    let (snapshot, _) = bind_session(view, transcript, draft, cursor, origin, Some(&successor.0), auth)?;
+    staged.close(session).map_err(|error| format!("close commit invariant failed: {error:?}"))?;
+    staged.select_tab(&successor).map_err(|error| format!("close commit invariant failed: {error:?}"))?;
+    *navigation = staged;
+    Ok(CloseTabResult { snapshot: Some(snapshot), draft: target.draft, cursor: target.cursor, scroll: target.scroll, selected_model: target.selected_model, generation: prospective, home: false })
+}
+
+#[cfg(feature = "native")]
+fn apply_close_tab_result(
+    result: CloseTabResult,
+    view: &mut crate::native_view::NativeView,
+    live: &mut Option<LiveSnapshot>,
+    history_window: &mut Option<crate::native_chat_projection::NativeHistoryWindow>,
+    binding_generation: &mut u64,
+    draft: &mut String,
+    draft_cursor: &mut usize,
+    selected: &mut Option<native_setup::Model>,
+    models: &[native_setup::Model],
+    session_route: &mut bool,
+) {
+    if let Some(snapshot) = result.snapshot {
+        *history_window = Some(crate::native_chat_projection::NativeHistoryWindow::new(
+            &snapshot.raw_history,
+            snapshot.history_next_before.clone(),
+        ));
+        *live = Some(snapshot);
+        *binding_generation = result.generation;
+    }
+    crate::native_composer::replace_draft_with_cursor(
+        draft,
+        draft_cursor,
+        result.draft,
+        result.cursor,
+    );
+    crate::native_composer::normalize_cursor(draft, draft_cursor);
+    if result.home {
+        *session_route = false;
+        view.set_session_route(false);
+    } else {
+        view.set_chat_scroll_offset(result.scroll);
+        *selected = result.selected_model.as_deref().and_then(|qualified| {
+            models.iter().find(|model| model.qualified() == qualified).cloned()
+        });
+    }
 }
 
 #[cfg(feature = "native")]
@@ -7047,7 +7387,291 @@ fn print_native_or_legacy(frame: &str) -> String {
 }
 
 #[cfg(all(test, feature = "native"))]
+mod tab_binding_tests {
+    use super::*;
+    use std::{io::{Read, Write}, net::TcpListener, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, time::{Duration, Instant}};
+
+    const A: &str = "00000000-0000-0000-0000-000000000001";
+    const B: &str = "00000000-0000-0000-0000-000000000002";
+
+    struct Fixture {
+        origin: String,
+        token: String,
+        requests: Arc<Mutex<Vec<String>>>,
+        fail: Arc<AtomicBool>,
+        stop: Arc<AtomicBool>,
+        thread: Option<std::thread::JoinHandle<()>>,
+    }
+
+    impl Fixture {
+        fn new() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+            listener.set_nonblocking(true).unwrap();
+            let origin = format!("http://{}", listener.local_addr().unwrap());
+            let token = "a".repeat(64);
+            let requests = Arc::new(Mutex::new(Vec::new()));
+            let fail = Arc::new(AtomicBool::new(false));
+            let stop = Arc::new(AtomicBool::new(false));
+            let (seen, failed, done, credential) = (requests.clone(), fail.clone(), stop.clone(), token.clone());
+            let thread = std::thread::spawn(move || {
+                let deadline = Instant::now() + Duration::from_secs(15);
+                while !done.load(Ordering::Acquire) && Instant::now() < deadline {
+                    let (mut socket, _) = match listener.accept() {
+                        Ok(value) => value,
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            std::thread::sleep(Duration::from_millis(2));
+                            continue;
+                        }
+                        Err(error) => panic!("fixture accept: {error}"),
+                    };
+                    socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                    socket.set_write_timeout(Some(Duration::from_secs(2))).unwrap();
+                    let mut raw = Vec::new();
+                    while !raw.windows(4).any(|bytes| bytes == b"\r\n\r\n") {
+                        let mut chunk = [0; 1024];
+                        let n = socket.read(&mut chunk).unwrap();
+                        assert!(n > 0 && raw.len() + n <= 16 * 1024);
+                        raw.extend_from_slice(&chunk[..n]);
+                    }
+                    let raw = String::from_utf8(raw).unwrap();
+                    assert!(raw.to_ascii_lowercase().contains(&format!("authorization: bearer {credential}")));
+                    let route = raw.lines().next().unwrap().split_whitespace().nth(1).unwrap().to_owned();
+                    seen.lock().unwrap().push(route.clone());
+                    let (status, body) = if failed.load(Ordering::Acquire) {
+                        ("503 Service Unavailable", serde_json::json!({"error":"fixture listing unavailable"}))
+                    } else if route == "/api/sessions" {
+                        ("200 OK", serde_json::json!({"sessions":[
+                            {"id":A,"title":"Session A","state":"idle","updated_at":"2026-10-26T00:00:00Z"},
+                            {"id":B,"title":"Session B","state":"idle","updated_at":"2026-10-26T00:00:00Z"}
+                        ]}))
+                    } else if route.contains("/history?") {
+                        let text = if route.contains(B) { "history from B" } else { "history from A" };
+                        ("200 OK", serde_json::json!({"messages":[{"id":"message-fixture","role":"assistant","body":{"storage":"inline","text":text}}]}))
+                    } else if route.ends_with("/todo") {
+                        ("200 OK", serde_json::json!([]))
+                    } else {
+                        ("200 OK", serde_json::json!({"servers":[]}))
+                    };
+                    let body = body.to_string();
+                    write!(socket, "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.len()).unwrap();
+                }
+            });
+            Self { origin, token, requests, fail, stop, thread: Some(thread) }
+        }
+    }
+
+    impl Drop for Fixture {
+        fn drop(&mut self) {
+            self.stop.store(true, Ordering::Release);
+            if let Some(thread) = self.thread.take() { thread.join().unwrap(); }
+        }
+    }
+
+    fn navigation() -> crate::native_navigation::NavigationState {
+        let mut navigation = crate::native_navigation::NavigationState::new();
+        navigation.open(SessionRef(A.into()));
+        navigation.open(SessionRef(B.into()));
+        navigation.save_active_state("left 世界 right".into(), 8, 23, Some("fixture/target".into())).unwrap();
+        navigation.select_tab(&SessionRef(A.into())).unwrap();
+        navigation
+    }
+
+    #[test]
+    fn tab_selection_binds_authenticated_target_history_and_live_send_identity() {
+        let fixture = Fixture::new();
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let mut transcript = NativeChatHistory::default();
+        let mut navigation = navigation();
+        let (snapshot, _) = bind_session(&mut view, &mut transcript, "", 0, &fixture.origin, Some(A), Some(&fixture.token)).unwrap();
+        let mut live = Some(snapshot);
+        let result = select_tab_transition(&mut view, &mut transcript, &mut navigation, "A unsent", 3, Some(&fixture.origin), Some(&fixture.token), 4, &SessionRef(B.into()), Some("fixture/source".into()), 7).expect("tab selection must bind the target");
+        assert_eq!(result.snapshot.as_ref().map(|snapshot| snapshot.session_id.as_str()), Some(B));
+        assert_eq!(navigation.active().unwrap().session.0, B);
+        assert!(transcript.lines.iter().any(|line| line.contains("history from B")));
+        assert!(fixture.requests.lock().unwrap().iter().any(|route| route == &format!("/api/sessions/{B}/history?limit=100")));
+        let mut history = None;
+        let mut generation = 4;
+        let mut draft = "A unsent".to_owned();
+        let mut cursor = 3;
+        let mut selected = None;
+        let mut route = true;
+        let models = [native_setup::Model { id: "target".into(), name: "Target".into(), provider_id: "fixture".into(), context_window: None }];
+        apply_close_tab_result(result, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut selected, &models, &mut route);
+        assert_eq!(live.as_ref().unwrap().session_id, B, "Send reads its session identity from live");
+        assert_eq!(generation, 5);
+        assert_eq!(draft, "left 世界 right");
+        assert_eq!(cursor, 8);
+        assert_eq!(view.chat_scroll_offset(), 23);
+        assert_eq!(selected.as_ref().unwrap().qualified(), "fixture/target");
+        assert!(history.is_some());
+        let outgoing = navigation.tabs().iter().find(|tab| tab.session.0 == A).unwrap();
+        assert_eq!((&outgoing.draft, outgoing.cursor, outgoing.scroll), (&"A unsent".to_owned(), 3, 7));
+    }
+
+    #[test]
+    fn failed_target_fetch_preserves_active_binding_history_and_tab_state() {
+        let fixture = Fixture::new();
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let mut transcript = NativeChatHistory::default();
+        let mut navigation = navigation();
+        let _ = bind_session(&mut view, &mut transcript, "", 0, &fixture.origin, Some(A), Some(&fixture.token)).unwrap();
+        let before = transcript.lines.clone();
+        let saved_draft = navigation.active().unwrap().draft.clone();
+        fixture.fail.store(true, Ordering::Release);
+        assert!(select_tab_transition(&mut view, &mut transcript, &mut navigation, "A newer draft", 2, Some(&fixture.origin), Some(&fixture.token), 4, &SessionRef(B.into()), None, 7).is_err());
+        assert_eq!(navigation.active().unwrap().session.0, A);
+        assert_eq!(navigation.active().unwrap().draft, saved_draft);
+        assert_eq!(transcript.lines, before);
+    }
+
+    #[test]
+    fn exhausted_binding_generation_refuses_selection_before_http_or_local_mutation() {
+        let fixture = Fixture::new();
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let mut transcript = NativeChatHistory::default();
+        let mut navigation = navigation();
+        assert!(select_tab_transition(&mut view, &mut transcript, &mut navigation, "draft", 2, Some(&fixture.origin), Some(&fixture.token), u64::MAX, &SessionRef(B.into()), None, 0).is_err());
+        assert!(fixture.requests.lock().unwrap().is_empty());
+        assert_eq!(navigation.active().unwrap().session.0, A);
+    }
+
+    #[test]
+    fn selecting_current_tab_preserves_unsent_state_without_http_or_generation_change() {
+        let fixture = Fixture::new();
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let mut transcript = NativeChatHistory::default();
+        let mut navigation = navigation();
+        let result = select_tab_transition(&mut view, &mut transcript, &mut navigation, "same unsent", 4, Some(&fixture.origin), Some(&fixture.token), u64::MAX, &SessionRef(A.into()), Some("fixture/source".into()), 12).unwrap();
+        assert!(result.snapshot.is_none());
+        assert_eq!(result.generation, u64::MAX);
+        assert_eq!((result.draft.as_str(), result.cursor, result.scroll), ("same unsent", 4, 12));
+        assert_eq!(result.selected_model.as_deref(), Some("fixture/source"));
+        assert!(fixture.requests.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn unknown_tab_refuses_selection_without_mutating_outgoing_state_or_fetching() {
+        let fixture = Fixture::new();
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let mut transcript = NativeChatHistory::default();
+        let mut navigation = navigation();
+        let original = navigation.active().unwrap().draft.clone();
+        assert!(select_tab_transition(&mut view, &mut transcript, &mut navigation, "new unsaved", 2, Some(&fixture.origin), Some(&fixture.token), 4, &SessionRef("00000000-0000-0000-0000-000000000003".into()), None, 0).is_err());
+        assert_eq!(navigation.active().unwrap().session.0, A);
+        assert_eq!(navigation.active().unwrap().draft, original);
+        assert!(fixture.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
 mod command_consumption_tests {
+    use super::native_input_decoder::InputEvent;
+
+    fn send_click(view: &crate::native_view::NativeView, draft: &str) -> InputEvent {
+        let (x, y, _) = view.send_button_region(draft).expect("visible Send control");
+        InputEvent::Mouse { x, y, kind: 0, modifiers: 0 }
+    }
+
+    #[test]
+    fn send_click_uses_active_submit_keymap_on_home_and_session() {
+        for session in [false, true] {
+            let mut view = crate::native_view::NativeView::new(100, 32);
+            view.set_session_route(session);
+            for (keymap, byte) in [(super::SubmitKeymap::Enter, 13), (super::SubmitKeymap::CtrlJ, 10)] {
+                let draft = "left 世界\nright";
+                let click = send_click(&view, draft);
+                let event = super::composer_pointer_event(click, &view, draft, keymap, true);
+                assert_eq!(event, InputEvent::Byte(byte));
+                assert_eq!(crate::native_composer::decide_byte(byte, super::native_composer_keymap(keymap)), Some(crate::native_composer::KeyAction::Submit));
+            }
+        }
+    }
+
+    #[test]
+    fn send_click_preserves_authoritative_draft_and_middle_cursor_until_ack() {
+        let view = crate::native_view::NativeView::new(100, 32);
+        let mut draft = String::from("left 世界\nright");
+        let mut cursor = 8;
+        let captured = draft.clone();
+        let click = send_click(&view, &draft);
+        assert_eq!(super::composer_pointer_event(click, &view, &draft, super::SubmitKeymap::Enter, true), InputEvent::Byte(13));
+        assert_eq!(draft, "left 世界\nright");
+        assert_eq!(cursor, 8);
+        draft.push_str(" newer edit");
+        assert!(!crate::native_composer::acknowledge_submitted_draft_with_cursor(&captured, &mut draft, &mut cursor));
+        assert_eq!(draft, "left 世界\nright newer edit");
+        assert_eq!(cursor, 8);
+        let captured = draft.clone();
+        assert!(crate::native_composer::acknowledge_submitted_draft_with_cursor(&captured, &mut draft, &mut cursor));
+        assert!(draft.is_empty());
+        assert_eq!(cursor, 0);
+    }
+
+    #[test]
+    fn send_click_cannot_cross_another_input_owner() {
+        let mut view = crate::native_view::NativeView::new(100, 32);
+        let draft = "keep this draft";
+        let click = send_click(&view, draft);
+        assert_eq!(super::composer_pointer_event(click.clone(), &view, draft, super::SubmitKeymap::Enter, false), click);
+        view.dialogs.open_permission("request", "session", "Run command").unwrap();
+        assert_eq!(super::composer_pointer_event(click.clone(), &view, draft, super::SubmitKeymap::Enter, true), click);
+    }
+
+    #[test]
+    fn send_click_ignores_release_wheel_drag_and_modified_presses() {
+        let view = crate::native_view::NativeView::new(100, 32);
+        let draft = "draft";
+        let (x, y, _) = view.send_button_region(draft).unwrap();
+        for (kind, modifiers) in [(1, 0), (2, 0), (3, 0), (4, 0), (0, 1), (0, 4)] {
+            let event = InputEvent::Mouse { x, y, kind, modifiers };
+            assert_eq!(super::composer_pointer_event(event.clone(), &view, draft, super::SubmitKeymap::Enter, true), event);
+        }
+    }
+
+    #[test]
+    fn send_click_uses_translated_rectangle_and_excludes_neighbor_cells() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let mut view = crate::native_view::NativeView::new(150, 32);
+            view.set_session_route(true);
+            view.set_tab_reservation(TabReservation::for_view(orientation, 150, 32));
+            let draft = "draft";
+            let (x, y, width) = view.send_button_region(draft).unwrap();
+            for column in x..x + width {
+                let event = InputEvent::Mouse { x: column, y, kind: 0, modifiers: 0 };
+                assert_eq!(super::composer_pointer_event(event, &view, draft, super::SubmitKeymap::Enter, true), InputEvent::Byte(13));
+            }
+            for (x, y) in [(x - 1, y), (x + width, y), (x, y - 1), (x, y + 1)] {
+                let event = InputEvent::Mouse { x, y, kind: 0, modifiers: 0 };
+                assert_eq!(super::composer_pointer_event(event.clone(), &view, draft, super::SubmitKeymap::Enter, true), event);
+            }
+        }
+    }
+
+    #[test]
+    fn send_click_rectangle_stays_inside_translated_composer_and_viewport() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+        for session in [false, true] {
+            for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+                let mut view = crate::native_view::NativeView::new(150, 32);
+                view.set_session_route(session);
+                view.set_tab_reservation(TabReservation::for_view(orientation, 150, 32));
+                let draft = "draft";
+                let (left, top, width, height) = view.composer_region(draft).unwrap();
+                let (x, y, cells) = view.send_button_region(draft).unwrap();
+                assert!(x >= left && x + cells <= left + width, "Send must stay inside the translated composer");
+                assert!(y >= top && y < top + height);
+                assert!(x + cells <= 150 && y < 32);
+                let frame = view.render_typed(draft, &[], false, &[]);
+                let mut painted = String::new();
+                crate::native_view_layout::visit_cells(&frame[usize::from(y)], 150, |col, glyph, _| {
+                    if col >= x && col < x + cells { painted.push_str(glyph); }
+                });
+                assert_eq!(painted, "[Send]", "hit rectangle must match the rendered cells");
+            }
+        }
+    }
+
     #[test]
     fn import_modal_visibility_keeps_permission_human_input_higher_priority() {
         assert!(super::import_modal_visible(false, false, false, true));
@@ -7118,6 +7742,108 @@ mod command_consumption_tests {
         assert!(!super::native_exit_route("/not-a-local-command"));
     }
     use super::{consume_local_command, is_recognized_local_command};
+
+    #[test]
+    fn exit_closes_final_client_tab_without_process_termination_and_retains_daemon_work() {
+        let mut navigation = crate::native_navigation::NavigationState::new();
+        let session = crate::native_navigation::SessionRef("00000000-0000-0000-0000-000000000001".into());
+        navigation.open(session.clone());
+        navigation.apply(crate::native_navigation::DaemonEvent::WorkState {
+            session: session.clone(),
+            state: crate::native_navigation::WorkState::Running,
+        });
+        assert!(super::native_close_tab_route("/exit"));
+        assert!(!super::native_process_exit_route("/exit"));
+        assert!(navigation.close(&session).is_ok());
+        assert_eq!(navigation.tab_len(), 0);
+        assert_eq!(navigation.work_state(&session), Some(crate::native_navigation::WorkState::Running));
+        assert!(super::native_process_exit_route("/quit"));
+        assert!(super::native_process_exit_route(":q"));
+        assert!(super::native_process_exit_route(":quit"));
+    }
+
+    #[test]
+    fn shared_close_result_application_restores_unicode_middle_cursor_scroll_and_model() {
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let mut live = None;
+        let mut history_window = None;
+        let mut generation = 4;
+        let mut draft = String::new();
+        let mut cursor = 0;
+        let mut selected = None;
+        let models = vec![super::native_setup::Model {
+            id: "target".into(),
+            name: "Target".into(),
+            provider_id: "fixture".into(),
+            context_window: None,
+        }];
+        let mut route = true;
+        super::apply_close_tab_result(
+            super::CloseTabResult {
+                snapshot: None,
+                draft: "left 世界 right".into(),
+                cursor: 9,
+                scroll: 37,
+                selected_model: Some("fixture/target".into()),
+                generation: 5,
+                home: false,
+            },
+            &mut view,
+            &mut live,
+            &mut history_window,
+            &mut generation,
+            &mut draft,
+            &mut cursor,
+            &mut selected,
+            &models,
+            &mut route,
+        );
+        assert_eq!(draft, "left 世界 right");
+        assert_eq!(cursor, 8, "cursor 9 in fixture is mid-codepoint; normalize_cursor must pull it back to the UTF-8 boundary at byte 8");
+        assert_eq!(view.chat_scroll_offset(), 37);
+        assert_eq!(selected.as_ref().map(|model| model.qualified()).as_deref(), Some("fixture/target"));
+        assert_eq!(generation, 4, "local result application does not commit generation twice");
+        assert!(route);
+    }
+
+    #[test]
+    fn shared_close_result_application_home_clears_route_without_erasing_live_work() {
+        let mut view = crate::native_view::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let mut live = None;
+        let mut history_window = None;
+        let mut generation = 7;
+        let mut draft = "unsent".into();
+        let mut cursor = 3;
+        let mut selected = None;
+        let models = Vec::new();
+        let mut route = true;
+        super::apply_close_tab_result(
+            super::CloseTabResult {
+                snapshot: None,
+                draft: String::new(),
+                cursor: 0,
+                scroll: 0,
+                selected_model: None,
+                generation: 7,
+                home: true,
+            },
+            &mut view,
+            &mut live,
+            &mut history_window,
+            &mut generation,
+            &mut draft,
+            &mut cursor,
+            &mut selected,
+            &models,
+            &mut route,
+        );
+        assert!(!route);
+        assert!(draft.is_empty());
+        assert_eq!(cursor, 0);
+        assert!(live.is_none(), "application seam does not invent or clear daemon state");
+    }
 
     /// Installed bug reproduced as a pure production-helper contract:
     /// `/status` typed in the CHAT composer is a non-submitted local

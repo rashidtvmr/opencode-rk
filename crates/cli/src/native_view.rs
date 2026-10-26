@@ -12,8 +12,9 @@
 //! connection/backend facts only — never dummy data.
 
 use crate::native_view_chat::ChatView;
+use crate::native_tabs::TabReservation;
 use crate::native_view_dialogs::DialogView;
-use crate::native_view_layout::{Layout, compose_frame, fit};
+use crate::native_view_layout::{compose_frame, fit, Layout};
 use crate::native_view_pages::{Page, PageRow, PageState};
 use crate::native_view_sessions::{SessionRow, SessionView};
 use crate::native_view_status::StatusView;
@@ -117,8 +118,10 @@ pub struct NativeView {
     placeholder_index: usize,
     dialog_size: DialogSize,
     composer_agent: Option<String>,
+    send_pointer: Option<(u16, u16)>,
     composer_variant: Option<String>,
     composer_model: Option<(String, String)>,
+    composer_effort: Option<String>,
     chat_row_classes: Vec<crate::native_view_chat::ChatRowClass>,
     chat_text_bounds: Vec<Option<(u16, u16)>>,
     /// Persisted global + per-box appearance; the framed composer reads the
@@ -135,6 +138,8 @@ pub struct NativeView {
     frame_busy: bool,
     mcp_hit: Vec<(String, bool, u16, u16, u16)>,
     sidebar_content_height: usize,
+    /// Frame reservation owned by the live session-tab shell.
+    tab_reservation: TabReservation,
 }
 
 #[cfg(test)]
@@ -147,16 +152,30 @@ mod page_spacing_tests {
         view.apply_mcp(&serde_json::json!({
             "status": {"alpha": {"status": "connected"}},
             "included": {"alpha": true}
-        })).unwrap();
+        }))
+        .unwrap();
         let frame = view.render("draft", &[], false, &[]);
-        let y = frame.iter().position(|line| line.contains("• alpha")).unwrap() as u16;
+        let y = frame
+            .iter()
+            .position(|line| line.contains("• alpha"))
+            .unwrap() as u16;
         let x = view.presentation().sidebar_offset.unwrap() + 3;
         assert_eq!(view.mcp_sidebar_action(x, y), Some(("alpha".into(), true)));
         view.set_sidebar_hidden(true);
-        assert!(view.mcp_sidebar_action(x, y).is_none(), "a hidden pane must not retain clickable rows");
+        assert!(
+            view.mcp_sidebar_action(x, y).is_none(),
+            "a hidden pane must not retain clickable rows"
+        );
         view.set_sidebar_hidden(false);
-        view.set_session_binding(Some(opencode_rk_contracts::SessionId::new().to_string()), Some("New session".into()), Some(0));
-        assert!(view.mcp_sidebar_action(x, y).is_none(), "old-session inclusion cannot authorize a new-session click");
+        view.set_session_binding(
+            Some(opencode_rk_contracts::SessionId::new().to_string()),
+            Some("New session".into()),
+            Some(0),
+        );
+        assert!(
+            view.mcp_sidebar_action(x, y).is_none(),
+            "old-session inclusion cannot authorize a new-session click"
+        );
     }
 
     #[test]
@@ -164,7 +183,9 @@ mod page_spacing_tests {
         for (cols, framed) in [(148, false), (100, false), (148, true)] {
             let mut view = NativeView::new(cols, 30);
             view.set_session_route(true);
-            if view.presentation().sidebar_offset.is_none() { view.toggle_sidebar(); }
+            if view.presentation().sidebar_offset.is_none() {
+                view.toggle_sidebar();
+            }
             if framed {
                 view.set_box_appearance(crate::native_box_style::BoxAppearance {
                     preset: crate::native_box_style::RadiusPreset::IosSquircle,
@@ -172,18 +193,36 @@ mod page_spacing_tests {
                 });
             }
             let status: serde_json::Map<String, Value> = (0..64)
-                .map(|index| (format!("server-{index:02}"), serde_json::json!({"status":"connected"}))).collect();
-            let included: serde_json::Map<String, Value> = status.keys()
-                .map(|name| (name.clone(), serde_json::json!(false))).collect();
-            view.apply_mcp(&serde_json::json!({"status":status,"included":included})).unwrap();
+                .map(|index| {
+                    (
+                        format!("server-{index:02}"),
+                        serde_json::json!({"status":"connected"}),
+                    )
+                })
+                .collect();
+            let included: serde_json::Map<String, Value> = status
+                .keys()
+                .map(|name| (name.clone(), serde_json::json!(false)))
+                .collect();
+            view.apply_mcp(&serde_json::json!({"status":status,"included":included}))
+                .unwrap();
             view.render("unchanged draft", &[], false, &[]);
             let x = view.presentation().sidebar_offset.unwrap() + 3;
-            assert!(!view.scroll_sidebar_at(x, 29, isize::MAX), "footer is not sidebar content");
+            assert!(
+                !view.scroll_sidebar_at(x, 29, isize::MAX),
+                "footer is not sidebar content"
+            );
             assert!(view.scroll_sidebar_at(x, 2, isize::MAX));
             let frame = view.render("unchanged draft", &[], false, &[]);
-            let y = frame.iter().position(|line| line.contains("server-63")).expect("last server must remain reachable") as u16;
+            let y = frame
+                .iter()
+                .position(|line| line.contains("server-63"))
+                .expect("last server must remain reachable") as u16;
             assert!(y < 29);
-            assert_eq!(view.mcp_sidebar_action(x, y), Some(("server-63".into(), false)));
+            assert_eq!(
+                view.mcp_sidebar_action(x, y),
+                Some(("server-63".into(), false))
+            );
         }
     }
 
@@ -191,16 +230,26 @@ mod page_spacing_tests {
     fn accepted_projection_invalidates_old_sidebar_coordinates_until_repaint() {
         let mut view = NativeView::new(148, 30);
         view.set_session_route(true);
-        view.apply_mcp(&serde_json::json!({"status":{"beta":{"status":"connected"}},"included":{"beta":true}})).unwrap();
+        view.apply_mcp(
+            &serde_json::json!({"status":{"beta":{"status":"connected"}},"included":{"beta":true}}),
+        )
+        .unwrap();
         let frame = view.render("draft", &[], false, &[]);
-        let y = frame.iter().position(|line| line.contains("• beta")).unwrap() as u16;
+        let y = frame
+            .iter()
+            .position(|line| line.contains("• beta"))
+            .unwrap() as u16;
         let x = view.presentation().sidebar_offset.unwrap() + 3;
         assert_eq!(view.mcp_sidebar_action(x, y), Some(("beta".into(), true)));
         view.apply_mcp(&serde_json::json!({
             "status":{"alpha":{"status":"connected"},"beta":{"status":"connected"}},
             "included":{"alpha":true,"beta":true}
-        })).unwrap();
-        assert!(view.mcp_sidebar_action(x, y).is_none(), "a new projection cannot authorize stale coordinates");
+        }))
+        .unwrap();
+        assert!(
+            view.mcp_sidebar_action(x, y).is_none(),
+            "a new projection cannot authorize stale coordinates"
+        );
         view.render("draft", &[], false, &[]);
         assert_eq!(view.mcp_sidebar_action(x, y), Some(("alpha".into(), true)));
     }
@@ -211,12 +260,18 @@ mod page_spacing_tests {
         view.set_session_route(true);
         view.apply_mcp(&serde_json::json!({"status":{"alpha":{"status":"connected"}},"included":{"alpha":true}})).unwrap();
         let frame = view.render("draft", &[], false, &[]);
-        let y = frame.iter().position(|line| line.contains("• alpha")).unwrap() as u16;
+        let y = frame
+            .iter()
+            .position(|line| line.contains("• alpha"))
+            .unwrap() as u16;
         let x = view.presentation().sidebar_offset.unwrap() + 3;
         assert!(view.mcp_sidebar_action(x, y).is_some());
         view.set_sidebar_hidden(true);
         view.set_sidebar_hidden(false);
-        assert!(view.mcp_sidebar_action(x, y).is_none(), "visibility changes invalidate the painted hit generation");
+        assert!(
+            view.mcp_sidebar_action(x, y).is_none(),
+            "visibility changes invalidate the painted hit generation"
+        );
         view.render("draft", &[], false, &[]);
         view.toggle_sidebar();
         view.toggle_sidebar();
@@ -228,31 +283,66 @@ mod page_spacing_tests {
             let mut view = NativeView::new(width, 30);
             view.open_page(Page::Memory);
             let content = format!("{}\nFINAL_MEMORY_LINE", "instruction line\n".repeat(100));
-            view.load_memory(&serde_json::json!({"sources":[{
-                "path":"/fixture/AGENTS.md","content":content,"included":true,"reason":null
-            }]}).to_string()).unwrap();
+            view.load_memory(
+                &serde_json::json!({"sources":[{
+                    "path":"/fixture/AGENTS.md","content":content,"included":true,"reason":null
+                }]})
+                .to_string(),
+            )
+            .unwrap();
             view.scroll_memory_content(isize::MAX);
             let frame = view.render("preserved draft", &[], false, &[]).join("\n");
-            assert!(frame.contains("FINAL_MEMORY_LINE"), "last source line is unreachable at width {width}");
+            assert!(
+                frame.contains("FINAL_MEMORY_LINE"),
+                "last source line is unreachable at width {width}"
+            );
         }
     }
     #[test]
     fn every_page_has_outer_space_heading_hierarchy_and_selected_row_roles() {
-        for page in [Page::Sessions, Page::Help, Page::Models, Page::Providers, Page::Agents,
-            Page::Workspaces, Page::Status, Page::Mcp, Page::Diff, Page::Context, Page::Commands, Page::Memory] {
+        for page in [
+            Page::Sessions,
+            Page::Help,
+            Page::Models,
+            Page::Providers,
+            Page::Agents,
+            Page::Workspaces,
+            Page::Status,
+            Page::Mcp,
+            Page::Diff,
+            Page::Context,
+            Page::Commands,
+            Page::Memory,
+        ] {
             let mut view = NativeView::new(100, 30);
             view.open_page(page);
-            view.set_page_rows(vec![PageRow { id:"one".into(), label:"Example item".into(), detail:"Secondary description".into(), enabled:true }]);
+            view.set_page_rows(vec![PageRow {
+                id: "one".into(),
+                label: "Example item".into(),
+                detail: "Secondary description".into(),
+                enabled: true,
+            }]);
             if page == Page::Memory {
                 view.load_memory(r#"{"sources":[{"path":"/fixture/AGENTS.md","content":"Example instruction","included":true,"reason":null}]}"#).unwrap();
             }
             let frame = view.render("unsent", &[], false, &[]);
             assert!(frame[0].trim().is_empty(), "{page:?}: outer top margin");
             let regions = view.ui_regions();
-            assert!(regions.iter().any(|row| row.role == crate::native_ui_style::Role::Heading), "{page:?}: heading role");
+            assert!(
+                regions
+                    .iter()
+                    .any(|row| row.role == crate::native_ui_style::Role::Heading),
+                "{page:?}: heading role"
+            );
             if page != Page::Status {
-                let selected = regions.iter().find(|row| row.role == crate::native_ui_style::Role::Selected).expect("selection role");
-                assert!(selected.x >= 4 && selected.width <= 92, "{page:?}: horizontal insets");
+                let selected = regions
+                    .iter()
+                    .find(|row| row.role == crate::native_ui_style::Role::Selected)
+                    .expect("selection role");
+                assert!(
+                    selected.x >= 4 && selected.width <= 92,
+                    "{page:?}: horizontal insets"
+                );
             }
         }
     }
@@ -260,12 +350,25 @@ mod page_spacing_tests {
     fn selected_page_row_stays_visible_after_many_arrow_moves_and_resize() {
         let mut view = NativeView::new(80, 16);
         view.open_page(Page::Sessions);
-        view.set_page_rows((0..30).map(|i| PageRow {id:format!("id-{i}"),label:format!("Item {i}"),detail:"details".into(),enabled:true}).collect());
-        for _ in 0..25 { view.page_next(); }
+        view.set_page_rows(
+            (0..30)
+                .map(|i| PageRow {
+                    id: format!("id-{i}"),
+                    label: format!("Item {i}"),
+                    detail: "details".into(),
+                    enabled: true,
+                })
+                .collect(),
+        );
+        for _ in 0..25 {
+            view.page_next();
+        }
         let frame = view.render("", &[], false, &[]).join("\n");
         assert!(frame.contains("Item 25"));
         let regions = view.ui_regions();
-        assert!(regions.iter().any(|row| row.role == crate::native_ui_style::Role::Selected && row.y < 16));
+        assert!(regions
+            .iter()
+            .any(|row| row.role == crate::native_ui_style::Role::Selected && row.y < 16));
     }
 }
 
@@ -382,16 +485,29 @@ pub struct BindCommit {
 }
 
 impl NativeView {
-    pub fn ui_regions(&self) -> Vec<crate::native_ui_style::Region> { self.ui_regions.clone() }
-    pub fn set_overlay_roles(&mut self, roles: Vec<crate::native_ui_style::Role>) { self.overlay_roles = roles; }
+    pub fn ui_regions(&self) -> Vec<crate::native_ui_style::Region> {
+        self.ui_regions.clone()
+    }
+    pub fn set_overlay_roles(&mut self, roles: Vec<crate::native_ui_style::Role>) {
+        self.overlay_roles = roles;
+    }
 
     pub fn page_panel(&self) -> Option<(u16, u16, u16, u16)> {
-        if matches!(self.page(), Page::Chat | Page::Theme) { return None; }
+        if matches!(self.page(), Page::Chat | Page::Theme) {
+            return None;
+        }
         let presentation = self.presentation();
-        let width = presentation.main_width.saturating_sub(if presentation.main_width >= 20 { 4 } else { 0 }).min(104);
+        let width = presentation
+            .main_width
+            .saturating_sub(if presentation.main_width >= 20 { 4 } else { 0 })
+            .min(104);
         let y = u16::from(self.render_height() >= 8);
-        Some((presentation.main_offset + (presentation.main_width - width) / 2, y,
-            width, (self.render_height() as u16).saturating_sub(2 * y)))
+        Some((
+            presentation.main_offset + (presentation.main_width - width) / 2,
+            y.saturating_add(self.tab_reservation.y_offset()),
+            width,
+            (self.render_height() as u16).saturating_sub(2 * y),
+        ))
     }
 
     pub fn open_command_palette(&mut self, has_session: bool) {
@@ -420,10 +536,8 @@ impl NativeView {
     }
     pub fn command_palette_render(&self) -> Vec<String> {
         let geometry = self.modal_presentation();
-        self.command_palette.render(
-            geometry.content_width,
-            self.modal_content_height(),
-        )
+        self.command_palette
+            .render(geometry.content_width, self.modal_content_height())
     }
 
     /// Startup composition for the given kernel geometry.
@@ -451,8 +565,10 @@ impl NativeView {
             placeholder_index: 0,
             dialog_size: DialogSize::Medium,
             composer_agent: None,
+            send_pointer: None,
             composer_variant: None,
             composer_model: None,
+            composer_effort: None,
             chat_row_classes: Vec::new(),
             chat_text_bounds: Vec::new(),
             box_appearance: crate::native_box_style::BoxAppearance::default(),
@@ -463,10 +579,25 @@ impl NativeView {
             frame_busy: false,
             mcp_hit: Vec::new(),
             sidebar_content_height: 0,
+            tab_reservation: TabReservation::default(),
         }
     }
 
     /// Kernel geometry changed: rebuild layout, keep scroll/page state.
+    /// Install the reservation computed for the current renderer frame.
+    /// Every geometry query below observes this same value.
+    pub fn set_tab_reservation(&mut self, reservation: TabReservation) {
+        if self.tab_reservation != reservation {
+            self.mcp_hit.clear();
+        }
+        self.tab_reservation = reservation;
+    }
+
+    #[must_use]
+    pub fn tab_reservation(&self) -> TabReservation {
+        self.tab_reservation
+    }
+
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.mcp_hit.clear();
         self.sidebar_content_height = 0;
@@ -480,12 +611,19 @@ impl NativeView {
         self.status.set_model(model);
     }
 
-    pub fn set_context_window(&mut self,window:Option<u64>) {
-        self.context_window=window;
+    pub fn set_context_window(&mut self, window: Option<u64>) {
+        self.context_window = window;
         self.status.set_context_window(window);
     }
-    pub fn set_usage(&mut self,input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>) {
-        self.status.set_usage(input,output,cached,reasoning,self.context_window);
+    pub fn set_usage(
+        &mut self,
+        input: u64,
+        output: u64,
+        cached: Option<u64>,
+        reasoning: Option<u64>,
+    ) {
+        self.status
+            .set_usage(input, output, cached, reasoning, self.context_window);
     }
 
     /// Compatibility shim for the first layout handoff.  Busy state is
@@ -581,12 +719,27 @@ impl NativeView {
         self.composer_variant = clean(variant);
     }
 
+    /// Set the provider effort actually selected for the next request.  The
+    /// caller must pass an observed/catalogued value; this view never invents
+    /// a default when the daemon did not report one.
+    pub fn set_composer_effort(&mut self, effort: Option<String>) {
+        self.composer_effort = effort.and_then(|value| {
+            let cleaned = crate::native_transcript::strip_ansi(&value)
+                .chars()
+                .filter(|c| !c.is_control())
+                .take(32)
+                .collect::<String>();
+            (!cleaned.trim().is_empty()).then_some(cleaned)
+        });
+    }
+
     fn render_height(&self) -> usize {
         let cols = usize::from(self.layout.cols);
         if cols == 0 {
             return 0;
         }
         usize::from(self.layout.rows)
+            .saturating_sub(usize::from(self.tab_reservation.y_offset()))
             .min(256)
             .min(MAX_FRAME_CELLS / cols)
     }
@@ -609,26 +762,34 @@ impl NativeView {
         // paints over the footer and leaves hit regions inconsistent with the
         // visible action rows.
         let available_height = self.render_height().saturating_sub(1);
-        let width = self
-            .layout
-            .cols
-            .saturating_sub(2)
-            .min(self.dialog_size.width());
+        let content_cols = self.layout.cols.saturating_sub(self.tab_reservation.x_offset());
+        let width = content_cols.saturating_sub(2).min(self.dialog_size.width());
         let y = (available_height as u16).div_ceil(4);
         let box_id = if self.command_palette.is_open() {
             crate::native_box_style::BoxId::Menu
         } else {
             crate::native_box_style::BoxId::Dialog
         };
-        let padding = u16::from(self.box_appearance.effective(box_id).padding.min(crate::native_box_style::MAX_PADDING));
-        let x = (self.layout.cols - width) / 2;
+        let padding = u16::from(
+            self.box_appearance
+                .effective(box_id)
+                .padding
+                .min(crate::native_box_style::MAX_PADDING),
+        );
+        let x = self
+            .tab_reservation
+            .x_offset()
+            .saturating_add(content_cols.saturating_sub(width) / 2);
         let inset = 2u16.saturating_add(padding).min(width);
         ModalPresentation {
             x,
-            y,
+            y: y.saturating_add(self.tab_reservation.y_offset()),
             width,
             content_x: x.saturating_add(inset),
-            content_y: y.saturating_add(1).saturating_add(padding),
+            content_y: y
+                .saturating_add(1)
+                .saturating_add(padding)
+                .saturating_add(self.tab_reservation.y_offset()),
             content_width: width.saturating_sub(2 * inset),
             bottom_padding: padding,
             backdrop_alpha: 150,
@@ -646,9 +807,16 @@ impl NativeView {
     /// Window modal content below its top inset and above its bottom border.
     pub fn modal_content_height(&self) -> usize {
         let modal = self.modal_presentation();
-        if modal.content_width == 0 { return 0; }
-        self.render_height().saturating_sub(1)
-            .saturating_sub(usize::from(modal.content_y) + 1 + usize::from(modal.bottom_padding))
+        if modal.content_width == 0 {
+            return 0;
+        }
+        self.render_height()
+            .saturating_sub(1)
+            .saturating_sub(
+                usize::from(modal.content_y.saturating_sub(self.tab_reservation.y_offset()))
+                    + 1
+                    + usize::from(modal.bottom_padding),
+            )
     }
 
     fn composer_metadata(&self) -> String {
@@ -667,6 +835,9 @@ impl NativeView {
         if let Some(variant) = &self.composer_variant {
             parts.push(variant.clone());
         }
+        if let Some(effort) = &self.composer_effort {
+            parts.push(effort.clone());
+        }
         parts.join(" · ")
     }
 
@@ -679,12 +850,16 @@ impl NativeView {
     /// Install the persisted global + per-box appearance. The native
     /// composer frame resolves `BoxId::ChatComposer` from this value.
     pub fn set_box_appearance(&mut self, appearance: crate::native_box_style::BoxAppearance) {
-        if self.box_appearance != appearance { self.mcp_hit.clear(); }
+        if self.box_appearance != appearance {
+            self.mcp_hit.clear();
+        }
         self.box_appearance = appearance;
     }
 
     pub fn set_session_route(&mut self, session_route: bool) {
-        if self.session_route != session_route { self.mcp_hit.clear(); }
+        if self.session_route != session_route {
+            self.mcp_hit.clear();
+        }
         self.session_route = session_route;
     }
 
@@ -710,7 +885,9 @@ impl NativeView {
     /// Mark the active session as a child (`parentID` present): upstream
     /// suppresses the sidebar regardless of width or toggle.
     pub fn set_parent_session(&mut self, parent_session: bool) {
-        if self.parent_session != parent_session { self.mcp_hit.clear(); }
+        if self.parent_session != parent_session {
+            self.mcp_hit.clear();
+        }
         self.parent_session = parent_session;
     }
 
@@ -723,11 +900,12 @@ impl NativeView {
         let main_width = self
             .layout
             .cols
+.saturating_sub(self.tab_reservation.x_offset())
             .saturating_sub(if inline { sidebar_width } else { 0 });
         ViewPresentation {
             cols: self.layout.cols,
             rows: self.layout.rows,
-            main_offset: 0,
+            main_offset: self.tab_reservation.x_offset(),
             main_width,
             main_padding: 2,
             sidebar_offset: if sidebar {
@@ -769,10 +947,12 @@ impl NativeView {
             );
             let composer_height = layout.height;
             Some((
-                2,
+                self.tab_reservation.x_offset().saturating_add(2),
                 // The shared body budget includes the header; the composer
                 // starts immediately after its remaining transcript rows.
-                body_height.saturating_sub(composer_height) as u16,
+                body_height
+                    .saturating_sub(composer_height)
+                    .saturating_add(usize::from(self.tab_reservation.y_offset())) as u16,
                 width - 4,
                 composer_height as u16,
             ))
@@ -780,8 +960,12 @@ impl NativeView {
             let (count, _, input_top) = self.home_positions(draft);
             let prompt_width = self.home_prompt_width();
             Some((
-                (width - prompt_width).div_ceil(2),
-                input_top.saturating_sub(1) as u16,
+                self.tab_reservation
+                    .x_offset()
+                    .saturating_add((width - prompt_width).div_ceil(2)),
+                input_top
+                    .saturating_sub(1)
+                    .saturating_add(usize::from(self.tab_reservation.y_offset())) as u16,
                 prompt_width,
                 (count + 4).min(height - input_top.saturating_sub(1)) as u16,
             ))
@@ -799,7 +983,54 @@ impl NativeView {
         {
             return None;
         }
-        Some(((width - 39).div_ceil(2), top as u16))
+        Some((
+            self.tab_reservation.x_offset().saturating_add((width - 39).div_ceil(2)),
+            (top as u16).saturating_add(self.tab_reservation.y_offset()),
+        ))
+    }
+
+    /// The same cell rectangle drives both drawing and pointer admission.
+    pub fn send_button_region(&self, draft: &str) -> Option<(u16, u16, u16)> {
+        if self.pages.page() != Page::Chat {
+            return None;
+        }
+        let (left, top, width, height) = self.composer_region(draft)?;
+        if width < 14 || height < 3 {
+            return None;
+        }
+        let row = top.checked_add(height.checked_sub(if self.session_route { 1 } else { 2 })?)?;
+        Some((
+            left.checked_add(width.checked_sub(8)?)?,
+            row,
+            6,
+        ))
+    }
+
+    pub fn send_button_hit(&self, draft: &str, x: u16, y: u16) -> bool {
+        if self.dialogs.is_open() || self.command_palette.is_open() {
+            return false;
+        }
+        if self.layout.cols <= 120
+            && self.sidebar_visible()
+            && self
+                .presentation()
+                .sidebar_offset
+                .is_some_and(|left| x >= left)
+        {
+            return false;
+        }
+        self.send_button_region(draft)
+            .is_some_and(|(left, row, width)| {
+                y == row && x >= left && x < left.saturating_add(width)
+            })
+    }
+
+    pub fn set_send_pointer(&mut self, draft: &str, x: u16, y: u16) -> bool {
+        let old = self
+            .send_pointer
+            .is_some_and(|(x, y)| self.send_button_hit(draft, x, y));
+        self.send_pointer = Some((x, y));
+        old != self.send_button_hit(draft, x, y)
     }
 
     pub fn home_cursor(&self, draft: &str) -> Option<(u16, u16)> {
@@ -833,6 +1064,15 @@ impl NativeView {
         self.status.set_session(session);
     }
 
+    /// Return the visual shell to Home after the client closes its last tab.
+    /// This is deliberately only a client-side projection: it does not delete
+    /// or mutate the daemon session, and the caller owns the tab/worker state.
+    pub fn reset_to_home_after_tab_close(&mut self) {
+        self.close_page();
+        self.set_session_route(false);
+        self.set_session(None);
+    }
+
     /// Forward an ACCEPTED authenticated binding (id + title + confirmed
     /// persisted message count from the SAME accepted snapshot) into the
     /// status projection. See
@@ -863,26 +1103,58 @@ impl NativeView {
         self.pages.set_rows(rows);
     }
 
-    pub fn load_memory(&mut self, body: &str) -> Result<(), String> { self.memory.load_response(body) }
-    pub fn set_memory_error(&mut self, error: &str) { self.memory.set_error(error); }
-    pub fn memory_mut(&mut self) -> &mut crate::native_memory::Memory { &mut self.memory }
-    pub fn memory(&self) -> &crate::native_memory::Memory { &self.memory }
-    pub fn compaction(&self) -> &crate::native_compaction_settings::CompactionSettingsView { &self.compaction }
-    pub fn compaction_mut(&mut self) -> &mut crate::native_compaction_settings::CompactionSettingsView { &mut self.compaction }
-    pub fn load_context(&mut self, body: &str) -> Result<(), String> { self.context.load_response(body) }
-    pub fn set_context_error(&mut self, error: &str) { self.context.set_error(error); }
-    pub fn invalidate_context(&mut self) { self.context.invalidate(); }
-    pub fn context_mut(&mut self) -> &mut crate::native_context::ContextView { &mut self.context }
-    pub fn context(&self) -> &crate::native_context::ContextView { &self.context }
-    pub fn select_context_step(&mut self, down: bool) { self.context.select_step(down); }
-    pub fn scroll_context_detail(&mut self, down: bool) { self.context.scroll_detail(down); }
+    pub fn load_memory(&mut self, body: &str) -> Result<(), String> {
+        self.memory.load_response(body)
+    }
+    pub fn set_memory_error(&mut self, error: &str) {
+        self.memory.set_error(error);
+    }
+    pub fn memory_mut(&mut self) -> &mut crate::native_memory::Memory {
+        &mut self.memory
+    }
+    pub fn memory(&self) -> &crate::native_memory::Memory {
+        &self.memory
+    }
+    pub fn compaction(&self) -> &crate::native_compaction_settings::CompactionSettingsView {
+        &self.compaction
+    }
+    pub fn compaction_mut(
+        &mut self,
+    ) -> &mut crate::native_compaction_settings::CompactionSettingsView {
+        &mut self.compaction
+    }
+    pub fn load_context(&mut self, body: &str) -> Result<(), String> {
+        self.context.load_response(body)
+    }
+    pub fn set_context_error(&mut self, error: &str) {
+        self.context.set_error(error);
+    }
+    pub fn invalidate_context(&mut self) {
+        self.context.invalidate();
+    }
+    pub fn context_mut(&mut self) -> &mut crate::native_context::ContextView {
+        &mut self.context
+    }
+    pub fn context(&self) -> &crate::native_context::ContextView {
+        &self.context
+    }
+    pub fn select_context_step(&mut self, down: bool) {
+        self.context.select_step(down);
+    }
+    pub fn scroll_context_detail(&mut self, down: bool) {
+        self.context.scroll_detail(down);
+    }
     pub fn scroll_memory_content(&mut self, lines: isize) {
-        let Some((_, _, width, height)) = self.page_panel() else { return; };
+        let Some((_, _, width, height)) = self.page_panel() else {
+            return;
+        };
         let inset = if width >= 8 { 2 } else { 0 };
         let vertical = u16::from(height >= 4);
-        self.memory.scroll_content(lines,
+        self.memory.scroll_content(
+            lines,
             usize::from(width.saturating_sub(2 * inset)),
-            usize::from(height.saturating_sub(2 * vertical)));
+            usize::from(height.saturating_sub(2 * vertical)),
+        );
     }
 
     /// Backend MCP snapshot (`GET /api/mcp`) projected into the right pane.
@@ -905,25 +1177,39 @@ impl NativeView {
 
     pub fn mcp_sidebar_action(&self, x: u16, y: u16) -> Option<(String, bool)> {
         if self.presentation().sidebar_offset.is_none()
-            || self.dialogs.intercepts_input() || self.command_palette_open() {
+            || self.dialogs.intercepts_input()
+            || self.command_palette_open()
+        {
             return None;
         }
-        self.mcp_hit.iter().find(|(_, _, left, top, width)|
-            x >= *left && x < left.saturating_add(*width) && y == *top
-        ).filter(|(name, included, _, _, _)| self.status.mcp_included(name) == Some(*included))
+        self.mcp_hit
+            .iter()
+            .find(|(_, _, left, top, width)| {
+                x >= *left && x < left.saturating_add(*width) && y == *top
+            })
+            .filter(|(name, included, _, _, _)| self.status.mcp_included(name) == Some(*included))
             .map(|(name, included, _, _, _)| (name.clone(), *included))
     }
 
     pub fn scroll_sidebar_at(&mut self, x: u16, y: u16, lines: isize) -> bool {
         let presentation = self.presentation();
-        let Some(left) = presentation.sidebar_offset else { return false; };
-        if x < left || x >= left.saturating_add(presentation.sidebar_width)
-            || usize::from(y) >= self.render_height().saturating_sub(1)
+        let Some(left) = presentation.sidebar_offset else {
+            return false;
+        };
+        let Some(content_y) = y.checked_sub(self.tab_reservation.y_offset()) else {
+            return false;
+        };
+        if x < left
+            || x >= left.saturating_add(presentation.sidebar_width)
+            || usize::from(content_y) >= self.render_height().saturating_sub(1)
             || self.sidebar_content_height == 0
-            || self.dialogs.intercepts_input() || self.command_palette_open() {
+            || self.dialogs.intercepts_input()
+            || self.command_palette_open()
+        {
             return false;
         }
-        self.status.scroll_sidebar(lines, self.sidebar_content_height);
+        self.status
+            .scroll_sidebar(lines, self.sidebar_content_height);
         self.mcp_hit.clear();
         true
     }
@@ -949,7 +1235,6 @@ impl NativeView {
     pub fn page_prev(&mut self) {
         self.pages.prev();
     }
-
     pub fn page_selected(&self) -> Option<&PageRow> {
         self.pages.selected()
     }
@@ -1140,12 +1425,25 @@ impl NativeView {
         self.chat.scroll_down(lines);
     }
 
+    /// Tail-relative chat viewport state owned by the active client tab.
+    #[must_use]
+    pub fn chat_scroll_offset(&self) -> usize {
+        self.chat.scroll_offset()
+    }
+
+    /// Restore a previously accepted tab viewport without changing the
+    /// pagination policy.
+    pub fn set_chat_scroll_offset(&mut self, rows: usize) {
+        self.chat.set_scroll(rows);
+    }
+
     pub fn chat_at_scroll_ceiling(&self) -> bool {
         self.chat.at_scroll_ceiling()
     }
 
-    pub fn chat_at_tail(&self) -> bool { self.chat.at_tail() }
-
+    pub fn chat_at_tail(&self) -> bool {
+        self.chat.at_tail()
+    }
 
     pub fn follow_tail(&mut self) {
         self.chat.follow_tail();
@@ -1381,7 +1679,7 @@ impl NativeView {
         busy: bool,
         overlay: &[String],
     ) -> Vec<String> {
-        self.render_content(draft, transcript, None, busy, overlay)
+        self.render_content(draft, transcript, None, busy, overlay, None)
     }
 
     pub fn render_typed(
@@ -1391,14 +1689,36 @@ impl NativeView {
         busy: bool,
         overlay: &[String],
     ) -> Vec<String> {
-        self.render_content(draft, &[], Some(messages), busy, overlay)
+        self.render_content(draft, &[], Some(messages), busy, overlay, None)
+    }
+
+    /// Renders a session-route permission prompt in the chat body. The
+    /// dialog remains owned by `DialogView`, so keyboard input and broker ACK
+    /// correlation are unchanged; this method only changes placement.
+    pub fn render_typed_permission(
+        &mut self,
+        draft: &str,
+        messages: &[crate::native_view_chat::ChatMessage],
+        busy: bool,
+        overlay: &[String],
+        permission_rows: &[String],
+    ) -> Vec<String> {
+        self.render_content(
+            draft,
+            &[],
+            Some(messages),
+            busy,
+            overlay,
+            Some(permission_rows),
+        )
     }
 
     /// Exact styled transcript height for a bounded message batch. Used by
     /// history pagination to preserve a rendered-row anchor across eviction.
     pub fn chat_message_rows(&self, messages: &[crate::native_view_chat::ChatMessage]) -> usize {
         let width = self.presentation().main_width.saturating_sub(4) as usize;
-        self.chat.styled_message_rows(width, messages, &self.box_appearance)
+        self.chat
+            .styled_message_rows(width, messages, &self.box_appearance)
     }
 
     pub fn chat_rendered_anchor(
@@ -1407,8 +1727,12 @@ impl NativeView {
     ) -> Option<crate::native_view_chat::RenderedChatAnchor> {
         let width = self.presentation().main_width.saturating_sub(4) as usize;
         let ids = entries.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
-        let messages = entries.iter().map(|(_, message)| message.clone()).collect::<Vec<_>>();
-        self.chat.rendered_anchor(width, &messages, &ids, &self.box_appearance)
+        let messages = entries
+            .iter()
+            .map(|(_, message)| message.clone())
+            .collect::<Vec<_>>();
+        self.chat
+            .rendered_anchor(width, &messages, &ids, &self.box_appearance)
     }
 
     pub fn restore_chat_rendered_anchor(
@@ -1418,10 +1742,16 @@ impl NativeView {
     ) -> bool {
         let width = self.presentation().main_width.saturating_sub(4) as usize;
         let ids = entries.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
-        let messages = entries.iter().map(|(_, message)| message.clone()).collect::<Vec<_>>();
-        let Some(scroll) = self.chat.scroll_for_anchor(
-            width, &messages, &ids, &self.box_appearance, anchor, 0,
-        ) else { return false; };
+        let messages = entries
+            .iter()
+            .map(|(_, message)| message.clone())
+            .collect::<Vec<_>>();
+        let Some(scroll) =
+            self.chat
+                .scroll_for_anchor(width, &messages, &ids, &self.box_appearance, anchor, 0)
+        else {
+            return false;
+        };
         self.chat.set_scroll(scroll);
         true
     }
@@ -1433,6 +1763,7 @@ impl NativeView {
         messages: Option<&[crate::native_view_chat::ChatMessage]>,
         busy: bool,
         overlay: &[String],
+        permission_rows: Option<&[String]>,
     ) -> Vec<String> {
         // A provider turn owns the footer loader.  Approval/setup overlays
         // retain their existing center loader semantics and must not be
@@ -1459,37 +1790,83 @@ impl NativeView {
             let vertical = usize::from(panel_height >= 4);
             let content_height = usize::from(panel_height).saturating_sub(2 * vertical);
             let lines = if self.pages.page() == Page::Status {
-                self.status.render_styled(content_width as usize, content_height)
+                self.status
+                    .render_styled(content_width as usize, content_height)
             } else if self.pages.page() == Page::Memory {
-                self.memory.render(content_width as usize, content_height).into_iter().enumerate().map(|(index, text)| crate::native_ui_style::Line {
-                    text,
-                    role: if index == 0 { crate::native_ui_style::Role::Heading }
-                        else if index == 1 && self.memory.selected().is_some() && self.memory.error().is_none() {
+                self.memory
+                    .render(content_width as usize, content_height)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, text)| crate::native_ui_style::Line {
+                        text,
+                        role: if index == 0 {
+                            crate::native_ui_style::Role::Heading
+                        } else if index == 1
+                            && self.memory.selected().is_some()
+                            && self.memory.error().is_none()
+                        {
                             crate::native_ui_style::Role::Selected
-                        } else { crate::native_ui_style::Role::Item },
-                    detail_from: None,
-                }).collect()
+                        } else {
+                            crate::native_ui_style::Role::Item
+                        },
+                        detail_from: None,
+                    })
+                    .collect()
             } else if self.pages.page() == Page::Compaction {
-                self.compaction.render(content_width as usize, content_height).into_iter().enumerate().map(|(index, text)| crate::native_ui_style::Line {
-                    text,
-                    role: if index == 0 { crate::native_ui_style::Role::Heading } else { crate::native_ui_style::Role::Item },
-                    detail_from: None,
-                }).collect()
+                self.compaction
+                    .render(content_width as usize, content_height)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, text)| crate::native_ui_style::Line {
+                        text,
+                        role: if index == 0 {
+                            crate::native_ui_style::Role::Heading
+                        } else {
+                            crate::native_ui_style::Role::Item
+                        },
+                        detail_from: None,
+                    })
+                    .collect()
             } else if self.pages.page() == Page::Context {
-                self.context.render(content_width as usize, content_height).into_iter().enumerate().map(|(index, text)| crate::native_ui_style::Line {
-                    text,
-                    role: if index == 0 { crate::native_ui_style::Role::Heading } else if index == 1 { crate::native_ui_style::Role::Selected } else { crate::native_ui_style::Role::Item },
-                    detail_from: None,
-                }).collect()
-            } else { self.pages.render_styled(content_width as usize, content_height) };
+                self.context
+                    .render(content_width as usize, content_height)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(index, text)| crate::native_ui_style::Line {
+                        text,
+                        role: if index == 0 {
+                            crate::native_ui_style::Role::Heading
+                        } else if index == 1 {
+                            crate::native_ui_style::Role::Selected
+                        } else {
+                            crate::native_ui_style::Role::Item
+                        },
+                        detail_from: None,
+                    })
+                    .collect()
+            } else {
+                self.pages
+                    .render_styled(content_width as usize, content_height)
+            };
             let mut center = vec![String::new(); height];
             for (index, line) in lines.into_iter().enumerate().take(content_height) {
                 let row = usize::from(top) + vertical + index;
-                if row >= height { break; }
+                if row >= height {
+                    break;
+                }
                 let x = left + inset;
-                center[row] = format!("{}{}", " ".repeat(usize::from(x)), fit(&line.text, content_width));
+                center[row] = format!(
+                    "{}{}",
+                    " ".repeat(usize::from(x)),
+                    fit(&line.text, content_width)
+                );
                 self.ui_regions.push(crate::native_ui_style::Region {
-                    x, y: row as u16, width: content_width, role: line.role, detail_from: line.detail_from, modal:false,
+                    x,
+                    y: row as u16,
+                    width: content_width,
+                    role: line.role,
+                    detail_from: line.detail_from,
+                    modal: false,
                 });
             }
             center
@@ -1542,22 +1919,103 @@ impl NativeView {
                         },
                         width,
                     ),
-                    None if self.status.model_label() != "Unavailable" => {
-                        padded(
-                            &if busy {
-                                format!("Thinking… · {}", self.composer_metadata())
-                            } else {
-                                self.composer_metadata()
-                            },
-                            width,
-                        )
-                    }
+                    None if self.status.model_label() != "Unavailable" => padded(
+                        &if busy {
+                            format!("Thinking… · {}", self.composer_metadata())
+                        } else {
+                            self.composer_metadata()
+                        },
+                        width,
+                    ),
+                    None if busy => padded("Thinking…", width),
+                    None => String::new(),
+                };
+            }
+            let has_permission = permission_rows.is_some();
+            // Upstream `SessionQuestion` (`permission.tsx:514-523`) renders the
+            // permission prompt inline at the conversation bottom with
+            // `maxHeight: 15` and REPLACES the composer (index.tsx Switch at
+            // 1610-1621: composer.open OR permission — never both). Reserve
+            // that bounded inline height BEFORE rendering the chat so the
+            // transcript foot is the prompt, not the composer footer, and do
+            // NOT append the composer metadata/blank separator when present.
+            let permission_height = has_permission.then(|| {
+                permission_rows
+                    .map(|rows| rows.iter().take(15).count())
+                    .unwrap_or(0)
+            });
+            let body_height = if height >= 4 {
+                height.saturating_sub(2).saturating_sub(permission_height.unwrap_or(0))
+            } else {
+                height
+            };
+            let mut body = if let Some(messages) = messages {
+                let rows = self.chat.render_styled(
+                    inner_width as usize,
+                    body_height,
+                    &self.workspace,
+                    messages,
+                    draft,
+                    busy,
+                    &self.box_appearance,
+                );
+                self.chat_row_classes
+                    .extend(rows.iter().map(|(_, class, _)| *class));
+                self.chat_text_bounds
+                    .extend(rows.iter().map(|(_, _, bounds)| {
+                        bounds.map(|(left, width)| (left.saturating_add(2), width))
+                    }));
+                rows.into_iter()
+                    .map(|(text, _, _)| text)
+                    .collect::<Vec<_>>()
+            } else {
+                self.chat.render(
+                    inner_width as usize,
+                    body_height,
+                    &self.workspace,
+                    transcript,
+                    draft,
+                    busy,
+                )
+            };
+            // The upstream scrollbox starts with a spacer, rather than a
+            // permanent workspace/header row. The composer stays at its foot.
+            if body.len() > 1 {
+                // Keep the confirmed selected model/provider visible in the
+                // conversation at narrow widths too. The footer is reserved
+                // for directory and turn/status chrome, and the optional
+                // sidebar is unavailable at these widths. Only replace the
+                // upstream spacer when an actual model observation exists;
+                // unknown state remains an empty spacer.
+                body[0] = match &self.composer_model {
+                    Some(_) => padded(
+                        &if busy {
+                            format!("Thinking… · {}", self.composer_metadata())
+                        } else {
+                            self.composer_metadata()
+                        },
+                        width,
+                    ),
+                    None if self.status.model_label() != "Unavailable" => padded(
+                        &if busy {
+                            format!("Thinking… · {}", self.composer_metadata())
+                        } else {
+                            self.composer_metadata()
+                        },
+                        width,
+                    ),
                     None if busy => padded("Thinking…", width),
                     None => String::new(),
                 };
             }
             let mut body: Vec<_> = body.into_iter().map(|line| padded(&line, width)).collect();
-            if height >= 4 {
+            if let Some(rows) = permission_rows {
+                body.extend(rows.iter().take(15).map(|row| padded(row, width)));
+            }
+            if has_permission {
+                // Permission prompt replaces the composer — no composer
+                // metadata / blank separator row beneath it (upstream Switch).
+            } else if height >= 4 {
                 body.push(padded(&self.composer_metadata(), width));
                 body.push(String::new());
             }
@@ -1585,8 +2043,12 @@ impl NativeView {
         };
         self.sidebar_content_height = if presentation.sidebar_width == 0 {
             0
-        } else if presentation.sidebar_width >= 4 && height >= 3
-            && self.box_appearance.full_outline(crate::native_box_style::BoxId::Sidebar) {
+        } else if presentation.sidebar_width >= 4
+            && height >= 3
+            && self
+                .box_appearance
+                .full_outline(crate::native_box_style::BoxId::Sidebar)
+        {
             height.saturating_sub(3)
         } else {
             height.saturating_sub(1)
@@ -1600,14 +2062,19 @@ impl NativeView {
             Vec::new()
         };
         self.mcp_hit.clear();
-        let mut sidebar: Vec<String> = sidebar_styled.iter().map(|line| padded(&line.text, presentation.sidebar_width)).collect();
+        let mut sidebar: Vec<String> = sidebar_styled
+            .iter()
+            .map(|line| padded(&line.text, presentation.sidebar_width))
+            .collect();
         let mut sidebar_inset = 2;
         let mut sidebar_top = 0;
         let mut sidebar_text_width = presentation.sidebar_width.saturating_sub(3);
         let mut sidebar_frame_painted = false;
         if presentation.sidebar_width >= 4
             && height >= 3
-            && self.box_appearance.full_outline(crate::native_box_style::BoxId::Sidebar)
+            && self
+                .box_appearance
+                .full_outline(crate::native_box_style::BoxId::Sidebar)
         {
             let style = self
                 .box_appearance
@@ -1642,10 +2109,13 @@ impl NativeView {
             });
             if let Some(geometry) = geometry {
                 let inside = usize::from(geometry.width.saturating_sub(2));
-                let pad = usize::from(geometry.pad)
-                    .min(inside.saturating_sub(1) / 2);
-                let frame = crate::native_box_style::TextFrame::new(style, usize::from(geometry.width), pad)
-                    .expect("BoxGeometry::framed guarantees minimum TextFrame width");
+                let pad = usize::from(geometry.pad).min(inside.saturating_sub(1) / 2);
+                let frame = crate::native_box_style::TextFrame::new(
+                    style,
+                    usize::from(geometry.width),
+                    pad,
+                )
+                .expect("BoxGeometry::framed guarantees minimum TextFrame width");
                 sidebar_inset = geometry.x.saturating_add(1 + pad as u16);
                 sidebar_top = geometry.y;
                 let text_width = geometry
@@ -1690,26 +2160,37 @@ impl NativeView {
             } else {
                 sidebar_styled.len().min(height)
             };
-            for (index, line) in sidebar_styled
-                .iter()
-                .enumerate()
-                .take(region_count)
-            {
+            for (index, line) in sidebar_styled.iter().enumerate().take(region_count) {
                 self.ui_regions.push(crate::native_ui_style::Region {
                     // `sidebar_inset` is local to the right pane; add the
                     // pane origin exactly once. Text starts after the top
                     // border row, not at the pane's row zero corner.
-                    x:left.saturating_add(sidebar_inset),
-                    y:if sidebar_frame_painted {
+                    x: left.saturating_add(sidebar_inset),
+                    y: if sidebar_frame_painted {
                         sidebar_top.saturating_add(1).saturating_add(index as u16)
                     } else {
                         index as u16
                     },
-                    width:sidebar_text_width,
-                    role:line.role,detail_from:None,modal:false,
+                    width: sidebar_text_width,
+                    role: line.role,
+                    detail_from: None,
+                    modal: false,
                 });
-                if let Some((name, included)) = self.status.mcp_sidebar_hit(38, self.sidebar_content_height, index) {
-                    self.mcp_hit.push((name.to_owned(), included, left.saturating_add(sidebar_inset), if sidebar_frame_painted { sidebar_top.saturating_add(1).saturating_add(index as u16) } else { index as u16 }, sidebar_text_width));
+                if let Some((name, included)) =
+                    self.status
+                        .mcp_sidebar_hit(38, self.sidebar_content_height, index)
+                {
+                    self.mcp_hit.push((
+                        name.to_owned(),
+                        included,
+                        left.saturating_add(sidebar_inset),
+                        if sidebar_frame_painted {
+                            sidebar_top.saturating_add(1).saturating_add(index as u16)
+                        } else {
+                            index as u16
+                        },
+                        sidebar_text_width,
+                    ));
                 }
             }
         }
@@ -1725,6 +2206,60 @@ impl NativeView {
             ..self.layout
         };
         let mut frame = compose_frame(&effective, &[], &center, &sidebar);
+        if self.tab_reservation.width > 0 || self.tab_reservation.height > 0 {
+            let x = usize::from(self.tab_reservation.x_offset());
+            let y = usize::from(self.tab_reservation.y_offset());
+            let rows = usize::from(self.layout.rows).min(256);
+            let width = usize::from(self.layout.cols);
+            let mut shifted = vec![String::new(); y.min(rows)];
+            for line in frame.into_iter().take(rows.saturating_sub(y)) {
+                let mut row = " ".repeat(x.min(width));
+                row.push_str(&line);
+                shifted.push(fit(&row, self.layout.cols));
+            }
+            shifted.resize(rows, String::new());
+            frame = shifted;
+            for region in &mut self.ui_regions {
+                region.x = region.x.saturating_add(self.tab_reservation.x_offset());
+                region.y = region.y.saturating_add(self.tab_reservation.y_offset());
+            }
+            for hit in &mut self.mcp_hit {
+                hit.2 = hit.2.saturating_add(self.tab_reservation.x_offset());
+                hit.3 = hit.3.saturating_add(self.tab_reservation.y_offset());
+            }
+        }
+        if let Some((left, row, button_width)) = self.send_button_region(draft) {
+            if let Some(line) = frame.get_mut(usize::from(row)) {
+                let right = left.saturating_add(button_width);
+                *line = format!(
+                    "{}[Send]{}",
+                    fit(line, left),
+                    crate::native_view_layout::slice_cells(
+                        line,
+                        right,
+                        self.layout.cols.saturating_sub(right)
+                    )
+                );
+                let enabled = !busy && !draft.trim().is_empty();
+                let hovered = self
+                    .send_pointer
+                    .is_some_and(|(x, y)| self.send_button_hit(draft, x, y));
+                self.ui_regions.push(crate::native_ui_style::Region {
+                    x: left,
+                    y: row,
+                    width: button_width,
+                    role: if !enabled {
+                        crate::native_ui_style::Role::Hint
+                    } else if hovered {
+                        crate::native_ui_style::Role::Selected
+                    } else {
+                        crate::native_ui_style::Role::Heading
+                    },
+                    detail_from: None,
+                    modal: false,
+                });
+            }
+        }
         if !inline {
             if let Some(offset) = presentation.sidebar_offset {
                 for (row, line) in sidebar.iter().enumerate().take(frame.len()) {
@@ -1743,31 +2278,61 @@ impl NativeView {
         // conversation column: dialog.tsx medium=60, maxWidth=cols-2, top=h/4.
         let modal_geometry = self.modal_presentation();
         let dialog_width = modal_geometry.width;
-        let modal_lines = if self.dialogs.is_open() {
-            self.dialogs
-                .render_styled(modal_geometry.content_width as usize, self.modal_content_height())
+        let modal_lines = if self.dialogs.is_open() && permission_rows.is_none() {
+            self.dialogs.render_styled(
+                modal_geometry.content_width as usize,
+                self.modal_content_height(),
+            )
         } else if self.command_palette.is_open() {
-            self.command_palette.render_styled(modal_geometry.content_width, self.modal_content_height())
+            self.command_palette
+                .render_styled(modal_geometry.content_width, self.modal_content_height())
         } else if self.pages.page() == Page::Theme {
             let height = self.modal_content_height().min(16);
-            let mut lines = self.pages.render_styled(usize::from(modal_geometry.content_width), height);
-            if let Some(first) = lines.first_mut() { first.text = "Themes".into(); }
+            let mut lines = self
+                .pages
+                .render_styled(usize::from(modal_geometry.content_width), height);
+            if let Some(first) = lines.first_mut() {
+                first.text = "Themes".into();
+            }
             lines
         } else {
             // Generic overlays use the exact same content budget as native
             // dialogs.  In particular, never let an untrusted/oversized
             // overlay consume the reserved footer row.
-            overlay.iter().take(self.modal_content_height()).enumerate().map(|(index, text)| crate::native_ui_style::Line {
-                text:text.clone(),role:self.overlay_roles.get(index).copied().unwrap_or(if index == 0 {crate::native_ui_style::Role::Heading} else {crate::native_ui_style::Role::Description}),detail_from:None,
-            }).collect()
+            overlay
+                .iter()
+                .take(self.modal_content_height())
+                .enumerate()
+                .map(|(index, text)| crate::native_ui_style::Line {
+                    text: text.clone(),
+                    role: self
+                        .overlay_roles
+                        .get(index)
+                        .copied()
+                        .unwrap_or(if index == 0 {
+                            crate::native_ui_style::Role::Heading
+                        } else {
+                            crate::native_ui_style::Role::Description
+                        }),
+                    detail_from: None,
+                })
+                .collect()
         };
         let modal_content_height = self.modal_content_height();
         for (index, line) in modal_lines.iter().enumerate().take(modal_content_height) {
             let y = usize::from(modal_geometry.content_y).saturating_add(index);
-            if y >= height.saturating_sub(1) { break; }
+            if y >= height.saturating_sub(1) {
+                break;
+            }
             self.ui_regions.push(crate::native_ui_style::Region {
-                x:modal_geometry.content_x, y:modal_geometry.content_y.saturating_add(index.min(u16::MAX as usize) as u16),
-                width:modal_geometry.content_width, role:line.role, detail_from:line.detail_from,modal:true,
+                x: modal_geometry.content_x,
+                y: modal_geometry
+                    .content_y
+                    .saturating_add(index.min(u16::MAX as usize) as u16),
+                width: modal_geometry.content_width,
+                role: line.role,
+                detail_from: line.detail_from,
+                modal: true,
             });
         }
         let modal: Vec<String> = modal_lines.into_iter().map(|line| line.text).collect();
@@ -1786,7 +2351,10 @@ impl NativeView {
             // The panel's inner top padding is an empty panel row, not
             // transcript text behind the dialog.
             for row in usize::from(modal_geometry.y)
-                ..height.saturating_sub(1).min(top.saturating_add(content_rows).saturating_add(1 + usize::from(modal_geometry.bottom_padding)))
+                ..height.saturating_sub(1).min(
+                    top.saturating_add(content_rows)
+                        .saturating_add(1 + usize::from(modal_geometry.bottom_padding)),
+                )
             {
                 let line = row
                     .checked_sub(top)
@@ -1800,10 +2368,19 @@ impl NativeView {
                 frame[row] = format!(
                     "{}{}{}",
                     fit(&frame[row], left),
-                    format!("{}{}{}",
+                    format!(
+                        "{}{}{}",
                         " ".repeat(usize::from(modal_geometry.content_x.saturating_sub(left))),
-                        fit(line.map_or("", String::as_str), modal_geometry.content_width),
-                        " ".repeat(usize::from(dialog_width.saturating_sub(modal_geometry.content_x.saturating_sub(left)).saturating_sub(modal_geometry.content_width)))),
+                        fit(
+                            line.map_or("", String::as_str),
+                            modal_geometry.content_width
+                        ),
+                        " ".repeat(usize::from(
+                            dialog_width
+                                .saturating_sub(modal_geometry.content_x.saturating_sub(left))
+                                .saturating_sub(modal_geometry.content_width)
+                        ))
+                    ),
                     right
                 );
             }
@@ -1829,7 +2406,9 @@ impl NativeView {
 
     fn footer_line(&self, width: u16, loading: bool) -> String {
         let inner = width.saturating_sub(4);
-        if inner == 0 { return padded("", width); }
+        if inner == 0 {
+            return padded("", width);
+        }
         // Active Thinking is rendered by the bounded conversation header
         // (`native_view_chat::render_header`), before sidebar composition. The
         // shared shell footer remains directory + MCP/version status and never
@@ -1837,16 +2416,37 @@ impl NativeView {
         let _ = loading;
         let mut right = env!("CARGO_PKG_VERSION").to_owned();
         if self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
-            let connected = self.status.entries().iter().filter(|entry|
-                matches!(entry.status, crate::native_view_status::McpStatus::Connected)
-            ).count();
+            let connected = self
+                .status
+                .entries()
+                .iter()
+                .filter(|entry| {
+                    matches!(
+                        entry.status,
+                        crate::native_view_status::McpStatus::Connected
+                    )
+                })
+                .count();
             right = format!("⊙ {connected} MCP /status  {right}");
         }
         let right_width = right.chars().count().min(usize::from(inner));
-        let left_width = usize::from(inner).saturating_sub(right_width).saturating_sub(1);
+        let left_width = usize::from(inner)
+            .saturating_sub(right_width)
+            .saturating_sub(1);
         let gap = usize::from(inner).saturating_sub(left_width + right_width);
-        let directory = fit(&footer_directory(&self.workspace, left_width as u16), left_width as u16);
-        padded(&format!("{}{}{}", directory, " ".repeat(gap), fit(&right, right_width as u16)), width)
+        let directory = fit(
+            &footer_directory(&self.workspace, left_width as u16),
+            left_width as u16,
+        );
+        padded(
+            &format!(
+                "{}{}{}",
+                directory,
+                " ".repeat(gap),
+                fit(&right, right_width as u16)
+            ),
+            width,
+        )
     }
 
     // home.tsx: two flex-grow spacers, four fixed rows before the logo,
@@ -1923,7 +2523,13 @@ impl NativeView {
         let home_frame = self.box_appearance.home_composer_outline();
         let home_corners = home_effective.corner_glyphs();
         let (home_h, home_v) = home_effective.border_glyphs();
-        let home_v = if !home_effective.has_border() { ' ' } else if home_frame { home_v } else { '┃' };
+        let home_v = if !home_effective.has_border() {
+            ' '
+        } else if home_frame {
+            home_v
+        } else {
+            '┃'
+        };
         for index in border_top..box_bottom.min(height) {
             if self.box_appearance != crate::native_box_style::BoxAppearance::default()
                 && !home_effective.has_border()
@@ -2077,7 +2683,9 @@ impl NativeView {
 /// reserved left segment. Clusters are collected through the same cell-aware
 /// native layout scanner, so Unicode and combining sequences are never split.
 fn footer_directory(path: &str, width: u16) -> String {
-    if width == 0 { return String::new(); }
+    if width == 0 {
+        return String::new();
+    }
     let bounded: String = crate::native_transcript::strip_ansi(path)
         .chars()
         .filter(|c| !c.is_control())
@@ -2107,14 +2715,18 @@ fn footer_directory(path: &str, width: u16) -> String {
     for _ in 0..trailing_spaces {
         clusters.push((" ".to_owned(), 1));
     }
-    let total: u16 = clusters.iter().fold(0, |sum, (_, cells)| sum.saturating_add(*cells));
+    let total: u16 = clusters
+        .iter()
+        .fold(0, |sum, (_, cells)| sum.saturating_add(*cells));
     if total <= width {
         return clusters.into_iter().map(|(glyph, _)| glyph).collect();
     }
     let mut used = 1u16;
     let mut tail = Vec::new();
     for (glyph, cells) in clusters.into_iter().rev() {
-        if used.saturating_add(cells) > width { break; }
+        if used.saturating_add(cells) > width {
+            break;
+        }
         used = used.saturating_add(cells);
         tail.push(glyph);
     }
@@ -2123,8 +2735,201 @@ fn footer_directory(path: &str, width: u16) -> String {
 }
 
 #[cfg(test)]
+mod tab_interaction_geometry_tests {
+    use super::*;
+    use crate::native_tabs::{TabOrientation, TabReservation};
+
+    fn views(orientation: TabOrientation) -> (NativeView, NativeView, TabReservation) {
+        let reservation = TabReservation::for_view(orientation, 150, 32);
+        let mut translated = NativeView::new(150, 32);
+        translated.set_session_route(false);
+        translated.set_tab_reservation(reservation);
+        let mut plain = NativeView::new(150 - reservation.x_offset(), 32 - reservation.y_offset());
+        plain.set_session_route(false);
+        (translated, plain, reservation)
+    }
+
+    #[test]
+    fn modal_rectangles_translate_once_and_stay_inside_content_viewport() {
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let (view, plain, reservation) = views(orientation);
+            let actual = view.modal_presentation();
+            let expected = plain.modal_presentation();
+            assert_eq!(actual.x, expected.x + reservation.x_offset());
+            assert_eq!(actual.y, expected.y + reservation.y_offset());
+            assert_eq!(actual.content_x, expected.content_x + reservation.x_offset());
+            assert_eq!(actual.content_y, expected.content_y + reservation.y_offset());
+            assert_eq!(actual.width, expected.width);
+            assert_eq!(actual.content_width, expected.content_width);
+            assert!(actual.x + actual.width <= 150);
+            assert!(actual.content_y < 31, "modal content must remain above the footer");
+        }
+    }
+
+    #[test]
+    fn modal_content_budget_is_independent_of_absolute_tab_offset() {
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let (view, plain, _) = views(orientation);
+            assert_eq!(view.modal_content_height(), plain.modal_content_height());
+            assert!(view.modal_content_height() > 0);
+        }
+    }
+
+    #[test]
+    fn home_logo_and_page_panel_translate_like_the_content_viewport() {
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let (mut view, mut plain, reservation) = views(orientation);
+            let (x, y) = plain.home_logo_region("draft").unwrap();
+            assert_eq!(view.home_logo_region("draft"), Some((x + reservation.x_offset(), y + reservation.y_offset())));
+            view.open_page(Page::Status);
+            plain.open_page(Page::Status);
+            let (x, y, width, height) = plain.page_panel().unwrap();
+            assert_eq!(view.page_panel(), Some((x + reservation.x_offset(), y + reservation.y_offset(), width, height)));
+        }
+    }
+
+    #[test]
+    fn sidebar_stays_right_aligned_after_either_tab_reservation() {
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let (mut view, _, _) = views(orientation);
+            view.set_session_route(true);
+            let presentation = view.presentation();
+            assert_eq!(presentation.sidebar_width, 42);
+            assert_eq!(presentation.sidebar_offset, Some(108));
+            assert_eq!(presentation.sidebar_offset.unwrap() + presentation.sidebar_width, 150);
+        }
+    }
+
+    #[test]
+    fn sidebar_scroll_admits_body_rows_and_excludes_tab_strip_and_footer() {
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let (mut view, _, reservation) = views(orientation);
+            view.set_session_route(true);
+            let _ = view.render_typed("draft", &[], false, &[]);
+            if reservation.y_offset() > 0 {
+                assert!(!view.scroll_sidebar_at(108, 0, 1), "tab strip does not belong to sidebar scrolling");
+            }
+            assert!(view.scroll_sidebar_at(108, reservation.y_offset(), 1));
+            assert!(view.scroll_sidebar_at(108, 30, 1), "last body row remains interactive");
+            assert!(!view.scroll_sidebar_at(108, 31, 1), "footer does not belong to sidebar scrolling");
+        }
+    }
+}
+
+#[cfg(test)]
 mod framed_composer_tests {
     use super::*;
+
+    #[test]
+    fn reservation_translates_live_view_geometry_and_preserves_boundaries() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+        // EXPLICIT expected x/y per upstream layout.ts boundary:
+        //  - 105 cols: Vertical does not fit (42 + 64 = 106 boundary), falls back
+        //    to Horizontal topbar -> x0 y1
+        //  - 106 cols: Vertical fits -> rail -> x42 y0 (SESSION_SIDEBAR_WIDTH=42)
+        for (cols, expected, expected_x, expected_y) in [
+            (105, TabOrientation::Horizontal, 0, 1),
+            (106, TabOrientation::Vertical, 42, 0),
+        ] {
+            let mut view = NativeView::new(cols, 12);
+            let reservation = TabReservation::for_view(TabOrientation::Vertical, cols, 12);
+            view.set_tab_reservation(reservation);
+            assert_eq!(reservation.orientation, Some(expected));
+            let presentation = view.presentation();
+            assert_eq!(
+                presentation.main_offset, expected_x,
+                "main_offset must reflect the translated x offset, not reservation.width"
+            );
+            assert_eq!(
+                reservation.x_offset(), expected_x,
+                "reservation.x_offset must match presentation main_offset"
+            );
+            assert_eq!(
+                reservation.y_offset(), expected_y,
+                "reservation.y_offset must match the orientation boundary contract"
+            );
+            assert_eq!(presentation.sidebar_offset, None);
+            let frame = view.render_typed("draft", &[], false, &[]);
+            assert_eq!(frame.len(), 12, "frame height equals render height");
+            assert!(
+                frame.iter().all(|line| crate::native_view_layout::visit_unpadded_cells(line, cols as usize, |_, _| {}).le(&(cols as usize))),
+                "every rendered line fits within cols boundary"
+            );
+        }
+        let mut tiny = NativeView::new(1, 1);
+        tiny.set_tab_reservation(TabReservation::for_view(TabOrientation::Horizontal, 1, 1));
+        assert!(tiny.render_typed("x", &[], false, &[]).len() <= 1);
+    }
+
+    #[test]
+    fn inline_permission_rows_are_painted_once_without_modal_regions() {
+        let mut view = NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.dialogs
+            .open_permission("req-inline", "ses-inline", "Run command")
+            .unwrap();
+        let rows = view.dialogs.render(
+            view.modal_presentation().content_width as usize,
+            view.modal_content_height(),
+        );
+        let rendered = view.render_typed_permission("", &[], false, &[], &rows);
+        let needle = "Allow once";
+        assert_eq!(
+            rendered.iter().filter(|line| line.contains(needle)).count(),
+            1,
+            "permission choice must not be duplicated by a center modal"
+        );
+        assert!(
+            view.ui_regions().iter().all(|region| !region.modal),
+            "inline permission must not publish modal hit regions"
+        );
+        assert!(
+            view.dialogs.intercepts_input(),
+            "inline placement must retain permission input focus"
+        );
+    }
+
+    #[test]
+    fn send_control_is_inside_home_and_session_composers() {
+        for session in [false, true] {
+            let mut view = NativeView::new(100, 32);
+            view.set_session_route(session);
+            let draft = "send fixture";
+            let rows = view.render_typed(draft, &[], false, &[]);
+            let (left, top, width, height) = view.composer_region(draft).unwrap();
+            let found = rows
+                .iter()
+                .enumerate()
+                .find_map(|(row, text)| {
+                    let mut candidate = None;
+                    let mut candidate_text = String::new();
+                    crate::native_view_layout::visit_cells(
+                        text,
+                        view.layout.cols,
+                        |column, glyph, _| {
+                            if candidate_text == "[Send]" {
+                                return;
+                            }
+                            if candidate.is_some() {
+                                candidate_text.push_str(glyph);
+                                if !"[Send]".starts_with(&candidate_text) {
+                                    candidate = None;
+                                    candidate_text.clear();
+                                }
+                            }
+                            if candidate.is_none() && glyph == "[" {
+                                candidate = Some(column);
+                                candidate_text.push('[');
+                            }
+                        },
+                    );
+                    candidate.map(|column| (usize::from(column), row))
+                })
+                .expect("composer includes the requested Send control");
+            assert!(found.1 >= usize::from(top) && found.1 < usize::from(top + height));
+            assert!(found.0 >= usize::from(left) && found.0 + 6 <= usize::from(left + width));
+        }
+    }
 
     #[test]
     fn default_composer_frame_has_exact_corners_draft_and_region() {
@@ -2156,13 +2961,19 @@ mod framed_composer_tests {
     #[test]
     fn composer_region_matches_rendered_frame_bottom_for_default_and_padded_styles() {
         for (appearance, draft) in [
-            (crate::native_box_style::BoxAppearance::default(), "default draft"),
-            ({
-                let mut appearance = crate::native_box_style::BoxAppearance::default();
-                appearance.preset = crate::native_box_style::RadiusPreset::Rounded;
-                appearance.padding = 1;
-                appearance
-            }, "padded draft"),
+            (
+                crate::native_box_style::BoxAppearance::default(),
+                "default draft",
+            ),
+            (
+                {
+                    let mut appearance = crate::native_box_style::BoxAppearance::default();
+                    appearance.preset = crate::native_box_style::RadiusPreset::Rounded;
+                    appearance.padding = 1;
+                    appearance
+                },
+                "padded draft",
+            ),
         ] {
             let mut view = NativeView::new(60, 24);
             view.set_session_route(true);
@@ -2171,12 +2982,50 @@ mod framed_composer_tests {
             let (left, top, width, height) = view.composer_region(draft).expect("composer region");
             let row = |index: usize| rows[index].chars().collect::<Vec<_>>();
             let bottom = top as usize + height as usize - 1;
-            assert_eq!(row(top as usize)[left as usize], appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().top_left);
-            assert_eq!(row(top as usize)[left as usize + width as usize - 1], appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().top_right);
-            assert_eq!(row(bottom)[left as usize], appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().bottom_left);
-            assert_eq!(row(bottom)[left as usize + width as usize - 1], appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().bottom_right);
-            assert_eq!(bottom, rows.iter().position(|line| line.chars().nth(left as usize) == Some(appearance.effective(crate::native_box_style::BoxId::ChatComposer).corner_glyphs().bottom_left)).expect("rendered bottom corner"));
-            assert!(bottom < rows.len() - 1, "composer frame must not include shared footer");
+            assert_eq!(
+                row(top as usize)[left as usize],
+                appearance
+                    .effective(crate::native_box_style::BoxId::ChatComposer)
+                    .corner_glyphs()
+                    .top_left
+            );
+            assert_eq!(
+                row(top as usize)[left as usize + width as usize - 1],
+                appearance
+                    .effective(crate::native_box_style::BoxId::ChatComposer)
+                    .corner_glyphs()
+                    .top_right
+            );
+            assert_eq!(
+                row(bottom)[left as usize],
+                appearance
+                    .effective(crate::native_box_style::BoxId::ChatComposer)
+                    .corner_glyphs()
+                    .bottom_left
+            );
+            assert_eq!(
+                row(bottom)[left as usize + width as usize - 1],
+                appearance
+                    .effective(crate::native_box_style::BoxId::ChatComposer)
+                    .corner_glyphs()
+                    .bottom_right
+            );
+            assert_eq!(
+                bottom,
+                rows.iter()
+                    .position(|line| line.chars().nth(left as usize)
+                        == Some(
+                            appearance
+                                .effective(crate::native_box_style::BoxId::ChatComposer)
+                                .corner_glyphs()
+                                .bottom_left
+                        ))
+                    .expect("rendered bottom corner")
+            );
+            assert!(
+                bottom < rows.len() - 1,
+                "composer frame must not include shared footer"
+            );
         }
         let mut narrow = NativeView::new(1, 10);
         narrow.set_session_route(true);
@@ -2188,20 +3037,28 @@ mod framed_composer_tests {
         let mut view = NativeView::new(80, 24);
         view.set_session_route(true);
         let messages: Vec<crate::native_view_chat::ChatMessage> = (0..61)
-            .map(|i| crate::native_view_chat::ChatMessage::text(
-                crate::native_view_chat::ChatRole::Assistant,
-                format!("entry {i:03}"),
-            ))
+            .map(|i| {
+                crate::native_view_chat::ChatMessage::text(
+                    crate::native_view_chat::ChatRole::Assistant,
+                    format!("entry {i:03}"),
+                )
+            })
             .collect();
         for _ in 0..40 {
             view.scroll_up(5);
             let _ = view.render_typed("", &messages, false, &[]);
         }
         let oldest = view.render_typed("", &messages, false, &[]);
-        assert!(oldest.iter().any(|row| row.contains("entry 000")), "oldest native frame: {oldest:?}");
+        assert!(
+            oldest.iter().any(|row| row.contains("entry 000")),
+            "oldest native frame: {oldest:?}"
+        );
         view.scroll_down(1);
         let next = view.render_typed("", &messages, false, &[]);
-        assert!(next.iter().any(|row| row.contains("entry 001")), "one-row native frame: {next:?}");
+        assert!(
+            next.iter().any(|row| row.contains("entry 001")),
+            "one-row native frame: {next:?}"
+        );
     }
 
     #[test]
@@ -2320,7 +3177,11 @@ mod framed_composer_tests {
             assert_eq!(width, 42);
             let chars: Vec<Vec<char>> = rows.iter().map(|row| row.chars().collect()).collect();
             assert_eq!(chars.len(), 20);
-            assert_eq!(chars[0][usize::from(left)], '┏', "padding {padding}: top-left");
+            assert_eq!(
+                chars[0][usize::from(left)],
+                '┏',
+                "padding {padding}: top-left"
+            );
             assert_eq!(
                 chars[0][usize::from(left + width - 1)],
                 '┓',
@@ -2351,7 +3212,10 @@ mod framed_composer_tests {
             for (index, region) in regions.into_iter().enumerate() {
                 assert_eq!(region.x, expected_x, "padding {padding}: region x");
                 assert_eq!(region.y, 1 + index as u16, "padding {padding}: region y");
-                assert_eq!(region.width, expected_width, "padding {padding}: region width");
+                assert_eq!(
+                    region.width, expected_width,
+                    "padding {padding}: region width"
+                );
                 assert!(region.x < 148);
                 assert!(u32::from(region.x) + u32::from(region.width) <= 148);
                 assert!(
@@ -2392,7 +3256,11 @@ mod framed_composer_tests {
         assert_eq!(bottom[usize::from(left)], '╚');
         assert_eq!(bottom[usize::from(left + width - 1)], '╝');
         assert_eq!(rows.len(), 12);
-        for region in view.ui_regions().into_iter().filter(|region| region.x >= left) {
+        for region in view
+            .ui_regions()
+            .into_iter()
+            .filter(|region| region.x >= left)
+        {
             assert!(u32::from(region.x) + u32::from(region.width) <= 100);
             assert!(usize::from(region.y) < frame_bottom);
             assert!(region.width > 0);
@@ -2410,40 +3278,80 @@ mod footer_layout_tests {
         view.open_command_palette(false);
         let baseline = view.modal_presentation();
         let mut appearance = crate::native_box_style::BoxAppearance::default();
-        appearance.overrides.insert(crate::native_box_style::BoxId::Menu,
-            crate::native_box_style::BoxOverride { padding: Some(2), ..Default::default() });
+        appearance.overrides.insert(
+            crate::native_box_style::BoxId::Menu,
+            crate::native_box_style::BoxOverride {
+                padding: Some(2),
+                ..Default::default()
+            },
+        );
         view.set_box_appearance(appearance);
         let padded = view.modal_presentation();
-        assert_eq!((padded.x, padded.y, padded.width), (baseline.x, baseline.y, baseline.width));
-        assert_eq!(padded.content_width, baseline.content_width.saturating_sub(4));
+        assert_eq!(
+            (padded.x, padded.y, padded.width),
+            (baseline.x, baseline.y, baseline.width)
+        );
+        assert_eq!(
+            padded.content_width,
+            baseline.content_width.saturating_sub(4)
+        );
         assert_eq!(padded.content_y, baseline.content_y + 2);
         view.render_typed("", &[], false, &[]);
         let regions: Vec<_> = view.ui_regions().into_iter().filter(|r| r.modal).collect();
         assert!(!regions.is_empty());
         assert_eq!(regions[0].x, baseline.x + 4);
         assert_eq!(regions[0].y, baseline.content_y + 2);
-        assert_eq!(padded.content_point(regions[0].x, regions[0].y, view.modal_content_height()), Some((0, 0)));
-        assert_eq!(padded.content_point(padded.content_x - 1, padded.content_y, view.modal_content_height()), None);
-        assert!(regions.iter().all(|r| r.y < 31 && r.x + r.width <= padded.x + padded.width));
+        assert_eq!(
+            padded.content_point(regions[0].x, regions[0].y, view.modal_content_height()),
+            Some((0, 0))
+        );
+        assert_eq!(
+            padded.content_point(
+                padded.content_x - 1,
+                padded.content_y,
+                view.modal_content_height()
+            ),
+            None
+        );
+        assert!(regions
+            .iter()
+            .all(|r| r.y < 31 && r.x + r.width <= padded.x + padded.width));
         view.close_command_palette();
-        assert_eq!(view.modal_presentation().content_width, baseline.content_width,
-            "Menu override must not change Dialog padding");
+        assert_eq!(
+            view.modal_presentation().content_width,
+            baseline.content_width,
+            "Menu override must not change Dialog padding"
+        );
     }
 
     #[test]
     fn configurable_dialog_padding_bounds_permission_content_and_footer() {
         let mut view = NativeView::new(80, 20);
         let mut appearance = crate::native_box_style::BoxAppearance::default();
-        appearance.overrides.insert(crate::native_box_style::BoxId::Dialog,
-            crate::native_box_style::BoxOverride { padding: Some(3), ..Default::default() });
+        appearance.overrides.insert(
+            crate::native_box_style::BoxId::Dialog,
+            crate::native_box_style::BoxOverride {
+                padding: Some(3),
+                ..Default::default()
+            },
+        );
         view.set_box_appearance(appearance);
         let modal = view.modal_presentation();
         let content_height = view.modal_content_height();
         assert_eq!(modal.content_x, modal.x + 5);
         assert_eq!(modal.content_y, modal.y + 4);
-        assert_eq!(modal.content_point(modal.content_x + 2, modal.content_y + 1, content_height), Some((2, 1)));
-        assert_eq!(modal.content_point(modal.x + 1, modal.content_y + 1, content_height), None);
-        assert_eq!(modal.content_point(modal.content_x, 19, content_height), None);
+        assert_eq!(
+            modal.content_point(modal.content_x + 2, modal.content_y + 1, content_height),
+            Some((2, 1))
+        );
+        assert_eq!(
+            modal.content_point(modal.x + 1, modal.content_y + 1, content_height),
+            None
+        );
+        assert_eq!(
+            modal.content_point(modal.content_x, 19, content_height),
+            None
+        );
         for (cols, rows) in [(0, 0), (4, 3), (10, 5)] {
             view.resize(cols, rows);
             let modal = view.modal_presentation();
@@ -2462,7 +3370,10 @@ mod footer_layout_tests {
         let painted = view.render_typed("draft", &[], false, &overlay);
         let underlay = view.modal_underlay_rows();
         assert_eq!(underlay.len(), baseline.len());
-        assert_eq!(underlay[..baseline.len() - 1], baseline[..baseline.len() - 1]);
+        assert_eq!(
+            underlay[..baseline.len() - 1],
+            baseline[..baseline.len() - 1]
+        );
         assert_ne!(painted, underlay);
         view.render_typed("draft", &[], false, &[]);
         assert!(view.modal_underlay_rows().is_empty());
@@ -2499,8 +3410,14 @@ mod footer_layout_tests {
             .enumerate()
             .find_map(|(y, row)| row.find("Thinking").map(|x| (x, y)))
             .expect("busy native session must expose Thinking");
-        assert!(thinking.0 < main_width, "Thinking must be in main pane: {thinking:?} main_width={main_width}");
-        assert!(thinking.1 < rows.len() - 1, "Thinking must not be the global footer row");
+        assert!(
+            thinking.0 < main_width,
+            "Thinking must be in main pane: {thinking:?} main_width={main_width}"
+        );
+        assert!(
+            thinking.1 < rows.len() - 1,
+            "Thinking must not be the global footer row"
+        );
     }
 
     #[test]
@@ -2514,8 +3431,14 @@ mod footer_layout_tests {
             .enumerate()
             .find_map(|(y, row)| row.find("Thinking").map(|x| (x, y)))
             .expect("busy native session must expose Thinking");
-        assert!(thinking.0 < main_width, "Thinking must be in main pane: {thinking:?} main_width={main_width}");
-        assert!(thinking.1 < rows.len() - 1, "Thinking must not be the global footer row");
+        assert!(
+            thinking.0 < main_width,
+            "Thinking must be in main pane: {thinking:?} main_width={main_width}"
+        );
+        assert!(
+            thinking.1 < rows.len() - 1,
+            "Thinking must not be the global footer row"
+        );
     }
 
     #[test]
@@ -2527,16 +3450,20 @@ mod footer_layout_tests {
         let rows = view.render_typed("draft", &[], true, &[]);
         let right_start = usize::from(view.presentation().sidebar_offset.expect("toggled sidebar"));
         assert!(
-            rows.iter()
-                .zip(idle.iter())
-                .all(|(busy_row, idle_row)| {
-                    busy_row.chars().skip(right_start).eq(idle_row.chars().skip(right_start))
-                }),
+            rows.iter().zip(idle.iter()).all(|(busy_row, idle_row)| {
+                busy_row
+                    .chars()
+                    .skip(right_start)
+                    .eq(idle_row.chars().skip(right_start))
+            }),
             "busy Thinking must not paint or alter any cell in the narrow right overlay"
         );
         assert!(
             rows.iter().any(|row| {
-                row.chars().take(right_start).collect::<String>().contains("Thinking")
+                row.chars()
+                    .take(right_start)
+                    .collect::<String>()
+                    .contains("Thinking")
             }),
             "busy status must remain visible in the main pane"
         );
@@ -2551,8 +3478,17 @@ mod footer_layout_tests {
         assert!(frame[..11].iter().any(|row| row.contains("Thinking")));
         assert!(!frame[11].contains("Thinking"));
         let modal = view.modal_presentation();
-        assert!(modal.y.saturating_add(modal.content_y.saturating_sub(modal.y)) < 11);
-        assert!(view.ui_regions().iter().filter(|r| r.modal).all(|r| r.y < 11));
+        assert!(
+            modal
+                .y
+                .saturating_add(modal.content_y.saturating_sub(modal.y))
+                < 11
+        );
+        assert!(view
+            .ui_regions()
+            .iter()
+            .filter(|r| r.modal)
+            .all(|r| r.y < 11));
     }
 
     #[test]
@@ -2560,12 +3496,24 @@ mod footer_layout_tests {
         let mut view = NativeView::new(48, 7);
         view.set_session_route(true);
         view.set_overlay_roles(vec![crate::native_ui_style::Role::Selected; 64]);
-        let overlay = (0..64).map(|index| format!("Choice {index}")).collect::<Vec<_>>();
+        let overlay = (0..64)
+            .map(|index| format!("Choice {index}"))
+            .collect::<Vec<_>>();
         let rows = view.render_typed("", &[], true, &overlay);
         assert_eq!(rows.len(), 7);
-        assert!(rows[..6].iter().any(|row| row.contains("Thinking")), "main Thinking must remain visible");
-        assert!(!rows[6].contains("Thinking"), "footer must not own Thinking");
-        assert!(view.ui_regions().iter().filter(|region| region.modal).all(|region| region.y < 6));
+        assert!(
+            rows[..6].iter().any(|row| row.contains("Thinking")),
+            "main Thinking must remain visible"
+        );
+        assert!(
+            !rows[6].contains("Thinking"),
+            "footer must not own Thinking"
+        );
+        assert!(view
+            .ui_regions()
+            .iter()
+            .filter(|region| region.modal)
+            .all(|region| region.y < 6));
     }
 
     #[test]
@@ -2584,7 +3532,10 @@ mod footer_layout_tests {
         let mut view = NativeView::new(80, 20);
         view.set_session_route(true);
         let rows = view.render_typed("draft", &[], true, &[]);
-        assert_eq!(rows.iter().filter(|row| row.contains("Thinking")).count(), 1);
+        assert_eq!(
+            rows.iter().filter(|row| row.contains("Thinking")).count(),
+            1
+        );
         assert!(rows[..19].iter().any(|row| row.contains("Thinking")));
         assert!(!rows[19].contains("Thinking"));
         assert!(view.composer_region("draft").is_some());
@@ -2601,7 +3552,10 @@ mod footer_layout_tests {
             let rows = view.render_typed("draft", &[], true, &[]);
             assert_eq!(rows.len(), usize::from(height));
             if height >= 4 {
-                assert!(rows.iter().any(|row| row.contains("Thinking")), "main Thinking remains visible at height {height}");
+                assert!(
+                    rows.iter().any(|row| row.contains("Thinking")),
+                    "main Thinking remains visible at height {height}"
+                );
             }
             assert!(view.composer_region("draft").is_some(), "height {height}");
         }
@@ -2652,9 +3606,13 @@ mod footer_layout_tests {
         );
         view.set_box_appearance(appearance);
         let rows = view.render_typed("draft", &[], false, &[]);
-        let region = view.composer_region("draft").expect("borderless composer region");
+        let region = view
+            .composer_region("draft")
+            .expect("borderless composer region");
         assert_eq!(region.2, view.presentation().main_width - 4);
-        assert!(rows.iter().all(|row| !row.contains('┌') && !row.contains('┐')));
+        assert!(rows
+            .iter()
+            .all(|row| !row.contains('┌') && !row.contains('┐')));
         assert!(region.1 + region.3 <= rows.len() as u16);
     }
 
@@ -2674,8 +3632,27 @@ mod footer_layout_tests {
         assert!(joined.contains("Two-client fixture"));
         assert!(joined.contains("acme"));
         assert!(joined.contains("first reply"));
-        assert!(rows.last().is_some_and(|row| row.contains("/selected/project")));
+        assert!(rows
+            .last()
+            .is_some_and(|row| row.contains("/selected/project")));
         assert!(rows.iter().any(|row| row.contains("> draft")));
+    }
+
+    #[test]
+    fn composer_metadata_renders_only_observed_effort() {
+        let mut view = NativeView::new(100, 32);
+        view.set_composer_agent(Some("build".into()), None);
+        view.set_composer_model("fixture", "openai");
+        view.set_composer_effort(Some("high".into()));
+        assert!(view
+            .render_typed("draft", &[], false, &[])
+            .join("\n")
+            .contains("high"));
+        view.set_composer_effort(None);
+        assert!(!view
+            .render_typed("draft", &[], false, &[])
+            .join("\n")
+            .contains("high"));
     }
 }
 
