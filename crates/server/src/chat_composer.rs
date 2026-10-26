@@ -12,6 +12,8 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::VecDeque;
+
 /// Maximum lowered turn text bytes (matches 64 KiB control-plane cap).
 pub const MAX_COMPOSER_TEXT_BYTES: usize = 64 * 1024;
 /// Maximum document nodes lowered or drafted in one composer state.
@@ -147,7 +149,7 @@ pub enum KeyAction {
 /// slot), `begin_live`/`stop` bracket the single live turn.
 #[derive(Debug, Default)]
 pub struct DraftQueue {
-    drafts: Vec<(String, String)>,
+    drafts: VecDeque<(String, String)>,
     live: bool,
 }
 
@@ -177,8 +179,28 @@ impl DraftQueue {
                 actual: self.drafts.len(),
             });
         }
-        self.drafts.push((owner.to_string(), text.to_string()));
+        self.drafts.push_back((owner.to_string(), text.to_string()));
         Ok(())
+    }
+
+    /// Remove and return the oldest queued draft.
+    ///
+    /// Follow-ups are always consumed in the same order they were accepted.
+    /// Calling this while a live turn is running is intentionally refused so a
+    /// caller cannot accidentally dispatch two turns concurrently.
+    pub fn pop_front(&mut self) -> Option<(String, String)> {
+        if self.live {
+            return None;
+        }
+        self.drafts.pop_front()
+    }
+
+    /// Mark the live turn complete and return the next queued follow-up, if any.
+    /// The returned item has been removed from the bounded queue; callers should
+    /// call [`DraftQueue::begin_live`] before dispatching it.
+    pub fn finish_live(&mut self) -> Option<(String, String)> {
+        self.live = false;
+        self.drafts.pop_front()
     }
 
     /// Replace one owner's queued text in place; queue order is preserved.
@@ -606,4 +628,78 @@ fn decode_node(value: &serde_json::Value) -> Result<Option<ComposerNode>, Compos
         _ => return Ok(None),
     };
     Ok(Some(node))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn follow_up_queue_drains_in_fifo_order_after_live_turn() {
+        let mut queue = DraftQueue::new();
+        queue.begin_live("active");
+        queue.push("one", "first follow-up").unwrap();
+        queue.push("two", "second follow-up").unwrap();
+        queue.push("three", "third follow-up").unwrap();
+
+        assert_eq!(queue.pop_front(), None, "live turn owns the dispatch slot");
+        assert_eq!(
+            queue.finish_live(),
+            Some(("one".to_string(), "first follow-up".to_string()))
+        );
+
+        queue.begin_live("one");
+        assert_eq!(
+            queue.finish_live(),
+            Some(("two".to_string(), "second follow-up".to_string()))
+        );
+        queue.begin_live("two");
+        assert_eq!(
+            queue.finish_live(),
+            Some(("three".to_string(), "third follow-up".to_string()))
+        );
+        assert!(queue.is_empty());
+    }
+
+    #[test]
+    fn follow_up_queue_is_bounded_without_dropping_accepted_items() {
+        let mut queue = DraftQueue::new();
+        queue.begin_live("active");
+        for index in 0..MAX_QUEUE_DRAFTS {
+            queue
+                .push(&format!("owner-{index}"), &format!("follow-up-{index}"))
+                .unwrap();
+        }
+
+        assert_eq!(queue.len(), MAX_QUEUE_DRAFTS);
+        assert_eq!(
+            queue.push("overflow", "must be rejected"),
+            Err(ComposerError::QueueFull {
+                max: MAX_QUEUE_DRAFTS,
+                actual: MAX_QUEUE_DRAFTS,
+            })
+        );
+        assert_eq!(queue.owner_at(0), Some("owner-0"));
+        assert_eq!(
+            queue.owner_at(MAX_QUEUE_DRAFTS - 1),
+            Some(format!("owner-{}", MAX_QUEUE_DRAFTS - 1).as_str())
+        );
+    }
+
+    #[test]
+    fn steering_keeps_original_fifo_position() {
+        let mut queue = DraftQueue::new();
+        queue.push("one", "draft one").unwrap();
+        queue.push("two", "draft two").unwrap();
+        queue.steer("one", "revised one").unwrap();
+
+        assert_eq!(
+            queue.pop_front(),
+            Some(("one".to_string(), "revised one".to_string()))
+        );
+        assert_eq!(
+            queue.pop_front(),
+            Some(("two".to_string(), "draft two".to_string()))
+        );
+    }
 }

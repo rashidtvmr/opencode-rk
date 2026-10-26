@@ -70,6 +70,8 @@ interface ComposerProps {
   disabled?: boolean
   sessionId?: string | null
   running?: boolean
+  queuedCount?: number
+  queueLimit?: number
   attachments?: DraftAttachment[]
   attachmentsAvailable?: boolean
   attachmentUnavailableReason?: string
@@ -182,6 +184,8 @@ export function Composer({
   disabled = false,
   sessionId = null,
   running = false,
+  queuedCount = 0,
+  queueLimit = 16,
   attachments = [],
   attachmentsAvailable = true,
   attachmentUnavailableReason,
@@ -322,7 +326,6 @@ export function Composer({
     if (
       !editor ||
       disabled ||
-      running ||
       submitting ||
       draftError ||
       attachments.length > 0
@@ -438,10 +441,10 @@ export function Composer({
         role="textbox"
         aria-labelledby="message-composer-label"
         aria-multiline="true"
-        aria-busy={submitting || running || undefined}
+        aria-busy={submitting || undefined}
         aria-describedby="composer-help composer-draft-status"
         aria-autocomplete={activePalette ? 'list' : undefined}
-        contentEditable={!disabled && !running}
+        contentEditable={!disabled}
         suppressContentEditableWarning
         data-placeholder={disabled ? 'Select or create a chat to start' : 'Ask anything'}
         onInput={syncDraft}
@@ -641,6 +644,13 @@ export function Composer({
           <p id="composer-draft-status" className="sr-only" aria-live="polite">
             {draftError}
           </p>
+          {running || queuedCount > 0 ? (
+            <p className="codex-composer-queue-status" role="status" aria-live="polite">
+              {queuedCount > 0
+                ? `${queuedCount} follow-up${queuedCount === 1 ? '' : 's'} queued · ${queueLimit} max`
+                : 'Generating · send another message to queue a follow-up'}
+            </p>
+          ) : null}
 
           <Button
             size="icon"
@@ -656,29 +666,30 @@ export function Composer({
           {running ? (
             <Button
               size="icon"
-              className="codex-send-button"
+              variant="ghost"
+              className="codex-composer-icon-button"
               aria-label="Stop generating"
               onPress={onStop}
             >
               <Square aria-hidden="true" />
             </Button>
-          ) : (
-            <Button
-              size="icon"
-              className="codex-send-button"
-              aria-label="Send message"
-              onPress={() => void submit()}
-              isDisabled={
-                disabled ||
-                submitting ||
-                Boolean(draftError) ||
-                attachments.length > 0 ||
-                draftText.trim().length === 0
-              }
-            >
-              <ArrowUp aria-hidden="true" />
-            </Button>
-          )}
+          ) : null}
+          <Button
+            size="icon"
+            className="codex-send-button"
+            aria-label={running ? 'Queue follow-up' : 'Send message'}
+            onPress={() => void submit()}
+            isDisabled={
+              disabled ||
+              submitting ||
+              Boolean(draftError) ||
+              attachments.length > 0 ||
+              draftText.trim().length === 0 ||
+              (running && queuedCount >= queueLimit)
+            }
+          >
+            <ArrowUp aria-hidden="true" />
+          </Button>
         </div>
       </div>
     </div>

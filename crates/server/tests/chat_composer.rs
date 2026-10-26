@@ -6,9 +6,9 @@
 use opencode_rk_server::chat_composer;
 
 use chat_composer::{
-    accessible_label, decode_draft, doc_from_legacy_text, editor_help, encode_draft, key_command,
-    lower_composer_doc, sanitize_doc, ComposerDoc, ComposerError, ComposerNode, DraftQueue,
-    KeyAction, MAX_COMPOSER_TEXT_BYTES, MAX_DOC_NODES, MAX_DRAFT_BYTES, MAX_QUEUE_DRAFTS,
+    ComposerDoc, ComposerError, ComposerNode, DraftQueue, KeyAction, MAX_COMPOSER_TEXT_BYTES,
+    MAX_DOC_NODES, MAX_DRAFT_BYTES, MAX_QUEUE_DRAFTS, accessible_label, decode_draft,
+    doc_from_legacy_text, editor_help, encode_draft, key_command, lower_composer_doc, sanitize_doc,
 };
 
 fn t01_doc() -> ComposerDoc {
@@ -233,6 +233,26 @@ fn web010_t04_bounds_cancel_queue_are_enforced() {
         queue.steer("ghost", "x").unwrap_err(),
         ComposerError::DraftNotFound
     );
+
+    let mut queue = DraftQueue::new();
+    queue.begin_live("active");
+    queue.push("ana", "first").unwrap();
+    queue.push("ben", "second").unwrap();
+    assert_eq!(
+        queue.pop_front(),
+        None,
+        "live turn must retain the dispatch slot"
+    );
+    assert_eq!(
+        queue.finish_live(),
+        Some(("ana".to_string(), "first".to_string()))
+    );
+    queue.begin_live("ana");
+    assert_eq!(
+        queue.finish_live(),
+        Some(("ben".to_string(), "second".to_string()))
+    );
+    assert!(queue.is_empty());
 }
 
 #[test]
