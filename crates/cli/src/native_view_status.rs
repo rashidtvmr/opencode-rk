@@ -40,6 +40,29 @@ use opencode_rk_contracts::SessionId;
 use serde_json::Value;
 use opencode_rk_sessions::{validate_todos, Todo};
 
+#[cfg(test)]
+mod measured_context_regression {
+    use super::StatusView;
+
+    #[test]
+    fn measured_context_survives_unknown_limit_without_double_counting_subsets() {
+        let mut view = StatusView::default();
+        view.set_usage(120, 30, Some(40), Some(10), None);
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|row| row == "context: used=150 window=unreported"));
+        let sidebar = view.render_sidebar(120, 30).join("\n");
+        assert!(sidebar.contains("150 tokens · last request"));
+        assert!(!sidebar.contains("0%"));
+
+        view.set_context_window(Some(200_000));
+        assert!(view.render(120, 30).iter().any(|row| row == "context: used=150 window=200000"));
+        view.set_context_window(None);
+        assert!(view.render(120, 30).iter().any(|row| row == "context: used=150 window=unreported"));
+        view.clear_usage();
+        assert!(view.render(120, 30).iter().any(|row| row == "context: Unavailable"));
+    }
+}
+
 /// Maximum MCP entries accepted from one snapshot (daemon registry cap).
 pub const MAX_MCP_ENTRIES: usize = 64;
 /// Maximum MCP server-name bytes (`MAX_ID_LEN` in `mcp_lifecycle.rs`).
@@ -172,8 +195,11 @@ pub struct StatusView {
     /// never confirmed / retracted — never transcript rows, provider
     /// deltas, or a fabricated zero.
     session_message_count: Option<usize>,
-    /// `(used, window)` from the caller's context snapshot.
-    context: Option<(u64, u64)>,
+    /// Measured context tokens used (provider-reported input+output of the
+    /// last turn) and the model limit when the caller confirmed one. The
+    /// total is shown even when the limit is unknown; the limit is never
+    /// fabricated (`None` renders no percentage, never `window=0`).
+    context: Option<(u64, Option<u64>)>,
     /// Provider-reported usage of the current turn: `(input, output)`
     /// authoritative totals plus optional cached/reasoning subsets.
     /// `None` subsets mean "provider did not report" — rendered as
@@ -245,8 +271,10 @@ impl StatusView {
         rows.push(("Context".to_owned(), Role::Heading, None));
         if let Some((used, window)) = self.context {
             rows.push((format!("{used} tokens · last request"), Role::Item, None));
-            if window > 0 { rows.push((format!("{} / {} tokens · {}%",used,window,used.saturating_mul(100)/window),Role::Description, None)); }
-            else {rows.push(("Model capacity not reported".into(),Role::Description, None));}
+            match window {
+                Some(window) => rows.push((format!("{} / {} tokens · {}%",used,window,used.saturating_mul(100)/window),Role::Description, None)),
+                None => rows.push(("Model capacity not reported".into(),Role::Description, None)),
+            }
         } else if self.usage.is_some() {
             rows.push(("Context limit unavailable".into(),Role::Description, None));
         } else {
@@ -492,31 +520,29 @@ impl StatusView {
     }
 
     pub fn set_context(&mut self, used: Option<u64>, window: Option<u64>) {
-        self.context = match (used, window) {
-            (Some(u), Some(w)) => Some((u, w)),
-            _ => None,
-        };
+        // A confirmed measured total is shown even without a confirmed limit;
+        // a missing limit is not a zero window.
+        self.context = used.map(|used| (used, window.filter(|window| *window > 0)));
     }
 
     /// Update only the observed model limit, retaining the provider usage
     /// tuple when it arrived before model selection was reconciled.
     pub fn set_context_window(&mut self, window: Option<u64>) {
-        self.context = match (self.usage, window) {
-            (Some((input, output, _, _)), Some(limit)) =>
-                Some((input.saturating_add(output), limit)),
-            _ => None,
-        };
+        self.context = self
+            .usage
+            .map(|(input, output, _, _)| {
+                (input.saturating_add(output), window.filter(|window| *window > 0))
+            });
     }
 
     pub fn set_usage(&mut self,input:u64,output:u64,cached:Option<u64>,reasoning:Option<u64>,window:Option<u64>) {
         self.usage=Some((input,output,cached,reasoning));
-        // Input/output are the authoritative totals; cached/reasoning are
-        // subsets of input/output, not extra tokens (`None` = unreported,
-        // never a fabricated zero), so neither enters the total here.
-        // A missing model limit is not a zero-sized context window.  Keep the
-        // authoritative turn totals visible in `usage`, but retract the
-        // percentage-bearing context projection until the limit is known.
-        self.context=window.map(|limit|(input.saturating_add(output),limit));
+        // input/output are the authoritative measured totals; cached/reasoning
+        // are subsets of input/output (`None` = unreported, never a fabricated
+        // zero), so neither enters the total and cache is never double counted.
+        // A missing model limit is not a zero window: keep the measured total
+        // visible and omit only the percentage until the limit is known.
+        self.context=Some((input.saturating_add(output),window.filter(|limit|*limit>0)));
     }
     pub fn clear_usage(&mut self) {self.usage=None;self.context=None;}
 
@@ -714,7 +740,8 @@ impl StatusView {
                 None => format!("messages: {UNAVAILABLE}"),
             },
             match self.context {
-                Some((used, window)) => format!("context: used={used} window={window}"),
+                Some((used, Some(window))) => format!("context: used={used} window={window}"),
+                Some((used, None)) => format!("context: used={used} window=unreported"),
                 None => format!("context: {UNAVAILABLE}"),
             },
         ]
@@ -1066,7 +1093,8 @@ mod tests {
         assert!(rows.iter().any(|r| r.contains("Cached 40 · Reasoning 10")));
         let rows = view.render(120, 30);
         assert!(rows.iter().any(|r| *r == "context: used=150 window=200000"));
-        // Unreported subsets: honest `unreported`, never 0; the same total
+        // Unreported subsets: honest `unreported`, never 0; the measured
+        // total stays visible (limit unreported), and the same total
         // contract holds with no subset material at all.
         let mut view = StatusView::default();
         view.set_usage(10, 4, None, None, None);
@@ -1075,14 +1103,14 @@ mod tests {
             .iter()
             .any(|r| r.contains("Cached unreported · Reasoning unreported")));
         let rows = view.render(120, 30);
-        assert!(rows.iter().any(|r| *r == "context: Unavailable"));
+        assert!(rows.iter().any(|r| *r == "context: used=14 window=unreported"));
         // Explicit provider zero is a real report, distinct from missing.
         let mut view = StatusView::default();
         view.set_usage(10, 4, Some(0), Some(0), None);
         let rows = view.render_sidebar(120, 30);
         assert!(rows.iter().any(|r| r.contains("Cached 0 · Reasoning 0")));
         let rows = view.render(120, 30);
-        assert!(rows.iter().any(|r| *r == "context: Unavailable"));
+        assert!(rows.iter().any(|r| *r == "context: used=14 window=unreported"));
     }
 
     #[test]
@@ -1090,9 +1118,37 @@ mod tests {
         let mut view = StatusView::default();
         view.set_usage(120, 30, None, None, None);
         let rows = view.render_sidebar(120, 30);
-        assert!(rows.iter().any(|row| row.contains("Context limit unavailable")));
+        // Measured total stays visible; only the capacity caption is honest.
+        assert!(rows.iter().any(|row| row.contains("150 tokens · last request")));
+        assert!(rows.iter().any(|row| row.contains("Model capacity not reported")));
         assert!(rows.iter().any(|row| row.contains("Input 120 · Output 30")));
         assert!(!rows.iter().any(|row| row.contains("window=0") || row.contains("0%")));
+    }
+
+    /// Cached tokens are a subset of the provider input total and are never
+    /// added into the context total (no double counting), independent of
+    /// whether the model limit is known.
+    #[test]
+    fn measured_usage_with_unknown_limit_is_not_unavailable() {
+        let mut view = StatusView::default();
+        view.set_usage(120, 30, None, None, None);
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|r| *r == "context: used=150 window=unreported"));
+        assert!(!rows.iter().any(|r| r == "context: Unavailable"));
+
+        let mut view = StatusView::default();
+        view.set_usage(120, 30, Some(40), Some(10), None);
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|r| *r == "context: used=150 window=unreported"));
+    }
+
+    /// A confirmed limit/usage pair is retained once the model is known.
+    #[test]
+    fn confirmed_limit_completes_projection() {
+        let mut view = StatusView::default();
+        view.set_usage(120, 30, None, None, Some(200000));
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|r| *r == "context: used=150 window=200000"));
     }
 
     #[test]
@@ -1118,6 +1174,35 @@ mod tests {
         assert!(confirmed
             .render(120, 30)
             .contains(&"daemon: Unavailable".to_owned()));
+    }
+
+    /// Root cause gate for the reported `context: Unavailable`: the selected
+    /// model's catalog `context_window` is commonly absent
+    /// (`/api/config/providers` keys `id|name|provider_id|context_window`;
+    /// the key is optional), so `tui_entry.rs:4232` calls
+    /// `set_context_window(None)` and the measured provider usage must still
+    /// render. A confirmed usage observation is never retracted by a missing
+    /// limit, and no reserved-buffer or other invented capacity is shown.
+    #[test]
+    fn measured_usage_survives_missing_model_context_window() {
+        let mut view = StatusView::default();
+        // Real event order: usage arrives, then the selected-model limit is
+        // reconciled from a catalog entry that has no `context_window`.
+        view.set_usage(120, 30, None, None, None);
+        view.set_context_window(None);
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|r| *r == "context: used=150 window=unreported"));
+        assert!(!rows.iter().any(|r| r == "context: Unavailable"));
+        // Only the capacity caption is unknown; no invented limit appears.
+        let sidebar = view.render_sidebar(120, 30);
+        assert!(sidebar
+            .iter()
+            .any(|r| r.contains("Model capacity not reported")));
+        assert!(!sidebar.iter().any(|r| r.contains('%')));
+        // A later confirmed limit upgrades the same measured total.
+        view.set_context_window(Some(200000));
+        let rows = view.render(120, 30);
+        assert!(rows.iter().any(|r| *r == "context: used=150 window=200000"));
     }
 
     #[test]
