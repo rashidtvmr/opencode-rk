@@ -81,7 +81,10 @@ describe('WEB-010 structured composer', () => {
       />,
     )
     expect(screen.getByRole('button', { name: 'Stop generating' })).not.toBeNull()
-    expect(screen.getByRole('textbox', { name: 'Message' }).getAttribute('contenteditable')).toBe('false')
+    // The running composer is deliberately writable so users can enqueue a
+    // follow-up while the existing turn streams, without cancelling it.
+    expect(screen.getByRole('textbox', { name: 'Message' }).getAttribute('contenteditable')).toBe('true')
+    expect(screen.getByText('Generating · send another message to queue a follow-up')).not.toBeNull()
   })
 
   it('exposes the same 32 KiB draft bound as the native composer state', () => {

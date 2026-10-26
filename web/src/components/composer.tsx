@@ -441,7 +441,7 @@ export function Composer({
         role="textbox"
         aria-labelledby="message-composer-label"
         aria-multiline="true"
-        aria-busy={submitting || undefined}
+        aria-busy={running || submitting || undefined}
         aria-describedby="composer-help composer-draft-status"
         aria-autocomplete={activePalette ? 'list' : undefined}
         contentEditable={!disabled}

@@ -34,6 +34,13 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
 - [x] Live subagent panel showing child state, model, role, generation, output
       preview, errors, approval wait and queued follow-ups; direct stop, retry,
       follow-up and transcript navigation use existing child endpoints.
+- [x] Nested subagent delegation and descendant tree/search/status controls;
+      depth is limited to 3 and read-only restrictions are inherited.
+- [x] Active-browser FIFO follow-up queue (16 messages) without interrupting
+      the running turn. This queue is not durable through browser restart and
+      does not provide intra-turn steering of model execution.
+- [x] Native MCP server replace/remove and custom provider removal with
+      guarded lifecycle cleanup, status refresh and confirmed UI controls.
 - [x] Settings dialog with appearance, general help, daemon model catalog and
       capability inventory; six themes, compact/comfortable display, text
       scale and reduced-motion preference persisted in local storage.
@@ -119,7 +126,10 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
 - [ ] Mention chips whose identity survives editing, copying and pasting.
 - [ ] Agent mentions anywhere in the prompt with explicit behavior for
       delegation versus role selection, not just leading-role syntax.
-- [ ] Queue prompts and steer a running orchestrator **without stopping** it.
+- [x] Queue follow-up prompts in the active browser tab without cancelling the
+      streaming turn; replay happens sequentially when the active turn settles.
+- [ ] Persist follow-up queue through reload/crash and support genuine
+      intra-turn steering of the running orchestrator.
 - [ ] Drag/drop attachments that are actually sent to capable providers.
 - [ ] Full slash command argument completion and per-workspace inventories.
 - [ ] Multimodal uploads, voice and clipboard file previews.
@@ -129,9 +139,8 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
 
 - [x] Poll native child registry for live statuses and output previews.
 - [x] Open transcript, stop, retry where permitted, and send queued follow-ups.
-- [ ] Nested parent/child tree for 2+ levels of subagents with stable ordering.
-      The current Rust turn service explicitly disables the `task` tool for
-      child sessions; genuine deeper delegation needs a backend change first.
+- [x] Native nested delegation/tree with search, state filters, depth bounds,
+      descendant controls and read-only inheritance (max depth 3).
 - [ ] Live per-agent tool chronology and execution cost/tokens/time.
 - [ ] Cross-session child discovery and history after daemon restart.
 - [ ] Parallel agent launch/control (with consent/permissions and safety caps).
@@ -155,7 +164,9 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
 - [ ] Full agent configuration editor and execution analytics.
 - [x] Models and native custom Providers page with write-only credential input.
 - [x] MCP servers status, disabled registration and confirmation-gated connect/disconnect.
-- [ ] Remote MCP, catalog discovery and restart-persistent server configuration.
+- [x] Guarded native MCP replace/delete lifecycle and custom provider removal.
+- [ ] Remote MCP catalog discovery, cross-daemon restart recovery and verified
+      persistence of running connections.
 - [x] Permission Rules page with explicit acknowledgement before allow.
 - [x] Session Tasks / TODO list with durable native status and priority updates.
 - [ ] Cross-session scheduled runs, OS notifications and recurring tasks.
