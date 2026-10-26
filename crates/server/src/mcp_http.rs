@@ -133,20 +133,49 @@ impl McpStatusRegistry {
         Self::default()
     }
 
-    /// Register `name` in the disabled state together with its validated
-    /// config. Rejections (`Duplicate`, `Overflow`, id validation) leave the
-    /// registry unchanged.
+    /// Add or replace `name` together with its validated config.
+    ///
+    /// Replacement invalidates any in-flight connection epoch before
+    /// detaching the old runtime. A late handshake therefore cannot publish
+    /// tools from the superseded configuration.
     /// Private by necessity: its argument is the module-private
     /// [`StoredLocalConfig`], which is never exported or serialized. The
     /// only caller is this module's `POST /api/mcp` handler.
     async fn add(&self, name: &str, config: StoredLocalConfig) -> Result<(), LifecycleError> {
-        let mut guard = self.inner.lock().await;
-        guard.lifecycle.add(name)?;
-        if config.enabled {
-            guard.lifecycle.set_enabled(name, true)?;
+        let old_runtime = {
+            let mut guard = self.inner.lock().await;
+            let replacing = guard.lifecycle.get(name).is_some();
+            let epoch = guard.epochs.get(name).copied().unwrap_or(0);
+            if replacing {
+                guard.lifecycle.remove(name)?;
+            }
+            guard.lifecycle.add(name)?;
+            if config.enabled {
+                guard.lifecycle.set_enabled(name, true)?;
+            }
+            guard.configs.insert(name.to_owned(), config);
+            guard
+                .epochs
+                .insert(name.to_owned(), if replacing { epoch.saturating_add(1) } else { 0 });
+            guard.runtimes.remove(name)
+        };
+        if let Some(runtime) = old_runtime {
+            runtime.disconnect().await.map_err(|_| LifecycleError::CleanupFailed)?;
         }
-        guard.configs.insert(name.to_owned(), config);
-        guard.epochs.insert(name.to_owned(), 0);
+        Ok(())
+    }
+
+    async fn remove(&self, name: &str) -> Result<(), LifecycleError> {
+        let runtime = {
+            let mut guard = self.inner.lock().await;
+            guard.lifecycle.remove(name)?;
+            guard.configs.remove(name);
+            guard.epochs.remove(name);
+            guard.runtimes.remove(name)
+        };
+        if let Some(runtime) = runtime {
+            runtime.disconnect().await.map_err(|_| LifecycleError::CleanupFailed)?;
+        }
         Ok(())
     }
 
@@ -456,15 +485,17 @@ pub(crate) async fn status(
 /// Boundary contract (strict, no silent acceptance):
 /// - payload must be a JSON object with exactly `{name, config}`;
 ///   unknown payload fields → 400 `mcp_add_field_unsupported`
-/// - `config` must be an explicitly disabled local config
-///   (`type:"local"`, `command:[exe,args...]`, `enabled:false`, optional
+/// - `config` must be an explicit local config
+///   (`type:"local"`, `command:[exe,args...]`, `enabled:boolean`, optional
 ///   bounded `environment` with no other fields) — see [`classify_config`];
 ///   malformed or unknown config fields → 400 with **no side effects**
-/// - `enabled` true/omitted and `type:"remote"` → 501
+/// - omitted `enabled` and `type:"remote"` → 501
 ///   `mcp_config_unsupported`, **registered nowhere**
-/// - accepted config is registered **disabled** (truthful: the caller asked
-///   for disabled), held in daemon memory, and the full status map returns
-/// - duplicate name → 409, registry full (64) → 507
+/// - accepted config is held in daemon memory with its requested enabled
+///   preference; process launch still requires the explicit connect endpoint
+/// - an existing name is replaced after validation; its previous runtime is
+///   detached and any in-flight handshake is superseded
+/// - registry full (64) → 507 for a new name
 ///
 /// Config detail is never echoed (it may contain secrets); only the stable
 /// codes above leave this handler. Nothing here spawns, opens a socket,
@@ -519,10 +550,10 @@ pub(crate) async fn add(
         .add(name, config)
         .await
         .map_err(|error| match error {
-            LifecycleError::Duplicate => ApiFailure {
+            LifecycleError::CleanupFailed => ApiFailure {
                 status: StatusCode::CONFLICT,
-                code: "mcp_duplicate_name",
-                message: "mcp server name is already registered".to_owned(),
+                code: "mcp_replace_cleanup_failed",
+                message: "previous mcp runtime cleanup failed".to_owned(),
             },
             LifecycleError::Overflow => ApiFailure {
                 status: StatusCode::INSUFFICIENT_STORAGE,
@@ -536,6 +567,29 @@ pub(crate) async fn add(
             },
         })?;
     Ok(Json(registry.status_map().await))
+}
+
+/// `DELETE /api/mcp/{name}` — remove one configured server and reclaim any
+/// owned runtime. Unknown name → 404.
+pub(crate) async fn remove(
+    Extension(registry): Extension<McpStatusRegistry>,
+    Path(name): Path<String>,
+) -> Result<Json<Value>, ApiFailure> {
+    let name = validate_name(&name)?;
+    registry.remove(name).await.map_err(|error| match error {
+        LifecycleError::Unknown => not_found(),
+        LifecycleError::CleanupFailed => ApiFailure {
+            status: StatusCode::CONFLICT,
+            code: "mcp_remove_cleanup_failed",
+            message: "mcp runtime cleanup failed".to_owned(),
+        },
+        _ => ApiFailure {
+            status: StatusCode::BAD_REQUEST,
+            code: "mcp_name_invalid",
+            message: "name: rejected by mcp registry".to_owned(),
+        },
+    })?;
+    Ok(Json(json!(true)))
 }
 
 /// `POST /api/mcp/{name}/disconnect` — genuine disable of a registered

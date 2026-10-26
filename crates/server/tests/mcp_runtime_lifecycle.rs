@@ -61,6 +61,15 @@ async fn body(response: axum::response::Response) -> (StatusCode, Value) {
     (status, serde_json::from_slice(&bytes).expect("json"))
 }
 
+fn request(token: &str, method: &str, uri: &str, value: Option<Value>) -> Request<Body> {
+    let mut builder = Request::builder()
+        .method(method)
+        .uri(uri)
+        .header("Authorization", format!("Bearer {token}"));
+    if value.is_some() { builder = builder.header("Content-Type", "application/json"); }
+    builder.body(value.map_or_else(Body::empty, |value| Body::from(value.to_string()))).expect("request")
+}
+
 #[tokio::test]
 async fn runtime_connects_lists_tools_and_disconnects_owned_child() {
     let fixture_dir = tempdir().expect("fixture dir");
@@ -115,4 +124,49 @@ async fn runtime_connects_lists_tools_and_disconnects_owned_child() {
             .expect("fixture child PID is numeric");
         wait_for_process_exit(pid);
     }
+}
+
+#[tokio::test]
+async fn replacement_and_removal_reclaim_owned_children_and_invalid_update_is_side_effect_free() {
+    let fixture_dir = tempdir().expect("fixture dir");
+    let fixture = fixture(&fixture_dir);
+    let pid_path = fixture_dir.path().join("mcp-runtime.pid");
+    let storage_dir = tempdir().expect("storage dir");
+    let storage = Storage::open_in_memory(storage_dir.path().join("blobs")).expect("storage");
+    let auth = DaemonAuth::mint().expect("auth");
+    let token = auth.token().to_owned();
+    let app = router_with_auth(AppState { sessions: SessionService::new(Arc::new(storage)), catalog: Arc::new(Catalog::default()) }, Some(auth));
+    let config = || json!({"name":"runtime","config":{"type":"local","command":["/bin/sh", fixture.clone()],"environment":{},"enabled":true}});
+
+    let (status, _) = body(app.clone().oneshot(request(&token, "POST", "/api/mcp", Some(config()))).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    let (status, connected) = body(app.clone().oneshot(request(&token, "POST", "/api/mcp/runtime/connect", None)).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(connected["runtime"]["status"], "connected");
+    let first_pid: u32 = std::fs::read_to_string(&pid_path).unwrap().trim().parse().unwrap();
+
+    let rejected = json!({"name":"runtime","config":{"type":"local","command":["/bin/false"],"enabled":false,"secret-fixture":"must-never-echo"}});
+    let (status, error) = body(app.clone().oneshot(request(&token, "POST", "/api/mcp", Some(rejected))).await.unwrap()).await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(!error.to_string().contains("must-never-echo"));
+    let (status, snapshot) = body(app.clone().oneshot(request(&token, "GET", "/api/mcp", None)).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(snapshot["runtime"]["status"], "connected", "rejected update must leave the live runtime untouched");
+
+    let (status, replaced) = body(app.clone().oneshot(request(&token, "POST", "/api/mcp", Some(config()))).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_ne!(replaced["runtime"]["status"], "connected", "replacement must detach the previous runtime before exposing state");
+    #[cfg(unix)] wait_for_process_exit(first_pid);
+
+    let (status, connected) = body(app.clone().oneshot(request(&token, "POST", "/api/mcp/runtime/connect", None)).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(connected["runtime"]["status"], "connected");
+    let second_pid: u32 = std::fs::read_to_string(&pid_path).unwrap().trim().parse().unwrap();
+    let (status, removed) = body(app.clone().oneshot(request(&token, "DELETE", "/api/mcp/runtime", None)).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(removed, json!(true));
+    #[cfg(unix)] wait_for_process_exit(second_pid);
+    let (status, snapshot) = body(app.oneshot(request(&token, "GET", "/api/mcp", None)).await.unwrap()).await;
+    assert_eq!(status, StatusCode::OK);
+    assert!(snapshot.get("runtime").is_none(), "removed server must not remain in status or tool discovery");
 }

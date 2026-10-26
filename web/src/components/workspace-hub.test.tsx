@@ -41,8 +41,10 @@ beforeEach(() => {
     }
     if (path === '/api/providers') return json({ providers: [{ id: 'dev', name: 'Dev', base_url: 'https://api.example.test', buffered_model_ids: [] }] })
     if (path === '/api/providers/demo' && method === 'POST') return json(true)
+    if (path === '/api/providers/dev' && method === 'DELETE') return json(true)
     if (path === '/api/mcp' && method === 'GET') return json({ 'local-test': { status: 'disabled', enabled: false, tools: [] } })
     if (path === '/api/mcp' && method === 'POST') return json({})
+    if (path === '/api/mcp/local-test' && method === 'DELETE') return json(true)
     if (path === '/api/permission-rules' || path.startsWith('/api/permission-rules?')) {
       return method === 'POST' ? new Response(null, { status: 204 }) : json({ rules: [] })
     }
@@ -143,6 +145,26 @@ describe('authenticated native workspace pages', () => {
     await user.click(screen.getByRole('button', { name: 'Register disabled' }))
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       '/api/mcp', expect.objectContaining({ method: 'POST', body: expect.stringContaining('"enabled":false') }),
+    ))
+  })
+
+  it('removes provider configuration through the native lifecycle endpoint', async () => {
+    const user = userEvent.setup()
+    render(<TestHub initial="providers" />)
+    await screen.findByText('Dev')
+    await user.click(screen.getByRole('button', { name: /Remove/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/providers/dev', expect.objectContaining({ method: 'DELETE' }),
+    ))
+  })
+
+  it('removes MCP configuration through the native lifecycle endpoint', async () => {
+    const user = userEvent.setup()
+    render(<TestHub initial="mcp" />)
+    await screen.findByText('local-test')
+    await user.click(screen.getByRole('button', { name: /Remove/ }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      '/api/mcp/local-test', expect.objectContaining({ method: 'DELETE' }),
     ))
   })
 

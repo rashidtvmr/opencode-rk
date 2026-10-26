@@ -2,12 +2,12 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import {
   Bot, Check, ChevronLeft, CircleAlert, Code2, FileText, Folder, FolderGit2,
   KeyRound, ListTodo, LoaderCircle, PlugZap, RefreshCcw, Server, ShieldCheck,
-  Square, Terminal, X,
+  Square, Terminal, Trash2, X,
 } from 'lucide-react'
 import {
   addDisabledMcp, browseSessionFiles, listCustomProviders, listMcpStatuses,
   listPermissionRules, listSessionTodos, modelKey, modelLabel, getSessionGit, getSessionGitDiff, runNativeShellStream,
-  saveCustomProvider, savePermissionRule, saveSessionTodos, setMcpConnection,
+  removeCustomProvider, removeMcp, saveCustomProvider, savePermissionRule, saveSessionTodos, setMcpConnection,
   type BrowserFileResult, type CommandInventory, type ModelSummary,
   type NativeMcpStatus, type NativePermissionRule, type NativeProvider, type SessionGitInfo,
   type NativeTodo, type WorkspaceCatalogState,
@@ -435,6 +435,10 @@ export function WorkspaceHub({
                       setProviderUrl(provider.base_url)
                       setProviderKey('')
                     }}>Edit</button>
+                    <button type="button" className="codex-hub-button danger" disabled={busy}
+                      onClick={() => void mutate(() => removeCustomProvider(provider.id), `Removed provider ${provider.id}`)}>
+                      <Trash2 size={14} /> Remove
+                    </button>
                   </div>
                 ))}
                 {!providers.length ? <Empty>No custom providers yet; OpenAI may still be available through native environment credentials.</Empty> : null}
@@ -443,7 +447,7 @@ export function WorkspaceHub({
               <form className="codex-hub-form" onSubmit={submitProvider}>
                 <label htmlFor="hub-provider-id">Provider ID</label>
                 <input id="hub-provider-id" value={providerId} onChange={(event) => setProviderId(event.target.value)}
-                  placeholder="my-provider" maxLength={63} required />
+                  placeholder="my-provider" maxLength={128} required />
                 <label htmlFor="hub-provider-name">Display name</label>
                 <input id="hub-provider-name" value={providerName} onChange={(event) => setProviderName(event.target.value)}
                   placeholder="My OpenAI-compatible provider" required maxLength={120} />
@@ -479,6 +483,10 @@ export function WorkspaceHub({
                       ) : (
                         <button type="button" className="codex-hub-button" onClick={() => setConfirmConnect(name)}>Connect</button>
                       )}
+                      <button type="button" className="codex-hub-button danger" disabled={busy}
+                        onClick={() => void mutate(() => removeMcp(name), `Removed MCP server ${name}`)}>
+                        <Trash2 size={14} /> Remove
+                      </button>
                     </div>
                     {confirmConnect === name ? <p className="codex-hub-warning">This runs a native local MCP process. Connect only to a configuration you trust.</p> : null}
                   </article>

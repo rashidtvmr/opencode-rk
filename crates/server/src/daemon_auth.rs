@@ -379,14 +379,21 @@ fn custom_provider_resume_path(method: &axum::http::Method, path: &str) -> bool 
     if read {
         return tail.strip_suffix("/models").is_some_and(opencode_rk_providers::custom_provider::valid_id);
     }
-    *method == axum::http::Method::POST && opencode_rk_providers::custom_provider::valid_id(tail)
+    matches!(*method, axum::http::Method::POST | axum::http::Method::DELETE)
+        && opencode_rk_providers::custom_provider::valid_id(tail)
 }
 
 fn mcp_lifecycle_resume_path(method: &axum::http::Method, path: &str) -> bool {
-    if *method != axum::http::Method::POST { return false; }
+    let is_delete = *method == axum::http::Method::DELETE;
+    if *method != axum::http::Method::POST && !is_delete { return false; }
     let Some(tail) = path.strip_prefix("/api/mcp/") else { return false; };
-    let Some(name) = tail.strip_suffix("/connect").or_else(|| tail.strip_suffix("/disconnect"))
-        else { return false; };
+    let name = if is_delete {
+        tail
+    } else {
+        let Some(name) = tail.strip_suffix("/connect").or_else(|| tail.strip_suffix("/disconnect"))
+            else { return false; };
+        name
+    };
     name.len() <= 64
         && name.bytes().next().is_some_and(|byte| byte.is_ascii_alphabetic())
         && name.bytes().all(|byte| byte.is_ascii_alphanumeric() || byte == b'_' || byte == b'-')
@@ -453,6 +460,8 @@ mod tests {
             ("POST", "/api/mcp", None, StatusCode::FORBIDDEN),
             ("POST", "/api/mcp/test-server/connect", Some(origin), StatusCode::NO_CONTENT),
             ("POST", "/api/mcp/test-server/disconnect", Some(origin), StatusCode::NO_CONTENT),
+            ("DELETE", "/api/mcp/test-server", Some(origin), StatusCode::NO_CONTENT),
+            ("DELETE", "/api/mcp/test-server", None, StatusCode::FORBIDDEN),
             ("GET", "/api/mcp/test-server/connect", None, StatusCode::FORBIDDEN),
             ("POST", "/api/mcp//connect", Some(origin), StatusCode::FORBIDDEN),
             ("POST", "/api/mcp/test-server/connect/extra", Some(origin), StatusCode::FORBIDDEN),
@@ -490,6 +499,8 @@ mod tests {
             ("GET", "/api/providers/9router/models", None, StatusCode::NO_CONTENT),
             ("POST", "/api/providers/9router", Some(origin), StatusCode::NO_CONTENT),
             ("POST", "/api/providers/9router", None, StatusCode::FORBIDDEN),
+            ("DELETE", "/api/providers/9router", Some(origin), StatusCode::NO_CONTENT),
+            ("DELETE", "/api/providers/9router", None, StatusCode::FORBIDDEN),
             ("POST", "/api/providers/9router", Some("http://localhost:9999"), StatusCode::FORBIDDEN),
             ("GET", "/api/providers/9router/secrets", None, StatusCode::FORBIDDEN),
             ("POST", "/api/providers/9router/models", Some(origin), StatusCode::FORBIDDEN),
@@ -501,7 +512,7 @@ mod tests {
             let response = app.clone().oneshot(request.body(axum::body::Body::empty()).unwrap()).await.unwrap();
             assert_eq!(response.status(), expected, "{method} {path}");
         }
-        assert_eq!(admitted.load(Ordering::SeqCst), 3, "denied requests must not reach handlers");
+        assert_eq!(admitted.load(Ordering::SeqCst), 4, "denied requests must not reach handlers");
     }
 
     #[test]

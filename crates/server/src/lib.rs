@@ -207,7 +207,10 @@ pub fn router_with_events_and_integration(
         .route("/api/permission-rules",get(list_permission_rules).post(save_permission_rule))
         .route("/api/models/{provider}/{model}", get(get_model))
         .route("/api/providers", get(list_custom_providers))
-        .route("/api/providers/{id}", post(save_custom_provider))
+        .route(
+            "/api/providers/{id}",
+            post(save_custom_provider).delete(delete_custom_provider),
+        )
         .route(
             "/api/providers/{id}/models",
             get(discover_custom_provider_models),
@@ -224,6 +227,7 @@ pub fn router_with_events_and_integration(
         )
         .route("/api/mcp/{name}/connect", post(mcp_http::connect))
         .route("/api/mcp/{name}/disconnect", post(mcp_http::disconnect))
+        .route("/api/mcp/{name}", delete(mcp_http::remove))
         .route(
             "/auth/{provider}",
             axum::routing::put(save_provider_auth)
@@ -510,6 +514,16 @@ async fn save_custom_provider(
         opencode_rk_providers::persisted_auth::save_api_key(provider_id, key, None)
             .await
             .map_err(ApiFailure::bad_request)?;
+    }
+    Ok(Json(json!(true)))
+}
+
+async fn delete_custom_provider(Path(id): Path<String>) -> Result<Json<Value>, ApiFailure> {
+    let removed = custom_provider::remove(&id)
+        .await
+        .map_err(|error| ApiFailure::bad_request(error.to_string()))?;
+    if !removed {
+        return Err(ApiFailure::not_found("provider not found"));
     }
     Ok(Json(json!(true)))
 }
