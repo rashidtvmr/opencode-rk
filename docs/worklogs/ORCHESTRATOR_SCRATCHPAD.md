@@ -13,7 +13,8 @@ and operating rules at the top of `AGENTS.md` before dispatching more work.
   plus approved extensions; Phase 1 is the immediate release priority.
 - Canonical checkout: `/Users/mymac/Projects/opencode-rk-recovery-20261005`.
 - Last observed canonical HEAD before these documentation edits:
-  `52a89c156a6e6e30268c49d2587b131836c11233` (`main-v2`).
+  `52a89c156a6e6e30268c49d2587b131836c11233` (`main-v2`). The operating-rule
+  documentation subsequently landed as `b7a3178307832945538cc9fa815044b2fe8d3574`.
 - User-selected upstream: `/Users/mymac/Projects/tmp/opencode`, verified HEAD
   `450e7b92412c780a7b5a75226bb8d49aaca24e22`. The older lock pin `95daf906...`
   is not the selected reference for current parity work.
@@ -73,8 +74,26 @@ Private verification tree:
   Resulting status file SHA256
   `43e309db7c63b6a8708bf9e45081ffd8a4170919da1a4dd2c02b5f0262c0bbd3`.
 - Reviewer `ses_e88e5d841ffes0OS7vHhKj793o` APPROVED this exact status-only
-  package and existing-assertion changes. Ready for scoped integration after
-  checking current base/path hashes. Not yet integrated at this snapshot.
+  package and existing-assertion changes. Integrated as
+  `14a4fb44bb2fcf8660b28ffef6e77abac5489b30` after the operating-rule commit.
+  Candidate preverification passed 838 CLI tests. Exact integrated release build
+  and installed acceptance still required; receipt is next to the package.
+- Integration preflight after the documentation commit found an unexpected
+  canonical status-file edit, SHA256
+  `103e49eda891ad95a122df4c1b1a5ee70a70e685f1cc48018be7a75f592f0017`.
+  It adds cache/reasoning to inclusive totals and changes the 150 assertion to
+  200; it is NOT the reviewed candidate. No approved patch was applied, no
+  status code committed, and the unexpected working file was left untouched.
+  Exact bytes/diff were preserved at
+  `.../T/opencode/unexpected-status-edit-preserved-kll4yq2i/`.
+  Provenance/stop-write requests went to research sessions
+  `ses_e89031db5ffehnSPru0cN5qDUZ` and `ses_e88f61dccffeqIbc4Ma0YUzlLv`.
+  Session `ses_e88f61dccffeqIbc4Ma0YUzlLv` subsequently completed and identified
+  its exact canonical candidate SHA (despite contradictory prose claiming no
+  edits); the other session denied writing. The completed worker's identified
+  delta was preserved, hash-checked and reversed, then the independently approved
+  package applied and committed. No unrelated work was touched. Future assignments
+  must reiterate read-only grants and absolute private artifact paths.
 
 ## Detailed inspector candidate and independent diagnosis
 
