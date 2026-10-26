@@ -121,6 +121,17 @@ function messageText(message: MessageRecord) {
 
 const MAX_ARTIFACT_DRAFT_BYTES = 64 * 1024
 const MAX_ARTIFACT_EDITOR_HISTORY = 32
+const MAX_FOLLOW_UP_QUEUE = 16
+
+type QueuedFollowUp = {
+  sessionId: string
+  text: string
+  reasoningEffort: ReasoningEffort
+  initialMessages?: MessageRecord[]
+  initialActivity?: AssistantActivity[]
+  configuredCommand?: { name: string; arguments: string }
+  mentionedAgent?: string
+}
 
 function MessageActions({
   message,
@@ -302,6 +313,8 @@ function App() {
   const permissionEpochRef = useRef(0)
   const [activeTurnSessionId, setActiveTurnSessionId] = useState<string | null>(null)
   const activeTurnRef = useRef<{ sessionId: string; controller: AbortController } | null>(null)
+  const [queuedFollowUps, setQueuedFollowUps] = useState<QueuedFollowUp[]>([])
+  const queuedFollowUpsRef = useRef<QueuedFollowUp[]>([])
   // Set when a turn seeds the transcript for a session whose load effect has
   // not run yet (branch-then-execute flow): the first effect run for that id
   // is then a render-order replay, not a real selection change, and must not
@@ -669,6 +682,18 @@ function App() {
     }
   }
 
+  const enqueueFollowUp = (followUp: QueuedFollowUp) => {
+    if (queuedFollowUpsRef.current.length >= MAX_FOLLOW_UP_QUEUE) {
+      setNotice(`Follow-up queue is full (${MAX_FOLLOW_UP_QUEUE} messages).`)
+      return false
+    }
+    const nextQueue = [...queuedFollowUpsRef.current, followUp]
+    queuedFollowUpsRef.current = nextQueue
+    setQueuedFollowUps(nextQueue)
+    setNotice(`${nextQueue.length} follow-up${nextQueue.length === 1 ? '' : 's'} queued.`)
+    return true
+  }
+
   const executeTurnInSession = async (
     sessionId: string,
     text: string,
@@ -683,7 +708,18 @@ function App() {
       return false
     }
 
-    activeTurnRef.current?.controller.abort()
+    if (activeTurnRef.current) {
+      return enqueueFollowUp({
+        sessionId,
+        text,
+        reasoningEffort,
+        initialMessages,
+        initialActivity,
+        configuredCommand,
+        mentionedAgent,
+      })
+    }
+
     const controller = new AbortController()
     activeTurnRef.current = { sessionId, controller }
     turnSeededSessionRef.current = sessionId
@@ -838,16 +874,60 @@ function App() {
       }
       setNotice(cause instanceof Error ? cause.message : 'Could not execute the turn')
       return persisted
+    } finally {
+      if (!activeTurnRef.current && queuedFollowUpsRef.current.length > 0) {
+        const [next, ...remaining] = queuedFollowUpsRef.current
+        queuedFollowUpsRef.current = remaining
+        setQueuedFollowUps(remaining)
+        queueMicrotask(() => {
+          void executeTurnInSession(
+            next.sessionId,
+            next.text,
+            next.reasoningEffort,
+            next.initialMessages,
+            next.initialActivity,
+            next.configuredCommand,
+            next.mentionedAgent,
+          )
+        })
+      }
     }
   }
 
-  const handleComposerSubmit = async (text: string, reasoningEffort: ReasoningEffort) => {
+  const handleComposerSubmit = (text: string, reasoningEffort: ReasoningEffort) => {
     if (!selectedSessionId) return false
     if (attachmentState.attachments.length > 0) {
       setNotice('Attached files are saved, but this provider turn adapter cannot send them yet.')
       return false
     }
+    if (!selectedModel) {
+      setNotice('Choose a model before sending a message.')
+      return false
+    }
     setSelectedReasoningEffort(reasoningEffort)
+    const dispatch = (
+      configuredCommand?: { name: string; arguments: string },
+      mentionedAgent?: string,
+    ) => {
+      const followUp: QueuedFollowUp = {
+        sessionId: selectedSessionId,
+        text,
+        reasoningEffort,
+        configuredCommand,
+        mentionedAgent,
+      }
+      if (activeTurnRef.current) return enqueueFollowUp(followUp)
+      void executeTurnInSession(
+        selectedSessionId,
+        text,
+        reasoningEffort,
+        undefined,
+        undefined,
+        configuredCommand,
+        mentionedAgent,
+      )
+      return true
+    }
     const parsedCommand = /^\/([^\s/]+)(?:\s+([\s\S]*))?$/.exec(text.trim())
     if (parsedCommand) {
       const name = parsedCommand[1]
@@ -855,16 +935,14 @@ function App() {
         setNotice(`Unknown slash command /${name}. Select a configured command from the composer.`)
         return false
       }
-      return executeTurnInSession(selectedSessionId, text, reasoningEffort, undefined, undefined, {
-        name, arguments: parsedCommand[2] ?? '',
-      })
+      return dispatch({ name, arguments: parsedCommand[2] ?? '' })
     }
     const parsedAgent = /^@([\w-]+)(?:\s+[\s\S]+)$/.exec(text.trim())
     if (parsedAgent && commandInventory.agents.some((candidate) => candidate.name === parsedAgent[1])) {
       const agent = parsedAgent[1]
-      return executeTurnInSession(selectedSessionId, text, reasoningEffort, undefined, undefined, undefined, agent)
+      return dispatch(undefined, agent)
     }
-    return executeTurnInSession(selectedSessionId, text, reasoningEffort)
+    return dispatch()
   }
 
   const handleFilesSelected = async (files: File[]) => {
@@ -1857,6 +1935,8 @@ function App() {
               disabled={!selectedSession}
               sessionId={selectedSession?.id ?? null}
               running={activeTurnSessionId === selectedSession?.id}
+              queuedCount={queuedFollowUps.length}
+              queueLimit={MAX_FOLLOW_UP_QUEUE}
               attachments={attachmentState.attachments}
               attachmentsAvailable={attachmentState.available}
               attachmentUnavailableReason={attachmentState.reason}

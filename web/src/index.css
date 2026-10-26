@@ -1078,6 +1078,14 @@
   gap: 0.15rem;
 }
 
+.codex-composer-queue-status {
+  margin: 0 0.35rem 0 0;
+  color: #a8a8a8;
+  font-size: 0.7rem;
+  line-height: 1.3;
+  white-space: nowrap;
+}
+
 .codex-composer-icon-button[data-slot="button"] {
   width: 2rem;
   height: 2rem;
