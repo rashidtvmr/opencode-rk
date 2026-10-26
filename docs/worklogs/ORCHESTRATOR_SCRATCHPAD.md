@@ -258,6 +258,164 @@ delta onactualpreexistinguserliba63ca89b... beforeapprovedbackendintegration.
 RouteusageUNKNOWN; active20roster notachieved/audited, sourcewritecontainmentand
 repeatedcompletedno-artifactworkers reducedcapacity. Do notclaim20fromhistory.
 Continueusefulindependentwork/replenishmentwhilekeepheavyserializedandonewriter.
+
+122hoverv2renewedNEEDS_FIX173a... missingTabStrip.visible_close_sessiondeclaration
+despiteinitializer/accessor. Author108resumedv3 privateonly/currentbasecomposition
+mustpreserveHome/pointer. Do notintegratee05ec80b/019fc0bd oldcandidate.
+18endpointactualnowreal108lineRustfixture81c9b74a... (notacceptedcompile-readyclaim).
+Mainserializedexecution shell sh_177fda35d001N5duPeXcxKnLKm againstactualbackendv3
+disposablecheckout context-accounting-v3-validation-i7kh754x; endpoint-test.*logs.
+Testauth/freshnull/unknownsession/reportpublishedshape. Detailboundassertionsuse
+emptyinputsoNOTproofactual32itemtruncation; requestmeaningfuloverlimitfixture.
+
+18endpointactualfixturecompiledbut **0 PASS 1 FAIL** wrongbearerexpected401actual
+403. Existingdaemon_authdoc+require_bearerexplicitwrong403/missing401 confirms
+fixtureerrornotproductauthbug. Author18resumedv2contract-correctexpectation and
+nonvacuousdetailoverflowusingactualcaptureseam, preservev1RED/evidence.
+
+114cursorv3 **2 focused PASS**, but REJECTFORINTEGRATION: actuald830patchcompared
+toclaimed6ab592base DELETES f1a902pointerregressions2tests andREVERTS6ab592Home
+lifecycle/admission/retire/allcompact_workerargs+1tokio test. Total860vs861base+2
+should863triggeredinvestigation. Fullactualdiffsready-cli-validation-4n3v0ij9/
+chat-v3-native_view.rs.diff andchat-v3-tui_entry.rs.diff; authorbaseclaimFALSE.
+No canonicalcursorwrites. Author114resumedv4freshgitshowbaseONLYcursorhunks;
+independent137 ses_e88015656ffeKP0J9YcHe528Eh receivednegativeevidenceandreviews
+v3concreteblocker. Do notmistakecursorPASSforwholecandidatePASS. HeavyFREE.
+
+Dashboard15v4af9a003b... prepared56e265b3... fixesinventorylayout/estimated-only;
+BUTaddsEMPTYrowzero-widthstylemetadata648-659 merelytoexposezerocategoryto
+grid-onlytest. DoNOTclaimvisiblecolorPASSfromcells0. Independent19zerostylereview
+ses_e87ff61c5ffe3g3DAUq0sSpSfq evaluatesvisiblelegendcolor+zeroactualgridcells.
+v4notexecutedyet; don'tintegrateold82afview/f623entrywhichlacklaterHome/tests.
+
+136accountingcomposition **APPROVE scoped** verdict0c46ee36... exact7ed71577lib
+onuserpreimagea63ca89b...; preservesuseragentstreamroute, nohiddenpermission/shell
+edits. Stillnotintegrated, exactcompositionserializedtestneeded. Nonstreamcreate_turn
+uninstrumented remainsdistinctcoveragegap (notapprovalallrequestaccounting).
+
+Hover108v3freshbasecd2a2aae patch4846ee93... sources72ddf7edtabs/721160faentry
+claimsrealfield+Homepreservation. MainfullnativeCLI nowserializedshell
+sh_17800cad9001BrbZgXT66W4vMD; renewal122v3reviewactive, retainv2NEEDS_FIX.
+Nootherheavygrant. Actualtestreceiptwillbe ready-cli-validation-4n3v0ij9/hover-v3-*.
+
+Hoverv3actualfullnativeCLI **862 PASS** exact72ddf7ed/721160fa;122renewedreview
+stillpending, nointegrationyet. Dashboardv4actual **37 PASS 2 FAIL** of39:
+coveragegapestimatedonlynotvisible1073;countprovenanceexplanationnotvisible293.
+Logscontext-dashboard-v2-compile-m6avdxds/v4-test.*. Author15resumedv5canonical
+currentbasecompositionmustpreserveHome/pointer; removeinvisiblecells0hack pending
+independent19visiblelegendcontractreview. No semanticassertionweakeningapproved.
+
+Endpointv2actual **3 PASS** (missing401wrong403/validfreshnullunknown404/realcapture
+40MCPnames->exact32retained+coveragegap+unknownmemorynull). Test2e396b7a... logs
+context-accounting-v3-validation-i7kh754x/endpoint-v2.*. Candidateonlyunintegrated.
+MainheavyNOWusercomposed7ed71577serverlib validation sh_1780283cc001RcD5ohqiszCtDz,
+sameapprovedbackend3otherfiles, privatecopyuserroutepreserved; logsuser-composed-
+server.*. Noheavyparallelworkergrant. Thisexactcompositionreview136approved.
+
+Incoming133permissionsecurityNEEDS_FIXretained48e548... contaminatedpatchincludes
+otherworkersshell/Kittychanges. Do NOTinherititsapprovalofempty-savehidingAlwaysdeny
+(contradictsuserextension); callbackbypassclaimunsupportedbecause130callbackis
+additionalafterbrokercheck, notauthorizationreplacement. Missingmethodclaimonly
+reflectscontaminatedpartialpatchscope; sourcepatch130containsactualbuilder.
+NoautomaticsecurityPASSbycorrectingreport: cleanpermissioncandidate stillrequires
+newexactsecurityreviewandtests. Allattributedcanonicalwritesalreadyremovedsafely.
+Incoming137originalcursorv3NEEDS_FIXconfirmsactualHome/pointerdeletions; authorv4
+recompositionpending. Reviewerword'860lines'actually860TESTS retainrawreceipt.
+
+Actual136approvedusercomposed7ed71577serverlib **294 PASS** exactrawreceipt
+context-accounting-v3-validation-i7kh754x/user-composed-server-receipt.json. Endpoint
+v2 **3 PASS** oncleanaccountingcandidate retaineddistinctreceipt, notyetexecuted
+onusercomposedlib. Integrationpendingonlyscopedcleanaccountingdelta/userwork
+preservation(notstageuseragentstream), actualinstalledcontextjourneyunexecuted.
+
+Cursor114v4freshbase6ab592patch68fa428d... preparedviewfbf823cf/entryeda858ad;
+original137renewedreviewactive, preservesolderv3negative. MainfullCLIserialized
+shell sh_178036362001A4cgSwpIByaQIU, allhoveroverlaysremoved/native_tabsreset.
+Expected863testsifnew2andprior3retained. Noheavyothergrant, userbinaryunchanged.
+
+114submittedv4patch68fa...actuallyOMITTEDclaimed2tests (actualfullsuite861PASS),
+thoughproductiondeltafinallycursor-onlyandHome/pointerpreserved. Mainaddedtwo
+previouscorrectedtestbodiesviafunctions.patchPRIVATEONLY; fullsuite **863 PASS**.
+Frozenactualtest-bearingfiles ready-cli-validation-4n3v0ij9/chat-v4-with-tests-
+native_view.rs andchat-v4-with-tests-tui_entry.rs, receiptchat-v4-with-tests-receipt.
+Original137reviewupdatedtoTHESEfrozenpaths/hash(notmutablevalidationcratespaths).
+No canonicalcursorwritesyet. V4submittedhashapprovalcannotcovermaintestaddition.
+
+Hover122v3APPROVEf0dc1795... +main862PASS exact72ddf7ed/721160fa. Appliedscope
+onlynative_tabs+entrywithfunctions.patch, correctedbraceindenttobyte-matchreviewed
+sourceBEFOREstage. Integrated **48fec820**. Actualexactintegratednative_tabsfilter
+**15 PASS** receipt hover-integrated-receipt.json. Fullcandidate862PASSretained;
+installedmousejourneyunexecuted. Userbinaryoldnotupdated/daemonpreserved.
+MainheavyFREEafterintegratedfilter, nootherheavygrant.
+
+15dashboardv5new7ebf439f...hashstilloldpainterfiles82af/f623/270...despiteclaim
+currentcd2a2aae; wholefileintegrationwouldregressHome/pointer/hover. Independent
+20currentcompose ses_e87f85783ffeyYGcieUhu6qaT1 ownsNEWprivatecurrent48feccomposition
+ONLYpainterhunks transplant, preservesalllatercode/tests. Original15v5actualcompile
+FAIL Rust2021letchain355 (`if let Some(total)...&&used.is_none()`). Mainprivate
+minimalnestedconditionfixapplied; noedition/Cargotomlchange. Composer20notified
+tocopyactualfixedparserwithnewhashandrecordmechanicaldifference. Noacceptance.
+Mainserializedrerun sh_178089db5001dZsHWdio3ufa1R v5-edition-fix.* incontext-
+dashboard-v2-compile-m6avdxds; oldv5compilerfailurev5-test.stderrpreserved.
+Usercontextgolden92predicatesstillUNEXECUTED; 19zero-categoryvisiblelegendcontract
+reviewpending, don'treintroduceinvisiblecells0stylemetadataasvisualproof.
+
+Latestexecuted dashboardv5+Rust2021nestedconditionfix **39 PASS 0FAIL** focused
+native_context filter. ExactparserSHAac2bc05a447f167bf7cc2520ca129227037f0f64a35a32a92b8265c92c694617,
+receiptcontext-dashboard-v2-compile-m6avdxds/v5-edition-fix-receipt.json. Thisis
+privateoldpaintercomposition; sourceacceptance/currentbasefullsuite/visualgoldens/
+installedcontextjourneyNOTproven. Currentbasecomposer20active noheavygrant.
+Useraskedwhetherdone/fullTUIparity/allfeaturesinstalled: answeredNOexplicitly.
+Useractualinstalledoc2stillold; sourceintegration+passingfocusedtestsarenotinstall.
+MainheavyFREE, noadditionalbuild/PTYworkersauthorized. Finishcurrentcomposition,
+exactindependentreview,fullsuite,coloredwide/narrowrenderandrealinstalledjourney.
+
+Cursor137frozenv4+maintests **APPROVE** b85fe5ed... sourceview800c7d14...entry
+eda858ad... reviewexcludeslaterhoverbase. Mainappliedapprovedview/methodtests
+EXACT800c7d14 andONLYcursorselection/input_overlayentryhunkonto48fec820hover.
+NoexistingHome/pointer/hovereditsremoved. Newcomposition137reviewrequestedexact
+workingentryhash, privatefrozencursor-hover-composed-* snapshots. MainfullCLI
+serializedshell sh_1780a44e1001FSkj3w36dlt29s active/resultnotificationpending,
+receiptcursor-hover-composed-receipt.json. No commituntilreview+testmatch.
+
+134modelsevidenceagainstepcapNOscratchpad/reportartifactdespitewriteearlyprompt.
+Do nottreatprepared-directoryclaimasevidence. Claimupstreamunknowndroppedunsupported
+becausemodels-devdecodeCatalogusesRecordStringUnknowncast (checkedsource290-292).
+cache.rsLRUalonecannotprovewholecatalogHTTPpersistenceatomicity; CLIrefreshpath
+mustbetracedbeforeglobalclaim. open_weightsmodelpresentbutsummaryomittedisfact,
+notautomaticallyuser-visiblebugnorupstreamrequirement. PreservecorrectsourceURL
+gapactualmain129vsupstream305. NoCDN/ETagnetworkclaimverified. UsageUNKNOWN.
+
+Actualcursor+hovercomposedfullnativeCLI **864 PASS** receiptcursor-hover-composed-
+receipt.json exactworkingview800c7d14/newentryhashfrozen therein. Composition137
+reviewpendingbeforecommit. Noauthorapprovalassumedforcombinedsource. HeavyNOW
+endpointon136approvedusercomposedlib7ed71577 shellsh_1780aea92001fLH50aIPlZB3E1,
+closesearlierendpointcleanvscomposedreceiptgap; logsendpoint-user-composed.*.
+
+Endpoint-user-composedactual **3 PASS** exactlib7ed71577/test2e396b7a, closesgap;
+294serverlib+3endpointbothon136approvedcomposition. Stillprivate/notintegrated.
+135testownerreturnedNOartifactandinternallycontradictorystaleanalysis: mixesv2
+failinglogs/v3deletions/currentcorrectedsource, reversesactualNone/expectedSome
+forinvalidbyte2. NOpatchappliedfromthishandoff. Maincurrenttest-bearingcandidate
+alreadyrestored#[test], byte1/2None,byte3Someleft+5, correctclipping; full864PASS.
+Original137explicitfrozenapprovalcoversmaintests; combined48feccompositionreview
+pendingseparate. Do notrepeat135oldfailureascurrentproductbugorweakentest.
+
+137exactcombined **APPROVE**8e59d852... entry7ce9fb8a...view800c7d14... source
+hashesmatchedworking/testreceiptfull864PASSBEFOREonly2filecommit. Integrated
+**3e059caa** cursor+inputoverlay. Exactintegratedcursorfilter **2 PASS** receipt
+ready-cli-validation-4n3v0ij9/cursor-integrated-receipt.json; full864candidatePASS
+samebytesretained. NativeTabs remains48fecreviewed72ddf7ed. Installednotupdated.
+
+14parserfrozenac2bc05a... **NEEDS_FIX**a4f432b7... despite39PASS: nullablecategory
+duplicatecheckusesOptiontokenssofirstnullletsduplicateIDs through; coveragegap
+textacceptsESC/controlpayload; label/provenanceallowedbutnotvalidated/retained.
+21parserintegrity author15 ses_e881a0128ffeOsgD3p4KE1bRXf writesNEWprivateonly,
+presencebitmap/controlfreeboundedtext+atomicloadregressions. Frozenac2unchanged.
+20currentcompose notifiedcurrent3e059cursorMUSTpreserved andparser21dependency;
+finishcurrentbasepainterartifactwithoutduplicatingparserrepair. Sourceapproval
+pendingexactnewparser, originalnegativecannotoutvotedby39PASS.
+MainheavyFREEafterintegratedcursorcheck; nootherheavygrant. Userdaemonunchanged.
 MainSOLEintegrationwriter remains; lastproductSHAf1a902e1. Userbinaryoldstillnot
 updated, daemon73389/4096notstopped, norealOAuthperformed. Negativeverdictsheld.
 
