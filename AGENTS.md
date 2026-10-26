@@ -2,6 +2,110 @@
 
 This repository is in **product-convergence mode**. The goal is a working OpenCode-compatible Rust application, not a larger task graph.
 
+## Current user operating instructions — 2026-10-26
+
+These explicit user instructions take precedence over conflicting delegation,
+parallelism and reference-selection guidance below. Persist them across restarts
+and compaction; do not require the user to repeat them. They remain in effect
+until the user changes them. Token allowances are today's user-provided budgets,
+not verified provider balances; never assume that a new session resets them.
+
+### Exclusive subagent allowlist
+
+Only the following subagents are authorized. Do not use another agent or model
+route, including an automatic fallback, without a new explicit user instruction.
+
+| User-authorized subagent | Limit and availability rule |
+| --- | --- |
+| `@vyce-deepseek-v41` | At most **8 concurrent** assignments; unlimited cumulative use. |
+| `@vyce-glm-5-3-flash` | **50 million tokens** total allowance; stop using this route when exhausted or on an error. |
+| `@9router-vyce-deepseek-v4.1-free-combined` | No user-specified usage limit. |
+| `@xkiro-gpt-6-luna` | Authorized for use; resolve the exact harness identifier before dispatch. |
+| `@9router-xk-qwen38-max-free` | **8 million tokens** total allowance; stop when exhausted or on an error. |
+| `@9router-luna-free` | Use if working; move work to another allowed route if unavailable. |
+| `@9router-th-dsv41-flash-free` | Use while its free allowance remains; stop when exhausted/unavailable. |
+
+Verify identifiers against the harness inventory. If a user spelling is an alias
+or typo, establish its exact mapping rather than guessing or silently choosing
+another model. In particular, resolve the spelling of `xkiro-gpt-6-luna` against
+the actual harness inventory before use. Authorization of a route does not waive its quota.
+Track reported token usage, route failures and exhaustion in the orchestrator
+scratchpad across all assignments and sessions. If usage telemetry is absent,
+record **UNKNOWN**, never invent a balance or claim a budget remains. Stop a
+budgeted route when its reported usage reaches the allowance or the provider
+reports exhaustion; respect the stricter stop-on-error rules above. Reassign its
+unfinished task to another allowed, available route and preserve its evidence.
+
+### Continuous delegation and prompt integration
+
+- Maintain **20 or more concurrent, useful subagent assignments** while product
+  tasks remain and independent work is available. Replenish completed assignments
+  promptly; do not wait for unrelated workers or a whole batch to finish.
+- Cover research, upstream comparison, implementation, independent review, audit,
+  testing, integration preparation, merge preparation and blocker diagnosis.
+  Reassign pending work as capacity becomes available. If dependencies, available
+  routes or resources prevent 20 useful assignments, record the actual constraint
+  and work to unblock it; do not manufacture duplicate tasks or claim idle agents
+  are active. The eight-assignment limit for `vyce-deepseek-v41` still applies.
+- Keep implementation path grants non-overlapping and heavy validation serialized.
+  Parallel research/review capacity does not authorize concurrent Cargo/PTY runs,
+  uncontrolled writers, new branch families or weakened semantic assertions.
+- Integrate each independently reviewed, verified, ready feature into `main-v2`
+  promptly through the **single integration writer**. Integration/merge workers
+  prepare scoped patches, exact hashes, reviews and checks; they do not race to
+  mutate canonical history. Do not hold a ready feature for unrelated work.
+- Investigate blockers, repair them, and continue. Redirect other workers to
+  independent work while the blocker is being resolved. Preserve negative review
+  verdicts until the corrected exact candidate is reviewed again.
+
+### Explicit roles, goals and success criteria
+
+Every delegation prompt must assign the worker's **role first**, followed by its
+goal and observable success criteria. Then instruct it to read the applicable
+worker best practices. Reading a rules file does not assign a role.
+
+Include the exact base SHA, absolute source/reference paths and upstream pin,
+allowed write paths or read-only scope, private artifact directory, dependencies,
+resource limits, required evidence and expected handoff. Distinguish research
+findings, proposed patches, executed verification and integrated acceptance.
+Use `docs/AGENT_WORKER_PRACTICES.md` for the shared best practices and handoff
+template; do not substitute a generic "read worker rules" prompt for an assignment.
+
+### OpenCode V2 is the architectural reference
+
+Build a Rust version of **all OpenCode V2 behavior as-is, plus the explicitly
+requested additional features**. Resolve ordinary architectural/API/UI decisions
+by inspecting the actual V2 source in `/Users/mymac/Projects/tmp/opencode`, rather
+than asking the user to decide what upstream already specifies. The current
+user-selected reference is **`450e7b92412c780a7b5a75226bb8d49aaca24e22`**;
+verify the checkout SHA and cite file/symbol evidence. This selection supersedes
+the older OpenCode pin in `sources/upstream.lock.json` for current parity work;
+do not silently change that lock or compare against a different revision.
+Preserve approved extensions and identify their behavior separately from upstream
+parity. Ask only for a genuine unresolved product choice or unavailable human
+authority. Completing Phase 1 remains the immediate release priority, not a claim
+that wider OpenCode parity is already complete.
+
+### Durable scratchpads are mandatory
+
+- Every research subagent maintains a unique scratchpad containing its question,
+  exact source pins/paths/symbols, findings, decision rationale, rejected options,
+  uncertainties, evidence/artifact hashes and next steps. Read relevant existing
+  scratchpads before repeating research; validate old findings against the current
+  source. Update the scratchpad before returning or approaching context limits.
+- The main orchestrator maintains `docs/worklogs/ORCHESTRATOR_SCRATCHPAD.md` and
+  updates it at meaningful changes and before compaction/handoff. Record current
+  SHA, active assignments and session IDs, route usage/errors, decisions, reviewed
+  candidates, actual test results, blockers, integration status and next actions.
+- Research workers write only their granted unique scratchpad/artifact paths.
+  Prefer an **absolute private directory outside canonical** and return its path
+  and hash; the orchestrator preserves useful durable notes under
+  `docs/worklogs/research/`. A relative `.private-tmp/` or `tests/e2e/T/` inside
+  canonical is not an external private directory. Never overwrite another worker's
+  notes, user work or shared scratchpad.
+- Scratchpads preserve reasoning and point to raw evidence; they are not acceptance
+  records or replacements for actual source/test verification. Keep secrets out.
+
 ## Temporary user override — finish Phase 1 first (2026-10-21)
 
 The user explicitly directed: "lets ignore the guards and running python script
@@ -140,7 +244,9 @@ Do not recursively turn every implementation detail into planning/review/registr
 
 ## Parallelism and backpressure
 
-Parallelism is a ceiling, not a fill target. Many agents may reason, investigate and verify in parallel, but writing packages must be independently useful and non-overlapping.
+The current user instruction above requires 20+ useful concurrent assignments
+when independent product work is available. The configured ceiling and resource
+limits still apply; writing packages must be independently useful and non-overlapping.
 
 - candidate high-water: **4** verified/unintegrated candidates;
 - at high-water, stop new implementation and move capacity to verification, rebase/integration prep, conflict resolution and upstream analysis;
@@ -169,7 +275,12 @@ When an old semantic test conflicts with a higher authority, an independent cont
 
 ## Upstream reference
 
-The pinned OpenCode commit is recorded in `sources/upstream.lock.json`. Use the full read-only local checkout at that exact pin when available and record upstream file/symbol evidence. Do not claim parity from selected excerpts when the relevant upstream source was not inspected.
+The current user-selected OpenCode reference and absolute checkout path are
+recorded in the operating instructions above; they supersede the older OpenCode
+pin in `sources/upstream.lock.json` for current parity work. Use the full read-only
+checkout at that exact selected pin and record upstream file/symbol evidence.
+Do not claim parity from selected excerpts when the relevant upstream source was
+not inspected.
 
 ## Non-destructive salvage
 
