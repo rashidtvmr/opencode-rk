@@ -32,6 +32,7 @@ import { Composer, type ReasoningEffort } from '@/components/composer'
 import { PersistedToolMessage, ToolTimeline, deriveStoredToolTimeline, type ToolExecutionItem } from '@/components/tool-timeline'
 import { MessageMarkdown } from '@/components/message-markdown'
 import type { HubPage } from '@/components/workspace-hub'
+import { browserRouteUrl, readBrowserRoute } from '@/lib/browser-navigation'
 import { useWebPreferences } from '@/lib/web-preferences'
 import { Button } from '@/components/ui/button'
 import {
@@ -220,7 +221,9 @@ function App() {
   const [showSettings, setShowSettings] = useState(false)
   const [showGlobalSearch, setShowGlobalSearch] = useState(false)
   const [showSubagents, setShowSubagents] = useState(false)
-  const [hubPage, setHubPage] = useState<HubPage | null>(null)
+  const [hubPage, setHubPage] = useState<HubPage | null>(
+    () => readBrowserRoute(window.location.search).view,
+  )
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
@@ -244,6 +247,8 @@ function App() {
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [error, setError] = useState('')
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null)
+  const initialRouteRef = useRef(readBrowserRoute(window.location.search))
+  const initialHistoryWriteRef = useRef(false)
   const [selectedModel, setSelectedModel] = useState('')
   const [selectedReasoningEffort, setSelectedReasoningEffort] = useState<ReasoningEffort>('high')
   const [query, setQuery] = useState('')
@@ -319,7 +324,9 @@ function App() {
             ? current
             : workspaceResult.workspaces[0]?.id ?? '',
         )
-        setSelectedSessionId((current) => current ?? sessionResult[0]?.id ?? null)
+        setSelectedSessionId((current) => current
+          ?? sessionResult.find((item) => item.id === initialRouteRef.current.chatId)?.id
+          ?? sessionResult[0]?.id ?? null)
         setSelectedModel((current) => current || (modelResult[0] ? modelKey(modelResult[0], 0) : ''))
         setLoadState('ready')
       })
@@ -331,6 +338,31 @@ function App() {
 
     return () => controller.abort()
   }, [])
+
+  // Back and forward navigate real sessions/pages, never duplicate a turn.
+  useEffect(() => {
+    const onPopState = () => {
+      const route = readBrowserRoute(window.location.search)
+      setHubPage(route.view)
+      setSelectedSessionId((current) => route.chatId
+        && sessions.some((item) => item.id === route.chatId) ? route.chatId : current)
+    }
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [sessions])
+
+  useEffect(() => {
+    if (loadState !== 'ready') return
+    const next = browserRouteUrl(window.location.pathname, window.location.search, {
+      chatId: selectedSessionId, view: hubPage,
+    })
+    const current = window.location.pathname + window.location.search
+    if (current !== next) {
+      const method = initialHistoryWriteRef.current ? 'pushState' : 'replaceState'
+      window.history[method](window.history.state, '', next)
+    }
+    initialHistoryWriteRef.current = true
+  }, [loadState, selectedSessionId, hubPage])
 
   useEffect(() => {
     const controller = new AbortController()

@@ -9,6 +9,8 @@ conversation markdown/tool cards and appearance settings.
 Use Ctrl/Cmd+K or the Search all navigation control to query local conversation
 titles and inline message bodies, advertised agents, and file names in the
 selected session directory. This does not upload files or index remote workspaces.
+Chat and workspace-page selection is reflected in shareable `?chat=<uuid>&view=<page>`
+links. Back and forward restore these choices, excluding native resume tokens.
 
 Stack: React 19, Vite, TypeScript, Tailwind CSS 4, and **shadcn/ui** using its
 `aria-nova` React Aria component base. `components.json` is the shadcn registry

@@ -51,6 +51,9 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
       bounded previews. The selected file path is inserted into the prompt,
       not automatically read into provider context.
 - [x] Workspace pages are code-split from the main conversation bundle.
+- [x] Validated chat and workspace-page deep links with browser history and
+      safe preservation of unrelated URL parameters; native launch secrets
+      are excluded from copied navigation URLs.
 - [x] Origin-bound native global search across local conversation titles and
       inline user/assistant messages, with current-session file paths and
       advertised agents included in the keyboard-accessible Ctrl/Cmd+K panel.
@@ -160,7 +163,8 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
       agents and **current-session** file names, with accessible keyboard shortcut.
 - [ ] Global file search across every registered workspace, blob-backed message
       indexing, search hit jumping/scroll anchoring, and FTS-backed scaling.
-- [ ] Real route-based navigation, deep links, breadcrumbs and browser history.
+- [x] Chat/workspace browser deep links and history navigation.
+- [ ] Complete path-based routes, breadcrumbs and anchored message/file links.
 
 ## P5 — Personalization and visual parity
 

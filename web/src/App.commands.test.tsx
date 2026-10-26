@@ -23,6 +23,7 @@ function ndjson(text: string, label: string) {
 }
 
 beforeEach(() => {
+  window.history.replaceState(null, '', `/#oc2-token=${'a'.repeat(64)}`)
   fetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     if (url === '/health') return json({ schema_version: 1, status: 'ok', runtime: 'native-rust' })
@@ -47,6 +48,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup()
+  window.history.replaceState(null, '', `/#oc2-token=${'a'.repeat(64)}`)
   fetchMock.mockReset()
   vi.unstubAllGlobals()
   sessionStorage.clear()
@@ -54,6 +56,23 @@ afterEach(() => {
 })
 
 describe('daemon-backed composer actions', () => {
+  it('restores valid conversation deep links and synchronizes navigation to browser history', async () => {
+    const user = userEvent.setup()
+    // Keep the native launch-token fragment seeded by the browser-resume
+    // fixture until the daemon authentication exchange consumes it.
+    window.history.replaceState(null, '', `/?chat=${SESSION}&view=models${window.location.hash}`)
+    render(<App />)
+    await screen.findByRole('heading', { name: 'Available models' })
+    await screen.findByRole('button', { name: 'Chat Developer conversation' })
+    expect(window.location.search).toContain(`chat=${SESSION}`)
+    await user.click(screen.getByRole('button', { name: 'Close workspace' }))
+    await waitFor(() => expect(window.location.search).not.toContain('view=models'))
+    // Deterministic history restoration without asynchronous navigation
+    // mutating the next test's URL.
+    window.history.replaceState(null, '', `/?chat=${SESSION}&view=models`)
+    window.dispatchEvent(new PopStateEvent('popstate'))
+    expect(await screen.findByRole('heading', { name: 'Available models' })).not.toBeNull()
+  })
   it('opens real workspace pages and isolates the hidden conversation controls', async () => {
     const user = userEvent.setup()
     render(<App />)
