@@ -13,8 +13,8 @@
 //! Reuses existing tested pieces instead of reimplementing them:
 //! - [`native_transcript::strip_ansi`] sanitizes every row (CSI/SGR,
 //!   OSC-8 hyperlinks, lone ESC/C1 and C0 controls except `\n`/`\t`
-//!   never cross the render boundary); tabs are blanked here so a paste
-//!   cannot shift columns.
+//!   never cross the render boundary); ordinary prose tabs are blanked here so
+//!   a paste cannot shift columns, while fenced source tabs remain literal.
 //! - [`native_transcript::render_lines`] word-wraps one history entry to
 //!   `width` chars, char-boundary safe, hard-capped at its `MAX_WINDOW`
 //!   rows (inherited ceiling: one entry contributes at most 200 rows).
@@ -766,6 +766,42 @@ fn sanitize_inline(text: &str) -> String {
         .collect()
 }
 
+/// Code sanitizer applies the same ANSI/control boundary policy as ordinary
+/// display rows. Fenced tabs are expanded separately at terminal-standard
+/// eight-column stops before wrapping/painting, so the row string and the
+/// native paint visitor have identical cell coordinates.
+fn sanitize_code(text: &str) -> String {
+    strip_ansi(text)
+        .chars()
+        .map(|c| if c.is_control() && c != '\t' { ' ' } else { c })
+        .collect()
+}
+
+fn expand_code_tabs(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut column = 0usize;
+    for segment in text.split_inclusive('\t') {
+        let (run, tab) = segment.strip_suffix('\t').map_or((segment, false), |s| (s, true));
+        // Preserve the source-level overflow contract before the shared
+        // iterator's bounded cluster projection; otherwise over-cap
+        // continuations would be discarded before they can be escaped.
+        let run = lossless_markdown_code_line(run);
+        crate::native_view_layout::visit_unpadded_cells(&run, MAX_INPUT_ROW_BYTES, |glyph, cells| {
+            if out.len().saturating_add(glyph.len()) <= MAX_INPUT_ROW_BYTES {
+                out.push_str(glyph);
+                column = column.saturating_add(cells);
+            }
+        });
+        if tab {
+            let count = 8 - (column % 8);
+            if out.len().saturating_add(count) > MAX_INPUT_ROW_BYTES { break; }
+            out.extend(std::iter::repeat_n(' ', count));
+            column = column.saturating_add(count);
+        }
+    }
+    out
+}
+
 /// Left padding for message text of `role`. User (and tool-role) bodies are
 /// indented as the upstream marker block; assistant/system text is flush.
 fn text_prefix(role: ChatRole) -> &'static str {
@@ -810,7 +846,7 @@ fn push_wrapped(
     text: &str,
     prefix: &str,
     class: ChatRowClass,
-) {
+) -> bool {
     let clean = sanitize(clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES));
     let content_width = if width == 0 {
         0
@@ -826,11 +862,328 @@ fn push_wrapped(
             content_width,
         ) {
             if rows.len() >= MAX_MESSAGE_ROWS {
-                return;
+                return true;
             }
             rows.push((truncate_row(&format!("{prefix}{row}"), width), class));
         }
     }
+    false
+}
+
+/// Preserve fenced-code whitespace while wrapping. Prose keeps the existing
+/// word-wrap behavior; fenced rows are split only at display-cluster
+/// boundaries so indentation and repeated spaces remain actual source text.
+fn push_markdown_wrapped(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    text: &str,
+    prefix: &str,
+    class: ChatRowClass,
+) {
+    let input_truncated = text.len() > MAX_INPUT_ROW_BYTES;
+    // Keep the bounded source raw until fence state is known: code indentation
+    // is source data, so the ordinary tab-normalizing sanitizer must not run
+    // before fenced lines are dispatched.
+    let bounded = clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES);
+    // Strip escape sequences over the complete bounded message before line
+    // projection. This preserves ANSI state that legally spans a newline;
+    // per-line stripping would expose payload bytes from an unterminated OSC,
+    // DCS, or CSI prefix.
+    let sanitized = strip_ansi(bounded);
+    let mut fence: Option<(char, usize)> = None;
+    let mut overflow = input_truncated;
+    for raw_line in sanitized.split('\n') {
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            overflow = true;
+            break;
+        }
+        let was_fenced = fence.is_some();
+        let mut code = was_fenced;
+        if let Some((marker, run, trailing)) = markdown_fence_marker(raw_line) {
+            match fence {
+                Some((open, minimum))
+                    if marker == open
+                        && run >= minimum
+                        && trailing.bytes().all(|byte| matches!(byte, b' ' | b'\t')) =>
+                {
+                    fence = None;
+                    code = true;
+                }
+                None => {
+                    fence = Some((marker, run));
+                    code = true;
+                }
+                _ => {}
+            }
+        }
+        let line = if code {
+            expand_code_tabs(&sanitize_code(raw_line))
+        } else {
+            sanitize(raw_line)
+        };
+        let line_overflow = if code {
+            push_code_wrapped(rows, width, &line, prefix, class)
+        } else {
+            push_wrapped(rows, width, &line, prefix, class)
+        };
+        if line_overflow {
+            overflow = true;
+            break;
+        }
+    }
+    if overflow {
+        push_markdown_overflow(rows, width, prefix, class);
+    }
+}
+
+/// Recognize a CommonMark-style opening/closing fence with up to three
+/// leading spaces. Returns its marker, run length and trailing info string.
+fn markdown_fence_marker(line: &str) -> Option<(char, usize, &str)> {
+    let indent = line.as_bytes().iter().take_while(|byte| **byte == b' ').count();
+    if indent > 3 {
+        return None;
+    }
+    let rest = &line[indent..];
+    let marker = rest.chars().next()?;
+    if !matches!(marker, '`' | '~') {
+        return None;
+    }
+    let run = rest.bytes().take_while(|byte| *byte == marker as u8).count();
+    if run < 3 {
+        return None;
+    }
+    let trailing = &rest[run..];
+    if marker == '`' && trailing.contains('`') {
+        return None;
+    }
+    Some((marker, run, trailing))
+}
+
+/// Mirrors the shared display helper's continuation ranges and cluster caps.
+/// ponytail: mirror the 8-continuation/4-base/48-byte ceiling until the shared helper path is granted; move this detector there.
+fn markdown_code_continuation(c: char) -> bool {
+    const RANGES: &[(u32, u32)] = &[
+        (0x0300, 0x036F),
+        (0x0483, 0x0489),
+        (0x0591, 0x05BD),
+        (0x05BF, 0x05BF),
+        (0x05C1, 0x05C2),
+        (0x05C4, 0x05C5),
+        (0x05C7, 0x05C7),
+        (0x0610, 0x061A),
+        (0x064B, 0x065F),
+        (0x0670, 0x0670),
+        (0x06D6, 0x06DC),
+        (0x06DF, 0x06E4),
+        (0x06E7, 0x06E8),
+        (0x06EA, 0x06ED),
+        (0x0711, 0x0711),
+        (0x0730, 0x074A),
+        (0x07A6, 0x07B0),
+        (0x07EB, 0x07F3),
+        (0x0816, 0x0819),
+        (0x081B, 0x0823),
+        (0x0825, 0x0827),
+        (0x0829, 0x082D),
+        (0x0E31, 0x0E31),
+        (0x0E34, 0x0E3A),
+        (0x0E47, 0x0E4E),
+        (0x1AB0, 0x1AFF),
+        (0x1DC0, 0x1DFF),
+        (0x200B, 0x200F),
+        (0x202A, 0x202E),
+        (0x2060, 0x2064),
+        (0x20D0, 0x20FF),
+        (0xFE00, 0xFE0F),
+        (0xFE20, 0xFE2F),
+        (0xFEFF, 0xFEFF),
+    ];
+    let cp = c as u32;
+    RANGES.iter().any(|&(start, end)| (start..=end).contains(&cp))
+        || (0x1F3FB..=0x1F3FF).contains(&cp)
+}
+
+/// Preserve ordinary code clusters verbatim. If the shared bounded cluster
+/// limits would discard part of one cluster, escape that cluster only; do not
+/// make an unrelated following scalar lossy merely because it shares a line.
+fn lossless_markdown_code_line(text: &str) -> String {
+    fn escaped(cluster: &str) -> String {
+        cluster.chars().map(|c| {
+            if c.is_ascii() { c.to_string() } else { format!("\\u{{{:x}}}", c as u32) }
+        }).collect()
+    }
+    let mut out = String::with_capacity(text.len());
+    let mut cluster = String::new();
+    let mut continuations = 0usize;
+    let mut bases = 1usize;
+    let mut bytes = 0usize;
+    let mut after_join = false;
+    let mut regional_count = 0usize;
+    let mut bad = false;
+    let mut flush = |out: &mut String, cluster: &mut String, bad: &mut bool| {
+        if *bad { out.push_str(&escaped(cluster)); } else { out.push_str(cluster); }
+        cluster.clear();
+        *bad = false;
+    };
+    for c in text.chars() {
+        let regional = (0x1F1E6..=0x1F1FF).contains(&(c as u32));
+        if regional {
+            if regional_count == 1 && !cluster.is_empty() {
+                cluster.push(c);
+                regional_count = 2;
+                continue;
+            }
+            if !cluster.is_empty() {
+                if regional_count == 1 { bad = true; }
+                flush(&mut out, &mut cluster, &mut bad);
+            }
+            cluster.push(c);
+            regional_count = 1;
+            bytes = c.len_utf8();
+            continuations = 0;
+            bases = 1;
+            after_join = false;
+            continue;
+        }
+        if regional_count == 1 {
+            bad = true;
+            flush(&mut out, &mut cluster, &mut bad);
+            regional_count = 0;
+        } else if regional_count == 2 {
+            regional_count = 0;
+        }
+        if markdown_code_continuation(c) {
+            if cluster.is_empty() {
+                out.push_str(&escaped(&c.to_string()));
+                continue;
+            }
+            cluster.push(c);
+            continuations += 1;
+            bytes += c.len_utf8();
+            bad |= continuations > 8 || bytes > 48;
+            after_join = c == '\u{200d}';
+            continue;
+        }
+        if cluster.is_empty() {
+            cluster.push(c);
+            bytes = c.len_utf8();
+            continuations = 0;
+            bases = 1;
+            after_join = false;
+            continue;
+        }
+        if after_join {
+            cluster.push(c);
+            bases += 1;
+            bytes += c.len_utf8();
+            bad |= bases > 4 || bytes > 48;
+            after_join = false;
+        } else {
+            flush(&mut out, &mut cluster, &mut bad);
+            cluster.push(c);
+            bytes = c.len_utf8();
+            continuations = 0;
+            bases = 1;
+        }
+    }
+    if regional_count == 1 { bad = true; }
+    flush(&mut out, &mut cluster, &mut bad);
+    out
+}
+
+/// Emit a bounded marker when an input-byte or row ceiling hides source text.
+/// Replacing the final row preserves the existing row cap.
+fn push_markdown_overflow(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    prefix: &str,
+    class: ChatRowClass,
+) {
+    let marker_prefix = if width == 0 || prefix.len() < width { prefix } else { "" };
+    let marker = if width == 0 {
+        format!("{marker_prefix}[display truncated]")
+    } else {
+        format!("{marker_prefix}! content omitted")
+    };
+    let marker = truncate_row(&marker, width);
+    if rows.len() >= MAX_MESSAGE_ROWS {
+        if let Some(last) = rows.last_mut() {
+            *last = (marker, class);
+        }
+    } else {
+        rows.push((marker, class));
+    }
+}
+
+/// Code-row wrapper that keeps bounded source content and whitespace. A wide
+/// scalar that cannot fit an exceptionally narrow pane uses a Unicode escape.
+fn push_code_wrapped(
+    rows: &mut Vec<(String, ChatRowClass)>,
+    width: usize,
+    text: &str,
+    prefix: &str,
+    class: ChatRowClass,
+) -> bool {
+    if rows.len() >= MAX_MESSAGE_ROWS {
+        return true;
+    }
+    let clean = sanitize_code(clip_utf8_prefix_bytes(text, MAX_INPUT_ROW_BYTES));
+    if width == 0 {
+        rows.push((format!("{prefix}{clean}"), class));
+        return false;
+    }
+    let clean = lossless_markdown_code_line(&clean);
+    // Decoration yields to message content on a pane too narrow to fit both.
+    let prefix = if prefix.len() < width { prefix } else { "" };
+    let content_width = width.saturating_sub(prefix.len()).max(1);
+    if clean.is_empty() {
+        rows.push((truncate_row(prefix, width), class));
+        return false;
+    }
+    let mut clusters = Vec::new();
+    crate::native_view_layout::visit_unpadded_cells(
+        &clean,
+        clean.len(),
+        |glyph, cells| clusters.push((glyph.to_owned(), cells)),
+    );
+    let mut line = String::new();
+    let mut used = 0usize;
+    for (glyph, cells) in clusters {
+        if rows.len() >= MAX_MESSAGE_ROWS {
+            return true;
+        }
+        if cells > content_width {
+            if !line.is_empty() {
+                rows.push((truncate_row(&format!("{prefix}{line}"), width), class));
+                line.clear();
+                used = 0;
+                if rows.len() >= MAX_MESSAGE_ROWS {
+                    return true;
+                }
+            }
+            let escaped: String = glyph.chars().map(|c| format!("\\u{{{:x}}}", c as u32)).collect();
+            for chunk in escaped.chars().collect::<Vec<_>>().chunks(content_width) {
+                if rows.len() >= MAX_MESSAGE_ROWS { return true; }
+                let chunk: String = chunk.iter().collect();
+                rows.push((truncate_row(&format!("{prefix}{chunk}"), width), class));
+            }
+            continue;
+        }
+        if used + cells > content_width {
+            rows.push((truncate_row(&format!("{prefix}{line}"), width), class));
+            line.clear();
+            used = 0;
+            if rows.len() >= MAX_MESSAGE_ROWS {
+                return true;
+            }
+        }
+        line.push_str(&glyph);
+        used += cells;
+    }
+    if !line.is_empty() && rows.len() < MAX_MESSAGE_ROWS {
+        rows.push((truncate_row(&format!("{prefix}{line}"), width), class));
+    }
+    false
 }
 
 /// Display rows of one typed message: optional group separator, optional
@@ -857,7 +1210,7 @@ fn typed_message_rows(
         }
         match part {
             ChatPart::Text(text) => {
-                push_wrapped(
+                push_markdown_wrapped(
                     &mut rows,
                     width,
                     text,
@@ -926,48 +1279,58 @@ fn typed_message_rows(
                     push_wrapped(&mut rows, width, output, "    ", class);
                 }
             }
-            ChatPart::File { filename, mime } => push_wrapped(
-                &mut rows,
-                width,
-                &format!("[file] {filename} ({mime})"),
-                "  ",
-                ChatRowClass::Metadata,
-            ),
+            ChatPart::File { filename, mime } => {
+                push_wrapped(
+                    &mut rows,
+                    width,
+                    &format!("[file] {filename} ({mime})"),
+                    "  ",
+                    ChatRowClass::Metadata,
+                );
+            }
             ChatPart::Subtask {
                 agent,
                 description,
                 background,
-            } => push_wrapped(
-                &mut rows,
-                width,
-                &format!(
-                    "[task] {agent}{} — {description}",
-                    if *background { " (background)" } else { "" }
-                ),
-                "  ",
-                ChatRowClass::ToolCall,
-            ),
-            ChatPart::Retry { attempt, message } => push_wrapped(
-                &mut rows,
-                width,
-                &format!("[retry {attempt}] {message}"),
-                "  ",
-                ChatRowClass::ToolError,
-            ),
-            ChatPart::Step { kind, detail } => push_wrapped(
-                &mut rows,
-                width,
-                &format!("[{kind}] {detail}"),
-                "  ",
-                ChatRowClass::Metadata,
-            ),
-            ChatPart::Compaction { reason } => push_wrapped(
-                &mut rows,
-                width,
-                &format!("[compaction] {reason}"),
-                "  ",
-                ChatRowClass::Metadata,
-            ),
+            } => {
+                push_wrapped(
+                    &mut rows,
+                    width,
+                    &format!(
+                        "[task] {agent}{} — {description}",
+                        if *background { " (background)" } else { "" }
+                    ),
+                    "  ",
+                    ChatRowClass::ToolCall,
+                );
+            }
+            ChatPart::Retry { attempt, message } => {
+                push_wrapped(
+                    &mut rows,
+                    width,
+                    &format!("[retry {attempt}] {message}"),
+                    "  ",
+                    ChatRowClass::ToolError,
+                );
+            }
+            ChatPart::Step { kind, detail } => {
+                push_wrapped(
+                    &mut rows,
+                    width,
+                    &format!("[{kind}] {detail}"),
+                    "  ",
+                    ChatRowClass::Metadata,
+                );
+            }
+            ChatPart::Compaction { reason } => {
+                push_wrapped(
+                    &mut rows,
+                    width,
+                    &format!("[compaction] {reason}"),
+                    "  ",
+                    ChatRowClass::Metadata,
+                );
+            }
             ChatPart::Patch { path, diff } => {
                 rows.push((
                     truncate_row(&format!("[diff] {path}"), width),
@@ -1315,6 +1678,168 @@ impl ChatView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_fenced_code_preserves_whitespace_and_unicode_when_wrapped() {
+        let source = "  let label = \"界e\u{301}\";  \n  println!(\"{label}\");";
+        let input = format!("intro prose wraps across this narrow pane\n~~~rust\n{source}\n~~~\noutro prose wraps too");
+        let message = ChatMessage::text(ChatRole::Assistant, input);
+        let rows = typed_message_rows(12, &message, false);
+
+        let opening = rows.iter().position(|(row, _)| row == "~~~rust").unwrap();
+        let closing = rows.iter().position(|(row, _)| row == "~~~").unwrap();
+        let code_rows: Vec<&str> = rows[opening + 1..closing]
+            .iter()
+            .map(|(row, _)| row.as_str())
+            .collect();
+        // A rendered row is a physical display row: source newlines are
+        // boundaries between rows, not characters stored in a row. Rebuild
+        // each physical source line independently so the assertion checks
+        // content, indentation, trailing spaces, and Unicode without
+        // manufacturing a newline that the row model does not represent.
+        let boundary = code_rows
+            .iter()
+            .position(|row| row.ends_with("  "))
+            .expect("first fenced source line keeps its trailing spaces");
+        let first_line: String = code_rows[..=boundary].concat();
+        let second_line: String = code_rows[boundary + 1..].concat();
+        let mut source_lines = source.split('\n');
+        assert_eq!(first_line, source_lines.next().unwrap());
+        assert_eq!(second_line, source_lines.next().unwrap());
+        assert!(source_lines.next().is_none());
+        assert!(rows.iter().any(|(row, _)| row == "intro prose"));
+        assert!(rows.iter().all(|(row, _)| row.chars().count() <= 12));
+    }
+
+    #[test]
+    fn markdown_fence_marker_and_minimum_run_control_closing() {
+        let input = "~~~~text\n  first  \n```\nsecond\n~~~~\nafter";
+        let message = ChatMessage::text(ChatRole::Assistant, input);
+        let rows = typed_message_rows(8, &message, false);
+        let opening = rows.iter().position(|(row, _)| row == "~~~~text").unwrap();
+        let closing = rows.iter().position(|(row, _)| row == "~~~~").unwrap();
+        assert_eq!(
+            rows[opening + 1..opening + 3]
+                .iter()
+                .map(|(row, _)| row.as_str())
+                .collect::<String>(),
+            "  first  ",
+        );
+        assert_eq!(rows[opening + 3].0, "```");
+        assert_eq!(rows[opening + 4].0, "second");
+        assert_eq!(rows[closing + 1].0, "after");
+        assert!(rows.iter().all(|(row, _)| row.chars().count() <= 8));
+    }
+
+    #[test]
+    fn markdown_code_wrap_handles_narrow_unicode_without_losing_ascii() {
+        let input = "```\n界a界b\n```";
+        let message = ChatMessage::text(ChatRole::Assistant, input);
+        let rows = typed_message_rows(1, &message, false);
+        assert!(rows.iter().all(|(row, _)| row.chars().count() <= 1));
+        let rendered: String = rows.iter().map(|(row, _)| row.as_str()).collect();
+        assert!(rendered.contains("u{754c}"), "narrow pane keeps the wide codepoint as an explicit escape: {rendered:?}");
+        assert!(rows.iter().any(|(row, _)| row == "a"));
+        assert!(rows.iter().any(|(row, _)| row == "b"));
+    }
+
+    #[test]
+    fn markdown_code_preserves_long_combining_and_join_sequences_visibly() {
+        let combining = format!("a{}", "\u{301}".repeat(12));
+        let joined = "👩‍👩‍👩‍👩‍👩";
+        let byte_heavy = format!(
+            "a{}‍b{}‍c{}‍d",
+            "\u{301}".repeat(8),
+            "\u{301}".repeat(8),
+            "\u{301}".repeat(8),
+        );
+        for (source, marker, expected) in [
+            (combining.as_str(), "\\u{301}", 12),
+            (joined, "\\u{200d}", 4),
+            (byte_heavy.as_str(), "\\u{301}", 24),
+            ("🇦", "\\u{1f1e6}", 1),
+        ] {
+            let message = ChatMessage::text(ChatRole::Assistant, format!("```\n{source}\n```"));
+            let rows = typed_message_rows(40, &message, false);
+            let rendered: String = rows.iter().map(|(row, _)| row.as_str()).collect();
+            assert_eq!(rendered.matches(marker).count(), expected, "{rendered:?}");
+        }
+    }
+
+    #[test]
+    fn markdown_code_preserves_tabs_and_unrelated_unicode_after_bad_cluster() {
+        let source = "\ta\u{301}\u{301}\u{301}\u{301}\u{301}\u{301}\u{301}\u{301}\u{301}界";
+        let message = ChatMessage::text(ChatRole::Assistant, format!("```\n{source}\n```"));
+        let rows = typed_message_rows(80, &message, false);
+        let rendered: String = rows.iter().map(|(row, _)| row.as_str()).collect();
+        assert!(!rendered.contains('\t'), "fenced source tabs expand to paint-safe spaces: {rendered:?}");
+        assert!(rendered.contains('界'), "unrelated valid scalar must not be line-globally escaped: {rendered:?}");
+        assert!(!rendered.contains("\\u{754c}"), "following 界 must not be escaped: {rendered:?}");
+    }
+
+    #[test]
+    fn markdown_code_tabs_use_shared_cluster_cells_at_eight_column_stops() {
+        assert_eq!(expand_code_tabs("é\tX"), "é       X");
+        assert_eq!(expand_code_tabs("👩‍💻\tX"), "👩‍💻      X");
+        let rows = typed_message_rows(
+            80,
+            &ChatMessage::text(ChatRole::Assistant, "```\n👩‍💻\tX\n```"),
+            false,
+        );
+        let code = rows.iter().find(|(row, _)| row.contains('X')).unwrap();
+        assert_eq!(code.0, "👩‍💻      X");
+    }
+
+    #[test]
+    fn markdown_code_escapes_standalone_regional_indicator_locally() {
+        for suffix in ["ASCII", "界"] {
+            let message = ChatMessage::text(
+                ChatRole::Assistant,
+                format!("```\n🇦{suffix}\n```"),
+            );
+            let rows = typed_message_rows(80, &message, false);
+            let rendered: String = rows.iter().map(|(row, _)| row.as_str()).collect();
+            assert!(rendered.contains("\\u{1f1e6}"), "{rendered:?}");
+            assert!(rendered.contains(suffix), "unrelated suffix was lost: {rendered:?}");
+        }
+    }
+
+    #[test]
+    fn markdown_code_strips_escape_state_across_physical_lines() {
+        let input = "```\n\u{1b}]8;;https://example.invalid\nVISIBLE\u{1b}\\\nSAFE\n```";
+        let rows = typed_message_rows(80, &ChatMessage::text(ChatRole::Assistant, input), false);
+        let rendered: String = rows.iter().map(|(row, _)| row.as_str()).collect();
+        assert!(!rendered.contains("VISIBLE"), "OSC payload must remain hidden: {rendered:?}");
+        assert!(rendered.contains("SAFE"), "post-terminator line remains visible: {rendered:?}");
+        assert!(!rendered.contains("https://example.invalid"), "OSC payload leaked: {rendered:?}");
+    }
+
+    #[test]
+    fn markdown_code_marks_input_and_row_overflow_visibly_within_row_cap() {
+        let input = format!("```\n{}", "x".repeat(MAX_INPUT_ROW_BYTES));
+        let rows = typed_message_rows(0, &ChatMessage::text(ChatRole::Assistant, input), false);
+        assert!(rows.iter().any(|(row, _)| row.contains("[display truncated]")));
+        assert!(rows.len() <= MAX_MESSAGE_ROWS);
+
+        let lines = vec!["x"; MAX_MESSAGE_ROWS + 8].join("\n");
+        let message = ChatMessage::text(ChatRole::Assistant, format!("```\n{lines}\n```"));
+        let rows = typed_message_rows(40, &message, false);
+        assert_eq!(rows.len(), MAX_MESSAGE_ROWS);
+        assert!(rows.last().unwrap().0.contains("! content omitted"));
+    }
+
+    #[test]
+    fn markdown_non_ascii_fence_suffix_does_not_close_code() {
+        let message = ChatMessage::text(
+            ChatRole::Assistant,
+            "```\nbody\n```\u{00a0}\nstill fenced\n```",
+        );
+        let rows = typed_message_rows(80, &message, false);
+        let suffix = rows.iter().position(|(row, _)| row == "```\u{00a0}").unwrap();
+        let still_fenced = rows.iter().position(|(row, _)| row == "still fenced").unwrap();
+        assert!(still_fenced > suffix);
+        assert_eq!(rows.last().unwrap().0, "```");
+    }
 
     #[test]
     fn unicode_cell_width_truncate_row_respects_cells_and_tail() {
