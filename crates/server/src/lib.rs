@@ -68,6 +68,7 @@ pub mod rules_globs;
 pub mod rules_loader;
 mod todo_http;
 mod workspace_files;
+mod search_http;
 mod git_http;
 mod todo_tool;
 mod memory_http;
@@ -204,6 +205,7 @@ pub fn router_with_events_and_integration(
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
         .route("/api/commands", get(list_configured_commands))
+        .route("/api/search", get(search_http::get))
         .route("/api/permission-rules",get(list_permission_rules).post(save_permission_rule))
         .route("/api/models/{provider}/{model}", get(get_model))
         .route("/api/providers", get(list_custom_providers))

@@ -6,6 +6,9 @@ See [WEB_PARITY_CHECKLIST.md](./WEB_PARITY_CHECKLIST.md) for the implementation
 audit, verified work, remaining pages and release gates. This build adds
 daemon-backed slash commands and @agent turns, a live subagent panel, safe
 conversation markdown/tool cards and appearance settings.
+Use Ctrl/Cmd+K or the Search all navigation control to query local conversation
+titles and inline message bodies, advertised agents, and file names in the
+selected session directory. This does not upload files or index remote workspaces.
 
 Stack: React 19, Vite, TypeScript, Tailwind CSS 4, and **shadcn/ui** using its
 `aria-nova` React Aria component base. `components.json` is the shadcn registry

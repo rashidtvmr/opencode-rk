@@ -104,6 +104,9 @@ const SettingsPanel = lazy(async () => ({
 const SubagentPanel = lazy(async () => ({
   default: (await import('@/components/subagent-panel')).SubagentPanel,
 }))
+const GlobalSearch = lazy(async () => ({
+  default: (await import('@/components/global-search')).GlobalSearch,
+}))
 
 function workspaceStatusLabel(status: number) {
   return ['Provisioning', 'Ready', 'Deleting', 'Unavailable'][status] ?? `Status ${status}`
@@ -215,8 +218,19 @@ function App() {
   const [capabilities, setCapabilities] = useState<WebCapabilities | null>(null)
   const [commandInventory, setCommandInventory] = useState<CommandInventory>({ commands: [], agents: [] })
   const [showSettings, setShowSettings] = useState(false)
+  const [showGlobalSearch, setShowGlobalSearch] = useState(false)
   const [showSubagents, setShowSubagents] = useState(false)
   const [hubPage, setHubPage] = useState<HubPage | null>(null)
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+        event.preventDefault()
+        setShowGlobalSearch(true)
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [])
   const [liveToolExecutions, setLiveToolExecutions] = useState<ToolExecutionItem[]>([])
   const [workspaceState, setWorkspaceState] = useState<WorkspaceCatalogState>({
     available: false,
@@ -1155,6 +1169,10 @@ function App() {
         </div>
 
         <nav aria-label="Primary" className="codex-primary-nav">
+          <button type="button" onClick={() => setShowGlobalSearch(true)} className="codex-nav-link">
+            <Search aria-hidden="true" />
+            Search all (Ctrl/Cmd+K)
+          </button>
           <Button
             variant="ghost"
             className="codex-new-chat"
@@ -1856,6 +1874,17 @@ function App() {
             capabilities={capabilities}
             health={health}
           />
+        </Suspense>
+      ) : null}
+      {showGlobalSearch ? (
+        <Suspense fallback={<div role="status">Loading search…</div>}>
+          <GlobalSearch sessionId={selectedSessionId} agents={commandInventory.agents}
+            onClose={() => setShowGlobalSearch(false)}
+            onOpenChat={(id) => {
+              setSelectedSessionId(id)
+              setHubPage(null)
+              setSidebarOpen(false)
+            }} />
         </Suspense>
       ) : null}
     </div>

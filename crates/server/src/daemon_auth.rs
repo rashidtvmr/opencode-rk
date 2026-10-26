@@ -260,6 +260,7 @@ pub async fn require_bearer(
     let resume_api_path = custom_provider_resume_path(&method, &path)
         || path == "/api/capabilities"
         || (path == "/api/commands" && (method == axum::http::Method::GET || method == axum::http::Method::HEAD))
+        || (path == "/api/search" && (method == axum::http::Method::GET || method == axum::http::Method::HEAD))
         || (path == "/api/permission-rules"
             && matches!(method, axum::http::Method::GET | axum::http::Method::POST))
         || (path == "/api/mcp"
@@ -443,6 +444,8 @@ mod tests {
         }).layer(axum::middleware::from_fn_with_state(auth, require_bearer));
         let cases = [
             ("GET", "/api/commands", None, StatusCode::NO_CONTENT),
+            ("GET", "/api/search?q=review", None, StatusCode::NO_CONTENT),
+            ("POST", "/api/search", Some(origin), StatusCode::FORBIDDEN),
             ("GET", "/api/sessions/test/files?path=src", None, StatusCode::NO_CONTENT),
             ("GET", "/api/sessions/test/git/diff?path=src", None, StatusCode::NO_CONTENT),
             ("GET", "/api/permission-rules", None, StatusCode::NO_CONTENT),

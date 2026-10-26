@@ -51,6 +51,10 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
       bounded previews. The selected file path is inserted into the prompt,
       not automatically read into provider context.
 - [x] Workspace pages are code-split from the main conversation bundle.
+- [x] Origin-bound native global search across local conversation titles and
+      inline user/assistant messages, with current-session file paths and
+      advertised agents included in the keyboard-accessible Ctrl/Cmd+K panel.
+      Search results are rendered as inert text; binary/blob content is not indexed.
 
 ## P0 — Correctness and security gates
 
@@ -152,7 +156,10 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
 - [x] Permission Rules page with explicit acknowledgement before allow.
 - [x] Session Tasks / TODO list with durable native status and priority updates.
 - [ ] Cross-session scheduled runs, OS notifications and recurring tasks.
-- [ ] Unified global search across sessions/files/agents.
+- [x] Unified native search across conversation titles, inline messages,
+      agents and **current-session** file names, with accessible keyboard shortcut.
+- [ ] Global file search across every registered workspace, blob-backed message
+      indexing, search hit jumping/scroll anchoring, and FTS-backed scaling.
 - [ ] Real route-based navigation, deep links, breadcrumbs and browser history.
 
 ## P5 — Personalization and visual parity
@@ -207,6 +214,7 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
 | Providers | `GET /api/providers`, `POST /api/providers/:id` | Authenticated, key never read back |
 | MCP lifecycle | `GET/POST /api/mcp`, `POST /api/mcp/:id/{connect,disconnect}` | Authenticated, connect requires UI confirmation |
 | Permission rules | `GET/POST /api/permission-rules` | Authenticated origin-bound preference update |
+| Global search | `GET /api/search?q=...` | Authenticated browser-resume read; literal match, max 25 sessions/50 messages |
 
 ## Release checks
 

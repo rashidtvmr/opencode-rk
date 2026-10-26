@@ -568,3 +568,53 @@ html[data-reduce-motion="true"] *, html[data-reduce-motion="true"] *::before, ht
   .codex-settings-content { padding: 1rem; }
   .codex-settings-theme-grid { grid-template-columns: repeat(2, 1fr); }
 }
+
+/* Search overlay is code split, but its layout tokens are shared across themes. */
+.codex-global-search-backdrop {
+  position: fixed; z-index: 300; inset: 0; display: flex;
+  justify-content: center; align-items: flex-start;
+  padding: min(12vh, 7rem) 1rem 1rem; background: rgb(0 0 0 / 48%);
+}
+.codex-global-search {
+  display: flex; flex-direction: column; width: min(100%, 43rem);
+  max-height: min(78vh, 48rem); overflow: hidden;
+  background: var(--background); color: var(--foreground);
+  border: 1px solid var(--border); border-radius: 0.9rem;
+  box-shadow: 0 2rem 7rem rgb(0 0 0 / 23%);
+}
+.codex-global-search-input {
+  display: flex; align-items: center; gap: 0.7rem;
+  padding: 0.85rem 1.05rem; border-bottom: 1px solid var(--border);
+}
+.codex-global-search-input input {
+  flex: 1; min-width: 0; border: 0; background: transparent;
+  color: var(--foreground); font: inherit; font-size: 0.86rem;
+}
+.codex-global-search-input button {
+  display: inline-flex; align-items: center; padding: 0.35rem;
+  border: 0; border-radius: 0.4rem; cursor: pointer;
+  color: var(--muted-foreground); background: transparent;
+}
+.codex-global-search-input button:hover { background: var(--muted); }
+.codex-global-search-results { overflow-y: auto; min-height: 7rem; padding: 0.6rem; scrollbar-width: thin; }
+.codex-global-search-results > h3 {
+  font-size: 0.68rem; font-weight: 650; color: var(--muted-foreground);
+  margin: 0.85rem 0 0.35rem 0.7rem;
+  text-transform: uppercase; letter-spacing: 0.06em;
+}
+.codex-global-search-results > p { font-size: 0.77rem; line-height: 1.5; padding: 0.65rem; color: var(--muted-foreground); }
+.codex-global-search-results button {
+  display: flex; flex-direction: column; gap: 0.2rem;
+  text-align: left; width: 100%; padding: 0.65rem 0.8rem;
+  border: 0; border-radius: 0.55rem; cursor: pointer;
+  background: transparent; color: var(--foreground);
+}
+.codex-global-search-results button:hover,
+.codex-global-search-results button:focus-visible { background: var(--muted); }
+.codex-global-search-results button strong { font-size: 0.79rem; font-weight: 580; overflow-wrap: anywhere; }
+.codex-global-search-results button small {
+  font-size: 0.73rem; color: var(--muted-foreground);
+  overflow-wrap: anywhere; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+}
+.codex-global-search-footnote { border-top: 1px solid var(--border); margin-top: 0.5rem; }

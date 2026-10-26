@@ -506,6 +506,10 @@ impl SessionService {
         let storage = Arc::clone(&self.storage);
         run_blocking(move || storage.display_tool_history_page(id, before, limit)).await
     }
+    pub async fn search_content(&self, query: String) -> Result<opencode_rk_storage::SearchContentResult, SessionError> {
+        let storage = Arc::clone(&self.storage);
+        run_blocking(move || storage.search_content(&query)).await
+    }
     pub async fn get(&self, id: SessionId) -> Result<SessionSummary, SessionError> {
         if let Some(manager) = self.fork_manager_for(id).await? {
             let session = run_session_blocking(move || manager.get_session(id)).await?;

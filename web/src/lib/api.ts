@@ -1620,6 +1620,29 @@ export async function listSessionTodos(sessionId: string, signal?: AbortSignal):
   return result.todos
 }
 
+export interface GlobalSearchResult {
+  sessions: Array<{ id: string; title: string }>
+  messages: Array<{ id: string; session_id: string; session_title: string; role: 'user' | 'assistant'; snippet: string }>
+  limitations: string
+}
+
+export async function searchConversations(query: string, signal?: AbortSignal): Promise<GlobalSearchResult> {
+  const q = query.trim()
+  if (q.length < 2 || q.length > 120 || /[\u0000-\u001f\u007f]/.test(q)) {
+    throw new Error('Search query must be between 2 and 120 printable characters')
+  }
+  const response = await request<GlobalSearchResult>(`/api/search?q=${encodeURIComponent(q)}`, { signal })
+  if (!response || !Array.isArray(response.sessions) || !Array.isArray(response.messages)
+    || response.sessions.length > 25 || response.messages.length > 50
+    || !response.sessions.every((hit) => typeof hit?.id === 'string' && typeof hit?.title === 'string')
+    || !response.messages.every((hit) => typeof hit?.id === 'string'
+      && typeof hit?.session_id === 'string' && typeof hit?.snippet === 'string'
+      && hit.snippet.length <= 1024 && (hit.role === 'user' || hit.role === 'assistant'))) {
+    throw new Error('Invalid native search response')
+  }
+  return response
+}
+
 export async function saveSessionTodos(sessionId: string, todos: NativeTodo[]): Promise<NativeTodo[]> {
   if (todos.length > 100 || todos.some((todo) => !todo.content.trim() || todo.content.length > 4096)) {
     throw new Error('Todo collection exceeds native limits')

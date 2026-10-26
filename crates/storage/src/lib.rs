@@ -94,6 +94,27 @@ pub struct ToolHistoryItem {
     pub message_id: MessageId,
 }
 
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SearchSessionHit {
+    pub id: String,
+    pub title: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SearchMessageHit {
+    pub id: String,
+    pub session_id: String,
+    pub session_title: String,
+    pub role: String,
+    pub snippet: String,
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct SearchContentResult {
+    pub sessions: Vec<SearchSessionHit>,
+    pub messages: Vec<SearchMessageHit>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HistoryItem {
     Message(MessageRecord),
@@ -905,6 +926,48 @@ impl Storage {
         limit: usize,
     ) -> Result<Vec<ToolHistoryItem>, StorageError> {
         self.display_tool_history_selected(id, None, limit, true)
+    }
+
+    /// Read-only, literal substring search over bounded session/message hits.
+    /// Scans only inline user/assistant text; never expands provider blobs.
+    pub fn search_content(&self, query: &str) -> Result<SearchContentResult, StorageError> {
+        if query.trim().len() < 2 || query.len() > 120 || query.chars().any(char::is_control) {
+            return Err(StorageError::Sqlite(rusqlite::Error::InvalidQuery));
+        }
+        let query = query.trim();
+        let connection = self.connection.lock().map_err(|_| StorageError::Poisoned)?;
+        let sessions = {
+            let mut stmt = connection.prepare(
+                "SELECT id,title FROM sessions
+                 WHERE instr(lower(title),lower(?1))>0
+                 ORDER BY updated_at DESC,id ASC LIMIT 25",
+            )?;
+            let rows = stmt.query_map(params![query], |row| {
+                Ok(SearchSessionHit { id: row.get(0)?, title: row.get(1)? })
+            })?;
+            rows.collect::<Result<Vec<_>,_>>()?
+        };
+        let messages = {
+            let mut stmt = connection.prepare(
+                "SELECT m.id,m.session_id,s.title,m.role,
+                    substr(m.inline_text,
+                      max(1,instr(lower(m.inline_text),lower(?1))-80),220)
+                 FROM messages m JOIN sessions s ON s.id=m.session_id
+                 WHERE m.role IN ('user','assistant')
+                   AND m.inline_text IS NOT NULL
+                   AND instr(lower(m.inline_text),lower(?1))>0
+                 ORDER BY m.rowid DESC LIMIT 50",
+            )?;
+            let rows = stmt.query_map(params![query], |row| {
+                Ok(SearchMessageHit {
+                    id: row.get(0)?, session_id: row.get(1)?,
+                    session_title: row.get(2)?, role: row.get(3)?,
+                    snippet: row.get(4)?,
+                })
+            })?;
+            rows.collect::<Result<Vec<_>,_>>()?
+        };
+        Ok(SearchContentResult { sessions, messages })
     }
 
     /// Read exactly the tool display rows in one page of conversation messages.
