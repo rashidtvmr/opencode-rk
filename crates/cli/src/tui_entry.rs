@@ -3026,18 +3026,33 @@ fn load_native_theme_with_budget(
 }
 
 #[cfg(feature = "native")]
-fn native_cli_config_path() -> Option<std::path::PathBuf> {
-    use std::path::PathBuf;
-    env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
+fn resolve_native_cli_config_path(
+    explicit_config_dir: Option<&std::path::Path>,
+    xdg_config_home: Option<&std::path::Path>,
+    home: Option<&std::path::Path>,
+) -> Option<std::path::PathBuf> {
+    explicit_config_dir
         .filter(|path| path.is_absolute())
+        .map(std::path::Path::to_path_buf)
         .or_else(|| {
-            env::var_os("HOME")
-                .map(PathBuf::from)
+            xdg_config_home
                 .filter(|path| path.is_absolute())
-                .map(|home| home.join(".config"))
+                .map(|path| path.join("opencode"))
         })
-        .map(|directory| directory.join("opencode/cli.json"))
+        .or_else(|| {
+            home.filter(|path| path.is_absolute())
+                .map(|path| path.join(".config/opencode"))
+        })
+        .map(|directory| directory.join("cli.json"))
+}
+
+#[cfg(feature = "native")]
+fn native_cli_config_path() -> Option<std::path::PathBuf> {
+    resolve_native_cli_config_path(
+        env::var_os("OPENCODE_CONFIG_DIR").as_deref().map(std::path::Path::new),
+        env::var_os("XDG_CONFIG_HOME").as_deref().map(std::path::Path::new),
+        env::var_os("HOME").as_deref().map(std::path::Path::new),
+    )
 }
 
 #[cfg(feature = "native")]
@@ -3362,16 +3377,34 @@ fn native_loop(
             inline_cli.as_deref(),
         );
     navigation.set_orientation(tab_orientation);
+    let (cli_theme, cli_theme_diagnostics) =
+        crate::native_ui_preferences::UiPreferences::cli_theme(
+            cli_path.as_deref(),
+            inline_cli.as_deref(),
+        );
+    for diagnostic in cli_theme_diagnostics {
+        append_transcript(&mut transcript, format!("error: {diagnostic}"));
+    }
     for diagnostic in tab_diagnostics {
         append_transcript(&mut transcript, format!("error: {diagnostic}"));
     }
-    let theme_mode = if preferences.theme_mode.as_deref() == Some("light") {
-        crate::native_theme_runtime::ThemeMode::Light
-    } else {
-        crate::native_theme_runtime::ThemeMode::Dark
+    // V2 cli.json theme is authoritative when valid; legacy tui/kv state is
+    // retained as the compatibility fallback. `system` remains dark until a
+    // terminal-color probe is available, matching the runtime default.
+    let selected_theme = cli_theme
+        .as_ref()
+        .map(|(name, _)| name.as_str())
+        .or(preferences.theme.as_deref())
+        .unwrap_or("opencode");
+    let selected_mode = cli_theme
+        .as_ref()
+        .map(|(_, mode)| mode.as_str());
+    let theme_mode = match selected_mode.or(preferences.theme_mode.as_deref()) {
+        Some("light") => crate::native_theme_runtime::ThemeMode::Light,
+        _ => crate::native_theme_runtime::ThemeMode::Dark,
     };
     let mut theme = match load_native_theme(
-        preferences.theme.as_deref().unwrap_or("opencode"),
+        selected_theme,
         theme_mode,
         &config_paths,
     ) {
@@ -8770,6 +8803,36 @@ mod compact_strategy_worker_tests {
             assert_eq!(sent, serde_json::json!({"model":"openai/fixture", "strategy":requested}));
         }
         assert!(NativeCompactWorker::start_strategy("http://192.0.2.1:1", "s", &"b".repeat(64), "openai/fixture", 1, "fallback").is_err());
+    }
+}
+
+#[cfg(all(test, feature = "native"))]
+mod native_cli_config_path_tests {
+    use super::resolve_native_cli_config_path;
+    use std::path::Path;
+
+    #[test]
+    fn home_only_uses_opencode_subdirectory() {
+        assert_eq!(
+            resolve_native_cli_config_path(None, None, Some(Path::new("/home/test"))),
+            Some(Path::new("/home/test/.config/opencode/cli.json").to_path_buf())
+        );
+    }
+
+    #[test]
+    fn explicit_then_xdg_then_home_precedence() {
+        let explicit = Path::new("/explicit");
+        let xdg = Path::new("/xdg");
+        let home = Path::new("/home/test");
+        assert_eq!(resolve_native_cli_config_path(Some(explicit), Some(xdg), Some(home)), Some(Path::new("/explicit/cli.json").to_path_buf()));
+        assert_eq!(resolve_native_cli_config_path(None, Some(xdg), Some(home)), Some(Path::new("/xdg/opencode/cli.json").to_path_buf()));
+        assert_eq!(resolve_native_cli_config_path(None, None, Some(home)), Some(Path::new("/home/test/.config/opencode/cli.json").to_path_buf()));
+    }
+
+    #[test]
+    fn relative_roots_are_ignored() {
+        assert_eq!(resolve_native_cli_config_path(Some(Path::new("relative")), Some(Path::new("xdg")), Some(Path::new("home"))), None);
+        assert_eq!(resolve_native_cli_config_path(Some(Path::new("relative")), None, Some(Path::new("/home/test"))), Some(Path::new("/home/test/.config/opencode/cli.json").to_path_buf()));
     }
 }
 

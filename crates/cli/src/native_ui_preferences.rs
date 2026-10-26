@@ -40,6 +40,42 @@ pub struct UiPreferences {
 }
 
 impl UiPreferences {
+    /// Load the V2 global/inline CLI theme. The inline document overlays the
+    /// global document, matching upstream CLI config merge semantics. Legacy
+    /// `tui.json`/kv theme remains the caller's lower-precedence fallback.
+    pub fn cli_theme(
+        cli_path: Option<&Path>,
+        inline: Option<&str>,
+    ) -> (Option<(String, String)>, Vec<String>) {
+        let mut merged: Option<(Option<String>, Option<String>)> = None;
+        let mut diagnostics = Vec::new();
+        if let Some(path) = cli_path {
+            let mut budget = crate::native_ui_budget::ReadBudget::default();
+            match budget.read(path, MAX_CONFIG_BYTES, "CLI config") {
+                Ok(Some(text)) => match parse_cli_theme(&text) {
+                    Ok(value) => merge_cli_theme(&mut merged, value),
+                    Err(error) => diagnostics.push(error),
+                },
+                Ok(None) => {}
+                Err(_) => diagnostics.push("unable to read bounded global CLI configuration".into()),
+            }
+        }
+        if let Some(text) = inline.filter(|text| !text.is_empty()) {
+            if text.len() > MAX_CONFIG_BYTES {
+                diagnostics.push("inline CLI configuration exceeds size limit".into());
+            } else {
+                match parse_cli_theme(text) {
+                Ok(value) => merge_cli_theme(&mut merged, value),
+                    Err(error) => diagnostics.push(error),
+                }
+            }
+        }
+        let selected = merged.and_then(|(name, mode)| {
+            Some((name.unwrap_or_else(|| "opencode".into()), mode.unwrap_or_else(|| "system".into())))
+        });
+        (selected, diagnostics)
+    }
+
     pub fn tab_orientation(
         cli_path: Option<&Path>,
         inline: Option<&str>,
@@ -698,6 +734,40 @@ fn strip_jsonc(input: &str) -> Result<String, String> {
     String::from_utf8(out).map_err(|_| "invalid UTF-8 in JSONC".into())
 }
 
+fn parse_cli_theme(text: &str) -> Result<Option<(Option<String>, Option<String>)>, String> {
+    let text = strip_jsonc(text)?;
+    let value: Value = serde_json::from_str(&text)
+        .map_err(|_| "invalid global CLI configuration".to_owned())?;
+    let Some(object) = value.as_object() else {
+        return Err("global CLI configuration root is not an object".into());
+    };
+    let Some(theme) = object.get("theme") else { return Ok(None) };
+    let Some(theme) = theme.as_object() else {
+        return Err("invalid CLI theme configuration: expected object".into());
+    };
+    let name = match theme.get("name") {
+        None => None,
+        Some(Value::String(name)) if !name.is_empty() && name.len() <= 64 && !name.chars().any(char::is_control) => Some(name.clone()),
+        Some(_) => return Err("invalid CLI theme name".into()),
+    };
+    let mode = match theme.get("mode") {
+        None => None,
+        Some(Value::String(mode)) if matches!(mode.as_str(), "system" | "dark" | "light") => Some(mode.clone()),
+        Some(_) => return Err("invalid CLI theme mode".into()),
+    };
+    Ok(Some((name, mode)))
+}
+
+fn merge_cli_theme(
+    merged: &mut Option<(Option<String>, Option<String>)>,
+    overlay: Option<(Option<String>, Option<String>)>,
+) {
+    let Some((name, mode)) = overlay else { return };
+    let current = merged.get_or_insert((None, None));
+    if name.is_some() { current.0 = name; }
+    if mode.is_some() { current.1 = mode; }
+}
+
 fn parse_cli_tab_orientation(text: &str) -> Result<Option<crate::native_navigation::TabOrientation>, ()> {
     if text.len() > MAX_CONFIG_BYTES {
         return Err(());
@@ -711,6 +781,83 @@ fn parse_cli_tab_orientation(text: &str) -> Result<Option<crate::native_navigati
         Some(Value::String(layout)) if layout == "horizontal" => Ok(Some(crate::native_navigation::TabOrientation::Horizontal)),
         Some(Value::String(layout)) if layout == "vertical" => Ok(Some(crate::native_navigation::TabOrientation::Vertical)),
         Some(_) => Err(()),
+    }
+}
+
+#[cfg(test)]
+mod cli_theme_tests {
+    use super::*;
+
+    #[test]
+    fn v2_theme_reads_name_and_mode_without_rewriting_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        let original = r#"{"theme":{"name":"custom","mode":"light"},"keep":7}"#;
+        fs::write(&path, original).unwrap();
+        let (theme, diagnostics) = UiPreferences::cli_theme(Some(&path), None);
+        assert_eq!(theme, Some(("custom".into(), "light".into())));
+        assert!(diagnostics.is_empty());
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
+    }
+
+    #[test]
+    fn inline_v2_theme_overlays_global_field_by_field() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"theme":{"name":"global","mode":"dark"}}"#).unwrap();
+        assert_eq!(UiPreferences::cli_theme(Some(&path), Some(r#"{"theme":{"mode":"light"}}"#)).0,
+            Some(("global".into(), "light".into())));
+    }
+
+    #[test]
+    fn malformed_theme_type_is_diagnostic_and_valid_inline_can_win() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"theme":{"mode":7}}"#).unwrap();
+        let (theme, diagnostics) = UiPreferences::cli_theme(Some(&path), Some(r#"{"theme":{"name":"inline","mode":"dark"}}"#));
+        assert_eq!(theme, Some(("inline".into(), "dark".into())));
+        assert_eq!(diagnostics.len(), 1);
+        assert!(!diagnostics[0].contains("7"));
+    }
+
+    #[test]
+    fn absent_name_or_mode_uses_v2_defaults() {
+        assert_eq!(UiPreferences::cli_theme(None, Some(r#"{"theme":{}}"#)).0,
+            Some(("opencode".into(), "system".into())));
+    }
+
+
+    #[test]
+    fn inline_theme_at_limit_is_accepted_without_oversize_diagnostic() {
+        let padding = " ".repeat(MAX_CONFIG_BYTES - r#"{"theme":{"mode":"light"}}"#.len());
+        let inline = format!(r#"{{"theme":{{"mode":"light"}}}}{}"#, padding);
+        assert_eq!(inline.len(), MAX_CONFIG_BYTES);
+        let (theme, diagnostics) = UiPreferences::cli_theme(None, Some(&inline));
+        assert_eq!(theme, Some(("opencode".into(), "light".into())));
+        assert!(diagnostics.is_empty());
+    }
+
+    #[test]
+    fn oversized_inline_theme_preserves_valid_global_and_does_not_echo_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"theme":{"name":"global","mode":"dark"}}"#).unwrap();
+        let secret = "DO_NOT_ECHO_THEME_VALUE";
+        let inline = format!(r#"{{"theme":{{"name":"{}"}}}}{}"#, secret, " ".repeat(MAX_CONFIG_BYTES));
+        let (theme, diagnostics) = UiPreferences::cli_theme(Some(&path), Some(&inline));
+        assert_eq!(theme, Some(("global".into(), "dark".into())));
+        assert_eq!(diagnostics, vec!["inline CLI configuration exceeds size limit"]);
+        assert!(diagnostics.iter().all(|line| !line.contains(secret)));
+    }
+
+    #[test]
+    fn inline_theme_below_limit_overlays_global_recursively() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, r#"{"theme":{"name":"global","mode":"dark"}}"#).unwrap();
+        let (theme, diagnostics) = UiPreferences::cli_theme(Some(&path), Some(r#"{"theme":{"mode":"light"}}"#));
+        assert_eq!(theme, Some(("global".into(), "light".into())));
+        assert!(diagnostics.is_empty());
     }
 }
 
