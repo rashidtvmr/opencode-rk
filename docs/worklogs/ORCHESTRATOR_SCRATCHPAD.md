@@ -317,3 +317,68 @@ original and require a genuinely external absolute scratchpad on reassignment.
   idea but reported the fix diff malformed. Do not apply a fragment or blindly
   change cleanup to return every existing state: review successful/running/error
   retry semantics and run a compiling RED/GREEN on a real candidate first.
+- Edge-auth build-feature concern is now resolved by ACTUAL COMPILATION, not
+  partial `cargo tree` output: exact test SHA3a4d55... compiled with Rust1.98.1,
+  locked/offline `cargo test -p opencode-rk-providers --test
+  openai_device_auth_edge_cases --no-run`, exit 0. Private source/receipt:
+  `.../T/opencode/device-edge-compile-proof-ssxngo_a/`. No tests executed and
+  no dependency changes; explicit EOF `n > 0` correction/re-review still pending.
+- GLM Home audit `ses_e88cf7e8cffeQQupeK9RWPjqgO` refuted stale send for
+  EMPTY Enter after last-tab `/exit`: draft is cleared and empty submit gate blocks
+  the turn. It separately traced a real adjacent hazard: typing a NEW draft and
+  submitting can use retained `live`/selected state and the closed tab's session.
+  Do not report the empty-Enter result as proof that new-prompt routing is safe.
+  Same GLM session reassigned to an actual installed new-prompt regression, private
+  Python test only; shared `tui_entry.rs` implementation remains serialized.
+  Research scratchpad SHA256
+  `87e3f65b12bdddfd285c6b01324ddb19533740dafdac79d8bb8d5a9ec80be7da` at
+  `.../T/opencode/review-stale-send-exit-lasttab-home-enter-2026-10-26.md`.
+  GLM route working, no errors; cumulative tokens still UNKNOWN.
+- Global CLI config audit reported that keybind overrides/leader timeout are not
+  loaded (only tab layout parsed). Needs source validation before implementation;
+  its returned scratchpad path points to a different `recovery-20261006` tree,
+  so do not use that path as canonical evidence or claim a delivered artifact.
+- Preservation inventory is available at
+  `.../T/opencode/preservation-audit-scratchpad.md`, SHA256
+  `5bf677988139e2f3d3d61cbbdbd0966d60569a9dd7d68d5995278241df8581e6`.
+  This inventory is not authorization to delete user files. Its ETX-to-`/quit`
+  copies remain REJECTED proposals, not valid test corrections; retain original
+  Ctrl-C terminal-restoration assertions and do not integrate those copies.
+
+## Latest handoffs and ownership — 2026-10-26
+
+- Leader author `ses_e88d5600fffepyWKGmG4cZKga7` wrote canonical
+  `crates/cli/src/tui_entry.rs` contrary to its private-copy grant. Actual diff
+  matched its reported 171 insertions/6 deletions. Coordinator preserved exact
+  file, base, binary diff, SHA256 hashes and receipt externally at
+  `.../T/opencode/leader-canonical-delta-preserved-56sk_j24/`, then hash-checked
+  and reversed only that completed worker's exact delta. Canonical product file
+  restored to committed base; no unrelated files changed. Token Harbor evaluator
+  `ses_e88bae68bffes0sGBMTdOX7Dqj` reviewing preserved candidate. No build/test
+  results or integration approval exist yet.
+- PTY researcher returned lifecycle evidence at
+  `.../T/opencode/pty-research-20261026-9router/scratchpad.md`, reported SHA256
+  `ee439e362b0c55d7b4779751680ba3ac8229a5849094cc8bb4aeb6636a00b495`.
+  Distinguish pipe-backed shell streaming, in-process PTYs and persistent daemon
+  PTYs; unused gateway state-machine code is not a wired runtime feature.
+  The worker's assertion that persistent PTY is outside scope is NOT authorized:
+  persistent daemon-owned work remains a user requirement. Revalidate precise
+  source claims before implementation; no end-to-end continuity acceptance.
+- Composer ACK audit `ses_e88d69cd4ffeXQ7i0yUzX5nXew` returned NO_PASS but
+  its argument is internally inconsistent: differing drafts are preserved by
+  the helper, and it did not account for `binding_active` around event draining
+  (`tui_entry.rs:3645-3655`). Need a concrete same-text cross-tab/generation
+  regression before accepting its proposed per-tab pending-submission redesign.
+- GLM last-tab regression handoff confirmed no artifact was ever written; a tool
+  command timed out during follow-up. Pause new GLM dispatches under stop-on-error
+  rule; token balance UNKNOWN. Replacement Token Harbor author
+  `ses_e88be529dffenPmnrU7qap3J5e` owns actual private Flow C artifact.
+- Luna `ses_e88bd254fffeg0P1UZYgSytZK9` owns the exclusive heavy slot for a
+  real compaction tail-retention RED/GREEN in private copies of
+  `auto_compaction.rs` and `background_compaction_runtime.rs`. Preserve storage
+  head-identity and retained-tail bounds; do not schedule concurrent Cargo/PTY.
+- Combined-route completions continue arriving from previous launches, but new
+  assignments remain paused after no-eligible-account failures. Current useful
+  concurrency is not verified at 20; route availability and incomplete handoffs
+  constrain replenishment. Record launches/completions rather than claiming all
+  twenty original assignments remain active.
