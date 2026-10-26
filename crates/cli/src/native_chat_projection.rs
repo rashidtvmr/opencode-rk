@@ -147,95 +147,236 @@ fn tool_result_part(message: &Value, budget: &mut usize) -> Option<ChatPart> {
     })
 }
 
+fn tool_identity_complete(part: &Value) -> bool {
+    part.get("round_id").and_then(Value::as_str).is_some_and(|id| !id.is_empty())
+        && part.get("pair_index").and_then(Value::as_u64).is_some()
+}
+
+fn same_optional_tool_field(left: &Value, right: &Value, key: &str) -> bool {
+    match (
+        left.get(key).filter(|value| !value.is_null()),
+        right.get(key).filter(|value| !value.is_null()),
+    ) {
+        (None, None) => true,
+        (Some(left), Some(right)) => left == right,
+        _ => false,
+    }
+}
+
+fn same_tool_pair_metadata(call: &Value, result: &Value) -> bool {
+    same_optional_tool_field(call, result, "round_id")
+        && same_optional_tool_field(call, result, "pair_index")
+}
+
+fn tool_pair_matches(call: &Value, result: &Value) -> bool {
+    let id = call.get("call_id").and_then(Value::as_str).unwrap_or("");
+    !id.is_empty()
+        && result.get("call_id").and_then(Value::as_str) == Some(id)
+        && call.get("name").and_then(Value::as_str).is_some_and(|name| !name.is_empty())
+        && call.get("name") == result.get("name")
+        && same_tool_pair_metadata(call, result)
+}
+
 fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
-    let Some(parts) = message.get("parts").and_then(Value::as_array) else {
+    let Some(all_parts) = message.get("parts").and_then(Value::as_array) else {
         return Vec::new();
     };
+    let parts = &all_parts[..all_parts.len().min(64)];
+    let mut call_outputs = vec![None; parts.len()];
+    let mut paired_outputs = vec![false; parts.len()];
+    let mut ambiguous = vec![false; parts.len()];
+
+    // The server emits tool records as role=tool, one storage pair per message.
+    // Match only that real role. Duplicate IDs require unique storage identity.
+    if role_of(message) != Some(ChatRole::Tool) {
+        // Do not fold non-tool records, but quarantine duplicate identities
+        // instead of presenting their independent statuses as authoritative.
+        for (index, part) in parts.iter().enumerate() {
+            if !matches!(part.get("type").and_then(Value::as_str), Some("tool_call" | "tool_output")) {
+                continue;
+            }
+            let id = part.get("call_id").and_then(Value::as_str).unwrap_or("");
+            if !id.is_empty() && parts.iter().filter(|other| {
+                matches!(other.get("type").and_then(Value::as_str), Some("tool_call" | "tool_output"))
+                    && other.get("call_id").and_then(Value::as_str) == Some(id)
+            }).count() > 1 {
+                for (other_index, other) in parts.iter().enumerate() {
+                    if matches!(other.get("type").and_then(Value::as_str), Some("tool_call" | "tool_output"))
+                        && other.get("call_id").and_then(Value::as_str) == Some(id)
+                    {
+                        ambiguous[other_index] = true;
+                    }
+                }
+            }
+        }
+    }
+    if role_of(message) == Some(ChatRole::Tool) {
+        if all_parts.len() > 64 {
+            for (index, part) in parts.iter().enumerate() {
+                if matches!(part.get("type").and_then(Value::as_str), Some("tool_call" | "tool_output")) {
+                    ambiguous[index] = true;
+                }
+            }
+        } else {
+            let mut handled = vec![false; parts.len()];
+            for (index, part) in parts.iter().enumerate() {
+                if handled[index] {
+                    continue;
+                }
+                let kind = part.get("type").and_then(Value::as_str).unwrap_or("");
+                if !matches!(kind, "tool_call" | "tool_output") {
+                    continue;
+                }
+                let id = part.get("call_id").and_then(Value::as_str).unwrap_or("");
+                if id.is_empty() {
+                    continue;
+                }
+                let group: Vec<_> = parts.iter().enumerate().filter_map(|(other_index, other)| {
+                    (matches!(other.get("type").and_then(Value::as_str), Some("tool_call" | "tool_output"))
+                        && other.get("call_id").and_then(Value::as_str) == Some(id))
+                        .then_some(other_index)
+                }).collect();
+                for other_index in &group {
+                    handled[*other_index] = true;
+                }
+                let calls: Vec<_> = group.iter().copied().filter(|other_index| {
+                    parts[*other_index].get("type").and_then(Value::as_str) == Some("tool_call")
+                }).collect();
+                let results: Vec<_> = group.iter().copied().filter(|other_index| {
+                    parts[*other_index].get("type").and_then(Value::as_str) == Some("tool_output")
+                }).collect();
+                let duplicate_id = calls.len() > 1 || results.len() > 1;
+                if duplicate_id && group.iter().any(|other_index| !tool_identity_complete(&parts[*other_index])) {
+                    for other_index in group {
+                        ambiguous[other_index] = true;
+                    }
+                    continue;
+                }
+
+                let mut candidates = vec![Vec::new(); calls.len()];
+                let mut reverse = vec![Vec::new(); results.len()];
+                for (call_offset, call_index) in calls.iter().enumerate() {
+                    for (result_offset, result_index) in results.iter().enumerate() {
+                        if tool_pair_matches(&parts[*call_index], &parts[*result_index]) {
+                            candidates[call_offset].push(result_offset);
+                            reverse[result_offset].push(call_offset);
+                        }
+                    }
+                }
+                if !duplicate_id && calls.len() == 1 && results.len() == 1
+                    && candidates[0].len() != 1
+                {
+                    ambiguous[calls[0]] = true;
+                    ambiguous[results[0]] = true;
+                    continue;
+                }
+                for (call_offset, matches) in candidates.iter().enumerate() {
+                    if duplicate_id && matches.is_empty() || matches.len() > 1 {
+                        ambiguous[calls[call_offset]] = true;
+                        for result_offset in matches {
+                            ambiguous[results[*result_offset]] = true;
+                        }
+                    }
+                }
+                for (result_offset, matches) in reverse.iter().enumerate() {
+                    if duplicate_id && matches.is_empty() || matches.len() > 1 {
+                        ambiguous[results[result_offset]] = true;
+                        for call_offset in matches {
+                            ambiguous[calls[*call_offset]] = true;
+                        }
+                    }
+                }
+                for (call_offset, matches) in candidates.iter().enumerate() {
+                    if matches.len() == 1 {
+                        let result_offset = matches[0];
+                        if reverse[result_offset].len() == 1
+                            && !ambiguous[calls[call_offset]]
+                            && !ambiguous[results[result_offset]]
+                        {
+                            call_outputs[calls[call_offset]] = Some(results[result_offset]);
+                            paired_outputs[results[result_offset]] = true;
+                        }
+                    }
+                }
+            }
+        }
+    }
+
     let mut output = Vec::new();
-    for part in parts.iter().take(64) {
+    for (index, part) in parts.iter().enumerate() {
         let text = |key: &str| part.get(key).and_then(Value::as_str).unwrap_or("");
-        let projected = match text("type") {
-            "tool_call" => Some(ChatPart::ToolState {
-                name: take(text("name"), budget),
-                id: take(text("call_id"), budget),
-                status: take(
-                    part.get("status").and_then(Value::as_str).unwrap_or("call"),
+        match text("type") {
+            "tool_call" => {
+                let name = take(text("name"), budget);
+                let id = take(text("call_id"), budget);
+                let result = call_outputs[index].map(|result_index| &parts[result_index]);
+                let is_error = result.is_some_and(tool_output_is_error);
+                let status = if ambiguous[index] {
+                    "ambiguous"
+                } else {
+                    result.map_or_else(
+                        || part.get("status").and_then(Value::as_str)
+                            .filter(|status| !status.is_empty()).unwrap_or("pending"),
+                        |_| if is_error { "error" } else { "completed" },
+                    )
+                };
+                let status = take(status, budget);
+                let args = take(
+                    &part.get("arguments").map(Value::to_string).unwrap_or_default(),
                     budget,
-                ),
-                args: take(
-                    &part
-                        .get("arguments")
-                        .map(Value::to_string)
-                        .unwrap_or_default(),
-                    budget,
-                ),
-                output: String::new(),
-                is_error: false,
-            }),
+                );
+                let (body, patch) = result.map_or_else(
+                    || (String::new(), None),
+                    |result| tool_output_content(
+                        result.get("output").or_else(|| result.get("payload"))
+                            .and_then(Value::as_str).unwrap_or(""),
+                        is_error,
+                        budget,
+                    ),
+                );
+                output.push(ChatPart::ToolState { name, id, status, args, output: body, is_error });
+                if let Some(patch) = patch { output.push(patch); }
+            }
             "tool_output" => {
-                let is_error = part
-                    .get("is_error")
-                    .and_then(Value::as_bool)
-                    .or_else(|| {
-                        part.get("success")
-                            .and_then(Value::as_bool)
-                            .map(|success| !success)
-                    })
-                    .or_else(|| part.get("error").map(|error| !error.is_null()))
-                    .unwrap_or(false);
+                if paired_outputs[index] {
+                    continue;
+                }
+                let is_error = tool_output_is_error(part);
                 output.extend(tool_output_parts_bounded(
                     text("name"),
                     text("call_id"),
-                    text("output"),
+                    part.get("output").or_else(|| part.get("payload"))
+                        .and_then(Value::as_str).unwrap_or(""),
                     is_error,
+                    ambiguous[index],
                     budget,
                 ));
-                None
             }
-            "text" => Some(ChatPart::Text(take(text("text"), budget))),
-            "reasoning" => Some(ChatPart::Thinking(take(text("text"), budget))),
-            "file" => Some(ChatPart::File {
-                filename: take(
-                    part.get("filename")
-                        .or_else(|| part.get("path"))
-                        .and_then(Value::as_str)
-                        .unwrap_or(""),
-                    budget,
-                ),
+            "text" => output.push(ChatPart::Text(take(text("text"), budget))),
+            "reasoning" => output.push(ChatPart::Thinking(take(text("text"), budget))),
+            "file" => output.push(ChatPart::File {
+                filename: take(part.get("filename").or_else(|| part.get("path"))
+                    .and_then(Value::as_str).unwrap_or(""), budget),
                 mime: take(text("mime"), budget),
             }),
-            "subtask" | "task" => Some(ChatPart::Subtask {
-                agent: take(text("agent"), budget),
-                description: take(text("description"), budget),
-                background: part
-                    .get("background")
-                    .and_then(Value::as_bool)
-                    .unwrap_or(false),
+            "subtask" | "task" => output.push(ChatPart::Subtask {
+                agent: take(text("agent"), budget), description: take(text("description"), budget),
+                background: part.get("background").and_then(Value::as_bool).unwrap_or(false),
             }),
-            "retry" => Some(ChatPart::Retry {
-                attempt: part
-                    .get("attempt")
-                    .and_then(Value::as_u64)
-                    .unwrap_or(0)
+            "retry" => output.push(ChatPart::Retry {
+                attempt: part.get("attempt").and_then(Value::as_u64).unwrap_or(0)
                     .min(usize::MAX as u64) as usize,
                 message: take(text("message"), budget),
             }),
             "step-start" | "step-finish" | "snapshot" | "agent" | "agent-switched"
-            | "model-switched" => Some(ChatPart::Step {
-                kind: take(text("type"), budget),
-                detail: take(&part.to_string(), budget),
+            | "model-switched" => output.push(ChatPart::Step {
+                kind: take(text("type"), budget), detail: take(&part.to_string(), budget),
             }),
-            "compaction" => Some(ChatPart::Compaction {
-                reason: take(text("reason"), budget),
+            "compaction" => output.push(ChatPart::Compaction { reason: take(text("reason"), budget) }),
+            "patch" => output.push(ChatPart::Patch {
+                path: take(text("path"), budget), diff: take(text("diff"), budget),
             }),
-            "patch" => Some(ChatPart::Patch {
-                path: take(text("path"), budget),
-                diff: take(text("diff"), budget),
-            }),
-            _ => None,
-        };
-        if let Some(part) = projected {
-            output.push(part);
+            _ => {}
         }
     }
     output
@@ -245,46 +386,47 @@ fn hydrated_parts(message: &Value, budget: &mut usize) -> Vec<ChatPart> {
 /// resembling a patch stays ordinary tool output.
 pub fn tool_output_parts(name: &str, id: &str, output: &str, is_error: bool) -> Vec<ChatPart> {
     let mut budget = MAX_MESSAGE_BYTES;
-    tool_output_parts_bounded(name, id, output, is_error, &mut budget)
+    tool_output_parts_bounded(name, id, output, is_error, false, &mut budget)
 }
 fn tool_output_parts_bounded(
     name: &str,
     id: &str,
     output: &str,
     is_error: bool,
+    ambiguous: bool,
     budget: &mut usize,
 ) -> Vec<ChatPart> {
-    let mut parts = Vec::new();
-    let mut end = output.len().min(MAX_MESSAGE_BYTES);
-    while !output.is_char_boundary(end) {
-        end -= 1;
-    }
-    let output = &output[..end];
-    let typed = serde_json::from_str::<Value>(output)
-        .ok()
-        .filter(|value| value["format"] == "opencode.file-edit.v1" && !is_error);
-    let body = typed
-        .as_ref()
-        .and_then(|value| value["output"].as_str())
-        .unwrap_or(output);
-    let status = take(if is_error { "error" } else { "result" }, budget);
-    parts.push(ChatPart::ToolState {
-        name: take(name, budget),
-        id: take(id, budget),
-        status,
-        args: String::new(),
-        output: take(body, budget),
-        is_error,
-    });
-    if let Some(edit) = typed {
-        if let Some(diff) = edit["diff"].as_str() {
-            parts.push(ChatPart::Patch {
-                path: take(edit["path"].as_str().unwrap_or(""), budget),
-                diff: take(diff, budget),
-            });
-        }
-    }
+    let status = take(if ambiguous { "ambiguous" } else if is_error { "error" } else { "completed" }, budget);
+    let name = take(name, budget);
+    let id = take(id, budget);
+    let (body, patch) = tool_output_content(output, is_error, budget);
+    let mut parts = vec![ChatPart::ToolState {
+        name, id, status, args: String::new(), output: body, is_error,
+    }];
+    if let Some(patch) = patch { parts.push(patch); }
     parts
+}
+
+fn tool_output_is_error(part: &Value) -> bool {
+    part.get("is_error").and_then(Value::as_bool)
+        .or_else(|| part.get("success").and_then(Value::as_bool).map(|success| !success))
+        .or_else(|| part.get("error").map(|error| !error.is_null()))
+        .unwrap_or(false)
+}
+
+fn tool_output_content(output: &str, is_error: bool, budget: &mut usize) -> (String, Option<ChatPart>) {
+    let mut end = output.len().min(MAX_MESSAGE_BYTES);
+    while !output.is_char_boundary(end) { end -= 1; }
+    let output = &output[..end];
+    let typed = serde_json::from_str::<Value>(output).ok()
+        .filter(|value| value["format"] == "opencode.file-edit.v1" && !is_error);
+    let body = typed.as_ref().and_then(|value| value["output"].as_str()).unwrap_or(output);
+    let body = take(body, budget);
+    let patch = typed.and_then(|edit| edit["diff"].as_str().map(|diff| ChatPart::Patch {
+        path: take(edit["path"].as_str().unwrap_or(""), budget),
+        diff: take(diff, budget),
+    }));
+    (body, patch)
 }
 
 /// Project one daemon message record into a typed chat message.
@@ -845,27 +987,130 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    fn actual_tool_record(parts: Value, body: &str) -> Value {
+        json!({
+            "id": "11111111-1111-4111-8111-111111111111",
+            "session_id": "22222222-2222-4222-8222-222222222222",
+            "role": "tool",
+            "body": { "storage": "inline", "text": body },
+            "created_at": "2026-10-19T00:00:00Z",
+            "parts": parts,
+        })
+    }
+
     #[test]
-    fn actual_hydrated_call_arguments_and_diff_are_visible() {
-        let record = json!({"role":"tool","parts":[
-            {"type":"tool_call","call_id":"edit-real","name":"edit","status":"completed","arguments":{"path":"source","oldString":"before","newString":"after"}},
-            {"type":"tool_output","call_id":"edit-real","name":"edit","success":true,"output":json!({"format":"opencode.file-edit.v1","path":"source","diff":"--- source\n+++ source\n@@ -1 +1 @@\n-before\n+after\n"}).to_string()}
+    fn actual_emitted_tool_error_record_pairs_once_with_real_tool_role() {
+        let record = actual_tool_record(json!([
+            {"type":"tool_call","call_id":"call-7","name":"bash","status":"completed","arguments":{"command":"cat secret.txt"}},
+            {"type":"tool_output","call_id":"call-7","name":"bash","output":"error: permission denied","success":false,"is_error":true,"error":"error: permission denied"}
+        ]), "[bash] error: permission denied");
+        let projected = project_message(&record).expect("server MessageRecord projects");
+        assert_eq!(projected.role, ChatRole::Tool);
+        assert_eq!(projected.parts.len(), 1);
+        assert!(matches!(&projected.parts[0], ChatPart::ToolState {
+            name, id, status, args, output, is_error
+        } if name == "bash" && id == "call-7" && status == "error"
+            && args.contains("cat secret.txt") && output == "error: permission denied" && *is_error));
+    }
+
+    #[test]
+    fn actual_emitted_edit_record_keeps_typed_diff_and_shared_budget() {
+        let output = json!({
+            "format":"opencode.file-edit.v1", "path":"src/lib.rs",
+            "diff":"--- a/src/lib.rs\n+++ b/src/lib.rs\n-old\n+new\n", "output":"Edit applied"
+        }).to_string();
+        let record = actual_tool_record(json!([
+            {"type":"tool_call","call_id":"edit-3","name":"edit","status":"completed","arguments":{"path":"src/lib.rs","oldString":"old","newString":"new"}},
+            {"type":"tool_output","call_id":"edit-3","name":"edit","output":output,"success":true,"is_error":false,"error":null}
+        ]), "[edit] Edit applied");
+        let projected = project_message(&record).expect("server edit MessageRecord projects");
+        assert_eq!(projected.parts.len(), 2);
+        assert!(matches!(&projected.parts[0], ChatPart::ToolState {
+            name, id, status, output, is_error, ..
+        } if name == "edit" && id == "edit-3" && status == "completed"
+            && output == "Edit applied" && !is_error));
+        assert!(matches!(&projected.parts[1], ChatPart::Patch { path, diff }
+            if path == "src/lib.rs" && diff.contains("+new")));
+        let retained: usize = projected.parts.iter().map(|part| match part {
+            ChatPart::ToolState { name, id, status, args, output, .. } => name.len() + id.len() + status.len() + args.len() + output.len(),
+            ChatPart::Patch { path, diff } => path.len() + diff.len(),
+            _ => 0,
+        }).sum();
+        assert!(retained <= MAX_MESSAGE_BYTES);
+    }
+
+    #[test]
+    fn duplicate_ids_without_storage_identity_are_quarantined_not_first_matched() {
+        let record = actual_tool_record(json!([
+            {"type":"tool_call","call_id":"dup","name":"bash","status":"completed","arguments":{"command":"one"}},
+            {"type":"tool_call","call_id":"dup","name":"bash","status":"completed","arguments":{"command":"two"}},
+            {"type":"tool_output","call_id":"dup","name":"bash","output":"one output","success":true,"is_error":false,"error":null}
+        ]), "[bash] one output");
+        let projected = project_message(&record).unwrap();
+        assert_eq!(projected.parts.len(), 3);
+        assert!(projected.parts.iter().all(|part| matches!(part,
+            ChatPart::ToolState { status, .. } if status == "ambiguous")));
+        let outputs = projected.parts.iter().filter(|part| matches!(part,
+            ChatPart::ToolState { output, .. } if output == "one output")).count();
+        assert_eq!(outputs, 1, "output remains visible but is not assigned to a call");
+    }
+
+    #[test]
+    fn duplicate_ids_on_non_tool_records_are_quarantined_without_pairing() {
+        let record = json!({"role":"assistant","parts":[
+            {"type":"tool_call","call_id":"dup","name":"bash","status":"completed","arguments":{}},
+            {"type":"tool_output","call_id":"dup","name":"bash","output":"result","success":true}
         ]});
-        let message = project_message(&record).unwrap();
-        let rows = super::super::native_view_chat::ChatView::new().render_typed_classified(
-            120,
-            30,
-            "workspace",
-            &[message],
-            "",
-            false,
-        );
-        assert!(
-            rows.iter().any(|(row, _)| row.contains("oldString")),
-            "actual call arguments were discarded"
-        );
-        assert!(rows.iter().any(|(row, _)| row.contains("-before")));
-        assert!(rows.iter().any(|(row, _)| row.contains("+after")));
+        let projected = project_message(&record).unwrap();
+        assert_eq!(projected.parts.len(), 2);
+        assert!(projected.parts.iter().all(|part| matches!(part,
+            ChatPart::ToolState { status, .. } if status == "ambiguous")));
+    }
+
+    #[test]
+    fn duplicate_outputs_without_storage_identity_are_quarantined() {
+        let record = actual_tool_record(json!([
+            {"type":"tool_call","call_id":"dup","name":"bash","status":"completed","arguments":{}},
+            {"type":"tool_output","call_id":"dup","name":"bash","output":"first","success":true},
+            {"type":"tool_output","call_id":"dup","name":"bash","output":"second","success":false}
+        ]), "[bash] second");
+        let projected = project_message(&record).unwrap();
+        assert_eq!(projected.parts.len(), 3);
+        assert!(projected.parts.iter().all(|part| matches!(part,
+            ChatPart::ToolState { status, .. } if status == "ambiguous")));
+    }
+
+    #[test]
+    fn repeated_call_ids_pair_only_by_round_and_storage_pair_index() {
+        let record = actual_tool_record(json!([
+            {"type":"tool_call","call_id":"reuse","name":"bash","round_id":"r1","pair_index":0,"arguments":{}},
+            {"type":"tool_call","call_id":"reuse","name":"bash","round_id":"r1","pair_index":1,"arguments":{}},
+            {"type":"tool_output","call_id":"reuse","name":"bash","round_id":"r1","pair_index":1,"output":"second"},
+            {"type":"tool_output","call_id":"reuse","name":"bash","round_id":"r1","pair_index":0,"output":"first"}
+        ]), "[bash] first");
+        let projected = project_message(&record).unwrap();
+        assert_eq!(projected.parts.len(), 2);
+        assert!(matches!(&projected.parts[0], ChatPart::ToolState { status, output, .. }
+            if status == "completed" && output == "first"));
+        assert!(matches!(&projected.parts[1], ChatPart::ToolState { status, output, .. }
+            if status == "completed" && output == "second"));
+    }
+
+    #[test]
+    fn actual_tool_output_clip_keeps_utf8_and_total_message_budget() {
+        let record = actual_tool_record(json!([
+            {"type":"tool_call","call_id":"clip","name":"bash","arguments":{}},
+            {"type":"tool_output","call_id":"clip","name":"bash","output":"漢".repeat(20 * 1024),"success":true}
+        ]), "[bash] clipped");
+        let projected = project_message(&record).unwrap();
+        let ChatPart::ToolState { name, id, status, args, output, .. } = &projected.parts[0] else {
+            panic!("paired tool state expected");
+        };
+        assert!(output.chars().all(|character| character == '漢'));
+        let retained = name.len() + id.len() + status.len() + args.len() + output.len();
+        assert!(retained <= MAX_MESSAGE_BYTES);
+        assert!(output.len() <= MAX_MESSAGE_BYTES);
+        assert!(output.len() >= MAX_MESSAGE_BYTES - 64);
     }
 
     /// The exact `/api/sessions/{id}/messages` record shape
