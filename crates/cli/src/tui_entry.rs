@@ -4503,6 +4503,10 @@ fn native_loop(
             input.push(byte[0], Instant::now());
         }
         let Some(mut event) = input.pop() else { continue };
+        let leader_followup_pending = leader_pending
+            && matches!(&event, native_input_decoder::InputEvent::Byte(byte) if *byte >= 0x20 && *byte != b'\t');
+        // Every popped event expires pending state; Ctrl-X re-arms in dispatch below.
+        leader_pending = false;
         let memory_source_direction = match &event {
             native_input_decoder::InputEvent::ArrowUp => Some(false),
             native_input_decoder::InputEvent::ArrowDown => Some(true),
@@ -6791,18 +6795,76 @@ fn native_loop(
             }
             b if b >= 0x20 && b != b'\t' => {
                 // Leader follow-up: `Ctrl-X` then `b` toggles the sidebar;
-                // any other key just ends the chord. The chord (and its
-                // follow-up key) is consumed WITHOUT touching the composer
-                // draft, the credential buffer or any page query, and only
-                // while the chat composer owns focus — never while a
-                // credential/model dialog, Help or a page is open.
-                if leader_pending
+                // `<leader>w` closes the active tab; `<leader>1`..`<leader>9`
+                // select tab slot 1..9 and `<leader>0` selects slot 10
+                // (upstream keybind.ts: `session.tab.select.{1..9,0=tenth}`,
+                // `session.tab.close`). Any other key just ends the chord.
+                // The chord (and its follow-up key) is consumed WITHOUT
+                // touching the composer draft, the credential buffer or any
+                // page query, and only while the chat composer owns focus —
+                // never while a credential/model dialog, Help or a page is open.
+                if leader_followup_pending
                     && matches!(dialog, native_setup::Dialog::None)
                     && !page_open
                     && !help_open
                 {
                     leader_pending = false;
-                    if b == b'b' {
+                    let slot = match b {
+                        b'1'..=b'9' => Some(usize::from(b - b'1')), // 0..8
+                        b'0' => Some(9),                            // 10th slot
+                        _ => None,
+                    };
+                    if let Some(index) = slot {
+                        // Reuse the SAME select_tab_transition +
+                        // apply_close_tab_result as mouse tab clicks.
+                        // Out-of-range: no-op, leave tabs intact.
+                        if let Some(target) = navigation.tab_at(index).map(|t| t.session.clone()) {
+                            let scroll = view.chat_scroll_offset();
+                            match select_tab_transition(
+                                &mut view, &mut transcript, &mut navigation,
+                                &draft, draft_cursor,
+                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                auth, binding_generation,
+                                &target, selected.as_ref().map(|m| m.qualified()), scroll,
+                            ) {
+                                Ok(result) => {
+                                    apply_close_tab_result(
+                                        result, &mut view, &mut live, &mut history_window,
+                                        &mut binding_generation, &mut draft, &mut draft_cursor,
+                                        &mut selected, &models, &mut session_route,
+                                    );
+                                    completion.sync(&draft);
+                                }
+                                Err(error) => append_transcript(&mut transcript, format!("error: select tab: {error}")),
+                            }
+                            needs_paint = true;
+                        }
+                    } else if b == b'w' {
+                        // `<leader>w` closes the ACTIVE tab — same transition
+                        // as mouse close-click on the active tab.
+                        let active_session = navigation
+                            .active()
+                            .map(|tab| tab.session.clone());
+                        if let Some(session) = active_session {
+                            let close_scroll = view.chat_scroll_offset();
+                            let scroll_result = close_tab_transition(
+                                &mut view, &mut transcript, &mut navigation,
+                                &draft, draft_cursor,
+                                live.as_ref().map(|snapshot| snapshot.origin.as_str()),
+                                auth, binding_generation, &session,
+                                selected.as_ref().map(|m| m.qualified()), close_scroll,
+                            );
+                            match scroll_result {
+                                Ok(result) => apply_close_tab_result(
+                                    result, &mut view, &mut live, &mut history_window,
+                                    &mut binding_generation, &mut draft, &mut draft_cursor,
+                                    &mut selected, &models, &mut session_route,
+                                ),
+                                Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
+                            }
+                            needs_paint = true;
+                        }
+                    } else if b == b'b' {
                         view.toggle_sidebar();
                         if let Err(error) =
                             crate::native_ui_preferences::UiPreferences::persist_sidebar(
