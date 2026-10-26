@@ -913,6 +913,7 @@ impl NativeView {
     pub fn set_session_route(&mut self, session_route: bool) {
         if self.session_route != session_route {
             self.mcp_hit.clear();
+            self.context_usage_hit = None;
         }
         self.session_route = session_route;
     }
@@ -1086,7 +1087,9 @@ impl NativeView {
 
     /// Admit a click only within the exact last-rendered usage label.
     pub fn context_usage_hit(&self, x: u16, y: u16) -> bool {
-        !self.dialogs.intercepts_input()
+        self.pages.page() == Page::Chat
+            && self.session_route
+            && !self.dialogs.intercepts_input()
             && !self.command_palette_open()
             && self.context_usage_hit.is_some_and(|(left, row, width)| {
                 width > 0 && y == row && x >= left && x < left.saturating_add(width)
@@ -3853,6 +3856,59 @@ fn truncate_prompt_metadata(text: &str, width: usize) -> String {
     }
     output.push('…');
     output
+}
+
+#[cfg(test)]
+mod context_pointer_regression {
+    use super::*;
+
+    #[test]
+    fn context_usage_hitbox_tracks_rendered_footer_and_tab_geometry() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+        for (cols, rows, orientation) in [
+            (100, 30, TabOrientation::Horizontal),
+            (150, 32, TabOrientation::Vertical),
+        ] {
+            let mut view = NativeView::new(cols, rows);
+            view.set_session_route(true);
+            view.set_tab_reservation(TabReservation::for_view(orientation, cols, rows));
+            view.set_usage(120, 30, None, None);
+            let draft = "unsent draft";
+            let send = view.send_button_region(draft);
+            let frame = view.render(draft, &[], false, &[]);
+            let (x, y, width) = view.context_usage_region().expect("confirmed indicator drawn");
+            assert!(frame[usize::from(y)].contains("Context Usage 150"));
+            assert!(view.context_usage_hit(x, y));
+            assert!(!view.context_usage_hit(x.saturating_sub(1), y));
+            assert!(!view.context_usage_hit(x.saturating_add(width), y));
+            assert_eq!(send, view.send_button_region(draft));
+            view.open_context_usage();
+            assert_eq!(view.page(), Page::Context);
+            assert!(!view.context_usage_hit(x, y));
+        }
+    }
+
+    #[test]
+    fn context_usage_target_retracts_on_home_and_resize_before_repaint() {
+        let mut view = NativeView::new(150, 32);
+        view.set_session_route(true);
+        view.render("draft", &[], false, &[]);
+        assert_eq!(view.context_usage_region(), None);
+        view.set_usage(0, 0, None, None);
+        view.render("draft", &[], false, &[]);
+        let (x, y, _) = view.context_usage_region().expect("measured zero remains visible");
+        assert!(view.context_usage_hit(x, y));
+        view.set_session_route(false);
+        assert_eq!(view.context_usage_region(), None);
+        assert!(!view.context_usage_hit(x, y));
+        view.set_session_route(true);
+        assert!(!view.context_usage_hit(x, y), "rebinding requires a fresh frame");
+        view.render("draft", &[], false, &[]);
+        assert!(view.context_usage_region().is_some());
+        view.resize(80, 24);
+        assert_eq!(view.context_usage_region(), None);
+        assert!(!view.context_usage_hit(x, y));
+    }
 }
 
 fn padded(line: &str, width: u16) -> String {
