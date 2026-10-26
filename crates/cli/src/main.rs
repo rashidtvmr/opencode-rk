@@ -11,7 +11,7 @@ use opencode_rk_server::{
         read_backend_descriptor,
     },
     daemon_auth::DaemonAuth,
-    router_with_auth,
+    provider_integration::ProviderIntegrationState,
 };
 use opencode_rk_sessions::{SessionManager, SessionService};
 use opencode_rk_storage::{Storage, StoragePaths};
@@ -794,11 +794,13 @@ async fn serve(
     let control = tokio::spawn(async move {
         daemon_accept.accept_clients().await;
     });
+    let integration = ProviderIntegrationState::default();
     let result = axum::serve(
         listener,
-        router_with_auth(AppState { sessions, catalog }, Some(credential)),
+        opencode_rk_server::router_with_provider_integration(AppState { sessions, catalog }, Some(credential), integration.clone()),
     )
     .await;
+    integration.server.shutdown().await;
     daemon.shutdown();
     let _ = control.await;
     result?;

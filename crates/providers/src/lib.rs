@@ -43,6 +43,7 @@ pub mod mcp_transport;
 pub mod metrics;
 pub mod model_route;
 pub mod oauth_flow;
+pub mod openai_device_auth;
 pub mod persisted_auth;
 pub mod provider_dispatch;
 pub mod proxy_route;

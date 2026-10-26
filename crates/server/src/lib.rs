@@ -43,6 +43,7 @@ pub mod event_cursor;
 pub mod event_http;
 pub mod event_stream;
 pub mod permission_rules;
+pub mod provider_integration;
 pub mod loop_driver;
 pub mod mcp_http;
 pub mod mcp_context;
@@ -142,6 +143,12 @@ pub fn router(state: AppState) -> Router {
 /// Authenticated router: `Some(auth)` gates every `/api/*` route with the
 /// bearer middleware; `None` is the legacy unauthenticated router used by
 /// frozen tests. The serve path always passes `Some`.
+pub fn router_with_provider_integration(
+    state: AppState, auth: Option<daemon_auth::DaemonAuth>, integration: provider_integration::ProviderIntegrationState,
+) -> Router {
+    let events = app_runtime::event_bus(); router_with_events_and_integration(state, auth, events, integration)
+}
+
 pub fn router_with_auth(state: AppState, auth: Option<daemon_auth::DaemonAuth>) -> Router {
     let events = app_runtime::event_bus();
     // HTTP admission cap is enforced authoritatively inside
@@ -158,6 +165,12 @@ pub fn router_with_events(
     state: AppState,
     auth: Option<daemon_auth::DaemonAuth>,
     events: event_bus::EventBus,
+) -> Router {
+    router_with_events_and_integration(state, auth, events, provider_integration::ProviderIntegrationState::default())
+}
+
+pub fn router_with_events_and_integration(
+    state: AppState, auth: Option<daemon_auth::DaemonAuth>, events: event_bus::EventBus, integration: provider_integration::ProviderIntegrationState,
 ) -> Router {
     // Authoritative HTTP admission cap for EVERY router composition,
     // including injected-bus production builds: lower-only (a preconfigured
@@ -182,6 +195,9 @@ pub fn router_with_events(
             "/auth/browser-resume/exchange",
             post(exchange_browser_resume),
         )
+        .route("/api/integration/{integration_id}/connect/oauth", post(provider_integration::connect_oauth))
+        .route("/api/integration/{integration_id}/connect/oauth/{attempt_id}", get(provider_integration::status_oauth).delete(provider_integration::cancel_oauth))
+        .route("/api/integration/{integration_id}/connect/oauth/{attempt_id}/complete", post(provider_integration::complete_oauth))
         .route("/api/capabilities", get(web_capabilities))
         .route("/api/workspaces", get(list_workspaces))
         .route("/api/models", get(search_models))
@@ -284,6 +300,7 @@ pub fn router_with_events(
             post(reply_session_permission),
         )
         .fallback(web_assets::serve)
+        .layer(axum::extract::Extension(integration))
         .layer(axum::extract::Extension(events))
         .layer(axum::extract::Extension(mcp_registry))
         .layer(axum::extract::Extension(children))
