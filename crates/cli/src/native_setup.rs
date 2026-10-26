@@ -25,10 +25,15 @@ impl Model {
     pub fn qualified(&self) -> String { format!("{}/{}", self.provider_id, self.id) }
     pub fn matches(&self, query: &str) -> bool {
         let query = query.trim().to_lowercase();
-        query.is_empty() || self.id.to_lowercase().contains(&query)
-            || self.name.to_lowercase().contains(&query)
-            || self.qualified().to_lowercase().contains(&query)
+        query.is_empty() || [self.id.to_lowercase(), self.name.to_lowercase(), self.qualified().to_lowercase()]
+            .iter()
+            .any(|value| value.contains(&query) || fuzzy_contains(value, &query))
     }
+}
+
+fn fuzzy_contains(value: &str, query: &str) -> bool {
+    let mut remaining = value.chars();
+    query.chars().all(|needle| remaining.by_ref().any(|candidate| candidate == needle))
 }
 
 /// Rows are catalogue indices, never arbitrary query text.
@@ -508,6 +513,15 @@ mod picker_tests {
         assert_eq!(visible_rows(&m, "öhn"), vec![0]);
         assert_eq!(visible_rows(&m, "j"), vec![0]);
         assert_eq!(visible_rows(&m, "k"), vec![1]);
+    }
+    #[test]
+    fn query_supports_fuzzy_subsequences_and_keeps_catalogue_order() {
+        let m = models();
+        assert_eq!(visible_rows(&m, "jh"), vec![0]);
+        assert_eq!(visible_rows(&m, "opai"), vec![0, 1]);
+        assert_eq!(visible_rows(&m, "kp"), vec![1]);
+        assert_eq!(selected_row(&m, "kp", 0).unwrap().id, "k-model");
+        assert_eq!(visible_rows(&m, "mo"), vec![0, 1]);
     }
     #[test] fn focused_row_clamps_and_no_result_cannot_select() {
         let m = models();
