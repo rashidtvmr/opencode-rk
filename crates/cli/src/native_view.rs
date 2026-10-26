@@ -820,25 +820,74 @@ impl NativeView {
     }
 
     fn composer_metadata(&self) -> String {
-        let mut parts = Vec::new();
         if self.shell_mode {
-            parts.push("Shell".to_owned());
-        } else if let Some(agent) = &self.composer_agent {
-            parts.push(agent.clone());
+            return self.composer_agent.as_deref().unwrap_or("Shell").to_owned();
         }
-        // The qualified label retains provider identity even before richer
-        // catalogue display metadata has been observed.
-        parts.push(match &self.composer_model {
-            Some((model, provider)) => format!("{model} {provider}"),
-            None => self.status.model_label().to_owned(),
-        });
-        if let Some(variant) = &self.composer_variant {
-            parts.push(variant.clone());
+
+        let terminal_width = usize::from(self.layout.cols);
+        let available = terminal_width.saturating_sub(if terminal_width < 44 { 9 } else { 13 });
+        let agent = (terminal_width >= 44)
+            .then_some(self.composer_agent.as_deref())
+            .flatten();
+        let (model, provider) = self
+            .composer_model
+            .as_ref()
+            .map_or((self.status.model_label(), ""), |(model, provider)| {
+                (model.as_str(), provider.as_str())
+            });
+        let provider = if terminal_width < 44 { "" } else { provider };
+        let provider_short = provider.rsplit(" / ").next().unwrap_or(provider);
+        let variant = self.composer_variant.as_deref();
+        let effort = self.composer_effort.as_deref();
+        let format = |provider: &str, model: &str| {
+            let mut parts = Vec::new();
+            if let Some(agent) = agent {
+                parts.push(agent.to_owned());
+            }
+            if !model.is_empty() {
+                if agent.is_some() {
+                    parts.push("·".to_owned());
+                }
+                parts.push(model.to_owned());
+                if !provider.is_empty() {
+                    parts.push(provider.to_owned());
+                }
+            }
+            if let Some(variant) = variant {
+                parts.push("·".to_owned());
+                parts.push(variant.to_owned());
+            }
+            if let Some(effort) = effort {
+                parts.push("·".to_owned());
+                parts.push(effort.to_owned());
+            }
+            parts.join(" ")
+        };
+
+        // Upstream `auto` comes from `local.permission.mode`; no confirmed
+        // mode fact reaches this view, so it must not fabricate that label.
+        for candidate in [
+            format(provider, model),
+            format(provider_short, model),
+            format("", model),
+        ] {
+            if prompt_metadata_cells(&candidate) <= available {
+                return candidate;
+            }
         }
-        if let Some(effort) = &self.composer_effort {
-            parts.push(effort.clone());
-        }
-        parts.join(" · ")
+
+        let prefix = agent.map_or_else(String::new, |agent| format!("{agent} · "));
+        let suffix = [variant, effort]
+            .into_iter()
+            .flatten()
+            .map(|value| format!(" · {value}"))
+            .collect::<String>();
+        let model_width = available
+            .saturating_sub(prompt_metadata_cells(&prefix))
+            .saturating_sub(prompt_metadata_cells(&suffix))
+            .max(9);
+        let model = truncate_prompt_metadata(model, model_width);
+        format("", &model)
     }
 
     // ---------- route / sidebar facts (set from the input loop) ----------
@@ -1053,10 +1102,7 @@ impl NativeView {
         if row >= height.saturating_sub(4) {
             return None;
         }
-        let mut cells = 0u16;
-        crate::native_view_layout::visit_cells(last, width - 3, |x, _, advance| {
-            cells = x.saturating_add(advance);
-        });
+        let cells = crate::native_view_layout::visit_unpadded_cells(last, usize::from(width - 3), |_, _| {}) as u16;
         Some((left + 3 + cells.min(width - 4), top + 1 + row))
     }
 
@@ -3654,6 +3700,101 @@ mod footer_layout_tests {
             .join("\n")
             .contains("high"));
     }
+}
+
+#[cfg(test)]
+mod composer_metadata_regression_tests {
+    use super::*;
+
+    fn configured(width: u16, model: &str, provider: &str) -> NativeView {
+        let mut view = NativeView::new(width, 32);
+        view.set_session_route(true);
+        view.set_composer_agent(Some("builder".into()), Some("balanced".into()));
+        view.set_composer_model(model, provider);
+        view.set_composer_effort(Some("high".into()));
+        view
+    }
+
+    #[test]
+    fn provider_fallback_boundaries_and_minimum_model_width_match_upstream() {
+        let model = format!("{}x", "model".repeat(11));
+        for (width, expected, expected_cells, absent) in [
+            (115, format!("builder · {model} provider / vendor · balanced · high"), 102, None),
+            (114, format!("builder · {model} vendor · balanced · high"), 91, None),
+            (104, format!("builder · {model} vendor · balanced · high"), 91, None),
+            (103, format!("builder · {model} · balanced · high"), 84, Some("vendor")),
+            (44, "builder · modelmod… · balanced · high".to_owned(), 37, Some("provider")),
+            (43, "modelmodelmodel… · balanced · high".to_owned(), 34, Some("builder")),
+        ] {
+            let mut view = configured(width, &model, "provider / vendor");
+            let actual = view.composer_metadata();
+            assert_eq!(actual, expected, "width {width}");
+            assert_eq!(prompt_metadata_cells(&actual), expected_cells, "width {width}");
+            if let Some(absent) = absent {
+                assert!(!actual.contains(absent), "width {width}: {actual}");
+            }
+        }
+    }
+
+    #[test]
+    fn unicode_measurement_truncation_and_provider_fallback_are_cell_aware() {
+        assert_eq!(prompt_metadata_cells("界e\u{301}👩‍💻🇺🇳"), 7);
+        assert_eq!(truncate_prompt_metadata("界e\u{301}👩‍💻Z", 4), "界e\u{301}…");
+
+        let mut view = NativeView::new(56, 32);
+        view.set_composer_agent(Some("builder".into()), None);
+        view.set_composer_model("model123456789012345", "供应商名称 / 外部");
+        assert_eq!(view.composer_metadata(), "builder · model123456789012345 外部");
+    }
+
+    #[test]
+    fn send_hitbox_edges_and_home_cursor_follow_composer_geometry() {
+        let mut session = configured(100, "model", "provider");
+        let _rows = session.render_typed("draft", &[], false, &[]);
+        let (x, y, width) = session.send_button_region("draft").expect("send hitbox");
+        assert_eq!(width, 6);
+        assert!(session.send_button_hit("draft", x, y));
+        assert!(session.send_button_hit("draft", x + width - 1, y));
+        assert!(!session.send_button_hit("draft", x.saturating_sub(1), y));
+        assert!(!session.send_button_hit("draft", x + width, y));
+        assert!(!session.send_button_hit("draft", x, y.saturating_add(1)));
+
+        let mut home = NativeView::new(100, 32);
+        home.set_session_route(false);
+        home.set_composer_model("model", "provider");
+        let draft = "界e\u{301}";
+        let _rows = home.render_typed(draft, &[], false, &[]);
+        let (left, top, _, _) = home.composer_region(draft).expect("home composer");
+        assert_eq!(home.home_cursor(draft), Some((left + 6, top + 1)));
+    }
+}
+
+fn prompt_metadata_cells(text: &str) -> usize {
+    let mut cells = 0;
+    crate::native_view_layout::visit_unpadded_cells(text, text.len(), |_, width| {
+        cells += width;
+    });
+    cells
+}
+
+fn truncate_prompt_metadata(text: &str, width: usize) -> String {
+    if prompt_metadata_cells(text) <= width {
+        return text.to_owned();
+    }
+    match width {
+        0 => return String::new(),
+        1 => return "…".to_owned(),
+        _ => {}
+    }
+    let mut output = String::new();
+    crate::native_view_layout::visit_unpadded_cells(text, width - 1, |glyph, _| {
+        output.push_str(glyph);
+    });
+    while output.chars().last().is_some_and(char::is_whitespace) {
+        output.pop();
+    }
+    output.push('…');
+    output
 }
 
 fn padded(line: &str, width: u16) -> String {
