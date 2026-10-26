@@ -347,6 +347,137 @@ original and require a genuinely external absolute scratchpad on reassignment.
 
 ## Latest handoffs and ownership — 2026-10-26
 
+- Token Harbor free route `9router-th-dsv41-flash-free` is EXHAUSTED. Provider
+  HTTP429 explicitly reports the next rolling period starts **2026-11-01 at
+  08:15 UTC**. Failed sessions include EOF correction
+  `ses_e88cea7e7ffeL1e1uHVpVJqm0U` and output-limit analysis
+  `ses_e88cf7e86ffemIND4Wyk4N2s7v`. Stop ALL new dispatches on this route
+  until renewed allowance is established; no paid-model switch authorized.
+  Token counts UNKNOWN; exhaustion is provider-reported, not an inferred balance.
+  Output-limit analysis remains incomplete. Coordinator prepared EOF correction
+  privately at `.../T/opencode/device-edge-eof-corrected-lzghckq0/`, adding
+  explicit `assert!(n > 0)` before extending the buffer. Original fixture
+  preserved; corrected copy awaits new review and verification. No Cargo run
+  while compaction worker owns the heavy slot.
+- Further Token Harbor exhaustion failures: browser OAuth
+  `ses_e88cf7e88ffeq5jHM32xSWbaIM` and macOS PID repair
+  `ses_e88cde434ffe1Tk103SMKsVVrb`. These failed assignments provide no completed
+  artifact or verification. Reassigned on allowed `vyce-deepseek-v41`:
+  browser OAuth researcher `ses_e88b4ff51ffexsxIO3C4JVdV47`, macOS PID private
+  implementer `ses_e88b4b383ffe5cFp62vAOnpQMe`. Same route also has EOF fixture
+  evaluator `ses_e88b92804ffeagmejD1Ya47dQS`. These three launch receipts stay
+  below the eight-concurrent cap; no reported usage telemetry, aggregate UNKNOWN.
+  No new Token Harbor assignments or paid fallback. MAC PID candidate must remain
+  private/unexecuted until the serialized heavy slot is available.
+- Coverage manifest verification `ses_e88c8a5d8ffeW5RdW2srvmx10Q` also failed
+  on the exhausted Token Harbor route. Coverage manifest remains UNVERIFIED;
+  no whole-workspace percentage or executable-manifest acceptance is established.
+  Deferred behind installed Phase-1 blockers rather than retrying the exhausted
+  route. Provider's parenthetical retry delay is not renewed free allowance;
+  explicit rolling reset remains 2026-11-01 08:15 UTC.
+- Browser OAuth replacement `ses_e88b4ff51ffexsxIO3C4JVdV47` delivered upstream
+  research under `.../T/opencode/browser-oauth-v41-recovery-20261026/`.
+  Coordinator verified actual SHA256: scratchpad.md
+  `433d2619fa1dbfb32890969ea0fe3aa9bc52ec2ff5ed3a72d501c5d9a9ddf99f`,
+  report.md `e3a0ddecea2d4c20cae0628447ee7027ca033f5e58cb0549df5dc7322bdd8246`.
+  Research only: no Rust source inspection, implementation or tests. The report
+  combines OpenAI/ChatGPT/MCP and contains questionable PKCE/refresh and persisted
+  monotonic-expiry generalizations. Same worker reassigned to a narrow OpenAI
+  browser-login Rust gap addendum, checking existing capabilities/credential
+  wiring and correcting those claims against actual sources. Do not advertise
+  browser login as supported based on this research delivery.
+- Ledger-backed tab fixture author `ses_e88ca554affeVqwp0ljN0bmuXS` failed
+  with Token Harbor `free_tier_limit_reached` (same Nov1 08:15UTC reset).
+  Horizontal/vertical fixture repairs remain incomplete; no artifact accepted.
+  Reassigned to allowed v41 private author `ses_e88ab51afffeVRtSKcgIyb6Mu2`
+  with explicit external directory, actual title/UUID identity requirements and
+  separate open-tab vs persistent-session ledgers. No Token Harbor retry/paid
+  fallback. New author has no execution permission while compaction holds heavy
+  slot. V41 launch roster now includes EOF review, OAuth gap, PID repair and
+  tab-fixture repair (four known assignments, below eight-concurrent cap).
+- MacOS PID replacement returned real private artifacts in
+  `.../T/opencode/macos-pid-v41-recovery-20261026/`, but handoff is INCOMPLETE:
+  draft tests, no compilation, CLI apply check not executed; server public-helper
+  proposal exceeds original client-only grant. Coordinator inspected draft and
+  reassigned same worker to generate actual client-only rustix implementation
+  plus valid test-only and production diffs. Include actual discover_presence
+  regression, not solely validate_descriptor, to catch duplicate inline probe.
+  No server visibility change authorized; existing artifacts preserved. No
+  verification or installed EOF resolution is established by this handoff.
+- EOF evaluator `ses_e88b92804ffeagmejD1Ya47dQS` returned wrong-file findings:
+  mistyped external path (omitted `y` in `dj81nc_j2yq2...`), then substituted
+  canonical `openai_device_auth.rs` for separate private edge-case fixture. Its
+  claims that artifact never existed/already integrated are FALSE. Coordinator
+  reverified actual target file exists and SHA256
+  `f3ea4ccfe30ff57df193048cfed7632a4dcb975593625696e9647c67da1e8ff5`.
+  Same evaluator reassigned with exact path and fail-closed BLOCKED instruction
+  on access failure. Existing canonical helper's 5s read timeout is irrelevant to
+  edge fixture's nested 10s aggregate/5s per-read limits. No approval received.
+- Luna compaction candidate delivered actual `source/evidence/candidate.patch`,
+  command manifest and `final-correct-target.log` under its private root. Worker
+  reports compiled pre-fix provider-continuation failure, then focused 1/1 PASS.
+  Production guard reuses held summary only when captured durable head equals
+  its retained assistant anchor; otherwise cancels held work and recomputes.
+  Storage head identity check remains unchanged. Coordinator inspected patch:
+  it REPLACES existing valid-reuse scenario and changes summary count 1->2,
+  losing regression coverage for normal reuse. NOT integration-ready.
+  Same Luna owner retains heavy slot to produce v2 preserving original scenario
+  plus separate stale-tail regression, compiling RED and both-tests GREEN.
+  V41 evaluator `ses_e88a214ffffeUUkvoFWaknNEvj` independently reviews immutable
+  v1 production approach; exact v2 candidate still needs renewed review once
+  delivered. No canonical integration or installed acceptance yet.
+- OAuth researcher delivered Rust-specific `rust-gap.md` under original external
+  browser research directory, reported SHA256
+  `bfbeab54fd489c937d18434700492a255d1c0441d1b58b11150a901a441c5bb2`.
+  Corrects earlier PKCE/refresh and epoch-expiry confusion; identifies existing
+  device/persistence support and missing browser listener/begin/complete flow.
+  Same v41 worker now implements ONE coherent private browser-login package,
+  granted private provider lib/new browser module, server lib/integration/new
+  callback module and NEW tests. No canonical/dependency/deviceauth edits or
+  execution permission; compaction still owns heavy slot. Browser method cannot
+  be advertised as supported before end-to-end wiring and validation. Security
+  review and exact candidate tests will be required; no implementation delivered
+  by the research addendum itself.
+- Corrected EOF reviewer `ses_e88b92804ffeagmejD1Ya47dQS` now APPROVES exact
+  `f3ea4ccfe30ff57df193048cfed7632a4dcb975593625696e9647c67da1e8ff5` after
+  retracting wrong-path/wrong-file claims. Source-only: no compilation/execution
+  of corrected fixture. Review note external
+  `.../T/opencode/eof-correction-review-v41-20261026/scratchpad.md`, reported
+  SHA256 `ee6f6040454b908f9db3646fe0933d3b7cd7aa625b4dfa9a15ec6891807a31c7`.
+  Original negative evaluator `ses_e88fb28c8ffeG9bPmJ5CMfwxn0` reassigned on
+  allowed v41 to review new hash; old3a4d55approval does not transfer. Validation
+  remains queued after compaction heavy slot; no integration/acceptance yet.
+- Original EOF evaluator renewed APPROVE on exact f3ea4ccf... . Coordinator then
+  executed corrected private fixture: **12 passed, 0 failed** in 6.52s,
+  `device-edge-compile-proof-ssxngo_a/corrected-tests.stdout`, receipt adjacent.
+  Still not integrated; new fixture source reviewed by both evaluators.
+- Compaction v2 actual green-v2.log shows BOTHtests PASS; red-stale-v2.log
+  shows compiled failure, red-validreuse-v2.log shows originalcasePASS. Saved
+  `test-v2.rs` differs actual source by final conditional summary-count assertion;
+  coordinator stopped manifest assembly on hash mismatch rather than claiming
+  exact-source provenance. More importantly independent reviewer raised substantive
+  upstream parity issue: bounded new tail should be retained with existing held
+  summary, not force another summary. v1/v2 NOT integration-ready. Luna reassigned
+  to v3 preserving within-budget reuse plus appendedtail, existingidentity/tail
+  limits/storageheadguard; source-hashed RED/GREEN required. Luna again owns
+  heavy slot after auth test run completed. No negative finding outvoted.
+- Exhausted Token Harbor also failed last-tab author
+  `ses_e88be529dffenPmnrU7qap3J5e` and leader evaluator
+  `ses_e88bae68bffes0sGBMTdOX7Dqj`. Allowed v41 replacements launched:
+  `ses_e889bc75affe4bRlbbc035kDvk` (private actual last-tab regression),
+  `ses_e889cf0c2ffeB1ZYzmZezNb3R3` (preserved leader candidate evaluation).
+  No Token Harbor retry. Unexpected web/ source edits observed in canonical
+  status; provenance unknown, preserve as user/other work and do not overwrite.
+- Tab fixture v41 author returned no files, read wrong truncated horizontalcopy,
+  mistyped output path, and falsely reported strategy note nonexistent. Coordinator
+  verified correct assigned horizontalbaseline EXISTS with950lines and strategy
+  note EXISTS with78lines; created writable exact external output directory
+  `.../T/opencode/tabs-fixture-v41-recovery-20261026/`. Same author narrowed to
+  ONEverticalfixture correction, write actualartifact before any more broad
+  research. Horizontalrepair still incomplete; no path/ACL diagnosis accepted
+  from misspelled-directory errors. Model-label-only partial must not be called
+  ledger identity/installed acceptance.
+
 - Leader author `ses_e88d5600fffepyWKGmG4cZKga7` wrote canonical
   `crates/cli/src/tui_entry.rs` contrary to its private-copy grant. Actual diff
   matched its reported 171 insertions/6 deletions. Coordinator preserved exact
