@@ -416,6 +416,78 @@ presencebitmap/controlfreeboundedtext+atomicloadregressions. Frozenac2unchanged.
 finishcurrentbasepainterartifactwithoutduplicatingparserrepair. Sourceapproval
 pendingexactnewparser, originalnegativecannotoutvotedby39PASS.
 MainheavyFREEafterintegratedcursorcheck; nootherheavygrant. Userdaemonunchanged.
+
+20dashboardcurrentcomposition17fced9a... preparedfrom3e059 butactualmaincompile
+FAILunexpectedclosingdelimiter native_view.rs2026/renderbranch1998. No testsran.
+Rawsource/logs dashboard-current-composition-mwkk1fx2/test.stderr. Compositor20
+resumedv2balancedactualtypedrenderbranch repairprivateonly; no approvalfromapply
+proof. Independent22painterreview ses_e87ee3b51ffeNvO6GLQdh86Ci4 reviewingactual
+oldsource hashes (dc094view/51c78entry); negativecandidatecannotintegrate.
+
+19zero-styleindependentreviewNEEDS_FIXv4invisiblespans confirmsactuallegendalready
+nonzero1cellswatches; actualproposalartifactEC1_zero_category_legend_review.md
+under19/scratchpad/review/testonlyproposal/. Parser21notifiedaddtestvisiblelegend
+ALL7categoriesincludingMessages0 pluszeroactualgridoccupancy, retainpositivefree
+gridcolor. V5removedinvisiblespansalreadybutchangedselftestonlyfreegridinsufficient.
+MainheavyFREEaftercompositioncompilefailure, singlewriter/canonicalunchanged.
+
+### Dashboard composition follow-up (2026-10-26)
+
+- Canonical remains documentation `a7b50059`, product `3e059caa`; no dashboard files integrated.
+- Composer v2 patch `4238ed87...` fixed delimiters but failed compilation: context coloring was injected into the tab loop, assigning to immutable `fg`.
+- Independent evaluator 22 retained NEEDS_FIX (`c6f4e010...`) and confirmed the real Context body never consumed its color spans.
+- Main private composition now removes tab injection and applies spans in the generic display-cell painter, after UI roles and before dimming/selection. Guards exclude modal, composer, sidebar, and non-page cells; whole glyph widths must fit the span.
+- Parser 21 candidate `a6897975...` adds independent category-presence tracking and control-free bounded coverage/category metadata. Main composed independent 19 visible-legend tests; restored displaced narrow-grid test attribute, removed duplicate test attribute, and corrected Rust ESC literal syntax. Original snapshots preserved.
+- v3 compilation failed on the test's invalid Rust Unicode escape. v4 ran **880 PASS / 1 FAIL**, exposing deletion of existing Context index-1 Selected role. Main restored the original role mapping without changing tests. v5 full native CLI run is active (`sh_178193a7f001Uk5kWmy4Ta5OHl`).
+- All exact private source hashes, test stdout/stderr, and receipts: `dashboard-current-composition-mwkk1fx2/v{3,4,5}-*` under the approved external temporary root.
+- Original evaluator 14 reviewing corrected parser; evaluator 22 reviewing body painter and restored selection role. Neither prior negative verdict is superseded until exact source approval.
+- Active assignments established in this continuation: evaluator 14 and evaluator 22. **20+ useful concurrent assignments have not been maintained; this requirement remains unmet.** No claim of unavailable resources or 20 active workers. Route usage telemetry UNKNOWN. Heavy validation remains serialized.
+- User executable, database, daemon, credentials, and unrelated working edits remain unchanged. Installation and full TUI parity remain unproven.
+
+Dashboard v5 actual result: **881 PASS / 0 FAIL**, exit 0. Exact hashes:
+`native_context.rs=780db4832f251f5b764218e878956c95565dabb48bbb62322c3578d25ef5c313`,
+`native_view.rs=66454ed76406f25115425799d553d62d1b19841610d5104f5f8651e850f7f40b`,
+`tui_entry.rs=c4dcf46b921faa747b0bc70b278e49e291841688dcc763353475cbdc5033bae5`.
+Grid `ec1c403e...` and main `270ed74d...` unchanged. v5 receipt private; no integration.
+Actual-color regression assignment 23: `ses_e87e5aadaffepVhRhpdoHs2xjI`, route
+`vyce-deepseek-v41`, private `context-user-23-realpainttest/`, test-only proposal,
+no heavy grant. Goal real renderer body colors/modal precedence, not metadata-only.
+Active established assignments now 14, 22, 23; still below requested 20.
+
+Evaluator 14 final parser verdict **APPROVE, parser only**, artifact
+`context-user-14-contractaudit/v6-parser-review/verdict/verdict.md`, SHA256
+`ff52ce7158838e0017d4a5399a44cfd51d8fee3216167028e6b8daab515e8cad`.
+Exact approved parser `780db483...` matches v5 full-suite 881 PASS source.
+Prior ac2 negative remains historical; null duplicates/control injection and
+metadata typing are resolved in the reviewed bytes. Parser approval does not
+approve painter or installed behavior. Active established: 22 painter, 23 real
+paint test. Main heavy slot free. Dashboard still unintegrated.
+
+### Integrated dashboard and backend (2026-10-26)
+
+- Evaluator 22 **APPROVE painter-only**, exact v5 hashes, review SHA256
+  `c2f70d51b43eb0b0f4ce1576ba0ed58c529cc6eaca5e90531163b707f9e9f59c`.
+- Integrated five-file dashboard as **`fd12b9f3392dfc089aa8650fd1d9d1028724dcdd`**.
+  Approved parser/painter/grid hashes matched the 881-PASS candidate and committed
+  bytes. Focused integrated `native_context` filter **40 PASS**, receipt
+  `dashboard-current-composition-mwkk1fx2/integrated-receipt.json`.
+- Integrated four-file accounting backend as **`c18418a1e49f94fd9e56efe59b535904ccaf5ffb`**.
+  Clean committed lib `f7ac6bad...`, accounting `5180558f...`, HTTP `b9eae549...`,
+  memory `024e9da9...`. Working lib is exact independently approved/tested user
+  composition `7ed71577...`; original user preimage `a63ca89b...` preserved in
+  external artifacts. Index contained only clean candidate source; user agent
+  route remains a separate 66-line working diff. `daemon_auth.rs` untouched.
+- Accounting index integration receipt and relative delta retained under
+  `context-accounting-v3-validation-i7kh754x/integration-accounting-*`.
+- Serialized exact integrated-source validation active:
+  `sh_1781e7a62001KxjjjBOnlAEPJb`. Fresh archive at c18418a1, disposable HOME,
+  server library then external HTTP fixture `2e396b7a...`, then native CLI suite.
+  No concurrent Cargo/PTY. External endpoint test is a harness addition, not a
+  claim that it is committed. Actual results pending notification.
+- Active worker 23 prepares actual native renderer color assertions; no heavy
+  grant. Twenty-plus concurrent assignments remain unmet. Usage UNKNOWN.
+- Installed executable unchanged; final release packaging, live context colors,
+  provider/context/tab journeys, and full TUI parity remain outstanding.
 MainSOLEintegrationwriter remains; lastproductSHAf1a902e1. Userbinaryoldstillnot
 updated, daemon73389/4096notstopped, norealOAuthperformed. Negativeverdictsheld.
 
