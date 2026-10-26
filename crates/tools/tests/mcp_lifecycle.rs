@@ -115,3 +115,19 @@ fn tool018_t05_determinism_and_isolation() {
     let dbg = format!("{:?}", build().list());
     assert!(!dbg.contains("token"));
 }
+
+#[test]
+fn tool018_t06_remove_is_bounded_and_side_effect_free_on_unknown_id() {
+    let mut reg = LifecycleRegistry::new();
+    reg.add("srv-a").unwrap();
+    reg.set_enabled("srv-a", true).unwrap();
+    reg.mark_starting("srv-a").unwrap();
+    reg.mark_ready("srv-a").unwrap();
+
+    let removed = reg.remove("srv-a").unwrap();
+    assert_eq!(removed.id, "srv-a");
+    assert_eq!(removed.state, LifecycleState::Ready);
+    assert!(reg.is_empty());
+    assert_eq!(reg.remove("srv-a"), Err(LifecycleError::Unknown));
+    assert!(reg.is_empty(), "failed removal must not mutate the registry");
+}

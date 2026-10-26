@@ -1566,7 +1566,7 @@ export async function listCustomProviders(signal?: AbortSignal): Promise<NativeP
 export async function saveCustomProvider(provider: {
   id: string; name: string; base_url: string; api_key?: string
 }): Promise<void> {
-  if (!/^[a-zA-Z][a-zA-Z0-9_-]{1,62}$/.test(provider.id)) throw new Error('Invalid provider identifier')
+  if (!/^[a-z0-9][a-z0-9_-]{0,127}$/.test(provider.id) || provider.id === 'openai') throw new Error('Invalid provider identifier')
   const parsed = new URL(provider.base_url)
   if (!['http:', 'https:'].includes(parsed.protocol) || !provider.name.trim()) {
     throw new Error('Invalid provider name or URL')
@@ -1574,6 +1574,11 @@ export async function saveCustomProvider(provider: {
   await request<unknown>(`/api/providers/${encodeURIComponent(provider.id)}`, {
     method: 'POST', body: JSON.stringify({ ...provider }),
   })
+}
+
+export async function removeCustomProvider(id: string): Promise<void> {
+  if (!/^[a-z0-9][a-z0-9_-]{0,127}$/.test(id) || id === 'openai') throw new Error('Invalid provider identifier')
+  await request<unknown>(`/api/providers/${encodeURIComponent(id)}`, { method: 'DELETE' })
 }
 
 export interface NativeMcpStatus {
@@ -1607,6 +1612,11 @@ export async function setMcpConnection(name: string, connect: boolean): Promise<
   await request<unknown>(`/api/mcp/${encodeURIComponent(name)}/${connect ? 'connect' : 'disconnect'}`, {
     method: 'POST', body: '{}',
   })
+}
+
+export async function removeMcp(name: string): Promise<void> {
+  if (!/^[a-zA-Z][a-zA-Z0-9_-]{1,63}$/.test(name)) throw new Error('Invalid MCP server name')
+  await request<unknown>(`/api/mcp/${encodeURIComponent(name)}`, { method: 'DELETE' })
 }
 
 export interface NativeTodo {

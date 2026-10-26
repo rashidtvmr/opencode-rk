@@ -183,6 +183,21 @@ impl LifecycleRegistry {
         self.add(id)
     }
 
+    /// Remove one configured MCP server.
+    ///
+    /// The caller owns runtime cleanup and must detach any live process before
+    /// calling this method. Unknown or invalid ids leave the registry
+    /// unchanged.
+    pub fn remove(&mut self, id: &str) -> Result<LifecycleEntry, LifecycleError> {
+        validate_id(id)?;
+        let index = self
+            .entries
+            .iter()
+            .position(|entry| entry.id == id)
+            .ok_or(LifecycleError::Unknown)?;
+        Ok(self.entries.remove(index))
+    }
+
     /// Number of configured servers.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -412,6 +427,14 @@ pub fn set_enabled(
     on: bool,
 ) -> Result<LifecycleState, LifecycleError> {
     registry.set_enabled(id, on)
+}
+
+/// Remove one configured server after caller-owned runtime cleanup.
+pub fn remove(
+    registry: &mut LifecycleRegistry,
+    id: &str,
+) -> Result<LifecycleEntry, LifecycleError> {
+    registry.remove(id)
 }
 
 /// Mark one server as starting.

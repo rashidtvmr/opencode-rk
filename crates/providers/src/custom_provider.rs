@@ -8,6 +8,7 @@ use thiserror::Error;
 pub const MAX_MODELS_BODY_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_MODELS: usize = 5000;
 const MAX_CONFIG_BYTES: usize = 1024 * 1024;
+static CONFIG_WRITE_GATE: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
 
 /// The native session accounting domain is `u32`; metadata outside that
 /// domain is not a usable context window and is therefore treated as unknown.
@@ -195,9 +196,20 @@ async fn save_options(config: CustomProviderConfig, preserve_buffered: bool) -> 
     validate_base_url(&config.base_url)?;
     validate_buffered_models(&config.buffered_model_ids)?;
     let path = config_path().ok_or(CustomProviderError::Io)?;
-    static WRITER: OnceLock<Arc<tokio::sync::Semaphore>> = OnceLock::new();
-    let permit = WRITER.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone().acquire_owned().await.map_err(|_| CustomProviderError::Io)?;
+    let permit = CONFIG_WRITE_GATE.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone().acquire_owned().await.map_err(|_| CustomProviderError::Io)?;
     tokio::task::spawn_blocking(move || { let _permit = permit; save_at_with_mode(&path, &config, preserve_buffered) }).await.map_err(|_| CustomProviderError::Io)?
+}
+
+/// Remove one provider from the writable custom-provider document.
+///
+/// Imported provider configuration and separately persisted credentials are
+/// intentionally outside this configuration lifecycle.
+pub async fn remove(id: &str) -> Result<bool, CustomProviderError> {
+    if !valid_id(id) { return Err(CustomProviderError::Invalid("invalid provider id".into())); }
+    let path = config_path().ok_or(CustomProviderError::Io)?;
+    let id = id.to_owned();
+    let permit = CONFIG_WRITE_GATE.get_or_init(|| Arc::new(tokio::sync::Semaphore::new(1))).clone().acquire_owned().await.map_err(|_| CustomProviderError::Io)?;
+    tokio::task::spawn_blocking(move || { let _permit = permit; remove_at(&path, &id) }).await.map_err(|_| CustomProviderError::Io)?
 }
 
 #[cfg(test)]
@@ -229,6 +241,25 @@ fn save_at_with_mode(path: &Path, config: &CustomProviderConfig, preserve_buffer
     let result = (|| { file.write_all(&bytes)?; file.sync_all()?; std::fs::rename(&temporary, path) })();
     if result.is_err() { let _ = std::fs::remove_file(&temporary); }
     result.map_err(|_| CustomProviderError::Io)
+}
+
+fn remove_at(path: &Path, id: &str) -> Result<bool, CustomProviderError> {
+    let mut root = read_root(path)?;
+    let providers = root["providers"].as_object_mut().ok_or(CustomProviderError::Json)?;
+    if providers.remove(id).is_none() { return Ok(false); }
+    let bytes = serde_json::to_vec_pretty(&root).map_err(|_| CustomProviderError::Json)?;
+    if bytes.len() > MAX_CONFIG_BYTES { return Err(CustomProviderError::TooLarge(MAX_CONFIG_BYTES)); }
+    let parent = path.parent().ok_or(CustomProviderError::Io)?;
+    std::fs::create_dir_all(parent).map_err(|_| CustomProviderError::Io)?;
+    let temporary = path.with_extension(format!("{}.tmp", std::process::id()));
+    let mut options = std::fs::OpenOptions::new();
+    options.create_new(true).write(true);
+    #[cfg(unix)] { use std::os::unix::fs::OpenOptionsExt; options.mode(0o600); }
+    let mut file = options.open(&temporary).map_err(|_| CustomProviderError::Io)?;
+    let result = (|| { file.write_all(&bytes)?; file.sync_all()?; std::fs::rename(&temporary, path) })();
+    if result.is_err() { let _ = std::fs::remove_file(&temporary); }
+    result.map_err(|_| CustomProviderError::Io)?;
+    Ok(true)
 }
 
 fn validate_buffered_models(models: &[String]) -> Result<(), CustomProviderError> {
@@ -346,5 +377,17 @@ mod tests {
             root["providers"]["9router"]["buffered_model_ids"] = invalid;
             assert!(decode_configs(&root).is_err());
         }
+    }
+    #[test] fn remove_preserves_unrelated_config_and_never_touches_absent_entries() {
+        let dir = tempfile::tempdir().unwrap(); let path = dir.path().join("custom.json");
+        std::fs::write(&path, br#"{"other":{"safe":true},"providers":{"remove-me":{"name":"Remove","base_url":"https://remove.example/v1"},"keep":{"name":"Keep","base_url":"https://keep.example/v1","extra":"preserved"}}}"#).unwrap();
+        assert!(remove_at(&path, "remove-me").unwrap());
+        let after = read_root(&path).unwrap();
+        assert!(after["providers"].get("remove-me").is_none());
+        assert_eq!(after["providers"]["keep"]["extra"], "preserved");
+        assert_eq!(after["other"]["safe"], true);
+        let bytes = std::fs::read(&path).unwrap();
+        assert!(!remove_at(&path, "missing").unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes, "absent removal must have no side effects");
     }
 }
