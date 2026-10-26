@@ -19,6 +19,14 @@ pub(crate) struct MemorySource {
     reason: Option<&'static str>,
 }
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct MemoryPromptUsage {
+    pub paths: Vec<String>,
+    pub paths_truncated: bool,
+}
+
+const MAX_USAGE_MEMORY_PATHS: usize = crate::context_accounting::MAX_USAGE_DETAILS;
+
 fn failure(error: opencode_rk_sessions::SessionError) -> ApiFailure {
     match error {
         opencode_rk_sessions::SessionError::NotFound(_) => {
@@ -76,41 +84,41 @@ pub(crate) async fn sources(
     Ok(sources)
 }
 
-pub(crate) async fn prompt(state: &AppState, id: SessionId) -> Result<String, ApiFailure> {
+pub(crate) async fn prompt_with_usage(
+    state: &AppState,
+    id: SessionId,
+) -> Result<(String, MemoryPromptUsage), ApiFailure> {
     let mut prompt = String::new();
-    for source in sources(state, id)
-        .await?
-        .into_iter()
-        .filter(|source| source.included)
-    {
+    let mut usage = MemoryPromptUsage::default();
+    for source in sources(state, id).await?.into_iter().filter(|source| source.included) {
+        if usage.paths.len() < MAX_USAGE_MEMORY_PATHS {
+            usage.paths.push(source.path.clone());
+        } else {
+            usage.paths_truncated = true;
+        }
         prompt.push_str("Instructions from: ");
         prompt.push_str(&source.path);
         prompt.push('\n');
         prompt.push_str(&source.content);
         prompt.push_str("\n\n");
     }
-    Ok(prompt)
+    Ok((prompt, usage))
 }
 
-pub(crate) async fn prepend(
+pub(crate) async fn prompt(state: &AppState, id: SessionId) -> Result<String, ApiFailure> {
+    prompt_with_usage(state, id).await.map(|(prompt, _)| prompt)
+}
+
+pub(crate) async fn prepend_with_usage(
     state: &AppState,
     id: SessionId,
     model: &str,
     items: &mut Vec<ResponsesItem>,
-) -> Result<(), ApiFailure> {
-    let prompt = prompt(state, id).await?;
+) -> Result<MemoryPromptUsage, ApiFailure> {
+    let (prompt, usage) = prompt_with_usage(state, id).await?;
     if !prompt.is_empty() {
-        items.insert(
-            0,
-            ResponsesItem::Text {
-                role: ResponsesRole::System,
-                content: prompt,
-            },
-        );
+        items.insert(0, ResponsesItem::Text { role: ResponsesRole::System, content: prompt });
     }
-    // Admit the complete serialized input after every system source has been
-    // assembled. Never discard durable history or silently omit selected rules
-    // to make the provider's request limits appear satisfied.
     match opencode_rk_providers::responses::responses_request_payload(model, "", items, &[], false) {
         Ok(_) => {}
         Err(opencode_rk_providers::responses::ResponsesError::TooManyMessages { .. }
@@ -123,7 +131,16 @@ pub(crate) async fn prepend(
         }
         Err(error) => return Err(crate::provider_failure(error)),
     }
-    Ok(())
+    Ok(usage)
+}
+
+pub(crate) async fn prepend(
+    state: &AppState,
+    id: SessionId,
+    model: &str,
+    items: &mut Vec<ResponsesItem>,
+) -> Result<(), ApiFailure> {
+    prepend_with_usage(state, id, model, items).await.map(|_| ())
 }
 
 pub(crate) async fn get(

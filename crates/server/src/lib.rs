@@ -2066,6 +2066,7 @@ struct TurnStreamState {
     /// File capability rooted at the turn's captured project directory.
     file_tool: FileTool,
     history_items: Vec<ResponsesItem>,
+    usage_input: context_accounting::AssembledUsageInput,
     compaction_window: Option<ResponsesCompactionWindow>,
     agent_prompt: Option<String>,
     loop_control: LoopController,
@@ -2425,7 +2426,7 @@ pub(crate) fn create_turn_stream_with_message(
     if let Some(prompt) = body.agent_prompt.as_ref() {
         input.insert(0, ResponsesItem::Text { role: ResponsesRole::System, content: prompt.clone() });
     }
-    memory_http::prepend(&state, id, model_id, &mut input).await?;
+    let memory_usage = memory_http::prepend_with_usage(&state, id, model_id, &mut input).await?;
 
     // Agentic loop setup: advertise tools only when turn-tool execution is
     // explicitly enabled (OPENCODE_RK_TURN_TOOLS). The list is deny-by-default:
@@ -2464,6 +2465,13 @@ pub(crate) fn create_turn_stream_with_message(
         .filter(|steps| *steps > 0)
         .unwrap_or(MAX_TURN_STEPS);
     let history_items = input;
+    let mcp_names: Vec<String> = mcp_defs.iter().map(|tool| tool.name.clone()).collect();
+    let capacity_tokens = state.catalog.model(provider_id, model_id).ok().and_then(|model| model.context_window);
+    let usage_input = context_accounting::capture_assembled_request(
+        &body.model, capacity_tokens, &history_items, &tools,
+        !memory_usage.paths.is_empty(), &mcp_names, &memory_usage.paths,
+        memory_usage.paths_truncated, compaction_window.is_some());
+    context_accounting::publish_usage_report(id, &usage_input, None);
 
     let mut child_stop = child_stop;
     let mut owner_cancelled = owner.cancellation_receiver();
@@ -2508,6 +2516,7 @@ pub(crate) fn create_turn_stream_with_message(
             broker,
             file_tool,
             history_items,
+            usage_input,
             compaction_window,
             agent_prompt: body.agent_prompt,
             loop_control: LoopController::with_cap(max_steps),
@@ -2610,6 +2619,11 @@ pub(crate) fn create_turn_stream_with_message(
                                 ));
                             }
                             Ok(Some(ResponsesStreamEvent::Completed { stop_reason })) => {
+                                context_accounting::publish_usage_report(
+                                    state.session_id,
+                                    &state.usage_input,
+                                    state.provider.usage().map(|usage| usage.input_tokens),
+                                );
                                 // Terminal provider event: either the turn ends
                                 // here or the accumulated tool calls execute and
                                 // the loop continues with the next round.
@@ -3013,28 +3027,41 @@ pub(crate) fn create_turn_stream_with_message(
                         if let Some(prompt) = state.agent_prompt.as_ref() {
                             history_items.insert(0, ResponsesItem::Text { role: ResponsesRole::System, content: prompt.clone() });
                         }
-                        if let Err(error) = memory_http::prepend(&state.app, state.session_id, &state.model, &mut history_items).await {
-                            state.stage = TurnStreamStage::Done;
-                            return Some((Ok::<Bytes, Infallible>(stream_error(error.code, error.message)), state));
-                        }
+                        let memory_usage = match memory_http::prepend_with_usage(
+                            &state.app, state.session_id, &state.model, &mut history_items,
+                        ).await {
+                            Ok(usage) => usage,
+                            Err(error) => {
+                                state.stage = TurnStreamStage::Done;
+                                return Some((Ok::<Bytes, Infallible>(stream_error(error.code, error.message)), state));
+                            }
+                        };
                         state.history_items = history_items;
                         state.compaction_window = compaction_window;
-                        // Re-project session-scoped MCP selection on every continuation;
-                        // never retain definitions after a user toggle.
+                        // Re-project and replace MCP definitions before both capture and dispatch.
+                        let mut mcp_names = Vec::new();
                         if !state.read_only {
                             let defs = match mcp_context::effective_tools(&state.mcp_registry, state.session_id, &state.sessions).await {
                                 Ok(defs) => defs,
                                 Err(_) => { state.stage = TurnStreamStage::Done; return None; }
                             };
-                            state.tools.retain(|tool| !tool.name.starts_with("mcp_") || defs.iter().any(|def| def.name == tool.name));
-                            state.enabled_tools.retain(|name| !name.starts_with("mcp_") || defs.iter().any(|def| def.name == *name));
+                            mcp_names = defs.iter().map(|def| def.name.clone()).collect();
+                            state.tools.retain(|tool| !tool.name.starts_with("mcp_"));
+                            state.enabled_tools.retain(|name| !name.starts_with("mcp_"));
                             for def in defs {
-                                if !state.tools.iter().any(|tool| tool.name == def.name) {
-                                    state.tools.push(ResponsesTool::function(def.name.clone(), def.description, def.input_schema));
-                                }
-                                if !state.enabled_tools.iter().any(|name| name == &def.name) { state.enabled_tools.push(def.name); }
+                                state.tools.push(ResponsesTool::function(
+                                    def.name.clone(), def.description, def.input_schema,
+                                ));
+                                state.enabled_tools.push(def.name);
                             }
                         }
+                        let (provider_id, model_id) = state.qualified_model.split_once('/').unwrap_or(("", ""));
+                        let capacity_tokens = state.app.catalog.model(provider_id, model_id).ok().and_then(|model| model.context_window);
+                        state.usage_input = context_accounting::capture_assembled_request(
+                            &state.qualified_model, capacity_tokens, &state.history_items, &state.tools,
+                            !memory_usage.paths.is_empty(), &mcp_names, &memory_usage.paths,
+                            memory_usage.paths_truncated, state.compaction_window.is_some());
+                        context_accounting::publish_usage_report(state.session_id, &state.usage_input, None);
                         // A disconnected child response is still drained by the
                         // owned producer, but explicit cancellation must also
                         // interrupt a provider request between tool rounds.

@@ -236,6 +236,7 @@ pub(crate) async fn get(
             "estimated_tokens":content.len().saturating_add(3)/4,"count_provenance":"instruction source UTF-8 bytes / 4"}));
     }
     let response = json!({"scope":"session","items":items,"next_before":next_before,
+        "usage_report":crate::context_accounting::latest_usage_report(id),
         "projection":projection,"checkpoint":checkpoint_metadata,"run_active":crate::run_owner::active(id).is_some(),
         "page_budget":{"stored_message_bytes":shown_bytes,"preview_bytes":PREVIEW_BYTES-remaining,
             "provenance":"this inspection page only; excluded and compacted durable rows remain visible"},
