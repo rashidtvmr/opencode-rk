@@ -225,3 +225,208 @@ fn typed_checkpoint_representation_authority_and_legacy_fallback() {
     true_view.load_response(&body(serde_json::json!([explicit_true]))).unwrap();
     assert!(true_view.items()[0].represented_by_checkpoint);
 }
+
+#[test]
+fn measurement_matches_response() {
+    let mut view = ContextView::new();
+    let mut value: serde_json::Value = serde_json::from_str(&body(serde_json::json!([item(
+        "00000000-0000-0000-0000-000000000001",
+        "message"
+    )])))
+    .unwrap();
+    value["items"][0]["bytes"] = serde_json::json!(80);
+    value["items"][0]["estimated_tokens"] = serde_json::json!(20);
+    view.load_response(&value.to_string()).unwrap();
+    let shown = view.items()[0].bytes.expect("measured bytes shown");
+    let tokens = view.items()[0]
+        .estimated_tokens
+        .expect("estimated tokens shown");
+    assert_eq!(shown, 80);
+    assert_eq!(tokens, 20);
+    // Unknown byte count with a known estimate keeps the reported estimate.
+    let mut only_tokens: serde_json::Value = serde_json::from_str(
+        &body(serde_json::json!([item(
+            "00000000-0000-0000-0000-000000000002",
+            "message"
+        )])),
+    )
+    .unwrap();
+    only_tokens["items"][0].as_object_mut().unwrap().remove("bytes");
+    only_tokens["items"][0]["estimated_tokens"] = serde_json::json!(12);
+    view.load_response(&only_tokens.to_string()).unwrap();
+    assert_eq!(view.items()[0].bytes, None);
+    assert_eq!(view.items()[0].estimated_tokens, Some(12));
+}
+
+/// Unmeasured items must not be replaced by a fabricated zero count.
+#[test]
+fn unmeasured_item_stays_unavailable() {
+    let mut view = ContextView::new();
+    let mut value: serde_json::Value = serde_json::from_str(&body(serde_json::json!([item(
+        "00000000-0000-0000-0000-000000000001",
+        "message"
+    )])))
+    .unwrap();
+    value["items"][0].as_object_mut().unwrap().remove("bytes");
+    value["items"][0].as_object_mut().unwrap().remove("estimated_tokens");
+    view.load_response(&value.to_string()).unwrap();
+    assert_eq!(view.items()[0].bytes, None);
+    assert_eq!(view.items()[0].estimated_tokens, None);
+    let rows = view.render(40, 8).join("\n");
+    assert!(!rows.contains("0 bytes / 0 tokens"));
+    assert!(rows.contains("- bytes / - tokens"));
+}
+
+/// Provenance survives so measured versus estimated is distinguishable.
+#[test]
+fn count_provenance_surfaces_in_detail() {
+    let mut view = ContextView::new();
+    let mut value: serde_json::Value = serde_json::from_str(&body(serde_json::json!([item(
+        "00000000-0000-0000-0000-000000000001",
+        "message"
+    )])))
+    .unwrap();
+    value["items"][0]["count_provenance"] =
+        serde_json::json!("stored UTF-8 bytes / 4; not measured tokenizer usage");
+    view.load_response(&value.to_string()).unwrap();
+    let rows = view.render(80, 12).join("\n");
+    assert!(rows.contains("not measured tokenizer usage"));
+}
+
+/// Content withheld by the backend renders a placeholder, never a fake body.
+#[test]
+fn unavailable_content_is_not_a_fake_body() {
+    let mut view = ContextView::new();
+    let mut value: serde_json::Value = serde_json::from_str(&body(serde_json::json!([item(
+        "00000000-0000-0000-0000-000000000001",
+        "message"
+    )])))
+    .unwrap();
+    value["items"][0]["content_available"] = serde_json::json!(false);
+    view.load_response(&value.to_string()).unwrap();
+    let mut seen = String::new();
+    for _ in 0..20 {
+        seen.push_str(&view.render(40, 8).join("\n"));
+        view.scroll_detail(true);
+    }
+    assert!(seen.contains("content not available from the daemon"));
+    assert!(seen.contains("hello") == false);
+}
+
+/// Rows visible in the detail viewport while scrolling, for reachability.
+fn detail_rows(view: &mut ContextView, width: usize, height: usize, steps: usize) -> Vec<String> {
+    let mut seen = Vec::new();
+    for _ in 0..steps {
+        seen.extend(view.render(width, height));
+        view.scroll_detail(true);
+    }
+    seen
+}
+
+/// The page breakdown is an inventory: a category with only unmeasured items
+/// shows `?` and is never summed as a fabricated `0`.
+#[test]
+fn page_breakdown_all_unmeasured_shows_unknown() {
+    let mut view = ContextView::new();
+    let mut value: serde_json::Value = serde_json::from_str(&body(serde_json::json!([item(
+        "00000000-0000-0000-0000-000000000001",
+        "message"
+    )])))
+    .unwrap();
+    value["items"][0].as_object_mut().unwrap().remove("bytes");
+    value["items"][0]
+        .as_object_mut()
+        .unwrap()
+        .remove("estimated_tokens");
+    view.load_response(&value.to_string()).unwrap();
+    let seen = detail_rows(&mut view, 90, 12, 40).join("\n");
+    assert!(seen.contains("conversation: ? tok · 1 unmeasured"));
+    assert!(!seen.contains("conversation: 0 tok"));
+}
+
+/// A mixed category reports the measured subtotal plus the unmeasured item
+/// count, so the displayed total is not presented as complete.
+#[test]
+fn page_breakdown_mixed_measured_and_unmeasured() {
+    let mut view = ContextView::new();
+    let mut measured = item("00000000-0000-0000-0000-000000000001", "message");
+    measured["bytes"] = serde_json::json!(40);
+    measured["estimated_tokens"] = serde_json::json!(10);
+    let mut snapshot: serde_json::Value = serde_json::from_str(&body(serde_json::json!([measured])))
+        .unwrap();
+    let mut unmeasured = item("00000000-0000-0000-0000-000000000002", "message");
+    unmeasured.as_object_mut().unwrap().remove("bytes");
+    unmeasured
+        .as_object_mut()
+        .unwrap()
+        .remove("estimated_tokens");
+    snapshot["items"]
+        .as_array_mut()
+        .unwrap()
+        .push(unmeasured);
+    view.load_response(&snapshot.to_string()).unwrap();
+    let seen = detail_rows(&mut view, 90, 12, 40).join("\n");
+    assert!(seen.contains("conversation: 10 tok · 1 items + 1 unmeasured"));
+    assert!(!seen.contains("conversation: 10 tok · 2 items"));
+}
+
+/// An explicit measured zero is a real report and stays `0`.
+#[test]
+fn page_breakdown_preserves_measured_zero() {
+    let mut view = ContextView::new();
+    let mut zero = item("00000000-0000-0000-0000-000000000001", "message");
+    zero["bytes"] = serde_json::json!(0);
+    zero["estimated_tokens"] = serde_json::json!(0);
+    view.load_response(&body(serde_json::json!([zero]))).unwrap();
+    let seen = detail_rows(&mut view, 90, 12, 40).join("\n");
+    assert!(seen.contains("conversation: 0 tok · 1 items"));
+}
+
+/// Excluded and compacted rows are inventory, not live request usage, so the
+/// breakdown omits them.
+#[test]
+fn page_breakdown_excludes_excluded_and_compacted() {
+    let mut view = ContextView::new();
+    let mut kept = item("00000000-0000-0000-0000-000000000001", "message");
+    kept["bytes"] = serde_json::json!(40);
+    kept["estimated_tokens"] = serde_json::json!(10);
+    let mut excluded = item("00000000-0000-0000-0000-000000000002", "message");
+    excluded["included"] = serde_json::json!(false);
+    excluded["bytes"] = serde_json::json!(400);
+    excluded["estimated_tokens"] = serde_json::json!(100);
+    let mut compacted = item("00000000-0000-0000-0000-000000000003", "message");
+    compacted["represented_by_checkpoint"] = serde_json::json!(true);
+    compacted["selectable"] = serde_json::json!(false);
+    compacted["bytes"] = serde_json::json!(400);
+    compacted["estimated_tokens"] = serde_json::json!(100);
+    view.load_response(&body(serde_json::json!([kept, excluded, compacted])))
+        .unwrap();
+    let seen = detail_rows(&mut view, 90, 12, 40).join("\n");
+    assert!(seen.contains("conversation: 10 tok · 1 items"));
+    assert!(!seen.contains("210 tok"));
+    assert!(!seen.lines().any(|row| {
+        row.trim_start().starts_with("conversation:") && row.contains("3 items")
+    }));
+}
+
+/// The page breakdown is labelled as inventory and never presents an
+/// unmeasured total as a fabricated zero.
+#[test]
+fn page_breakdown_categorizes_items() {
+    let mut view = ContextView::new();
+    let mut message = item("00000000-0000-0000-0000-000000000001", "message");
+    message["bytes"] = serde_json::json!(40);
+    message["estimated_tokens"] = serde_json::json!(10);
+    let mut system = item("00000000-0000-0000-0000-000000000002", "message");
+    system["role"] = serde_json::json!("system");
+    system["selectable"] = serde_json::json!(false);
+    system["bytes"] = serde_json::json!(80);
+    system["estimated_tokens"] = serde_json::json!(20);
+    view.load_response(&body(serde_json::json!([message, system])))
+        .unwrap();
+    let seen = detail_rows(&mut view, 90, 12, 40).join("\n");
+    assert!(seen.contains("Breakdown (page inventory"));
+    assert!(seen.contains("excludes excluded/compacted"));
+    assert!(seen.contains("conversation: 10 tok · 1 items"));
+    assert!(seen.contains("system: 20 tok · 1 items"));
+}

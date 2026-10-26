@@ -33,8 +33,19 @@ pub(crate) struct ContextItem {
     /// Typed authority for whether this item is represented by a checkpoint.
     /// This remains distinct from the legacy display reason.
     pub(crate) represented_by_checkpoint: bool,
-    pub(crate) bytes: u64,
-    pub(crate) estimated_tokens: u64,
+    /// Known stored byte count, when the backend measured it (`None` =
+    /// unmeasured; never fabricated to `0`).
+    pub(crate) bytes: Option<u64>,
+    /// Known byte/4 estimate, when the backend measured `bytes`
+    /// (`None` = unmeasured; never fabricated from preview content).
+    pub(crate) estimated_tokens: Option<u64>,
+    /// False when the backend withheld item content (e.g. an excluded item
+    /// whose editor text is unavailable); the preview is then a placeholder.
+    pub(crate) content_available: bool,
+    /// Backend-declared provenance for `bytes`/`estimated_tokens` (e.g.
+    /// "stored UTF-8 bytes / 4; not measured tokenizer usage"). Surfaced so
+    /// measured and estimated values are distinguishable, never dropped.
+    pub(crate) count_provenance: Option<String>,
     pub(crate) records: Vec<ContextRecord>,
     pub(crate) truncated: bool,
 }
@@ -174,8 +185,20 @@ impl ContextView {
             }
             total = total.saturating_add(content.len());
             let bytes = optional_u64(o, "bytes")?;
-            let estimated_tokens = optional_u64(o, "estimated_tokens")?
-                .unwrap_or_else(|| bytes.unwrap_or(content.len() as u64).saturating_add(3) / 4);
+            // Measured accounting: `bytes` and `estimated_tokens` are absent
+            // when the backend could not measure the item (e.g. an excluded
+            // item whose editor text is unavailable). They must stay `None`
+            // so the renderer can show `unreported`; they are never replaced
+            // by a derived non-zero count. When `bytes` is known and the
+            // estimate is missing, fall back to documented `bytes / 4`.
+            let estimated_tokens = match optional_u64(o, "estimated_tokens")? {
+                Some(tokens) => Some(tokens),
+                None => bytes.map(|bytes| bytes.saturating_add(3) / 4),
+            };
+            let content_available = o
+                .get("content_available")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
             let reason = match o.get("reason") {
                 None | Some(Value::Null) => None,
                 Some(Value::String(s)) => Some(s.chars().take(512).collect()),
@@ -214,8 +237,13 @@ impl ContextView {
                 content,
                 reason,
                 represented_by_checkpoint: compacted,
-                bytes: bytes.unwrap_or(0),
+                bytes,
                 estimated_tokens,
+                content_available,
+                count_provenance: o
+                    .get("count_provenance")
+                    .and_then(Value::as_str)
+                    .map(|s| s.chars().take(512).collect()),
                 records,
                 truncated: o.get("truncated").and_then(Value::as_bool).unwrap_or(false),
             });
@@ -280,8 +308,8 @@ impl ContextView {
             ));
             rows.push(format!(
                 "{} bytes / {} tokens · {}",
-                item.bytes,
-                item.estimated_tokens,
+                shown(item.bytes),
+                shown(item.estimated_tokens),
                 reason_label(item)
             ));
         } else {
@@ -339,6 +367,10 @@ impl ContextView {
                 self.projection.provenance
             ));
         }
+        if let Some(breakdown) = breakdown_lines(&self.items) {
+            out.extend(breakdown);
+        }
+
         if let Some((stored, preview)) = self.page_budget {
             out.push(format!(
                 "Page budget: stored={} preview={}",
@@ -355,11 +387,19 @@ impl ContextView {
 fn item_detail(item: &ContextItem, width: usize) -> Vec<String> {
     let mut out = wrap(&format!("Source: {}", item.source), width);
     out.extend(wrap(&format!("Identity: {}", item.id), width));
+    if let Some(provenance) = &item.count_provenance {
+        out.extend(wrap(&format!("Counting: {provenance}"), width));
+    }
     out.push(format!(
         "Content{}:",
         if item.truncated { " (truncated)" } else { "" }
     ));
-    out.extend(wrap(&item.content, width));
+    if item.content_available {
+        out.extend(wrap(&item.content, width));
+    } else {
+        // Not a fake empty body: the backend withheld the item text.
+        out.extend(wrap("(content not available from the daemon)", width));
+    }
     for r in &item.records {
         out.extend(wrap(
             &format!(
@@ -401,6 +441,72 @@ fn reason_label(item: &ContextItem) -> String {
 fn shown(v: Option<u64>) -> String {
     v.map_or_else(|| "-".into(), |n| n.to_string())
 }
+
+/// Bounded Claude-Code-style PAGE INVENTORY over the loaded inspection page,
+/// grouped by category. This is an inventory of what the page contains, NOT
+/// the actual request usage sent to the provider: rows the daemon marked
+/// `included == false` (excluded) or `represented_by_checkpoint == true`
+/// (compacted) are omitted so they can never be counted as live request usage.
+///
+/// Returns one header row plus one row per non-empty category. Each category
+/// is kept on its own short row so a narrow viewport cannot cell-wrap a single
+/// long line and split a category label from its value (which would make it
+/// unreachable). Measured items report their known `bytes / 4` estimate; an
+/// unmeasured item is counted as unmeasured (`?`), never added as a fabricated
+/// `0`, and an explicit provider `0` stays `0`. A mixed category prints the
+/// measured subtotal plus the unmeasured item count so the total is never
+/// presented as complete. Long rows are truncated by the caller's width mask
+/// only after the label; the value stays adjacent to its label.
+fn breakdown_lines(items: &[ContextItem]) -> Option<Vec<String>> {
+    // (label, measured_tokens, measured_items, unmeasured_items)
+    let mut buckets: [(&str, u64, u64, u64); 5] = [
+        ("system", 0, 0, 0),
+        ("conversation", 0, 0, 0),
+        ("tools", 0, 0, 0),
+        ("memory/files", 0, 0, 0),
+        ("checkpoint", 0, 0, 0),
+    ];
+    let mut any = false;
+    for item in items {
+        if !item.included || item.represented_by_checkpoint {
+            continue;
+        }
+        let index = match item.kind.as_str() {
+            "memory" => 3,
+            "tool_pair" => 2,
+            "checkpoint" => 4,
+            _ if item.role == "system" => 0,
+            _ => 1,
+        };
+        any = true;
+        match item.estimated_tokens {
+            Some(tokens) => {
+                buckets[index].1 = buckets[index].1.saturating_add(tokens);
+                buckets[index].2 += 1;
+            }
+            None => buckets[index].3 += 1,
+        }
+    }
+    if !any {
+        return None;
+    }
+    let mut out = vec!["Breakdown (page inventory; excludes excluded/compacted)".to_owned()];
+    for (name, tokens, measured, unmeasured) in buckets.iter() {
+        if *measured == 0 && *unmeasured == 0 {
+            continue;
+        }
+        let row = if *measured == 0 {
+            format!("  {name}: ? tok · {unmeasured} unmeasured")
+        } else if *unmeasured == 0 {
+            format!("  {name}: {tokens} tok · {measured} items")
+        } else {
+            format!("  {name}: {tokens} tok · {measured} items + {unmeasured} unmeasured")
+        };
+        out.push(row);
+    }
+    Some(out)
+}
+
 fn string(o: &serde_json::Map<String, Value>, key: &str) -> Result<String, String> {
     o.get(key)
         .and_then(Value::as_str)
