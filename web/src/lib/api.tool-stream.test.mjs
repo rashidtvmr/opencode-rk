@@ -5,16 +5,11 @@ import test from 'node:test'
 
 import { runTurnStream } from './api.ts'
 
-// B1 RED: the native daemon emits tool_call/tool_output NDJSON events on
-// POST /api/sessions/:id/turns/stream (crates/server/src/lib.rs, ndjson
-// json!({"type": "tool_call", ...}) and json!({"type": "tool_output", ...})),
-// but web/src/lib/api.ts parseTurnStreamEvent has no such cases and throws
-// 'Server returned an unknown turn stream event'. These tests pin the
-// observable accepted-tool-stream contract; they fail cleanly until the
-// client learns the server's real tool events. Component RED only: the
-// fake opener is not browser proof, real-browser acceptance still pending.
+// Native HTTP harness: bounded fragmented NDJSON, malformed tool events,
+// errors and credential exchange. Not a substitute for live browser QA.
 
 const token = 'c'.repeat(64)
+const capability = 'u'.repeat(43)
 
 function userMessage(sessionId) {
   return {
@@ -70,6 +65,20 @@ function startHarness(respond) {
       body += chunk
     })
     request.on('end', () => {
+      if (request.url === '/auth/browser-resume') {
+        if (request.headers.authorization !== `Bearer ${token}`) {
+          response.writeHead(403, { 'content-type': 'application/json' }).end('{}')
+          return
+        }
+        response.writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ browser_capability: capability }))
+        return
+      }
+      if (request.url === '/auth/browser-resume/exchange') {
+        response.writeHead(200, { 'content-type': 'application/json' })
+          .end(JSON.stringify({ browser_capability: capability }))
+        return
+      }
       observed.push({ authorization: request.headers.authorization, url: request.url, body })
       respond(request, response, body)
     })
@@ -96,7 +105,16 @@ async function withBrowser(port, fn) {
       }
     },
   }
-  globalThis.window = { location, history: globalThis.history }
+  const storage = new Map()
+  globalThis.window = {
+    location,
+    history: globalThis.history,
+    sessionStorage: {
+      getItem(key) { return storage.get(key) ?? null },
+      setItem(key, value) { storage.set(key, String(value)) },
+      removeItem(key) { storage.delete(key) },
+    },
+  }
   globalThis.fetch = (input, init) => {
     const target = new URL(String(input), `http://127.0.0.1:${port}/`)
     return originalFetch(target, init)
@@ -128,7 +146,7 @@ function sendFragmented(response, lines) {
 test('tool round streams to completion: user -> tool_call -> tool_output -> deltas -> assistant_message', async () => {
   const sessionId = 'ses_g6_tool_1'
   const { server, observed } = startHarness((request, response) => {
-    if (request.headers.authorization !== `Bearer ${token}`) {
+    if (request.headers.authorization !== `BrowserResume ${capability}`) {
       response.writeHead(401, { 'content-type': 'application/json' }).end('{}')
       return
     }

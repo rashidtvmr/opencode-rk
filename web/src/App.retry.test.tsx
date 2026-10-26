@@ -3,6 +3,7 @@ import { cleanup, render, screen, waitFor, within } from '@testing-library/react
 import userEvent from '@testing-library/user-event'
 
 import App from './App'
+import { withBrowserResume } from './test/browser-resume-fixture'
 
 const PARENT_ID = '0195f36a-2997-7a89-a11a-fc3359b0be00'
 const EDIT_CHILD_ID = '0195f36a-2997-7a89-a11a-fc3359b0be01'
@@ -168,7 +169,7 @@ beforeEach(() => {
 
     return json({ code: 'not_found', message: `${method} ${url}` }, 404)
   })
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withBrowserResume(fetchMock))
 })
 
 afterEach(() => {

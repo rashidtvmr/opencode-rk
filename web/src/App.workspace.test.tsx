@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { cleanup, render, screen } from '@testing-library/react'
 
 import App from './App'
+import { withBrowserResume } from './test/browser-resume-fixture'
 
 const SESSION_ID = '0195f36a-2997-7a89-a11a-fc3359b0c400'
 const fetchMock = vi.fn()
@@ -48,7 +49,7 @@ beforeEach(() => {
     if (url === `/api/sessions/${SESSION_ID}/fork`) return json({ fork: null })
     return json({ code: 'not_found', message: `${method} ${url}` }, 404)
   })
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withBrowserResume(fetchMock))
 })
 
 afterEach(() => {

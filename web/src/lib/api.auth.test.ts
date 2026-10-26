@@ -6,6 +6,7 @@ const fetchMock = vi.fn()
 beforeEach(() => {
   vi.resetModules()
   fetchMock.mockReset()
+  window.sessionStorage.clear()
   fetchMock.mockImplementation(async () => new Response(JSON.stringify({ models: [] }), {
     headers: { 'content-type': 'application/json' },
   }))
@@ -14,6 +15,7 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.unstubAllGlobals()
+  window.sessionStorage.clear()
   window.history.replaceState(null, '', '/')
 })
 
@@ -26,21 +28,25 @@ describe('browser daemon credential boundary', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('sends no bearer for a malformed fragment and propagates the server rejection', async () => {
+  it('rejects a malformed fragment before any unauthenticated fetch', async () => {
     window.history.replaceState(null, '', '/#oc2-token=invalid')
-    fetchMock.mockResolvedValue(new Response(JSON.stringify({ message: 'missing bearer credential' }), {
-      status: 401,
-      headers: { 'content-type': 'application/json' },
-    }))
     const { listModels } = await import('./api')
 
-    await expect(listModels()).rejects.toThrow('missing bearer credential')
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    expect(new Headers(fetchMock.mock.calls[0][1].headers).has('authorization')).toBe(false)
+    await expect(listModels()).rejects.toThrow('Re-authentication required')
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
-  it('consumes a valid fragment and retains the bearer only for this document', async () => {
+  it('exchanges a trusted native token for a scoped browser capability without leaking the token into API requests', async () => {
     window.history.replaceState(null, '', `/chat?view=fixture#oc2-token=${TOKEN}`)
+    fetchMock.mockImplementation(async (input: RequestInfo | URL) => {
+      const path = String(input)
+      const payload = path === '/auth/browser-resume'
+        ? { browser_capability: 'v'.repeat(43) }
+        : path === '/auth/browser-resume/exchange'
+          ? { browser_capability: 'w'.repeat(43) }
+          : { models: [] }
+      return new Response(JSON.stringify(payload), { headers: { 'content-type': 'application/json' } })
+    })
     const { listModels } = await import('./api')
 
     await expect(listModels()).resolves.toEqual([])
@@ -48,15 +54,20 @@ describe('browser daemon credential boundary', () => {
     expect(window.location.pathname).toBe('/chat')
     expect(window.location.search).toBe('?view=fixture')
     expect(window.location.hash).toBe('')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    for (const [url, init] of fetchMock.mock.calls) {
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    expect(fetchMock.mock.calls[0][0]).toBe('/auth/browser-resume')
+    expect(new Headers(fetchMock.mock.calls[0][1].headers).get('authorization')).toBe(`Bearer ${TOKEN}`)
+    for (const [url, init] of fetchMock.mock.calls.slice(1)) {
       expect(String(url)).not.toContain(TOKEN)
-      expect(new Headers(init.headers).get('authorization')).toBe(`Bearer ${TOKEN}`)
+      expect(new Headers(init.headers).get('authorization')).toBe(`BrowserResume ${'v'.repeat(43)}`)
     }
 
     vi.resetModules()
     const freshDocumentApi = await import('./api')
-    await expect(freshDocumentApi.listModels()).rejects.toThrow('Re-authentication required')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    await expect(freshDocumentApi.listModels()).resolves.toEqual([])
+    expect(fetchMock.mock.calls[3][0]).toBe('/auth/browser-resume/exchange')
+    expect(new Headers(fetchMock.mock.calls[3][1].headers).get('authorization')).toBe(`BrowserResume ${'v'.repeat(43)}`)
+    expect(new Headers(fetchMock.mock.calls[4][1].headers).get('authorization')).toBe(`BrowserResume ${'w'.repeat(43)}`)
+    expect(fetchMock).toHaveBeenCalledTimes(5)
   })
 })

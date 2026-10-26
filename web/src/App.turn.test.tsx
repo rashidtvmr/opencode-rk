@@ -3,6 +3,7 @@ import { cleanup, render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 import App from './App'
+import { withBrowserResume } from './test/browser-resume-fixture'
 
 const SESSION_ID = '0195f36a-2997-7a89-a11a-fc3359b0bd6e'
 const fetchMock = vi.fn()
@@ -56,7 +57,7 @@ beforeEach(() => {
 
     return jsonResponse({ code: 'not_found', message: 'missing fixture' }, 404)
   })
-  vi.stubGlobal('fetch', fetchMock)
+  vi.stubGlobal('fetch', withBrowserResume(fetchMock))
 })
 
 afterEach(() => {

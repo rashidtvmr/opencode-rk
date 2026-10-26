@@ -281,6 +281,7 @@ pub fn router_with_events_and_integration(
         .route("/api/sessions/{id}/fork", get(get_fork_provenance))
         .route("/api/sessions/{id}/turns", post(create_turn))
         .route("/api/sessions/{id}/turns/stream", post(create_turn_stream))
+        .route("/api/sessions/{id}/agent/stream", post(create_agent_turn_stream))
         .route("/api/sessions/{id}/mcp", get(mcp_context_http::get))
         .route("/api/sessions/{id}/mcp/{name}", axum::routing::put(mcp_context_http::put))
         .route("/api/sessions/{id}/children", get(task_children::list))
@@ -1646,6 +1647,71 @@ struct ConfiguredCommandBody {
     arguments: String,
     model: Option<String>,
     agent: Option<String>,
+}
+
+/// Apply an advertised @agent using server-owned role prompts and tool policy.
+/// Clients cannot supply a system prompt or relax read-only tool restrictions.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AgentTurnBody {
+    agent: String,
+    text: String,
+    model: String,
+    reasoning_effort: String,
+}
+
+async fn create_agent_turn_stream(
+    State(state): State<AppState>,
+    Path(raw_id): Path<String>,
+    Extension(events): Extension<event_bus::EventBus>,
+    Extension(children): Extension<task_children::Children>,
+    Json(body): Json<AgentTurnBody>,
+) -> Result<Response, ApiFailure> {
+    if body.agent.is_empty() || body.agent.len() > 128
+        || body.agent.chars().any(|ch| ch.is_whitespace() || ch.is_control() || ch == '@') {
+        return Err(ApiFailure::bad_request("invalid agent mention"));
+    }
+    if body.text.trim().is_empty() || body.text.len() > 32768 {
+        return Err(ApiFailure::bad_request("agent turn text must contain 1..32768 bytes"));
+    }
+    let id = parse_session_id(&raw_id)?;
+    state.sessions.get(id).await.map_err(ApiFailure::internal)?;
+    let root = session_workdir(&state.sessions, id, None).await?;
+    let inventory = command_inventory(root).await?;
+    let config = inventory.agents.get(&body.agent);
+    let builtin = builtin_agents::resolve(&body.agent);
+    if config.is_none() && builtin.is_none() {
+        return Err(ApiFailure::bad_request("agent mention is not configured"));
+    }
+    if config.is_some_and(|value|
+        value.get("disable").and_then(Value::as_bool) == Some(true)
+        || value.get("disabled").and_then(Value::as_bool) == Some(true)
+        || value.get("hidden").and_then(Value::as_bool) == Some(true)
+        || value.get("mode").and_then(Value::as_str) == Some("primary")
+    ) {
+        return Err(ApiFailure::bad_request("agent mention is unavailable"));
+    }
+    if config.is_some_and(|value| value.get("permissions").is_some() || value.get("permission").is_some()) {
+        return Err(ApiFailure::bad_request("agent-specific permission rules are not available"));
+    }
+    let config_prompt = config.and_then(|value| value.get("prompt")).and_then(Value::as_str).unwrap_or("");
+    let builtin_prompt = builtin.map_or("", |role| role.prompt);
+    let agent_prompt = format!("Agent: {}\n{}\n{}", body.agent, builtin_prompt, config_prompt);
+    if agent_prompt.len() > 32768 { return Err(ApiFailure::bad_request("agent prompt exceeds limit")); }
+    let read_only = builtin.is_some_and(|role| role.read_only)
+        || config.and_then(|value| value.get("read_only")).and_then(Value::as_bool).unwrap_or(false);
+    let configured_model = config.and_then(|value| value.get("model")).and_then(Value::as_str).unwrap_or(&body.model);
+    let (model, variant) = configured_model.rsplit_once('#')
+        .map_or((configured_model, None), |(name, variant)| (name, Some(variant)));
+    let reasoning_effort = variant.unwrap_or(&body.reasoning_effort);
+    create_turn_stream(
+        State(state), Path(raw_id), Extension(events), Extension(children),
+        Json(CreateTurnBody {
+            text: body.text, model: model.to_owned(), reasoning_effort: reasoning_effort.to_owned(),
+            workdir: None, agent_prompt: Some(agent_prompt), read_only,
+            replay_requires_no_tools: false,
+        }),
+    ).await
 }
 
 async fn run_configured_command(
