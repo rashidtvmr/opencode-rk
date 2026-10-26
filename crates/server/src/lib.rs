@@ -1459,6 +1459,8 @@ struct CreateTurnBody {
     replay_requires_no_tools: bool,
 }
 
+fn background_request_context(body: &CreateTurnBody) -> auto_compaction::BackgroundRequestContext { auto_compaction::request_context(body.agent_prompt.as_deref(), &body.reasoning_effort) }
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct CompactBody {
@@ -1967,11 +1969,9 @@ async fn create_turn(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
-    let provider = responses_client(provider_id)
-        .await
-        .map_err(provider_failure)?;
-    auto_compaction::before_user_append(&state.sessions, &provider, &owner, id,
-        provider_id, model_id, &body.text).await?;
+    let provider = responses_client(provider_id).await.map_err(provider_failure)?;
+    let request_context = auto_compaction::request_context(None, &body.reasoning_effort);
+    auto_compaction::before_user_append(&state.sessions, &provider, &owner, id, provider_id, model_id, &request_context, &body.text).await?;
     let user_message = state
         .sessions
         .append_text(id, MessageRole::User, body.text)
@@ -1988,21 +1988,21 @@ async fn create_turn(
     ).await?;
     memory_http::prepend(&state, id, model_id, &mut input).await?;
     let mut cancelled = owner.cancellation_receiver();
-    let assistant_text = tokio::select! {
+    let completed = tokio::select! {
         biased;
         _ = cancelled.changed() => return Err(ApiFailure::bad_gateway("turn cancelled")),
         result = async {
             match checkpoint.as_ref() {
-                Some(window) => provider.create_with_compaction_window(model_id, &body.reasoning_effort, window, &input).await,
-                None => provider.create_with_items(model_id, &body.reasoning_effort, &input).await,
+                Some(window) => provider.create_with_compaction_window_and_usage(model_id, &body.reasoning_effort, window, &input).await,
+                None => provider.create_with_items_and_usage(model_id, &body.reasoning_effort, &input).await,
             }
         } => {
             result.map_err(provider_failure)?
         },
     };
-    if owner.is_cancelled() {
-        return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() });
-    }
+    if owner.is_cancelled() { return Err(ApiFailure { status: StatusCode::BAD_GATEWAY, code: "cancelled", message: "turn cancelled".into() }); }
+    let assistant_text = completed.text;
+    let usage = completed.usage;
     let assistant_message = state
         .sessions
         .append_text(id, MessageRole::Assistant, assistant_text)
@@ -2012,6 +2012,7 @@ async fn create_turn(
         session: id,
         message_id: assistant_message.id,
     });
+    auto_compaction::schedule_after_successful_turn(&state.sessions, &provider, &owner, id, provider_id, model_id, usage, &request_context).await;
 
     Ok((
         StatusCode::CREATED,
@@ -2361,15 +2362,14 @@ pub(crate) fn create_turn_stream_with_message(
         return Err(ApiFailure::bad_request("unsupported reasoning effort"));
     }
 
-    let client = responses_client(provider_id)
-        .await
-        .map_err(provider_failure)?;
+    let client = responses_client(provider_id).await.map_err(provider_failure)?;
+    let request_context = background_request_context(&body);
     // A provider retry already has a durable prompt.  Do not compact across
     // that prompt before replay: the retry path must preserve its exact
     // durable boundary and must never manufacture a second prompt.
     if retry.is_none() {
         auto_compaction::before_user_append(&state.sessions, &client, &owner, id,
-            provider_id, model_id, &body.text).await?;
+            provider_id, model_id, &request_context, &body.text).await?;
     }
     let user_message = if let Some(retry) = retry {
         if retry.child_id != id || retry.generation == 0 || state.sessions.has_tool_admissions(id).await.map_err(ApiFailure::internal)? {
@@ -2637,6 +2637,23 @@ pub(crate) fn create_turn_stream_with_message(
                                             },
                                         );
                                         state.stage = TurnStreamStage::Done;
+                                        if stop == TurnStop::Completed {
+                                            let request_context = auto_compaction::request_context(
+                                                state.agent_prompt.as_deref(),
+                                                &state.reasoning_effort,
+                                            );
+                                            auto_compaction::schedule_after_successful_turn(
+                                                &state.sessions,
+                                                &state.client,
+                                                &state.owner,
+                                                state.session_id,
+                                                state.qualified_model.split_once('/').map_or("", |(p, _)| p),
+                                                &state.model,
+                                                state.provider.usage(),
+                                                &request_context,
+                                            )
+                                            .await;
+                                        }
                                         return Some((
                                             Ok::<Bytes, Infallible>(ndjson(json!({
                                                 "type": "assistant_message",

@@ -1,3 +1,4 @@
+
 //! Bounded OpenAI Responses API client for native turns.
 
 use std::sync::Arc;
@@ -1012,10 +1013,9 @@ impl OpenAiResponsesClient {
         Ok(Self {
             http,
             base_url: config.base_url.trim_end_matches('/').to_owned(),
-            credential: Arc::new(Mutex::new(api_key.map_or(
-                RequestCredential::Anonymous,
-                RequestCredential::ApiKey,
-            ))),
+            credential: Arc::new(Mutex::new(
+                api_key.map_or(RequestCredential::Anonymous, RequestCredential::ApiKey),
+            )),
             oauth_token_url: OPENAI_OAUTH_TOKEN_URL.to_owned(),
             max_output_tokens: config.max_tokens.clamp(1, 65_536),
             buffered_model_ids: Vec::new(),
@@ -1043,9 +1043,7 @@ impl OpenAiResponsesClient {
             .redirect(Policy::none())
             .build()
             .map_err(|error| ResponsesError::InvalidConfig(error.to_string()))?;
-        let base_url = if config.base_url.trim_end_matches('/')
-            == "https://api.openai.com/v1"
-        {
+        let base_url = if config.base_url.trim_end_matches('/') == "https://api.openai.com/v1" {
             OPENAI_CODEX_BASE_URL.to_owned()
         } else {
             config.base_url.trim_end_matches('/').to_owned()
@@ -1071,13 +1069,20 @@ impl OpenAiResponsesClient {
             RequestCredential::OAuth(value)
                 if value.expires_at > epoch_ms().saturating_add(OAUTH_REFRESH_SKEW_MS) =>
             {
-                Ok((Some(value.access_token.clone()), value.account_id.clone(), true))
+                Ok((
+                    Some(value.access_token.clone()),
+                    value.account_id.clone(),
+                    true,
+                ))
             }
             RequestCredential::OAuth(value) => {
                 let response = self
                     .http
                     .post(&self.oauth_token_url)
-                    .header(reqwest::header::CONTENT_TYPE, "application/x-www-form-urlencoded")
+                    .header(
+                        reqwest::header::CONTENT_TYPE,
+                        "application/x-www-form-urlencoded",
+                    )
                     .form(&[
                         ("grant_type", "refresh_token"),
                         ("refresh_token", value.refresh_token.as_str()),
@@ -1108,9 +1113,8 @@ impl OpenAiResponsesClient {
                     .refresh_token
                     .filter(|value| !value.trim().is_empty())
                     .unwrap_or_else(|| value.refresh_token.clone());
-                let expires = epoch_ms().saturating_add(
-                    token.expires_in.unwrap_or(3600).saturating_mul(1000),
-                );
+                let expires = epoch_ms()
+                    .saturating_add(token.expires_in.unwrap_or(3600).saturating_mul(1000));
                 crate::persisted_auth::save_refreshed_oauth(
                     "openai".to_owned(),
                     access.clone(),
@@ -1335,16 +1339,33 @@ impl OpenAiResponsesClient {
         window: Option<&ResponsesCompactionWindow>,
         items: &[ResponsesItem],
     ) -> Result<String, ResponsesError> {
+        self.summarize_with_context_and_reasoning(model, "", window, items)
+            .await
+    }
+
+    pub async fn summarize_with_context_and_reasoning(
+        &self,
+        model: &str,
+        reasoning_effort: &str,
+        window: Option<&ResponsesCompactionWindow>,
+        items: &[ResponsesItem],
+    ) -> Result<String, ResponsesError> {
         let mut payload = match window {
             Some(window) => compaction_continuation_payload(
                 self.resolved_model(model),
-                "",
+                reasoning_effort,
                 window,
                 items,
                 &[],
                 false,
             )?,
-            None => responses_request_payload(self.resolved_model(model), "", items, &[], false)?,
+            None => responses_request_payload(
+                self.resolved_model(model),
+                reasoning_effort,
+                items,
+                &[],
+                false,
+            )?,
         };
         payload["max_output_tokens"] = json!(self.max_output_tokens.min(4096));
         payload["tools"] = json!([]);
@@ -1383,6 +1404,19 @@ impl OpenAiResponsesClient {
         window: &ResponsesCompactionWindow,
         tail: &[ResponsesItem],
     ) -> Result<String, ResponsesError> {
+        Ok(self
+            .create_with_compaction_window_and_usage(model, reasoning_effort, window, tail)
+            .await?
+            .text)
+    }
+
+    pub async fn create_with_compaction_window_and_usage(
+        &self,
+        model: &str,
+        reasoning_effort: &str,
+        window: &ResponsesCompactionWindow,
+        tail: &[ResponsesItem],
+    ) -> Result<CompletedResponse, ResponsesError> {
         let mut payload = compaction_continuation_payload(
             self.resolved_model(model),
             reasoning_effort,
@@ -1392,7 +1426,17 @@ impl OpenAiResponsesClient {
             false,
         )?;
         payload["max_output_tokens"] = json!(self.max_output_tokens);
-        self.create_with_payload(&payload).await
+        let mut response = self.send_with_retry(&payload).await?;
+        let body = read_bounded_body(&mut response).await?;
+        let text = std::str::from_utf8(&body)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        let value: Value = serde_json::from_str(text)
+            .map_err(|error| ResponsesError::InvalidJson(error.to_string()))?;
+        let parsed = BufferedResponsesBody::parse(text)?;
+        Ok(CompletedResponse {
+            text: extract_output_text(&value)?,
+            usage: parsed.usage(),
+        })
     }
 
     async fn create_with_payload(&self, payload: &Value) -> Result<String, ResponsesError> {
