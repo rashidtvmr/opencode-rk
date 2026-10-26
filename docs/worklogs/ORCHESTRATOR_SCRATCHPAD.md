@@ -488,6 +488,92 @@ paint test. Main heavy slot free. Dashboard still unintegrated.
   grant. Twenty-plus concurrent assignments remain unmet. Usage UNKNOWN.
 - Installed executable unchanged; final release packaging, live context colors,
   provider/context/tab journeys, and full TUI parity remain outstanding.
+
+Exact combined product SHA `c18418a1e49f94fd9e56efe59b535904ccaf5ffb` passed
+**294 server-library + 3 external HTTP-endpoint + 881 native CLI tests**.
+Fresh clean archive and raw logs: `context-integrated-final-k657ld_g/receipt.json`
+and `check-{0,1,2}.{stdout,stderr}`. This tests committed clean lib rather than
+silently certifying the user's working agent-route additions. Existing private
+user-preserving composition separately passed 294+3, as recorded above.
+Documentation checkpoint `9dff7b0a` records source integration.
+Serialized release build from the tested c18418a1 archive is active:
+`sh_1781fcb3d001O3vUaB6h76ho1y`, release receipt/logs in that same private archive.
+No installation or installed visual PASS yet. Native library closure and real
+provider/tab/context PTY journeys remain required before installed claims.
+
+Release build **PASS**, exact c18418a1 binary SHA256
+`086319cb0b5a9565dfdfad2bc53b007c8bbc507b7addeb9300a6f3fa4c1bbb3b`,
+`context-exact-integrated-jjhruynv/target/release/oc2`. Manifest
+`context-integrated-final-k657ld_g/build.json`; native library SHA256
+`9e3325596b6217e6e00c9326ce1cb99a2cd613ed6771ef0c37093500243ee5be`,
+byte-identical installed `/Users/mymac/.local/lib/libopentui.dylib`.
+Real installed provider setup/restart journey **PASS** exit 0, exact release,
+disposable bin/lib/HOME/daemon. Receipt `provider-journey-receipt.json`.
+
+Vertical installed fixture **FAIL**, initial Home predicate at line 471 timed out
+before provider requests. Raw result `vertical-tabs-installed/native-vertical-tabs-result.json`;
+fixture `/private/var/folders/b0/dj81nc_j2yq2bkmg0yd2sgyc0000gn/T/vtabs-c9acx12w`.
+Worker 24 `ses_e87dc0614ffeLE3oZ7HBWWPZnI` diagnoses product vs fixture read-only,
+private `context-user-24-vtabdiagnosis/`, no heavy grant. Do not count vertical PASS.
+
+Private installed-context supplement extends provider journey after actual turns:
+assert backend model, estimated usage, provider usage remains null when omitted,
+then `/context` visible dashboard. First attempt **FAIL fixture construction**:
+invented `?scope=session` rejected HTTP400 by deny_unknown_fields InspectionQuery
+(context_http.rs57-62 accepts only before/limit). Removed unsupported query,
+same semantic assertions preserved; rerun active `sh_17824516b001eIinj8ltO9fCiA`,
+new artifact `context-installed-v2/`; original failure evidence retained.
+Supplement does not claim color coverage; worker23 handles actual color assertions.
+Actual user executable still unchanged; installed provider success is disposable.
+
+Installed-context v2 failed its model assertion. Source lib.rs capture passes
+`&body.model` (qualified request identity), so the private fixture's bare MODEL
+expectation was incorrect. v3 now requires exact `openai/` + MODEL, preserves
+null provider-usage/real estimate/dashboard assertions, and writes full bounded
+fixture response before asserting for diagnosis. Main serial run active
+`sh_178252204001ZjzepTGC2TK6Ay`; prior v2 failure receipt preserved. No product
+changes or release rebuild introduced by these fixture-only corrections.
+
+### User executable updated (2026-10-26)
+
+- Installed exact tested c18418a1 release to `/Users/mymac/.local/bin/oc2`,
+  SHA256 `086319cb0b5a9565dfdfad2bc53b007c8bbc507b7addeb9300a6f3fa4c1bbb3b`.
+  Previous executable preserved `/Users/mymac/.local/bin/oc2.before-c18418a1`,
+  SHA256 `b843a5e86d388f905142f85f3c04fcff4df670959104a9218a8fb2f5e2255bf0`.
+  Atomic adjacent temporary-file replacement; library already matches release.
+  Installed `--version` succeeds: `oc2 0.1.0-alpha.1`.
+- Package archive `context-integrated-final-k657ld_g/oc2-c18418a1-macos-arm64.tar.gz`
+  SHA256 `846282176bce203d8f0d5da38270b875f9be6d4072212985e2ef5fdef4e36dd2`.
+  Install details `user-install-receipt.json`; loader closure `release-loader.txt`.
+- Original provider journey PASS. Private context journey v7 **PASS**, actual
+  settled first/resumed requests, exact qualified model, positive message estimates
+  and provenance, unknown provider usage, partial coverage with unknown total,
+  `/context` opening, bounded detail scrolling to grid, Escape return to Chat,
+  clean UI closure. It does **not** prove colors, footer visibility, initial grid
+  prominence or full parity. Independent fixture reviewer 25 remains active.
+- Earlier context v3 expected a non-null aggregate despite incomplete skills
+  coverage; corrected to require honest partial/unknown total and real message
+  category estimate. v4 early viewport assertion and v5 footer readiness failed;
+  v6 reached the grid but tried process exit while page open (Ctrl-C closes page).
+  v7 explicitly Escape-closes Context before existing Chat exit checks. All older
+  failure logs remain, not overwritten or relabeled PASS.
+- Exact installed-path/hash repeat context journey active
+  `sh_178295bb7001kvtHldjd8qXGIv`, disposable data only. No user databases touched.
+- Existing user daemon **PID 73389 remains running** the previously loaded image.
+  Updating the on-disk executable does not replace that live server. New backend
+  behavior is verified with new disposable daemons, not claimed active in the
+  preserved user daemon. No restart/cancellation performed.
+- Vertical-tab startup fixture remains FAIL pending worker24 diagnosis; actual
+  renderer-color tests pending worker23. Full TUI parity remains incomplete.
+  Active established workers: 23,24,25; 20+ concurrency requirement remains unmet.
+
+Installed-path repeat actual context journey **PASS** exit 0. Receipt
+`user-binary-context-receipt.json` verifies actual `/Users/mymac/.local/bin/oc2`
+hash `086319cb...`; fixture still isolates data and its owned test daemons.
+Durable source/test/build/install/failed-vertical evidence and fixture now copied
+with SHA256 inventory to shared Git common directory:
+`/Users/mymac/Projects/opencode-rk/.git/recovery-evidence/c18418a1e49f94fd9e56efe59b535904ccaf5ffb/context-delivery/`.
+These are scoped verification records, not full Phase-1 acceptance. Heavy slot free.
 MainSOLEintegrationwriter remains; lastproductSHAf1a902e1. Userbinaryoldstillnot
 updated, daemon73389/4096notstopped, norealOAuthperformed. Negativeverdictsheld.
 
