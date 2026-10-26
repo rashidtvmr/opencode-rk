@@ -6860,6 +6860,30 @@ fn native_loop(
                             // never auto-replayed as a second POST).
                             let working_draft =
                                 command_transaction_draft(&draft, command, from_chat_composer);
+                            // Stage the complete outgoing tab state and the new
+                            // identity together.  Navigation is client-local
+                            // transaction state: the old tab must remember the
+                            // transaction-local remainder, cursor, scroll and
+                            // selected model, while the new tab starts with its
+                            // own empty draft/history state.  Nothing in this
+                            // staged clone becomes visible until the exact ACKed
+                            // target bind succeeds below.
+                            let mut staged_navigation = navigation.clone();
+                            let outgoing_model = selected.as_ref().map(|model| model.qualified());
+                            if let Err(error) = staged_navigation.save_active_state(
+                                working_draft.clone(),
+                                draft_cursor,
+                                view.chat_scroll_offset(),
+                                outgoing_model,
+                            ) {
+                                append_transcript(
+                                    &mut transcript,
+                                    format!("error: session create: state staging refused: {error:?}"),
+                                );
+                                needs_paint = true;
+                                continue;
+                            }
+                            staged_navigation.open(crate::native_navigation::SessionRef(created_id.clone()));
                             let bound = live
                                 .as_ref()
                                 .ok_or_else(|| "daemon unavailable".to_owned())
@@ -6878,6 +6902,60 @@ fn native_loop(
                                 Ok((snapshot, restored_draft)) => {
                                     // An accepted explicit bind owns the session
                                     // route even before its first message.
+                                    // The target tab was opened in the staged
+                                    // clone with fresh local state. Synchronize
+                                    // the bind result into that same tab before
+                                    // publishing the clone; otherwise the
+                                    // global composer would show the restored
+                                    // target draft while a later tab switch
+                                    // would resurrect the default empty state.
+                                    let target_cursor = if restored_draft.is_empty() {
+                                        0
+                                    } else {
+                                        restored_draft.len()
+                                    };
+                                    // Upstream's session.new keeps the current
+                                    // model selection when it routes Home; the
+                                    // native tab must carry that same selection,
+                                    // while a new target always starts at chat
+                                    // scroll zero. Keep the global view in the
+                                    // identical state before publishing the
+                                    // staged navigation clone.
+                                    let target_model = selected
+                                        .as_ref()
+                                        .map(|model| model.qualified());
+                                    if let Err(error) = staged_navigation.save_active_state(
+                                        restored_draft.clone(),
+                                        target_cursor,
+                                        0,
+                                        target_model,
+                                    ) {
+                                        append_transcript(
+                                            &mut transcript,
+                                            format!("error: session create: target state staging refused: {error:?}"),
+                                        );
+                                        needs_paint = true;
+                                        continue;
+                                    }
+                                    navigation = staged_navigation;
+                                    history_window = Some(
+                                        crate::native_chat_projection::NativeHistoryWindow::new(
+                                            &snapshot.raw_history,
+                                            snapshot.history_next_before.clone(),
+                                        ),
+                                    );
+                                    history_pending = false;
+                                    history_active = None;
+                                    history_navigation_request = None;
+                                    history_tail_refresh_pending = false;
+                                    history_browsing = false;
+                                    view.set_chat_scroll_offset(0);
+                                    if let Some(model) = selected.as_ref() {
+                                        view.set_model(Some(model.qualified()));
+                                        view.set_composer_model(&model.name, &model.provider_id);
+                                    } else {
+                                        view.set_model(None);
+                                    }
                                     session_route = true;
                                     view.set_session_route(session_route);
                                     live = Some(snapshot);
@@ -8114,6 +8192,26 @@ mod tab_binding_tests {
         assert!(history.is_some());
         let outgoing = navigation.tabs().iter().find(|tab| tab.session.0 == A).unwrap();
         assert_eq!((&outgoing.draft, outgoing.cursor, outgoing.scroll), (&"A unsent".to_owned(), 3, 7));
+    }
+
+    #[test]
+    fn new_target_keeps_global_model_and_zeroes_shared_scroll_with_stored_tab_state() {
+        let mut navigation = crate::native_navigation::NavigationState::new();
+        navigation.open(crate::native_navigation::SessionRef("old".into()));
+        navigation.save_active_state("outgoing 世界".into(), 9, 27, Some("openai/current".into())).unwrap();
+        let mut staged = navigation.clone();
+        staged.open(crate::native_navigation::SessionRef("new".into()));
+        staged.save_active_state("".into(), 0, 0, Some("openai/current".into())).unwrap();
+        let target = staged.active().unwrap();
+        assert_eq!(target.session.0, "new");
+        assert_eq!(target.draft, "");
+        assert_eq!(target.cursor, 0);
+        assert_eq!(target.scroll, 0);
+        assert_eq!(target.selected_model.as_deref(), Some("openai/current"));
+        let old = staged.tabs().iter().find(|tab| tab.session.0 == "old").unwrap();
+        assert_eq!(old.draft, "outgoing 世界");
+        assert_eq!(old.scroll, 27);
+        assert_eq!(old.selected_model.as_deref(), Some("openai/current"));
     }
 
     #[test]

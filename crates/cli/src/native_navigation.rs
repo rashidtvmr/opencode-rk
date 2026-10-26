@@ -398,8 +398,11 @@ impl NavigationState {
         selected_model: Option<String>,
     ) -> Result<(), NavRefusal> {
         let tab = self.active_mut().ok_or(NavRefusal::NoTabOpen)?;
+        tab.cursor = cursor.min(draft.len());
+        while tab.cursor > 0 && !draft.is_char_boundary(tab.cursor) {
+            tab.cursor -= 1;
+        }
         tab.draft = draft;
-        tab.cursor = cursor;
         tab.scroll = scroll;
         tab.selected_model = selected_model;
         Ok(())
@@ -672,6 +675,18 @@ mod tests {
             nav.active().unwrap().selected_model.as_deref(),
             Some("model-b")
         );
+    }
+
+    #[test]
+    fn save_active_state_normalizes_cursor_to_utf8_boundary() {
+        let mut nav = NavigationState::new();
+        nav.open(s("a"));
+        nav.save_active_state("世界".into(), 1, 4, None).unwrap();
+        let tab = nav.active().unwrap();
+        assert_eq!(tab.cursor, 0);
+        assert_eq!(tab.scroll, 4);
+        nav.save_active_state("世界".into(), 99, 4, None).unwrap();
+        assert_eq!(nav.active().unwrap().cursor, "世界".len());
     }
 
     #[test]
