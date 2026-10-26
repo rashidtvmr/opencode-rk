@@ -8,7 +8,7 @@ import { Check, Copy } from 'lucide-react'
  */
 function inline(text: string): ReactNode[] {
   const nodes: ReactNode[] = []
-  const matcher = /(`[^`\n]+`|\*\*[^*\n]+\*\*|\*[^*\n]+\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g
+  const matcher = /(`[^`\n]+`|\*\*[^*\n]+\*\*|~~[^~\n]+~~|\*[^*\n]+\*|\[[^\]]+\]\(https?:\/\/[^\s)]+\))/g
   let cursor = 0
   let index = 0
   for (const match of text.matchAll(matcher)) {
@@ -19,6 +19,8 @@ function inline(text: string): ReactNode[] {
       nodes.push(<code key={index++}>{value.slice(1, -1)}</code>)
     } else if (value.startsWith('**')) {
       nodes.push(<strong key={index++}>{value.slice(2, -2)}</strong>)
+    } else if (value.startsWith('~~')) {
+      nodes.push(<del key={index++}>{value.slice(2, -2)}</del>)
     } else if (value.startsWith('*')) {
       nodes.push(<em key={index++}>{value.slice(1, -1)}</em>)
     } else {
@@ -30,6 +32,39 @@ function inline(text: string): ReactNode[] {
   }
   if (cursor < text.length) nodes.push(text.slice(cursor))
   return nodes
+}
+
+const LANGUAGE_HIGHLIGHT = /^(?:js|jsx|ts|tsx|javascript|typescript|json|rust|rs|bash|sh|python|py)$/i
+const CODE_TOKEN = /(\/\/[^\n]*|#[^\n]*|\/\*[\s\S]*?\*\/|"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|\b(?:const|let|var|async|await|fn|pub|struct|impl|enum|match|if|else|return|function|class|import|export|from|use|mod|def|for|while|true|false|null|None|Ok|Err)\b|\b\d+(?:\.\d+)?\b)/g
+
+function highlightedCode(code: string, language: string): ReactNode {
+  if (code.length > 12_000 || !LANGUAGE_HIGHLIGHT.test(language)) return code
+  const nodes: ReactNode[] = []
+  let index = 0
+  let offset = 0
+  for (const match of code.matchAll(CODE_TOKEN)) {
+    const start = match.index ?? 0
+    if (start > offset) nodes.push(code.slice(offset, start))
+    const word = match[0]
+    const kind = word.startsWith('//') || word.startsWith('#') || word.startsWith('/*')
+      ? 'comment' : word.startsWith('"') || word.startsWith("'")
+        ? 'string' : /^\d/.test(word) ? 'number' : 'keyword'
+    nodes.push(<span key={index++} className={`codex-code-${kind}`}>{word}</span>)
+    offset = start + word.length
+  }
+  if (offset < code.length) nodes.push(code.slice(offset))
+  return nodes
+}
+
+function DiffLines({ code }: { code: string }) {
+  // Text-only coloring; untrusted diffs are never interpreted as HTML.
+  if (code.length > 64_000) return <>{code}</>
+  const lines = code.split('\n')
+  return <>{lines.map((line, index) => <span key={index} className={
+    line.startsWith('+') && !line.startsWith('+++') ? 'codex-diff-add'
+      : line.startsWith('-') && !line.startsWith('---') ? 'codex-diff-remove'
+        : line.startsWith('@@') ? 'codex-diff-hunk' : undefined
+  }>{line}{index < lines.length - 1 ? '\n' : ''}</span>)}</>
 }
 
 function CodeFence({ code, language }: { code: string; language: string }) {
@@ -47,7 +82,8 @@ function CodeFence({ code, language }: { code: string; language: string }) {
           {copied ? 'Copied' : 'Copy'}
         </button>
       </div>
-      <pre><code className={language && /^[a-z0-9_+-]{1,35}$/i.test(language) ? `language-${language}` : undefined}>{code}</code></pre>
+      <pre><code className={language && /^[a-z0-9_+-]{1,35}$/i.test(language) ? `language-${language}` : undefined}>{language === 'diff'
+        ? <DiffLines code={code} /> : highlightedCode(code, language)}</code></pre>
     </div>
   )
 }
@@ -117,7 +153,13 @@ function parseMarkdown(text: string): ReactNode[] {
     if (/^[-*+] /.test(line)) {
       const items: string[] = []
       while (i < lines.length && /^[-*+] /.test(lines[i])) items.push(lines[i++].slice(2))
-      blocks.push(<ul key={id++}>{items.map((item, j) => <li key={j}>{inline(item)}</li>)}</ul>)
+      blocks.push(<ul key={id++}>{items.map((item, j) => {
+        const task = /^\[([ xX])\]\s+([\s\S]*)$/.exec(item)
+        return <li key={j}>{task ? <label className="codex-markdown-task">
+          <input type="checkbox" checked={task[1].toLowerCase() === 'x'} disabled
+            aria-label={task[2]} />{inline(task[2])}
+        </label> : inline(item)}</li>
+      })}</ul>)
       continue
     }
     if (/^\d+[.)] /.test(line)) {

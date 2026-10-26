@@ -1723,7 +1723,8 @@ function App() {
                                   .flatMap((part) => {
                                     const item = storedTools.get(part.call_id)
                                     return item ? [item] : []
-                                  })} />
+                                  })} expandedByDefault={preferences.expandToolCards}
+                                  onExpandedChange={(open) => setPreferences({ expandToolCards: open })} />
                               ) : null}
                               {message.role === 'assistant' && assistantActivity[message.id] ? (
                                 <details className="codex-assistant-activity">
@@ -1732,7 +1733,9 @@ function App() {
                                 </details>
                               ) : null}
                               {message.role === 'tool' ? (
-                                <PersistedToolMessage text={messageText(message)} />
+                                <PersistedToolMessage text={messageText(message)}
+                                  expandedByDefault={preferences.expandToolCards}
+                                  onExpandedChange={(open) => setPreferences({ expandToolCards: open })} />
                               ) : (
                                 <div className="codex-message-content">
                                   <span className="sr-only">{message.role}: </span>
@@ -1766,7 +1769,8 @@ function App() {
                     {streamingAssistantText || streamingReasoningSummary || streamingToolProgress || liveToolExecutions.length > 0 ? (
                       <li className="codex-message codex-message-row codex-message-assistant">
                         <div className="codex-message-stack">
-                          <ToolTimeline tools={liveToolExecutions} />
+                          <ToolTimeline tools={liveToolExecutions} expandedByDefault={preferences.expandToolCards}
+                            onExpandedChange={(open) => setPreferences({ expandToolCards: open })} />
                           {streamingReasoningSummary ? (
                             <details className="codex-assistant-activity" open>
                               <summary>Reasoning summary</summary>

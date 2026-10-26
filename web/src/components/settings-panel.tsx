@@ -11,6 +11,7 @@ const themeChoices: { value: WebTheme; label: string; summary: string }[] = [
   { value: 'midnight', label: 'Midnight', summary: 'Deep black' },
   { value: 'ocean', label: 'Ocean', summary: 'Blue graphite' },
   { value: 'forest', label: 'Forest', summary: 'Muted green' },
+  { value: 'contrast', label: 'High contrast', summary: 'Maximum text and border contrast' },
 ]
 
 export function SettingsPanel({ onClose, preferences, setPreferences, models, capabilities, health }: {
@@ -99,6 +100,16 @@ export function SettingsPanel({ onClose, preferences, setPreferences, models, ca
                 <label className="codex-settings-checkbox">
                   <input type="checkbox" checked={preferences.reducedMotion} onChange={(event) => setPreferences({ reducedMotion: event.target.checked })} />
                   Reduce animations
+                </label>
+                <div className="codex-settings-field">
+                  <label htmlFor="settings-sidebar-width">Desktop sidebar width: {preferences.sidebarWidth}px</label>
+                  <input id="settings-sidebar-width" type="range" min="220" max="420" step="10"
+                    value={preferences.sidebarWidth} onChange={(event) => setPreferences({ sidebarWidth: Number(event.target.value) })} />
+                </div>
+                <label className="codex-settings-checkbox">
+                  <input type="checkbox" checked={preferences.expandToolCards}
+                    onChange={(event) => setPreferences({ expandToolCards: event.target.checked })} />
+                  Expand tool execution cards by default
                 </label>
               </>
             ) : null}

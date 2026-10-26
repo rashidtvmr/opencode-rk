@@ -57,6 +57,15 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
       within the selected session directory, no symlinks, blocklisted secrets,
       bounded previews. The selected file path is inserted into the prompt,
       not automatically read into provider context.
+- [x] `@folder` mention suggestions from the same bounded protected lookup,
+      with explicit directory/filename categories. Mentions remain plain path
+      references, not silently attached directory contents.
+- [x] Markdown extensions: inert task checkboxes, strikethrough, bounded basic
+      code token highlighting and Git diff line coloring. Tool cards distinguish
+      shell/file/search/MCP/subagent classes and allow user-requested text-log
+      downloads without parsing returned tool output as HTML.
+- [x] High-contrast theme, validated/persisted sidebar width and global
+      tool-card expand/collapse preference.
 - [x] Workspace pages are code-split from the main conversation bundle.
 - [x] Validated chat and workspace-page deep links with browser history and
       safe preservation of unrelated URL parameters; native launch secrets
@@ -101,11 +110,16 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
       in paginated history.
 - [ ] Elapsed duration, process exit codes, approval-event timeline and native
       event reconstruction spanning daemon restart.
-- [ ] Different renderers for file writes, patches, Git diffs, searches,
-      tasks, MCP tools and nested subagent tool events.
+- [x] Categorized safe text renderers for file/patch/Git, search, MCP,
+      shell and nested agent tool events.
+- [ ] Full visual semantic renderers for native patch previews, search
+      results, tasks and executable native action approvals.
 - [ ] Collapsible thinking/reasoning traces with provider-specific redaction.
-- [ ] Syntax highlighting, Git diff highlighting and downloadable terminal logs.
-- [ ] Full CommonMark/GFM including task lists, nested tables and math.
+- [x] Bounded basic syntax token highlighting, Git diff line coloring and
+      user-triggered text-log download.
+- [x] GFM-style strikethrough and read-only task checkboxes.
+- [ ] Full CommonMark/GFM, nested tables, LaTeX/math and robust language-aware
+      syntax parsers.
 - [ ] In-message images, audio, video and rich structured results via safe,
       capability-gated UI; optional OpenUI-inspired result renderers.
 - [ ] Stream reconnect/replay, stop/continue semantics and partial-generation
@@ -121,8 +135,9 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
 - [x] Real command POST and leading `@agent` role routing.
 - [x] Scoped `@file` path suggestions from the bounded, authenticated
       session lookup endpoint; files are never silently injected into context.
-- [ ] `@folder`, `@symbol`, Git-ignore-aware indexing and permission-gated
-      file content attachments.
+- [x] `@folder` as a protected path reference.
+- [ ] `@symbol`, Git-ignore-aware indexing and permission-gated actual file
+      content attachments.
 - [ ] Mention chips whose identity survives editing, copying and pasting.
 - [ ] Agent mentions anywhere in the prompt with explicit behavior for
       delegation versus role selection, not just leading-role syntax.
@@ -187,8 +202,10 @@ conversation state. The browser MUST NOT reimplement or bypass those controls.
 - [ ] Complete CSS variable/token audit: eliminate dark-only hard-coded colors
       in all legacy components (light mode is not yet pixel-perfect).
 - [ ] Full keyboard/focus-trap semantics for dialog and suggestion listbox.
-- [ ] Persist layout, sidebar width, tool-card collapse preferences.
-- [ ] Accessible high-contrast theme, color-blind palettes, typography presets.
+- [x] Validated, persistent desktop sidebar width and tool-card expand state.
+- [x] A high-contrast theme with explicit high-visibility keyboard focus rings.
+- [ ] Drag-resizable sidebar, per-tool expansion overrides, multiple accessible
+      color-blind palettes and font-family typography presets.
 - [ ] Visual regression tests at common desktop/tablet/mobile widths.
 - [ ] Complete ChatGPT-style interaction polishing with OpenCode RK branding.
 

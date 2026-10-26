@@ -1511,10 +1511,15 @@ export async function browseSessionFiles(sessionId: string, path = '.', signal?:
   throw new Error('Invalid or oversized file listing from daemon')
 }
 
-export async function searchSessionFiles(sessionId: string, query: string, signal?: AbortSignal): Promise<string[]> {
+export async function searchSessionFiles(
+  sessionId: string,
+  query: string,
+  signal?: AbortSignal,
+  kind: 'files' | 'directories' | 'both' = 'files',
+): Promise<string[]> {
   if (!query || query.length > 128 || query.includes('..')) return []
   const payload = await request<{ results: unknown }>(
-    `/api/sessions/${encodeURIComponent(sessionId)}/files/lookup?q=${encodeURIComponent(query)}`,
+    `/api/sessions/${encodeURIComponent(sessionId)}/files/lookup?q=${encodeURIComponent(query)}${kind === 'files' ? '' : `&kind=${kind}`}`,
     { signal },
   )
   if (!Array.isArray(payload.results) || payload.results.length > 50

@@ -256,6 +256,16 @@
 .codex-markdown > * { margin: 0; }
 .codex-markdown > * + * { margin-top: 0.75rem; }
 .codex-markdown p { white-space: pre-wrap; }
+.codex-markdown-task { display: inline-flex; align-items: baseline; gap: 0.5rem; }
+.codex-markdown-task input { width: 0.85rem; height: 0.85rem; flex: 0 0 auto; accent-color: var(--primary); opacity: 1; }
+.codex-markdown ul:has(> li > .codex-markdown-task) { list-style: none; padding-left: 0.3rem; }
+.codex-markdown-code .codex-code-keyword { color: color-mix(in srgb, var(--foreground) 50%, #a78bfa); }
+.codex-markdown-code .codex-code-string { color: color-mix(in srgb, var(--foreground) 45%, #34d399); }
+.codex-markdown-code .codex-code-number { color: color-mix(in srgb, var(--foreground) 50%, #fb923c); }
+.codex-markdown-code .codex-code-comment { color: var(--muted-foreground); font-style: italic; }
+.codex-diff-add { color: color-mix(in srgb, var(--foreground) 40%, #16a34a); background: color-mix(in srgb, transparent 88%, #16a34a); }
+.codex-diff-remove { color: color-mix(in srgb, var(--foreground) 40%, #dc2626); background: color-mix(in srgb, transparent 88%, #dc2626); }
+.codex-diff-hunk { color: color-mix(in srgb, var(--foreground) 50%, #3b82f6); }
 .codex-markdown h2 { font-size: 1.25rem; font-weight: 650; line-height: 1.35; }
 .codex-markdown h3 { font-size: 1.1rem; font-weight: 630; line-height: 1.4; }
 .codex-markdown h4 { font-size: 1rem; font-weight: 620; }
@@ -335,6 +345,54 @@ html[data-theme="forest"] {
   --popover: #273a30;
   --muted: #28392d;
   --border: #3d4f42;
+}
+html[data-theme="contrast"] {
+  color-scheme: dark;
+  --background: #000000;
+  --foreground: #ffffff;
+  --card: #080808;
+  --card-foreground: #ffffff;
+  --popover: #080808;
+  --popover-foreground: #ffffff;
+  --primary: #ffffff;
+  --primary-foreground: #000000;
+  --secondary: #151515;
+  --secondary-foreground: #ffffff;
+  --muted: #171717;
+  --muted-foreground: #f0f0f0;
+  --accent: #222222;
+  --accent-foreground: #ffffff;
+  --border: #cccccc;
+  --input: #dddddd;
+  --ring: #ffe066;
+  --sidebar: #000000;
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: #ffffff;
+  --sidebar-primary-foreground: #000000;
+  --sidebar-accent: #222222;
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: #dddddd;
+  --sidebar-ring: #ffe066;
+}
+html[data-theme="contrast"] .codex-message-user .codex-message-content {
+  background: #222222;
+  border: 1px solid #cccccc;
+}
+html[data-theme="contrast"] :is(button, input, textarea, select, [role="textbox"]):focus-visible {
+  outline: 3px solid #ffe066;
+  outline-offset: 2px;
+}
+html[data-theme="contrast"] :is(.codex-nav-link, .codex-history-row, .codex-icon-button, .codex-sidebar-message) {
+  color: var(--foreground);
+}
+html[data-theme="contrast"] .codex-composer,
+html[data-theme="contrast"] .codex-structured-editor {
+  background: var(--card);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+html[data-theme="contrast"] .codex-markdown a {
+  color: #80caff;
 }
 html[data-theme="midnight"] .codex-composer,
 html[data-theme="ocean"] .codex-composer,
@@ -459,6 +517,9 @@ html[data-theme="light"] .codex-artifact-textarea[data-slot="textarea"] {
 .codex-tool-card > summary small { margin-left: auto; color: var(--muted-foreground); font-size: 0.7rem; }
 .codex-tool-card > summary::marker { color: var(--muted-foreground); }
 .codex-tool-section { border-top: 1px solid var(--border); padding: 0.45rem 0.75rem 0.65rem; }
+.codex-tool-section-heading { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.codex-tool-section-heading button { display: inline-flex; gap: 0.35rem; align-items: center; padding: 0.25rem 0.4rem; background: transparent; border: 0; border-radius: 0.4rem; color: var(--muted-foreground); font-size: 0.7rem; cursor: pointer; }
+.codex-tool-section-heading button:hover { color: var(--foreground); background: var(--muted); }
 .codex-tool-section h4 { margin: 0 0 0.3rem; color: var(--muted-foreground); font-size: 0.7rem; font-weight: 550; }
 .codex-tool-section pre, .codex-subagent-output pre {
   margin: 0; max-height: 18rem; overflow: auto; overflow-wrap: anywhere;

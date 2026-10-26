@@ -153,7 +153,7 @@
 .codex-app {
   height: 100dvh;
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr);
+  grid-template-columns: var(--codex-sidebar-width, 260px) minmax(0, 1fr);
   overflow: hidden;
   background: var(--background);
 }
@@ -1242,7 +1242,7 @@
 
 @media (max-width: 900px) {
   .codex-app {
-    grid-template-columns: 235px minmax(0, 1fr);
+    grid-template-columns: min(var(--codex-sidebar-width, 260px), 35vw) minmax(0, 1fr);
   }
 }
 

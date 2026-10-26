@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { cleanup, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { Composer } from './composer'
 import { SettingsPanel } from './settings-panel'
@@ -16,6 +16,8 @@ const preferences: WebPreferences = {
   density: 'comfortable',
   textSize: 'normal',
   reducedMotion: false,
+  sidebarWidth: 260,
+  expandToolCards: false,
 }
 
 afterEach(() => {
@@ -83,7 +85,7 @@ describe('working composer discovery', () => {
     const user = userEvent.setup()
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const path = String(input)
-      if (path.endsWith('/files/lookup?q=App')) {
+      if (path.endsWith('/files/lookup?q=App&kind=both')) {
         return new Response(JSON.stringify({ results: ['src/App.tsx'] }), {
           status: 200, headers: { 'content-type': 'application/json' },
         })
@@ -103,7 +105,29 @@ describe('working composer discovery', () => {
     const option = await screen.findByRole('option', { name: /src\/App.tsx/ })
     await user.click(option)
     expect(editor.textContent).toContain('@src/App.tsx ')
-    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/chat-files/files/lookup?q=App', expect.anything())
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/chat-files/files/lookup?q=App&kind=both', expect.anything())
+  })
+
+  it('offers directory references as @folder chips without reading folder contents', async () => {
+    const user = userEvent.setup()
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      if (String(input).endsWith('/files/lookup?q=src&kind=both')) {
+        return new Response(JSON.stringify({ results: ['src/', 'src/App.tsx'] }), {
+          status: 200, headers: { 'content-type': 'application/json' },
+        })
+      }
+      return new Response('{}', { status: 404, headers: { 'content-type': 'application/json' } })
+    })
+    vi.stubGlobal('fetch', withBrowserResume(fetchMock))
+    render(<Composer sessionId="chat-folder" models={models} selectedModel="openai/gpt-5.6"
+      onModelChange={vi.fn()} />)
+    const editor = screen.getByRole('textbox', { name: 'Message' })
+    await user.click(editor)
+    await user.type(editor, '@src')
+    const option = await screen.findByRole('option', { name: /@src\/.*Session folder reference/ })
+    await user.click(option)
+    expect(editor.textContent).toContain('@src/ ')
+    expect(fetchMock).toHaveBeenCalledWith('/api/sessions/chat-folder/files/lookup?q=src&kind=both', expect.anything())
   })
 })
 
@@ -134,10 +158,28 @@ describe('developer panels', () => {
       '# Review results\n\n**Safe** output.\n\n```ts\nconst safe = true\n```\n\n| File | State |\n| --- | --- |\n| src/App.tsx | clean |\n\n<img src=x onerror=alert(1)>'
     } />)
     expect(screen.getByRole('heading', { name: 'Review results' })).not.toBeNull()
-    expect(screen.getByText('const safe = true')).not.toBeNull()
+    expect(container.querySelector('code.language-ts')?.textContent).toBe('const safe = true')
     expect(screen.getByRole('table')).not.toBeNull()
     expect(container.querySelector('img')).toBeNull()
     expect(screen.getByText('<img src=x onerror=alert(1)>')).not.toBeNull()
+  })
+
+  it('renders inert GFM task items, strike-through and bounded highlighted code/diff lines', () => {
+    const hostile = '<script>alert(1)</script>'
+    const { container } = render(<MessageMarkdown text={
+      `- [x] Completed review\n- [ ] Pending review\n\n~~obsolete~~\n\n\`\`\`ts\nconst secret = "${hostile}"\n\`\`\`\n\n\`\`\`diff\n@@ -1,1 +1,1 @@\n-old value\n+new ${hostile}\n\`\`\``
+    } />)
+    const checks = screen.getAllByRole('checkbox')
+    expect(checks).toHaveLength(2)
+    expect((checks[0] as HTMLInputElement).checked).toBe(true)
+    expect((checks[1] as HTMLInputElement).checked).toBe(false)
+    expect(checks.every((input) => (input as HTMLInputElement).disabled)).toBe(true)
+    expect(container.querySelector('del')?.textContent).toBe('obsolete')
+    expect(container.querySelector('.codex-code-keyword')?.textContent).toBe('const')
+    expect(container.querySelector('.codex-diff-add')?.textContent).toContain('+new')
+    expect(container.querySelector('.codex-diff-remove')?.textContent).toContain('-old')
+    expect(container.querySelector('script')).toBeNull()
+    expect(container.textContent).toContain(hostile)
   })
 
   it('changes browser appearance through real settings controls', async () => {
@@ -155,6 +197,21 @@ describe('developer panels', () => {
     expect(setPreferences).toHaveBeenCalledWith({ theme: 'ocean' })
     await user.selectOptions(screen.getByLabelText('Display density'), 'compact')
     expect(setPreferences).toHaveBeenCalledWith({ density: 'compact' })
+    await user.click(screen.getByRole('radio', { name: /High contrast/i }))
+    expect(setPreferences).toHaveBeenCalledWith({ theme: 'contrast' })
+    fireEvent.change(screen.getByLabelText(/Desktop sidebar width/i), { target: { value: '360' } })
+    expect(setPreferences).toHaveBeenCalledWith({ sidebarWidth: 360 })
+    await user.click(screen.getByLabelText('Expand tool execution cards by default'))
+    expect(setPreferences).toHaveBeenCalledWith({ expandToolCards: true })
+  })
+
+  it('persists a global tool-card expansion preference from its native details toggle', async () => {
+    const change = vi.fn()
+    render(<ToolTimeline tools={[{
+      id: 'shell-1', name: 'bash', arguments: '', output: 'done', state: 'completed',
+    }]} expandedByDefault={false} onExpandedChange={change} />)
+    await userEvent.setup().click(screen.getByText('bash'))
+    await waitFor(() => expect(change).toHaveBeenCalledWith(true))
   })
 
   it('renders a structured terminal call and output without HTML injection', () => {
@@ -165,6 +222,20 @@ describe('developer panels', () => {
     expect(screen.getByLabelText('Tool execution')).not.toBeNull()
     expect(screen.getByText('bash')).not.toBeNull()
     expect(container.querySelector('img')).toBeNull()
+  })
+
+  it('classifies patch tools and displays a diff without executing tool-output HTML', () => {
+    const hostile = '<img src=x onerror=alert(1)>'
+    const { container } = render(<ToolTimeline tools={[{
+      id: 'patch-1', name: 'apply_patch', arguments: '{"path":"src/App.tsx"}',
+      output: `diff --git a/src/App.tsx b/src/App.tsx\n@@ -1 +1 @@\n-old\n+new ${hostile}`,
+      state: 'completed',
+    }]} />)
+    expect(screen.getByText('Files')).not.toBeNull()
+    expect(container.querySelector('.codex-diff-add')?.textContent).toContain('+new')
+    expect(container.querySelector('.codex-diff-remove')?.textContent).toContain('-old')
+    expect(container.querySelector('img')).toBeNull()
+    expect(container.querySelector('button[aria-label="Download apply_patch output"]')).not.toBeNull()
   })
 
   it('uses the live child registry and accepts queued follow-up instructions', async () => {

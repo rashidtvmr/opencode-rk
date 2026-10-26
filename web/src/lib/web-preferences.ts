@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-export type WebTheme = 'system' | 'light' | 'dark' | 'midnight' | 'ocean' | 'forest'
+export type WebTheme = 'system' | 'light' | 'dark' | 'midnight' | 'ocean' | 'forest' | 'contrast'
 export type WebDensity = 'comfortable' | 'compact'
 export type WebTextSize = 'small' | 'normal' | 'large'
 
@@ -9,6 +9,8 @@ export interface WebPreferences {
   density: WebDensity
   textSize: WebTextSize
   reducedMotion: boolean
+  sidebarWidth: number
+  expandToolCards: boolean
 }
 
 export const DEFAULT_WEB_PREFERENCES: WebPreferences = {
@@ -16,10 +18,17 @@ export const DEFAULT_WEB_PREFERENCES: WebPreferences = {
   density: 'comfortable',
   textSize: 'normal',
   reducedMotion: false,
+  sidebarWidth: 260,
+  expandToolCards: false,
 }
 
 const STORAGE_KEY = 'opencode-rk:web-preferences:v1'
-const themes: WebTheme[] = ['system', 'light', 'dark', 'midnight', 'ocean', 'forest']
+const themes: WebTheme[] = ['system', 'light', 'dark', 'midnight', 'ocean', 'forest', 'contrast']
+
+export function clampSidebarWidth(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value)
+    ? Math.round(Math.min(420, Math.max(220, value))) : 260
+}
 
 function storedPreferences(): WebPreferences {
   try {
@@ -29,6 +38,8 @@ function storedPreferences(): WebPreferences {
       density: stored.density === 'compact' ? 'compact' : 'comfortable',
       textSize: stored.textSize === 'small' || stored.textSize === 'large' ? stored.textSize : 'normal',
       reducedMotion: stored.reducedMotion === true,
+      sidebarWidth: clampSidebarWidth(stored.sidebarWidth),
+      expandToolCards: stored.expandToolCards === true,
     }
   } catch {
     return DEFAULT_WEB_PREFERENCES
@@ -48,6 +59,7 @@ export function useWebPreferences() {
       root.dataset.density = preferences.density
       root.dataset.textSize = preferences.textSize
       root.dataset.reduceMotion = String(preferences.reducedMotion)
+      root.style.setProperty('--codex-sidebar-width', `${clampSidebarWidth(preferences.sidebarWidth)}px`)
     }
     apply()
     systemDark?.addEventListener?.('change', apply)
@@ -60,6 +72,8 @@ export function useWebPreferences() {
   return {
     preferences,
     setPreferences: (patch: Partial<WebPreferences>) =>
-      setPreferences((current) => ({ ...current, ...patch })),
+      setPreferences((current) => ({ ...current, ...patch,
+        sidebarWidth: clampSidebarWidth(patch.sidebarWidth ?? current.sidebarWidth),
+      })),
   }
 }

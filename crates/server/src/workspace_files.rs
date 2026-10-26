@@ -51,9 +51,17 @@ const MAX_LOOKUP_RESULTS: usize = 50;
 #[derive(Deserialize)]
 pub(crate) struct LookupQuery {
     q: String,
+    kind: Option<String>,
 }
 
-fn lookup_files(root: &FsPath, query: &str) -> Result<Value, String> {
+#[derive(Clone, Copy, Debug)]
+enum LookupKind {
+    Files,
+    Directories,
+    Both,
+}
+
+fn lookup_files(root: &FsPath, query: &str, kind: LookupKind) -> Result<Value, String> {
     if query.is_empty() {
         return Ok(json!({"results":[]}));
     }
@@ -109,13 +117,23 @@ fn lookup_files(root: &FsPath, query: &str) -> Result<Value, String> {
             if relative.len() > 1024 {
                 continue;
             }
-            if meta.is_dir() && depth < MAX_LOOKUP_DEPTH {
-                pending.push((entry.path(), relative, depth + 1));
-            } else if meta.is_file() && relative.to_ascii_lowercase().contains(&needle) {
-                found.push(relative);
-                if found.len() >= MAX_LOOKUP_RESULTS * 3 {
-                    break;
+            if meta.is_dir() {
+                if !matches!(kind, LookupKind::Files)
+                    && relative.to_ascii_lowercase().contains(&needle)
+                {
+                    found.push(format!("{relative}/"));
                 }
+                if depth < MAX_LOOKUP_DEPTH {
+                    pending.push((entry.path(), relative, depth + 1));
+                }
+            } else if meta.is_file()
+                && !matches!(kind, LookupKind::Directories)
+                && relative.to_ascii_lowercase().contains(&needle)
+            {
+                found.push(relative);
+            }
+            if found.len() >= MAX_LOOKUP_RESULTS * 3 {
+                break;
             }
         }
     }
@@ -136,7 +154,13 @@ pub(crate) async fn lookup(
     let id = parse_session_id(&raw_session)?;
     state.sessions.get(id).await.map_err(ApiFailure::internal)?;
     let root = session_workdir(&state.sessions, id, None).await?;
-    tokio::task::spawn_blocking(move || lookup_files(&root, &query.q))
+    let kind = match query.kind.as_deref().unwrap_or("files") {
+        "files" => LookupKind::Files,
+        "directories" => LookupKind::Directories,
+        "both" => LookupKind::Both,
+        _ => return Err(ApiFailure::bad_request("unsupported file lookup kind")),
+    };
+    tokio::task::spawn_blocking(move || lookup_files(&root, &query.q, kind))
         .await
         .map_err(ApiFailure::internal)?
         .map(Json)
@@ -298,13 +322,33 @@ mod tests {
         std::fs::write(root.path().join("src/App.tsx"), "export default 1").unwrap();
         std::fs::write(root.path().join(".env.local"), "TOKEN").unwrap();
         assert_eq!(
-            lookup_files(root.path(), "app").unwrap()["results"][0],
+            lookup_files(root.path(), "app", LookupKind::Files).unwrap()["results"][0],
             "src/App.tsx"
         );
-        assert!(lookup_files(root.path(), "env").unwrap()["results"]
-            .as_array()
-            .unwrap()
-            .is_empty());
-        assert!(lookup_files(root.path(), "../secrets").is_err());
+        assert!(
+            lookup_files(root.path(), "env", LookupKind::Both).unwrap()["results"]
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert!(lookup_files(root.path(), "../secrets", LookupKind::Both).is_err());
+        assert_eq!(
+            lookup_files(root.path(), "src", LookupKind::Directories).unwrap()["results"][0],
+            "src/"
+        );
+        assert_eq!(
+            lookup_files(root.path(), "src", LookupKind::Both).unwrap()["results"]
+                .as_array()
+                .unwrap()
+                .len(),
+            2
+        );
+        assert!(
+            lookup_files(root.path(), "src", LookupKind::Files).unwrap()["results"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|p| p.as_str().unwrap().ends_with("App.tsx"))
+        );
     }
 }

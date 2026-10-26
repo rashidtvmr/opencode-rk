@@ -224,7 +224,7 @@ export function Composer({
       return () => controller.abort()
     }
     const timeout = window.setTimeout(() => {
-      searchSessionFiles(sessionId, fileQuery, controller.signal)
+      searchSessionFiles(sessionId, fileQuery, controller.signal, 'both')
         .then((files) => { if (!controller.signal.aborted) setFileMatches(files) })
         .catch(() => { if (!controller.signal.aborted) setFileMatches([]) })
     }, 150)
@@ -241,7 +241,9 @@ export function Composer({
           ...agents.filter((item) => item.name.toLowerCase().includes(suggestionQuery.toLowerCase()))
             .map((item) => ({ key: `@${item.name}`, description: item.description })),
           ...fileMatches.filter((path) => path.toLowerCase().includes(suggestionQuery.toLowerCase()))
-            .map((path) => ({ key: `@${path}`, description: 'Session file path · agent must use its native read tool' })),
+            .map((path) => ({ key: `@${path}`, description: path.endsWith('/')
+              ? 'Session folder reference · agent must use native read tools'
+              : 'Session file path · agent must use its native read tool' })),
         ].slice(0, 12)
       : []
 
