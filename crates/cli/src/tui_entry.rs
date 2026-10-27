@@ -2342,9 +2342,7 @@ fn native_paint(
     if let Some(completion) = ctx.completion {
         for (index, (line, selected)) in completion.rows.iter().enumerate() {
             let y = u32::from(completion.y) + index as u32;
-            let role = if index == 0 { crate::native_ui_style::Role::Heading }
-                else if *selected { crate::native_ui_style::Role::Selected }
-                else if index + 1 == completion.rows.len() { crate::native_ui_style::Role::Hint }
+            let role = if *selected { crate::native_ui_style::Role::Selected }
                 else { crate::native_ui_style::Role::Item };
             let style = crate::native_ui_style::style(role);
             let bg = style.background.map(|slot| paint_color(ctx.palette, slot)).unwrap_or(panel);
@@ -3644,7 +3642,7 @@ fn native_loop(
     let mut configured_commands_loaded = false;
     let mut completion = crate::native_completion::Completion::default();
     completion.commands = crate::native_view_pages::command_rows().into_iter()
-        .map(|row| crate::native_completion::Item { value: row.label, description: row.detail }).collect();
+        .map(|row| crate::native_completion::Item { value: row.label, description: row.detail, disabled: false }).collect();
     for (value, description) in [
         ("/commands", "Browse commands"), ("/new", "New session"),
         ("/sidebar", "Toggle sidebar"), ("/appearance", "Adjust appearance"),
@@ -3652,7 +3650,7 @@ fn native_loop(
         ("/subagents", "View subagents"), ("/exit", "Exit"),
         ("/cd", "Change workspace directory (requires a path)"),
     ] {
-        completion.commands.push(crate::native_completion::Item { value: value.into(), description: description.into() });
+        completion.commands.push(crate::native_completion::Item { value: value.into(), description: description.into(), disabled: false });
     }
     let (completion_tx, mut completion_rx) = tokio::sync::mpsc::channel::<(Vec<crate::native_completion::Item>, Option<serde_json::Value>)>(1);
     let mut completion_load: Option<tokio::task::JoinHandle<()>> = None;
@@ -3723,7 +3721,7 @@ fn native_loop(
                 if let Ok(rows) = configured_command_rows(&catalogue) {
                     for row in rows {
                         if !completion.commands.iter().any(|item| item.value == row.label) {
-                            completion.commands.push(crate::native_completion::Item { value: row.label, description: crate::native_completion::description(&row.detail) });
+                            completion.commands.push(crate::native_completion::Item { value: row.label, description: crate::native_completion::description(&row.detail), disabled: false });
                         }
                     }
                 }
@@ -3733,6 +3731,7 @@ fn native_loop(
                         if name.is_empty() || name.len() > 128 || name.chars().any(|ch| ch.is_whitespace() || ch.is_control()) { continue; }
                         mentions.push(crate::native_completion::Item {
                             value: format!("@{name}"), description: format!("agent · {}", crate::native_completion::description(agent.get("description").and_then(serde_json::Value::as_str).unwrap_or(""))),
+                            disabled: false,
                         });
                     }
                 }
@@ -5109,7 +5108,16 @@ fn native_loop(
         if completion_mouse_eligible {
             if let native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } = event {
             if let Some(panel) = view.composer_region(&draft).and_then(|anchor| completion.panel_at(&draft, draft_cursor, anchor)) {
-                            if let Some(route) = panel.command_at(x, y).map(str::to_owned) {
+                            if let Some(value) = panel.value_at(x, y).map(str::to_owned).filter(|_| !panel.is_disabled_at(x, y)) {
+                                if !value.starts_with('/') {
+                                    if let Some(cursor) = completion.accept_value_at(&mut draft, &value, draft_cursor, MAX_NATIVE_DRAFT_BYTES) {
+                                        draft_cursor = cursor;
+                                        utf8.reset();
+                                    }
+                                    needs_paint = true;
+                                    continue;
+                                }
+                                let route = value;
                     if route == "/cd" {
                         if let Some(cursor) = completion.accept_value_at(
                             &mut draft,

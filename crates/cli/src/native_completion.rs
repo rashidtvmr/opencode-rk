@@ -6,6 +6,8 @@
 pub struct Item {
     pub value: String,
     pub description: String,
+    /// Disabled catalogue entries remain visible but cannot be accepted.
+    pub disabled: bool,
 }
 
 #[derive(Default)]
@@ -60,12 +62,12 @@ impl Completion {
     pub fn selected_command(&self) -> Option<&str> {
         let (_, marker, _) = self.trigger()?;
         if marker != '/' { return None; }
-        self.visible().get(self.selected()).map(|item| item.value.as_str())
+        self.visible().get(self.selected()).filter(|item| !item.disabled).map(|item| item.value.as_str())
     }
 
     pub fn selected_command_at(&self, draft: &str, cursor: usize) -> Option<&str> {
         let items = self.visible_at(draft, cursor);
-        items.get(self.selected.min(items.len().saturating_sub(1))).map(|item| item.value.as_str())
+        items.get(self.selected.min(items.len().saturating_sub(1))).filter(|item| !item.disabled).map(|item| item.value.as_str())
     }
 
     /// Overlay rows fit strictly above the composer, including a spacer and
@@ -77,19 +79,19 @@ impl Completion {
     pub fn panel_at(&self, draft: &str, cursor: usize, anchor: (u16, u16, u16, u16)) -> Option<Panel> {
         let (x, y, width, _) = anchor;
         let items = self.visible_at(draft, cursor);
-        if items.is_empty() || y < 3 || width < 12 { return None; }
-        let capacity = usize::from(y.saturating_sub(2)).min(6);
+        if items.is_empty() || y == 0 || width < 12 { return None; }
+        let capacity = usize::from(y).min(10);
         let selected = self.selected.min(items.len().saturating_sub(1));
         let start = selected.saturating_sub(capacity - 1);
-        let command_mode = self.trigger_at(draft, cursor)?.1 == '/';
-        let mut rows = vec![(if command_mode { " Commands".into() } else { " Mentions".into() }, false)];
-        let mut command_values = Vec::new();
+        let mut rows = Vec::new();
+        let mut values = Vec::new();
+        let mut disabled = Vec::new();
         for (index, item) in items.iter().enumerate().skip(start).take(capacity) {
             rows.push((format!(" {} {}  {}", if index == selected { "›" } else { " " }, item.value, item.description), index == selected));
-            if command_mode { command_values.push(item.value.clone()); }
+            values.push(item.value.clone());
+            disabled.push(item.disabled);
         }
-        rows.push((" ↑/↓ select · Tab/Enter complete · Esc close".into(), false));
-        Some(Panel { x, y: y - rows.len() as u16, width, rows, command_values })
+        Some(Panel { x, y: y - rows.len() as u16, width, rows, values, disabled })
     }
 
     pub fn navigate(&mut self, down: bool) {
@@ -152,8 +154,11 @@ impl Completion {
         if draft != &self.draft { return false; }
         let Some((start, _, _)) = self.trigger() else { return false; };
         let Some(item) = self.visible().get(self.selected()).copied() else { return false; };
-        if start + item.value.len() + 1 > limit { return false; }
+        if item.disabled { return false; }
+        // `accept` is the end-of-draft path; cursor-relative suffixes use
+        // `accept_value_at`, so no completed-value-length slice is needed here.
         let replacement = format!("{} ", item.value);
+        if start + replacement.len() > limit { return false; }
         draft.replace_range(start.., &replacement);
         self.sync(draft);
         true
@@ -176,8 +181,10 @@ impl Completion {
     ) -> Option<usize> {
         let (start, marker, query) = self.trigger_at(draft, cursor)?;
         let items = self.visible_at(draft, cursor);
-        if !items.iter().any(|item| item.value == value) || !value.starts_with(marker) || query.chars().any(char::is_whitespace) { return None; }
-        let replacement = format!("{value} ");
+        let item = items.iter().find(|item| item.value == value)?;
+        if item.disabled || !value.starts_with(marker) || query.chars().any(char::is_whitespace) { return None; }
+        let suffix = &draft[cursor..];
+        let replacement = format!("{value}{}", (!suffix.starts_with(' ')).then_some(" ").unwrap_or(""));
         let new_len = draft.len() - (cursor - start) + replacement.len();
         if new_len > limit { return None; }
         draft.replace_range(start..cursor, &replacement);
@@ -217,18 +224,27 @@ pub struct Panel {
     pub y: u16,
     pub width: u16,
     pub rows: Vec<(String, bool)>,
-    command_values: Vec<String>,
+    values: Vec<String>,
+    disabled: Vec<bool>,
 }
 
 impl Panel {
     /// Return the command under a left-button press. Coordinates are derived
     /// from the actual rendered panel rectangle and rows, not a guessed popup
     /// offset. Non-command panels never produce an executable value.
-    pub fn command_at(&self, x: u16, y: u16) -> Option<&str> {
+    pub fn value_at(&self, x: u16, y: u16) -> Option<&str> {
         if x < self.x || x >= self.x.saturating_add(self.width) || y < self.y { return None; }
-        let row = usize::from(y - self.y);
-        if row == 0 || row + 1 >= self.rows.len() { return None; }
-        self.command_values.get(row - 1).map(String::as_str)
+        self.values.get(usize::from(y - self.y)).map(String::as_str)
+    }
+
+    /// Disabled catalogue entries may be painted and hit-tested, but never accepted.
+    pub fn is_disabled_at(&self, x: u16, y: u16) -> bool {
+        if x < self.x || x >= self.x.saturating_add(self.width) || y < self.y { return true; }
+        self.disabled.get(usize::from(y - self.y)).copied().unwrap_or(true)
+    }
+
+    pub fn command_at(&self, x: u16, y: u16) -> Option<&str> {
+        self.value_at(x, y).filter(|value| value.starts_with('/'))
     }
 }
 
@@ -261,7 +277,7 @@ pub fn workspace_files(root: &std::path::Path) -> Vec<Item> {
                 let Ok(relative) = path.strip_prefix(&root) else { continue; };
                 let Some(relative) = relative.to_str() else { continue; };
                 if relative.len() > 512 || relative.chars().any(|ch| ch.is_control() || ch.is_whitespace()) { continue; }
-                items.push(Item { value: format!("@{relative}"), description: "file".into() });
+                items.push(Item { value: format!("@{relative}"), description: "file".into(), disabled: false });
             }
         }
     }
@@ -274,8 +290,8 @@ mod tests {
     use super::*;
     fn fixture() -> Completion {
         Completion {
-            commands: vec![Item { value: "/models".into(), description: "Select model".into() }, Item { value: "/mcp".into(), description: "MCP status".into() }],
-            mentions: vec![Item { value: "@explore".into(), description: "agent".into() }, Item { value: "@src/café.rs".into(), description: "file".into() }],
+            commands: vec![Item { value: "/models".into(), description: "Select model".into(), disabled: false }, Item { value: "/mcp".into(), description: "MCP status".into(), disabled: false }],
+            mentions: vec![Item { value: "@explore".into(), description: "agent".into(), disabled: false }, Item { value: "@src/café.rs".into(), description: "file".into(), disabled: false }],
             ..Completion::default()
         }
     }
@@ -305,8 +321,8 @@ mod tests {
         let mut draft = "prefix /mo suffix 世界".to_owned();
         let cursor = "prefix /mo".len();
         c.sync(&draft);
-        assert_eq!(c.accept_value_at(&mut draft, "/models", cursor, 4096), Some("prefix /models ".len()));
-        assert_eq!(draft, "prefix /models  suffix 世界");
+        assert_eq!(c.accept_value_at(&mut draft, "/models", cursor, 4096), Some("prefix /models".len()));
+        assert_eq!(draft, "prefix /models suffix 世界");
     }
 
     #[test]
@@ -316,16 +332,16 @@ mod tests {
         let cursor = "prefix /mo".len();
         c.sync(&draft);
         let next = c.complete_key_at(b'\t', &mut draft, cursor, 4096);
-        assert_eq!(next, Some("prefix /models ".len()));
-        assert_eq!(draft, "prefix /models  suffix 世界");
+        assert_eq!(next, Some("prefix /models".len()));
+        assert_eq!(draft, "prefix /models suffix 世界");
     }
 
     #[test]
     fn mention_panel_highlight_and_keyboard_acceptance_share_local_selection() {
         let mut c = fixture();
         c.mentions.extend([
-            Item { value: "@src/café.txt".into(), description: "text".into() },
-            Item { value: "@src/café.md".into(), description: "markdown".into() },
+            Item { value: "@src/café.txt".into(), description: "text".into(), disabled: false },
+            Item { value: "@src/café.md".into(), description: "markdown".into(), disabled: false },
         ]);
         let mut draft = "prefix @src/caf suffix 世界".to_owned();
         let cursor = "prefix @src/caf".len();
@@ -337,9 +353,9 @@ mod tests {
         let selected = items[items.len() - 1].value.clone();
         assert!(selected_row.contains(&selected));
         let expected = selected.clone();
-        let expected_cursor = "prefix ".len() + expected.len() + 1;
+        let expected_cursor = "prefix ".len() + expected.len();
         assert_eq!(c.complete_key_at(b'\t', &mut draft, cursor, 4096), Some(expected_cursor));
-        assert_eq!(draft, format!("prefix {expected}  suffix 世界"));
+        assert_eq!(draft, format!("prefix {expected} suffix 世界"));
     }
 
     #[test]
@@ -359,8 +375,8 @@ mod tests {
     fn panel_navigation_and_acceptance_share_middle_cursor_view_for_mentions() {
         let mut c = fixture();
         c.mentions.extend([
-            Item { value: "@src/café.txt".into(), description: "text".into() },
-            Item { value: "@src/café.md".into(), description: "markdown".into() },
+            Item { value: "@src/café.txt".into(), description: "text".into(), disabled: false },
+            Item { value: "@src/café.md".into(), description: "markdown".into(), disabled: false },
         ]);
         let mut draft = "prefix @src/caf suffix 世界".to_owned();
         let cursor = "prefix @src/caf".len();
@@ -371,25 +387,25 @@ mod tests {
         let highlighted = panel.rows.iter().find(|(_, selected)| *selected).unwrap().0.clone();
         assert!(highlighted.contains(&selected));
         let next = c.accept_value_at(&mut draft, &selected, cursor, 4096);
-        let expected_cursor = "prefix ".len() + selected.len() + 1;
+        let expected_cursor = "prefix ".len() + selected.len();
         assert_eq!(next, Some(expected_cursor));
-        assert_eq!(draft, format!("prefix {selected}  suffix 世界"));
+        assert_eq!(draft, format!("prefix {selected} suffix 世界"));
     }
 
     #[test]
     fn complete_key_at_uses_local_selection_for_middle_token() {
         let mut c = fixture();
         c.commands.extend([
-            Item { value: "/more".into(), description: String::new() },
-            Item { value: "/module".into(), description: String::new() },
+            Item { value: "/more".into(), description: String::new(), disabled: false },
+            Item { value: "/module".into(), description: String::new(), disabled: false },
         ]);
         let mut draft = "prefix /mo suffix 世界".to_owned();
         let cursor = "prefix /mo".len();
         c.sync(&draft);
         c.selected = 2;
         let next = c.complete_key_at(b'\t', &mut draft, cursor, 4096);
-        assert_eq!(next, Some("prefix /module ".len()));
-        assert_eq!(draft, "prefix /module  suffix 世界");
+        assert_eq!(next, Some("prefix /module".len()));
+        assert_eq!(draft, "prefix /module suffix 世界");
     }
     #[test]
     fn escape_preserves_draft_and_edit_reopens() {
@@ -423,8 +439,8 @@ mod tests {
     #[test]
     fn failed_completion_does_not_consume_submit_key_and_bad_items_are_ignored() {
         let mut c = fixture();
-        c.commands.push(Item { value: String::new(), description: String::new() });
-        c.commands.push(Item { value: "é".into(), description: String::new() });
+        c.commands.push(Item { value: String::new(), description: String::new(), disabled: false });
+        c.commands.push(Item { value: "é".into(), description: String::new(), disabled: false });
         let mut draft = "/m".to_owned();
         c.sync(&draft);
         assert_eq!(c.visible().len(), 2);
@@ -450,9 +466,9 @@ mod tests {
         let mut c = fixture();
         c.sync("@");
         c.navigate(true);
-        c.replace_mentions(vec![Item {value:"@added".into(),description:String::new()},
-            Item {value:"@extra".into(),description:String::new()},
-            Item {value:"@src/café.rs".into(),description:"file".into()}]);
+        c.replace_mentions(vec![Item {value:"@added".into(),description:String::new(),disabled:false},
+            Item {value:"@extra".into(),description:String::new(),disabled:false},
+            Item {value:"@src/café.rs".into(),description:"file".into(),disabled:false}]);
         let mut draft = "@".to_owned();
         assert!(c.accept(&mut draft, 4096));
         assert_eq!(draft, "@src/café.rs ");
@@ -463,11 +479,49 @@ mod tests {
         c.sync("/");
         c.navigate(true);
         let panel = c.panel((4, 3, 40, 4)).unwrap();
-        assert_eq!((panel.x, panel.y, panel.width), (4, 0, 40));
-        assert_eq!(panel.rows.len(), 3);
+        assert_eq!((panel.x, panel.y, panel.width), (4, 1, 40));
+        assert_eq!(panel.rows.len(), 2);
         assert!(panel.rows[1].0.contains("/mcp"));
         assert!(panel.rows[1].1);
-        assert!(c.panel((0, 2, 40, 4)).is_none());
+        assert!(c.panel((0, 0, 40, 4)).is_none());
+    }
+    #[test]
+    fn first_and_last_visible_rows_hit_exact_values() {
+        let mut c = fixture();
+        c.commands.clear();
+        c.commands.extend((0..12).map(|index| Item { value: format!("/model{index:02}"), description: "command".into(), disabled: false }));
+        let draft = "/model".to_owned();
+        c.sync(&draft);
+        let first = c.panel((2, 12, 60, 1)).unwrap();
+        assert_eq!(first.rows.len(), 10);
+        assert_eq!(first.value_at(2, first.y), Some("/model00"));
+        assert_eq!(first.value_at(2, first.y + 9), Some("/model09"));
+        c.selected = c.visible().len() - 1;
+        let last = c.panel((2, 12, 60, 1)).unwrap();
+        assert_eq!(last.value_at(2, last.y), Some("/model02"));
+        assert_eq!(last.value_at(2, last.y + 9), Some("/model11"));
+        assert_eq!(last.value_at(2, last.y + 10), None);
+    }
+
+    #[test]
+    fn disabled_entries_are_visible_but_inert() {
+        let mut c = fixture();
+        c.commands[0].disabled = true;
+        let mut draft = "/m".to_owned();
+        c.sync(&draft);
+        assert!(c.visible().iter().any(|item| item.disabled));
+        assert!(!c.accept(&mut draft, 4096));
+        assert_eq!(draft, "/m");
+    }
+
+    #[test]
+    fn unicode_cursor_and_existing_space_do_not_duplicate_suffix_space() {
+        let mut c = fixture();
+        let mut draft = "préfix /mo suffix 世界".to_owned();
+        let cursor = "préfix /mo".len();
+        c.sync(&draft);
+        assert_eq!(c.accept_value_at(&mut draft, "/models", cursor, 4096), Some("préfix /models".len()));
+        assert_eq!(draft, "préfix /models suffix 世界");
     }
     #[test]
     fn workspace_mentions_are_relative_and_exclude_hidden_build_and_symlink_paths() {
