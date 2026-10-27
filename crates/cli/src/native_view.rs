@@ -2084,34 +2084,9 @@ impl NativeView {
             };
             // The upstream scrollbox starts with a spacer, rather than a
             // permanent workspace/header row. The composer stays at its foot.
-            if body.len() > 1 && self.chat_row_classes.first().is_some_and(|class|
-                *class != crate::native_view_chat::ChatRowClass::Composer) {
-                // Keep the confirmed selected model/provider visible in the
-                // conversation at narrow widths too. The footer is reserved
-                // for directory and turn/status chrome, and the optional
-                // sidebar is unavailable at these widths. Only replace the
-                // upstream spacer when an actual model observation exists;
-                // unknown state remains an empty spacer.
-                body[0] = match &self.composer_model {
-                    Some(_) => padded(
-                        &if busy {
-                            format!("Thinking… · {}", self.composer_metadata())
-                        } else {
-                            self.composer_metadata()
-                        },
-                        width,
-                    ),
-                    None if self.status.model_label() != "Unavailable" => padded(
-                        &if busy {
-                            format!("Thinking… · {}", self.composer_metadata())
-                        } else {
-                            self.composer_metadata()
-                        },
-                        width,
-                    ),
-                    None if busy => padded("Thinking…", width),
-                    None => String::new(),
-                };
+            if !busy && self.chat_row_classes.first().is_some_and(|class|
+                *class == crate::native_view_chat::ChatRowClass::Header) {
+                if let Some(header) = body.first_mut() { header.clear(); }
             }
             let prompt = crate::native_view_chat::session_composer_layout(
                 usize::from(inner_width), body_height, draft, &self.box_appearance,
@@ -4360,7 +4335,12 @@ mod tests {
             view.set_model(Some("fixture-model".into()));
             view.set_tab_reservation(TabReservation::for_view(orientation, 120, 40));
             let frame = view.render_typed("draft", &[], false, &[]);
-            let metadata_row = frame.iter().rposition(|row| row.contains("fixture-model")).unwrap();
+            let metadata_rows: Vec<_> = frame.iter().enumerate()
+                .filter(|(_, row)| row.contains("fixture-model"))
+                .map(|(index, _)| index).collect();
+            assert_eq!(metadata_rows.len(), 1,
+                "observed model belongs once in the composer, without a duplicate top header");
+            let metadata_row = metadata_rows[0];
             assert_eq!(view.chat_row_classes()[metadata_row], ChatRowClass::Metadata,
                 "composer model row is not generic blank padding");
             assert_eq!(view.chat_text_bounds()[metadata_row], None);
