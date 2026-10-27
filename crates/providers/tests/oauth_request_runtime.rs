@@ -5,6 +5,51 @@ use std::{sync::{Arc, atomic::{AtomicUsize, Ordering}}, time::{SystemTime, UNIX_
 static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener, sync::{oneshot, Mutex as TokioMutex}, time::{sleep, timeout, Duration}};
 
+
+/// RAII guard: captures prior `XDG_DATA_HOME` and `UNUSED_OAUTH_TEST_KEY`,
+/// installs a disposable tempdir, and restores originals on drop (including
+/// panic unwinding). Removes the disposable directory on both panic and
+/// success. Safe because this process is the only writer of these env vars
+/// during the test; other binaries keep separate process env and are unaffected.
+struct EnvGuard {
+    prior_xdg: Option<std::ffi::OsString>,
+    prior_key: Option<std::ffi::OsString>,
+    pub root: std::path::PathBuf,
+}
+
+impl EnvGuard {
+    fn install() -> Self {
+        let prior_xdg = std::env::var_os("XDG_DATA_HOME");
+        let prior_key = std::env::var_os("UNUSED_OAUTH_TEST_KEY");
+        let root = std::env::temp_dir().join(format!(
+            "opencode-oauth-v2-{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+                .min(u128::from(u64::MAX)) as u64
+        ));
+        std::env::set_var("XDG_DATA_HOME", &root);
+        // Value is intentionally non-secret marker only; never log real env secrets.
+        std::env::set_var("UNUSED_OAUTH_TEST_KEY", "must-not-be-used");
+        std::fs::create_dir_all(root.join("opencode")).unwrap();
+        EnvGuard { prior_xdg, prior_key, root }
+    }
+}
+
+impl Drop for EnvGuard {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.root);
+        match &self.prior_xdg {
+            Some(value) => std::env::set_var("XDG_DATA_HOME", value),
+            None => std::env::remove_var("XDG_DATA_HOME"),
+        }
+        match &self.prior_key {
+            Some(value) => std::env::set_var("UNUSED_OAUTH_TEST_KEY", value),
+            None => std::env::remove_var("UNUSED_OAUTH_TEST_KEY"),
+        }
+    }
+}
 async fn peer(listener: TcpListener, count: Arc<AtomicUsize>, body: &'static str, status: &'static str, expected: &[&str]) {
     let (mut socket, _) = listener.accept().await.unwrap();
     count.fetch_add(1, Ordering::SeqCst);
@@ -211,4 +256,174 @@ async fn oauth_credential_is_used_by_compact_and_stream_dispatch() {
     assert!(saw_text);
     assert!(saw_completed, "stream fixture must be consumed through response.completed");
     assert_eq!(compact_count.load(Ordering::SeqCst), 1); assert_eq!(stream_count.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn failed_refresh_preserves_persisted_old_credential_and_context() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let _env = EnvGuard::install();
+
+    opencode_rk_providers::persisted_auth::save_oauth_credential_with_metadata(
+        "openai".into(),
+        "old-persisted-access".into(),
+        "old-persisted-refresh".into(),
+        7,
+        Some("old-account-context".into()),
+        Some("https://enterprise.example".into()),
+    )
+    .await
+    .unwrap();
+    let before = opencode_rk_providers::persisted_auth::oauth("openai")
+        .await
+        .expect("seeded old credential");
+    assert_eq!(before.access_token, "old-persisted-access");
+    assert_eq!(before.refresh_token, "old-persisted-refresh");
+    assert_eq!(before.expires_at, 7);
+    assert_eq!(before.account_id.as_deref(), Some("old-account-context"));
+    assert_eq!(before.enterprise_url.as_deref(), Some("https://enterprise.example"));
+
+    let refresh = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let refresh_addr = refresh.local_addr().unwrap();
+    let model_addr = model.local_addr().unwrap();
+    let refresh_count = Arc::new(AtomicUsize::new(0));
+    let model_count = Arc::new(AtomicUsize::new(0));
+
+    tokio::spawn(peer(
+        refresh,
+        refresh_count.clone(),
+        r#"{"error":"invalid_grant"}"#,
+        "400 Bad Request",
+        &[],
+    ));
+    let model_task = tokio::spawn(assert_no_request(model, model_count.clone()));
+
+    let client = OpenAiResponsesClient::from_oauth_config_with_endpoint(
+        config(format!("http://{model_addr}")),
+        oauth(1),
+        format!("http://{refresh_addr}"),
+    )
+    .unwrap();
+    let error = client.create_with_items("fixture", "", &input()).await.unwrap_err();
+    assert!(
+        matches!(error, opencode_rk_providers::responses::ResponsesError::OAuthRefresh(_)),
+        "failed refresh must surface OAuthRefresh, not {error:?}"
+    );
+    assert_eq!(refresh_count.load(Ordering::SeqCst), 1);
+    model_task.await.unwrap();
+    assert_eq!(
+        model_count.load(Ordering::SeqCst),
+        0,
+        "fallback/model listener observed an attempted request"
+    );
+
+    let after = opencode_rk_providers::persisted_auth::oauth("openai")
+        .await
+        .expect("failed refresh must retain old credential");
+    assert_eq!(after.access_token, before.access_token);
+    assert_eq!(after.refresh_token, before.refresh_token);
+    assert_eq!(after.expires_at, before.expires_at);
+    assert_eq!(after.account_id, before.account_id);
+    assert_eq!(after.enterprise_url, before.enterprise_url);
+
+    let persisted = std::fs::read(_env.root.join("opencode/auth.json")).unwrap();
+    let persisted_text = String::from_utf8(persisted).unwrap();
+    assert!(persisted_text.contains("old-persisted-access"));
+    assert!(persisted_text.contains("old-persisted-refresh"));
+    assert!(persisted_text.contains("old-account-context"));
+    assert!(persisted_text.contains("https://enterprise.example"));
+    assert!(!format!("{:?}", after).contains("old-persisted-access"));
+    assert!(!format!("{:?}", after).contains("old-persisted-refresh"));
+}
+
+/// Expiry-triggered refresh persistence: when the OAuth credential is expired,
+/// the client performs one refresh, dispatches the rotated access token with the
+/// seeded account header, and atomically persists the rotated access/refresh with
+/// account/enterprise context preserved. Debug output redacts token values.
+/// Complements the failed-refresh preservation test above. Uses `EnvGuard` for
+/// RAII env/temp restoration on both panic and success; no API-key fallback.
+#[tokio::test(flavor = "current_thread")]
+async fn expiry_triggered_refresh_preserves_account_and_persists_rotated_credential() {
+    let _env_lock = ENV_LOCK.lock().unwrap();
+    let _env = EnvGuard::install();
+
+    let root = &_env.root;
+    opencode_rk_providers::persisted_auth::save_oauth_credential_with_metadata(
+        "openai".into(),
+        "seeded-access".into(),
+        "seeded-refresh".into(),
+        1,
+        Some("seeded-account".into()),
+        Some("https://enterprise.example".into()),
+    )
+    .await
+    .unwrap();
+
+    let refresh = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let model = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let refresh_addr = refresh.local_addr().unwrap();
+    let model_addr = model.local_addr().unwrap();
+    let refresh_count = Arc::new(AtomicUsize::new(0));
+    let model_count = Arc::new(AtomicUsize::new(0));
+
+    tokio::spawn(peer(
+        refresh,
+        refresh_count.clone(),
+        r#"{"access_token":"rotated-access","refresh_token":"rotated-refresh","expires_in":3600}"#,
+        "200 OK",
+        &[],
+    ));
+    tokio::spawn(peer(
+        model,
+        model_count.clone(),
+        r#"{"status":"completed","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}]}"#,
+        "200 OK",
+        &["authorization: Bearer rotated-access", "chatgpt-account-id: seeded-account"],
+    ));
+
+    // The client credential carries the same account/enterprise context as the
+    // seeded persisted fixture, so the refresh path (responses.rs:1118-1136)
+    // preserves exactly that context through `save_refreshed_oauth`.
+    let client_credential = PersistedOAuth {
+        access_token: "seeded-access".into(),
+        refresh_token: "seeded-refresh".into(),
+        expires_at: 1,
+        account_id: Some("seeded-account".into()),
+        enterprise_url: Some("https://enterprise.example".into()),
+    };
+    let client = OpenAiResponsesClient::from_oauth_config_with_endpoint(
+        config(format!("http://{model_addr}")),
+        client_credential,
+        format!("http://{refresh_addr}"),
+    )
+    .unwrap();
+    let client = Arc::new(client);
+    let handle = {
+        let client = client.clone();
+        tokio::spawn(async move { client.create_with_items("fixture", "", &input()).await })
+    };
+
+    let completed = handle.await.unwrap().unwrap();
+    assert_eq!(completed, "ok");
+    assert_eq!(refresh_count.load(Ordering::SeqCst), 1);
+    assert_eq!(model_count.load(Ordering::SeqCst), 1);
+
+    let after = opencode_rk_providers::persisted_auth::oauth("openai")
+        .await
+        .expect("rotated credential must persist");
+    assert_eq!(after.access_token, "rotated-access");
+    assert_eq!(after.refresh_token, "rotated-refresh");
+    assert!(after.expires_at > 1, "rotated credential must advance expiry");
+    assert_eq!(after.account_id.as_deref(), Some("seeded-account"));
+    assert_eq!(after.enterprise_url.as_deref(), Some("https://enterprise.example"));
+
+    let persisted_text = String::from_utf8(std::fs::read(root.join("opencode/auth.json")).unwrap()).unwrap();
+    assert!(persisted_text.contains("rotated-access"));
+    assert!(persisted_text.contains("rotated-refresh"));
+    assert!(persisted_text.contains("seeded-account"));
+    assert!(persisted_text.contains("https://enterprise.example"));
+    assert!(!persisted_text.contains("seeded-access"));
+    assert!(!persisted_text.contains("seeded-refresh"));
+    assert!(!format!("{:?}", after).contains("rotated-access"));
+    assert!(!format!("{:?}", after).contains("rotated-refresh"));
 }
