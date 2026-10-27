@@ -4650,7 +4650,7 @@ fn native_loop(
                 if session_route {
                     view.chat_cursor(draft_echo, draft_cursor)
                 } else {
-                    view.home_cursor(draft_echo)
+                    view.home_cursor_at(draft_echo, draft_cursor)
                 }
             } else {
                 None

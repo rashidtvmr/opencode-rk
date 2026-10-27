@@ -1116,6 +1116,11 @@ impl NativeView {
     }
 
     pub fn home_cursor(&self, draft: &str) -> Option<(u16, u16)> {
+        self.home_cursor_at(draft, draft.len())
+    }
+
+    /// Project the actual insertion offset onto the clipped Home draft rows.
+    pub fn home_cursor_at(&self, draft: &str, byte_cursor: usize) -> Option<(u16, u16)> {
         if self.session_route {
             return None;
         }
@@ -1123,19 +1128,20 @@ impl NativeView {
         if width <= 3 || height <= 3 {
             return None;
         }
-        let bounded: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
-        let clean = crate::native_transcript::strip_ansi(&bounded);
-        let mut lines = clean.split('\n').take(129);
-        let mut last = lines.next().unwrap_or("");
-        let mut row = 0u16;
-        for line in lines {
-            row += 1;
-            last = line;
-        }
-        if row >= height.saturating_sub(4) {
+        let visible_len = draft.char_indices().nth(MAX_RENDER_DRAFT_CHARS)
+            .map_or(draft.len(), |(index, _)| index);
+        if byte_cursor > visible_len || !draft.is_char_boundary(byte_cursor) {
             return None;
         }
-        let cells = crate::native_view_layout::visit_unpadded_cells(last, usize::from(width - 3), |_, _| {}) as u16;
+        let before = draft.get(..byte_cursor)?;
+        let clean = crate::native_transcript::strip_ansi(before);
+        let row = clean.bytes().filter(|byte| *byte == b'\n').count();
+        if row >= usize::from(height.saturating_sub(4)) {
+            return None;
+        }
+        let line = clean.rsplit('\n').next().unwrap_or("").replace('\t', " ");
+        let cells = crate::native_view_layout::visit_unpadded_cells(&line, usize::from(width - 3), |_, _| {}) as u16;
+        let row = u16::try_from(row).ok()?;
         Some((left + 3 + cells.min(width - 4), top + 1 + row))
     }
 
@@ -3857,6 +3863,21 @@ mod footer_layout_tests {
 
 #[cfg(test)]
 mod composer_metadata_regression_tests {
+    #[test]
+    fn home_insertion_caret_tracks_prefix_instead_of_line_end() {
+        let mut view = super::NativeView::new(100, 32);
+        view.set_session_route(false);
+        let draft = "界ab\nxy";
+        let _ = view.render_typed(draft, &[], false, &[]);
+        let (left, top, _, _) = view.composer_region(draft).unwrap();
+        assert_eq!(view.home_cursor_at(draft, 0), Some((left + 3, top + 1)));
+        assert_eq!(view.home_cursor_at(draft, 3), Some((left + 5, top + 1)));
+        assert_eq!(view.home_cursor_at(draft, 4), Some((left + 6, top + 1)));
+        assert_eq!(view.home_cursor_at(draft, 6), Some((left + 3, top + 2)));
+        assert_eq!(view.home_cursor_at(draft, 7), Some((left + 4, top + 2)));
+        assert_eq!(view.home_cursor_at(draft, 1), None);
+        assert_eq!(view.home_cursor_at(draft, draft.len() + 1), None);
+    }
     use super::*;
 
     fn configured(width: u16, model: &str, provider: &str) -> NativeView {
