@@ -1034,13 +1034,13 @@ impl NativeView {
     }
 
     pub fn home_logo_region(&self, draft: &str) -> Option<(u16, u16)> {
-        let height = self.render_height();
+        let height = self.render_height().saturating_sub(self.home_footer_rows());
         let width = self.presentation().main_width;
         let (count, top, _) = self.home_positions(draft);
         if self.session_route
             || !matches!(self.pages.page(), Page::Chat | Page::Theme)
             || width < 43
-            || height < count + 15
+            || height < count + 14
         {
             return None;
         }
@@ -2043,66 +2043,6 @@ impl NativeView {
             }
             center
         } else if self.session_route {
-            let body_height = if height >= 4 { height - 2 } else { height };
-            let mut body = if let Some(messages) = messages {
-                let rows = self.chat.render_styled(
-                    inner_width as usize,
-                    body_height,
-                    &self.workspace,
-                    messages,
-                    draft,
-                    busy,
-                    &self.box_appearance,
-                );
-                self.chat_row_classes
-                    .extend(rows.iter().map(|(_, class, _)| *class));
-                self.chat_text_bounds
-                    .extend(rows.iter().map(|(_, _, bounds)| {
-                        bounds.map(|(left, width)| (left.saturating_add(2), width))
-                    }));
-                rows.into_iter()
-                    .map(|(text, _, _)| text)
-                    .collect::<Vec<_>>()
-            } else {
-                self.chat.render(
-                    inner_width as usize,
-                    body_height,
-                    &self.workspace,
-                    transcript,
-                    draft,
-                    busy,
-                )
-            };
-            // The upstream scrollbox starts with a spacer, rather than a
-            // permanent workspace/header row. The composer stays at its foot.
-            if body.len() > 1 {
-                // Keep the confirmed selected model/provider visible in the
-                // conversation at narrow widths too. The footer is reserved
-                // for directory and turn/status chrome, and the optional
-                // sidebar is unavailable at these widths. Only replace the
-                // upstream spacer when an actual model observation exists;
-                // unknown state remains an empty spacer.
-                body[0] = match &self.composer_model {
-                    Some(_) => padded(
-                        &if busy {
-                            format!("Thinking… · {}", self.composer_metadata())
-                        } else {
-                            self.composer_metadata()
-                        },
-                        width,
-                    ),
-                    None if self.status.model_label() != "Unavailable" => padded(
-                        &if busy {
-                            format!("Thinking… · {}", self.composer_metadata())
-                        } else {
-                            self.composer_metadata()
-                        },
-                        width,
-                    ),
-                    None if busy => padded("Thinking…", width),
-                    None => String::new(),
-                };
-            }
             let has_permission = permission_rows.is_some();
             // Upstream `SessionQuestion` (`permission.tsx:514-523`) renders the
             // permission prompt inline at the conversation bottom with
@@ -2181,8 +2121,13 @@ impl NativeView {
                 };
             }
             let mut body: Vec<_> = body.into_iter().map(|line| padded(&line, width)).collect();
+            self.chat_row_classes.resize(body.len(), crate::native_view_chat::ChatRowClass::Blank);
+            self.chat_text_bounds.resize(body.len(), None);
             if let Some(rows) = permission_rows {
                 body.extend(rows.iter().take(15).map(|row| padded(row, width)));
+                self.chat_row_classes.extend(std::iter::repeat_n(
+                    crate::native_view_chat::ChatRowClass::Metadata, rows.len().min(15)));
+                self.chat_text_bounds.extend(std::iter::repeat_n(None, rows.len().min(15)));
             }
             if has_permission {
                 // Permission prompt replaces the composer — no composer
@@ -2190,6 +2135,11 @@ impl NativeView {
             } else if height >= 4 {
                 body.push(padded(&self.composer_metadata(), width));
                 body.push(String::new());
+                self.chat_row_classes.extend([
+                    crate::native_view_chat::ChatRowClass::Metadata,
+                    crate::native_view_chat::ChatRowClass::Blank,
+                ]);
+                self.chat_text_bounds.extend([None, None]);
             }
             body
         } else {
@@ -2391,6 +2341,17 @@ impl NativeView {
             }
             shifted.resize(rows, String::new());
             frame = shifted;
+            // Paint classes and selectable intervals describe the returned
+            // screen, so they must move with its text under both tab layouts.
+            self.chat_row_classes = std::iter::repeat_n(
+                crate::native_view_chat::ChatRowClass::Blank, y.min(rows),
+            ).chain(self.chat_row_classes.drain(..)).take(rows).collect();
+            self.chat_text_bounds = std::iter::repeat_n(None, y.min(rows))
+                .chain(self.chat_text_bounds.drain(..).map(|bounds|
+                    bounds.map(|(left, width)| (left.saturating_add(x as u16), width))))
+                .take(rows).collect();
+            self.chat_row_classes.resize(rows, crate::native_view_chat::ChatRowClass::Blank);
+            self.chat_text_bounds.resize(rows, None);
             for region in &mut self.ui_regions {
                 region.x = region.x.saturating_add(self.tab_reservation.x_offset());
                 region.y = region.y.saturating_add(self.tab_reservation.y_offset());
@@ -2571,9 +2532,10 @@ impl NativeView {
             // the footer even when a modal/overlay is present; `frame_busy`
             // is only the separate center-composer suppression projection.
             let (footer, context_hit) = self.footer_line(self.layout.cols, busy);
-            frame[height - 1] = footer;
+            let footer_row = frame.len().saturating_sub(1);
+            frame[footer_row] = footer;
             self.context_usage_hit = context_hit.map(|(left, width)| {
-                (left, height.saturating_sub(1) as u16, width)
+                (left, footer_row as u16, width)
             });
         }
         frame
@@ -2654,17 +2616,18 @@ impl NativeView {
         (footer, context_hit)
     }
 
-    // home.tsx: two flex-grow spacers, four fixed rows before the logo,
+    // home.tsx: two flex-grow spacers, three fixed rows before the logo,
     // one spacer and one prompt padding row. Keep painter and text geometry
     // derived from the same bounded draft, including compact terminals.
     fn home_positions(&self, draft: &str) -> (usize, usize, usize) {
         let height = self.render_height();
+        let height = height.saturating_sub(self.home_footer_rows());
         let bounded: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
         let clean = crate::native_transcript::strip_ansi(&bounded);
         let count = clean.split('\n').take((height / 2).clamp(1, 12)).count();
-        let required = count + 15;
+        let required = count + 14;
         if height >= required {
-            let top = 4 + (height - required) / 2;
+            let top = 3 + (height - required) / 2;
             (count, top, top + 7)
         } else {
             (
@@ -2677,6 +2640,19 @@ impl NativeView {
         }
     }
 
+    /// Home's footer is a nonshrinking sibling, not an overpainted last row.
+    /// Pinned feature-plugins/home/footer.tsx reserves 0, 1, or 3 rows.
+    fn home_footer_rows(&self) -> usize {
+        let height = self.render_height();
+        if self.presentation().main_width < 44 || height < 14 {
+            0
+        } else if height < 16 {
+            1
+        } else {
+            3
+        }
+    }
+
     /// Pinned Home composition: centered four-row logo and a 75-cell maximum
     /// prompt, constrained by the parent's two-cell horizontal padding.
     fn home_column(&self, width: u16, height: usize, draft: &str) -> Vec<String> {
@@ -2684,11 +2660,13 @@ impl NativeView {
         if height == 0 || width == 0 {
             return rows;
         }
+        let footer_rows = self.home_footer_rows();
+        let body_height = height.saturating_sub(footer_rows);
         let prompt_width = self.home_prompt_width();
         let left = width.saturating_sub(prompt_width).div_ceil(2);
         let draft: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
         let draft = crate::native_transcript::strip_ansi(&draft);
-        let input: Vec<_> = draft.split('\n').take((height / 2).clamp(1, 12)).collect();
+        let input: Vec<_> = draft.split('\n').take((body_height / 2).clamp(1, 12)).collect();
         let (_, top, input_top) = self.home_positions(&draft);
         // logo.ts marker substitutions match component/logo.tsx's glyphs;
         // marker-specific shading is applied by the native paint layer.
@@ -2698,7 +2676,7 @@ impl NativeView {
             ("█__█ █__█ █^^^ █__█", "█___ █__█ █__█ █^^^"),
             ("▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"),
         ];
-        if height >= input.len() + 15 {
+        if body_height >= input.len() + 14 {
             let logo_width = width.saturating_sub(4).min(39);
             let logo_left = width.saturating_sub(logo_width).div_ceil(2);
             for (index, (left_line, right_line)) in logo.iter().enumerate() {
@@ -2735,7 +2713,7 @@ impl NativeView {
         } else {
             '┃'
         };
-        for index in border_top..box_bottom.min(height) {
+        for index in border_top..box_bottom.min(body_height) {
             if self.box_appearance != crate::native_box_style::BoxAppearance::default()
                 && !home_effective.has_border()
             {
@@ -2774,7 +2752,7 @@ impl NativeView {
             };
         }
         for (index, line) in input.iter().enumerate() {
-            if input_top + index < height {
+            if input_top + index < body_height {
                 let normal = [
                     "Fix a TODO in the codebase",
                     "What is the tech stack of this project?",
@@ -2808,7 +2786,7 @@ impl NativeView {
             }
         }
         let model_row = input_top + input.len() + 1;
-        if model_row < height {
+        if model_row < body_height {
             rows[model_row] = if home_frame && prompt_width >= 5 {
                 format!(
                     "{}{home_v}  {}{home_v}",
@@ -2824,7 +2802,7 @@ impl NativeView {
                 )
             };
         }
-        if box_bottom < height && home_effective.has_border() {
+        if box_bottom < body_height && home_effective.has_border() {
             rows[box_bottom] = if home_frame && prompt_width >= 2 {
                 format!(
                     "{}{}{}{}",
@@ -2843,17 +2821,20 @@ impl NativeView {
                 )
             };
         }
-        if box_bottom + 1 < height.saturating_sub(1) {
+        if box_bottom + 1 < body_height {
             let hint = "ctrl+p commands";
+            let location_width = prompt_width.saturating_sub(hint.len() as u16 + 2);
             rows[box_bottom + 1] = format!(
-                "{}{}",
-                " ".repeat(usize::from(
-                    left + prompt_width.saturating_sub(hint.len() as u16)
-                )),
+                "{}{}{}{}",
+                " ".repeat(usize::from(left)),
+                footer_directory(&self.workspace, location_width),
+                " ".repeat(usize::from(prompt_width.saturating_sub(location_width + hint.len() as u16))),
                 hint
             );
         }
-        let mut right = env!("CARGO_PKG_VERSION").to_owned();
+        if footer_rows == 0 { return rows; }
+        let right = if width >= 64 { env!("CARGO_PKG_VERSION") } else { "" };
+        let mut status = String::new();
         if self.status.mcp_acknowledged() && !self.status.entries().is_empty() {
             let connected = self
                 .status
@@ -2866,18 +2847,22 @@ impl NativeView {
                     )
                 })
                 .count();
-            right = format!("⊙ {connected} MCP /status  {right}");
+            let failed = self.status.entries().iter().filter(|entry|
+                matches!(entry.status, crate::native_view_status::McpStatus::Failed { .. })).count();
+            status = if failed > 0 { format!("⊙ {failed} MCP failed") } else { format!("⊙ {connected} MCP") };
+            if width >= 64 { status.push_str(" /mcps"); }
         }
         let inner = width.saturating_sub(4);
         let right_width = (right.chars().count().min(usize::from(inner))) as u16;
         let left_width = inner.saturating_sub(right_width).saturating_sub(2);
         let footer = format!(
             "{}{}{}",
-            fit(&self.workspace, left_width),
+            fit(&status, left_width),
             " ".repeat(usize::from(inner.saturating_sub(left_width + right_width))),
             fit(&right, right_width)
         );
-        rows[height - 1] = padded(&footer, width);
+        let footer_row = height - footer_rows + usize::from(footer_rows == 3);
+        rows[footer_row] = padded(&footer, width);
         rows
     }
 }
@@ -4159,6 +4144,102 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
 /// local simulation.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn appended_session_rows_keep_explicit_nonselectable_metadata() {
+        use super::*;
+        use crate::native_tabs::TabOrientation;
+        use crate::native_view_chat::ChatRowClass;
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let mut view = NativeView::new(120, 40);
+            view.set_session_route(true);
+            view.set_model(Some("fixture-model".into()));
+            view.set_tab_reservation(TabReservation::for_view(orientation, 120, 40));
+            let frame = view.render_typed("draft", &[], false, &[]);
+            let metadata_row = frame.iter().rposition(|row| row.contains("fixture-model")).unwrap();
+            assert_eq!(view.chat_row_classes()[metadata_row], ChatRowClass::Metadata,
+                "composer model row is not generic blank padding");
+            assert_eq!(view.chat_text_bounds()[metadata_row], None);
+            let permissions = ["permission heading".into(), "permission choice".into()];
+            let frame = view.render_typed_permission("draft", &[], false, &[], &permissions);
+            assert_eq!(view.chat_row_classes().len(), frame.len());
+            for marker in &permissions {
+                let row = frame.iter().position(|row| row.contains(marker)).unwrap();
+                assert_eq!(view.chat_row_classes()[row], ChatRowClass::Metadata,
+                    "inline permission rows have explicit nonselectable chrome metadata");
+                assert_eq!(view.chat_text_bounds()[row], None);
+            }
+        }
+    }
+    #[test]
+    fn home_multiline_prompt_footer_stays_inside_body_sibling() {
+        use super::*;
+        for height in [16, 24, 40] {
+            let mut view = NativeView::new(120, height);
+            view.set_session_route(false);
+            view.set_workspace("/fixture/project".into());
+            let frame = view.render(&"line\n".repeat(12), &[], false, &[]);
+            let body_end = usize::from(height) - view.home_footer_rows();
+            let prompt_footer = frame.iter().position(|row| row.contains("ctrl+p commands"))
+                .expect("bounded multiline editor leaves room for its prompt footer");
+            assert!(prompt_footer < body_end, "prompt footer stays before reserved Home footer rows");
+            assert!(frame[prompt_footer].contains("project"));
+            assert!(frame[body_end + 1].contains(env!("CARGO_PKG_VERSION")));
+            assert!(frame[body_end].trim().is_empty());
+            assert!(frame[body_end + 2].trim().is_empty());
+        }
+    }
+    #[test]
+    fn tab_reservations_shift_chat_paint_and_selection_with_text() {
+        use super::*;
+        use crate::native_tabs::TabOrientation;
+        use crate::native_view_chat::{ChatMessage, ChatRole, ChatRowClass};
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let mut view = NativeView::new(120, 40);
+            view.set_session_route(true);
+            let reservation = TabReservation::for_view(orientation, 120, 40);
+            view.set_tab_reservation(reservation);
+            let frame = view.render_typed("", &[ChatMessage::text(ChatRole::User, "needle")], false, &[]);
+            assert_eq!(view.chat_row_classes().len(), frame.len(), "paint metadata covers resized frame rows");
+            assert_eq!(view.chat_text_bounds().len(), frame.len(), "selection metadata covers resized frame rows");
+            assert_eq!(view.chat_row_classes().last(), Some(&ChatRowClass::Blank));
+            assert_eq!(view.chat_text_bounds().last(), Some(&None));
+            let row = frame.iter().position(|line| line.contains("needle")).unwrap();
+            assert_eq!(view.chat_row_classes()[row], ChatRowClass::UserCard);
+            assert_eq!(view.chat_row_classes()[row + 1], ChatRowClass::UserCard,
+                "bottom raised padding stays aligned with the rail");
+            let (left, _) = view.chat_text_bounds()[row].expect("actual text keeps its selection interval");
+            assert_eq!(left, reservation.x_offset() + 5, "two outer plus three inner columns, shifted by rail");
+            let prefix = &frame[row][..frame[row].find("needle").unwrap()];
+            let text_cell = crate::native_view_layout::visit_unpadded_cells(prefix, 120, |_, _| {});
+            assert_eq!(text_cell, usize::from(left),
+                "selection starts at the actual rendered text cell, not a UTF-8 byte position");
+            if reservation.y_offset() > 0 {
+                assert_eq!(view.chat_row_classes()[0], ChatRowClass::Blank, "tab strip has no transcript surface");
+            }
+        }
+    }
+    #[test]
+    fn pinned_home_footer_reserves_padding_before_centering() {
+        use super::*;
+        for (width, height, footer_row, logo_top) in [(120, 40, 38, 14), (269, 59, 57, 23)] {
+            let mut view = NativeView::new(width, height);
+            view.set_session_route(false);
+            view.set_workspace("/fixture/project".into());
+            let frame = view.render("draft", &[], false, &[]);
+            assert!(frame[footer_row].contains(env!("CARGO_PKG_VERSION")), "version sits between padded footer rows");
+            assert!(frame[usize::from(height) - 1].trim().is_empty(), "one bottom footer-padding row");
+            let (_, top, _) = view.home_positions("draft");
+            assert_eq!(top, logo_top, "center within body after excluding three-row footer");
+            assert!(frame.iter().any(|row| row.contains("/fixture/project")), "location remains in prompt footer");
+        }
+        for (width, height, visible) in [(43, 40, false), (120, 13, false), (44, 14, false), (64, 15, true), (64, 16, true)] {
+            let mut view = NativeView::new(width, height);
+            view.set_session_route(false);
+            let frame = view.render("", &[], false, &[]).join("\n");
+            assert_eq!(frame.contains(env!("CARGO_PKG_VERSION")), visible,
+                "version requires visible footer and width>=64 at {width}x{height}");
+        }
+    }
     use super::*;
 
     fn row(id: &str) -> SessionRow {

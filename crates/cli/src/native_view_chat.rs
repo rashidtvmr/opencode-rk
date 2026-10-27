@@ -645,6 +645,42 @@ fn boxed_message_rows(
             .map(|(text, class)| (text, class, Some((0, width.min(u16::MAX as usize) as u16))))
             .collect()
     };
+    // The pinned TUI has two different primitives, not a shared padded card:
+    // UserMessage is a raised left-rail surface (1 + 2 columns), whereas
+    // TextPart is unboxed prose with a three-column inset. Keep explicit
+    // appearance extensions below, but derive the ordinary geometry directly
+    // from those primitives rather than the symmetric BoxAppearance padding.
+    let default_padding = style.padding == 0
+        && appearance.overrides.get(&id).and_then(|value| value.padding).is_none();
+    if default_padding && style.has_border() && !appearance.full_outline(id)
+        && matches!(id, BoxId::User | BoxId::Assistant) && width > 3
+    {
+        let inner = width - 3;
+        let mut output = Vec::new();
+        if separator {
+            output.push((String::new(), ChatRowClass::Separator, None));
+        }
+        let user = id == BoxId::User;
+        let padding = format!("{USER_RAIL}{}", " ".repeat(width - 1));
+        if user {
+            output.push((padding.clone(), ChatRowClass::UserCard, None));
+        }
+        let limit = MAX_MESSAGE_ROWS.saturating_sub(output.len() + usize::from(user));
+        for (text, class) in typed_message_rows_with_prefix(inner, message, false, Some(""))
+            .into_iter().take(limit)
+        {
+            let text = crate::native_view_layout::slice_cells(&text, 0, inner.min(u16::MAX as usize) as u16);
+            output.push((
+                format!("{}{text}", if user { "┃  " } else { "   " }),
+                class,
+                Some((3, inner.min(u16::MAX as usize) as u16)),
+            ));
+        }
+        if user {
+            output.push((padding, ChatRowClass::UserCard, None));
+        }
+        return output;
+    }
     // Borderless is an explicit fill/content choice. Do not enter the frame
     // path (which would reserve outline rows) and do not synthesize blank
     // border glyphs; retain the ordinary typed message classes and bounds.
@@ -823,6 +859,13 @@ fn starts_new_group(index: usize, messages: &[ChatMessage]) -> bool {
         ChatRole::System => messages[index - 1].role != ChatRole::System,
         ChatRole::Assistant | ChatRole::Tool => false,
     }
+}
+
+// SessionRowView gives an assistant row its own one-row top margin. Keep
+// the legacy plain-text transcript grouping separate from the styled TUI.
+fn starts_styled_group(index: usize, messages: &[ChatMessage]) -> bool {
+    starts_new_group(index, messages)
+        || (index > 0 && messages[index].role == ChatRole::Assistant)
 }
 
 /// `[tool] name (id)` / `[result] name` / `[error] name` header, from
@@ -1195,6 +1238,15 @@ fn typed_message_rows(
     message: &ChatMessage,
     separator: bool,
 ) -> Vec<(String, ChatRowClass)> {
+    typed_message_rows_with_prefix(width, message, separator, None)
+}
+
+fn typed_message_rows_with_prefix(
+    width: usize,
+    message: &ChatMessage,
+    separator: bool,
+    prefix: Option<&str>,
+) -> Vec<(String, ChatRowClass)> {
     let mut rows: Vec<(String, ChatRowClass)> = Vec::new();
     if separator {
         rows.push((String::new(), ChatRowClass::Separator));
@@ -1210,11 +1262,18 @@ fn typed_message_rows(
         }
         match part {
             ChatPart::Text(text) => {
-                push_markdown_wrapped(
+                let push = |rows: &mut Vec<(String, ChatRowClass)>, width, text: &str, prefix: &str, class| {
+                    if message.role == ChatRole::User {
+                        push_wrapped(rows, width, text, prefix, class);
+                    } else {
+                        push_markdown_wrapped(rows, width, text, prefix, class);
+                    }
+                };
+                push(
                     &mut rows,
                     width,
                     text,
-                    text_prefix(message.role),
+                    prefix.unwrap_or_else(|| text_prefix(message.role)),
                     match message.role {
                         ChatRole::User => ChatRowClass::UserCard,
                         ChatRole::Assistant => ChatRowClass::AssistantCard,
@@ -1573,7 +1632,7 @@ impl ChatView {
                 for row in boxed_message_rows(
                     width,
                     message,
-                    starts_new_group(index, messages),
+                    starts_styled_group(index, messages),
                     appearance,
                 )
                 .into_iter()
@@ -1595,7 +1654,12 @@ impl ChatView {
         let end = reversed.len().saturating_sub(effective_scroll);
         let start = end.saturating_sub(transcript_h);
         let visible = reversed[start..end].to_vec();
-        let first = body_h.saturating_sub(visible.len());
+        // OpenTUI's scrollbox follows the tail only once content overflows;
+        // shorter conversations start after its single top spacer. Padding
+        // belongs below the conversation, never between that spacer and User.
+        let first = rows.iter().take(body_h)
+            .position(|(_, class)| *class == ChatRowClass::Header)
+            .map_or(0, |header| header + 1);
         let mut bounds = vec![None; rows.len()];
         for (index, (text, class, range)) in visible.into_iter().enumerate() {
             rows[first + index] = (text, class);
@@ -1614,7 +1678,7 @@ impl ChatView {
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> usize {
         messages.iter().enumerate().map(|(index, message)|
-            boxed_message_rows(width, message, starts_new_group(index, messages), appearance).len()
+            boxed_message_rows(width, message, starts_styled_group(index, messages), appearance).len()
         ).sum()
     }
 
@@ -1631,7 +1695,7 @@ impl ChatView {
         let mut total = 0usize;
         let mut spans = Vec::with_capacity(messages.len());
         for (index, message) in messages.iter().enumerate() {
-            let rows = boxed_message_rows(width, message, starts_new_group(index, messages), appearance).len();
+            let rows = boxed_message_rows(width, message, starts_styled_group(index, messages), appearance).len();
             spans.push((total, rows));
             total = total.saturating_add(rows);
         }
@@ -1658,7 +1722,7 @@ impl ChatView {
         let mut total = 0usize;
         let mut anchor_start = None;
         for (index, message) in messages.iter().enumerate() {
-            let rows = boxed_message_rows(width, message, starts_new_group(index, messages), appearance).len();
+            let rows = boxed_message_rows(width, message, starts_styled_group(index, messages), appearance).len();
             if ids.get(index).map(String::as_str) == Some(anchor.id.as_str()) {
                 anchor_start = Some((total, rows));
             }
@@ -2023,6 +2087,68 @@ mod tests {
                 !row.chars().any(|c| matches!(c, '╭' | '┌' | '╔' | '┏' | '┃')),
                 "assistant prose stays unbordered: {row:?}"
             );
+        }
+    }
+
+    /// Selected OpenCode's UserMessage has one rail cell, two columns of
+    /// content inset, and one raised padding row on either side. Its sibling
+    /// assistant TextPart has a three-column inset and no card-padding rows.
+    #[test]
+    fn pinned_message_role_geometry_and_literal_user_text() {
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        for width in [12, 116, 265] {
+            let user = boxed_message_rows(
+                width,
+                &ChatMessage::text(ChatRole::User, "hello"),
+                false,
+                &appearance,
+            );
+            assert_eq!(user.len(), 3, "one padding row on each side");
+            assert_eq!(user[1].0.trim_end(), "┃  hello");
+            assert_eq!(user[1].2, Some((3, (width - 3) as u16)));
+            for padding in [&user[0], &user[2]] {
+                assert_eq!(padding.1, ChatRowClass::UserCard, "raised fill continues across padding");
+                assert_eq!(padding.2, None, "card padding is not selectable text");
+            }
+            let assistant = boxed_message_rows(
+                width,
+                &ChatMessage::text(ChatRole::Assistant, "hello"),
+                false,
+                &appearance,
+            );
+            assert_eq!(assistant.len(), 1, "assistant text has no card padding");
+            assert_eq!(assistant[0].0.trim_end(), "   hello");
+            assert_eq!(assistant[0].1, ChatRowClass::AssistantCard);
+            assert_eq!(assistant[0].2, Some((3, (width - 3) as u16)));
+        }
+        let literal = boxed_message_rows(
+            40,
+            &ChatMessage::text(ChatRole::User, "**literal** `code`"),
+            false,
+            &appearance,
+        );
+        assert_eq!(literal[1].0.trim_end(), "┃  **literal** `code`");
+    }
+
+    #[test]
+    fn pinned_short_conversation_starts_at_top_with_assistant_row_gap() {
+        let view = ChatView::new();
+        let messages = [
+            ChatMessage::text(ChatRole::User, "question"),
+            ChatMessage::text(ChatRole::Assistant, "answer"),
+        ];
+        for height in [18, 40, 59] {
+            let rows = view.render_styled(60, height, "workspace", &messages, "", false,
+                &crate::native_box_style::BoxAppearance::default());
+            assert_eq!(rows[0].1, ChatRowClass::Header, "the header/spacer is not overwritten");
+            assert!(rows[0].0.contains("workspace"), "helper header content is preserved");
+            assert_eq!(rows[1].1, ChatRowClass::UserCard, "user padding starts after the scrollbox spacer");
+            assert_eq!(rows[2].0.trim_end(), "┃  question");
+            assert_eq!(rows[3].1, ChatRowClass::UserCard);
+            assert_eq!(rows[4].1, ChatRowClass::Separator, "assistant row wrapper marginTop=1");
+            assert_eq!(rows[5].0.trim_end(), "   answer");
+            assert!(rows.iter().skip(6).take_while(|(_, class, _)| *class != ChatRowClass::Composer)
+                .all(|(text, _, _)| text.trim().is_empty()), "unused space follows the conversation");
         }
     }
 
