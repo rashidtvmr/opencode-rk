@@ -997,8 +997,14 @@ impl Renderer {
         }
         #[cfg(feature = "native")]
         {
-            // SAFETY: live handle; plain integers only.
-            unsafe { setCursorPosition(handle, x as i32, y as i32, visible) };
+            // OpenTUI's cursor API uses terminal coordinates (1-based),
+            // unlike the zero-based framebuffer and this Rust facade.
+            let terminal_x = i32::try_from(x.checked_add(1).ok_or(BridgeError::RenderFailed)?)
+                .map_err(|_| BridgeError::RenderFailed)?;
+            let terminal_y = i32::try_from(y.checked_add(1).ok_or(BridgeError::RenderFailed)?)
+                .map_err(|_| BridgeError::RenderFailed)?;
+            // SAFETY: live handle; bounded coordinates converted to the native ABI.
+            unsafe { setCursorPosition(handle, terminal_x, terminal_y, visible) };
             Ok(())
         }
     }
