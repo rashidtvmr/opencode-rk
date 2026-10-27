@@ -1208,6 +1208,7 @@ struct PaintCtx {
     page_panel: Option<(u16, u16, u16, u16)>,
     logo: Option<(u16, u16)>,
     tabs: Option<TabStrip>,
+    vertical_rail: Option<crate::native_tab_rail::RailFrame>,
 }
 
 #[cfg(feature = "native")]
@@ -1220,6 +1221,26 @@ enum NativeIntent {
 #[cfg(all(test, feature = "native"))]
 mod surface_paint_regressions {
     use super::*;
+
+    #[test]
+    fn vertical_rail_preserves_overlapping_modal_body_cells() {
+        use crate::native_tab_rail::{RailRect, RailRow, RailRowKind, RailStyle};
+        let mut renderer = NativeRenderer::create_memory(12, 3).unwrap();
+        let foreground = Rgba::rgb(240, 240, 240);
+        let background = Rgba::rgb(20, 20, 20);
+        renderer.draw_text_styled(3, 0, "MODAL", foreground, Some(background), 0).unwrap();
+        let row = RailRow {
+            kind: RailRowKind::Empty, style: RailStyle::Idle,
+            rect: RailRect { x: 0, y: 0, width: 12, height: 2 },
+            text: "abcdefghijkl\nmnopqrstuvwx".into(),
+        };
+        paint_rail_row(&mut renderer, &row, Some((3, 0, 5, 1)), foreground, background).unwrap();
+        renderer.frame(|_| {}).unwrap();
+        let snapshot = renderer.snapshot_text().unwrap();
+        let lines: Vec<_> = snapshot.lines().collect();
+        assert_eq!(lines[0], "abcMODALijkl", "rail must not overwrite modal contents");
+        assert_eq!(lines[1], "mnopqrstuvwx", "rail outside the modal remains painted");
+    }
 
     #[test]
     fn horizontal_rules_span_past_512_cells_without_crossing_viewport() {
@@ -1281,6 +1302,7 @@ mod surface_paint_regressions {
             page_panel: view.page_panel(),
             logo: None,
             tabs: None,
+            vertical_rail: None,
         }).expect("paint native frame");
         let snapshot = renderer.snapshot_text().expect("native text snapshot");
         let actual = snapshot.lines().nth(usize::from(composer.1)).expect("painted border row");
@@ -1780,6 +1802,36 @@ fn surface_fill_rect(
 }
 
 #[cfg(feature = "native")]
+fn paint_rail_row(
+    renderer: &mut NativeRenderer,
+    row: &crate::native_tab_rail::RailRow,
+    modal: Option<(u32, u32, u32, u32)>,
+    foreground: Rgba,
+    background: Rgba,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let left = u32::from(row.rect.x);
+    let right = left.saturating_add(u32::from(row.rect.width)).min(renderer.cols());
+    for offset in 0..u32::from(row.rect.height) {
+        let y = u32::from(row.rect.y).saturating_add(offset);
+        if y >= renderer.rows() || left >= right { continue; }
+        let spans = match modal {
+            Some((x, top, width, height)) if y >= top && y < top.saturating_add(height) =>
+                [(left, right.min(x)), (left.max(x.saturating_add(width)), right)],
+            _ => [(left, right), (right, right)],
+        };
+        let line = row.text.split('\n').nth(offset as usize).unwrap_or("");
+        for (start, end) in spans {
+            if start >= end { continue; }
+            let width = end - start;
+            let text = crate::native_view_layout::slice_cells(line, (start - left) as u16, width as u16);
+            renderer.fill_rect(start, y, width, 1, background)?;
+            renderer.draw_text_styled(start, y, &text, foreground, Some(background), 0)?;
+        }
+    }
+    Ok(())
+}
+
+#[cfg(feature = "native")]
 fn native_paint(
     renderer: &mut NativeRenderer,
     lines: &[String],
@@ -2109,7 +2161,24 @@ fn native_paint(
             }
         }
     }
-    if let Some(tabs) = ctx.tabs {
+    if let Some(rail) = ctx.vertical_rail.as_ref() {
+        for row in &rail.rows {
+            let x = u32::from(row.rect.x); let y = u32::from(row.rect.y);
+            if x >= cols || y >= rows { continue; }
+            let bg = match row.style {
+                crate::native_tab_rail::RailStyle::Active => element,
+                crate::native_tab_rail::RailStyle::Hovered => element,
+                crate::native_tab_rail::RailStyle::Busy => panel,
+                crate::native_tab_rail::RailStyle::Attention => element,
+                crate::native_tab_rail::RailStyle::NewControl => element,
+                _ => panel,
+            };
+            // Modal body cells were painted by the general row pass above.
+            // Exclude their whole rectangle, not just the later border pass.
+            paint_rail_row(renderer, row, modal, dim(text_color, base_alpha), dim(bg, base_alpha))?;
+        }
+    }
+    if let Some(tabs) = ctx.tabs.filter(|_| ctx.vertical_rail.is_none()) {
         let fg = accent;
         let bg = dim(panel, base_alpha);
         for (index, row) in tabs.rows.iter().enumerate() {
@@ -3307,6 +3376,7 @@ fn native_loop(
     // The last painted strip is the sole hit-test snapshot; paint and input
     // never independently recompute tab geometry.
     let mut rendered_tabs: Option<TabStrip> = None;
+    let mut rendered_rail: Option<crate::native_tab_rail::RailFrame> = None;
     let mut tab_hovered: Option<crate::native_navigation::SessionRef> = None;
     // Press capture binds the click to a stable tab and painted rect.
     let mut tab_press: Option<(crate::native_navigation::SessionRef, crate::native_tabs::TabRect, bool, TabOrientation)> = None;
@@ -4554,6 +4624,12 @@ fn native_loop(
             tab_hovered.as_ref(),
             matches!(effective_orientation, TabOrientation::Horizontal),
         );
+        let frame_rail = if effective_orientation == TabOrientation::Vertical {
+            let rail_inputs = tab_inputs.iter().map(|tab| crate::native_tab_rail::RailInput {
+                session: tab.session.clone(), title: tab.title.clone(), detail: String::new(), flags: tab.flags,
+            }).collect::<Vec<_>>();
+            Some(crate::native_tab_rail::RailFrame::render(&rail_inputs, tab_reservation.width, viewport.1, rendered_rail.as_ref().map_or(0, |r| r.scroll_start), tab_hovered.as_ref()))
+        } else { None };
         let mut lines = if help_open && !dialog_open {
             Vec::new()
         } else {
@@ -4756,10 +4832,12 @@ fn native_loop(
                     } else {
                         view.home_logo_region(draft_echo)
                     },
-                    tabs: Some(frame_tabs.clone()),
+            tabs: Some(frame_tabs.clone()),
+            vertical_rail: frame_rail.clone(),
                 },
             )?;
             rendered_tabs = Some(frame_tabs);
+            rendered_rail = frame_rail;
             needs_paint = false;
             crate::native_debug::event(
                 "ui.frame",
@@ -5053,14 +5131,31 @@ fn native_loop(
                     && modifiers == 0
                 {
                     if kind == 7 {
-                        tab_hovered = rendered_tabs.as_ref().and_then(|tabs| tabs.hit(x, y)).map(|hit| hit.session);
+                        tab_hovered = if effective_orientation == TabOrientation::Vertical {
+                            rendered_rail.as_ref().and_then(|rail| match rail.hit(x, y) { Some(crate::native_tab_rail::RailHit::Session(id)) => Some(id), _ => None })
+                        } else {
+                            rendered_tabs.as_ref().and_then(|tabs| tabs.hit(x, y)).map(|hit| hit.session)
+                        };
                         needs_paint = true;
                         continue;
                     }
                     if kind == 0 {
                         tab_press = None;
                         add_press = None;
-                        if let Some(tabs) = rendered_tabs.as_ref() {
+                        if effective_orientation == TabOrientation::Vertical {
+                            if let Some(rail) = rendered_rail.as_ref() {
+                                match rail.hit(x, y) {
+                                    Some(crate::native_tab_rail::RailHit::Session(session)) => {
+                                        if let Some(row) = rail.rows.iter().find(|row| matches!(&row.kind, crate::native_tab_rail::RailRowKind::Session(id) if id == &session)) {
+                                            let close = rail.close_hit(x, y) == Some(&session);
+                                            tab_press = Some((session, crate::native_tabs::TabRect { x: row.rect.x, y: row.rect.y, width: row.rect.width, height: row.rect.height }, close, effective_orientation));
+                                        }
+                                    }
+                                    Some(crate::native_tab_rail::RailHit::New) => add_press = Some((crate::native_tabs::TabRect { x: rail.new_rect.map_or(0, |r| r.x), y: rail.new_rect.map_or(0, |r| r.y), width: rail.new_rect.map_or(0, |r| r.width), height: rail.new_rect.map_or(0, |r| r.height) }, effective_orientation)),
+                                    None => {}
+                                }
+                            }
+                        } else if let Some(tabs) = rendered_tabs.as_ref() {
                             if let Some(hit) = tabs.hit(x, y) {
                                 let session = hit.session;
                                 if let Some((_, rect)) = tabs.rects.iter().find(|(id, _)| id == &session) {
@@ -5085,14 +5180,17 @@ fn native_loop(
                         let captured_add = add_press.take();
                         let Some(tabs) = rendered_tabs.as_ref() else { continue };
                         if let Some((session, rect, pressed_close, pressed_orientation)) = captured {
-                            let still_same = pressed_orientation == effective_orientation && tabs.rects.iter().any(|(id, current)| *id == session && *current == rect && x >= current.x && y >= current.y && x < current.x.saturating_add(current.width) && y < current.y.saturating_add(current.height));
+                            let still_same = pressed_orientation == effective_orientation && if effective_orientation == TabOrientation::Vertical { rendered_rail.as_ref().is_some_and(|rail| rail.rows.iter().any(|row| matches!(&row.kind, crate::native_tab_rail::RailRowKind::Session(id) if id == &session) && row.rect.x == rect.x && row.rect.y == rect.y && row.rect.width == rect.width && row.rect.height == rect.height && x >= rect.x && y >= rect.y && x < rect.x.saturating_add(rect.width) && y < rect.y.saturating_add(rect.height))) } else { tabs.rects.iter().any(|(id, current)| *id == session && *current == rect && x >= current.x && y >= current.y && x < current.x.saturating_add(current.width) && y < current.y.saturating_add(current.height)) };
                             if still_same {
-                                let close_hit = tabs.visible_close_rect().is_some_and(|close| {
+                                let close_hit = if effective_orientation == TabOrientation::Vertical {
+                                    rendered_rail.as_ref().is_some_and(|rail| rail.close_hit(x, y) == Some(&session))
+                                } else { tabs.visible_close_rect().is_some_and(|close| {
                                     tabs.hovered_session() == Some(&session)
                                         && x >= close.x && y >= close.y
                                         && x < close.x.saturating_add(close.width)
                                         && y < close.y.saturating_add(close.height)
-                                });
+                                }) };
+                                if pressed_close && !close_hit { continue; }
                                 if pressed_close && close_hit {
                                     let close_scroll = view.chat_scroll_offset();
                                     match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
@@ -5129,7 +5227,7 @@ fn native_loop(
                         }
                         if let Some((rect, pressed_orientation)) = captured_add {
                             if navigation.active().is_none() { continue; }
-                            let same = pressed_orientation == effective_orientation && tabs.add_rect == Some(rect) && x >= rect.x && y >= rect.y && x < rect.x.saturating_add(rect.width) && y < rect.y.saturating_add(rect.height);
+                            let same = pressed_orientation == effective_orientation && if effective_orientation == TabOrientation::Vertical { rendered_rail.as_ref().and_then(|rail| rail.new_rect).is_some_and(|current| current.x == rect.x && current.y == rect.y && current.width == rect.width && current.height == rect.height && x >= current.x && y >= current.y && x < current.x.saturating_add(current.width) && y < current.y.saturating_add(current.height)) } else { tabs.add_rect == Some(rect) && x >= rect.x && y >= rect.y && x < rect.x.saturating_add(rect.width) && y < rect.y.saturating_add(rect.height) };
                             if same {
                                 // Home is lazy: retain old tabs and their state;
                                 // no session creation request occurs until submit.
