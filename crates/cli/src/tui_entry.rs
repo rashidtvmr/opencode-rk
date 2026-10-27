@@ -2238,10 +2238,19 @@ fn native_paint(
                 renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), "✕", fg, Some(bg), 0)?;
             }
         }
+        for (row, rect) in tabs.rows.iter().skip(tabs.rects.len()).zip(&tabs.overflow_rects) {
+            if rect.x < cols as u16 && rect.y < rows as u16 {
+                renderer.fill_rect(u32::from(rect.x), u32::from(rect.y),
+                    u32::from(rect.width).min(cols - u32::from(rect.x)), 1, bg)?;
+                renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), row,
+                    muted, Some(bg), 0)?;
+            }
+        }
         if let Some(rect) = tabs.add_rect {
             if rect.x < cols as u16 && rect.y < rows as u16 {
                 renderer.fill_rect(u32::from(rect.x), u32::from(rect.y), u32::from(rect.width).min(cols - u32::from(rect.x)), u32::from(rect.height).min(rows - u32::from(rect.y)), bg)?;
-                renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), "+", accent, Some(bg), 0)?;
+                let label = if rect.width < 3 { "+" } else { " + " };
+                renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), label, accent, Some(bg), 0)?;
             }
         }
     }

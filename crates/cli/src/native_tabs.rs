@@ -146,6 +146,9 @@ pub struct TabStrip {
     pub orientation: TabOrientation,
     pub available_width: u16,
     pub rows: Vec<String>,
+    /// Marker rows follow the session rows in `rows`; their rectangles never
+    /// participate in session identity or close hit testing.
+    pub overflow_rects: Vec<TabRect>,
     pub rects: Vec<(SessionRef, TabRect)>,
     pub close_rects: Vec<(SessionRef, TabRect)>,
     pub overflow_before: bool,
@@ -173,6 +176,10 @@ impl TabStrip {
             rect.y = rect.y.saturating_add(y);
         }
         for (_, rect) in &mut self.close_rects {
+            rect.x = rect.x.saturating_add(x);
+            rect.y = rect.y.saturating_add(y);
+        }
+        for rect in &mut self.overflow_rects {
             rect.x = rect.x.saturating_add(x);
             rect.y = rect.y.saturating_add(y);
         }
@@ -232,7 +239,7 @@ impl TabStrip {
     }
 
     /// Runtime composition matching the upstream separate new-session control.
-    /// The tab layout receives only the space left of the always-visible button.
+    /// The tab budget reserves the button; its position follows the final child.
     #[must_use]
     pub fn render_with_hover_and_add(
         inputs: &[TabInput],
@@ -248,6 +255,7 @@ impl TabStrip {
             add_rect: None,
             available_width: width,
             rows: Vec::new(),
+            overflow_rects: Vec::new(),
             rects: Vec::new(),
             close_rects: Vec::new(),
             overflow_before: false,
@@ -286,9 +294,6 @@ impl TabStrip {
         out.scroll = solved.start;
         out.overflow_before = solved.before > 0;
         out.overflow_after = solved.after > 0;
-        if horizontal && show_add && width > 0 {
-            out.add_rect = Some(TabRect { x: width.saturating_sub(TabReservation::ADD_TAB_WIDTH), y: 0, width: TabReservation::ADD_TAB_WIDTH.min(width), height: height.min(1) });
-        }
         let visible = &inputs[solved.start..solved.start + solved.count];
         let before_cells = if solved.before > 0 {
             overflow_width(solved.before)
@@ -348,6 +353,24 @@ impl TabStrip {
                 out.close_rects.push((input.session.clone(), close));
             }
             x_or_y = x_or_y.saturating_add(if horizontal { item_width } else { 1 });
+        }
+        let after_cells = if solved.after > 0 { overflow_width(solved.after) } else { 0 };
+        if horizontal {
+            for (count, x, cells, label) in [
+                (solved.before, 0, marker_left as u16, format!("‹{}", solved.before)),
+                (solved.after, x_or_y, after_cells.min(usize::from(available.saturating_sub(x_or_y))) as u16,
+                    format!(" {}›", solved.after)),
+            ] {
+                if count > 0 && cells > 0 {
+                    out.rows.push(fit(&label, cells));
+                    out.overflow_rects.push(TabRect { x, y: 0, width: cells, height: 1 });
+                }
+            }
+        }
+        if horizontal && show_add {
+            let x = usize::from(x_or_y).saturating_add(after_cells).min(usize::from(available)) as u16;
+            out.add_rect = Some(TabRect { x, y: 0,
+                width: TabReservation::ADD_TAB_WIDTH.min(width.saturating_sub(x)), height: 1 });
         }
         out.visible_close_session = out
             .hovered
@@ -573,6 +596,30 @@ fn display_width(s: &str) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn horizontal_new_follows_short_or_empty_tab_list_without_right_anchoring() {
+        for count in 0..=2 {
+            let inputs: Vec<_> = (0..count).map(|id| input(&id.to_string(), "tab")).collect();
+            let strip = TabStrip::render_with_hover_and_add(&inputs, TabOrientation::Horizontal, 80, 1, 0, None, true);
+            let after_tabs = strip.rects.last().map_or(0, |(_, rect)| rect.x + rect.width);
+            let add = strip.add_rect.unwrap();
+            assert_eq!(add.x, after_tabs, "New is the next flex child, not pinned to the screen edge");
+            assert!(strip.add_hit(add.x + 1, 0));
+            assert!(strip.mouse_action(add.x + 1, 0).is_none());
+        }
+    }
+
+    #[test]
+    fn horizontal_overflow_labels_are_paint_rows_not_session_targets() {
+        let tabs = vec![input("a", "first"), input("b", "second"), input("c", "third")];
+        let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 12, 1, 1, None, true);
+        assert!(strip.overflow_before && strip.overflow_after);
+        assert!(strip.rows.iter().any(|row| row.trim_end() == "‹1"), "before count must be painted");
+        assert!(strip.rows.iter().any(|row| row.trim_end() == " 1›"), "after count must be painted");
+        assert!(strip.hit(0, 0).is_none());
+        assert!(strip.hit(6, 0).is_none());
+        assert_eq!(strip.add_rect.unwrap().x, 9);
+    }
     fn input(id: &str, title: &str) -> TabInput {
         TabInput {
             session: SessionRef(id.into()),
@@ -647,7 +694,9 @@ mod tests {
             let inputs: Vec<_> = (0..count).map(|i| input(&format!("id-{i}"), "tab")).collect();
             let strip = TabStrip::render_with_hover_and_add(&inputs, TabOrientation::Horizontal, 80, 1, 0, None, true);
             let add = strip.add_rect.expect("runtime plus is always visible");
-            assert_eq!(add, TabRect { x: 77, y: 0, width: 3, height: 1 });
+            let x = match count { 0 => 0, 1 => 32, 2 => 64, _ => 77 };
+            assert_eq!(add, TabRect { x, y: 0, width: 3, height: 1 },
+                "New follows capped tab widths and overflow markers");
             assert!(strip.rects.iter().all(|(_, rect)| rect.x + rect.width <= add.x));
         }
         for width in 1..=2 {
