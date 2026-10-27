@@ -411,11 +411,16 @@ impl TerminalInputDecoder {
         } // release is not text; repeat has the same printable press value
         if modifier == 1 {
             match codepoint {
-                57350 => self.emit(InputEvent::ArrowLeft),
-                57351 => self.emit(InputEvent::ArrowRight),
+                57350 => {
+                    self.emit(InputEvent::ArrowLeft);
+                    return;
+                }
+                57351 => {
+                    self.emit(InputEvent::ArrowRight);
+                    return;
+                }
                 _ => {}
             }
-            return;
         }
         if (0xE000..=0xF8FF).contains(&codepoint) || codepoint > 0x10FFFF {
             return;
@@ -647,6 +652,63 @@ mod mouse_protocol_tests {
         assert_eq!(
             decoder.pop(),
             Some(InputEvent::Mouse { x: 3, y: 1, kind: 6, modifiers: 0 })
+        );
+    }
+}
+
+#[cfg(test)]
+mod kitty_printable_regressions {
+    use super::*;
+
+    fn decode(bytes: &[u8]) -> Vec<InputEvent> {
+        let mut decoder = TerminalInputDecoder::default();
+        let now = Instant::now();
+        let mut events = Vec::new();
+        for &byte in bytes {
+            decoder.push(byte, now);
+            while let Some(event) = decoder.pop() {
+                events.push(event);
+            }
+        }
+        events
+    }
+
+    #[test]
+    fn unmodified_kitty_printable_is_not_dropped() {
+        assert_eq!(decode(b"\x1b[99;1u"), vec![InputEvent::Byte(b'c')]);
+    }
+
+    #[test]
+    fn unmodified_unicode_is_emitted_as_complete_utf8() {
+        assert_eq!(
+            decode(b"\x1b[233;1u\x1b[128512;1u"),
+            "é😀".bytes().map(InputEvent::Byte).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn kitty_press_and_repeat_emit_but_release_does_not() {
+        assert_eq!(
+            decode(b"\x1b[99;1:1u\x1b[99;1:2u\x1b[99;1:3u"),
+            vec![InputEvent::Byte(b'c'), InputEvent::Byte(b'c')]
+        );
+    }
+
+    #[test]
+    fn invalid_modifiers_scalars_and_protocol_keys_are_not_text() {
+        assert!(decode(b"\x1b[99;0u\x1b[57344;1u\x1b[55296;1u\x1b[1114112;1u").is_empty());
+        assert_eq!(
+            decode(b"\x1b[57350;1u\x1b[57351;1u"),
+            vec![InputEvent::ArrowLeft, InputEvent::ArrowRight]
+        );
+    }
+
+    #[test]
+    fn kitty_bytes_preserve_seed_without_protocol_reports() {
+        let events = decode(b"native escape seed \x1b[12;34R\x1b[99;1u caf\xc3\xa9");
+        assert_eq!(
+            events,
+            "native escape seed c café".bytes().map(InputEvent::Byte).collect::<Vec<_>>()
         );
     }
 }
