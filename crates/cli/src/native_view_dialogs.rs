@@ -427,6 +427,22 @@ fn permission_alias(label: &str) -> Option<PermissionChoice> {
     }
 }
 
+/// Measure the visible, unpadded terminal cells using the exact cluster
+/// segmentation used by the native painter. This deliberately does not use
+/// `visit_cells`, which first pads through `fit`; action hit regions must never
+/// include padding after a wide cluster is clipped.
+fn visible_text(text: &str, budget: usize) -> String {
+    let mut visible = String::new();
+    crate::native_view_layout::visit_unpadded_cells(text, budget, |glyph, _| {
+        visible.push_str(glyph);
+    });
+    visible
+}
+
+fn visible_cells(text: &str, budget: usize) -> usize {
+    crate::native_view_layout::visit_unpadded_cells(text, budget, |_, _| {})
+}
+
 impl DialogView {
     /// Closed view (no dialog, input passes through).
     #[must_use]
@@ -819,15 +835,34 @@ impl DialogView {
     }
 
     #[must_use]
+    /// Return the rendered terminal-cell span for a permission action on `row`.
+    /// Both the prefix and label are measured by the native cell iterator used
+    /// by the painter, so wide/combining clusters and cell clipping cannot move
+    /// the pointer target away from the painted action.
+    #[must_use]
+    pub fn choice_region_at_row(&self, width: usize, height: usize, row: usize) -> Option<(usize, usize, usize)> {
+        let (lines, hits, _) = self.layout(width, height);
+        let index = hits.get(row).copied().flatten()?;
+        let dialog = self.dialog.as_ref()?;
+        let label = dialog.choices.get(index)?;
+        lines.get(row)?;
+        let marker = if self.selection == Some(index) { " > " } else { "   " };
+        let prefix = format!("{marker}{}. ", index + 1);
+        // Measure the same unpadded cluster stream as `fit`, with the same
+        // terminal-cell budget. A wide cluster that does not fit is dropped,
+        // leaving only actual painted source cells clickable.
+        let start = visible_cells(&prefix, width);
+        let label_width = visible_cells(label, width.saturating_sub(start));
+        let end = start.saturating_add(label_width);
+        (end > start).then_some((index, start, end - start))
+    }
+
+    #[must_use]
     pub fn choice_at_cell(&self, width: usize, height: usize, row: usize, col: usize) -> Option<usize> {
         let (lines, hits, _) = self.layout(width, height);
         let index = hits.get(row).copied().flatten()?;
-        let text = lines.get(row)?.text.as_str();
-        let dialog = self.dialog.as_ref()?;
-        let label = dialog.choices.get(index)?;
-        let start = 3 + (index + 1).to_string().chars().count() + 2;
-        let end = start + label.chars().count();
-        (col >= start && col < end && col < text.chars().count()).then_some(index)
+        let (_, start, span) = self.choice_region_at_row(width, height, row)?;
+        (col >= start && col < start.saturating_add(span)).then_some(index)
     }
 
     #[must_use]
@@ -855,7 +890,7 @@ impl DialogView {
         let line = |text, role| Line {text,role,detail_from:None};
         if let Some(dialog) = self.dialog.as_ref() {
             // Heading first: prioritized on short terminals.
-            lines.push(line(dialog.title.clone(), Role::Heading));
+            lines.push(line(dialog.title.clone(), if dialog.kind == DialogKind::Permission { Role::Warning } else { Role::Heading }));
             let roomy = height >= dialog.choices.len() + 7;
             if roomy {
                 lines.push(line(String::new(), Role::Description));
@@ -906,7 +941,7 @@ impl DialogView {
                     ""
                 };
                 lines.push(line(format!("{marker}{}. {}{suffix}", index + 1, choice),
-                    if self.selection == Some(index) { Role::Selected } else if dialog.disabled[index] { Role::Description } else { Role::Item }));
+                    if self.selection == Some(index) { Role::Selected } else if dialog.disabled[index] { Role::Description } else if dialog.kind == DialogKind::Permission { Role::Action } else { Role::Item }));
             }
             if roomy && has_footer {
                 lines.push(line(String::new(), Role::Description));
@@ -935,7 +970,10 @@ impl DialogView {
         while lines.len() < height {
             lines.push(line(String::new(), Role::Description));
         }
-        (lines.into_iter().map(|mut line| { line.text = clip(&line.text, width); line }).collect(), hits, footer_row)
+        (lines.into_iter().map(|mut line| {
+            line.text = visible_text(&line.text, width);
+            line
+        }).collect(), hits, footer_row)
     }
 
     fn require_interactive(&self) -> Result<(), DialogError> {
@@ -1039,6 +1077,74 @@ mod scoped_input_tests {
         dialog.answer().unwrap();
         assert!((0..24).all(|row| dialog.choice_at_row(60,24,row).is_none()));
     }
+    #[test]
+    fn generic_unicode_action_regions_use_terminal_cells_and_pending_is_inert() {
+        let mut dialog = DialogView::new();
+        dialog.open_request(DialogRequest {
+            id: "r".into(), session_id: "s".into(), kind: DialogKind::Confirm,
+            title: "Confirm".into(),
+            choices: vec!["界 e\u{301}".into(), "last".into()], message: None,
+            disabled: Vec::new(), error: None,
+        }).unwrap();
+        let width = 22;
+        let height = 12;
+        let row = (0..height).find(|&r| dialog.choice_at_row(width, height, r) == Some(0)).unwrap();
+        let (_, start, span) = dialog.choice_region_at_row(width, height, row).unwrap();
+        assert_eq!(dialog.choice_at_cell(width, height, row, start), Some(0));
+        assert_eq!(dialog.choice_at_cell(width, height, row, start + span), None);
+        assert_eq!(dialog.choice_at_cell(width, height, row, start.saturating_sub(1)), None);
+        assert!(span >= 3, "wide + combining label must occupy terminal cells");
+        assert!(dialog.select(0));
+        let intent = dialog.answer().unwrap();
+        assert!(matches!(intent, DecisionIntent::Answer { choice_index: 0, .. }));
+        assert!((0..width).all(|col| dialog.choice_at_cell(width, height, row, col).is_none()));
+        assert!((0..height).all(|r| dialog.choice_region_at_row(width, height, r).is_none()));
+    }
+
+    #[test]
+    fn arbitrary_unicode_permission_label_is_explicitly_rejected() {
+        let mut dialog = DialogView::new();
+        let result = dialog.open_request(DialogRequest {
+            id: "r".into(), session_id: "s".into(), kind: DialogKind::Permission,
+            title: "Permission".into(),
+            choices: vec!["界 e\u{301}".into(), "Deny once".into()], message: None,
+            disabled: Vec::new(), error: None,
+        });
+        assert_eq!(result, Err(DialogError::UnknownPermissionChoice));
+        assert!(!dialog.is_open());
+        assert_eq!(dialog.answer(), Err(DialogError::NotOpen));
+    }
+
+
+    #[test]
+    fn permission_action_first_and_last_labels_clip_without_outside_hits() {
+        let mut dialog = DialogView::new();
+        dialog.open_permission("r", "s", "Permission required").unwrap();
+        for width in [1, 5, 12, 80] {
+            for height in [2, 8, 24] {
+                for row in 0..height {
+                    if let Some((index, start, span)) = dialog.choice_region_at_row(width, height, row) {
+                        assert!(start < width && span > 0);
+                        assert!(dialog.choice_at_cell(width, height, row, start).is_some());
+                        assert_eq!(dialog.choice_at_cell(width, height, row, start + span), None);
+                        assert!(index < 6);
+                    }
+                }
+            }
+        }
+        let mut generic = DialogView::new();
+        generic.open_request(DialogRequest {
+            id: "wide".into(), session_id: "s".into(), kind: DialogKind::Confirm,
+            title: "Confirm".into(), choices: vec!["界".into()], message: None,
+            disabled: Vec::new(), error: None,
+        }).unwrap();
+        // Prefix consumes three cells; the two-cell glyph cannot fit in the
+        // one-cell remainder at width four, so no padding cell is clickable.
+        let row = (0..8).find(|&r| generic.choice_at_row(4, 8, r) == Some(0)).unwrap();
+        assert!(generic.choice_region_at_row(4, 8, row).is_none());
+        assert!((0..4).all(|col| generic.choice_at_cell(4, 8, row, col).is_none()));
+    }
+
     #[test]
     fn click_footer_row_from_render_confirms_blank_padding_inert() {
         let mut dialog = DialogView::new();
