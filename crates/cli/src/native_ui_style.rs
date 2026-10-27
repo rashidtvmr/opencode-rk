@@ -4,7 +4,7 @@
 use crate::native_theme_runtime::Slot;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Role { Heading, Item, Description, Selected, Hint, Error }
+pub enum Role { Heading, SidebarHeading, Item, Description, Selected, Hint, Error }
 
 pub struct Style {
     pub foreground: Slot,
@@ -33,6 +33,7 @@ pub fn style(role: Role) -> Style {
     const BOLD: u32 = 1;
     let (foreground, background, attributes) = match role {
         Role::Heading => (Slot::Primary, None, BOLD),
+        Role::SidebarHeading => (Slot::Text, None, BOLD),
         Role::Item => (Slot::Text, None, 0),
         Role::Description | Role::Hint => (Slot::TextMuted, None, 0),
         Role::Selected => (Slot::Background, Some(Slot::Primary), BOLD),

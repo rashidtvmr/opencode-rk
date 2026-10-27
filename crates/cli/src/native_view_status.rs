@@ -224,6 +224,23 @@ mod conditional_sidebar_tests {
     use super::StatusView;
 
     #[test]
+    fn sidebar_headings_use_base_text_and_bold_not_primary_action_color() {
+        let mut view = StatusView::default();
+        let id = opencode_rk_contracts::SessionId::new().to_string();
+        view.set_session_binding(Some(id), Some("Confirmed title".into()), Some(0));
+        view.set_context(Some(30), Some(200000));
+        view.apply_mcp(&serde_json::json!({"fixture": {"status":"connected"}})).unwrap();
+        view.apply_todos(&serde_json::json!({"todos":[{"id":"task", "content":"Inspect colors", "status":"pending", "priority":"high"}]})).unwrap();
+        let rows = view.render_sidebar_styled(38, 30);
+        for label in ["Confirmed title", "Context", "MCP", "Todo"] {
+            let line = rows.iter().find(|line| line.text == label).unwrap();
+            let style = crate::native_ui_style::style(line.role);
+            assert_eq!(style.foreground, crate::native_theme_runtime::Slot::Text, "{label}");
+            assert_eq!(style.attributes & 1, 1, "{label} remains bold");
+        }
+    }
+
+    #[test]
     fn unobserved_sidebar_omits_empty_plugin_sections_and_diagnostic_placeholders() {
         let view = StatusView::default();
         assert!(view.render_sidebar(38, 30).iter().all(|row| row.trim().is_empty()));
@@ -290,7 +307,14 @@ impl StatusView {
     }
 
     pub fn render_sidebar_styled(&self, width: usize, height: usize) -> Vec<crate::native_ui_style::Line> {
-        self.sidebar_rows(width, height).into_iter().map(|row| row.line).collect()
+        self.sidebar_rows(width, height).into_iter().map(|mut row| {
+            // The normal session sidebar uses base text with bold weight;
+            // action-accent headings belong to the separate diagnostic pages.
+            if row.line.role == crate::native_ui_style::Role::Heading {
+                row.line.role = crate::native_ui_style::Role::SidebarHeading;
+            }
+            row.line
+        }).collect()
     }
 
     pub fn scroll_sidebar(&mut self, lines: isize, height: usize) {
