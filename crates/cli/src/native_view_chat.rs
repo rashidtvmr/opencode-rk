@@ -107,9 +107,15 @@ fn clip_utf8_prefix_bytes(text: &str, max: usize) -> &str {
 pub struct ChatView {
     /// Rows above the tail; clamped to [`MAX_SCROLL_ROWS`].
     scroll: Cell<usize>,
+    prompt_cursor: Option<usize>,
 }
 
 impl ChatView {
+    pub(crate) fn set_prompt_cursor(&mut self, cursor: usize) { self.prompt_cursor = Some(cursor); }
+    pub(crate) fn prompt_cursor(&self, draft: &str) -> usize {
+        self.prompt_cursor.filter(|cursor| *cursor <= draft.len() && draft.is_char_boundary(*cursor))
+            .unwrap_or(draft.len())
+    }
     #[must_use]
     pub fn new() -> Self {
         Self::default()
@@ -578,15 +584,10 @@ pub(crate) fn composer_layout(
     let framed = frame.has_border()
         && width > 2 + 2 * pad
         && height > 3 + 2 * pad;
-    let height = if framed {
-        framed_composer_height(draft, height, frame.padding)
-    } else {
-        draft
-            .split('\n')
-            .take(129)
-            .count()
-            .clamp(1, (height / 2).max(1))
-    };
+    let overhead = if framed { 2 + 2 * pad } else { 0 };
+    let text_width = width.saturating_sub(overhead + 2);
+    let input = crate::native_prompt_layout::wrap_prompt(draft, text_width, draft.len());
+    let height = input.rows.len().clamp(1, ((height.saturating_sub(overhead)) / 2).max(1)) + overhead;
     ComposerLayout { framed, rail: false, height }
 }
 
@@ -606,7 +607,9 @@ pub(crate) fn session_composer_layout(
         && style.padding == 0 && width > 5 && height >= 6
     {
         let max_input = ((height + 2) / 3).max(6).min(height - 4);
-        let input = draft.split('\n').take(max_input).count().max(1);
+        let inset = if width < 40 { 1 } else { 2 };
+        let input = crate::native_prompt_layout::wrap_prompt(draft,
+            width.saturating_sub(1 + 2 * inset), draft.len()).rows.len().min(max_input).max(1);
         ComposerLayout { framed: false, rail: true, height: input + 4 }
     } else {
         composer_layout(width, height, draft, style)
@@ -1587,15 +1590,10 @@ impl ChatView {
             );
         }
         let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
-        let composer = bounded_composer_rows(draft, content_h + 1);
-        let mut text_rows =
-            render_composer(content_w, content_h, &composer.rows, composer.total_lines);
-        // `render_composer` can retain the overflow witness in addition to the
-        // requested content budget. The outer framed allocation owns exactly
-        // `frame_h` rows, so discard excess content rows before adding the
-        // bottom padding/border; this preserves the closing border and keeps
-        // the public frame bounded at the clamped height.
-        text_rows.truncate(content_h);
+        let input = crate::native_prompt_layout::wrap_prompt(draft, content_w.saturating_sub(2), self.prompt_cursor(draft));
+        let start = input.window_start(content_h);
+        let mut text_rows: Vec<_> = input.rows.iter().skip(start).take(content_h)
+            .enumerate().map(|(index, text)| format!("{}{text}", if index + start == 0 { "> " } else { "  " })).collect();
         while text_rows.len() < content_h {
             text_rows.push(String::new());
         }
@@ -1687,13 +1685,28 @@ impl ChatView {
             rows.push((blank.clone(), ChatRowClass::Composer));
             let inset = if width < 40 { 1 } else { 2 };
             let text_width = width.saturating_sub(1 + 2 * inset);
-            for line in draft.split('\n').take(prompt.height - 4) {
+            let input = crate::native_prompt_layout::wrap_prompt(draft, text_width, self.prompt_cursor(draft));
+            let start = input.window_start(prompt.height - 4);
+            for line in input.rows.iter().skip(start).take(prompt.height - 4) {
                 rows.push((format!("┃{}{}", " ".repeat(inset),
                     crate::native_view_layout::slice_cells(&line.replace('\t', " "), 0, text_width as u16)), ChatRowClass::Composer));
             }
             rows.push((blank.clone(), ChatRowClass::Composer));
             rows.push((blank, ChatRowClass::Composer));
             rows.push((format!("╹{}", "▀".repeat(width - 1)), ChatRowClass::Composer));
+            rows
+        } else if !prompt.framed {
+            let mut rows = vec![(String::new(), ChatRowClass::Blank); height.saturating_sub(prompt.height)];
+            if let Some(header) = rows.first_mut() {
+                *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
+            }
+            let text_width = width.saturating_sub(2);
+            let input = crate::native_prompt_layout::wrap_prompt(draft, text_width, self.prompt_cursor(draft));
+            let start = input.window_start(prompt.height);
+            for (index, line) in input.rows.iter().skip(start).take(prompt.height).enumerate() {
+                let prefix = if index + start == 0 { "> " } else { "  " };
+                rows.push((truncate_row(&format!("{prefix}{line}"), width), ChatRowClass::Composer));
+            }
             rows
         } else { self.render_typed_classified_framed(
             width,

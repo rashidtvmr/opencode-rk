@@ -1134,30 +1134,26 @@ impl NativeView {
         self.home_cursor_at(draft, draft.len())
     }
 
+    pub fn set_prompt_cursor(&mut self, cursor: usize) { self.chat.set_prompt_cursor(cursor); }
+
     /// Project the actual insertion offset onto the clipped Home draft rows.
     pub fn home_cursor_at(&self, draft: &str, byte_cursor: usize) -> Option<(u16, u16)> {
         if self.session_route {
             return None;
         }
         let (left, top, width, height) = self.composer_region(draft)?;
-        if width <= 3 || height <= 3 {
+        if width <= 5 || height <= 4 {
             return None;
         }
-        let visible_len = draft.char_indices().nth(MAX_RENDER_DRAFT_CHARS)
-            .map_or(draft.len(), |(index, _)| index);
+        let draft = crate::native_prompt_layout::bounded_source(draft);
+        let visible_len = draft.len();
         if byte_cursor > visible_len || !draft.is_char_boundary(byte_cursor) {
             return None;
         }
-        let before = draft.get(..byte_cursor)?;
-        let clean = crate::native_transcript::strip_ansi(before);
-        let row = clean.bytes().filter(|byte| *byte == b'\n').count();
-        if row >= usize::from(height.saturating_sub(4)) {
-            return None;
-        }
-        let line = clean.rsplit('\n').next().unwrap_or("").replace('\t', " ");
-        let cells = crate::native_view_layout::visit_unpadded_cells(&line, usize::from(width - 3), |_, _| {}) as u16;
-        let row = u16::try_from(row).ok()?;
-        Some((left + 3 + cells.min(width - 4), top + 1 + row))
+        let input = crate::native_prompt_layout::wrap_prompt(draft, usize::from(width - 5), byte_cursor);
+        let start = input.window_start(usize::from(height - 4));
+        let (column, row) = input.cursor?;
+        Some((left + 3 + column as u16, top + 1 + row.saturating_sub(start) as u16))
     }
 
     /// Cursor position for the session composer, using the same bounded,
@@ -1203,40 +1199,10 @@ impl NativeView {
         if text_width == 0 || text_height == 0 {
             return None;
         }
-
-        let bounded_len = draft.len().min(crate::native_view_chat::MAX_DRAFT_BYTES);
-        let visible_len = (0..=bounded_len)
-            .rev()
-            .find(|index| draft.is_char_boundary(*index))?;
-        if byte_cursor > visible_len || !draft.is_char_boundary(byte_cursor) {
-            return None;
-        }
-        let before = draft.get(..byte_cursor)?;
-        let row = before.bytes().filter(|byte| *byte == b'\n').count();
-        let line = before.rsplit('\n').next().unwrap_or("");
-        let line = crate::native_transcript::strip_ansi(line).replace('\t', " ");
-        let cells = crate::native_view_layout::visit_unpadded_cells(
-            &line,
-            text_width.saturating_add(1),
-            |_, _| {},
-        );
-        // `render_composer` clips a row, rather than wrapping it.  A caret at
-        // or beyond the clipped edge has no rendered cell to own.
-        if cells > text_width {
-            return None;
-        }
-        let draft_rows = draft
-            .get(..visible_len)?
-            .split('\n')
-            .count();
-        let visible_rows = usize::from(text_height);
-        if row >= visible_rows || (draft_rows > visible_rows && row + 1 >= visible_rows) {
-            return None;
-        }
-        Some((
-            text_left.checked_add(cells as u16)?,
-            text_top.checked_add(row as u16)?,
-        ))
+        let input = crate::native_prompt_layout::wrap_prompt(draft, text_width, byte_cursor);
+        let start = input.window_start(text_height);
+        let (column, row) = input.cursor?;
+        Some((text_left.checked_add(column as u16)?, text_top.checked_add(row.saturating_sub(start) as u16)?))
     }
 
     pub fn set_session(&mut self, session: Option<String>) {
@@ -2667,9 +2633,11 @@ impl NativeView {
     fn home_positions(&self, draft: &str) -> (usize, usize, usize) {
         let height = self.render_height();
         let height = height.saturating_sub(self.home_footer_rows());
-        let bounded: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
-        let clean = crate::native_transcript::strip_ansi(&bounded);
-        let count = clean.split('\n').take((height / 2).clamp(1, 12)).count();
+        let bounded = crate::native_prompt_layout::bounded_source(draft);
+        let max_input = (self.render_height() / 3).max(6).min(height.saturating_sub(4).max(1));
+        let count = crate::native_prompt_layout::wrap_prompt(&bounded,
+            usize::from(self.home_prompt_width().saturating_sub(5)), self.chat.prompt_cursor(&bounded))
+            .rows.len().min(max_input);
         let required = count + 14;
         if height >= required {
             let top = 3 + (height - required) / 2;
@@ -2709,9 +2677,12 @@ impl NativeView {
         let body_height = height.saturating_sub(footer_rows);
         let prompt_width = self.home_prompt_width();
         let left = width.saturating_sub(prompt_width).div_ceil(2);
-        let draft: String = draft.chars().take(MAX_RENDER_DRAFT_CHARS).collect();
-        let draft = crate::native_transcript::strip_ansi(&draft);
-        let input: Vec<_> = draft.split('\n').take((body_height / 2).clamp(1, 12)).collect();
+        let draft = crate::native_prompt_layout::bounded_source(draft);
+        let wrapped = crate::native_prompt_layout::wrap_prompt(&draft,
+            usize::from(prompt_width.saturating_sub(5)), self.chat.prompt_cursor(&draft));
+        let (count, _, _) = self.home_positions(&draft);
+        let first = wrapped.window_start(count);
+        let input: Vec<_> = wrapped.rows.iter().skip(first).take(count).map(String::as_str).collect();
         let (_, top, input_top) = self.home_positions(&draft);
         // logo.ts marker substitutions match component/logo.tsx's glyphs;
         // marker-specific shading is applied by the native paint layer.
@@ -3977,14 +3948,20 @@ mod composer_metadata_regression_tests {
     }
 
     #[test]
-    fn chat_cursor_hides_clipped_rows_and_columns() {
+    fn chat_cursor_wraps_long_rows_and_keeps_caret_visible() {
         let mut view = configured(20, "model", "provider");
         let draft = "123456789012345678901234567890";
-        let _ = view.render_typed(draft, &[], false, &[]);
-        assert_eq!(view.chat_cursor(draft, draft.len()), None);
+        let frame = view.render_typed(draft, &[], false, &[]);
+        let (left, top, _, height) = view.composer_region(draft).unwrap();
+        assert_eq!(height, 7);
+        assert!(frame[usize::from(top + 1)].contains("1234567890123"));
+        assert!(frame[usize::from(top + 2)].contains("4567890123456"));
+        assert!(frame[usize::from(top + 3)].contains("7890"));
+        assert_eq!(view.chat_cursor(draft, draft.len()), Some((left + 6, top + 3)));
         let multiline = "one\ntwo";
         let _ = view.render_typed(multiline, &[], false, &[]);
-        assert!(view.chat_cursor(multiline, multiline.len()).is_some());
+        let (left, top, _, _) = view.composer_region(multiline).unwrap();
+        assert_eq!(view.chat_cursor(multiline, multiline.len()), Some((left + 5, top + 2)));
     }
 
     #[test]
@@ -4202,6 +4179,91 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
 /// local simulation.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn explicit_outline_prompt_wraps_and_tracks_cursor_through_resize() {
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.frame_mode = crate::native_box_style::FrameMode::Outline;
+        for width in [28, 40] {
+            let mut view = super::NativeView::new(width, 40);
+            view.set_box_appearance(appearance.clone());
+            let draft = "alpha beta gamma delta epsilon 界 end";
+            let frame = view.render_typed(draft, &[], false, &[]);
+            let (left, top, region_width, height) = view.composer_region(draft).unwrap();
+            let layout = crate::native_view_chat::session_composer_layout(
+                usize::from(region_width), view.session_body_height(), draft, &appearance);
+            assert!(layout.framed);
+            let wrapped = crate::native_prompt_layout::wrap_prompt(draft, usize::from(region_width - 4), draft.len());
+            assert!(wrapped.rows.len() > 1);
+            assert_eq!(usize::from(height), wrapped.rows.len() + 2);
+            let (column, row) = wrapped.cursor.unwrap();
+            assert!(frame[usize::from(top) + 1 + row].contains("end"));
+            assert_eq!(view.chat_cursor(draft, draft.len()), Some((left + 3 + column as u16, top + 1 + row as u16)));
+        }
+    }
+
+    #[test]
+    fn narrow_home_cursor_never_underflows_input_width() {
+        for width in 0..=10 {
+            let mut view = super::NativeView::new(width, 40);
+            view.set_session_route(false);
+            let _ = view.render_typed("x", &[], false, &[]);
+            let _ = view.home_cursor_at("x", 1);
+        }
+    }
+
+    #[test]
+    fn home_scroll_uses_original_cursor_offsets_before_ansi_normalization() {
+        let mut view = super::NativeView::new(80, 24);
+        view.set_session_route(false);
+        let draft = format!("{}{}\x1b[0m", "\x1b[31m".repeat(40), (0..30).map(|n| format!("line-{n:02}")).collect::<Vec<_>>().join("\n"));
+        let cursor = draft.find("line-10").unwrap();
+        view.set_prompt_cursor(cursor);
+        let frame = view.render_typed(&draft, &[], false, &[]);
+        let (_, y) = view.home_cursor_at(&draft, cursor).unwrap();
+        assert!(frame[usize::from(y)].contains("line-10"));
+    }
+
+    #[test]
+    fn session_prompt_wraps_words_and_places_caret_on_the_rendered_continuation() {
+        let mut view = super::NativeView::new(28, 40);
+        view.set_session_route(true);
+        let draft = "alpha beta gamma delta epsilon";
+        let frame = view.render_typed(draft, &[], false, &[]);
+        let (left, top, _, height) = view.composer_region(draft).unwrap();
+        assert_eq!(height, 6, "two wrapped input rows plus four chrome rows");
+        assert!(frame[usize::from(top + 1)].contains("alpha beta gamma"));
+        assert!(frame[usize::from(top + 2)].contains("delta epsilon"));
+        assert_eq!(view.chat_cursor(draft, draft.len()), Some((left + 2 + 13, top + 2)));
+    }
+
+    #[test]
+    fn session_prompt_scrolls_to_the_insertion_row_after_its_height_cap() {
+        let mut view = super::NativeView::new(80, 24);
+        view.set_session_route(true);
+        let draft = (0..30).map(|i| format!("line-{i:02}")).collect::<Vec<_>>().join("\n");
+        let frame = view.render_typed(&draft, &[], false, &[]);
+        let (left, top, _, height) = view.composer_region(&draft).unwrap();
+        assert!(height <= 12);
+        assert!(frame.iter().any(|row| row.contains("line-29")), "last insertion line stays visible");
+        assert!(!frame[usize::from(top + 1)].contains("line-00"));
+        let (x, y) = view.chat_cursor(&draft, draft.len()).expect("visible insertion caret");
+        assert_eq!(x, left + 3 + 7);
+        assert!(y > top && y < top + height - 3);
+    }
+
+    #[test]
+    fn home_prompt_wraps_instead_of_clipping_and_keeps_the_end_caret_visible() {
+        let mut view = super::NativeView::new(120, 40);
+        view.set_session_route(false);
+        let draft = format!("{}ENDMARK", "word ".repeat(20));
+        let frame = view.render_typed(&draft, &[], false, &[]);
+        let (_, top, _, height) = view.composer_region(&draft).unwrap();
+        assert!(height > 5, "height={height}, width={}, rows={:?}", view.home_prompt_width(), crate::native_prompt_layout::wrap_prompt(&draft, 70, draft.len()).rows);
+        assert!(frame.iter().any(|line| line.contains("ENDMARK")));
+        let (_, y) = view.home_cursor_at(&draft, draft.len()).unwrap();
+        assert!(y > top + 1 && y < top + height - 3);
+    }
+
     #[test]
     fn default_session_prompt_has_upstream_rail_and_inner_metadata() {
         use super::*;

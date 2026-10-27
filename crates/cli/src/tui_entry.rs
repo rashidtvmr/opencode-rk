@@ -4627,6 +4627,7 @@ fn native_loop(
         view.set_box_appearance(appearance.style.clone());
         view.set_context_window(selected.as_ref().and_then(|model|model.context_window));
         view.set_prompt_mode(draft.starts_with('!'));
+        view.set_prompt_cursor(draft_cursor);
         let draft_echo = if matches!(dialog, native_setup::Dialog::ApiKey) {
             ""
         } else {

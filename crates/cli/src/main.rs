@@ -122,6 +122,8 @@ mod native_view;
 #[cfg(feature = "native")]
 mod native_view_chat;
 #[cfg(feature = "native")]
+mod native_prompt_layout;
+#[cfg(feature = "native")]
 mod native_view_dialogs;
 // Pure display-cell parsing is also used by the portable transcript path.
 mod native_view_layout;
