@@ -351,6 +351,8 @@ struct LiveSnapshot {
     parent_session_id: Option<String>,
     #[cfg(feature = "native")]
     directory: Option<String>,
+    #[cfg(feature = "native")]
+    session_titles: Vec<(String, String)>,
 }
 
 
@@ -877,12 +879,18 @@ fn snapshot_from_listing(
     session: Option<&str>,
     auth: Option<&str>,
 ) -> Result<LiveSnapshot, String> {
+    // Validate the complete authenticated listing before selecting a target or
+    // reading any title. parse_rows rejects malformed raw titles (controls and
+    // >512 bytes) and oversized listings atomically; never hide an error with a
+    // fallback title/cache.
+    let parsed_rows = crate::session_list::parse_rows(value)
+        .map_err(|error| format!("session listing unusable: {error}"))?;
+    if parsed_rows.is_empty() {
+        return Err("daemon is reachable but has no sessions yet; create one with `opencode-rk session create`".to_string());
+    }
     let sessions = value["sessions"]
         .as_array()
         .ok_or_else(|| "daemon session list is missing the sessions array".to_string())?;
-    if sessions.is_empty() {
-        return Err("daemon is reachable but has no sessions yet; create one with `opencode-rk session create`".to_string());
-    }
     let target = if let Some(id) = session {
         sessions
             .iter()
@@ -892,6 +900,7 @@ fn snapshot_from_listing(
         // RFC3339 timestamps sort lexicographically; last updated wins.
         sessions
             .iter()
+            .filter(|candidate| parsed_rows.iter().any(|row| candidate["id"].as_str() == Some(row.id.as_str())))
             .max_by(|a, b| {
                 let ka = a["updated_at"].as_str().unwrap_or_default();
                 let kb = b["updated_at"].as_str().unwrap_or_default();
@@ -903,6 +912,11 @@ fn snapshot_from_listing(
         .as_str()
         .ok_or_else(|| "daemon session is missing its id".to_string())?
         .to_owned();
+    let parsed_target = parsed_rows
+        .iter()
+        .find(|row| row.id == id)
+        .ok_or_else(|| format!("session {id} is not present in the validated session listing"))?;
+    let accepted_title = parsed_target.title.clone();
     let parent_session_id = match target["parent_session_id"].as_str().filter(|id| !id.is_empty()) {
         Some(parent) => Some(parent.parse::<opencode_rk_contracts::SessionId>()
             .map_err(|_| "daemon session has an invalid parent session id".to_owned())?
@@ -941,7 +955,7 @@ fn snapshot_from_listing(
     Ok(LiveSnapshot {
         origin: origin.to_owned(),
         session_id: id,
-        title: target["title"].as_str().unwrap_or_default().to_owned(),
+        title: accepted_title,
         state: target["state"].as_str().unwrap_or_default().to_owned(),
         updated_at: target["updated_at"].as_str().unwrap_or_default().to_owned(),
         message_count: messages.len(),
@@ -961,6 +975,8 @@ fn snapshot_from_listing(
         parent_session_id,
         #[cfg(feature = "native")]
         directory: target["directory"].as_str().map(str::to_owned),
+        #[cfg(feature = "native")]
+        session_titles: parsed_rows.into_iter().map(|row| (row.id, row.title)).collect(),
     })
 }
 
@@ -2375,6 +2391,24 @@ fn current_workspace_label() -> String {
 /// target draft, and only then commits active marker/status/transcript.
 /// Returns the fetched snapshot plus the restored composer draft.
 #[cfg(feature = "native")]
+fn seed_navigation_titles(
+    navigation: &mut crate::native_navigation::NavigationState,
+    snapshot: &LiveSnapshot,
+) {
+    // This is a single upsert per authenticated listing row, not a replacement:
+    // local tabs and titles for other sessions survive every accepted bind.
+    let target = snapshot.session_id.as_str();
+    let mut rows: Vec<_> = snapshot.session_titles.iter().cloned()
+        .filter(|(id, _)| id != target)
+        .map(|(id, title)| (crate::native_navigation::SessionRef(id), title))
+        .collect();
+    if let Some((id, title)) = snapshot.session_titles.iter().find(|(id, _)| id == target) {
+        rows.push((crate::native_navigation::SessionRef(id.clone()), title.clone()));
+    }
+    navigation.ingest_snapshot_titles(rows);
+}
+
+#[cfg(feature = "native")]
 fn bind_session(
     view: &mut crate::native_view::NativeView,
     transcript: &mut NativeChatHistory,
@@ -3260,6 +3294,7 @@ fn native_loop(
     let mut navigation = crate::native_navigation::NavigationState::new();
     if let Some(snapshot) = live.as_ref() {
         navigation.open(crate::native_navigation::SessionRef(snapshot.session_id.clone()));
+        seed_navigation_titles(&mut navigation, snapshot);
     }
     let mut selection = crate::native_text_selection::TextSelection::default();
     // Setup is an action from Home, not a mandatory startup modal. In
@@ -6271,6 +6306,7 @@ fn native_loop(
                         });
                     match bound {
                         Ok((snapshot, restored_draft)) => {
+                            seed_navigation_titles(&mut navigation, &snapshot);
                             // Route follows the accepted snapshot: a bind
                             // with history restores the session route; an
                             // empty target (/new) returns to Home.
@@ -7195,6 +7231,7 @@ fn native_loop(
                                 });
                             match bound {
                                 Ok((snapshot, restored_draft)) => {
+                                    seed_navigation_titles(&mut staged_navigation, &snapshot);
                                     // An accepted explicit bind owns the session
                                     // route even before its first message.
                                     // The target tab was opened in the staged
@@ -7499,6 +7536,7 @@ fn native_loop(
                                 auth,
                             ) {
                                 Ok((snapshot, _restored_draft)) => {
+                                    seed_navigation_titles(&mut navigation, &snapshot);
                                     navigation.open(crate::native_navigation::SessionRef(snapshot.session_id.clone()));
                                     history_window = Some(crate::native_chat_projection::NativeHistoryWindow::new(
                                         &snapshot.raw_history,
@@ -7882,6 +7920,7 @@ fn open_child_transition(
     let prospective = crate::native_view::reserve_generation(generation)
         .ok_or_else(|| "child open refused: binding generation exhausted".to_owned())?;
     let (snapshot, restored) = bind_session(view, transcript, draft, cursor, origin, Some(child), auth)?;
+    seed_navigation_titles(&mut staged, &snapshot);
     let target = staged.active().cloned().ok_or_else(|| "child open target missing".to_owned())?;
     *navigation = staged;
     Ok((snapshot, if target.draft.is_empty() { restored } else { target.draft }, prospective, target.cursor, target.scroll, target.selected_model))
@@ -7906,6 +7945,7 @@ fn return_parent_transition(
     let prospective = crate::native_view::reserve_generation(generation)
         .ok_or_else(|| "parent return refused: binding generation exhausted".to_owned())?;
     let (snapshot, restored) = bind_session(view, transcript, draft, cursor, origin, Some(parent), auth)?;
+    seed_navigation_titles(&mut staged, &snapshot);
     let target = staged.active().cloned().ok_or_else(|| "parent return target missing".to_owned())?;
     *navigation = staged;
     Ok((snapshot, if target.draft.is_empty() { restored } else { target.draft }, prospective, target.cursor, target.scroll, target.selected_model))
@@ -7942,6 +7982,7 @@ fn select_tab_transition(
         .ok_or_else(|| "select refused: binding generation exhausted".to_owned())?;
     let origin = origin.ok_or_else(|| "select refused: daemon unavailable".to_owned())?;
     let (snapshot, _) = bind_session(view, transcript, draft, cursor, origin, Some(&session.0), auth)?;
+    seed_navigation_titles(&mut staged, &snapshot);
     *navigation = staged;
     Ok(CloseTabResult { snapshot: Some(snapshot), draft: target.draft, cursor: target.cursor, scroll: target.scroll, selected_model: target.selected_model, generation: prospective, home: false })
 }
@@ -7983,6 +8024,7 @@ fn close_tab_transition(
     let target = staged.tab_at(staged.tabs().iter().position(|tab| tab.session == successor).ok_or_else(|| "close refused: successor missing" )?).cloned()
         .ok_or_else(|| "close refused: successor missing".to_owned())?;
     let (snapshot, _) = bind_session(view, transcript, draft, cursor, origin, Some(&successor.0), auth)?;
+    seed_navigation_titles(&mut staged, &snapshot);
     staged.close(session).map_err(|error| format!("close commit invariant failed: {error:?}"))?;
     staged.select_tab(&successor).map_err(|error| format!("close commit invariant failed: {error:?}"))?;
     *navigation = staged;
@@ -8534,6 +8576,16 @@ mod tab_binding_tests {
     }
 
     #[test]
+    fn malformed_snapshot_titles_are_rejected_before_history_fetch() {
+        let fixture = Fixture::new();
+        for title in ["bad\ncontrol", &"x".repeat(513)] {
+            let listing = serde_json::json!({"sessions":[{"id":A,"title":title,"state":"idle","updated_at":"2026-10-26T00:00:00Z"}]});
+            assert!(snapshot_from_listing(&fixture.origin, &listing, Some(A), Some(&fixture.token)).is_err());
+        }
+        assert!(!fixture.requests.lock().unwrap().iter().any(|route| route.contains("/history?")));
+    }
+
+    #[test]
     fn malformed_parent_identity_is_rejected_before_history_fetch() {
         let fixture = Fixture::new();
         let listing = serde_json::json!({"sessions":[{"id":A,"title":"A","state":"idle","updated_at":"2026-10-26T00:00:00Z","parent_session_id":"not-a-uuid"}]});
@@ -8553,7 +8605,7 @@ mod tab_binding_tests {
         let mut completion = crate::native_completion::Completion::default();
         let models = vec![native_setup::Model { id: "child".into(), name: "Child".into(), provider_id: "fixture".into(), context_window: None }];
         let mut selected = None;
-        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, parent_session: true, parent_session_id: Some(B.into()), directory: None };
+        let snapshot = LiveSnapshot { origin: "http://127.0.0.1:1".into(), session_id: A.into(), title: "A".into(), state: "idle".into(), updated_at: String::new(), message_count: 0, last_text: None, history: vec![], typed_history: vec![], raw_history: vec![], history_next_before: None, parent_session: true, parent_session_id: Some(B.into()), directory: None, session_titles: vec![] };
         commit_child_route(snapshot, "child draft".into(), 2, 8, 13, Some("fixture/child".into()), &models, &mut selected, &mut view, &mut live, &mut history, &mut generation, &mut draft, &mut cursor, &mut route, &mut completion);
         assert_eq!(draft, "child draft");
         assert_eq!(cursor, 8);
@@ -8865,6 +8917,7 @@ mod command_consumption_tests {
             parent_session: false,
             parent_session_id: None,
             directory: None,
+            session_titles: vec![],
         });
         let mut history_window = live.as_ref().map(|snapshot| crate::native_chat_projection::NativeHistoryWindow::new(
             &snapshot.raw_history,
@@ -8916,6 +8969,7 @@ mod command_consumption_tests {
             title: "Closed session".into(), state: "idle".into(), updated_at: String::new(),
             message_count: 0, last_text: None, history: Vec::new(), typed_history: Vec::new(),
             raw_history: Vec::new(), history_next_before: None, parent_session: false, parent_session_id: None, directory: None,
+            session_titles: vec![],
         });
         let mut history = None;
         let mut generation = 7;

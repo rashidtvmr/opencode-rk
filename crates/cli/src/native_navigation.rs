@@ -27,6 +27,9 @@ use crate::native_app::Focus;
 /// Upper bound on open tabs, retained titles, work entries and tombstones.
 pub const MAX_TABS: usize = 32;
 
+/// Upper bound on retained unversioned snapshot titles (bounded to open tabs).
+pub const MAX_SNAPSHOT_TITLES: usize = MAX_TABS;
+
 /// Upper bound on navigable sidebar entries (mirrors the tab bound).
 pub const MAX_SIDEBAR: usize = MAX_TABS;
 
@@ -293,6 +296,8 @@ pub struct NavigationState {
     work: Vec<(SessionRef, WorkState)>,
     /// Display titles with the revision that set them.
     titles: Vec<(SessionRef, String, u64)>,
+    /// Unversioned session-list snapshot titles; never fabricate revisions.
+    snapshot_titles: Vec<(SessionRef, String)>,
     /// Archive tombstones so stale renames cannot resurrect dead sessions.
     archived: Vec<(SessionRef, u64)>,
 }
@@ -556,18 +561,22 @@ impl NavigationState {
                 if self.tombstone_at_or_above(&session, rev) {
                     return;
                 }
-                match self.titles.iter_mut().find(|(s, _, _)| *s == session) {
-                    Some(entry) => {
-                        if entry.2 <= rev {
-                            entry.1 = title;
-                            entry.2 = rev;
-                        }
+                let accepted = match self.titles.iter().position(|(s, _, _)| s == &session) {
+                    Some(index) if self.titles[index].2 <= rev => {
+                        let entry = &mut self.titles[index];
+                        entry.1 = title;
+                        entry.2 = rev;
+                        true
                     }
-                    None => {
-                        if self.titles.len() < MAX_TABS {
-                            self.titles.push((session, title, rev));
-                        }
+                    Some(_) => false,
+                    None if self.titles.len() < MAX_TABS => {
+                        self.titles.push((session.clone(), title, rev));
+                        true
                     }
+                    None => false,
+                };
+                if accepted {
+                    self.snapshot_titles.retain(|(sid, _)| sid != &session);
                 }
             }
             DaemonEvent::Archived { session, rev } => {
@@ -576,6 +585,7 @@ impl NavigationState {
                 }
                 self.remove_tab(&session);
                 self.titles.retain(|(s, _, _)| *s != session);
+                self.snapshot_titles.retain(|(s, _)| *s != session);
                 self.work.retain(|(s, _)| *s != session);
                 if self.archived.len() >= MAX_TABS {
                     self.archived.remove(0);
@@ -615,6 +625,40 @@ impl NavigationState {
             .iter()
             .find(|(s, _, _)| s == session)
             .map(|(_, t, _)| t.as_str())
+            .or_else(|| self.snapshot_titles.iter().find(|(s, _)| s == session).map(|(_, t)| t.as_str()))
+    }
+
+    fn bound_snapshot_title(title: String) -> String {
+        const MAX_TITLE_BYTES: usize = 512;
+        if title.len() <= MAX_TITLE_BYTES { return title; }
+        let mut end = MAX_TITLE_BYTES;
+        while !title.is_char_boundary(end) { end -= 1; }
+        title[..end].to_owned()
+    }
+
+    /// Store an authenticated listing title without manufacturing a revision.
+    pub fn ingest_snapshot_title(&mut self, session: SessionRef, title: String) {
+        if self.archived.iter().any(|(s, _)| s == &session) { return; }
+        let title = Self::bound_snapshot_title(title);
+        if let Some(index) = self.snapshot_titles.iter().position(|(s, _)| s == &session) {
+            // Refresh recency deterministically: the most recently observed
+            // session is retained when the bounded cache must evict.
+            self.snapshot_titles.remove(index);
+            self.snapshot_titles.push((session, title));
+        } else {
+            if self.snapshot_titles.len() >= MAX_SNAPSHOT_TITLES {
+                // FIFO over refresh order is a bounded LRU approximation with
+                // no clock or synthetic revision. Callers seed the active
+                // target last, so it cannot be evicted by a large listing.
+                self.snapshot_titles.remove(0);
+            }
+            self.snapshot_titles.push((session, title));
+        }
+    }
+
+    pub fn ingest_snapshot_titles<I>(&mut self, titles: I)
+    where I: IntoIterator<Item = (SessionRef, String)> {
+        for (session, title) in titles { self.ingest_snapshot_title(session, title); }
     }
 
     fn tombstone_at_or_above(&self, session: &SessionRef, rev: u64) -> bool {
@@ -1116,4 +1160,62 @@ mod tests {
         assert_eq!(bar.selected(), None);
         assert_eq!(bar.selected_index(), 0);
     }
+
+    #[test]
+    fn snapshot_titles_are_separate_from_revisioned_renames_and_tombstones() {
+        let mut nav = NavigationState::new();
+        let a = s("a");
+        let b = s("b");
+        nav.ingest_snapshot_titles(vec![(a.clone(), "Alpha".into()), (b.clone(), "Beta".into())]);
+        assert_eq!(nav.title(&a), Some("Alpha"));
+        assert_eq!(nav.title(&b), Some("Beta"));
+        nav.apply(DaemonEvent::Renamed { session: a.clone(), title: "A2".into(), rev: 1 });
+        assert_eq!(nav.title(&a), Some("A2"));
+        assert_eq!(nav.title(&b), Some("Beta"));
+        nav.apply(DaemonEvent::Archived { session: a.clone(), rev: 2 });
+        nav.ingest_snapshot_title(a.clone(), "zombie".into());
+        assert_eq!(nav.title(&a), None);
+    }
+
+    #[test]
+    fn snapshot_cache_evicts_oldest_refresh_and_retains_target_seeded_last() {
+        let mut nav = NavigationState::new();
+        for i in 0..MAX_SNAPSHOT_TITLES {
+            nav.ingest_snapshot_title(s(&format!("s{i}")), format!("title-{i}"));
+        }
+        // Refresh s0, making s1 the deterministic eviction victim.
+        nav.ingest_snapshot_title(s("s0"), "refreshed".into());
+        nav.ingest_snapshot_title(s("target"), "target-title".into());
+        assert_eq!(nav.title(&s("s0")), Some("refreshed"));
+        assert_eq!(nav.title(&s("s1")), None);
+        assert_eq!(nav.title(&s("target")), Some("target-title"));
+        assert_eq!(nav.title(&s("s31")), Some("title-31"));
+    }
+
+    #[test]
+    fn snapshot_title_bound_is_utf8_safe_and_preserves_empty() {
+        let mut nav = NavigationState::new();
+        let a = s("a");
+        nav.ingest_snapshot_title(a.clone(), "é".repeat(300));
+        assert_eq!(nav.title(&a).unwrap().len(), 512);
+        nav.ingest_snapshot_title(a.clone(), String::new());
+        assert_eq!(nav.title(&a), Some(""));
+    }
+
+
+    #[test]
+    fn bounded_tombstone_horizon_is_explicit() {
+        let mut nav = NavigationState::new();
+        let archived = s("archived");
+        nav.apply(DaemonEvent::Archived { session: archived.clone(), rev: 1 });
+        for i in 0..MAX_TABS {
+            nav.apply(DaemonEvent::Archived { session: s(&format!("other-{i}")), rev: 1 });
+        }
+        // Existing bounded FIFO tombstone behavior: after the horizon passes,
+        // the old tombstone is no longer retained and snapshot ingestion may
+        // observe that limitation rather than pretending archive durability.
+        nav.ingest_snapshot_title(archived.clone(), "reobserved".into());
+        assert_eq!(nav.title(&archived), Some("reobserved"));
+    }
+
 }

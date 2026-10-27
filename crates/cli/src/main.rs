@@ -129,6 +129,8 @@ mod native_home_logo;
 mod native_view_dialogs;
 // Pure display-cell parsing is also used by the portable transcript path.
 mod native_view_layout;
+// Portable authenticated session-list validation shared by all snapshot paths.
+mod session_list;
 #[cfg(feature = "native")]
 mod native_view_pages;
 #[cfg(feature = "native")]

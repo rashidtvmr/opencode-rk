@@ -503,69 +503,11 @@ fn truncate_utf8(s: &str, max: usize) -> String {
 /// last good list. Arrays over MAX_ROWS are `Err` rather than a truncated list.
 /// Unknown `state` values such as `archived` are skipped (not listed).
 pub fn parse_rows(value: &Value) -> Result<Vec<SessionRow>, String> {
-    let raw: Vec<&Value> = match value {
-        Value::Array(items) => items.iter().collect(),
-        Value::Object(map) => match map.get("sessions") {
-            Some(Value::Array(items)) => items.iter().collect(),
-            Some(other) => return Err(format!("expected sessions array, got {other}")),
-            None => return Err("missing `sessions` array".into()),
-        },
-        other => return Err(format!("unexpected payload: {other}")),
-    };
-
-    if raw.len() > MAX_ROWS {
-        return Err(format!(
-            "server sent {} sessions; refusing to present a truncated {MAX_ROWS}-row list",
-            raw.len()
-        ));
-    }
-
-    let mut rows = Vec::with_capacity(raw.len());
-    for entry in raw {
-        let obj = entry
-            .as_object()
-            .ok_or_else(|| format!("session entry not an object: {entry}"))?;
-
-        let state = obj
-            .get("state")
-            .map(|s| s.as_str().unwrap_or_default().to_string())
-            .unwrap_or_default();
-        if state == "archived" || state == "deleted" {
-            continue;
-        }
-
-        let id = obj
-            .get("id")
-            .and_then(|v| v.as_str())
-            .ok_or_else(|| "session entry missing string `id`".to_string())?;
-        id.parse::<opencode_rk_contracts::SessionId>()
-            .map_err(|e| format!("invalid session id {id:?}: {e}"))?;
-
-        let title_raw = obj.get("title").and_then(|v| v.as_str()).unwrap_or("");
-        // P2 fix: enforce the byte bound on the RAW backend title BEFORE any
-        // sanitation. sanitize_title truncates at a UTF-8 boundary, so a
-        // length check afterwards could never fire (unreachable) and an
-        // oversized backend title would be silently accepted truncated.
-        if title_raw.len() > MAX_TITLE_BYTES {
-            return Err(format!(
-                "session {id} title exceeds {MAX_TITLE_BYTES} bytes ({} bytes)",
-                title_raw.len()
-            ));
-        }
-        if title_raw.chars().any(|c| c.is_control() && c != ' ') {
-            return Err(format!("session {id} title contains control characters"));
-        }
-        // Sanitation still strips controls and stays UTF-8-boundary safe; the
-        // raw value already fits MAX_TITLE_BYTES so nothing is cut.
-        let title = sanitize_title(title_raw);
-        debug_assert!(title.len() <= MAX_TITLE_BYTES);
-
-        rows.push(SessionRow {
-            id: id.to_string(),
-            title,
-        });
-    }
-    Ok(rows)
+    crate::session_list::parse_rows(value).map(|rows| {
+        rows.into_iter()
+            .map(|row| SessionRow { id: row.id, title: row.title })
+            .collect()
+    })
 }
 
 #[cfg(test)]
@@ -793,7 +735,7 @@ mod tests {
     #[test]
     fn window_bounded_at_5k_and_render_clips_to_height() {
         let entries: Vec<Value> = (0..MAX_ROWS)
-            .map(|_| json!({"id": VALID_ID, "title": "t", "state": "active"}))
+            .map(|i| json!({"id": format!("00000000-0000-4000-8000-{i:012x}"), "title": "t", "state": "active"}))
             .collect();
         let payload = json!({"sessions": entries});
         // 5k sent: only MAX_ROWS+1 tests; here 5000 > 256 -> Err
