@@ -2128,6 +2128,12 @@ fn native_paint(
                 renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), "✕", fg, Some(bg), 0)?;
             }
         }
+        if let Some(rect) = tabs.add_rect {
+            if rect.x < cols as u16 && rect.y < rows as u16 {
+                renderer.fill_rect(u32::from(rect.x), u32::from(rect.y), u32::from(rect.width).min(cols - u32::from(rect.x)), u32::from(rect.height).min(rows - u32::from(rect.y)), bg)?;
+                renderer.draw_text_styled(u32::from(rect.x), u32::from(rect.y), "+", accent, Some(bg), 0)?;
+            }
+        }
     }
     if let Some(rect) = ctx.page_panel {
         if ctx.appearance.full_outline(crate::native_box_style::BoxId::Menu) {
@@ -3300,6 +3306,9 @@ fn native_loop(
     // never independently recompute tab geometry.
     let mut rendered_tabs: Option<TabStrip> = None;
     let mut tab_hovered: Option<crate::native_navigation::SessionRef> = None;
+    // Press capture binds the click to a stable tab and painted rect.
+    let mut tab_press: Option<(crate::native_navigation::SessionRef, crate::native_tabs::TabRect, bool, TabOrientation)> = None;
+    let mut add_press: Option<(crate::native_tabs::TabRect, TabOrientation)> = None;
     let mut tab_viewport: Option<(u16, u16)> = None;
     if !memory.is_empty() {
         transcript.push(format!("memory: {} file(s) loaded", memory.len()));
@@ -4518,10 +4527,12 @@ fn native_loop(
             || appearance.open || children_panel.open
         {
             tab_hovered = None;
+            tab_press = None;
+            add_press = None;
         }
         view.set_tab_reservation(tab_reservation);
         let tab_inputs = TabStrip::from_navigation(&navigation, &[]);
-        let frame_tabs = TabStrip::render_with_hover(
+        let frame_tabs = TabStrip::render_with_hover_and_add(
             &tab_inputs,
             effective_orientation,
             match effective_orientation {
@@ -4534,6 +4545,7 @@ fn native_loop(
             },
             rendered_tabs.as_ref().map_or(0, |tabs| tabs.scroll),
             tab_hovered.as_ref(),
+            matches!(effective_orientation, TabOrientation::Horizontal),
         );
         let mut lines = if help_open && !dialog_open {
             Vec::new()
@@ -4996,56 +5008,120 @@ fn native_loop(
         let byte = match event {
             native_input_decoder::InputEvent::Byte(byte) => byte,
             native_input_decoder::InputEvent::Mouse { x, y, kind, modifiers } => {
+                if kind != 0 && kind != 2 && kind != 7 { tab_press = None; add_press = None; }
                 if !view.dialogs.intercepts_input() && !permission_editor.open && !appearance.open && !children_panel.open
                     && !help_open && !view.command_palette_open() && matches!(dialog, native_setup::Dialog::None)
                     && modifiers == 0
                 {
                     if kind == 7 {
-                        tab_hovered = rendered_tabs
-                            .as_ref()
-                            .and_then(|tabs| tabs.hit(x, y))
-                            .map(|hit| hit.session);
+                        tab_hovered = rendered_tabs.as_ref().and_then(|tabs| tabs.hit(x, y)).map(|hit| hit.session);
                         needs_paint = true;
                         continue;
                     }
                     if kind == 0 {
-                    if let Some(intent) = rendered_tabs.as_ref().and_then(|tabs| tabs.mouse_action(x, y)).map(|hit| if hit.close { NativeIntent::CloseTab { session: hit.session } } else { NativeIntent::SelectTab { session: hit.session } }) {
-                        match intent {
-                            NativeIntent::SelectTab { session } => {
-                                tab_hovered = None;
-                                let scroll = view.chat_scroll_offset();
-                                match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|model| model.qualified()), scroll) {
-                                    Ok(result) => {
+                        tab_press = None;
+                        add_press = None;
+                        if let Some(tabs) = rendered_tabs.as_ref() {
+                            if let Some(hit) = tabs.hit(x, y) {
+                                let session = hit.session;
+                                if let Some((_, rect)) = tabs.rects.iter().find(|(id, _)| id == &session) {
+                                    let close = tabs.visible_close_rect().is_some_and(|close| {
+                                        tabs.hovered_session() == Some(&session)
+                                            && x >= close.x && y >= close.y
+                                            && x < close.x.saturating_add(close.width)
+                                            && y < close.y.saturating_add(close.height)
+                                    });
+                                    tab_press = Some((session, *rect, close, effective_orientation));
+                                }
+                            } else if let Some(rect) = tabs.add_rect.filter(|rect| x >= rect.x && y >= rect.y && x < rect.x.saturating_add(rect.width) && y < rect.y.saturating_add(rect.height)) {
+                                add_press = Some((rect, effective_orientation));
+                            }
+                        }
+                        if tab_press.is_some() || add_press.is_some() {
+                            continue;
+                        }
+                    }
+                    if kind == 2 {
+                        let captured = tab_press.take();
+                        let captured_add = add_press.take();
+                        let Some(tabs) = rendered_tabs.as_ref() else { continue };
+                        if let Some((session, rect, pressed_close, pressed_orientation)) = captured {
+                            let still_same = pressed_orientation == effective_orientation && tabs.rects.iter().any(|(id, current)| *id == session && *current == rect && x >= current.x && y >= current.y && x < current.x.saturating_add(current.width) && y < current.y.saturating_add(current.height));
+                            if still_same {
+                                let close_hit = tabs.visible_close_rect().is_some_and(|close| {
+                                    tabs.hovered_session() == Some(&session)
+                                        && x >= close.x && y >= close.y
+                                        && x < close.x.saturating_add(close.width)
+                                        && y < close.y.saturating_add(close.height)
+                                });
+                                if pressed_close && close_hit {
+                                    let close_scroll = view.chat_scroll_offset();
+                                    match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
+                                      Ok(result) => {
                                         apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
                                         completion.sync(&draft);
+                                        history_pending = false;
+                                        history_active = None;
+                                        history_navigation_request = None;
+                                        blocked_history_scroll = None;
+                                        history_tail_refresh_pending = false;
+                                        history_browsing = false;
+                                      }
+                                      Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
                                     }
-                                    Err(error) => append_transcript(&mut transcript, format!("error: select tab: {error}")),
+                                    needs_paint = true; continue;
                                 }
-                                needs_paint = true; continue;
-                            }
-                            NativeIntent::CloseTab { session } => {
-                                tab_hovered = None;
-                                let close_scroll = view.chat_scroll_offset();
-                match close_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|m| m.qualified()), close_scroll) {
-                                    Ok(result) => apply_close_tab_result(
-                                        result,
-                                        &mut view,
-                                        &mut live,
-                                        &mut history_window,
-                                        &mut binding_generation,
-                                        &mut draft,
-                                        &mut draft_cursor,
-                                        &mut selected,
-                                        &models,
-                                        &mut session_route,
-                                        &mut compact_worker,
-                                    ),
-                                    Err(error) => append_transcript(&mut transcript, format!("error: close tab: {error}")),
+                                let scroll = view.chat_scroll_offset();
+                                match select_tab_transition(&mut view, &mut transcript, &mut navigation, &draft, draft_cursor, live.as_ref().map(|snapshot| snapshot.origin.as_str()), auth, binding_generation, &session, selected.as_ref().map(|model| model.qualified()), scroll) {
+                                  Ok(result) => {
+                                    apply_close_tab_result(result, &mut view, &mut live, &mut history_window, &mut binding_generation, &mut draft, &mut draft_cursor, &mut selected, &models, &mut session_route, &mut compact_worker);
+                                    completion.sync(&draft);
+                                    history_pending = false;
+                                    history_active = None;
+                                    history_navigation_request = None;
+                                    blocked_history_scroll = None;
+                                    history_tail_refresh_pending = false;
+                                    history_browsing = false;
+                                  }
+                                  Err(error) => append_transcript(&mut transcript, format!("error: select tab: {error}")),
                                 }
                                 needs_paint = true; continue;
                             }
                         }
-                    }
+                        if let Some((rect, pressed_orientation)) = captured_add {
+                            if navigation.active().is_none() { continue; }
+                            let same = pressed_orientation == effective_orientation && tabs.add_rect == Some(rect) && x >= rect.x && y >= rect.y && x < rect.x.saturating_add(rect.width) && y < rect.y.saturating_add(rect.height);
+                            if same {
+                                // Home is lazy: retain old tabs and their state;
+                                // no session creation request occurs until submit.
+                                let outgoing_model = selected.as_ref().map(|model| model.qualified());
+                                if let Err(error) = navigation.save_active_state(
+                                    draft.clone(),
+                                    draft_cursor,
+                                    view.chat_scroll_offset(),
+                                    outgoing_model,
+                                ) {
+                                    append_transcript(&mut transcript, format!("error: new tab: state save refused: {error:?}"));
+                                    needs_paint = true;
+                                    continue;
+                                }
+                                live = None;
+                                history_window = None;
+                                history_pending = false;
+                                history_active = None;
+                                history_navigation_request = None;
+                                blocked_history_scroll = None;
+                                history_tail_refresh_pending = false;
+                                history_browsing = false;
+                                draft.clear(); draft_cursor = 0;
+                                navigation.enter_home();
+                                session_route = false;
+                                view.reset_to_home_after_tab_close();
+                                view.set_chat_scroll_offset(0);
+                                needs_paint = true;
+                            }
+                            continue;
+                        }
                     }
                 }
                 // Tabs were resolved first. Send clicks were normalized before
@@ -7629,8 +7705,10 @@ fn select_tab_transition(
     // Preflight every fallible navigation operation on a private snapshot.
     // Failed target fetches must leave both the current tab and binding intact.
     let mut staged = navigation.clone();
-    staged.save_active_state(draft.to_owned(), cursor, scroll, selected_model)
-        .map_err(|error| format!("select refused: {error:?}"))?;
+    if navigation.active().is_some() {
+        staged.save_active_state(draft.to_owned(), cursor, scroll, selected_model)
+            .map_err(|error| format!("select refused: {error:?}"))?;
+    }
     staged.select_tab(session).map_err(|error| format!("select refused: {error:?}"))?;
     let target = staged.active().cloned().ok_or_else(|| "select refused: target missing".to_owned())?;
     if navigation.active().is_some_and(|tab| tab.session == *session) {
@@ -7661,8 +7739,10 @@ fn close_tab_transition(
 ) -> Result<CloseTabResult, String> {
     let active = navigation.active().map(|tab| tab.session.clone());
     let mut staged = navigation.clone();
-    staged.save_active_state(draft.to_owned(), cursor, scroll, selected_model.clone())
-        .map_err(|error| format!("close refused: {error:?}"))?;
+    if navigation.active().is_some() {
+        staged.save_active_state(draft.to_owned(), cursor, scroll, selected_model.clone())
+            .map_err(|error| format!("close refused: {error:?}"))?;
+    }
     if active.as_ref() != Some(session) {
         staged.close(session).map_err(|error| format!("close refused: {error:?}"))?;
         *navigation = staged;

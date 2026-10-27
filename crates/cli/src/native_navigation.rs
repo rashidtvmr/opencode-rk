@@ -287,6 +287,7 @@ pub enum DaemonEvent {
 pub struct NavigationState {
     tabs: Vec<Tab>,
     active: usize,
+    home: bool,
     orientation: TabOrientation,
     /// Daemon-reported work state per session, retained even with no tab.
     work: Vec<(SessionRef, WorkState)>,
@@ -327,6 +328,7 @@ impl NavigationState {
     /// full the oldest tab is evicted; focus stays on the previously active
     /// session unless it was the evicted one.
     pub fn open(&mut self, session: SessionRef) -> usize {
+        self.home = false;
         if let Some(idx) = self.tabs.iter().position(|t| t.session == session) {
             self.active = idx;
             return idx;
@@ -430,6 +432,7 @@ impl NavigationState {
             .position(|t| t.session == *session)
             .ok_or(NavRefusal::NoSuchTab)?;
         self.active = idx;
+        self.home = false;
         Ok(idx)
     }
 
@@ -466,12 +469,17 @@ impl NavigationState {
     /// The focused tab.
     #[must_use]
     pub fn active(&self) -> Option<&Tab> {
-        self.tabs.get(self.active)
+        if self.home { None } else { self.tabs.get(self.active) }
     }
 
     /// Mutable focused tab (draft/scroll/model edits are client-local).
     pub fn active_mut(&mut self) -> Option<&mut Tab> {
-        self.tabs.get_mut(self.active)
+        if self.home { None } else { self.tabs.get_mut(self.active) }
+    }
+
+    /// Enter Home without deleting or mutating retained tab-local state.
+    pub fn enter_home(&mut self) {
+        self.home = true;
     }
 
     /// Open tab count.
@@ -641,6 +649,19 @@ mod tests {
 
     fn s(id: &str) -> SessionRef {
         SessionRef(id.to_string())
+    }
+
+    #[test]
+    fn home_retains_tabs_without_exposing_active_state() {
+        let mut nav = NavigationState::new();
+        let id = s("home-retained");
+        nav.open(id.clone());
+        nav.save_active_state("draft".into(), 5, 3, Some("model".into())).unwrap();
+        nav.enter_home();
+        assert!(nav.active().is_none());
+        assert_eq!(nav.tab_len(), 1);
+        nav.open(id);
+        assert_eq!(nav.active().unwrap().draft, "draft");
     }
 
     #[test]

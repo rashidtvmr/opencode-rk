@@ -28,7 +28,7 @@ pub struct TabReservation {
 impl TabReservation {
     pub const VERTICAL_WIDTH: u16 = 42;
     pub const CONTENT_PREFERRED_WIDTH: u16 = 64;
-    pub const ADD_TAB_WIDTH: u16 = 0;
+    pub const ADD_TAB_WIDTH: u16 = 3;
 
     /// Port of upstream `sessionTabsFitVertically` at the pinned revision.
     /// Horizontal and vertical offsets of the reserved content area.
@@ -141,6 +141,8 @@ pub struct TabAction {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TabStrip {
+    /// Painted add-session control, independent of session hit rectangles.
+    pub add_rect: Option<TabRect>,
     pub orientation: TabOrientation,
     pub available_width: u16,
     pub rows: Vec<String>,
@@ -159,8 +161,7 @@ pub struct TabStrip {
 }
 
 impl TabStrip {
-    /// Width available to tabs. The native runtime currently has no
-    /// functional add control, so no three-cell plus reservation is made.
+    /// Width available to session tabs, excluding the horizontal add control.
     #[must_use]
     pub fn content_width(&self) -> u16 { self.available_width }
 
@@ -172,6 +173,10 @@ impl TabStrip {
             rect.y = rect.y.saturating_add(y);
         }
         for (_, rect) in &mut self.close_rects {
+            rect.x = rect.x.saturating_add(x);
+            rect.y = rect.y.saturating_add(y);
+        }
+        if let Some(rect) = &mut self.add_rect {
             rect.x = rect.x.saturating_add(x);
             rect.y = rect.y.saturating_add(y);
         }
@@ -223,8 +228,24 @@ impl TabStrip {
         scroll: usize,
         hovered: Option<&SessionRef>,
     ) -> Self {
+        Self::render_with_hover_and_add(inputs, orientation, width, height, scroll, hovered, false)
+    }
+
+    /// Runtime composition matching the upstream separate new-session control.
+    /// The tab layout receives only the space left of the always-visible button.
+    #[must_use]
+    pub fn render_with_hover_and_add(
+        inputs: &[TabInput],
+        orientation: TabOrientation,
+        width: u16,
+        height: u16,
+        scroll: usize,
+        hovered: Option<&SessionRef>,
+        show_add: bool,
+    ) -> Self {
         let mut out = Self {
             orientation,
+            add_rect: None,
             available_width: width,
             rows: Vec::new(),
             rects: Vec::new(),
@@ -238,16 +259,19 @@ impl TabStrip {
         if width == 0 || height == 0 {
             return out;
         }
-        let (available, horizontal) = match orientation {
-            TabOrientation::Horizontal => (width, true),
-            TabOrientation::Vertical => (height, false),
+        let horizontal = matches!(orientation, TabOrientation::Horizontal);
+        let available = if horizontal && show_add {
+            width.saturating_sub(TabReservation::ADD_TAB_WIDTH)
+        } else {
+            match orientation { TabOrientation::Horizontal => width, TabOrientation::Vertical => height }
         };
         let active = inputs.iter().position(|tab| tab.flags.active);
         // The adaptive model governs the horizontal SessionTabs strip.  A
         // rail is a one-row-per-tab list: its extent is height, while its
         // cell width remains the complete rail width.
+        let layout_available = available;
         let solved = if horizontal {
-            adaptive_layout(inputs.len(), active, usize::from(available), scroll)
+            adaptive_layout(inputs.len(), active, usize::from(layout_available), scroll)
         } else {
             let start = scroll.min(inputs.len());
             let count = inputs.len().saturating_sub(start).min(usize::from(height));
@@ -262,6 +286,9 @@ impl TabStrip {
         out.scroll = solved.start;
         out.overflow_before = solved.before > 0;
         out.overflow_after = solved.after > 0;
+        if horizontal && show_add && width > 0 {
+            out.add_rect = Some(TabRect { x: width.saturating_sub(TabReservation::ADD_TAB_WIDTH), y: 0, width: TabReservation::ADD_TAB_WIDTH.min(width), height: height.min(1) });
+        }
         let visible = &inputs[solved.start..solved.start + solved.count];
         let before_cells = if solved.before > 0 {
             overflow_width(solved.before)
@@ -340,6 +367,11 @@ impl TabStrip {
             .map(|(_, rect)| *rect)
     }
 
+    /// The session whose close glyph is actually painted in this frame.
+    pub fn hovered_session(&self) -> Option<&SessionRef> {
+        self.visible_close_session.as_ref()
+    }
+
     #[must_use]
     pub fn hit(&self, x: u16, y: u16) -> Option<TabHit> {
         for (session, rect) in &self.rects {
@@ -382,6 +414,11 @@ impl TabStrip {
             }
         }
         None
+    }
+
+    /// Hit test the dedicated horizontal add-session control.
+    pub fn add_hit(&self, x: u16, y: u16) -> bool {
+        self.add_rect.is_some_and(|rect| rect.contains(x, y))
     }
 }
 
@@ -545,6 +582,15 @@ mod tests {
     }
 
     #[test]
+    fn horizontal_add_control_is_reserved_and_identity_free() {
+        let strip = TabStrip::render_with_hover_and_add(&[input("a", "alpha")], TabOrientation::Horizontal, 20, 1, 0, None, true);
+        let add = strip.add_rect.expect("horizontal add control");
+        assert_eq!(add, TabRect { x: 17, y: 0, width: 3, height: 1 });
+        assert!(strip.add_hit(18, 0));
+        assert!(strip.hit(18, 0).is_none());
+    }
+
+    #[test]
     fn unicode_labels_use_cells_and_close_hit_is_identity_stable() {
         let tabs = vec![input("a", "界面"), input("b", "second")];
         let strip = TabStrip::render_with_hover(
@@ -593,6 +639,33 @@ mod tests {
             strip.mouse_action(body.x, body.y).map(|a| a.close),
             Some(false)
         );
+    }
+
+    #[test]
+    fn runtime_add_control_is_visible_and_non_overlapping_for_all_tab_counts() {
+        for count in [0usize, 1, 2, 8, 32] {
+            let inputs: Vec<_> = (0..count).map(|i| input(&format!("id-{i}"), "tab")).collect();
+            let strip = TabStrip::render_with_hover_and_add(&inputs, TabOrientation::Horizontal, 80, 1, 0, None, true);
+            let add = strip.add_rect.expect("runtime plus is always visible");
+            assert_eq!(add, TabRect { x: 77, y: 0, width: 3, height: 1 });
+            assert!(strip.rects.iter().all(|(_, rect)| rect.x + rect.width <= add.x));
+        }
+        for width in 1..=2 {
+            let strip = TabStrip::render_with_hover_and_add(&[], TabOrientation::Horizontal, width, 1, 0, None, true);
+            let add = strip.add_rect.expect("bounded tiny plus");
+            assert_eq!(add.width, width);
+            assert!(strip.add_hit(width - 1, 0));
+        }
+    }
+
+    #[test]
+    fn add_control_has_non_overlapping_geometry_for_single_or_empty_strip() {
+        for tabs in [Vec::new(), vec![input("a", "alpha")]] {
+            let strip = TabStrip::render_with_hover_and_add(&tabs, TabOrientation::Horizontal, 20, 1, 0, None, true);
+            let add = strip.add_rect.expect("horizontal add control");
+            assert!(add.x + add.width <= 20);
+            assert!(strip.rects.iter().all(|(_, rect)| rect.x + rect.width <= add.x));
+        }
     }
 
     #[test]
