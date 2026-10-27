@@ -1448,7 +1448,9 @@ mod tests {
             .map(|index| inline("user", &format!("entry{index:03}")))
             .collect();
         let projected = project_history(&messages);
-        let mut view = crate::native_view::NativeView::new(100, 32);
+        // The upstream rail prompt reserves two more rows than the previous
+        // rectangle. Preserve the same adjacent-record viewport contract.
+        let mut view = crate::native_view::NativeView::new(100, 34);
         for _ in 0..80 {
             view.scroll_up(3);
         }

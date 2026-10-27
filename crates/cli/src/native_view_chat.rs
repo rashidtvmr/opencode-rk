@@ -562,6 +562,7 @@ pub type StyledChatRow = (String, ChatRowClass, Option<(u16, u16)>);
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ComposerLayout {
     pub framed: bool,
+    pub rail: bool,
     pub height: usize,
 }
 
@@ -586,7 +587,56 @@ pub(crate) fn composer_layout(
             .count()
             .clamp(1, (height / 2).max(1))
     };
-    ComposerLayout { framed, height }
+    ComposerLayout { framed, rail: false, height }
+}
+
+pub(crate) fn session_composer_layout(
+    width: usize,
+    height: usize,
+    draft: &str,
+    appearance: &crate::native_box_style::BoxAppearance,
+) -> ComposerLayout {
+    let style = appearance.effective(crate::native_box_style::BoxId::ChatComposer);
+    let height = height.min(MAX_VIEW_ROWS);
+    let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
+    if height == 0 {
+        return ComposerLayout { framed: false, rail: false, height: 0 };
+    }
+    if !appearance.home_composer_outline() && style.has_border()
+        && style.padding == 0 && width > 5 && height >= 6
+    {
+        let max_input = ((height + 2) / 3).max(6).min(height - 4);
+        let input = draft.split('\n').take(max_input).count().max(1);
+        ComposerLayout { framed: false, rail: true, height: input + 4 }
+    } else {
+        composer_layout(width, height, draft, style)
+    }
+}
+
+#[cfg(test)]
+mod rail_prompt_bounds_tests {
+    use super::*;
+
+    #[test]
+    fn rail_prompt_input_cap_respects_every_height_including_six_rows() {
+        let appearance = crate::native_box_style::BoxAppearance::default();
+        let multiline = "line\n".repeat(MAX_VIEW_ROWS + 10);
+        for height in 0..=MAX_VIEW_ROWS + 2 {
+            for width in [0, 5, 6, 39, 40, 120] {
+                for draft in ["", "draft", multiline.as_str()] {
+                    let layout = session_composer_layout(width, height, draft, &appearance);
+                    assert!(layout.height <= height.min(MAX_VIEW_ROWS), "width={width} height={height}");
+                    if layout.rail {
+                        assert!(layout.height >= 5);
+                        assert!(layout.height - 4 <= height - 4);
+                    }
+                }
+            }
+        }
+        let smallest = session_composer_layout(40, 6, &multiline, &appearance);
+        assert!(smallest.rail);
+        assert_eq!(smallest.height, 6);
+    }
 }
 
 /// Identity of a rendered message row. `row` is relative to that message's
@@ -1602,8 +1652,50 @@ impl ChatView {
         busy: bool,
         appearance: &crate::native_box_style::BoxAppearance,
     ) -> Vec<StyledChatRow> {
+        self.render_styled_mode(width, height, workspace, messages, draft, busy, appearance, true)
+    }
+
+    pub fn render_styled_without_prompt(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+    ) -> Vec<StyledChatRow> {
+        self.render_styled_mode(width, height, workspace, messages, "", busy, appearance, false)
+    }
+
+    fn render_styled_mode(
+        &self, width: usize, height: usize, workspace: &str, messages: &[ChatMessage],
+        draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+        show_prompt: bool,
+    ) -> Vec<StyledChatRow> {
         let requested_scroll = self.scroll.get();
-        let mut rows = self.render_typed_classified_framed(
+        let height = height.min(MAX_VIEW_ROWS);
+        let width = width.min(u16::MAX as usize);
+        let draft = clip_utf8_prefix_bytes(draft, MAX_DRAFT_BYTES);
+        let prompt = session_composer_layout(width, height, draft, appearance);
+        let mut rows = if !show_prompt {
+            let mut rows = vec![(String::new(), ChatRowClass::Blank); height];
+            if let Some(header) = rows.first_mut() {
+                *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
+            }
+            rows
+        } else if prompt.rail {
+            let mut rows = vec![(String::new(), ChatRowClass::Blank); height - prompt.height];
+            if let Some(header) = rows.first_mut() {
+                *header = (render_header(width, workspace, busy, self.scroll.get()), ChatRowClass::Header);
+            }
+            let blank = format!("┃{}", " ".repeat(width - 1));
+            rows.push((blank.clone(), ChatRowClass::Composer));
+            let inset = if width < 40 { 1 } else { 2 };
+            let text_width = width.saturating_sub(1 + 2 * inset);
+            for line in draft.split('\n').take(prompt.height - 4) {
+                rows.push((format!("┃{}{}", " ".repeat(inset),
+                    crate::native_view_layout::slice_cells(&line.replace('\t', " "), 0, text_width as u16)), ChatRowClass::Composer));
+            }
+            rows.push((blank.clone(), ChatRowClass::Composer));
+            rows.push((blank, ChatRowClass::Composer));
+            rows.push((format!("╹{}", "▀".repeat(width - 1)), ChatRowClass::Composer));
+            rows
+        } else { self.render_typed_classified_framed(
             width,
             height,
             workspace,
@@ -1615,7 +1707,7 @@ impl ChatView {
             draft,
             busy,
             appearance.effective(crate::native_box_style::BoxId::ChatComposer),
-        );
+        ) };
         // The first pass is only the shared frame/composer layout. Restore
         // the caller's scroll request before calculating the actual boxed
         // transcript window; typed and boxed rows can have different heights.
@@ -1669,6 +1761,40 @@ impl ChatView {
             .zip(bounds)
             .map(|((text, class), bounds)| (text, class, bounds))
             .collect()
+    }
+
+    /// Legacy callers have text rows, not role facts. Reuse the exact prompt
+    /// scaffold without inventing user/assistant roles for their transcript.
+    pub fn render_legacy_styled(
+        &self, width: usize, height: usize, workspace: &str,
+        transcript: &[String], draft: &str, busy: bool,
+        appearance: &crate::native_box_style::BoxAppearance,
+    ) -> Vec<StyledChatRow> {
+        self.render_legacy_styled_mode(width, height, workspace, transcript, draft, busy, appearance, true)
+    }
+
+    pub fn render_legacy_without_prompt(
+        &self, width: usize, height: usize, workspace: &str, transcript: &[String],
+        busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+    ) -> Vec<StyledChatRow> {
+        self.render_legacy_styled_mode(width, height, workspace, transcript, "", busy, appearance, false)
+    }
+
+    fn render_legacy_styled_mode(
+        &self, width: usize, height: usize, workspace: &str, transcript: &[String],
+        draft: &str, busy: bool, appearance: &crate::native_box_style::BoxAppearance,
+        show_prompt: bool,
+    ) -> Vec<StyledChatRow> {
+        let scroll = self.scroll.get();
+        let mut rows = self.render_styled_mode(width, height, workspace, &[], draft, busy, appearance, show_prompt);
+        self.scroll.set(scroll);
+        let body = rows.iter().position(|(_, class, _)| *class == ChatRowClass::Composer).unwrap_or(rows.len());
+        let first = usize::from(body > 0);
+        let window = self.transcript_window(width, body.saturating_sub(first), transcript);
+        for (index, text) in window.into_iter().enumerate() {
+            rows[first + index] = (text, ChatRowClass::Text, Some((0, width.min(u16::MAX as usize) as u16)));
+        }
+        rows
     }
 
     pub fn styled_message_rows(

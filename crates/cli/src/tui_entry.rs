@@ -1200,6 +1200,7 @@ struct PaintCtx {
     loading: Option<(char, &'static str)>,
     /// True when this frame is the Home column (explicit route fact).
     home: bool,
+    rail_prompt: bool,
     composer: Option<(u16, u16, u16, u16)>,
     completion: Option<crate::native_completion::Panel>,
     ui_regions: Vec<crate::native_ui_style::Region>,
@@ -1294,6 +1295,7 @@ mod surface_paint_regressions {
             modal_box: crate::native_box_style::BoxId::Dialog,
             loading: Some(('⠦', "Thinking…")),
             home: false,
+            rail_prompt: view.session_prompt_rail("draft"),
             composer: Some(composer),
             completion: None,
             context_usage_styles: view.context_usage_styles().to_vec(),
@@ -2045,7 +2047,7 @@ fn native_paint(
                 {
                     bg = accent;
                 }
-                if ctx.home && !in_modal {
+                if (ctx.home || ctx.rail_prompt) && !in_modal {
                     if let Some((left, top, width, height)) = ctx.composer {
                         if x >= u32::from(left)
                             && x < u32::from(left + width)
@@ -2228,7 +2230,7 @@ fn native_paint(
                         && y >= u32::from(rect.1) && y < u32::from(rect.1) + u32::from(rect.3)
                 };
                 let composer = ctx.composer.filter(|rect| contains(*rect));
-                let home_root = ctx.home && composer.is_some_and(|rect|
+                let home_root = (ctx.home || ctx.rail_prompt) && composer.is_some_and(|rect|
                     home_composer_root_cell(&ctx.appearance,
                         ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer), rect, x, y));
                 let role = chat_row_background(ctx.chat_row_classes.get(y as usize), background, panel, element);
@@ -4818,6 +4820,7 @@ fn native_loop(
                         )
                     }),
                     home,
+                    rail_prompt: view.session_prompt_rail(&draft),
                     composer: if help_open {
                         None
                     } else {

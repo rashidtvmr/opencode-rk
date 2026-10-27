@@ -987,6 +987,11 @@ impl NativeView {
             && (self.sidebar_open || (!self.sidebar_hidden && self.sidebar_wide()))
     }
 
+    fn session_body_height(&self) -> usize {
+        let height = self.render_height();
+        if height >= 4 { height - 2 } else { height }
+    }
+
     /// Composer box coordinates shared with the painter. The box is derived
     /// from route and bounded draft rows, never from visible text matching.
     pub fn composer_region(&self, draft: &str) -> Option<(u16, u16, u16, u16)> {
@@ -998,17 +1003,14 @@ impl NativeView {
         // Upstream child sessions replace the main composer with return-parent UI.
         if self.parent_session { return None; }
         if self.session_route {
-            let body_height = if height >= 4 { height - 2 } else { height };
-            let frame = self
-                .box_appearance
-                .effective(crate::native_box_style::BoxId::ChatComposer);
+            let body_height = self.session_body_height();
             // Shared with the actual ChatComposer renderer; Home's legacy
             // rail remains a separate layout path.
-            let layout = crate::native_view_chat::composer_layout(
+            let layout = crate::native_view_chat::session_composer_layout(
                 usize::from(width - 4),
                 body_height,
                 draft,
-                frame,
+                &self.box_appearance,
             );
             let composer_height = layout.height;
             Some((
@@ -1055,6 +1057,14 @@ impl NativeView {
     }
 
     /// The same cell rectangle drives both drawing and pointer admission.
+    pub fn session_prompt_rail(&self, draft: &str) -> bool {
+        self.session_route && crate::native_view_chat::session_composer_layout(
+            usize::from(self.presentation().main_width.saturating_sub(4)),
+            self.session_body_height(), draft, &self.box_appearance,
+        ).rail
+    }
+
+    /// The same cell rectangle drives both drawing and pointer admission.
     pub fn send_button_region(&self, draft: &str) -> Option<(u16, u16, u16)> {
         if self.pages.page() != Page::Chat {
             return None;
@@ -1063,7 +1073,8 @@ impl NativeView {
         if width < 14 || height < 3 {
             return None;
         }
-        let row = top.checked_add(height.checked_sub(if self.session_route { 1 } else { 2 })?)?;
+        let rail = self.session_prompt_rail(draft);
+        let row = top.checked_add(height.checked_sub(if self.session_route && !rail { 1 } else { 2 })?)?;
         Some((
             left.checked_add(width.checked_sub(8)?)?,
             row,
@@ -1156,22 +1167,23 @@ impl NativeView {
             return None;
         }
         let (left, top, width, height) = self.composer_region(draft)?;
-        let body_height = if self.render_height() >= 4 {
-            self.render_height() - 2
-        } else {
-            self.render_height()
-        };
+        let body_height = self.session_body_height();
         let frame = self
             .box_appearance
             .effective(crate::native_box_style::BoxId::ChatComposer);
-        let layout = crate::native_view_chat::composer_layout(
+        let layout = crate::native_view_chat::session_composer_layout(
             usize::from(width),
             body_height,
             draft,
-            frame,
+            &self.box_appearance,
         );
         let pad = usize::from(frame.padding);
-        let (text_left, text_top, text_width, text_height) = if layout.framed {
+        let (text_left, text_top, text_width, text_height) = if layout.rail {
+            let inset: u16 = if width < 40 { 1 } else { 2 };
+            (left.checked_add(1 + inset)?, top.checked_add(1)?,
+                usize::from(width).checked_sub(1 + 2 * usize::from(inset))?,
+                usize::from(height).checked_sub(4)?)
+        } else if layout.framed {
             let content_width = usize::from(width).checked_sub(2 + 2 * pad)?;
             let content_height = usize::from(height).checked_sub(2 + 2 * pad)?;
             (
@@ -2060,13 +2072,15 @@ impl NativeView {
                     .map(|rows| rows.iter().take(15).count())
                     .unwrap_or(0)
             });
-            let body_height = if height >= 4 {
-                height.saturating_sub(2).saturating_sub(permission_height.unwrap_or(0))
-            } else {
-                height
-            };
+            let body_height = if let Some(permission_height) = permission_height {
+                // The shared shell footer is still a non-prompt sibling.
+                height.saturating_sub(1).saturating_sub(permission_height)
+            } else { self.session_body_height() };
             let mut body = if let Some(messages) = messages {
-                let rows = self.chat.render_styled(
+                let rows = if has_permission {
+                    self.chat.render_styled_without_prompt(inner_width as usize, body_height,
+                        &self.workspace, messages, busy, &self.box_appearance)
+                } else { self.chat.render_styled(
                     inner_width as usize,
                     body_height,
                     &self.workspace,
@@ -2074,7 +2088,7 @@ impl NativeView {
                     draft,
                     busy,
                     &self.box_appearance,
-                );
+                ) };
                 self.chat_row_classes
                     .extend(rows.iter().map(|(_, class, _)| *class));
                 self.chat_text_bounds
@@ -2085,18 +2099,27 @@ impl NativeView {
                     .map(|(text, _, _)| text)
                     .collect::<Vec<_>>()
             } else {
-                self.chat.render(
+                let rows = if has_permission {
+                    self.chat.render_legacy_without_prompt(inner_width as usize, body_height,
+                        &self.workspace, transcript, busy, &self.box_appearance)
+                } else { self.chat.render_legacy_styled(
                     inner_width as usize,
                     body_height,
                     &self.workspace,
                     transcript,
                     draft,
                     busy,
-                )
+                    &self.box_appearance,
+                ) };
+                self.chat_row_classes.extend(rows.iter().map(|(_, class, _)| *class));
+                self.chat_text_bounds.extend(rows.iter().map(|(_, _, bounds)|
+                    bounds.map(|(left, width)| (left.saturating_add(2), width))));
+                rows.into_iter().map(|(text, _, _)| text).collect()
             };
             // The upstream scrollbox starts with a spacer, rather than a
             // permanent workspace/header row. The composer stays at its foot.
-            if body.len() > 1 {
+            if body.len() > 1 && self.chat_row_classes.first().is_some_and(|class|
+                *class != crate::native_view_chat::ChatRowClass::Composer) {
                 // Keep the confirmed selected model/provider visible in the
                 // conversation at narrow widths too. The footer is reserved
                 // for directory and turn/status chrome, and the optional
@@ -2124,6 +2147,18 @@ impl NativeView {
                     None => String::new(),
                 };
             }
+            let prompt = crate::native_view_chat::session_composer_layout(
+                usize::from(inner_width), body_height, draft, &self.box_appearance,
+            );
+            let mut body = body;
+            if prompt.rail && !has_permission {
+                let row = body.len().saturating_sub(2);
+                let inset = if inner_width < 40 { " " } else { "  " };
+                body[row] = format!("┃{inset}{}", self.composer_metadata());
+                if let Some(class) = self.chat_row_classes.get_mut(row) {
+                    *class = crate::native_view_chat::ChatRowClass::Metadata;
+                }
+            }
             let mut body: Vec<_> = body.into_iter().map(|line| padded(&line, width)).collect();
             self.chat_row_classes.resize(body.len(), crate::native_view_chat::ChatRowClass::Blank);
             self.chat_text_bounds.resize(body.len(), None);
@@ -2137,7 +2172,9 @@ impl NativeView {
                 // Permission prompt replaces the composer — no composer
                 // metadata / blank separator row beneath it (upstream Switch).
             } else if height >= 4 {
-                body.push(padded(&self.composer_metadata(), width));
+                body.push(if prompt.rail {
+                    padded(&footer_directory(&self.workspace, inner_width), width)
+                } else { padded(&self.composer_metadata(), width) });
                 body.push(String::new());
                 self.chat_row_classes.extend([
                     crate::native_view_chat::ChatRowClass::Metadata,
@@ -3132,9 +3169,12 @@ mod framed_composer_tests {
     }
 
     #[test]
-    fn default_composer_frame_has_exact_corners_draft_and_region() {
+    fn explicit_composer_outline_has_exact_corners_draft_and_region() {
         let mut view = NativeView::new(60, 24);
         view.set_session_route(true);
+        let mut appearance = crate::native_box_style::BoxAppearance::default();
+        appearance.frame_mode = crate::native_box_style::FrameMode::Outline;
+        view.set_box_appearance(appearance);
         let draft = "hello frame";
         let rows = view.render_typed(draft, &[], false, &[]);
         let (left, top, width, region_h) = view.composer_region(draft).expect("region");
@@ -3162,7 +3202,11 @@ mod framed_composer_tests {
     fn composer_region_matches_rendered_frame_bottom_for_default_and_padded_styles() {
         for (appearance, draft) in [
             (
-                crate::native_box_style::BoxAppearance::default(),
+                {
+                    let mut appearance = crate::native_box_style::BoxAppearance::default();
+                    appearance.frame_mode = crate::native_box_style::FrameMode::Outline;
+                    appearance
+                },
                 "default draft",
             ),
             (
@@ -3835,7 +3879,11 @@ mod footer_layout_tests {
         assert!(rows
             .last()
             .is_some_and(|row| row.contains("/selected/project")));
-        assert!(rows.iter().any(|row| row.contains("> draft")));
+        assert!(rows.iter().any(|row| row.trim_start().starts_with("┃  draft")));
+        let (left, top, width, height) = view.composer_region("draft").unwrap();
+        let (cursor_x, cursor_y) = view.chat_cursor("draft", 5).unwrap();
+        assert!(cursor_x >= left && cursor_x < left + width);
+        assert!(cursor_y > top && cursor_y < top + height);
     }
 
     #[test]
@@ -4154,6 +4202,62 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
 /// local simulation.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn default_session_prompt_has_upstream_rail_and_inner_metadata() {
+        use super::*;
+        let mut view = NativeView::new(120, 40);
+        view.set_session_route(true);
+        view.set_model(Some("fixture-model".into()));
+        let frame = view.render_typed("draft", &[], false, &[]);
+        assert_eq!(view.composer_region("draft"), Some((2, 33, 116, 5)));
+        assert_eq!(view.chat_cursor("draft", 2), Some((7, 34)));
+        assert!(frame[33].trim_start().starts_with('┃'));
+        assert!(frame[34].trim_start().starts_with("┃  draft"));
+        assert!(frame[36].trim_start().starts_with("┃  fixture-model"), "metadata is inside the raised prompt");
+        assert!(frame[37].trim_start().starts_with('╹'));
+        assert!(!frame[34].contains("> draft"));
+        let (x, y, width) = view.send_button_region("draft").unwrap();
+        assert_eq!(y, 36, "approved Send extension stays on the metadata row");
+        assert!(view.send_button_hit("draft", x + width - 1, y));
+    }
+
+    #[test]
+    fn session_prompt_height_boundaries_keep_geometry_and_controls_in_frame() {
+        for height in 0..=48 {
+            for draft in ["", "draft", "a\nb\nc\nd\ne\nf\ng\nh\ni\nj"] {
+                let mut view = NativeView::new(80, height);
+                view.set_session_route(true);
+                let rows = view.render_typed(draft, &[], false, &[]);
+                assert_eq!(rows.len(), usize::from(height));
+                if let Some((left, top, width, prompt_height)) = view.composer_region(draft) {
+                    assert!(top + prompt_height <= height);
+                    assert!(left + width <= 80);
+                    if view.session_prompt_rail(draft) {
+                        assert!(rows[usize::from(top)].trim_start().starts_with('┃'));
+                        assert!(rows[usize::from(top + prompt_height - 1)].trim_start().starts_with('╹'));
+                        if let Some((_, row, _)) = view.send_button_region(draft) {
+                            assert_eq!(row, top + prompt_height - 2);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn inline_permission_replaces_entire_rail_prompt_and_keeps_bottom_choices() {
+        let mut view = NativeView::new(100, 32);
+        view.set_session_route(true);
+        view.set_workspace("/fixture/project".into());
+        view.dialogs.open_permission("req-inline", "ses-inline", "Run command").unwrap();
+        let permission = vec!["Permission required".into(), "Allow once · Deny once".into()];
+        let rows = view.render_typed_permission("unsent-private-draft", &[], false, &[], &permission);
+        assert!(!rows.iter().any(|row| row.contains("unsent-private-draft")), "permission replaces the input, not only its metadata");
+        assert!(!rows.iter().any(|row| row.contains('╹')), "no composer mask beneath permission");
+        assert!(rows[29].contains("Permission required"));
+        assert!(rows[30].contains("Allow once · Deny once"));
+        assert!(!view.chat_row_classes().contains(&crate::native_view_chat::ChatRowClass::Composer));
+    }
     #[test]
     fn sidebar_breakpoint_uses_width_remaining_after_vertical_tabs() {
         use super::*;
@@ -4694,7 +4798,9 @@ mod tests {
         );
         // Rows 2..=28: empty transcript viewport — blank center cells,
         // no fabricated filler, no prompt creeping up under the header.
-        for i in 2..27 {
+        let (_, prompt_top, _, prompt_height) = view.composer_region("").unwrap();
+        assert_eq!((prompt_top, prompt_height), (23, 5), "independent default rail geometry");
+        for i in 2..usize::from(prompt_top) {
             assert_eq!(
                 center(i).trim(),
                 "",
@@ -4704,10 +4810,12 @@ mod tests {
         }
         // Row 29: composer prompt on the last frame row.
         assert!(
-            center(27).trim_start().starts_with("> "),
-            "composer above model metadata and upstream bottom padding: {:?}",
-            center(27)
+            center(24).trim_start().starts_with('┃'),
+            "default input row is inside the left-rail prompt: {:?}",
+            center(24)
         );
+        assert!(center(27).trim_start().starts_with('╹'));
+        assert_eq!(view.chat_row_classes()[26], crate::native_view_chat::ChatRowClass::Metadata);
 
         // Tiny frame (2 rows): whole-frame chat priority — workspace
         // header and draft composer stay visible, no chrome row steals
