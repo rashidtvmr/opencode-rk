@@ -1408,6 +1408,50 @@ fn chat_row_background(class: Option<&crate::native_view_chat::ChatRowClass>, ro
 }
 
 #[cfg(feature = "native")]
+fn chat_row_background_at(
+    class: Option<&crate::native_view_chat::ChatRowClass>,
+    presentation: crate::native_view::ViewPresentation, x: u32,
+    root: Rgba, panel: Rgba, element: Rgba,
+) -> Option<Rgba> {
+    // Message rows are composed inside the scrollbox's horizontal insets.
+    // A row role owns that content surface, never the surrounding root cells,
+    // vertical tab rail, or sidebar. Use this same ownership for modal corners.
+    let inset = presentation.main_padding.min(presentation.main_width / 2);
+    let left = u32::from(presentation.main_offset) + u32::from(inset);
+    let right = u32::from(presentation.main_offset)
+        + u32::from(presentation.main_width.saturating_sub(inset));
+    (x >= left && x < right)
+        .then(|| chat_row_background(class, root, panel, element))
+        .flatten()
+}
+
+#[cfg(all(test, feature = "native"))]
+mod chat_surface_inset_tests {
+    use super::*;
+    #[test]
+    fn message_surfaces_preserve_outer_inset_in_horizontal_and_vertical_layouts() {
+        use crate::native_tabs::{TabOrientation, TabReservation};
+        let root = Rgba::rgb(10, 10, 10);
+        let panel = Rgba::rgb(20, 20, 20);
+        let element = Rgba::rgb(30, 30, 30);
+        for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
+            let mut view = crate::native_view::NativeView::new(269, 59);
+            view.set_session_route(true);
+            view.set_tab_reservation(TabReservation::for_view(orientation, 269, 59));
+            let presentation = view.presentation();
+            let left = u32::from(presentation.main_offset) + 2;
+            let right = u32::from(presentation.main_offset + presentation.main_width) - 2;
+            for x in 0..269 {
+                let actual = chat_row_background_at(Some(&crate::native_view_chat::ChatRowClass::UserCard),
+                    presentation, x, root, panel, element);
+                assert_eq!(actual, (x >= left && x < right).then_some(panel),
+                    "message surface ownership at x={x} with {orientation:?}");
+            }
+        }
+    }
+}
+
+#[cfg(feature = "native")]
 fn visible_modal_rect(cols:u32, rows:u32, x:u32,y:u32,width:u32,content:usize)->Option<(u32,u32,u32,u32)> {
     let width=width.min(cols.saturating_sub(x));
     if x>=cols || y>=rows || width==0 || content==0 { return None; }
@@ -1994,7 +2038,7 @@ fn native_paint(
                         && y >= u32::from(top)
                         && y < u32::from(top) + u32::from(height)
                 });
-                let role_bg = chat_row_background(ctx.chat_row_classes.get(row), background, panel, element);
+                let role_bg = chat_row_background_at(ctx.chat_row_classes.get(row), presentation, x, background, panel, element);
                 let in_page = ctx.page_panel.is_some_and(|(left, top, width, height)| {
                     x >= u32::from(left) && x < u32::from(left + width)
                         && y >= u32::from(top) && y < u32::from(top + height)
@@ -2233,7 +2277,7 @@ fn native_paint(
                 let home_root = (ctx.home || ctx.rail_prompt) && composer.is_some_and(|rect|
                     home_composer_root_cell(&ctx.appearance,
                         ctx.appearance.effective(crate::native_box_style::BoxId::ChatComposer), rect, x, y));
-                let role = chat_row_background(ctx.chat_row_classes.get(y as usize), background, panel, element);
+                let role = chat_row_background_at(ctx.chat_row_classes.get(y as usize), presentation, x, background, panel, element);
                 let mut color = surface_underlay_background(
                     sidebar_cell(presentation, x, y) || ctx.page_panel.is_some_and(contains),
                     role, composer.is_some(), home_root, background, panel, element,
