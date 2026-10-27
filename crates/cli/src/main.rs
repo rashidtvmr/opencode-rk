@@ -52,6 +52,8 @@ mod native_chat_projection;
 #[cfg(feature = "native")]
 mod native_command_palette;
 #[cfg(feature = "native")]
+mod native_settings;
+#[cfg(feature = "native")]
 mod native_children;
 mod native_composer;
 #[cfg(feature = "native")]

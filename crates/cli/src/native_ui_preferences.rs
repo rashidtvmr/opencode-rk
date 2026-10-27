@@ -269,6 +269,21 @@ impl UiPreferences {
             state.insert("theme_mode".into(), Value::String(mode.into()));
         })
     }
+
+    pub fn persist_tab_orientation(
+        cli_path: &Path,
+        orientation: crate::native_navigation::TabOrientation,
+    ) -> Result<(), String> {
+        let location = StateLocation::open(cli_path, true)?.ok_or("CLI config parent unavailable")?;
+        let mut state = location.read_with_limit(MAX_CONFIG_BYTES, true)?;
+        let tabs = state.entry("tabs").or_insert_with(|| Value::Object(Map::new()));
+        let tabs = tabs.as_object_mut().ok_or("CLI tabs configuration is not an object")?;
+        tabs.insert("layout".into(), Value::String(match orientation {
+            crate::native_navigation::TabOrientation::Horizontal => "horizontal",
+            crate::native_navigation::TabOrientation::Vertical => "vertical",
+        }.into()));
+        location.write_with_limit(state, MAX_CONFIG_BYTES)
+    }
 }
 
 pub(crate) fn read_bounded(
@@ -434,38 +449,25 @@ impl StateLocation {
     }
 
     fn read(&self) -> Result<Map<String, Value>, String> {
-        if self.original.is_none() {
-            return Ok(Map::new());
-        }
-        let file = File::from(
-            rfs::openat(
-                &self.directory,
-                &self.name,
-                rfs::OFlags::RDONLY
-                    | rfs::OFlags::NOFOLLOW
-                    | rfs::OFlags::NONBLOCK
-                    | rfs::OFlags::CLOEXEC,
-                rfs::Mode::empty(),
-            )
-            .map_err(|_| "unable to open anchored TUI state")?,
-        );
-        let metadata = file
-            .metadata()
-            .map_err(|_| "unable to inspect opened TUI state")?;
-        if !metadata.is_file()
-            || metadata.nlink() != 1
-            || metadata.uid() != getuid().as_raw()
-            || Some((metadata.dev(), metadata.ino())) != self.original
-            || metadata.len() > MAX_STATE_BYTES as u64
-        {
-            return Err("TUI state changed or exceeds bounds".into());
+        self.read_with_limit(MAX_STATE_BYTES, false)
+    }
+
+    fn read_with_limit(&self, limit: usize, jsonc: bool) -> Result<Map<String, Value>, String> {
+        if self.original.is_none() { return Ok(Map::new()); }
+        let file = File::from(rfs::openat(&self.directory, &self.name,
+            rfs::OFlags::RDONLY | rfs::OFlags::NOFOLLOW | rfs::OFlags::NONBLOCK | rfs::OFlags::CLOEXEC,
+            rfs::Mode::empty()).map_err(|_| "unable to open anchored state")?);
+        let metadata = file.metadata().map_err(|_| "unable to inspect opened state")?;
+        if !metadata.is_file() || metadata.nlink() != 1 || metadata.uid() != getuid().as_raw()
+            || Some((metadata.dev(), metadata.ino())) != self.original || metadata.len() > limit as u64 {
+            return Err("state changed or exceeds bounds".into());
         }
         let mut bytes = Vec::new();
-        file.take(MAX_STATE_BYTES as u64 + 1)
-            .read_to_end(&mut bytes)
-            .map_err(|_| "unable to read anchored TUI state")?;
-        if bytes.len() > MAX_STATE_BYTES {
-            return Err("TUI state exceeds bounds".into());
+        file.take(limit as u64 + 1).read_to_end(&mut bytes).map_err(|_| "unable to read anchored state")?;
+        if bytes.len() > limit { return Err("state exceeds bounds".into()); }
+        if jsonc {
+            let text = String::from_utf8(bytes).map_err(|_| "CLI configuration is not UTF-8")?;
+            return parse_jsonc_value(&text)?.as_object().cloned().ok_or("CLI configuration root is not an object".into());
         }
         serde_json::from_slice(&bytes).map_err(|_| "invalid TUI state JSON".into())
     }
@@ -489,8 +491,12 @@ impl StateLocation {
     }
 
     fn write(&self, state: Map<String, Value>) -> Result<(), String> {
+        self.write_with_limit(state, MAX_STATE_BYTES)
+    }
+
+    fn write_with_limit(&self, state: Map<String, Value>, limit: usize) -> Result<(), String> {
         let bytes = serde_json::to_vec(&state).map_err(|_| "unable to encode TUI state")?;
-        if bytes.len() > MAX_STATE_BYTES {
+        if bytes.len() > limit {
             return Err("TUI state exceeds size limit".into());
         }
         self.validate()?;
@@ -993,5 +999,34 @@ mod tests {
         assert_eq!(prefs.theme.as_deref(), Some("opencode"));
         assert_eq!(read_state(&path).unwrap()["keep"], 7);
         fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod settings_persistence_tests {
+    use super::*;
+    use crate::native_navigation::TabOrientation;
+    use std::fs;
+
+    #[test]
+    fn cli_jsonc_layout_write_preserves_unrelated_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        fs::write(&path, "{ // keep comment\n \"keep\":7, \"tabs\": { \"mode\": \"auto\", },\n}").unwrap();
+        UiPreferences::persist_tab_orientation(&path, TabOrientation::Vertical).unwrap();
+        let value = parse_jsonc_value(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(value["keep"], 7);
+        assert_eq!(value["tabs"]["mode"], "auto");
+        assert_eq!(value["tabs"]["layout"], "vertical");
+    }
+
+    #[test]
+    fn invalid_tabs_refuses_write_and_keeps_original_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("cli.json");
+        let original = r#"{"keep":7,"tabs":"invalid"}"#;
+        fs::write(&path, original).unwrap();
+        assert!(UiPreferences::persist_tab_orientation(&path, TabOrientation::Vertical).is_err());
+        assert_eq!(fs::read_to_string(path).unwrap(), original);
     }
 }

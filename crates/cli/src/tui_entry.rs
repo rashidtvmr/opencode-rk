@@ -3148,6 +3148,8 @@ fn native_loop(
     // Setup is an action from Home, not a mandatory startup modal. In
     // particular, custom-provider discovery must never steal composer input.
     let mut dialog = native_setup::Dialog::None;
+    let mut settings_dialog = crate::native_settings::SettingsDialog::default();
+    let mut settings_error: Option<String> = None;
     let mut help_open = false;
     // Track whether the model catalogue was actually observed (HTTP + parse
     // succeeded): a failed fetch yields `None`, never a fabricated "confirmed
@@ -4335,6 +4337,11 @@ fn native_loop(
             needs_paint = true;
         }
         let mut overlay: Vec<String> = match dialog {
+            native_setup::Dialog::Settings => {
+                let mut rows = settings_dialog.render(view.modal_presentation().content_width, view.modal_content_height());
+                if let Some(error) = settings_error.as_deref() { rows.push(format!("error: {error}")); }
+                rows
+            }
             native_setup::Dialog::None => Vec::new(),
             native_setup::Dialog::Provider => {
                 let mut panel = vec![
@@ -4834,6 +4841,38 @@ fn native_loop(
         // inert, and the permission modal / Help gates above keep
         // precedence over both.
         let page_query_open = view.page().accepts_search();
+        if matches!(dialog, native_setup::Dialog::Settings) {
+            let action = match event {
+                native_input_decoder::InputEvent::Escape => { settings_dialog.close(); utf8.reset(); dialog = native_setup::Dialog::None; None }
+                native_input_decoder::InputEvent::ArrowLeft => settings_dialog.left(),
+                native_input_decoder::InputEvent::ArrowRight => settings_dialog.right(),
+                native_input_decoder::InputEvent::Byte(13 | 10) => settings_dialog.right(),
+                native_input_decoder::InputEvent::Byte(8 | 127) => { utf8.reset(); settings_dialog.backspace(); None },
+                native_input_decoder::InputEvent::Byte(byte) if byte >= 32 => {
+                    if let Some(character) = utf8.push(byte) { settings_dialog.push_query(character); }
+                    None
+                },
+                native_input_decoder::InputEvent::Mouse { x, y, kind: 0, modifiers: 0 } => {
+                    let modal = view.modal_presentation();
+                    let in_row = x.checked_sub(modal.content_x).zip(y.checked_sub(modal.content_y))
+                        .is_some_and(|(column, row)| settings_dialog.hit_layout(
+                            column, row, modal.content_width, view.modal_content_height()));
+                    if in_row { settings_dialog.click("tabs.layout") } else { None }
+                }
+                _ => None,
+            };
+            if let Some(crate::native_settings::SettingsAction::Apply(orientation)) = action {
+                match cli_path.as_deref() {
+                    Some(path) => match crate::native_ui_preferences::UiPreferences::persist_tab_orientation(path, orientation) {
+                        Ok(()) => { navigation.set_orientation(orientation); settings_dialog.applied(orientation); settings_error = None; }
+                        Err(error) => settings_error = Some(error),
+                    },
+                    None => settings_error = Some("settings configuration path unavailable".into()),
+                }
+            }
+            needs_paint = true;
+            continue;
+        }
         // Import owns navigation before completion and composer shortcuts,
         // except when a permission HITL is active (that branch below remains
         // the highest-priority human decision surface).
@@ -6609,7 +6648,9 @@ fn native_loop(
                                 );
                             }
                         }
-                        native_setup::Dialog::None => {}
+                        // Settings owns its events before composer/provider
+                        // dispatch and never commits a provider selection.
+                        native_setup::Dialog::Settings | native_setup::Dialog::None => {}
                     }
                     // Filter dialogs consumed only their dialog-local
                     // buffer: the API-key dialog keeps its segregated
@@ -6679,6 +6720,15 @@ fn native_loop(
                             "error: sessions page: daemon unavailable".to_owned(),
                         ),
                     }
+                    utf8.reset();
+                    needs_paint = true;
+                    continue;
+                }
+                if command == "/settings" {
+                    settings_dialog.open(navigation.orientation());
+                    settings_error = None;
+                    dialog = native_setup::Dialog::Settings;
+                    consume_local_command_with_cursor(&mut draft, &mut draft_cursor, command, from_chat_composer);
                     utf8.reset();
                     needs_paint = true;
                     continue;
@@ -7550,7 +7600,7 @@ fn configured_command_input(text: &str) -> Option<(&str, &str)> {
 #[cfg(feature = "native")]
 fn is_recognized_local_command(command: &str) -> bool {
     crate::native_view_pages::Page::from_route(command).is_some()
-        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/compact fallback" | "/compact auto" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import")
+        || matches!(command, "/commands" | "/new" | "/compact" | "/compact native" | "/compact fallback" | "/compact auto" | "/sidebar" | "/appearance" | "/subagents" | "/permission" | "/permissions" | "/import" | "/settings-import" | "/settings")
 }
 
 /// Consume the typed text of a RECOGNIZED local slash command that was
@@ -8537,7 +8587,7 @@ mod command_consumption_tests {
                     || super::native_local_page_route(route).is_some()
                     || matches!(
                         route,
-                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance" | "/subagents" | "/import" | "/settings-import"
+                        "/help" | "/sessions" | "/new" | "/connect" | "/models" | "/appearance" | "/subagents" | "/import" | "/settings-import" | "/settings"
                     ),
                 "palette action has no local handler: {route}"
             );

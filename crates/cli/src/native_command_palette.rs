@@ -148,6 +148,13 @@ impl CommandPalette {
             "/appearance",
         ));
         regular.push(entry(
+            "system:opencode.settings",
+            "opencode.settings",
+            "Open settings",
+            "System",
+            "/settings",
+        ));
+        regular.push(entry(
             "system:help.show",
             "help.show",
             "Help",
@@ -190,6 +197,13 @@ impl CommandPalette {
                     "/new",
                 ));
             }
+            entries.push(entry(
+                "suggested:opencode.settings",
+                "opencode.settings",
+                "Open settings",
+                "Suggested",
+                "/settings",
+            ));
         }
         entries.extend(regular);
         if needle.is_empty() {

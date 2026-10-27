@@ -53,6 +53,7 @@ pub(super) fn selected_row(models: &[Model], query: &str, row: usize) -> Option<
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum Dialog {
     None,
+    Settings,
     Provider,
     ProviderId,
     BaseUrl,
