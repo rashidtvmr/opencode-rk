@@ -41,6 +41,32 @@ pub(super) fn visible_rows(models: &[Model], query: &str) -> Vec<usize> {
     models.iter().enumerate().filter_map(|(index, model)| model.matches(query).then_some(index)).collect()
 }
 pub(super) fn clamp_row(row: usize, visible_len: usize) -> usize { row.min(visible_len.saturating_sub(1)) }
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) struct PickerViewport { pub start: usize, pub len: usize }
+
+pub(super) fn picker_viewport(selected: usize, visible_len: usize, capacity: usize) -> PickerViewport {
+    let selected = clamp_row(selected, visible_len);
+    let start = selected.saturating_sub(capacity.saturating_sub(1));
+    PickerViewport { start, len: visible_len.saturating_sub(start).min(capacity) }
+}
+
+pub(super) fn picker_capacity(content_height: usize, list_start: usize, footer_rows: usize) -> usize {
+    content_height.saturating_sub(list_start.saturating_add(footer_rows)).min(10)
+}
+
+pub(super) fn picker_render_indices(active: usize, visible_len: usize, capacity: usize) -> Vec<usize> {
+    let viewport = picker_viewport(active, visible_len, capacity);
+    (0..viewport.len).map(|offset| viewport.start + offset).collect()
+}
+
+pub(super) fn picker_hit_index(viewport: PickerViewport, row: usize) -> Option<usize> {
+    (row < viewport.len).then_some(viewport.start + row)
+}
+
+pub(super) fn picker_hit_row(viewport: PickerViewport, content_row: usize, list_start: usize) -> Option<usize> {
+    content_row.checked_sub(list_start).and_then(|offset| picker_hit_index(viewport, offset))
+}
 pub(super) fn move_row(row: usize, visible_len: usize, down: bool) -> usize {
     if visible_len == 0 { return 0; }
     if down { row.saturating_add(1).min(visible_len - 1) } else { row.saturating_sub(1) }
@@ -530,6 +556,31 @@ mod picker_tests {
         assert!(selected_row(&m, "no-match", 0).is_none());
         assert_eq!(move_row(99, 0, true), 0);
     }
+    #[test]
+    fn picker_bounds_reject_empty_short_and_outside_rows() {
+        // These are the same list projections consumed by the provider/model
+        // render paths: capacity zero paints no rows, while one paints exactly
+        // the selected row without any capacity-1 arithmetic.
+        let provider_zero = picker_viewport(0, 0, picker_capacity(0, 4, 2));
+        let model_zero = picker_viewport(0, 3, picker_capacity(5, 4, 2));
+        assert_eq!(provider_zero.len, 0);
+        assert_eq!(model_zero.len, 0);
+        assert_eq!(picker_viewport(0, 3, 1).len, 1);
+        assert_eq!(picker_viewport(99, 3, 1).start, 2);
+        assert_eq!(picker_render_indices(0, 3, 0), Vec::<usize>::new());
+        assert_eq!(picker_render_indices(0, 3, 1), vec![0]);
+        assert_eq!(picker_render_indices(99, 3, 1), vec![2]);
+        assert_eq!(picker_render_indices(1, 3, 2), vec![0, 1]);
+        assert_eq!(picker_capacity(0, 4, 2), 0);
+        assert_eq!(picker_capacity(5, 4, 2), 0);
+        assert_eq!(picker_capacity(12, 4, 2), 6);
+        let viewport = picker_viewport(99, 3, 4);
+        assert_eq!(picker_hit_row(viewport, 3, 4), None);
+        assert_eq!(picker_hit_row(viewport, 4, 4), Some(0));
+        assert_eq!(picker_hit_row(viewport, 6, 4), Some(2));
+        assert_eq!(picker_hit_row(viewport, 7, 4), None);
+    }
+
     #[test] fn exact_identity_not_variant_or_typed_fallback() {
         let m = models();
         assert_eq!(selected_row(&m, "j-model-extra", 0), None);

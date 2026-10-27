@@ -4483,15 +4483,14 @@ fn native_loop(
                 let query = filter_input.trim().to_lowercase();
                 let visible: Vec<_> = providers
                     .iter()
-                    .filter(|row| row.0.contains(&query) || row.1.to_lowercase().contains(&query))
+                    .filter(|row| row.0.to_lowercase().contains(&query) || row.1.to_lowercase().contains(&query))
                     .collect();
                 let active = native_setup::clamp_row(model_row, visible.len());
-                let capacity = (renderer.rows() as usize)
-                    .saturating_sub(usize::from(view.modal_presentation().content_y) + 9)
-                    .clamp(1, 10);
-                let start = active.saturating_sub(capacity - 1);
-                for (index, row) in visible.iter().enumerate().skip(start).take(capacity)
-                {
+                let list_start = 4usize;
+                let footer_rows = 2 + usize::from(setup_error.is_some()) + usize::from(model_load.is_some());
+                let capacity = native_setup::picker_capacity(view.modal_content_height(), list_start, footer_rows);
+                for index in native_setup::picker_render_indices(active, visible.len(), capacity) {
+                    let Some(row) = visible.get(index) else { continue };
                     panel.push(format!(
                         "{} {}",
                         if index == active { ">" } else { " " },
@@ -4558,27 +4557,13 @@ fn native_loop(
                 // dialog-local `filter_input`, never the chat draft.
                 let visible = native_setup::visible_rows(&models, &filter_input);
                 let active = native_setup::clamp_row(model_row, visible.len());
-                let capacity = (renderer.rows() as usize)
-                    .saturating_sub(usize::from(view.modal_presentation().content_y) + 9)
-                    .clamp(1, 10);
-                let start = active.saturating_sub(capacity - 1);
-                panel.extend(
-                    visible
-                        .iter()
-                        .enumerate()
-                        .skip(start)
-                        .take(capacity)
-                        .filter_map(|(shown, index)| {
-                            models.get(*index).map(|model| {
-                                format!(
-                                    "{} {} — {}",
-                                    if shown == active { ">" } else { " " },
-                                    model.qualified(),
-                                    model.name
-                                )
-                            })
-                        }),
-                );
+                let list_start = 4 + usize::from(model_load.is_some()) + usize::from(setup_error.is_some());
+                let capacity = native_setup::picker_capacity(view.modal_content_height(), list_start, 2);
+                panel.extend(native_setup::picker_render_indices(active, visible.len(), capacity).into_iter().filter_map(|index| {
+                    models.get(visible[index]).map(|model| format!(
+                        "{} {} — {}", if index == active { ">" } else { " " }, model.qualified(), model.name
+                    ))
+                }));
                 if visible.is_empty() && model_load.is_none() {
                     panel.push("No matching models".into());
                 }
@@ -5449,6 +5434,25 @@ fn native_loop(
                     needs_paint = true;
                     continue;
                 }
+                if kind == 0 && modifiers == 0 && !help_open
+                    && matches!(dialog, native_setup::Dialog::Provider | native_setup::Dialog::Model)
+                {
+                    let modal = view.modal_presentation();
+                    let Some((_column, content_row)) = modal.content_point(x, y, view.modal_content_height()) else { needs_paint = true; continue; };
+                    let (visible_len, list_start, footer_rows) = if dialog == native_setup::Dialog::Model {
+                        (native_setup::visible_rows(&models, &filter_input).len(), 4 + usize::from(model_load.is_some()) + usize::from(setup_error.is_some()), 2usize)
+                    } else {
+                        let query = filter_input.trim().to_lowercase();
+                        (providers.iter().filter(|row| row.0.to_lowercase().contains(&query) || row.1.to_lowercase().contains(&query)).count(), 4usize, 2 + usize::from(setup_error.is_some()) + usize::from(model_load.is_some()))
+                    };
+                    let capacity = native_setup::picker_capacity(view.modal_content_height(), list_start, footer_rows);
+                    if capacity > 0 {
+                        let viewport = native_setup::picker_viewport(model_row, visible_len, capacity);
+                        if let Some(row) = native_setup::picker_hit_row(viewport, content_row, list_start) { model_row = row; }
+                    }
+                    needs_paint = true;
+                    continue;
+                }
                 if matches!(kind, 3 | 4) && modifiers == 0 && !help_open
                     && !view.command_palette_open()
                     && matches!(dialog, native_setup::Dialog::None)
@@ -5660,7 +5664,7 @@ fn native_loop(
                     let count = providers
                         .iter()
                         .filter(|row| {
-                            row.0.contains(&query) || row.1.to_lowercase().contains(&query)
+                            row.0.to_lowercase().contains(&query) || row.1.to_lowercase().contains(&query)
                         })
                         .count();
                     model_row = native_setup::move_row(
@@ -6623,7 +6627,7 @@ fn native_loop(
                             let rows: Vec<_> = providers
                                 .iter()
                                 .filter(|row| {
-                                    row.0.contains(&query) || row.1.to_lowercase().contains(&query)
+                                    row.0.to_lowercase().contains(&query) || row.1.to_lowercase().contains(&query)
                                 })
                                 .collect();
                             if let Some(row) =
