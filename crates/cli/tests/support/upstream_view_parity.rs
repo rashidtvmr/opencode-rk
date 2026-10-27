@@ -136,8 +136,8 @@ fn home_prompt_width_modes_follow_config_and_appear_in_real_rows() {
     view.set_prompt_width(PromptWidth::Auto);
     assert_eq!(
         view.home_prompt_width(),
-        36,
-        "auto width is constrained by cols - 4"
+        38,
+        "compact Home padding leaves cols - 2"
     );
 }
 

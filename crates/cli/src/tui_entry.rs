@@ -2160,18 +2160,13 @@ fn native_paint(
     // logo.ts + component/logo.tsx: two 19-cell halves separated by one
     // cell, muted left/text right, with 25%-tinted marker backgrounds.
     if let Some((x, y)) = ctx.logo {
-        let logo = [
-            ("                   ", "             ▄     "),
-            ("█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█"),
-            ("█__█ █__█ █^^^ █__█", "█___ █__█ █__█ █^^^"),
-            ("▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"),
-        ];
-        for (row, (left, right)) in logo.iter().enumerate() {
-            let py = u32::from(y) + row as u32;
+        for segment in crate::native_home_logo::segments(cols as u16, rows as u16) {
+            let py = u32::from(y) + u32::from(segment.y);
             if py >= rows || modal.is_some_and(|(_, dy, _, h)| (dy..dy + h).contains(&py)) {
                 continue;
             }
-            for (offset, raw, original_fg) in [(0u32, *left, muted), (20, *right, text_color)] {
+            let original_fg = if segment.bold { text_color } else { muted };
+            {
                 let shadow = dim(
                     Rgba::new(
                         ((3 * u16::from(background.r) + u16::from(original_fg.r) + 2) / 4) as u8,
@@ -2182,8 +2177,8 @@ fn native_paint(
                     base_alpha,
                 );
                 let fg = dim(original_fg, base_alpha);
-                for (col, marker) in raw.chars().enumerate() {
-                    let px = u32::from(x) + offset + col as u32;
+                for (col, marker) in segment.raw.chars().enumerate() {
+                    let px = u32::from(x) + u32::from(segment.x) + col as u32;
                     if px >= cols {
                         break;
                     }
@@ -2201,7 +2196,7 @@ fn native_paint(
                         glyph.encode_utf8(&mut bytes),
                         color,
                         background,
-                        0,
+                        u32::from(segment.bold),
                     )?;
                 }
             }

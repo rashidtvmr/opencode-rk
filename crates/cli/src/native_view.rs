@@ -761,7 +761,13 @@ impl NativeView {
                 .min(u16::MAX as usize) as u16,
             PromptWidth::Fixed(value) => value.max(1),
         };
-        width.saturating_sub(4).min(requested)
+        width.saturating_sub(if self.layout.cols < 44 { 2 } else { 4 }).min(requested)
+    }
+
+    fn home_prompt_inset(&self) -> u16 { if self.layout.cols < 44 { 1 } else { 2 } }
+
+    fn home_text_width(&self) -> u16 {
+        self.home_prompt_width().saturating_sub(1 + 2 * self.home_prompt_inset())
     }
 
     pub fn modal_presentation(&self) -> ModalPresentation {
@@ -1042,16 +1048,18 @@ impl NativeView {
     pub fn home_logo_region(&self, draft: &str) -> Option<(u16, u16)> {
         let height = self.render_height().saturating_sub(self.home_footer_rows());
         let width = self.presentation().main_width;
-        let (count, top, _) = self.home_positions(draft);
+        let (_, top, input_top) = self.home_positions(draft);
+        let (logo_width, logo_height) = crate::native_home_logo::dimensions(self.layout.cols, self.layout.rows);
         if self.session_route
             || !matches!(self.pages.page(), Page::Chat | Page::Theme)
-            || width < 43
-            || height < count + 14
+            || logo_height == 0 || logo_width > width
+            || top + usize::from(logo_height) > input_top.saturating_sub(2)
+            || top + usize::from(logo_height) > height
         {
             return None;
         }
         Some((
-            self.tab_reservation.x_offset().saturating_add((width - 39).div_ceil(2)),
+            self.tab_reservation.x_offset().saturating_add((width - logo_width).div_ceil(2)),
             (top as u16).saturating_add(self.tab_reservation.y_offset()),
         ))
     }
@@ -1142,7 +1150,8 @@ impl NativeView {
             return None;
         }
         let (left, top, width, height) = self.composer_region(draft)?;
-        if width <= 5 || height <= 4 {
+        let inset = self.home_prompt_inset();
+        if width <= 1 + 2 * inset || height <= 4 {
             return None;
         }
         let draft = crate::native_prompt_layout::bounded_source(draft);
@@ -1150,10 +1159,10 @@ impl NativeView {
         if byte_cursor > visible_len || !draft.is_char_boundary(byte_cursor) {
             return None;
         }
-        let input = crate::native_prompt_layout::wrap_prompt(draft, usize::from(width - 5), byte_cursor);
+        let input = crate::native_prompt_layout::wrap_prompt(draft, usize::from(self.home_text_width()), byte_cursor);
         let start = input.window_start(usize::from(height - 4));
         let (column, row) = input.cursor?;
-        Some((left + 3 + column as u16, top + 1 + row.saturating_sub(start) as u16))
+        Some((left + 1 + inset + column as u16, top + 1 + row.saturating_sub(start) as u16))
     }
 
     /// Cursor position for the session composer, using the same bounded,
@@ -2609,14 +2618,18 @@ impl NativeView {
         let height = self.render_height();
         let height = height.saturating_sub(self.home_footer_rows());
         let bounded = crate::native_prompt_layout::bounded_source(draft);
-        let max_input = (self.render_height() / 3).max(6).min(height.saturating_sub(4).max(1));
+        let max_input = (usize::from(self.layout.rows) / 3).max(6).min(height.saturating_sub(4).max(1));
         let count = crate::native_prompt_layout::wrap_prompt(&bounded,
-            usize::from(self.home_prompt_width().saturating_sub(5)), self.chat.prompt_cursor(&bounded))
+            usize::from(self.home_text_width()), self.chat.prompt_cursor(&bounded))
             .rows.len().min(max_input);
-        let required = count + 14;
+        let logo_height = usize::from(crate::native_home_logo::dimensions(self.layout.cols, self.layout.rows).1);
+        let required = count + 10 + logo_height;
         if height >= required {
-            let top = 3 + (height - required) / 2;
-            (count, top, top + 7)
+            let top = 3 + (height - required).div_ceil(2);
+            (count, top, top + logo_height + 3)
+        } else if height >= required.saturating_sub(3) {
+            let top = 3usize.saturating_sub(required - height);
+            (count, top, top + logo_height + 3)
         } else {
             (
                 count,
@@ -2654,24 +2667,18 @@ impl NativeView {
         let left = width.saturating_sub(prompt_width).div_ceil(2);
         let draft = crate::native_prompt_layout::bounded_source(draft);
         let wrapped = crate::native_prompt_layout::wrap_prompt(&draft,
-            usize::from(prompt_width.saturating_sub(5)), self.chat.prompt_cursor(&draft));
+            usize::from(self.home_text_width()), self.chat.prompt_cursor(&draft));
         let (count, _, _) = self.home_positions(&draft);
         let first = wrapped.window_start(count);
         let input: Vec<_> = wrapped.rows.iter().skip(first).take(count).map(String::as_str).collect();
         let (_, top, input_top) = self.home_positions(&draft);
         // logo.ts marker substitutions match component/logo.tsx's glyphs;
         // marker-specific shading is applied by the native paint layer.
-        let logo = [
-            ("                   ", "             ▄     "),
-            ("█▀▀█ █▀▀█ █▀▀█ █▀▀▄", "█▀▀▀ █▀▀█ █▀▀█ █▀▀█"),
-            ("█__█ █__█ █^^^ █__█", "█___ █__█ █__█ █^^^"),
-            ("▀▀▀▀ █▀▀▀ ▀▀▀▀ ▀~~▀", "▀▀▀▀ ▀▀▀▀ ▀▀▀▀ ▀▀▀▀"),
-        ];
-        if body_height >= input.len() + 14 {
-            let logo_width = width.saturating_sub(4).min(39);
-            let logo_left = width.saturating_sub(logo_width).div_ceil(2);
-            for (index, (left_line, right_line)) in logo.iter().enumerate() {
-                let line: String = format!("{left_line} {right_line}")
+        if let Some((logo_left, logo_top)) = self.home_logo_region(draft) {
+            let logo_left = logo_left.saturating_sub(self.tab_reservation.x_offset());
+            let logo_top = usize::from(logo_top.saturating_sub(self.tab_reservation.y_offset()));
+            for segment in crate::native_home_logo::segments(self.layout.cols, self.layout.rows) {
+                let line: String = segment.raw
                     .chars()
                     .map(|c| match c {
                         '_' => ' ',
@@ -2680,11 +2687,11 @@ impl NativeView {
                         other => other,
                     })
                     .collect();
-                rows[top + index] = format!(
-                    "{}{}",
-                    " ".repeat(logo_left as usize),
-                    fit(&line, logo_width)
-                );
+                let index = logo_top + usize::from(segment.y);
+                let x = logo_left + segment.x;
+                let prefix = if segment.x == 0 { " ".repeat(usize::from(x)) }
+                    else { fit(&rows[index], x) };
+                rows[index] = format!("{prefix}{line}");
             }
         }
         let border_top = input_top.saturating_sub(1);
@@ -2742,6 +2749,7 @@ impl NativeView {
                 )
             };
         }
+        let text_padding = " ".repeat(usize::from(self.home_prompt_inset()));
         for (index, line) in input.iter().enumerate() {
             if input_top + index < body_height {
                 let normal = [
@@ -2768,10 +2776,10 @@ impl NativeView {
                     )
                 } else {
                     format!(
-                        "{}{}  {}",
+                        "{}{}{text_padding}{}",
                         " ".repeat(left as usize),
                         home_v,
-                        fit(label, prompt_width.saturating_sub(3))
+                        fit(label, self.home_text_width())
                     )
                 };
             }
@@ -2786,10 +2794,10 @@ impl NativeView {
                 )
             } else {
                 format!(
-                    "{}{}  {}",
+                    "{}{}{text_padding}{}",
                     " ".repeat(left as usize),
                     home_v,
-                    fit(&self.composer_metadata(), prompt_width.saturating_sub(3))
+                    fit(&self.composer_metadata(), prompt_width.saturating_sub(1 + self.home_prompt_inset()))
                 )
             };
         }
@@ -4355,6 +4363,38 @@ mod tests {
             }
         }
     }
+
+    #[test]
+    fn home_odd_free_space_matches_reference_lower_half_rounding() {
+        let mut view = super::NativeView::new(120, 59);
+        view.set_session_route(false);
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Horizontal, 120, 59));
+        let draft = "alpha beta gamma delta epsilon ".to_owned()
+            + &"hello  world source boundary prompt wrapping ".repeat(5);
+        let (count, logo, input) = view.home_positions(&draft);
+        assert_eq!(count, 4);
+        assert_eq!(logo + 1, 23, "matched120x59 reference logo starts at screen row23");
+        assert_eq!(input + 1, 30, "matched reference first input row30");
+    }
+
+    #[test]
+    fn compact_home_matches_reference_prompt_and_stacked_logo_regions() {
+        let mut view = super::NativeView::new(43, 24);
+        view.set_session_route(false);
+        view.set_tab_reservation(crate::native_tabs::TabReservation::for_view(
+            crate::native_tabs::TabOrientation::Horizontal, 43, 24));
+        let draft = "alpha beta gamma delta epsilon ".to_owned()
+            + &"hello  world source boundary prompt wrapping ".repeat(5);
+        let frame = view.render_typed(&draft, &[], false, &[]);
+        let (left, top, width, _) = view.composer_region(&draft).unwrap();
+        assert_eq!((left, top, width), (1, 12, 41));
+        assert_eq!(view.home_logo_region(&draft), Some((12, 3)));
+        assert!(frame[3].contains("█▀▀█ █▀▀█ █▀▀█ █▀▀▄"));
+        assert!(frame[7].contains("█▀▀▀ █▀▀█ █▀▀█ █▀▀█"));
+        assert!(frame[13].starts_with(" ┃ alpha beta gamma delta epsilon hello"));
+        assert_eq!(view.home_cursor_at(&draft, 0), Some((3, 13)));
+    }
     #[test]
     fn home_multiline_prompt_footer_stays_inside_body_sibling() {
         use super::*;
@@ -4406,7 +4446,7 @@ mod tests {
     #[test]
     fn pinned_home_footer_reserves_padding_before_centering() {
         use super::*;
-        for (width, height, footer_row, logo_top) in [(120, 40, 38, 14), (269, 59, 57, 23)] {
+        for (width, height, footer_row, logo_top) in [(120, 40, 38, 14), (269, 59, 57, 24)] {
             let mut view = NativeView::new(width, height);
             view.set_session_route(false);
             view.set_workspace("/fixture/project".into());
