@@ -805,7 +805,7 @@ impl NativeView {
     }
 
     pub fn sidebar_backdrop_alpha(&self) -> u8 {
-        if self.sidebar_visible() && self.layout.cols <= 120 {
+        if self.sidebar_visible() && !self.sidebar_wide() {
             70
         } else {
             0
@@ -954,7 +954,7 @@ impl NativeView {
     #[must_use]
     pub fn presentation(&self) -> ViewPresentation {
         let sidebar = self.sidebar_visible();
-        let inline = sidebar && self.layout.cols > 120;
+        let inline = sidebar && self.sidebar_wide();
         let sidebar_width = if sidebar { self.layout.cols.min(42) } else { 0 };
         let main_width = self
             .layout
@@ -976,11 +976,15 @@ impl NativeView {
         }
     }
 
+    fn sidebar_wide(&self) -> bool {
+        self.layout.cols.saturating_sub(self.tab_reservation.x_offset()) > 120
+    }
+
     fn sidebar_visible(&self) -> bool {
         self.session_route
             && !self.parent_session
             && self.layout.rows >= 2
-            && (self.sidebar_open || (!self.sidebar_hidden && self.layout.cols > 120))
+            && (self.sidebar_open || (!self.sidebar_hidden && self.sidebar_wide()))
     }
 
     /// Composer box coordinates shared with the painter. The box is derived
@@ -1071,7 +1075,7 @@ impl NativeView {
         if self.dialogs.is_open() || self.command_palette.is_open() {
             return false;
         }
-        if self.layout.cols <= 120
+        if !self.sidebar_wide()
             && self.sidebar_visible()
             && self
                 .presentation()
@@ -2267,6 +2271,7 @@ impl NativeView {
                 self.sidebar_content_height = 0;
             }
         }
+        let sidebar_region_start = self.ui_regions.len();
         if let Some(left) = presentation.sidebar_offset {
             // Do not publish regions for a frame that failed closed. For a
             // normal unframed pane, the existing local content inset is the
@@ -2316,7 +2321,7 @@ impl NativeView {
                 }
             }
         }
-        let inline = presentation.sidebar_width > 0 && self.layout.cols > 120;
+        let inline = presentation.sidebar_width > 0 && self.sidebar_wide();
         let effective = Layout {
             center_width: width,
             right_width: if inline {
@@ -2352,12 +2357,15 @@ impl NativeView {
                 .take(rows).collect();
             self.chat_row_classes.resize(rows, crate::native_view_chat::ChatRowClass::Blank);
             self.chat_text_bounds.resize(rows, None);
-            for region in &mut self.ui_regions {
-                region.x = region.x.saturating_add(self.tab_reservation.x_offset());
+            for (index, region) in self.ui_regions.iter_mut().enumerate() {
+                // Sidebar regions already use the absolute right-pane origin;
+                // only main-column regions still need the rail translation.
+                if index < sidebar_region_start {
+                    region.x = region.x.saturating_add(self.tab_reservation.x_offset());
+                }
                 region.y = region.y.saturating_add(self.tab_reservation.y_offset());
             }
             for hit in &mut self.mcp_hit {
-                hit.2 = hit.2.saturating_add(self.tab_reservation.x_offset());
                 hit.3 = hit.3.saturating_add(self.tab_reservation.y_offset());
             }
         }
@@ -2983,6 +2991,7 @@ mod tab_interaction_geometry_tests {
         for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
             let (mut view, _, _) = views(orientation);
             view.set_session_route(true);
+            if !view.sidebar_visible() { view.toggle_sidebar(); }
             let presentation = view.presentation();
             assert_eq!(presentation.sidebar_width, 42);
             assert_eq!(presentation.sidebar_offset, Some(108));
@@ -2995,6 +3004,7 @@ mod tab_interaction_geometry_tests {
         for orientation in [TabOrientation::Horizontal, TabOrientation::Vertical] {
             let (mut view, _, reservation) = views(orientation);
             view.set_session_route(true);
+            if !view.sidebar_visible() { view.toggle_sidebar(); }
             let _ = view.render_typed("draft", &[], false, &[]);
             if reservation.y_offset() > 0 {
                 assert!(!view.scroll_sidebar_at(108, 0, 1), "tab strip does not belong to sidebar scrolling");
@@ -4144,6 +4154,35 @@ pub fn initial_page_rows(backend: bool) -> Vec<PageRow> {
 /// local simulation.
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sidebar_breakpoint_uses_width_remaining_after_vertical_tabs() {
+        use super::*;
+        use crate::native_tabs::TabOrientation;
+        for cols in [140, 162, 163] {
+            let mut view = NativeView::new(cols, 40);
+            view.set_session_route(true);
+            view.set_tab_reservation(TabReservation::for_view(TabOrientation::Vertical, cols, 40));
+            let wide = cols > 162;
+            assert_eq!(view.sidebar_visible(), wide, "available width, not terminal width, controls auto sidebar");
+            if !wide {
+                assert_eq!(view.presentation().main_width, cols - 42);
+                view.toggle_sidebar();
+                assert!(view.sidebar_visible());
+                assert_eq!(view.sidebar_backdrop_alpha(), 70, "manually opened narrow sidebar is an overlay");
+                assert_eq!(view.presentation().main_width, cols - 42, "overlay does not reserve another 42 columns");
+            } else {
+                assert_eq!(view.sidebar_backdrop_alpha(), 0);
+                assert_eq!(view.presentation().main_width, cols - 84);
+            }
+            assert_eq!(view.presentation().sidebar_offset, Some(cols - 42), "sidebar is right-aligned in absolute screen coordinates");
+            assert_eq!(view.presentation().sidebar_width, 42);
+            let frame = view.render_typed("", &[], false, &[]);
+            assert_eq!(frame.len(), 40);
+            assert!(view.ui_regions().iter().all(|region|
+                region.x.saturating_add(region.width) <= cols),
+                "sidebar style/hit regions stay inside its rendered screen pane");
+        }
+    }
     #[test]
     fn appended_session_rows_keep_explicit_nonselectable_metadata() {
         use super::*;
